@@ -224,9 +224,19 @@ describe(oneLine`
 
 			expect((await readEnrollment()).headers[cacheStatusHeader]).toBe('HIT');
 
+			// The read reaches the note through filters alone and shows no column of
+			// it, so its body is not a field this read is bound to; the reverse fk the
+			// filter crosses is, and rewriting it moves the note out of the filter.
 			await request(getUrl(vendor, env))
 				.patch(`/items/${NOTE}/${pinnedNoteId}`)
 				.send({ body: 'rewritten' })
+				.set('Authorization', auth);
+
+			expect((await readEnrollment()).headers[cacheStatusHeader]).toBe('HIT');
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${NOTE}/${pinnedNoteId}`)
+				.send({ discipline_id: null })
 				.set('Authorization', auth);
 
 			// Secondary: the note's own pk slice purges this read on the fix.

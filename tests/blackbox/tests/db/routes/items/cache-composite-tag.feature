@@ -111,6 +111,26 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     When slot "r1" is updated with owner "sigma"
     Then the read is purged
 
+  Scenario: a read matching two ways is purged by a write matching either
+    Given the slots:
+      | marker | owner   | method | note  | amount |
+      | v1     | tau     | slow   | first | 10     |
+    And the slots owned by "tau" or read with the "spaced" method are cached
+    When the slots are created:
+      | marker | owner | method | note   | amount |
+      | v2     | phi   | spaced | second | 20     |
+    Then the read is purged
+
+  Scenario: a read matching two ways survives a write matching neither
+    Given the slots:
+      | marker | owner | method | note  | amount |
+      | w1     | omega | slow   | first | 10     |
+    And the slots owned by "omega" or read with the "spaced" method are cached
+    When the slots are created:
+      | marker | owner | method | note   | amount |
+      | w2     | koppa | slow   | second | 20     |
+    Then the read is still cached
+
   Scenario: a delete of a matching row purges the read
     Given the slots:
       | marker | owner   | method | note  | amount |

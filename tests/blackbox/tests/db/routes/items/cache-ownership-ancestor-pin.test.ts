@@ -195,15 +195,23 @@ describe(oneLine`
 			expect((await readNotes()).headers[cacheStatusHeader]).toBe('HIT');
 		});
 
-		it('a write to the owned ancestor slice evicts the read', async () => {
+		it(oneLine`
+			a rename of the owned ancestor leaves the read cached: the response shows
+			no column of it, so nothing it could have changed is in there (#531)
+		`, async () => {
 			await clearCache();
 
 			expect((await readNotes()).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readNotes()).headers[cacheStatusHeader]).toBe('HIT');
 
+			// The ancestor is nested to be pinned by key, never to be shown: the read
+			// asks for `fields: '*'` of the note alone. The slice above still names
+			// this grandowner — the pin is what the two tests above assert — and the
+			// purge now drops the entry only for a write touching a field the read is
+			// bound to, which a name it never reads is not.
 			await updateGrandowner(ownedGrandownerId, 'grandowner-owned-touched');
 
-			expect((await readNotes()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readNotes()).headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });

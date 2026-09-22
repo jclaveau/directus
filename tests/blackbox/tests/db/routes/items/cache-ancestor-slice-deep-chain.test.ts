@@ -165,7 +165,11 @@ describe(oneLine`
 			return request(getUrl(vendor, env))
 				.get(`/items/${CONFIG}`)
 				.query({
-					fields: '*,range.slots.part.course.unit.discipline.student.name',
+					// The unit's own name is read too: a purge drops an entry only for a
+					// write touching a field it is bound to, so a read showing no column
+					// of the ancestor would not be evicted by a rename of it.
+					fields: '*,range.slots.part.course.unit.name'
+						+ ',range.slots.part.course.unit.discipline.student.name',
 					[ownerKey]: String(ownedOwnerId),
 				})
 				.set('Authorization', auth);

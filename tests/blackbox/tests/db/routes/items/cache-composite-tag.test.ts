@@ -492,6 +492,72 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
+			'a read matching two ways is purged by a write matching either',
+			(steps) => {
+				const ids = new Map<string, number>();
+
+				const query = {
+					fields: 'id,owner,method',
+					'filter[_or][0][owner][_eq]': 'tau',
+					'filter[_or][1][method][_eq]': 'spaced',
+				};
+
+				givenSlots(steps, ids);
+
+				steps.and(
+					'the slots owned by "tau" or read with the "spaced" method are cached',
+					async () => await fillCache(query),
+				);
+
+				steps.when(
+					'the slots are created:',
+					async (table: Record<string, string>[]) => {
+						await createSlots(table, ids);
+					},
+				);
+
+				steps.then(
+					'the read is purged',
+					async () => await expectCacheStatus(query, 'MISS'),
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a read matching two ways survives a write matching neither',
+			(steps) => {
+				const ids = new Map<string, number>();
+
+				const query = {
+					fields: 'id,owner,method',
+					'filter[_or][0][owner][_eq]': 'omega',
+					'filter[_or][1][method][_eq]': 'spaced',
+				};
+
+				givenSlots(steps, ids);
+
+				steps.and(
+					'the slots owned by "omega" or read with the "spaced" method are cached',
+					async () => await fillCache(query),
+				);
+
+				steps.when(
+					'the slots are created:',
+					async (table: Record<string, string>[]) => {
+						await createSlots(table, ids);
+					},
+				);
+
+				steps.then(
+					'the read is still cached',
+					async () => await expectCacheStatus(query, 'HIT'),
+				);
+			},
+			60_000,
+		);
+
+		scenario(
 			'a delete of a matching row purges the read',
 			(steps) => {
 				const ids = new Map<string, number>();

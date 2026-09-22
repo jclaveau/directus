@@ -365,10 +365,15 @@ describe(oneLine`
 			expect(warm.headers[cacheTagsHeader])
 				.not.toMatch(new RegExp(`(^|, )${CHILD}:parent=`));
 
-			// Bare means a child of ANY parent evicts it, including the sibling's.
+			// Bare means a child of ANY parent evicts it, including the sibling's —
+			// through the fk it hangs off, which is what decides whether the read
+			// holds that row at all. Its body is a column the read never shows.
 			expect((await readMainless()).headers[cacheStatusHeader]).toBe('HIT');
 
-			await updateChild(siblingChildId, 'sibling touched for mainless root');
+			await request(getUrl(vendor, env))
+				.patch(`/items/${CHILD}/${siblingChildId}`)
+				.send({ parent: ownedParentId })
+				.set('Authorization', auth);
 
 			expect((await readMainless()).headers[cacheStatusHeader]).toBe('MISS');
 		});
@@ -404,11 +409,11 @@ describe(oneLine`
 
 			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('HIT');
 
-			// Bare: this child is under only ONE of the two aliases, and a write to it
-			// evicts all the same.
+			// Bare: this child is under only ONE of the two aliases, and a write to the
+			// fk of the OTHER evicts all the same.
 			await request(getUrl(vendor, env))
 				.patch(`/items/${CONFLICT_CHILD}/${conflictChildId}`)
-				.send({ body: 'touched under one alias' })
+				.send({ alt_parent: conflictParentId })
 				.set('Authorization', auth);
 
 			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('MISS');

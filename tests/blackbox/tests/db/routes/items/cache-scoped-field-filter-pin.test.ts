@@ -123,6 +123,13 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		function updateTag(id: number, item: Record<string, string>) {
+			return request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${id}`)
+				.send(item)
+				.set('Authorization', auth);
+		}
+
 		function clearCache() {
 			return request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -148,15 +155,20 @@ describe(oneLine`
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
 		});
 
-		it('a write to a tag with the filtered label evicts the read', async () => {
+		it('a tag leaving the filtered label evicts the read', async () => {
 			await clearCache();
 
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
 
-			await updateTagBody(alphaTagId, 'alpha touched');
+			// The label, not the body: the read shows no tag column, so only a write
+			// moving a tag across the slice the filter named changes its response.
+			await updateTag(alphaTagId, { label: 'alpha moved' });
 
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
+
+			// Back in the slice the tests below read.
+			await updateTag(alphaTagId, { label: 'alpha' });
 		});
 
 		it('inserting a tag with the filtered label evicts the read', async () => {
@@ -224,9 +236,13 @@ describe(oneLine`
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('HIT');
 
-			await updateTagBody(alphaTagId, 'alpha conflict touched');
+			// Either scoped field the filter named bounds this read, so a write moving
+			// the tag along one of them evicts it.
+			await updateTag(alphaTagId, { kind: 'k2' });
 
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
+
+			await updateTag(alphaTagId, { kind: 'k1' });
 		});
 	});
 });
