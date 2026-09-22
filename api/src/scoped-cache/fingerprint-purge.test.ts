@@ -203,6 +203,21 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
+		leaves an entry pinning nothing alone when the mutation keeps the collection
+		tag warm: that entry is what the tag covers
+	`, async () => {
+		members = {
+			[BARE]: ['slot:&|ns:entry-bare'],
+			[ALPHA]: ['slot:&owner=,alpha,&|ns:entry-alpha'],
+		};
+
+		await purge({ includeCollectionTag: false });
+
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bare');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+	});
+
+	it(oneLine`
 		still sweeps a tag a hook declared: it names a slice, not the rows the
 		mutation wrote, and nothing read back can resolve it
 	`, async () => {

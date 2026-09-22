@@ -269,6 +269,73 @@ export function scopedCacheUnaliasedPath(
 }
 
 /**
+ * The field each nested collection's rows are filed under the parent they were
+ * read through: the reverse fk of the to-many they hang off.
+ *
+ * A read of `course` reaching `parts` holds the parts whose `course` names that
+ * course, so a part rewritten onto another course leaves the read's result set —
+ * a response that changed on a column the read never selected. The field map
+ * records what the read SELECTED, filtered and sorted of each collection; this
+ * records what decides which of its rows the read holds at all, and the purge's
+ * field test has to count both.
+ *
+ * An M2O adds nothing: the fk lives on the near collection, where the field map
+ * already records it, and the row it names is reached by its own immutable key.
+ */
+export function scopedCacheNestedRowBindings(
+	schema: SchemaOverview,
+	rootCollection: CollectionKey,
+	fieldMap: FieldMap,
+	fieldNames: ReadonlyMap<string, string>,
+): Map<CollectionKey, Set<string>> {
+	const bindings = new Map<CollectionKey, Set<string>>();
+
+	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		if (path === '') {
+			continue;
+		}
+
+		const segments = path.split('.');
+		const fields = scopedCacheUnaliasedPath(fieldNames, segments);
+		const aliasField = fields[fields.length - 1];
+
+		if (aliasField === undefined) {
+			continue;
+		}
+
+		const parentCollection = scopedCacheCollectionAtPathEnd(
+			schema,
+			rootCollection,
+			fields.slice(0, -1),
+		);
+
+		if (parentCollection === null) {
+			continue;
+		}
+
+		const { relation, relationType } = getRelationInfo(
+			schema.relations,
+			parentCollection,
+			aliasField,
+		);
+
+		if (
+			relationType !== 'o2m'
+			|| !relation
+			|| relation.collection !== entry.collection
+		) {
+			continue;
+		}
+
+		const bound = bindings.get(entry.collection) ?? new Set<string>();
+		bound.add(relation.field);
+		bindings.set(entry.collection, bound);
+	}
+
+	return bindings;
+}
+
+/**
  * The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
  * flat scope field; otherwise a child write emits just its pk slice, which an
  * INSERT of a new child never carries — so a pin on the parent's key would serve

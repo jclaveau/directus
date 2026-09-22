@@ -30,6 +30,7 @@ import {
 	pinnedScopedCacheTagsFromO2mChildren,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheFieldNamesByAliasedPath,
+	scopedCacheNestedRowBindings,
 	scopedCacheNodeBoundsByCollection,
 	scopedCacheRowsAtPathEnd,
 	scopedCacheUnaliasedPath,
@@ -236,9 +237,18 @@ export class ScopedCacheReadPlan {
 	 * adds afterwards ride on top: a pinned path is a field the read is bound to
 	 * by definition, and the field map files it under the collection it belongs to
 	 * rather than the one pinning it.
+	 *
+	 * The reverse fk of each to-many the read descends joins them: the field map
+	 * says which columns of a nested row the read shows, and that one says which
+	 * rows it shows at all.
 	 */
 	fieldsByCollection(): Map<CollectionKey, string[]> {
-		const byCollection = new Map<CollectionKey, Set<string>>();
+		const byCollection = scopedCacheNestedRowBindings(
+			this.schema,
+			this.collection,
+			this.fieldMap,
+			this.fieldNames,
+		);
 
 		for (const entries of [this.fieldMap.read, this.fieldMap.other]) {
 			for (const { collection, fields } of entries.values()) {

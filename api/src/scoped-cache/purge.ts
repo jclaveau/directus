@@ -45,6 +45,7 @@ import {
 	scopedCacheRowBuckets,
 } from './fingerprint-index.js';
 import {
+	parseScopedCacheFingerprint,
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintPurgedBy,
 	type ScopedCacheFingerprint,
@@ -625,6 +626,7 @@ async function purgeScopedCacheFingerprintIndex(
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 	changed: readonly string[] | null,
 	ownerPath: string | null,
+	includeCollectionTag: boolean,
 ): Promise<number> {
 	if (rowFingerprints.length === 0) {
 		return 0;
@@ -656,6 +658,17 @@ async function purgeScopedCacheFingerprintIndex(
 
 			for (const member of members) {
 				const { fingerprint, key } = parseScopedCacheIndexMember(member);
+
+				// A fingerprint pinning nothing is what the bare collection tag
+				// covers, so a mutation keeping that tag warm keeps these entries
+				// too — the global reads a write that opted out of the collection
+				// tag means to leave standing.
+				if (
+					includeCollectionTag === false
+					&& parseScopedCacheFingerprint(fingerprint).pairs.size === 0
+				) {
+					continue;
+				}
 
 				if (!scopedCacheFingerprintPurgedBy(
 					fingerprint,
@@ -1475,6 +1488,7 @@ export async function purgeScopedCache(
 						options.rowFingerprints,
 						options.changed ?? null,
 						options.ownerPath ?? null,
+						options.includeCollectionTag !== false,
 					),
 				purgeScopedCacheTagKeys(cache, tagKeys),
 			]);

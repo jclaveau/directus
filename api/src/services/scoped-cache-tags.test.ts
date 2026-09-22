@@ -1,11 +1,15 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
 import type { Filter, SchemaOverview } from '@directus/types';
+import type {
+	FieldMap,
+} from '../permissions/modules/process-ast/types.js';
 import {
 	canonicalScopedCacheValue,
 	composeScopedCachePaths,
 	pinnedScopedCacheBoundsFromFilter,
 	pinnedScopedCacheTagsFromFilter,
+	scopedCacheNestedRowBindings,
 	scopedCacheTagsFromRows,
 	serializeScopedCacheTags,
 } from '../scoped-cache.js';
@@ -1132,5 +1136,63 @@ describe('pinnedScopedCacheBoundsFromFilter', () => {
 
 		expect(pinnedScopedCacheBoundsFromFilter('slots', ['student'], filter))
 			.toEqual([]);
+	});
+});
+
+describe('scopedCacheNestedRowBindings', () => {
+	const schema = {
+		collections: {
+			course: { collection: 'course', primary: 'id', fields: {} },
+			part: { collection: 'part', primary: 'id', fields: {} },
+		},
+		relations: [
+			{
+				collection: 'part',
+				field: 'course',
+				related_collection: 'course',
+				meta: { one_field: 'parts' },
+			},
+		],
+	} as unknown as SchemaOverview;
+
+	test('binds a nested child by the fk the to-many reads it back through', () => {
+		const fieldMap = {
+			read: new Map([
+				['parts', { collection: 'part', fields: new Set(['id']) }],
+			]),
+			other: new Map(),
+		} as unknown as FieldMap;
+
+		expect(scopedCacheNestedRowBindings(schema, 'course', fieldMap, new Map()))
+			.toEqual(new Map([['part', new Set(['course'])]]));
+	});
+
+	test(oneLine`
+		binds nothing through an M2O: the fk is a field of the collection holding it,
+		and the row it names is reached by its own key
+	`, () => {
+		const fieldMap = {
+			read: new Map([
+				['course', { collection: 'course', fields: new Set(['title']) }],
+			]),
+			other: new Map(),
+		} as unknown as FieldMap;
+
+		expect(scopedCacheNestedRowBindings(schema, 'part', fieldMap, new Map()))
+			.toEqual(new Map());
+	});
+
+	test('reads the path through the alias the read named it by', () => {
+		const fieldMap = {
+			read: new Map([
+				['chapters', { collection: 'part', fields: new Set(['id']) }],
+			]),
+			other: new Map(),
+		} as unknown as FieldMap;
+
+		const fieldNames = new Map([['chapters', 'parts']]);
+
+		expect(scopedCacheNestedRowBindings(schema, 'course', fieldMap, fieldNames))
+			.toEqual(new Map([['part', new Set(['course'])]]));
 	});
 });
