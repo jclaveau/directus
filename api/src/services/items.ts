@@ -823,10 +823,10 @@ implements AbstractService<Item> {
 		// bounded to this read — it rides the result via `getMeta()`, not a field.
 		const {
 			tags: scopedCacheTags,
-			bounds: scopedCacheBounds,
+			queryCases: scopedCacheQueryCases,
 			unautopurgeable: scopedCacheUnautopurgeableTags,
-			boundFields: scopedCacheBoundFields,
-			ownerPaths: scopedCacheOwnerPaths,
+			queryCaseFields: scopedCacheQueryCaseFields,
+			bucketPaths: scopedCacheBucketPaths,
 		} = await this.scopedCache.readTags({
 				ast,
 				plan: scopedCachePlan,
@@ -868,10 +868,10 @@ implements AbstractService<Item> {
 		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
-			scopedCacheBounds,
+			scopedCacheQueryCases,
 			scopedCacheUnautopurgeableTags,
-			scopedCacheBoundFields: Object.fromEntries(scopedCacheBoundFields),
-			scopedCacheOwnerPaths: Object.fromEntries(scopedCacheOwnerPaths),
+			scopedCacheQueryCaseFields: Object.fromEntries(scopedCacheQueryCaseFields),
+			scopedCacheBucketPaths: Object.fromEntries(scopedCacheBucketPaths),
 			// A `scopeTo` names a collection the pre-query capture could not know
 			// about, and hands over the counter its own dependent read took.
 			scopedCacheEpochs: foldHandedOverScopedCacheEpochs(

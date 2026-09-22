@@ -7,7 +7,7 @@ import type {
 import {
 	canonicalScopedCacheValue,
 	composeScopedCachePaths,
-	pinnedScopedCacheBoundsFromFilter,
+	pinnedScopedCacheQueryCasesFromFilter,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheNestedRowBindings,
 	scopedCacheTagsFromRows,
@@ -1058,12 +1058,12 @@ describe('composeScopedCachePaths — auto-derived multi-hop paths', () => {
 	});
 });
 
-describe('pinnedScopedCacheBoundsFromFilter', () => {
+describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 	test('an _and of two fields is one way to match, holding both', () => {
 		const filter = { student: { _eq: 'A' }, course: { _eq: 'math' } };
 
 		expect(
-			pinnedScopedCacheBoundsFromFilter('slots', ['student', 'course'], filter),
+			pinnedScopedCacheQueryCasesFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([
 			[
 				{ collection: 'slots', field: 'student', value: 'A' },
@@ -1080,7 +1080,7 @@ describe('pinnedScopedCacheBoundsFromFilter', () => {
 		};
 
 		expect(
-			pinnedScopedCacheBoundsFromFilter('slots', ['student', 'course'], filter),
+			pinnedScopedCacheQueryCasesFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([
 			[{ collection: 'slots', field: 'student', value: 'A' }],
 			[{ collection: 'slots', field: 'course', value: 'math' }],
@@ -1096,7 +1096,7 @@ describe('pinnedScopedCacheBoundsFromFilter', () => {
 		};
 
 		expect(
-			pinnedScopedCacheBoundsFromFilter('slots', ['student', 'course'], filter),
+			pinnedScopedCacheQueryCasesFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([
 			[
 				{ collection: 'slots', field: 'student', value: 'A' },
@@ -1121,20 +1121,20 @@ describe('pinnedScopedCacheBoundsFromFilter', () => {
 			],
 		};
 
-		const bounds = pinnedScopedCacheBoundsFromFilter(
+		const queryCases = pinnedScopedCacheQueryCasesFromFilter(
 			'slots',
 			['student', 'course'],
 			filter,
 		);
 
-		expect(bounds.length).toBe(10);
-		expect(bounds.every((bound) => bound.length === 1)).toBe(true);
+		expect(queryCases.length).toBe(10);
+		expect(queryCases.every((queryCase) => queryCase.length === 1)).toBe(true);
 	});
 
 	test('an unbound branch drops the pin, as it does for tags', () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { note: { _eq: 'x' } }] };
 
-		expect(pinnedScopedCacheBoundsFromFilter('slots', ['student'], filter))
+		expect(pinnedScopedCacheQueryCasesFromFilter('slots', ['student'], filter))
 			.toEqual([]);
 	});
 });

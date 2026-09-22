@@ -110,14 +110,14 @@ function purge(options: Record<string, unknown>) {
 	return purgeScopedCache(cache, 'slot', [], null, {
 		rowFingerprints: [row],
 		changed: ['method'],
-		ownerPath: 'owner',
+		bucketPath: 'owner',
 		...options,
 	});
 }
 
 describe('a purge shown the rows it wrote', () => {
 	it(oneLine`
-		drops the entries whose whole bound the row satisfies, and leaves the one
+		drops the entries whose whole query case the row satisfies, and leaves the one
 		bound to another value of a field the row also carries
 	`, async () => {
 		members = {
@@ -169,7 +169,7 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		removes the matched member from the set it was found in, so a later write to
-		the same owner does not test a key that is already gone
+		the same bucket value does not test a key that is already gone
 	`, async () => {
 		members = {
 			[ALPHA]: [
@@ -195,7 +195,7 @@ describe('a purge shown the rows it wrote', () => {
 			return ['0', ['slot:&|ns:entry-second']];
 		});
 
-		await purge({ ownerPath: null });
+		await purge({ bucketPath: null });
 
 		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual(['0', '7']);
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-first');
@@ -231,7 +231,7 @@ describe('a purge shown the rows it wrote', () => {
 			{
 				rowFingerprints: [row],
 				changed: ['method'],
-				ownerPath: 'owner',
+				bucketPath: 'owner',
 				sweepScopedCacheTags: [hookTag],
 			},
 		);

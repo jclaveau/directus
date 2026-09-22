@@ -155,12 +155,12 @@ describe(oneLine`
 			}
 		});
 
-		const ownerPath = [
+		const bucketPath = [
 			'range', 'slots', 'part', 'course', 'unit', 'discipline', 'student', 'owner',
 		];
 
 		function readConfig() {
-			const ownerKey = `filter[${ownerPath.join('][')}][_eq]`;
+			const bucketKey = `filter[${bucketPath.join('][')}][_eq]`;
 
 			return request(getUrl(vendor, env))
 				.get(`/items/${CONFIG}`)
@@ -170,7 +170,7 @@ describe(oneLine`
 					// of the ancestor would not be evicted by a rename of it.
 					fields: '*,range.slots.part.course.unit.name'
 						+ ',range.slots.part.course.unit.discipline.student.name',
-					[ownerKey]: String(ownedOwnerId),
+					[bucketKey]: String(ownedOwnerId),
 				})
 				.set('Authorization', auth);
 		}

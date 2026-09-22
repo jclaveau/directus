@@ -19,7 +19,7 @@ import {
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
-	scopedCacheBoundsFromTags,
+	scopedCacheQueryCasesFromTags,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheTagLabel,
 	tagScopedCacheKeys,
@@ -69,21 +69,21 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// The same pinning grouped by what had to hold together — one entry per way the
 	// read matches a collection, each rendered as one fingerprint below. A read that
 	// carries none is read tag by tag, which over-purges rather than serving stale.
-	const readBounds: ScopedCacheTag[][] | undefined =
-		res.locals['scopedCacheBounds'] ?? payloadMeta?.scopedCacheBounds;
+	const readQueryCases: ScopedCacheTag[][] | undefined =
+		res.locals['scopedCacheQueryCases'] ?? payloadMeta?.scopedCacheQueryCases;
 
 	// The fields each of those collections is bound to, and the path its index is
-	// bucketed by. Composed with the bounds below into the fingerprints the purge
-	// matches a written row against. A collection missing from either is bound to
-	// all of its fields and filed in the bare bucket.
-	const readBoundFields: Record<string, string[]> =
-		res.locals['scopedCacheBoundFields']
-		?? payloadMeta?.scopedCacheBoundFields
+	// bucketed by. Composed with the query cases below into the fingerprints the
+	// purge matches a written row against. A collection missing from either is
+	// bound to all of its fields and filed in the bare bucket.
+	const readQueryCaseFields: Record<string, string[]> =
+		res.locals['scopedCacheQueryCaseFields']
+		?? payloadMeta?.scopedCacheQueryCaseFields
 		?? {};
 
-	const readOwnerPaths: Record<string, string | null> =
-		res.locals['scopedCacheOwnerPaths']
-		?? payloadMeta?.scopedCacheOwnerPaths
+	const readBucketPaths: Record<string, string | null> =
+		res.locals['scopedCacheBucketPaths']
+		?? payloadMeta?.scopedCacheBucketPaths
 		?? {};
 
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
@@ -152,22 +152,22 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// fingerprint has to carry no pair and no field — any write drops the entry. The
 	// bare tag alone says that, but composing it beside this read's pins would keep
 	// them and hold a stale count, so the pins go first.
-	const boundByCollection = new Map(Object.entries(readBoundFields));
+	const queryCaseFieldsByCollection = new Map(Object.entries(readQueryCaseFields));
 
-	const readOrTagBounds = readBounds?.length
-		? readBounds
-		: scopedCacheBoundsFromTags(readTags ?? []);
+	const readOrTagQueryCases = readQueryCases?.length
+		? readQueryCases
+		: scopedCacheQueryCasesFromTags(readTags ?? []);
 
-	const fingerprintBounds = countsWholeCollection && req.collection
+	const fingerprintQueryCases = countsWholeCollection && req.collection
 		? [
-			...readOrTagBounds.filter((bound) => {
-				return bound[0]?.collection !== req.collection;
+			...readOrTagQueryCases.filter((queryCase) => {
+				return queryCase[0]?.collection !== req.collection;
 			}),
-			...scopedCacheBoundsFromTags(collectionFallbackTags),
+			...scopedCacheQueryCasesFromTags(collectionFallbackTags),
 		]
 		: [
-			...readOrTagBounds,
-			...scopedCacheBoundsFromTags(
+			...readOrTagQueryCases,
+			...scopedCacheQueryCasesFromTags(
 				readTags?.length
 					? []
 					: collectionFallbackTags,
@@ -175,12 +175,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		];
 
 	if (countsWholeCollection && req.collection) {
-		boundByCollection.delete(req.collection);
+		queryCaseFieldsByCollection.delete(req.collection);
 	}
 
 	const scopedCacheFingerprints = scopedCacheFingerprintsByCollection(
-		fingerprintBounds,
-		boundByCollection,
+		fingerprintQueryCases,
+		queryCaseFieldsByCollection,
 	);
 
 	// The tags a fill of this request would be indexed under, in the form the
@@ -293,7 +293,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					? [cacheTagsKey(redisKey)]
 					: [],
 				scopedCacheFingerprints,
-				new Map(Object.entries(readOwnerPaths)),
+				new Map(Object.entries(readBucketPaths)),
 			);
 
 			// Handed over together rather than awaited in turn: node-redis corks its

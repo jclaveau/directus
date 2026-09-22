@@ -6,7 +6,7 @@ import {
 	renderScopedCacheIndexMember,
 	scopedCacheFingerprintBuckets,
 	scopedCacheFingerprintIndexKey,
-	scopedCacheOwnerPath,
+	scopedCacheBucketPath,
 	scopedCacheRowBuckets,
 } from './fingerprint-index.js';
 
@@ -14,7 +14,7 @@ vi.mock('@directus/env', () => {
 	return { useEnv: () => ({ CACHE_NAMESPACE: 'scalabus' }) };
 });
 
-// `slot` owns through `zone`, which owns through `region`, so its ownership chain
+// `slot` owns through `zone`, which owns through `region`, so its bucket path
 // is two hops deep and the bucket has a longest path to prefer. `note` scopes on a
 // flat column alone, so it has no ancestor to bucket by.
 const schema = new SchemaBuilder()
@@ -58,55 +58,55 @@ describe('scopedCacheFingerprintIndexKey', () => {
 	});
 });
 
-describe('scopedCacheOwnerPath', () => {
-	it('follows the ownership chain to its deepest ancestor key', () => {
-		expect(scopedCacheOwnerPath(schema, 'slot')).toBe('zone.region.owner');
+describe('scopedCacheBucketPath', () => {
+	it('follows the bucket path to its deepest ancestor key', () => {
+		expect(scopedCacheBucketPath(schema, 'slot')).toBe('zone.region.owner');
 	});
 
 	it('stops at the ancestor a shorter chain reaches', () => {
-		expect(scopedCacheOwnerPath(schema, 'zone')).toBe('region.owner');
+		expect(scopedCacheBucketPath(schema, 'zone')).toBe('region.owner');
 	});
 
 	it(oneLine`
 		falls back to the first field a collection scoping only on its own columns
 		declares
 	`, () => {
-		expect(scopedCacheOwnerPath(schema, 'note')).toBe('method');
+		expect(scopedCacheBucketPath(schema, 'note')).toBe('method');
 	});
 
 	it('has no path for a collection declaring no scope at all', () => {
-		expect(scopedCacheOwnerPath(schema, 'loose')).toBe(null);
+		expect(scopedCacheBucketPath(schema, 'loose')).toBe(null);
 	});
 });
 
 describe('scopedCacheFingerprintBuckets', () => {
-	it('files a read under the owner it pinned', () => {
+	it('files a read under the bucket value it pinned', () => {
 		expect(scopedCacheFingerprintBuckets(
 			'slot:&fields=,id,&method=,spaced,&zone.region.owner=,ana,&',
 			'zone.region.owner',
 		)).toEqual(['zone.region.owner=ana']);
 	});
 
-	it('files a read bounded to a list of owners under each of them', () => {
+	it('files a read bounded to a list of bucket values under each of them', () => {
 		expect(scopedCacheFingerprintBuckets(
 			'slot:&zone.region.owner=,ana,bo,&',
 			'zone.region.owner',
 		)).toEqual(['zone.region.owner=ana', 'zone.region.owner=bo']);
 	});
 
-	it('files a read pinning every axis but the owner bare', () => {
+	it('files a read pinning every axis but the bucket value bare', () => {
 		expect(scopedCacheFingerprintBuckets(
 			'slot:&fields=,id,&method=,spaced,&',
 			'zone.region.owner',
 		)).toEqual(['']);
 	});
 
-	it('files every read of a collection with no owner path bare', () => {
+	it('files every read of a collection with no bucket path bare', () => {
 		expect(scopedCacheFingerprintBuckets('loose:&fields=,id,&', null))
 			.toEqual(['']);
 	});
 
-	it('escapes an owner value carrying a separator, so its set is its own', () => {
+	it('escapes a bucket value carrying a separator, so its set is its own', () => {
 		expect(scopedCacheFingerprintBuckets(
 			'slot:&zone.region.owner=,a\\,b,&',
 			'zone.region.owner',
@@ -125,7 +125,7 @@ describe('scopedCacheRowBuckets', () => {
 		)).toEqual(['', 'zone.region.owner=ana', 'zone.region.owner=bo']);
 	});
 
-	it('reads one set for two rows of the same owner', () => {
+	it('reads one set for two rows of the same bucket value', () => {
 		expect(scopedCacheRowBuckets(
 			[
 				'slot:&id=,1,&zone.region.owner=,ana,&',
@@ -135,18 +135,18 @@ describe('scopedCacheRowBuckets', () => {
 		)).toEqual(['', 'zone.region.owner=ana']);
 	});
 
-	it('reads the bare set alone for a row whose owner never resolved', () => {
+	it('reads the bare set alone for a row whose bucket value never resolved', () => {
 		expect(scopedCacheRowBuckets(['slot:&id=,1,&'], 'zone.region.owner'))
 			.toEqual(['']);
 	});
 
-	it('reads the bare set alone for a collection with no owner path', () => {
+	it('reads the bare set alone for a collection with no bucket path', () => {
 		expect(scopedCacheRowBuckets(['loose:&id=,1,&'], null)).toEqual(['']);
 	});
 });
 
 describe('renderScopedCacheIndexMember', () => {
-	it('carries the bound and the key it protects in one member', () => {
+	it('carries the query case and the key it protects in one member', () => {
 		expect(renderScopedCacheIndexMember('slot:&method=,spaced,&', 'ns:abc'))
 			.toBe('slot:&method=,spaced,&|ns:abc');
 	});

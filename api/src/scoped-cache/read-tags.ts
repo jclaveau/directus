@@ -1155,7 +1155,7 @@ function descendFilterSegment(
  * hundred SADDs to file and a hundred compares to purge — for a precision no read
  * of that shape needs.
  */
-const SCOPED_CACHE_MAX_FILTER_BOUNDS = 16;
+const SCOPED_CACHE_MAX_QUERY_CASES = 16;
 
 /**
  * Scope a read's root cache tags off a filter — the read side. A read is soundly
@@ -1185,7 +1185,7 @@ const SCOPED_CACHE_MAX_FILTER_BOUNDS = 16;
  * here. - The purge side emits the same tag from the keys it already holds, so read
  * and write agree without either paying a query for it.
  */
-export function pinnedScopedCacheBoundsFromFilter(
+export function pinnedScopedCacheQueryCasesFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
@@ -1225,13 +1225,13 @@ export function pinnedScopedCacheBoundsFromFilter(
 	// bound a pinnable field covers its rows; an uncovered node's rows carry no pinned
 	// tag (would be stale).
 	//
-	// `bounds` is the same pinning read as a disjunction: one entry per way a row
+	// `queryCases` is the same pinning read as a disjunction: one entry per way a row
 	// can match the node, each holding every field that way binds. `tags` flattens
 	// it, losing which values had to hold together — which is all a tag sweep can
 	// use, and not enough for a composite one.
 	type Eval = {
 		tags: Map<string, Set<unknown>>;
-		bounds: Map<string, Set<unknown>>[];
+		queryCases: Map<string, Set<unknown>>[];
 		covered: boolean;
 	};
 
@@ -1252,7 +1252,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 	}
 
 	/** A node's own pinned fields as the one way its rows match it. */
-	function boundsOf(
+	function queryCasesOf(
 		tags: Map<string, Set<unknown>>,
 	): Map<string, Set<unknown>>[] {
 		return tags.size === 0
@@ -1267,7 +1267,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 	// Past the cap the product is dropped for the two sides' ways side by side —
 	// each still covers the rows it named, and a row matching both is matched twice
 	// rather than once. That widens what a purge reaches, never narrows it.
-	function andBounds(
+	function andQueryCases(
 		left: Map<string, Set<unknown>>[],
 		right: Map<string, Set<unknown>>[],
 	): Map<string, Set<unknown>>[] {
@@ -1277,7 +1277,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 				: left;
 		}
 
-		if (left.length * right.length > SCOPED_CACHE_MAX_FILTER_BOUNDS) {
+		if (left.length * right.length > SCOPED_CACHE_MAX_QUERY_CASES) {
 			return [...left, ...right];
 		}
 
@@ -1307,7 +1307,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 			value === null ||
 			typeof value !== 'object'
 		) {
-			return { tags, bounds: [], covered: false };
+			return { tags, queryCases: [], covered: false };
 		}
 
 		const ops = value as Record<string, unknown>;
@@ -1340,7 +1340,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 			}
 		}
 
-		return { tags, bounds: boundsOf(tags), covered: tags.size > 0 };
+		return { tags, queryCases: queryCasesOf(tags), covered: tags.size > 0 };
 	}
 
 	// Follow a declared path's segments down the nested filter to the terminal ops
@@ -1402,7 +1402,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 		const paths = pathsByHead.get(headField);
 
 		if (!paths || value === null || typeof value !== 'object') {
-			return { tags, bounds: [], covered: false };
+			return { tags, queryCases: [], covered: false };
 		}
 
 		for (const { field, segments } of paths) {
@@ -1417,7 +1417,7 @@ export function pinnedScopedCacheBoundsFromFilter(
 			}
 		}
 
-		return { tags, bounds: boundsOf(tags), covered: tags.size > 0 };
+		return { tags, queryCases: queryCasesOf(tags), covered: tags.size > 0 };
 	}
 
 	// OR: a row matches at least one branch. Sound to pin only when EVERY branch
@@ -1428,20 +1428,20 @@ export function pinnedScopedCacheBoundsFromFilter(
 		if (branches.length === 0 || !branches.every((branch) => branch.covered)) {
 			return {
 				tags: new Map<string, Set<unknown>>(),
-				bounds: [],
+				queryCases: [],
 				covered: false,
 			};
 		}
 
 		const tags = new Map<string, Set<unknown>>();
-		const bounds: Map<string, Set<unknown>>[] = [];
+		const queryCases: Map<string, Set<unknown>>[] = [];
 
 		for (const branch of branches) {
 			unionTags(tags, branch.tags);
-			bounds.push(...branch.bounds);
+			queryCases.push(...branch.queryCases);
 		}
 
-		return { tags, bounds, covered: true };
+		return { tags, queryCases, covered: true };
 	}
 
 	// Every key at an object level is AND-combined (the root and `_and` share this): a
@@ -1450,13 +1450,13 @@ export function pinnedScopedCacheBoundsFromFilter(
 	function evalNode(node: Filter): Eval {
 		const result: Eval = {
 			tags: new Map<string, Set<unknown>>(),
-			bounds: [],
+			queryCases: [],
 			covered: false,
 		};
 
 		function andIn(part: Eval): void {
 			unionTags(result.tags, part.tags);
-			result.bounds = andBounds(result.bounds, part.bounds);
+			result.queryCases = andQueryCases(result.queryCases, part.queryCases);
 			result.covered = result.covered || part.covered;
 		}
 
@@ -1480,10 +1480,10 @@ export function pinnedScopedCacheBoundsFromFilter(
 
 	const pinned = evalNode(filter);
 
-	return pinned.bounds.map((bound) => {
+	return pinned.queryCases.map((queryCase) => {
 		const tags: ScopedCacheTag[] = [];
 
-		for (const [field, values] of bound) {
+		for (const [field, values] of queryCase) {
 			for (const value of values) {
 				tags.push({ collection, field, value, type: fieldTypes[field] });
 			}
@@ -1494,17 +1494,17 @@ export function pinnedScopedCacheBoundsFromFilter(
 }
 
 /**
- * Bounds flattened: every tag any of them names, deduplicated. What a tag sweep
- * files an entry under, where each tag stands alone and any one of them
+ * Query cases flattened: every tag any of them names, deduplicated. What a tag
+ * sweep files an entry under, where each tag stands alone and any one of them
  * reproduced by a write drops the entry.
  */
-export function scopedCacheTagsOfBounds(
-	bounds: readonly (readonly ScopedCacheTag[])[],
+export function scopedCacheTagsOfQueryCases(
+	queryCases: readonly (readonly ScopedCacheTag[])[],
 ): ScopedCacheTag[] {
 	const tags = new Map<string, ScopedCacheTag>();
 
-	for (const bound of bounds) {
-		for (const tag of bound) {
+	for (const queryCase of queryCases) {
+		for (const tag of queryCase) {
 			tags.set(scopedCacheTagKey(tag), tag);
 		}
 	}
@@ -1512,11 +1512,15 @@ export function scopedCacheTagsOfBounds(
 	return [...tags.values()];
 }
 
-/** The same pinning as `pinnedScopedCacheBoundsFromFilter`, read as a tag list. */
+/**
+ * The same pinning as `pinnedScopedCacheQueryCasesFromFilter`, read as a tag list.
+ */
 export function pinnedScopedCacheTagsFromFilter(
-	...inputs: Parameters<typeof pinnedScopedCacheBoundsFromFilter>
+	...inputs: Parameters<typeof pinnedScopedCacheQueryCasesFromFilter>
 ): ScopedCacheTag[] {
-	return scopedCacheTagsOfBounds(pinnedScopedCacheBoundsFromFilter(...inputs));
+	return scopedCacheTagsOfQueryCases(
+		pinnedScopedCacheQueryCasesFromFilter(...inputs),
+	);
 }
 
 /**

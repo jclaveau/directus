@@ -6,7 +6,7 @@ import {
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintFieldsTouched,
 	scopedCacheFingerprintFromTags,
-	scopedCacheBoundsFromTags,
+	scopedCacheQueryCasesFromTags,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
@@ -246,7 +246,8 @@ describe('scopedCacheFingerprintFieldsTouched', () => {
 
 describe('scopedCacheFingerprintsByCollection', () => {
 	it(oneLine`
-		folds one bound's pins into one fingerprint, and each collection into its own
+		folds one query case's pins into one fingerprint, and each collection into its
+		own
 	`, () => {
 		expect(scopedCacheFingerprintsByCollection(
 			[
@@ -293,7 +294,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 			.toEqual(['slot:&']);
 	});
 
-	it('carries the same bound once, however many times it is named', () => {
+	it('carries the same query case once, however many times it is named', () => {
 		expect(scopedCacheFingerprintsByCollection([
 			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
 			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
@@ -301,9 +302,9 @@ describe('scopedCacheFingerprintsByCollection', () => {
 	});
 });
 
-describe('scopedCacheBoundsFromTags', () => {
+describe('scopedCacheQueryCasesFromTags', () => {
 	it('reads each tag as a way of its own, which is how a sweep reads them', () => {
-		expect(scopedCacheBoundsFromTags([
+		expect(scopedCacheQueryCasesFromTags([
 			{ collection: 'slot', field: 'owner', value: 'alpha' },
 			{ collection: 'slot', field: 'method', value: 'spaced' },
 		])).toEqual([
@@ -389,7 +390,9 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		)).toBe(true);
 	});
 
-	it('leaves the read alone when no row of the batch satisfies its bound', () => {
+	it(oneLine`
+		leaves the read alone when no row of the batch satisfies its query case
+	`, () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
 			[

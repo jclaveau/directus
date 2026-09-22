@@ -120,9 +120,9 @@ const readHandler = asyncHandler(async (req, res, next) => {
 	res.locals['scopedCacheUnautopurgeableTags'] =
 		resultMeta?.scopedCacheUnautopurgeableTags;
 
-	res.locals['scopedCacheBounds'] = resultMeta?.scopedCacheBounds;
-	res.locals['scopedCacheBoundFields'] = resultMeta?.scopedCacheBoundFields;
-	res.locals['scopedCacheOwnerPaths'] = resultMeta?.scopedCacheOwnerPaths;
+	res.locals['scopedCacheQueryCases'] = resultMeta?.scopedCacheQueryCases;
+	res.locals['scopedCacheQueryCaseFields'] = resultMeta?.scopedCacheQueryCaseFields;
+	res.locals['scopedCacheBucketPaths'] = resultMeta?.scopedCacheBucketPaths;
 	res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 
 	return next();
@@ -161,9 +161,12 @@ router.get(
 		res.locals['scopedCacheUnautopurgeableTags'] =
 			resultMeta?.scopedCacheUnautopurgeableTags;
 
-		res.locals['scopedCacheBounds'] = resultMeta?.scopedCacheBounds;
-	res.locals['scopedCacheBoundFields'] = resultMeta?.scopedCacheBoundFields;
-		res.locals['scopedCacheOwnerPaths'] = resultMeta?.scopedCacheOwnerPaths;
+		res.locals['scopedCacheQueryCases'] = resultMeta?.scopedCacheQueryCases;
+
+		res.locals['scopedCacheQueryCaseFields'] =
+			resultMeta?.scopedCacheQueryCaseFields;
+
+		res.locals['scopedCacheBucketPaths'] = resultMeta?.scopedCacheBucketPaths;
 		res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 
 		return next();

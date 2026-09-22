@@ -40,7 +40,7 @@ import {
 	scopedCachePurgeEnabled,
 } from './config.js';
 import { scopedCacheFingerprintFromTags } from './fingerprint.js';
-import { scopedCacheOwnerPath } from './fingerprint-index.js';
+import { scopedCacheBucketPath } from './fingerprint-index.js';
 import type {
 	ScopedCacheCapture,
 	ScopedCacheMutatedWrite,
@@ -49,11 +49,11 @@ import {
 	purgeScopedCache,
 } from './purge.js';
 import {
-	pinnedScopedCacheBoundsFromFilter,
+	pinnedScopedCacheQueryCasesFromFilter,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheNestedCollections,
 	scopedCachePathReversesChain,
-	scopedCacheTagsOfBounds,
+	scopedCacheTagsOfQueryCases,
 } from './read-tags.js';
 import {
 	scopedCacheMaxPinsPerCollection,
@@ -681,7 +681,7 @@ export class ItemScopedCacheService {
 			: {
 				rowFingerprints: rows.fingerprints,
 				changed: rows.changed,
-				ownerPath: scopedCacheOwnerPath(this.schema, this.collection),
+				bucketPath: scopedCacheBucketPath(this.schema, this.collection),
 				sweepScopedCacheTags: hookTags,
 			};
 
@@ -794,10 +794,10 @@ export class ItemScopedCacheService {
 	 */
 	async readTags(inputs: ScopedCacheReadInputs): Promise<{
 		tags: ScopedCacheTag[];
-		bounds: ScopedCacheTag[][];
+		queryCases: ScopedCacheTag[][];
 		unautopurgeable: ScopedCacheTag[];
-		boundFields: Map<CollectionKey, string[]>;
-		ownerPaths: Map<CollectionKey, string | null>;
+		queryCaseFields: Map<CollectionKey, string[]>;
+		bucketPaths: Map<CollectionKey, string | null>;
 	}> {
 		const {
 			ast,
@@ -813,10 +813,10 @@ export class ItemScopedCacheService {
 		if (!scopedCachePurgeEnabled()) {
 			return {
 				tags,
-				bounds: [],
+				queryCases: [],
 				unautopurgeable,
-				boundFields: new Map(),
-				ownerPaths: new Map(),
+				queryCaseFields: new Map(),
+				bucketPaths: new Map(),
 			};
 		}
 
@@ -849,22 +849,23 @@ export class ItemScopedCacheService {
 			}
 		}
 
-		// Scope off the read's EFFECTIVE bound = the API filter AND the permission
-		// cases, combined by the same `joinFilterWithCases` the SQL WHERE uses
-		// (`{ _and: [filter, { _or: cases }] }`) so the pin can't diverge from what
-		// the query actually returns. Both are already dynamic-var-resolved before
-		// the service runs — the filter by sanitizeQuery, the cases by
+		// Scope off the read's EFFECTIVE query case = the API filter AND the
+		// permission cases, combined by the same `joinFilterWithCases` the SQL WHERE
+		// uses (`{ _and: [filter, { _or: cases }] }`) so the pin can't diverge from
+		// what the query actually returns. Both are already dynamic-var-resolved
+		// before the service runs — the filter by sanitizeQuery, the cases by
 		// fetchPermissions → processPermissions → parseFilter — so `$CURRENT_USER`
 		// is the concrete user id, matching what a write's row yields. The pinner
 		// unions an `_or`'s slices when every branch binds a pinnable field — same
 		// field or different ones (the multi-policy case) — else falls back to bare.
 		//
-		// Kept as bounds as well as tags: the tags say which slices the read sits
-		// in, and the bounds say which of them had to hold TOGETHER — an `_and` of
-		// two fields is one bound of two pairs, an `_or` of them is two bounds.
-		const rootScopedCacheBounds = rootPaths.size > 1
+		// Kept as query cases as well as tags: the tags say which slices the read
+		// sits in, and the query cases say which of them had to hold TOGETHER — an
+		// `_and` of two fields is one query case of two pairs, an `_or` of them is
+		// two query cases.
+		const rootScopedCacheQueryCases = rootPaths.size > 1
 			? []
-			: pinnedScopedCacheBoundsFromFilter(
+			: pinnedScopedCacheQueryCasesFromFilter(
 				this.collection,
 				this.flatFields,
 				joinFilterWithCases(updatedQuery.filter, ast.cases),
@@ -874,7 +875,8 @@ export class ItemScopedCacheService {
 				this.schema.collections[this.collection]?.primary,
 			);
 
-		const rootScopedCacheTags = scopedCacheTagsOfBounds(rootScopedCacheBounds);
+		const rootScopedCacheTags =
+			scopedCacheTagsOfQueryCases(rootScopedCacheQueryCases);
 
 		// A filter reaching a collection only through an operator on the
 		// relational key itself (`{ rel: { _gt: X } }`) leaves it out of the
@@ -994,9 +996,9 @@ export class ItemScopedCacheService {
 		// reaches the collection by, since a path that escapes the bound is a row
 		// the slice does not cover:
 		//
-		// - the path walks the slice's ownership chain backwards from the root, whose
-		//   own pin then bounds every row nested that way (`courses` off a student
-		//   read by key pins `course:student=<key>`);
+		// - the path walks the chain to the slice's bucket value backwards from the
+		//   root, whose own pin then bounds every row nested that way (`courses` off
+		//   a student read by key pins `course:student=<key>`);
 		// - the read's own filter binds the path-prefixed slice for every row the root
 		//   returns — the root pinner run over that one path, so an `_or` branch
 		//   leaving it unbound leaves it unbound. The rows nested under such a path
@@ -1005,7 +1007,7 @@ export class ItemScopedCacheService {
 		//
 		// A filter that keyed the collection somewhere ELSE cannot stand in: its keys
 		// name rows reached by a hop this collection never takes, which is the
-		// wrong-owner stale hit `cache-ancestor-slice-wrong-value` forbids.
+		// wrong-bucket-value stale hit `cache-ancestor-slice-wrong-value` forbids.
 		const sliceTagsFor = (collection: string): ScopedCacheTag[] => {
 			if (collection === this.collection) {
 				return [];
@@ -1079,7 +1081,7 @@ export class ItemScopedCacheService {
 						: undefined;
 				})();
 
-				const bound = new Map<string, ScopedCacheTag>();
+				const queryCase = new Map<string, ScopedCacheTag>();
 				let everyPathBound = true;
 
 				// By field, not alias: a filter names fields, and so do the paths the
@@ -1111,7 +1113,7 @@ export class ItemScopedCacheService {
 
 					for (const { value } of tags) {
 						const sliced = { collection, field: slice.field, value, type };
-						bound.set(scopedCacheTagKey(sliced), sliced);
+						queryCase.set(scopedCacheTagKey(sliced), sliced);
 					}
 				}
 
@@ -1119,10 +1121,10 @@ export class ItemScopedCacheService {
 				// keyed filter's pin: a partial set leaves the rows it omits uncovered.
 				if (
 					everyPathBound
-					&& bound.size > 0
-					&& bound.size <= scopedCacheMaxPinsPerCollection()
+					&& queryCase.size > 0
+					&& queryCase.size <= scopedCacheMaxPinsPerCollection()
 				) {
-					return [...bound.values()];
+					return [...queryCase.values()];
 				}
 			}
 
@@ -1145,7 +1147,7 @@ export class ItemScopedCacheService {
 			}
 
 			const related = relatedServiceOf(collection);
-			const bound = new Map<string, ScopedCacheTag>();
+			const queryCase = new Map<string, ScopedCacheTag>();
 
 			for (const nodeBound of bounds) {
 				const nodeTags = nodeBound === null
@@ -1165,12 +1167,12 @@ export class ItemScopedCacheService {
 				}
 
 				for (const tag of nodeTags) {
-					bound.set(scopedCacheTagKey(tag), tag);
+					queryCase.set(scopedCacheTagKey(tag), tag);
 				}
 			}
 
-			return bound.size <= scopedCacheMaxPinsPerCollection()
-				? [...bound.values()]
+			return queryCase.size <= scopedCacheMaxPinsPerCollection()
+				? [...queryCase.values()]
 				: [];
 		};
 
@@ -1475,40 +1477,41 @@ export class ItemScopedCacheService {
 		// enrichment read is unknown, and a `fields` pair narrower than the truth
 		// would keep an entry a write did change. A collection left out is bound to
 		// all of its fields, which every write touches.
-		const boundFields = plan.fieldsByCollection();
+		const queryCaseFields = plan.fieldsByCollection();
 
 		for (const tag of hookAddedTags.values()) {
-			boundFields.delete(tag.collection);
+			queryCaseFields.delete(tag.collection);
 		}
 
-		const ownerPaths = new Map(tags.map(({ collection }) => {
-			return [collection, scopedCacheOwnerPath(this.schema, collection)];
+		const bucketPaths = new Map(tags.map(({ collection }) => {
+			return [collection, scopedCacheBucketPath(this.schema, collection)];
 		}));
 
 		// The root's own filter is the one place several tags of a collection have
 		// to hold together — everywhere else a tag stands alone, the way the sweep
-		// reads it, so each is a bound of its own. Reading those as a conjunction
-		// would leave a read cached that a write to any one of their slices staled.
-		const rootBoundKeys = new Set(
-			rootScopedCacheBounds.flat().map(scopedCacheTagKey),
+		// reads it, so each is a query case of its own. Reading those as a
+		// conjunction would leave a read cached that a write to any one of their
+		// slices staled.
+		const rootQueryCaseKeys = new Set(
+			rootScopedCacheQueryCases.flat().map(scopedCacheTagKey),
 		);
 
-		const bounds = tags
-			.filter((tag) => rootBoundKeys.has(scopedCacheTagKey(tag)) === false)
+		const queryCases = tags
+			.filter((tag) => rootQueryCaseKeys.has(scopedCacheTagKey(tag)) === false)
 			.map((tag) => [tag]);
 
 		const rootTagKeys = new Set(tags.map(scopedCacheTagKey));
 
-		const rootBounds = rootScopedCacheBounds.filter((bound) => {
-			return bound.every((tag) => rootTagKeys.has(scopedCacheTagKey(tag)));
+		const rootQueryCases = rootScopedCacheQueryCases.filter((queryCase) => {
+			return queryCase.every((tag) => rootTagKeys.has(scopedCacheTagKey(tag)));
 		});
 
 		return {
 			tags,
-			bounds: [...rootBounds, ...bounds],
+			queryCases: [...rootQueryCases, ...queryCases],
 			unautopurgeable,
-			boundFields,
-			ownerPaths,
+			queryCaseFields,
+			bucketPaths,
 		};
 	}
 }

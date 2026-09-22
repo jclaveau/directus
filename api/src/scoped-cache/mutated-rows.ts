@@ -119,7 +119,7 @@ function sameStoredValue(before: unknown, after: unknown): boolean {
 /**
  * What an insert or a delete shows the purge for itself: the rows it wrote, and
  * no `changed` — the row entered or left the result set whichever columns it
- * carries, so every read whose bound it satisfies is stale.
+ * carries, so every read whose query case it satisfies is stale.
  *
  * Nothing when the capture could not resolve the rows' scope: that purge is the
  * collection-wide one, which has no use for them.

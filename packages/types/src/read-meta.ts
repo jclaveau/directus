@@ -24,7 +24,7 @@ export interface ScopedCacheTag {
  * evicted: a read bounded to `owner=alpha AND method=spaced` is dropped by every
  * write carrying `method=spaced`, whoever owns it. A fingerprint carries the same
  * pins as ONE token, so a write purges it only when the row it wrote satisfies the
- * whole bound. The grammar and the matcher live in the api's `scoped-cache`.
+ * whole query case. The grammar and the matcher live in the api's `scoped-cache`.
  */
 export type ScopedCacheFingerprint = string;
 
@@ -222,13 +222,14 @@ export interface ReadMeta {
 	/**
 	 * The same tags, grouped by what had to hold TOGETHER: one entry per way the
 	 * read matches a collection. A root filter of `owner=alpha AND method=spaced`
-	 * is one bound of two tags, an `_or` over those fields is two bounds of one,
-	 * and every tag from anywhere else stands alone the way the sweep reads it.
+	 * is one query case of two tags, an `_or` over those fields is two query cases
+	 * of one, and every tag from anywhere else stands alone the way the sweep
+	 * reads it.
 	 *
 	 * Each becomes one `ScopedCacheFingerprint` at fill time. Absent, the tags are
 	 * read one by one, which over-purges rather than serving stale.
 	 */
-	scopedCacheBounds?: ScopedCacheTag[][];
+	scopedCacheQueryCases?: ScopedCacheTag[][];
 
 	/**
 	 * Tags a read hook scoped this response TO that are unautopurgeable — a value
@@ -247,13 +248,13 @@ export interface ReadMeta {
 	 * A collection missing here is bound to all of its fields — the fail-safe
 	 * direction is the over-purge, never the stale hit.
 	 */
-	scopedCacheBoundFields?: Record<string, string[]>;
+	scopedCacheQueryCaseFields?: Record<string, string[]>;
 
 	/**
 	 * The path each of those collections' index sets is bucketed by, so the fill
 	 * files a fingerprint where the writes that can match it will look.
 	 */
-	scopedCacheOwnerPaths?: Record<string, string | null>;
+	scopedCacheBucketPaths?: Record<string, string | null>;
 
 	/**
 	 * The purge counters of the collections this read depends on, captured BEFORE its

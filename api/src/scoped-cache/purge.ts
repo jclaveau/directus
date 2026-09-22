@@ -295,7 +295,7 @@ export async function tagScopedCacheKeys(
 	scopedCacheTags: Iterable<ScopedCacheTag>,
 	extraSiblings: string[] = [],
 	fingerprints: readonly ScopedCacheFingerprint[] = [],
-	ownerPaths: ReadonlyMap<string, string | null> = new Map(),
+	bucketPaths: ReadonlyMap<string, string | null> = new Map(),
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled()) {
 		return;
@@ -379,19 +379,19 @@ export async function tagScopedCacheKeys(
 
 	// Filed in the same pipeline as the tag sets above, and holding the same
 	// members: a purge that knows the rows it wrote matches fingerprints here and
-	// drops only the entries whose whole bound the row satisfies, while one that
-	// knows nothing but a tag — a hook's own `purgeBy`, a collection-wide fallback
-	// — still sweeps the sets above. Both index the same entry, so whichever a
-	// purge reaches it by, the entry goes.
+	// drops only the entries whose whole query case the row satisfies, while one
+	// that knows nothing but a tag — a hook's own `purgeBy`, a collection-wide
+	// fallback — still sweeps the sets above. Both index the same entry, so
+	// whichever a purge reaches it by, the entry goes.
 	for (const fingerprint of fingerprints) {
 		const collection = scopedCacheFingerprintCollection(fingerprint);
-		const ownerPath = ownerPaths.get(collection) ?? null;
+		const bucketPath = bucketPaths.get(collection) ?? null;
 
 		const members = [key, cacheExpiresAtKey(key), ...extraSiblings].map(
 			(member) => renderScopedCacheIndexMember(fingerprint, member),
 		);
 
-		for (const bucket of scopedCacheFingerprintBuckets(fingerprint, ownerPath)) {
+		for (const bucket of scopedCacheFingerprintBuckets(fingerprint, bucketPath)) {
 			const bucketKey = scopedCacheFingerprintIndexKey(collection, bucket);
 
 			if (ttlSeconds > 0) {
@@ -594,14 +594,15 @@ async function purgeScopedCacheTagKeys(
  * How many members one `SSCAN` of an index set is asked to look at per round trip.
  *
  * The set is read in pages rather than whole: a collection's bare set holds every
- * cached read that pinned no owner, and `SMEMBERS` on it would put the whole thing
- * in this process's memory — and hold Redis for the length of the reply — to keep
- * the handful the write actually matched.
+ * cached read that pinned no bucket value, and `SMEMBERS` on it would put the
+ * whole thing in this process's memory — and hold Redis for the length of the
+ * reply — to keep the handful the write actually matched.
  */
 const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
 
 /**
- * Drop the entries whose whole bound the written rows satisfy, and nothing else.
+ * Drop the entries whose whole query case the written rows satisfy, and nothing
+ * else.
  *
  * This is the purge #531 exists for. A tag purge asks "is this entry filed under a
  * slice I wrote", and an entry bounded to `owner=alpha AND method=spaced` answers
@@ -610,22 +611,22 @@ const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
  * — so the answer is no for every owner but alpha.
  *
  * The index sets it reads are picked by the rows: the bare set, which every write
- * to the collection reads, and the one each row's owner names. A fingerprint filed
- * under a different owner is never even looked at.
+ * to the collection reads, and the one each row's bucket value names. A
+ * fingerprint filed under a different bucket value is never even looked at.
  *
  * Matched members are SREMed from the set they were found in: nothing else prunes
  * them, and a purged entry left named by the index would be re-tested by every
- * later write to that owner for as long as the set lives. A member of a SECOND
- * set — an entry bounded to a list of owners — is left behind for its own set's
- * expiry, since finding it would cost a scan of every set to save a string
- * compare.
+ * later write to that bucket value for as long as the set lives. A member of a
+ * SECOND set — an entry bounded to a list of bucket values — is left behind for
+ * its own set's expiry, since finding it would cost a scan of every set to save a
+ * string compare.
  */
 async function purgeScopedCacheFingerprintIndex(
 	cache: Keyv,
 	collection: string,
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 	changed: readonly string[] | null,
-	ownerPath: string | null,
+	bucketPath: string | null,
 	includeCollectionTag: boolean,
 ): Promise<number> {
 	if (rowFingerprints.length === 0) {
@@ -642,7 +643,7 @@ async function purgeScopedCacheFingerprintIndex(
 	const keys: string[] = [];
 	const seenKeys = new Set<string>();
 
-	for (const bucket of scopedCacheRowBuckets(rowFingerprints, ownerPath)) {
+	for (const bucket of scopedCacheRowBuckets(rowFingerprints, bucketPath)) {
 		const bucketKey = scopedCacheFingerprintIndexKey(collection, bucket);
 		let cursor = '0';
 
@@ -1366,7 +1367,7 @@ export async function purgeScopedCache(
 		changed?: readonly string[] | null;
 		// The path the collection's index is bucketed by, so the purge reads back
 		// the sets its rows own instead of every set the collection has.
-		ownerPath?: string | null;
+		bucketPath?: string | null;
 		// The tags in the list that the rows do NOT answer for, and so keep their
 		// tag sweep: a hook's `purgeBy` names a slice, not the rows it wrote, and
 		// nothing the mutation read back can resolve it.
@@ -1487,7 +1488,7 @@ export async function purgeScopedCache(
 						collection,
 						options.rowFingerprints,
 						options.changed ?? null,
-						options.ownerPath ?? null,
+						options.bucketPath ?? null,
 						options.includeCollectionTag !== false,
 					),
 				purgeScopedCacheTagKeys(cache, tagKeys),

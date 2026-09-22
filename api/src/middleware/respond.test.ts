@@ -68,7 +68,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
 		// Real for the same reason: composing the tags into fingerprints is pure,
 		// and a stand-in would agree with the assertions rather than the grammar.
-		scopedCacheBoundsFromTags: actual.scopedCacheBoundsFromTags,
+		scopedCacheQueryCasesFromTags: actual.scopedCacheQueryCasesFromTags,
 		scopedCacheFingerprintsByCollection: actual.scopedCacheFingerprintsByCollection,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it

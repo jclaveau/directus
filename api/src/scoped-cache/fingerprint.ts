@@ -60,7 +60,7 @@ function splitUnescaped(input: string, separator: string): string[] {
 }
 
 /**
- * Render a bound as a fingerprint. `fields` rides as a pair of its own so the
+ * Render a query case as a fingerprint. `fields` rides as a pair of its own so the
  * write side reads it back the same way it reads a pin, and is left out entirely
  * when the caller names none — a serialised ROW has pairs and no fields.
  */
@@ -157,7 +157,7 @@ export function scopedCacheFingerprintCollection(
 /**
  * The fingerprint a set of one collection's tags composes to.
  *
- * The pinners still derive tags — a read's bound is assembled from a dozen
+ * The pinners still derive tags — a read's query case is assembled from a dozen
  * different places, each of which knows one slice — and this is where those
  * slices stop being an OR and become the AND they always described. Several tags
  * on the SAME field are one pair listing both values, which is what an `_in`
@@ -263,21 +263,21 @@ export function scopedCacheFingerprintFieldsTouched(
 		return true;
 	}
 
-	const bound = new Set(fields);
+	const queryCase = new Set(fields);
 
-	if (bound.has(SCOPED_CACHE_ANY_FIELD)) {
+	if (queryCase.has(SCOPED_CACHE_ANY_FIELD)) {
 		return true;
 	}
 
 	for (const field of changed) {
-		if (bound.has(field)) {
+		if (queryCase.has(field)) {
 			return true;
 		}
 
 		const segments = field.split('.');
 
 		for (let depth = segments.length - 1; depth > 0; depth--) {
-			if (bound.has(`${segments.slice(0, depth).join('.')}.*`)) {
+			if (queryCase.has(`${segments.slice(0, depth).join('.')}.*`)) {
 				return true;
 			}
 		}
@@ -287,35 +287,35 @@ export function scopedCacheFingerprintFieldsTouched(
 }
 
 /**
- * One fingerprint per way the read matches — per bound, not per collection.
+ * One fingerprint per way the read matches — per query case, not per collection.
  *
- * A bound holds the tags that had to hold TOGETHER on one collection: a filter of
- * `owner=alpha AND method=spaced` is one bound of two pairs, and the entry it
- * files is dropped only by a write satisfying both. An `_or` across two fields is
- * two bounds instead, since a row matching either changes the response, and one
- * fingerprint ANDing them would match neither.
+ * A query case holds the tags that had to hold TOGETHER on one collection: a
+ * filter of `owner=alpha AND method=spaced` is one query case of two pairs, and
+ * the entry it files is dropped only by a write satisfying both. An `_or` across
+ * two fields is two query cases instead, since a row matching either changes the
+ * response, and one fingerprint ANDing them would match neither.
  *
  * The tags a collection carries from anywhere else — a nested node's slice, an
  * ancestor's key, a hook's own tag — each stand alone the way a tag sweep reads
- * them, so each is a bound of its own.
+ * them, so each is a query case of its own.
  *
- * A bound naming no field pins nothing, so its fingerprint carries no pair and
- * every row of that collection matches — which is what a bare tag means. Its
+ * A query case naming no field pins nothing, so its fingerprint carries no pair
+ * and every row of that collection matches — which is what a bare tag means. Its
  * fields still narrow it: a write touching none of them cannot change the
  * response, whether or not the read could say which rows it depends on.
  *
- * Bounds are rendered in the order they come in, deduplicated, so a read's
+ * Query cases are rendered in the order they come in, deduplicated, so a read's
  * fingerprints come back stable without sorting what the caller may have ordered
  * on purpose.
  */
 export function scopedCacheFingerprintsByCollection(
-	bounds: readonly (readonly ScopedCacheTag[])[],
+	queryCases: readonly (readonly ScopedCacheTag[])[],
 	fieldsByCollection: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ScopedCacheFingerprint[] {
 	const rendered = new Set<ScopedCacheFingerprint>();
 
-	for (const bound of bounds) {
-		const collection = bound[0]?.collection;
+	for (const queryCase of queryCases) {
+		const collection = queryCase[0]?.collection;
 
 		if (collection === undefined) {
 			continue;
@@ -323,7 +323,7 @@ export function scopedCacheFingerprintsByCollection(
 
 		rendered.add(scopedCacheFingerprintFromTags(
 			collection,
-			bound,
+			queryCase,
 			fieldsByCollection.get(collection) ?? [],
 		));
 	}
@@ -332,14 +332,14 @@ export function scopedCacheFingerprintsByCollection(
 }
 
 /**
- * A flat tag list read as bounds: each tag on its own, which is how a tag sweep
- * reads them — any one of them reproduced by a write drops the entry.
+ * A flat tag list read as query cases: each tag on its own, which is how a tag
+ * sweep reads them — any one of them reproduced by a write drops the entry.
  *
- * What a caller with no bounds of its own hands over, and the fail-safe direction:
- * a conjunction read this way over-purges, while bounds read as a conjunction that
- * was never one serves stale.
+ * What a caller with no query cases of its own hands over, and the fail-safe
+ * direction: a conjunction read this way over-purges, while query cases read as a
+ * conjunction that was never one serves stale.
  */
-export function scopedCacheBoundsFromTags(
+export function scopedCacheQueryCasesFromTags(
 	tags: readonly ScopedCacheTag[],
 ): ScopedCacheTag[][] {
 	return tags.map((tag) => [tag]);
@@ -355,10 +355,11 @@ export function scopedCacheBoundsFromTags(
  * carries, and an update only when it rewrote a column the read selected, sorted
  * or filtered on.
  *
- * And one of the rows it wrote satisfies the read's whole bound. `rowFingerprints`
- * carries the row as it was AND as it became, so a row moving INTO the read's
- * slice purges it on its new values and one moving OUT on its old ones — each of
- * them changes the response, and neither is visible from the other side alone.
+ * And one of the rows it wrote satisfies the read's whole query case.
+ * `rowFingerprints` carries the row as it was AND as it became, so a row moving
+ * INTO the read's slice purges it on its new values and one moving OUT on its old
+ * ones — each of them changes the response, and neither is visible from the other
+ * side alone.
  */
 export function scopedCacheFingerprintPurgedBy(
 	fingerprint: ScopedCacheFingerprint,
@@ -371,11 +372,11 @@ export function scopedCacheFingerprintPurgedBy(
 	// not it also selected it: a write moving a row across one of them moves it in
 	// or out of the result set, which is a changed response by itself. Added only
 	// beside declared fields, since naming none already means every field.
-	const bound = fields.length === 0
+	const queryCase = fields.length === 0
 		? fields
 		: [...fields, ...pairs.keys()];
 
-	if (scopedCacheFingerprintFieldsTouched(bound, changed) === false) {
+	if (scopedCacheFingerprintFieldsTouched(queryCase, changed) === false) {
 		return false;
 	}
 
