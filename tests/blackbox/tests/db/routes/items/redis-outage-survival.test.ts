@@ -663,12 +663,36 @@ describe('the API boots with Redis unreachable', () => {
 			instance.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
 			instance.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
 
-			instance.on('exit', (code) => {
-				instanceLog.push(`=== instance exited with ${code} ===`);
+			// A boot that dies or stalls here has only its own log to say why, and
+			// the hook's timeout reports none of it: an exit ends the wait with the
+			// tail, and a stall prints it before the timeout does.
+			const exited = new Promise<never>((_, reject) => {
+				instance.once('exit', (code) => {
+					instanceLog.push(`=== instance exited with ${code} ===`);
+
+					const tail = instanceLog.join('').slice(-6000);
+
+					reject(new Error(
+						`the Directus instance exited with ${code} before it listened:\n${tail}`,
+					));
+				});
 			});
 
-			await awaitDirectusConnection(port);
-		}, 60_000);
+			// Settled by the kill in `afterAll` once the race is over, with nobody
+			// left to hear it.
+			exited.catch(() => {});
+
+			const stalled = setTimeout(() => {
+				mark(`instance still booting:\n${instanceLog.join('').slice(-6000)}`);
+			}, 100_000);
+
+			try {
+				await Promise.race([awaitDirectusConnection(port), exited]);
+			}
+			finally {
+				clearTimeout(stalled);
+			}
+		}, 120_000);
 
 		afterAll(async () => {
 			if (instance.exitCode === null) {
@@ -713,15 +737,14 @@ describe('the API boots with Redis unreachable', () => {
 					throw error;
 				});
 
-			const servedIn = Date.now() - askedAt;
+			mark(`read served with redis never up in ${Date.now() - askedAt}ms`);
 
-			mark(`read served with redis never up in ${servedIn}ms`);
+			expect(Date.now() - askedAt).toBeLessThan(5_000);
 			await assertInstanceAlive();
 
 			expect(served.status).toBe(200);
 			expect(served.body.data.subject).toBe('read');
 			expect(served.headers[cacheStatusHeader]).toBe('MISS');
-			expect(servedIn).toBeLessThan(5_000);
 
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
@@ -732,7 +755,8 @@ describe('the API boots with Redis unreachable', () => {
 			let status: string | undefined;
 
 			for (let attempt = 0; attempt < 24; attempt++) {
-				status = (await get(`/items/${BOOT_NOTE}/${note}`)).headers[cacheStatusHeader];
+				const read = await get(`/items/${BOOT_NOTE}/${note}`);
+				status = read.headers[cacheStatusHeader];
 
 				if (status === 'HIT') {
 					break;

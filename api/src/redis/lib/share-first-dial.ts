@@ -36,14 +36,15 @@ export function shareFirstDial(store: DialingStore): void {
 		if (dialing === undefined && !store.client.isOpen) {
 			let refused: () => void = () => {};
 
-			const firstError = new Promise<void>((resolve) => {
-				refused = resolve;
-				store.client.once('error', refused);
-			});
-
 			// The listener goes with the wait: left behind a dial that answered
 			// `ready`, it would resolve a promise nobody waits on at the first outage.
-			dialing = Promise.race([dial.call(store), firstError]).finally(() => {
+			dialing = Promise.race([
+				dial.call(store),
+				new Promise<void>((resolve) => {
+					refused = resolve;
+					store.client.once('error', refused);
+				}),
+			]).finally(() => {
 				store.client.off('error', refused);
 				dialing = undefined;
 			});
