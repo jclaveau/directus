@@ -37,6 +37,10 @@ import {
 	scopedCachePurgeEnabled,
 } from './config.js';
 import {
+	scopedCacheFingerprintFromTags,
+	type ScopedCacheFingerprint,
+} from './fingerprint.js';
+import {
 	purgeScopedCache,
 } from './purge.js';
 import {
@@ -304,10 +308,112 @@ export class ItemScopedCacheService {
 
 	/**
 	 * Every value slice the mutated rows sit in right now: the flat columns the
-	 * collection scopes on, plus the terminal value each path scope resolves to
+	 * collection scopes on, plus the terminal value each path scope resolves to.
+	 *
+	 * Dedups per field across the rows, so a batch touching a hundred rows of one
+	 * owner emits that owner's slice once. Which is also why it cannot say which
+	 * row sat in which slice — `fingerprintsFromPks` keeps the rows apart.
+	 */
+	private async snapshotValueSliceTags(
+		keys: PrimaryKey[],
+		fieldTypes: FieldTypesByField,
+	): Promise<ScopedCacheTag[] | null> {
+		const flatFields = this.flatFields;
+		const pathFields = this.resolvablePathFields();
+
+		if (flatFields.length === 0 && pathFields.length === 0) {
+			return [];
+		}
+
+		const rows = await this.scopeValueRows(keys);
+		const tags: ScopedCacheTag[] = [];
+
+		if (flatFields.length > 0) {
+			const flatTags = scopedCacheTagsFromRows(
+				this.collection,
+				flatFields,
+				rows,
+				'coarse',
+				fieldTypes,
+			);
+
+			// A flat field is always projected, so 'coarse' only nulls on a caller
+			// feeding unprojected rows — never here; propagate it regardless.
+			//
+			// Which leaves this return, and the `=== null` arms in the three
+			// callers, unreachable today. They stay on purpose:
+			// - null is the fail-safe: scope unresolvable, so purge coarsely.
+			// - it is unreachable only because the select above projects exactly
+			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
+			//   two lists together.
+			// - so a later edit to either side makes it reachable again, and
+			//   without the arms the purge would silently narrow rather than
+			//   widen: a stale cache instead of a slow one.
+			if (flatTags === null) {
+				return null;
+			}
+
+			tags.push(...flatTags);
+		}
+
+		for (const field of pathFields) {
+			tags.push(...scopedCacheTagsFromRows(
+				this.collection,
+				[field],
+				rows,
+				'skip',
+				{ [field]: fieldTypes[field] },
+			));
+		}
+
+		return tags;
+	}
+
+	/**
+	 * One fingerprint per mutated row: the row written as the same string a read
+	 * pins itself with, so deciding whether that read depends on that row is a
+	 * substring search rather than a set intersection.
+	 *
+	 * Where the snapshot above dedups a batch's slices per field, this keeps the
+	 * rows apart on purpose. `owner=alpha` and `method=spaced` coming from two
+	 * DIFFERENT rows must not read as one row holding both — that combination is
+	 * exactly what a composite tag exists to tell apart.
+	 */
+	async fingerprintsFromPks(
+		keys: PrimaryKey[],
+	): Promise<ScopedCacheFingerprint[]> {
+		if (!scopedCachePurgeEnabled() || keys.length === 0) {
+			return [];
+		}
+
+		if (this.schema.collections[this.collection]?.primary === undefined) {
+			return [];
+		}
+
+		const fieldTypes = this.fieldTypes;
+		const rows = await this.scopeValueRows(keys);
+
+		return rows.map((row) => {
+			// 'skip' over 'coarse': every field below is projected by the select, and
+			// a row that somehow lost one is better pinned by the rest of itself than
+			// dropped — the fingerprint then matches MORE reads, never fewer.
+			const tags = scopedCacheTagsFromRows(
+				this.collection,
+				Object.keys(row),
+				[row],
+				'skip',
+				fieldTypes,
+			);
+
+			return scopedCacheFingerprintFromTags(this.collection, tags);
+		});
+	}
+
+	/**
+	 * The mutated rows, holding every column a read can pin itself to: the primary
+	 * key, the flat scope fields, and the terminal each path scope resolves to
 	 * through its M2O join chain. The mutated row carries only the first-hop fk, so
-	 * the ancestor joins recover the SAME terminals the read side pinned — the
-	 * identical `field=<path>` slices.
+	 * the ancestor joins recover the SAME terminals the read side pinned.
 	 *
 	 * One query for all of it, not one per path and one more for the flat columns.
 	 * The joins already select FROM the mutated collection, so its own columns ride
@@ -316,12 +422,12 @@ export class ItemScopedCacheService {
 	 * join keyed by the segments leading to it is shared and each further path costs
 	 * at most one more join. A M2O join cannot multiply the rows it is read from, so
 	 * the flat columns read the same as they did on their own query.
+	 *
+	 * Each path terminal comes back under the path's own dotted name, which is what
+	 * both callers tag it as. The query selects it positionally instead — two paths
+	 * ending on the same terminal field would collide under that name in SQL.
 	 */
-	private async snapshotValueSliceTags(
-		keys: PrimaryKey[],
-		fieldTypes: FieldTypesByField,
-	): Promise<ScopedCacheTag[] | null> {
-		const flatFields = this.flatFields;
+	private async scopeValueRows(keys: PrimaryKey[]): Promise<Item[]> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const aliasByLeadingSegments = new Map<string, string>();
 		const terminalRefByPath: { field: string; terminalRef: string }[] = [];
@@ -363,17 +469,11 @@ export class ItemScopedCacheService {
 			});
 		}
 
-		if (flatFields.length === 0 && terminalRefByPath.length === 0) {
-			return [];
-		}
-
-		// Positional column names for the paths: a path spells its own name with dots,
-		// and two paths ending on the same terminal field would collide under it.
 		const rows = await query
 			.select([
 				// Deduped: a project that also lists its primary key in
 				// `scoped_cache_fields` would otherwise project the column twice.
-				...[...new Set([primaryKeyField, ...flatFields])].map((field) => {
+				...[...new Set([primaryKeyField, ...this.flatFields])].map((field) => {
 					return this.knex.ref(`root.${field}`).as(field);
 				}),
 				...terminalRefByPath.map(({ terminalRef }, index) => {
@@ -382,47 +482,31 @@ export class ItemScopedCacheService {
 			])
 			.whereIn(`root.${primaryKeyField}`, keys);
 
-		const tags: ScopedCacheTag[] = [];
+		return rows.map((row: Item) => {
+			const named: Item = {};
 
-		if (flatFields.length > 0) {
-			const flatTags = scopedCacheTagsFromRows(
-				this.collection,
-				flatFields,
-				rows,
-				'coarse',
-				fieldTypes,
-			);
-
-			// A flat field is always projected, so 'coarse' only nulls on a caller
-			// feeding unprojected rows — never here; propagate it regardless.
-			//
-			// Which leaves this return, and the `=== null` arms in the three
-			// callers, unreachable today. They stay on purpose:
-			// - null is the fail-safe: scope unresolvable, so purge coarsely.
-			// - it is unreachable only because the select above projects exactly
-			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
-			//   two lists together.
-			// - so a later edit to either side makes it reachable again, and
-			//   without the arms the purge would silently narrow rather than
-			//   widen: a stale cache instead of a slow one.
-			if (flatTags === null) {
-				return null;
+			for (const [column, value] of Object.entries(row)) {
+				named[column] = value;
 			}
 
-			tags.push(...flatTags);
-		}
+			terminalRefByPath.forEach(({ field }, index) => {
+				delete named[`value${index}`];
+				named[field] = row[`value${index}`];
+			});
 
-		terminalRefByPath.forEach(({ field }, index) => {
-			tags.push(...scopedCacheTagsFromRows(
-				this.collection,
-				[field],
-				rows.map((row) => ({ [field]: row[`value${index}`] })),
-				'skip',
-				{ [field]: fieldTypes[field] },
-			));
+			return named;
 		});
+	}
 
-		return tags;
+	/**
+	 * The dotted scope paths that still resolve to a terminal value. A path whose
+	 * chain has gained a to-many hop resolves to nothing and pins nothing, which is
+	 * what makes it drop to the bare collection tag on both sides.
+	 */
+	private resolvablePathFields(): string[] {
+		return this.paths
+			.filter(({ field }) => Boolean(this.resolvePath(field)))
+			.map(({ field }) => field);
 	}
 
 	/**
