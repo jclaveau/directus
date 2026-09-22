@@ -23,16 +23,12 @@ function dialingStore() {
 	const store = { client, getClient: dial };
 	shareFirstDial(store);
 
-	return { store, dial, settle: () => settle(), fail: (error: Error) => fail(error) };
-}
-
-async function settled(promise: Promise<unknown>) {
-	let state = 'pending';
-
-	promise.then(() => (state = 'resolved'), () => (state = 'rejected'));
-	await new Promise((resolve) => setImmediate(resolve));
-
-	return state;
+	return {
+		store,
+		dial,
+		settle: () => settle(),
+		fail: (error: Error) => fail(error),
+	};
 }
 
 describe('shareFirstDial', () => {
@@ -46,7 +42,11 @@ describe('shareFirstDial', () => {
 		const second = store.getClient();
 
 		expect(dial).toHaveBeenCalledTimes(1);
-		expect(await settled(second)).toBe('pending');
+
+		let state = 'pending';
+		second.then(() => (state = 'resolved'), () => (state = 'rejected'));
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(state).toBe('pending');
 
 		settle();
 
@@ -54,7 +54,9 @@ describe('shareFirstDial', () => {
 		expect(await second).toBe(store.client);
 	});
 
-	it('hands the client over at once when it is open and no dial is pending', async () => {
+	it(oneLine`
+		hands the client over at once when it is open and no dial is pending
+	`, async () => {
 		const { store, dial, settle } = dialingStore();
 
 		const first = store.getClient();
