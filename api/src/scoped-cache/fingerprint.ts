@@ -235,8 +235,8 @@ export function scopedCacheFingerprintLabels(
  * `fields`), so the test is a plain substring search per value: the wrapping
  * commas make `&owner=,alpha,` unable to match a row whose owner is `alphabet`,
  * and the leading `&` makes it unable to match a `parent.owner` pair. Which is
- * why this needs no globs and no cap — it is the same string compare the Lua
- * purge runs, and it is exact.
+ * why the purge needs no globs and no cap over them: the compare is exact, so
+ * there is nothing to widen and nothing to bound.
  */
 export function scopedCacheFingerprintMatchesRow(
 	fingerprint: ScopedCacheFingerprint,
@@ -337,5 +337,50 @@ export function scopedCacheFingerprintsByCollection(
 			collectionTags,
 			fieldsByCollection.get(collection) ?? [],
 		);
+	});
+}
+
+/**
+ * Whether a write purges a read: the whole write-side rule, in one call.
+ *
+ * Two tests, both of which have to hold.
+ *
+ * The write touched a field the read is bound to — an insert or a delete always
+ * does, since the row entered or left the result set whichever columns it
+ * carries, and an update only when it rewrote a column the read selected, sorted
+ * or filtered on.
+ *
+ * And one of the rows it wrote satisfies the read's whole bound. `rowFingerprints`
+ * carries the row as it was AND as it became, so a row moving INTO the read's
+ * slice purges it on its new values and one moving OUT on its old ones — each of
+ * them changes the response, and neither is visible from the other side alone.
+ */
+export function scopedCacheFingerprintPurgedBy(
+	fingerprint: ScopedCacheFingerprint,
+	rowFingerprints: readonly ScopedCacheFingerprint[],
+	changed: readonly string[] | null,
+): boolean {
+	const { pairs, fields } = parseScopedCacheFingerprint(fingerprint);
+
+	if (scopedCacheFingerprintFieldsTouched(fields, changed) === false) {
+		return false;
+	}
+
+	// Escaped once for every row rather than once per row: a purge tests one
+	// fingerprint against every row of a batch, and the needles do not vary.
+	const needles = [...pairs].map(([field, values]) => {
+		const key = escapeScopedCacheFingerprintToken(field);
+
+		return values.map((value) => {
+			return `&${key}=,${escapeScopedCacheFingerprintToken(value)},`;
+		});
+	});
+
+	return rowFingerprints.some((rowFingerprint) => {
+		const row = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
+
+		return needles.every((alternatives) => {
+			return alternatives.some((needle) => row.includes(needle));
+		});
 	});
 }

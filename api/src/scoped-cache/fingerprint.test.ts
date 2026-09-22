@@ -9,6 +9,7 @@ import {
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
+	scopedCacheFingerprintPurgedBy,
 } from './fingerprint.js';
 
 describe('renderScopedCacheFingerprint', () => {
@@ -272,5 +273,115 @@ describe('scopedCacheFingerprintsByCollection', () => {
 	`, () => {
 		expect(scopedCacheFingerprintsByCollection([{ collection: 'slot' }]))
 			.toEqual(['slot:&']);
+	});
+});
+
+describe('scopedCacheFingerprintPurgedBy', () => {
+	const read = 'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&';
+
+	it('purges when the row satisfies every pair and a bound field changed', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			['slot:&id=,1,&method=,spaced,&owner=,alpha,&'],
+			['owner'],
+		)).toBe(true);
+	});
+
+	it(oneLine`
+		leaves the read alone when the row satisfies one pair but not the other
+	`, () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			['slot:&id=,1,&method=,spaced,&owner=,beta,&'],
+			['owner'],
+		)).toBe(false);
+	});
+
+	it('leaves the read alone when the write changed no field it is bound to', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			['slot:&id=,1,&method=,spaced,&owner=,alpha,&'],
+			['note'],
+		)).toBe(false);
+	});
+
+	it('purges on an insert, whichever columns the row carries', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			['slot:&id=,1,&method=,spaced,&owner=,alpha,&'],
+			null,
+		)).toBe(true);
+	});
+
+	it(oneLine`
+		purges on the row as it became, so a row moving into the read's slice drops
+		it
+	`, () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			[
+				'slot:&id=,1,&method=,spaced,&owner=,beta,&',
+				'slot:&id=,1,&method=,spaced,&owner=,alpha,&',
+			],
+			['owner'],
+		)).toBe(true);
+	});
+
+	it(oneLine`
+		purges on the row as it was, so a row moving out of the read's slice drops it
+	`, () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			[
+				'slot:&id=,1,&method=,spaced,&owner=,alpha,&',
+				'slot:&id=,1,&method=,spaced,&owner=,sigma,&',
+			],
+			['owner'],
+		)).toBe(true);
+	});
+
+	it('leaves the read alone when no row of the batch satisfies its bound', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			read,
+			[
+				'slot:&id=,1,&method=,massed,&owner=,alpha,&',
+				'slot:&id=,2,&method=,spaced,&owner=,beta,&',
+			],
+			null,
+		)).toBe(false);
+	});
+
+	it('purges a read pinning nothing on any write to its collection', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			'slot:&',
+			['slot:&id=,1,&owner=,beta,&'],
+			['note'],
+		)).toBe(true);
+	});
+
+	it('purges a read bounded to a list of owners by a write to either', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			'slot:&fields=,id,owner,&owner=,kappa,lambda,&',
+			['slot:&id=,1,&owner=,lambda,&'],
+			['owner'],
+		)).toBe(true);
+	});
+
+	it(oneLine`
+		leaves a read bounded to a list of owners alone for a write outside it
+	`, () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			'slot:&fields=,id,owner,&owner=,mu,nu,&',
+			['slot:&id=,1,&owner=,xi,&'],
+			['owner'],
+		)).toBe(false);
+	});
+
+	it('purges a read of every field on a change to any column', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			'slot:&fields=,*,&owner=,zeta,&',
+			['slot:&id=,1,&owner=,zeta,&'],
+			['note'],
+		)).toBe(true);
 	});
 });
