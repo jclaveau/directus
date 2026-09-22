@@ -196,6 +196,23 @@ describe('`directus cache flush` clears a running node from another process', ()
 		}, 60_000);
 
 		it(oneLine`
+			sends its first command over a store that has finished dialing, rather than
+			over one node-redis already calls open
+		`, async () => {
+			// The stores dial as they are built, node-redis is open from the first
+			// byte it sends, `getClient()` hands the client over as soon as it is
+			// open, and `disableOfflineQueue` refuses a command sent before the
+			// handshake answers. The first command a fresh process sends — here the
+			// lock `set` that opens `clearSystemCache` — is the one that lands in that
+			// window. The flush is best-effort, so neither the exit code nor the
+			// "flushed" line said so: only the warn did, on every deploy.
+			const { code, output } = await runCacheFlush();
+
+			expect(code).toBe(0);
+			expect(output).not.toMatch(/The client is offline/);
+		}, 60_000);
+
+		it(oneLine`
 			serves a read the running node had cached before it as a MISS
 		`, async () => {
 			await readOwner('acme');
