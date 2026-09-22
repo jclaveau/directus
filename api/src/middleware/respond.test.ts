@@ -673,7 +673,8 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], [], [], new Map());
+		expect(tagScopedCacheKeys)
+			.toHaveBeenCalledWith('cache-key', [], [], [], new Map());
 	});
 
 	test(oneLine`

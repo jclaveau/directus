@@ -1,4 +1,5 @@
-import type { CollectionKey, SchemaOverview } from '@directus/types';
+import type { SchemaOverview } from '@directus/types';
+import type { CollectionKey } from '../permissions/modules/process-ast/types.js';
 import {
 	escapeScopedCacheFingerprintToken,
 	parseScopedCacheFingerprint,

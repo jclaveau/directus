@@ -9,6 +9,9 @@ import type {
 	ScopedCacheTag,
 	SchemaOverview,
 } from '@directus/types';
+import type {
+	CollectionKey,
+} from '../permissions/modules/process-ast/types.js';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
@@ -36,11 +39,12 @@ import { ScopedCacheReadPlan } from './read-plan.js';
 import {
 	scopedCachePurgeEnabled,
 } from './config.js';
-import {
-	scopedCacheFingerprintFromTags,
-	type ScopedCacheFingerprint,
-} from './fingerprint.js';
+import { scopedCacheFingerprintFromTags } from './fingerprint.js';
 import { scopedCacheOwnerPath } from './fingerprint-index.js';
+import type {
+	ScopedCacheCapture,
+	ScopedCacheMutatedWrite,
+} from './mutated-rows.js';
 import {
 	purgeScopedCache,
 } from './purge.js';
@@ -72,6 +76,14 @@ export type ScopedCacheReadInputs = {
  * schema), both fixed for the owning ItemsService, so the getters memoize on
  * first access.
  */
+/**
+ * The alias each scope path's terminal is selected under, since two paths ending
+ * on the same field would collide under their own name. Prefixed with a character
+ * no column of a Directus collection carries, because the select beside it now
+ * projects every column and a plain `value0` could be one of them.
+ */
+const PATH_ALIAS = '#path';
+
 export class ItemScopedCacheService {
 	private collection: string;
 	private schema: SchemaOverview;
@@ -259,20 +271,27 @@ export class ItemScopedCacheService {
 	}
 
 	/**
-	 * Snapshot the current scope values for the given keys as scoped cache tags,
-	 * before a mutation runs. Snapshots the *old* values an update/delete is
-	 * about to change so their slices get purged (an update that moves a row from
-	 * `student=A` to `student=B` must drop both). Returns an empty list when
-	 * there are no keys (a collection-level purge then suffices).
+	 * What a mutation's purge is built from, read before it runs and again once it
+	 * commits: the scope tags the touched rows sit in, and the rows themselves.
+	 *
+	 * Both come off ONE read. The tags are the union a tag sweep still needs — one
+	 * per field per distinct value, a batch of a hundred rows of one owner emitting
+	 * that owner once — and the rows are what keeps those values attached to the row
+	 * they came from: `owner=alpha` and `method=spaced` coming from two DIFFERENT
+	 * rows must not read as one row holding both, which is exactly what a read
+	 * pinned to that pair depends on.
 	 *
 	 * Always emits the primary-key slice of every key, on every collection, whether it
 	 * declares scope fields or not: the read side pins that axis on every collection,
 	 * and a read pinning an axis the write never emits is never purged — stale, which
 	 * is worse than any hit ratio. It costs no query, since the keys are already here.
+	 *
+	 * `tags: null` is the fail-safe: the scope of these rows is unresolvable, so
+	 * their collection is purged whole.
 	 */
-	async snapshot(keys: PrimaryKey[]): Promise<ScopedCacheTag[] | null> {
+	async capture(keys: PrimaryKey[]): Promise<ScopedCacheCapture> {
 		if (!scopedCachePurgeEnabled() || keys.length === 0) {
-			return [];
+			return { tags: [], rows: [] };
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]?.primary;
@@ -282,7 +301,7 @@ export class ItemScopedCacheService {
 		// schema. Such a collection resolves no key and no scope field either, and the
 		// bare collection tag the purge always carries still drops its reads.
 		if (primaryKeyField === undefined) {
-			return [];
+			return { tags: [], rows: [] };
 		}
 
 		const fieldTypes = this.fieldTypes;
@@ -296,66 +315,57 @@ export class ItemScopedCacheService {
 			};
 		});
 
-		const valueSliceTags = await this.snapshotValueSliceTags(keys, fieldTypes);
-
-		if (valueSliceTags === null) {
-			return null;
-		}
-
-		tags.push(...valueSliceTags);
-
-		return tags;
-	}
-
-	/**
-	 * Every value slice the mutated rows sit in right now: the flat columns the
-	 * collection scopes on, plus the terminal value each path scope resolves to.
-	 *
-	 * Dedups per field across the rows, so a batch touching a hundred rows of one
-	 * owner emits that owner's slice once. Which is also why it cannot say which
-	 * row sat in which slice — `fingerprintsFromPks` keeps the rows apart.
-	 */
-	private async snapshotValueSliceTags(
-		keys: PrimaryKey[],
-		fieldTypes: FieldTypesByField,
-	): Promise<ScopedCacheTag[] | null> {
 		const flatFields = this.flatFields;
 		const pathFields = this.resolvablePathFields();
 
+		// A collection scoping on nothing has no slice to read and no query to pay
+		// for it — its primary key alone completes each row's fingerprint, since the
+		// pairs a read can pin there are its keys and nothing else.
+		//
+		// The columns stay unread: they would only buy the `changed` diff, and
+		// buying it here would put a SELECT on every mutation of every collection in
+		// the schema. So every update of one reads as touching every field, exactly
+		// as it did before.
 		if (flatFields.length === 0 && pathFields.length === 0) {
-			return [];
+			return {
+				tags,
+				rows: tags.map((tag) => {
+					return {
+						key: tag.value as PrimaryKey,
+						row: null,
+						fingerprint: scopedCacheFingerprintFromTags(this.collection, [tag]),
+					};
+				}),
+			};
 		}
 
 		const rows = await this.scopeValueRows(keys);
-		const tags: ScopedCacheTag[] = [];
 
-		if (flatFields.length > 0) {
-			const flatTags = scopedCacheTagsFromRows(
-				this.collection,
-				flatFields,
-				rows,
-				'coarse',
-				fieldTypes,
-			);
+		const flatTags = scopedCacheTagsFromRows(
+			this.collection,
+			flatFields,
+			rows,
+			'coarse',
+			fieldTypes,
+		);
 
-			// A flat field is always projected, so 'coarse' only nulls on a caller
-			// feeding unprojected rows — never here; propagate it regardless.
-			//
-			// Which leaves this return, and the `=== null` arms in the three
-			// callers, unreachable today. They stay on purpose:
-			// - null is the fail-safe: scope unresolvable, so purge coarsely.
-			// - it is unreachable only because the select above projects exactly
-			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
-			//   two lists together.
-			// - so a later edit to either side makes it reachable again, and
-			//   without the arms the purge would silently narrow rather than
-			//   widen: a stale cache instead of a slow one.
-			if (flatTags === null) {
-				return null;
-			}
-
-			tags.push(...flatTags);
+		// A flat field is always projected, so 'coarse' only nulls on a caller
+		// feeding unprojected rows — never here; propagate it regardless.
+		//
+		// Which leaves this return, and the `=== null` arms in the callers,
+		// unreachable today. They stay on purpose:
+		// - null is the fail-safe: scope unresolvable, so purge coarsely.
+		// - it is unreachable only because the select above projects exactly
+		//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
+		//   two lists together.
+		// - so a later edit to either side makes it reachable again, and
+		//   without the arms the purge would silently narrow rather than
+		//   widen: a stale cache instead of a slow one.
+		if (flatTags === null) {
+			return { tags: null, rows: [] };
 		}
+
+		tags.push(...flatTags);
 
 		for (const field of pathFields) {
 			tags.push(...scopedCacheTagsFromRows(
@@ -367,54 +377,45 @@ export class ItemScopedCacheService {
 			));
 		}
 
-		return tags;
+		// The axes a read can pin itself to, which is what a fingerprint's pairs are.
+		// Every OTHER column the row carries stays out of them and rides the row
+		// instead: it can only ever be a field the read is bound to, never a slice.
+		const pinnable = [...new Set([
+			primaryKeyField,
+			...flatFields,
+			...pathFields,
+		])];
+
+		return {
+			tags,
+			rows: rows.map((row) => {
+				// 'skip' over 'coarse': every field below is projected by the select,
+				// and a row that somehow lost one is better pinned by the rest of
+				// itself than dropped — the fingerprint then matches MORE reads,
+				// never fewer.
+				const rowTags = scopedCacheTagsFromRows(
+					this.collection,
+					pinnable,
+					[row],
+					'skip',
+					fieldTypes,
+				);
+
+				return {
+					key: row[primaryKeyField] as PrimaryKey,
+					row,
+					fingerprint: scopedCacheFingerprintFromTags(this.collection, rowTags),
+				};
+			}),
+		};
 	}
 
 	/**
-	 * One fingerprint per mutated row: the row written as the same string a read
-	 * pins itself with, so deciding whether that read depends on that row is a
-	 * substring search rather than a set intersection.
-	 *
-	 * Where the snapshot above dedups a batch's slices per field, this keeps the
-	 * rows apart on purpose. `owner=alpha` and `method=spaced` coming from two
-	 * DIFFERENT rows must not read as one row holding both — that combination is
-	 * exactly what a composite tag exists to tell apart.
-	 */
-	async fingerprintsFromPks(
-		keys: PrimaryKey[],
-	): Promise<ScopedCacheFingerprint[]> {
-		if (!scopedCachePurgeEnabled() || keys.length === 0) {
-			return [];
-		}
-
-		if (this.schema.collections[this.collection]?.primary === undefined) {
-			return [];
-		}
-
-		const fieldTypes = this.fieldTypes;
-		const rows = await this.scopeValueRows(keys);
-
-		return rows.map((row) => {
-			// 'skip' over 'coarse': every field below is projected by the select, and
-			// a row that somehow lost one is better pinned by the rest of itself than
-			// dropped — the fingerprint then matches MORE reads, never fewer.
-			const tags = scopedCacheTagsFromRows(
-				this.collection,
-				Object.keys(row),
-				[row],
-				'skip',
-				fieldTypes,
-			);
-
-			return scopedCacheFingerprintFromTags(this.collection, tags);
-		});
-	}
-
-	/**
-	 * The mutated rows, holding every column a read can pin itself to: the primary
-	 * key, the flat scope fields, and the terminal each path scope resolves to
-	 * through its M2O join chain. The mutated row carries only the first-hop fk, so
-	 * the ancestor joins recover the SAME terminals the read side pinned.
+	 * The mutated rows, holding every column of the collection — a read binds the
+	 * fields it selected, sorted and filtered on, and any of them can be a column
+	 * no scope names — plus the terminal each path scope resolves to through its
+	 * M2O join chain. The mutated row carries only the first-hop fk, so the
+	 * ancestor joins recover the SAME terminals the read side pinned.
 	 *
 	 * One query for all of it, not one per path and one more for the flat columns.
 	 * The joins already select FROM the mutated collection, so its own columns ride
@@ -474,11 +475,15 @@ export class ItemScopedCacheService {
 			.select([
 				// Deduped: a project that also lists its primary key in
 				// `scoped_cache_fields` would otherwise project the column twice.
-				...[...new Set([primaryKeyField, ...this.flatFields])].map((field) => {
+				...[...new Set([
+					primaryKeyField,
+					...this.flatFields,
+					...this.rootColumns(),
+				])].map((field) => {
 					return this.knex.ref(`root.${field}`).as(field);
 				}),
 				...terminalRefByPath.map(({ terminalRef }, index) => {
-					return this.knex.ref(terminalRef).as(`value${index}`);
+					return this.knex.ref(terminalRef).as(`${PATH_ALIAS}${index}`);
 				}),
 			])
 			.whereIn(`root.${primaryKeyField}`, keys);
@@ -491,12 +496,24 @@ export class ItemScopedCacheService {
 			}
 
 			terminalRefByPath.forEach(({ field }, index) => {
-				delete named[`value${index}`];
-				named[field] = row[`value${index}`];
+				delete named[`${PATH_ALIAS}${index}`];
+				named[field] = row[`${PATH_ALIAS}${index}`];
 			});
 
 			return named;
 		});
+	}
+
+	/**
+	 * Every column of the collection as the schema knows it. An alias field (o2m,
+	 * m2m, a presentation block) has no column to read and would break the select.
+	 */
+	private rootColumns(): string[] {
+		const fields = this.schema.collections[this.collection]?.fields ?? {};
+
+		return Object.values(fields)
+			.filter(({ alias }) => alias === false)
+			.map(({ field }) => field);
 	}
 
 	/**
@@ -609,10 +626,23 @@ export class ItemScopedCacheService {
 		tags: ScopedCacheTag[] | null,
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
 		changedCollections: string[] = [],
-		// `false` leaves this collection's bare tag warm: a filter-cancel wrote
-		// nothing, so its global reads stay; a mutation opting out through
-		// `purgeCollectionTag` keeps them on purpose and drops the rows' own slices.
-		{ includeCollectionTag = true }: { includeCollectionTag?: boolean } = {},
+		{
+			// `false` leaves this collection's bare tag warm: a filter-cancel wrote
+			// nothing, so its global reads stay; a mutation opting out through
+			// `purgeCollectionTag` keeps them on purpose and drops the rows' own
+			// slices.
+			includeCollectionTag = true,
+			// The rows the mutation wrote, as they were AND as they became, with the
+			// fields it rewrote. Given them, an entry of this collection is dropped
+			// only when one of those rows satisfies its whole fingerprint — which is
+			// the narrowing this whole thing is for. Left out (a purge with no rows
+			// to show for it: a hook's declared tags, a collection changed by a
+			// cascade), every entry the tags reach is dropped as before.
+			rows,
+		}: {
+			includeCollectionTag?: boolean;
+			rows?: ScopedCacheMutatedWrite | undefined;
+		} = {},
 	): Promise<ScopedCacheTag[] | null> {
 		// Callers reach here through `shouldClearCache`, which already rules out a
 		// null cache — but it narrows `this.cache`, and a mutable field does not
@@ -642,6 +672,17 @@ export class ItemScopedCacheService {
 			})
 			: [];
 
+		// What the rows narrow the purge of THIS collection to. A purge that shows no
+		// rows carries none of it and sweeps its tags whole, as it did before.
+		const boundToRows = rows === undefined
+			? {}
+			: {
+				rowFingerprints: rows.fingerprints,
+				changed: rows.changed,
+				ownerPath: scopedCacheOwnerPath(this.schema, this.collection),
+				sweepScopedCacheTags: hookTags,
+			};
+
 		if (ownTags !== null && otherCollections.length === 0) {
 			const ownAndHookTags = [...ownTags, ...hookTags];
 
@@ -655,6 +696,7 @@ export class ItemScopedCacheService {
 					this.collection,
 					ownAndHookTags,
 					context,
+					boundToRows,
 				);
 			}
 
@@ -663,7 +705,7 @@ export class ItemScopedCacheService {
 				this.collection,
 				ownAndHookTags,
 				context,
-				{ includeCollectionTag: false },
+				{ ...boundToRows, includeCollectionTag: false },
 			);
 		}
 
@@ -682,8 +724,8 @@ export class ItemScopedCacheService {
 				[...ownTags, ...hookTags],
 				context,
 				includeCollectionTag
-					? { scopedCachePurgeId }
-					: { includeCollectionTag: false, scopedCachePurgeId },
+					? { ...boundToRows, scopedCachePurgeId }
+					: { ...boundToRows, includeCollectionTag: false, scopedCachePurgeId },
 			));
 		}
 		else {

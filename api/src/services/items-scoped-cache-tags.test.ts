@@ -153,13 +153,13 @@ describe('readByQuery scoped cache tag accumulation', () => {
 	});
 });
 
-// The write-side snapshot ran behind a "no scope fields declared" early return until
+// The write-side capture ran behind a "no scope fields declared" early return until
 // the key axis made it run for every mutation, so it now meets collections absent
 // from the schema. Every mutation reaching it dereferences that collection first, so
 // only a direct call gets here today — the guard is what keeps a caller that stops
 // doing so from throwing on `.primary` of undefined.
 describe(oneLine`
-	the write-side snapshot on a collection the schema does not know
+	the write-side capture on a collection the schema does not know
 `, () => {
 	beforeEach(() => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
@@ -174,7 +174,10 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await service.scopedCache.snapshot([1])).toEqual([]);
+		expect(await service.scopedCache.capture([1])).toEqual({
+			tags: [],
+			rows: [],
+		});
 	});
 
 	test('resolves the key slice on a collection it does know', async () => {
@@ -184,9 +187,14 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await service.scopedCache.snapshot([1])).toEqual([
-			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-		]);
+		expect(await service.scopedCache.capture([1])).toEqual({
+			tags: [
+				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+			],
+			rows: [
+				{ key: 1, row: null, fingerprint: 'articles:&id=,1,&' },
+			],
+		});
 	});
 });
 

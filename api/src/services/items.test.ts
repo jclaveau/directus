@@ -1760,6 +1760,9 @@ describe('Services / Items / purgeScopedCache', () => {
 			'test',
 			[{ collection: 'test' }],
 			expect.anything(),
+			// A purge shown no rows carries none of their narrowing and sweeps its
+			// tags whole, as it did before composite tags.
+			{},
 		);
 	});
 });

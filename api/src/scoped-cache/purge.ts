@@ -43,11 +43,11 @@ import {
 	scopedCacheFingerprintBuckets,
 	scopedCacheFingerprintIndexKey,
 	scopedCacheRowBuckets,
-	type ScopedCacheFingerprint,
 } from './fingerprint-index.js';
 import {
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintPurgedBy,
+	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import {
 	bumpScopedCacheEpochs,
@@ -1354,6 +1354,10 @@ export async function purgeScopedCache(
 		// The path the collection's index is bucketed by, so the purge reads back
 		// the sets its rows own instead of every set the collection has.
 		ownerPath?: string | null;
+		// The tags in the list that the rows do NOT answer for, and so keep their
+		// tag sweep: a hook's `purgeBy` names a slice, not the rows it wrote, and
+		// nothing the mutation read back can resolve it.
+		sweepScopedCacheTags?: readonly ScopedCacheTag[];
 	} = {},
 ): Promise<ScopedCacheTag[] | null> {
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
@@ -1438,15 +1442,23 @@ export async function purgeScopedCache(
 	}
 
 	// Row-driven: the fingerprints answer for every tag the mutation itself
-	// declared, so only what the `cache.purge` filter ADDED is still swept by tag.
-	// A hook declaring `purgeBy` is asking for that sweep — it names a slice, not
-	// the rows it wrote, and nothing else can resolve it.
-	const declared = new Set(declaredScopedCacheTags.map(scopedCacheTagKey));
+	// declared, so only what a hook declared and what the `cache.purge` filter
+	// ADDED is still swept by tag — each of those names a slice, not the rows the
+	// mutation wrote, and nothing else can resolve it.
+	const sweptAnyway = new Set(
+		(options.sweepScopedCacheTags ?? []).map(scopedCacheTagKey),
+	);
+
+	const rowDriven = new Set(
+		declaredScopedCacheTags
+			.map(scopedCacheTagKey)
+			.filter((key) => sweptAnyway.has(key) === false),
+	);
 
 	const sweptScopedCacheTags = options.rowFingerprints === undefined
 		? resolvedScopedCacheTags
 		: resolvedScopedCacheTags.filter((tag) => {
-			return declared.has(scopedCacheTagKey(tag)) === false;
+			return rowDriven.has(scopedCacheTagKey(tag)) === false;
 		});
 
 	const tagKeys = [...new Set(sweptScopedCacheTags.map(scopedCacheTagKey))];

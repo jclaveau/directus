@@ -51,17 +51,43 @@ function serviceFor(collection: string) {
 	return new ItemScopedCacheService(collection, schema, db, null, null);
 }
 
-describe('fingerprintsFromPks', () => {
+describe('capture', () => {
 	it(oneLine`
-		writes one row as one fingerprint, holding every axis it sits on
+		captures one row as one fingerprint, holding every axis it sits on
 	`, async () => {
 		tracker.on.select('item').response([
-			{ id: 1, owner: 'alpha', method: 'spaced', value0: 'north' },
+			{ id: 1, owner: 'alpha', method: 'spaced', parent: 9, '#path0': 'north' },
 		]);
 
-		expect(await serviceFor('item').fingerprintsFromPks([1])).toEqual([
-			'item:&id=,1,&method=,spaced,&owner=,alpha,&parent.area=,north,&',
-		]);
+		expect(await serviceFor('item').capture([1])).toEqual({
+			tags: [
+				{ collection: 'item', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'item', field: 'owner', value: 'alpha', type: 'string' },
+				{ collection: 'item', field: 'method', value: 'spaced', type: 'string' },
+				{
+					collection: 'item',
+					field: 'parent.area',
+					value: 'north',
+					type: 'string',
+				},
+			],
+			rows: [
+				{
+					key: 1,
+					// Every column, not only the axes: the `changed` diff reads this
+					// row, and a read binds fields no scope ever names.
+					row: {
+						id: 1,
+						owner: 'alpha',
+						method: 'spaced',
+						parent: 9,
+						'parent.area': 'north',
+					},
+					fingerprint:
+						'item:&id=,1,&method=,spaced,&owner=,alpha,&parent.area=,north,&',
+				},
+			],
+		});
 	});
 
 	// The whole point of a composite tag: a read pinned to BOTH owner=alpha and
@@ -69,53 +95,99 @@ describe('fingerprintsFromPks', () => {
 	// their values were emitted as separate tags to be matched one at a time.
 	it('keeps two rows apart rather than pooling their values', async () => {
 		tracker.on.select('item').response([
-			{ id: 1, owner: 'alpha', method: 'spaced', value0: 'north' },
-			{ id: 2, owner: 'beta', method: 'slow', value0: 'south' },
+			{ id: 1, owner: 'alpha', method: 'spaced', parent: 9, '#path0': 'north' },
+			{ id: 2, owner: 'beta', method: 'slow', parent: 8, '#path0': 'south' },
 		]);
 
-		expect(await serviceFor('item').fingerprintsFromPks([1, 2])).toEqual([
-			'item:&id=,1,&method=,spaced,&owner=,alpha,&parent.area=,north,&',
-			'item:&id=,2,&method=,slow,&owner=,beta,&parent.area=,south,&',
+		const { rows } = await serviceFor('item').capture([1, 2]);
+
+		expect(rows).toEqual([
+			{
+				key: 1,
+				row: {
+					id: 1,
+					owner: 'alpha',
+					method: 'spaced',
+					parent: 9,
+					'parent.area': 'north',
+				},
+				fingerprint:
+					'item:&id=,1,&method=,spaced,&owner=,alpha,&parent.area=,north,&',
+			},
+			{
+				key: 2,
+				row: {
+					id: 2,
+					owner: 'beta',
+					method: 'slow',
+					parent: 8,
+					'parent.area': 'south',
+				},
+				fingerprint:
+					'item:&id=,2,&method=,slow,&owner=,beta,&parent.area=,south,&',
+			},
 		]);
 	});
 
 	it(oneLine`
-		writes a null column as the sentinel a read pinning null also renders
+		captures a null column as the sentinel a read pinning null also renders
 	`, async () => {
 		tracker.on.select('item').response([
-			{ id: 3, owner: null, method: 'spaced', value0: null },
+			{ id: 3, owner: null, method: 'spaced', parent: null, '#path0': null },
 		]);
 
-		expect(await serviceFor('item').fingerprintsFromPks([3])).toEqual([
-			'item:&id=,3,&method=,spaced,&owner=,\x00null,&parent.area=,\x00null,&',
+		const { rows } = await serviceFor('item').capture([3]);
+
+		expect(rows).toEqual([
+			{
+				key: 3,
+				row: {
+					id: 3,
+					owner: null,
+					method: 'spaced',
+					parent: null,
+					'parent.area': null,
+				},
+				fingerprint:
+					'item:&id=,3,&method=,spaced,&owner=,\x00null,&parent.area=,\x00null,&',
+			},
 		]);
 	});
 
 	// A collection declaring no scope field still pins its key axis on both sides,
-	// so a read of one row is purged by a write to that row and by no other.
-	it('writes the key axis of a collection scoping on nothing', async () => {
-		tracker.on.select('zone').response([{ id: 7 }]);
-
-		expect(await serviceFor('zone').fingerprintsFromPks([7])).toEqual([
-			'zone:&id=,7,&',
-		]);
+	// so a read of one row is purged by a write to that row and by no other. Its
+	// columns are never read — no query is issued at all — so the row rides as
+	// `null` and every update of it reads as touching every field.
+	it('captures the key axis of a collection scoping on nothing', async () => {
+		expect(await serviceFor('zone').capture([7])).toEqual({
+			tags: [
+				{ collection: 'zone', field: 'id', value: 7, type: 'integer' },
+			],
+			rows: [
+				{ key: 7, row: null, fingerprint: 'zone:&id=,7,&' },
+			],
+		});
 	});
 
 	it(oneLine`
-		writes nothing for no keys, which a collection-wide purge already covers
+		captures nothing for no keys, which a collection-wide purge already covers
 	`, async () => {
-		expect(await serviceFor('item').fingerprintsFromPks([])).toEqual([]);
+		expect(await serviceFor('item').capture([])).toEqual({ tags: [], rows: [] });
 	});
 
 	it(oneLine`
-		writes nothing while scoped purging is off, since a full flush follows
+		captures nothing while scoped purging is off, since a full flush follows
 	`, async () => {
 		purgeEnabled = false;
 
-		expect(await serviceFor('item').fingerprintsFromPks([1])).toEqual([]);
+		expect(await serviceFor('item').capture([1])).toEqual({ tags: [], rows: [] });
 	});
 
-	it('writes nothing for a collection absent from the schema', async () => {
-		expect(await serviceFor('unknown').fingerprintsFromPks([1])).toEqual([]);
+	it('captures nothing for a collection absent from the schema', async () => {
+		expect(await serviceFor('unknown').capture([1])).toEqual({
+			tags: [],
+			rows: [],
+		});
 	});
 });
+
