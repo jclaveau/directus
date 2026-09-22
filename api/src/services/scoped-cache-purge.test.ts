@@ -223,6 +223,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -247,6 +248,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -276,7 +278,9 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
 			expect.anything(),
-			{ includeCollectionTag: false },
+			// The rows the mutation wrote ride in the same options object; what this
+			// case is about is the bare tag the purge is told to leave warm.
+			expect.objectContaining({ includeCollectionTag: false }),
 		);
 	});
 
@@ -302,7 +306,10 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			]),
 			expect.anything(),
-			{ includeCollectionTag: false, scopedCachePurgeId: expect.any(String) },
+			expect.objectContaining({
+				includeCollectionTag: false,
+				scopedCachePurgeId: expect.any(String),
+			}),
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
@@ -360,6 +367,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -401,6 +409,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -434,6 +443,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -457,6 +467,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			]),
 			expect.anything(),
+			expect.anything(),
 		);
 
 		// Never the coarse null fallback now that old + new are both snapshotted.
@@ -464,6 +475,7 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			null,
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -486,6 +498,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -522,6 +535,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -571,6 +585,7 @@ describe(oneLine`
 					{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 				],
 				expect.anything(),
+				expect.anything(),
 			);
 		}
 		finally {
@@ -602,6 +617,7 @@ describe(oneLine`
 				},
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -625,6 +641,7 @@ describe(oneLine`
 				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: null, type: 'string' },
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -711,6 +728,7 @@ describe(oneLine`
 					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 				],
 				expect.anything(),
+				expect.anything(),
 			);
 		}
 		finally {
@@ -743,6 +761,7 @@ describe(oneLine`
 					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 					{ collection: 'test', field: 'student', value: 'C', type: 'string' },
 				],
+				expect.anything(),
 				expect.anything(),
 			);
 		}
@@ -1224,6 +1243,7 @@ describe(oneLine`
 						authorsDependency,
 					],
 					expect.anything(),
+					expect.anything(),
 				);
 			}
 			finally {
@@ -1260,6 +1280,7 @@ describe(oneLine`
 						authorsDependency,
 					],
 					expect.anything(),
+					expect.anything(),
 				);
 			}
 			finally {
@@ -1292,6 +1313,7 @@ describe(oneLine`
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 						authorsDependency,
 					],
+					expect.anything(),
 					expect.anything(),
 				);
 			}
@@ -1329,12 +1351,14 @@ describe(oneLine`
 						authorsDependency,
 					],
 					expect.anything(),
+					expect.anything(),
 				);
 
 				expect(purgeScopedCache).not.toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
 					null,
+					expect.anything(),
 					expect.anything(),
 				);
 			}
@@ -1527,6 +1551,7 @@ describe(oneLine`
 						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
 					]),
 					expect.anything(),
+					expect.anything(),
 				);
 			}
 			finally {
@@ -1590,6 +1615,7 @@ describe(oneLine`
 					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				],
+				expect.anything(),
 				expect.anything(),
 			);
 
@@ -1662,6 +1688,7 @@ describe(oneLine`
 						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
 						{ collection: 'test', field: 'id', value: 5, type: 'integer' },
 					],
+					expect.anything(),
 					expect.anything(),
 				);
 			}
@@ -1800,13 +1827,13 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		hops the shorter paths already walked
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+			{ id: 1, teaching_unit: 10, '#path0': 20, '#path1': 30, '#path2': 'A' },
 		]);
 
 		tracker.on.update('student_course').response(1);
 
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+			{ id: 1, teaching_unit: 10, '#path0': 20, '#path1': 30, '#path2': 'A' },
 		]);
 
 		await new ItemsService(
@@ -1826,7 +1853,7 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		row and the committed one
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+			{ id: 1, teaching_unit: 10, '#path0': 20, '#path1': 30, '#path2': 'A' },
 		]);
 
 		tracker.on.update('student_course').response(1);
@@ -1834,7 +1861,7 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		// Every terminal differs from the old row's, so a column read off the wrong path
 		// would surface as a wrong value rather than passing on a shared one.
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 11, value0: 21, value1: 31, value2: 'B' },
+			{ id: 1, teaching_unit: 11, '#path0': 21, '#path1': 31, '#path2': 'B' },
 		]);
 
 		await new ItemsService(
@@ -1898,6 +1925,7 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 				},
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -1909,8 +1937,8 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 			id: 1,
 			left_ref: 7,
 			right_ref: 8,
-			value0: 'left-owner',
-			value1: 'right-owner',
+			'#path0': 'left-owner',
+			'#path1': 'right-owner',
 		}]);
 
 		tracker.on.delete('note').response(1);
@@ -1938,6 +1966,7 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 					type: 'string',
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -1980,8 +2009,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		reading every path off that row rather than the first one
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
-			{ id: 2, teaching_unit: 20, value0: 21, value1: 22, value2: 'B' },
+			{ id: 1, teaching_unit: 10, '#path0': 11, '#path1': 12, '#path2': 'A' },
+			{ id: 2, teaching_unit: 20, '#path0': 21, '#path1': 22, '#path2': 'B' },
 		]);
 
 		tracker.on.delete('student_course').response(2);
@@ -2057,6 +2086,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 				},
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -2065,9 +2095,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		pins, and collapses two such rows onto one tag
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
-			{ id: 2, teaching_unit: null, value0: null, value1: null, value2: null },
-			{ id: 3, teaching_unit: null, value0: null, value1: null, value2: null },
+			{ id: 1, teaching_unit: 10, '#path0': 11, '#path1': 12, '#path2': 'A' },
+			{ id: 2, teaching_unit: null, '#path0': null, '#path1': null, '#path2': null },
+			{ id: 3, teaching_unit: null, '#path0': null, '#path1': null, '#path2': null },
 		]);
 
 		tracker.on.delete('student_course').response(3);
@@ -2149,6 +2179,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 				},
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -2156,7 +2187,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		leaves out a path the schema cannot resolve, and still emits its sibling's slice
 	`, async () => {
 		tracker.on.select('note')
-			.responseOnce([{ id: 1, holder: 7, value0: 'owner-a' }]);
+			.responseOnce([{ id: 1, holder: 7, '#path0': 'owner-a' }]);
 
 		tracker.on.delete('note').response(1);
 
@@ -2189,6 +2220,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 				},
 			],
 			expect.anything(),
+			expect.anything(),
 		);
 	});
 
@@ -2217,6 +2249,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 					type: `integer`,
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
