@@ -343,7 +343,15 @@ export function scopedCacheFingerprintPurgedBy(
 ): boolean {
 	const { pairs, fields } = parseScopedCacheFingerprint(fingerprint);
 
-	if (scopedCacheFingerprintFieldsTouched(fields, changed) === false) {
+	// Every field the read pinned to a value is a field it is bound to, whether or
+	// not it also selected it: a write moving a row across one of them moves it in
+	// or out of the result set, which is a changed response by itself. Added only
+	// beside declared fields, since naming none already means every field.
+	const bound = fields.length === 0
+		? fields
+		: [...fields, ...pairs.keys()];
+
+	if (scopedCacheFingerprintFieldsTouched(bound, changed) === false) {
 		return false;
 	}
 

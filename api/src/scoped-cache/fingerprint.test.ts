@@ -305,6 +305,18 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		)).toBe(false);
 	});
 
+	// A pinned field is bound whether or not the read also selected it: the row
+	// crossing it enters or leaves the result set, which is a changed response by
+	// itself. This is how a read sliced by a path — `course:&tu.owner.user=,7,&` —
+	// survives a write that only rewrote the fk that path runs through.
+	it('purges on a pinned field the read never selected', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			'course:&fields=,id,name,&tu.owner.user=,7,&',
+			['course:&id=,1,&tu.owner.user=,7,&'],
+			['tu', 'tu.owner.user'],
+		)).toBe(true);
+	});
+
 	it('purges on an insert, whichever columns the row carries', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
