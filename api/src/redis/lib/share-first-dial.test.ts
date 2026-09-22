@@ -1,4 +1,5 @@
 import { oneLine } from '@directus/utils';
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { shareFirstDial } from './share-first-dial.js';
 
@@ -8,7 +9,7 @@ function dialingStore() {
 	let settle!: () => void;
 	let fail!: (error: Error) => void;
 
-	const client = { isOpen: false };
+	const client = Object.assign(new EventEmitter(), { isOpen: false });
 
 	const dial = vi.fn(() => {
 		client.isOpen = true;
@@ -62,6 +63,40 @@ describe('shareFirstDial', () => {
 
 		expect(await store.getClient()).toBe(store.client);
 		expect(dial).toHaveBeenCalledTimes(1);
+	});
+
+	it(oneLine`
+		lets a command through on the dial's first error rather than holding it on
+		reconnects that never end, so a process booting during an outage fails open
+	`, async () => {
+		const { store, dial, settle } = dialingStore();
+
+		const first = store.getClient();
+		const second = store.getClient();
+
+		store.client.emit('error', new Error('ECONNREFUSED'));
+
+		expect(await first).toBe(store.client);
+		expect(await second).toBe(store.client);
+
+		// Open and reconnecting: the client refuses the command itself, and nothing
+		// here dials a second time over it.
+		expect(await store.getClient()).toBe(store.client);
+		expect(dial).toHaveBeenCalledTimes(1);
+
+		// The dial that answers late finds nothing waiting, and no listener left over.
+		settle();
+		expect(store.client.listenerCount('error')).toBe(0);
+	});
+
+	it('leaves no error listener behind a dial that answered ready', async () => {
+		const { store, settle } = dialingStore();
+
+		const first = store.getClient();
+		settle();
+		await first;
+
+		expect(store.client.listenerCount('error')).toBe(0);
 	});
 
 	it(oneLine`

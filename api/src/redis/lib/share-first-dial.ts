@@ -1,6 +1,10 @@
 /** The slice of a `@keyv/redis` store this needs: the client, and the dial. */
 export interface DialingStore {
-	client: { isOpen: boolean };
+	client: {
+		isOpen: boolean;
+		once(event: 'error', listener: (error: Error) => void): unknown;
+		off(event: 'error', listener: (error: Error) => void): unknown;
+	};
 	getClient(): Promise<unknown>;
 }
 
@@ -15,11 +19,14 @@ export interface DialingStore {
  * production the lock `set` opening `clearSystemCache`, then the `clear` behind
  * it, warned on every `cache flush`, `migrate:latest` and `bootstrap`.
  *
- * A reconnect after an outage is not a dial: the client stays open through it and
- * nothing here is pending, so the command is refused as `disableOfflineQueue`
- * intends. A dial that fails still resolves, as the adapter's does — it reports
- * through the `error` the adapter forwards, and the command it lets through is
- * refused as closed.
+ * The wait ends with the dial's first answer, `ready` or `error`, and never with
+ * the reconnects behind it: node-redis retries a refused dial without end and
+ * settles `connect()` only when it stops, so a process booting during an outage
+ * would hold every cached read on it. After that first `error` the client is open
+ * and reconnecting, which is the outage `disableOfflineQueue` refuses commands
+ * during — the read fails open, as it does when Redis goes away later. A reconnect
+ * is not a dial for the same reason: the client stays open through it and nothing
+ * here is pending.
  */
 export function shareFirstDial(store: DialingStore): void {
 	const dial = store.getClient;
@@ -27,7 +34,19 @@ export function shareFirstDial(store: DialingStore): void {
 
 	store.getClient = async () => {
 		if (dialing === undefined && !store.client.isOpen) {
-			dialing = dial.call(store).finally(() => (dialing = undefined));
+			let refused: () => void = () => {};
+
+			const firstError = new Promise<void>((resolve) => {
+				refused = resolve;
+				store.client.once('error', refused);
+			});
+
+			// The listener goes with the wait: left behind a dial that answered
+			// `ready`, it would resolve a promise nobody waits on at the first outage.
+			dialing = Promise.race([dial.call(store), firstError]).finally(() => {
+				store.client.off('error', refused);
+				dialing = undefined;
+			});
 		}
 
 		await dialing;
