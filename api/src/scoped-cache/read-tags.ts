@@ -34,6 +34,7 @@ import {
 	canonicalScopedCacheValue,
 	isPinnableScopeType,
 	scopedCacheMaxPinsPerCollection,
+	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 } from './tags.js';
 
@@ -1081,6 +1082,15 @@ function descendFilterSegment(
 }
 
 /**
+ * How many ways to match one filter are carried apart before they are carried
+ * side by side instead. A filter ANDing two `_in`s of ten values each has a
+ * hundred pairings, and an entry filed under a hundred index members costs a
+ * hundred SADDs to file and a hundred compares to purge — for a precision no read
+ * of that shape needs.
+ */
+const SCOPED_CACHE_MAX_FILTER_BOUNDS = 16;
+
+/**
  * Scope a read's root cache tags off a filter — the read side. A read is soundly
  * scoped to a value slice only when the filter *bounds* it to that value: a future
  * insert with a new scope value must be excluded by the same filter, or the read
@@ -1108,7 +1118,7 @@ function descendFilterSegment(
  * here. - The purge side emits the same tag from the keys it already holds, so read
  * and write agree without either paying a query for it.
  */
-export function pinnedScopedCacheTagsFromFilter(
+export function pinnedScopedCacheBoundsFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
@@ -1116,7 +1126,7 @@ export function pinnedScopedCacheTagsFromFilter(
 	relatedPrimaryKeys: Record<string, string> = {},
 	scopedCachePaths: ScopedCachePath[] = [],
 	primaryKeyField?: string,
-): ScopedCacheTag[] {
+): ScopedCacheTag[][] {
 	const fieldSet = new Set(fields);
 
 	if (primaryKeyField !== undefined) {
@@ -1147,7 +1157,16 @@ export function pinnedScopedCacheTagsFromFilter(
 	// A node's pinned tags plus whether it *covers* every row it matches — a leaf that
 	// bound a pinnable field covers its rows; an uncovered node's rows carry no pinned
 	// tag (would be stale).
-	type Eval = { tags: Map<string, Set<unknown>>; covered: boolean };
+	//
+	// `bounds` is the same pinning read as a disjunction: one entry per way a row
+	// can match the node, each holding every field that way binds. `tags` flattens
+	// it, losing which values had to hold together — which is all a tag sweep can
+	// use, and not enough for a composite one.
+	type Eval = {
+		tags: Map<string, Set<unknown>>;
+		bounds: Map<string, Set<unknown>>[];
+		covered: boolean;
+	};
 
 	// Union `source`'s values into `target` in place (shared by AND and OR).
 	function unionTags(
@@ -1165,6 +1184,50 @@ export function pinnedScopedCacheTagsFromFilter(
 		}
 	}
 
+	/** A node's own pinned fields as the one way its rows match it. */
+	function boundsOf(
+		tags: Map<string, Set<unknown>>,
+	): Map<string, Set<unknown>>[] {
+		return tags.size === 0
+			? []
+			: [tags];
+	}
+
+	// AND of two disjunctions: every pairing of one way to match each side, each
+	// holding both sides' fields. A side pinning nothing constrains nothing, so the
+	// other side stands alone.
+	//
+	// Past the cap the product is dropped for the two sides' ways side by side —
+	// each still covers the rows it named, and a row matching both is matched twice
+	// rather than once. That widens what a purge reaches, never narrows it.
+	function andBounds(
+		left: Map<string, Set<unknown>>[],
+		right: Map<string, Set<unknown>>[],
+	): Map<string, Set<unknown>>[] {
+		if (left.length === 0 || right.length === 0) {
+			return left.length === 0
+				? right
+				: left;
+		}
+
+		if (left.length * right.length > SCOPED_CACHE_MAX_FILTER_BOUNDS) {
+			return [...left, ...right];
+		}
+
+		const merged: Map<string, Set<unknown>>[] = [];
+
+		for (const one of left) {
+			for (const other of right) {
+				const both = new Map<string, Set<unknown>>();
+				unionTags(both, one);
+				unionTags(both, other);
+				merged.push(both);
+			}
+		}
+
+		return merged;
+	}
+
 	// A single `_eq`/`_in` (or relational `{ fk: { <pk>: { _eq | _in } } }`) leaf →
 	// its value set. Covered iff it bound a pinnable scope field; a
 	// non-scope/date/non-`_eq`/`_in` key covers nothing.
@@ -1177,7 +1240,7 @@ export function pinnedScopedCacheTagsFromFilter(
 			value === null ||
 			typeof value !== 'object'
 		) {
-			return { tags, covered: false };
+			return { tags, bounds: [], covered: false };
 		}
 
 		const ops = value as Record<string, unknown>;
@@ -1210,7 +1273,7 @@ export function pinnedScopedCacheTagsFromFilter(
 			}
 		}
 
-		return { tags, covered: tags.size > 0 };
+		return { tags, bounds: boundsOf(tags), covered: tags.size > 0 };
 	}
 
 	// Follow a declared path's segments down the nested filter to the terminal ops
@@ -1272,7 +1335,7 @@ export function pinnedScopedCacheTagsFromFilter(
 		const paths = pathsByHead.get(headField);
 
 		if (!paths || value === null || typeof value !== 'object') {
-			return { tags, covered: false };
+			return { tags, bounds: [], covered: false };
 		}
 
 		for (const { field, segments } of paths) {
@@ -1287,7 +1350,7 @@ export function pinnedScopedCacheTagsFromFilter(
 			}
 		}
 
-		return { tags, covered: tags.size > 0 };
+		return { tags, bounds: boundsOf(tags), covered: tags.size > 0 };
 	}
 
 	// OR: a row matches at least one branch. Sound to pin only when EVERY branch
@@ -1296,26 +1359,37 @@ export function pinnedScopedCacheTagsFromFilter(
 	// covering tag lies in it, across different fields too.
 	function evalOr(branches: Eval[]): Eval {
 		if (branches.length === 0 || !branches.every((branch) => branch.covered)) {
-			return { tags: new Map<string, Set<unknown>>(), covered: false };
+			return {
+				tags: new Map<string, Set<unknown>>(),
+				bounds: [],
+				covered: false,
+			};
 		}
 
 		const tags = new Map<string, Set<unknown>>();
+		const bounds: Map<string, Set<unknown>>[] = [];
 
 		for (const branch of branches) {
 			unionTags(tags, branch.tags);
+			bounds.push(...branch.bounds);
 		}
 
-		return { tags, covered: true };
+		return { tags, bounds, covered: true };
 	}
 
 	// Every key at an object level is AND-combined (the root and `_and` share this): a
 	// row satisfies every conjunct, so tags union and the node is covered if ANY
 	// conjunct covers the row.
 	function evalNode(node: Filter): Eval {
-		const result: Eval = { tags: new Map<string, Set<unknown>>(), covered: false };
+		const result: Eval = {
+			tags: new Map<string, Set<unknown>>(),
+			bounds: [],
+			covered: false,
+		};
 
 		function andIn(part: Eval): void {
 			unionTags(result.tags, part.tags);
+			result.bounds = andBounds(result.bounds, part.bounds);
 			result.covered = result.covered || part.covered;
 		}
 
@@ -1338,15 +1412,44 @@ export function pinnedScopedCacheTagsFromFilter(
 	}
 
 	const pinned = evalNode(filter);
-	const tags: ScopedCacheTag[] = [];
 
-	for (const [field, values] of pinned.tags) {
-		for (const value of values) {
-			tags.push({ collection, field, value, type: fieldTypes[field] });
+	return pinned.bounds.map((bound) => {
+		const tags: ScopedCacheTag[] = [];
+
+		for (const [field, values] of bound) {
+			for (const value of values) {
+				tags.push({ collection, field, value, type: fieldTypes[field] });
+			}
+		}
+
+		return tags;
+	});
+}
+
+/**
+ * Bounds flattened: every tag any of them names, deduplicated. What a tag sweep
+ * files an entry under, where each tag stands alone and any one of them
+ * reproduced by a write drops the entry.
+ */
+export function scopedCacheTagsOfBounds(
+	bounds: readonly (readonly ScopedCacheTag[])[],
+): ScopedCacheTag[] {
+	const tags = new Map<string, ScopedCacheTag>();
+
+	for (const bound of bounds) {
+		for (const tag of bound) {
+			tags.set(scopedCacheTagKey(tag), tag);
 		}
 	}
 
-	return tags;
+	return [...tags.values()];
+}
+
+/** The same pinning as `pinnedScopedCacheBoundsFromFilter`, read as a tag list. */
+export function pinnedScopedCacheTagsFromFilter(
+	...inputs: Parameters<typeof pinnedScopedCacheBoundsFromFilter>
+): ScopedCacheTag[] {
+	return scopedCacheTagsOfBounds(pinnedScopedCacheBoundsFromFilter(...inputs));
 }
 
 /**

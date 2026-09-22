@@ -19,6 +19,7 @@ import {
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
+	scopedCacheBoundsFromTags,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheTagLabel,
 	tagScopedCacheKeys,
@@ -65,10 +66,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const readTags: ScopedCacheTag[] | undefined =
 		res.locals['scopedCacheTags'] ?? payloadMeta?.scopedCacheTags;
 
+	// The same pinning grouped by what had to hold together — one entry per way the
+	// read matches a collection, each rendered as one fingerprint below. A read that
+	// carries none is read tag by tag, which over-purges rather than serving stale.
+	const readBounds: ScopedCacheTag[][] | undefined =
+		res.locals['scopedCacheBounds'] ?? payloadMeta?.scopedCacheBounds;
+
 	// The fields each of those collections is bound to, and the path its index is
-	// bucketed by. Composed with the tags below into one fingerprint per collection
-	// — the form the purge matches a written row against. A collection missing from
-	// either is bound to all of its fields and filed in the bare bucket.
+	// bucketed by. Composed with the bounds below into the fingerprints the purge
+	// matches a written row against. A collection missing from either is bound to
+	// all of its fields and filed in the bare bucket.
 	const readBoundFields: Record<string, string[]> =
 		res.locals['scopedCacheBoundFields']
 		?? payloadMeta?.scopedCacheBoundFields
@@ -147,21 +154,32 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// them and hold a stale count, so the pins go first.
 	const boundByCollection = new Map(Object.entries(readBoundFields));
 
-	const fingerprintTags = countsWholeCollection && req.collection
+	const readOrTagBounds = readBounds?.length
+		? readBounds
+		: scopedCacheBoundsFromTags(readTags ?? []);
+
+	const fingerprintBounds = countsWholeCollection && req.collection
 		? [
-			...scopedCacheTags.filter(({ collection }) => {
-				return collection !== req.collection;
+			...readOrTagBounds.filter((bound) => {
+				return bound[0]?.collection !== req.collection;
 			}),
-			...collectionFallbackTags,
+			...scopedCacheBoundsFromTags(collectionFallbackTags),
 		]
-		: scopedCacheTags;
+		: [
+			...readOrTagBounds,
+			...scopedCacheBoundsFromTags(
+				readTags?.length
+					? []
+					: collectionFallbackTags,
+			),
+		];
 
 	if (countsWholeCollection && req.collection) {
 		boundByCollection.delete(req.collection);
 	}
 
 	const scopedCacheFingerprints = scopedCacheFingerprintsByCollection(
-		fingerprintTags,
+		fingerprintBounds,
 		boundByCollection,
 	);
 

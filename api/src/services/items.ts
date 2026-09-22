@@ -823,6 +823,7 @@ implements AbstractService<Item> {
 		// bounded to this read — it rides the result via `getMeta()`, not a field.
 		const {
 			tags: scopedCacheTags,
+			bounds: scopedCacheBounds,
 			unautopurgeable: scopedCacheUnautopurgeableTags,
 			boundFields: scopedCacheBoundFields,
 			ownerPaths: scopedCacheOwnerPaths,
@@ -867,6 +868,7 @@ implements AbstractService<Item> {
 		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
+			scopedCacheBounds,
 			scopedCacheUnautopurgeableTags,
 			scopedCacheBoundFields: Object.fromEntries(scopedCacheBoundFields),
 			scopedCacheOwnerPaths: Object.fromEntries(scopedCacheOwnerPaths),

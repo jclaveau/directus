@@ -49,9 +49,11 @@ import {
 	purgeScopedCache,
 } from './purge.js';
 import {
+	pinnedScopedCacheBoundsFromFilter,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheNestedCollections,
 	scopedCachePathReversesChain,
+	scopedCacheTagsOfBounds,
 } from './read-tags.js';
 import {
 	scopedCacheMaxPinsPerCollection,
@@ -792,6 +794,7 @@ export class ItemScopedCacheService {
 	 */
 	async readTags(inputs: ScopedCacheReadInputs): Promise<{
 		tags: ScopedCacheTag[];
+		bounds: ScopedCacheTag[][];
 		unautopurgeable: ScopedCacheTag[];
 		boundFields: Map<CollectionKey, string[]>;
 		ownerPaths: Map<CollectionKey, string | null>;
@@ -810,6 +813,7 @@ export class ItemScopedCacheService {
 		if (!scopedCachePurgeEnabled()) {
 			return {
 				tags,
+				bounds: [],
 				unautopurgeable,
 				boundFields: new Map(),
 				ownerPaths: new Map(),
@@ -854,9 +858,13 @@ export class ItemScopedCacheService {
 		// is the concrete user id, matching what a write's row yields. The pinner
 		// unions an `_or`'s slices when every branch binds a pinnable field — same
 		// field or different ones (the multi-policy case) — else falls back to bare.
-		const rootScopedCacheTags = rootPaths.size > 1
+		//
+		// Kept as bounds as well as tags: the tags say which slices the read sits
+		// in, and the bounds say which of them had to hold TOGETHER — an `_and` of
+		// two fields is one bound of two pairs, an `_or` of them is two bounds.
+		const rootScopedCacheBounds = rootPaths.size > 1
 			? []
-			: pinnedScopedCacheTagsFromFilter(
+			: pinnedScopedCacheBoundsFromFilter(
 				this.collection,
 				this.flatFields,
 				joinFilterWithCases(updatedQuery.filter, ast.cases),
@@ -865,6 +873,8 @@ export class ItemScopedCacheService {
 				this.paths,
 				this.schema.collections[this.collection]?.primary,
 			);
+
+		const rootScopedCacheTags = scopedCacheTagsOfBounds(rootScopedCacheBounds);
 
 		// A filter reaching a collection only through an operator on the
 		// relational key itself (`{ rel: { _gt: X } }`) leaves it out of the
@@ -1475,6 +1485,30 @@ export class ItemScopedCacheService {
 			return [collection, scopedCacheOwnerPath(this.schema, collection)];
 		}));
 
-		return { tags, unautopurgeable, boundFields, ownerPaths };
+		// The root's own filter is the one place several tags of a collection have
+		// to hold together — everywhere else a tag stands alone, the way the sweep
+		// reads it, so each is a bound of its own. Reading those as a conjunction
+		// would leave a read cached that a write to any one of their slices staled.
+		const rootBoundKeys = new Set(
+			rootScopedCacheBounds.flat().map(scopedCacheTagKey),
+		);
+
+		const bounds = tags
+			.filter((tag) => rootBoundKeys.has(scopedCacheTagKey(tag)) === false)
+			.map((tag) => [tag]);
+
+		const rootTagKeys = new Set(tags.map(scopedCacheTagKey));
+
+		const rootBounds = rootScopedCacheBounds.filter((bound) => {
+			return bound.every((tag) => rootTagKeys.has(scopedCacheTagKey(tag)));
+		});
+
+		return {
+			tags,
+			bounds: [...rootBounds, ...bounds],
+			unautopurgeable,
+			boundFields,
+			ownerPaths,
+		};
 	}
 }

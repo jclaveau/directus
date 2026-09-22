@@ -287,38 +287,62 @@ export function scopedCacheFingerprintFieldsTouched(
 }
 
 /**
- * One fingerprint per collection the tags name, each holding that collection's
- * whole share of the read: the slices it was pinned to, and the fields the read
- * is bound to there.
+ * One fingerprint per way the read matches — per bound, not per collection.
  *
- * A collection the tags name bare pins nothing, so its fingerprint carries no pair
- * and every row of it matches — which is what a bare tag means. Its fields still
- * narrow it: a write touching none of them cannot change the response, whether or
- * not the read could say which rows it depends on.
+ * A bound holds the tags that had to hold TOGETHER on one collection: a filter of
+ * `owner=alpha AND method=spaced` is one bound of two pairs, and the entry it
+ * files is dropped only by a write satisfying both. An `_or` across two fields is
+ * two bounds instead, since a row matching either changes the response, and one
+ * fingerprint ANDing them would match neither.
  *
- * Collections are rendered in the order the tags first name them, so a read's
- * fingerprints come back in a stable order without sorting what the caller may
- * have ordered on purpose.
+ * The tags a collection carries from anywhere else — a nested node's slice, an
+ * ancestor's key, a hook's own tag — each stand alone the way a tag sweep reads
+ * them, so each is a bound of its own.
+ *
+ * A bound naming no field pins nothing, so its fingerprint carries no pair and
+ * every row of that collection matches — which is what a bare tag means. Its
+ * fields still narrow it: a write touching none of them cannot change the
+ * response, whether or not the read could say which rows it depends on.
+ *
+ * Bounds are rendered in the order they come in, deduplicated, so a read's
+ * fingerprints come back stable without sorting what the caller may have ordered
+ * on purpose.
  */
 export function scopedCacheFingerprintsByCollection(
-	tags: readonly ScopedCacheTag[],
+	bounds: readonly (readonly ScopedCacheTag[])[],
 	fieldsByCollection: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ScopedCacheFingerprint[] {
-	const tagsByCollection = new Map<string, ScopedCacheTag[]>();
+	const rendered = new Set<ScopedCacheFingerprint>();
 
-	for (const tag of tags) {
-		const known = tagsByCollection.get(tag.collection) ?? [];
-		known.push(tag);
-		tagsByCollection.set(tag.collection, known);
+	for (const bound of bounds) {
+		const collection = bound[0]?.collection;
+
+		if (collection === undefined) {
+			continue;
+		}
+
+		rendered.add(scopedCacheFingerprintFromTags(
+			collection,
+			bound,
+			fieldsByCollection.get(collection) ?? [],
+		));
 	}
 
-	return [...tagsByCollection].map(([collection, collectionTags]) => {
-		return scopedCacheFingerprintFromTags(
-			collection,
-			collectionTags,
-			fieldsByCollection.get(collection) ?? [],
-		);
-	});
+	return [...rendered];
+}
+
+/**
+ * A flat tag list read as bounds: each tag on its own, which is how a tag sweep
+ * reads them — any one of them reproduced by a write drops the entry.
+ *
+ * What a caller with no bounds of its own hands over, and the fail-safe direction:
+ * a conjunction read this way over-purges, while bounds read as a conjunction that
+ * was never one serves stale.
+ */
+export function scopedCacheBoundsFromTags(
+	tags: readonly ScopedCacheTag[],
+): ScopedCacheTag[][] {
+	return tags.map((tag) => [tag]);
 }
 
 /**

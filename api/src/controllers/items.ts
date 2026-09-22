@@ -120,6 +120,7 @@ const readHandler = asyncHandler(async (req, res, next) => {
 	res.locals['scopedCacheUnautopurgeableTags'] =
 		resultMeta?.scopedCacheUnautopurgeableTags;
 
+	res.locals['scopedCacheBounds'] = resultMeta?.scopedCacheBounds;
 	res.locals['scopedCacheBoundFields'] = resultMeta?.scopedCacheBoundFields;
 	res.locals['scopedCacheOwnerPaths'] = resultMeta?.scopedCacheOwnerPaths;
 	res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
@@ -160,7 +161,8 @@ router.get(
 		res.locals['scopedCacheUnautopurgeableTags'] =
 			resultMeta?.scopedCacheUnautopurgeableTags;
 
-		res.locals['scopedCacheBoundFields'] = resultMeta?.scopedCacheBoundFields;
+		res.locals['scopedCacheBounds'] = resultMeta?.scopedCacheBounds;
+	res.locals['scopedCacheBoundFields'] = resultMeta?.scopedCacheBoundFields;
 		res.locals['scopedCacheOwnerPaths'] = resultMeta?.scopedCacheOwnerPaths;
 		res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 

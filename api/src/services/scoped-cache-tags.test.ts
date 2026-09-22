@@ -4,6 +4,7 @@ import type { Filter, SchemaOverview } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
 	composeScopedCachePaths,
+	pinnedScopedCacheBoundsFromFilter,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
 	serializeScopedCacheTags,
@@ -1050,5 +1051,86 @@ describe('composeScopedCachePaths — auto-derived multi-hop paths', () => {
 		);
 
 		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
+	});
+});
+
+describe('pinnedScopedCacheBoundsFromFilter', () => {
+	test('an _and of two fields is one way to match, holding both', () => {
+		const filter = { student: { _eq: 'A' }, course: { _eq: 'math' } };
+
+		expect(
+			pinnedScopedCacheBoundsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+		]);
+	});
+
+	// The multi-policy case: a row carrying either value is in the read's result
+	// set, so reading the two as one conjunction would match neither's write.
+	test('an _or over two fields is two ways, one per branch', () => {
+		const filter = {
+			_or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }],
+		};
+
+		expect(
+			pinnedScopedCacheBoundsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			[{ collection: 'slots', field: 'student', value: 'A' }],
+			[{ collection: 'slots', field: 'course', value: 'math' }],
+		]);
+	});
+
+	test('an _and over an _or distributes, one way per branch', () => {
+		const filter = {
+			_and: [
+				{ student: { _eq: 'A' } },
+				{ _or: [{ course: { _eq: 'math' } }, { course: { _eq: 'art' } }] },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheBoundsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'art' },
+			],
+		]);
+	});
+
+	test(oneLine`
+		carries the two sides side by side past the cap, rather than every pairing
+	`, () => {
+		const values = Array.from({ length: 5 }, (_, at) => `s${at}`);
+
+		const filter = {
+			_and: [
+				{ _or: values.map((value) => ({ student: { _eq: value } })) },
+				{ _or: values.map((value) => ({ course: { _eq: value } })) },
+			],
+		};
+
+		const bounds = pinnedScopedCacheBoundsFromFilter(
+			'slots',
+			['student', 'course'],
+			filter,
+		);
+
+		expect(bounds.length).toBe(10);
+		expect(bounds.every((bound) => bound.length === 1)).toBe(true);
+	});
+
+	test('an unbound branch drops the pin, as it does for tags', () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { note: { _eq: 'x' } }] };
+
+		expect(pinnedScopedCacheBoundsFromFilter('slots', ['student'], filter))
+			.toEqual([]);
 	});
 });

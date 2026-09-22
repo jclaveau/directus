@@ -220,6 +220,17 @@ export interface ReadMeta {
 	scopedCacheTags: ScopedCacheTag[];
 
 	/**
+	 * The same tags, grouped by what had to hold TOGETHER: one entry per way the
+	 * read matches a collection. A root filter of `owner=alpha AND method=spaced`
+	 * is one bound of two tags, an `_or` over those fields is two bounds of one,
+	 * and every tag from anywhere else stands alone the way the sweep reads it.
+	 *
+	 * Each becomes one `ScopedCacheFingerprint` at fill time. Absent, the tags are
+	 * read one by one, which over-purges rather than serving stale.
+	 */
+	scopedCacheBounds?: ScopedCacheTag[][];
+
+	/**
 	 * Tags a read hook scoped this response TO that are unautopurgeable — a value
 	 * slice on a field the target collection isn't scoped on, not `manuallyPurged`. No
 	 * write can auto-purge them, so respond.ts must not cache the response; it also

@@ -6,6 +6,7 @@ import {
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintFieldsTouched,
 	scopedCacheFingerprintFromTags,
+	scopedCacheBoundsFromTags,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
@@ -245,14 +246,15 @@ describe('scopedCacheFingerprintFieldsTouched', () => {
 
 describe('scopedCacheFingerprintsByCollection', () => {
 	it(oneLine`
-		folds a collection's pins into one fingerprint, and each collection into its
-		own
+		folds one bound's pins into one fingerprint, and each collection into its own
 	`, () => {
 		expect(scopedCacheFingerprintsByCollection(
 			[
-				{ collection: 'slot', field: 'owner', value: 'alpha' },
-				{ collection: 'zone', field: 'area', value: 'north' },
-				{ collection: 'slot', field: 'method', value: 'spaced' },
+				[
+					{ collection: 'slot', field: 'owner', value: 'alpha' },
+					{ collection: 'slot', field: 'method', value: 'spaced' },
+				],
+				[{ collection: 'zone', field: 'area', value: 'north' }],
 			],
 			new Map([['slot', ['id', 'owner']], ['zone', ['area']]]),
 		)).toEqual([
@@ -261,9 +263,25 @@ describe('scopedCacheFingerprintsByCollection', () => {
 		]);
 	});
 
+	// The `_or` across two fields: a row matching either changes the response, so
+	// each way is its own fingerprint. One fingerprint holding both pairs would
+	// match a row carrying both and nothing else.
+	it('renders one fingerprint per way the read matches a collection', () => {
+		expect(scopedCacheFingerprintsByCollection(
+			[
+				[{ collection: 'slot', field: 'owner', value: 'alpha' }],
+				[{ collection: 'slot', field: 'dept', value: 'rh' }],
+			],
+			new Map([['slot', ['id']]]),
+		)).toEqual([
+			'slot:&fields=,id,&owner=,alpha,&',
+			'slot:&dept=,rh,&fields=,id,&',
+		]);
+	});
+
 	it('renders a bare tag as a fingerprint pinning nothing but its fields', () => {
 		expect(scopedCacheFingerprintsByCollection(
-			[{ collection: 'slot' }],
+			[[{ collection: 'slot' }]],
 			new Map([['slot', ['id', 'note']]]),
 		)).toEqual(['slot:&fields=,id,note,&']);
 	});
@@ -271,8 +289,27 @@ describe('scopedCacheFingerprintsByCollection', () => {
 	it(oneLine`
 		renders a collection whose fields are unknown as one any write matches
 	`, () => {
-		expect(scopedCacheFingerprintsByCollection([{ collection: 'slot' }]))
+		expect(scopedCacheFingerprintsByCollection([[{ collection: 'slot' }]]))
 			.toEqual(['slot:&']);
+	});
+
+	it('carries the same bound once, however many times it is named', () => {
+		expect(scopedCacheFingerprintsByCollection([
+			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
+			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
+		])).toEqual(['slot:&owner=,alpha,&']);
+	});
+});
+
+describe('scopedCacheBoundsFromTags', () => {
+	it('reads each tag as a way of its own, which is how a sweep reads them', () => {
+		expect(scopedCacheBoundsFromTags([
+			{ collection: 'slot', field: 'owner', value: 'alpha' },
+			{ collection: 'slot', field: 'method', value: 'spaced' },
+		])).toEqual([
+			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
+			[{ collection: 'slot', field: 'method', value: 'spaced' }],
+		]);
 	});
 });
 
