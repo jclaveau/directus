@@ -143,8 +143,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const scopedCacheFingerprints = countsWholeCollection && req.collection
 		? [
-			...readFingerprints.filter((fingerprint) => {
-				return scopedCacheFingerprintCollection(fingerprint) !== req.collection;
+			...readFingerprints.filter((readFingerprint) => {
+				return scopedCacheFingerprintCollection(readFingerprint) !== req.collection;
 			}),
 			...collectionFallbackFingerprints,
 		]
@@ -156,14 +156,15 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// path derived from the collection, never from the read, so the fill and the
 	// write that has to find it read the same one.
 	const scopedCacheBucketPaths = new Map(
-		scopedCacheFingerprints.map((fingerprint) => {
-			const collection = scopedCacheFingerprintCollection(fingerprint);
+		scopedCacheFingerprints.map((indexedFingerprint) => {
+			const fingerprintCollection =
+				scopedCacheFingerprintCollection(indexedFingerprint);
 
 			return [
-				collection,
+				fingerprintCollection,
 				req.schema === undefined
 					? null
-					: scopedCacheBucketPath(req.schema, collection),
+					: scopedCacheBucketPath(req.schema, fingerprintCollection),
 			];
 		}),
 	);

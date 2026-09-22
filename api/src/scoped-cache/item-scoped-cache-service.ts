@@ -342,12 +342,12 @@ export class ItemScopedCacheService {
 			};
 		}
 
-		const rows = await this.scopeValueRows(keys);
+		const scopedRows = await this.scopeValueRows(keys);
 
 		const flatTags = scopedCacheTagsFromRows(
 			this.collection,
 			flatFields,
-			rows,
+			scopedRows,
 			'coarse',
 			fieldTypes,
 		);
@@ -374,7 +374,7 @@ export class ItemScopedCacheService {
 			tags.push(...scopedCacheTagsFromRows(
 				this.collection,
 				[field],
-				rows,
+				scopedRows,
 				'skip',
 				{ [field]: fieldTypes[field] },
 			));
@@ -383,7 +383,7 @@ export class ItemScopedCacheService {
 		// The axes a read can pin itself to, which is what a fingerprint's pairs are.
 		// Every OTHER column the row carries stays out of them and rides the row
 		// instead: it can only ever be a field the read is bound to, never a slice.
-		const pinnable = [...new Set([
+		const pinnableFields = [...new Set([
 			primaryKeyField,
 			...flatFields,
 			...pathFields,
@@ -391,14 +391,14 @@ export class ItemScopedCacheService {
 
 		return {
 			tags,
-			rows: rows.map((row) => {
+			rows: scopedRows.map((row) => {
 				// 'skip' over 'coarse': every field below is projected by the select,
 				// and a row that somehow lost one is better pinned by the rest of
 				// itself than dropped — the fingerprint then matches MORE reads,
 				// never fewer.
 				const rowTags = scopedCacheTagsFromRows(
 					this.collection,
-					pinnable,
+					pinnableFields,
 					[row],
 					'skip',
 					fieldTypes,
@@ -474,7 +474,7 @@ export class ItemScopedCacheService {
 			});
 		}
 
-		const rows = await query
+		const scopedRows = await query
 			.select([
 				// Deduped: a project that also lists its primary key in
 				// `scoped_cache_fields` would otherwise project the column twice.
@@ -491,19 +491,19 @@ export class ItemScopedCacheService {
 			])
 			.whereIn(`root.${primaryKeyField}`, keys);
 
-		return rows.map((row: Item) => {
-			const named: Item = {};
+		return scopedRows.map((row: Item) => {
+			const namedRow: Item = {};
 
 			for (const [column, value] of Object.entries(row)) {
-				named[column] = value;
+				namedRow[column] = value;
 			}
 
 			terminalRefByPath.forEach(({ field }, index) => {
-				delete named[`${PATH_ALIAS}${index}`];
-				named[field] = row[`${PATH_ALIAS}${index}`];
+				delete namedRow[`${PATH_ALIAS}${index}`];
+				namedRow[field] = row[`${PATH_ALIAS}${index}`];
 			});
 
-			return named;
+			return namedRow;
 		});
 	}
 
@@ -512,9 +512,9 @@ export class ItemScopedCacheService {
 	 * m2m, a presentation block) has no column to read and would break the select.
 	 */
 	private rootColumns(): string[] {
-		const fields = this.schema.collections[this.collection]?.fields ?? {};
+		const collectionFields = this.schema.collections[this.collection]?.fields ?? {};
 
-		return Object.values(fields)
+		return Object.values(collectionFields)
 			.filter(({ alias }) => alias === false)
 			.map(({ field }) => field);
 	}
@@ -1499,11 +1499,11 @@ export class ItemScopedCacheService {
 			})
 			.map((tag) => [tag]);
 
-		const fingerprints = scopedCacheFingerprintsByCollection(
+		const readFingerprints = scopedCacheFingerprintsByCollection(
 			[...rootQueryCases, ...standaloneQueryCases],
 			queryCaseFields,
 		);
 
-		return { fingerprints, unautopurgeable };
+		return { fingerprints: readFingerprints, unautopurgeable };
 	}
 }

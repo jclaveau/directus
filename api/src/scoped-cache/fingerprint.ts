@@ -16,7 +16,7 @@ export const SCOPED_CACHE_ANY_FIELD = '*';
 const RESERVED = /[\\,&|]/g;
 
 export function escapeScopedCacheFingerprintToken(token: string): string {
-	return token.replace(RESERVED, (character) => `\\${character}`);
+	return token.replace(RESERVED, (reservedCharacter) => `\\${reservedCharacter}`);
 }
 
 export function unescapeScopedCacheFingerprintToken(token: string): string {
@@ -29,34 +29,34 @@ export function unescapeScopedCacheFingerprintToken(token: string): string {
  * escaped separator too, and a value carrying `&` would come back as two pairs.
  */
 function splitUnescaped(input: string, separator: string): string[] {
-	const parts: string[] = [];
-	let current = '';
-	let escaped = false;
+	const splitParts: string[] = [];
+	let currentPart = '';
+	let escapePending = false;
 
-	for (const character of input) {
-		if (escaped) {
-			current += `\\${character}`;
-			escaped = false;
+	for (const reservedCharacter of input) {
+		if (escapePending) {
+			currentPart += `\\${reservedCharacter}`;
+			escapePending = false;
 			continue;
 		}
 
-		if (character === '\\') {
-			escaped = true;
+		if (reservedCharacter === '\\') {
+			escapePending = true;
 			continue;
 		}
 
-		if (character === separator) {
-			parts.push(current);
-			current = '';
+		if (reservedCharacter === separator) {
+			splitParts.push(currentPart);
+			currentPart = '';
 			continue;
 		}
 
-		current += character;
+		currentPart += reservedCharacter;
 	}
 
-	parts.push(current);
+	splitParts.push(currentPart);
 
-	return parts;
+	return splitParts;
 }
 
 /**
@@ -69,24 +69,24 @@ export function renderScopedCacheFingerprint(
 	pairs: ReadonlyMap<string, readonly string[]>,
 	fields: readonly string[] = [],
 ): ScopedCacheFingerprint {
-	const rendered = new Map<string, readonly string[]>(pairs);
+	const renderedPairs = new Map<string, readonly string[]>(pairs);
 
 	if (fields.length > 0) {
-		rendered.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fields);
+		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fields);
 	}
 
-	let fingerprint = `${collection}:`;
+	let renderedFingerprint = `${collection}:`;
 
-	for (const key of [...rendered.keys()].sort()) {
-		const values = [
-			...new Set(rendered.get(key)!.map(escapeScopedCacheFingerprintToken)),
+	for (const key of [...renderedPairs.keys()].sort()) {
+		const sortedValues = [
+			...new Set(renderedPairs.get(key)!.map(escapeScopedCacheFingerprintToken)),
 		].sort();
 
-		fingerprint += `&${escapeScopedCacheFingerprintToken(key)}=,`
-			+ `${values.join(',')},`;
+		renderedFingerprint += `&${escapeScopedCacheFingerprintToken(key)}=,`
+			+ `${sortedValues.join(',')},`;
 	}
 
-	return `${fingerprint}&`;
+	return `${renderedFingerprint}&`;
 }
 
 /**
@@ -112,18 +112,18 @@ export function parseScopedCacheFingerprint(
 	// On the FIRST colon: a collection name carries none, and a value may.
 	const colonAt = fingerprint.indexOf(':');
 
-	const collection = colonAt === -1
+	const parsedCollection = colonAt === -1
 		? fingerprint
 		: fingerprint.slice(0, colonAt);
 
-	const pairs = new Map<string, string[]>();
-	let fields: string[] = [];
+	const parsedPairs = new Map<string, string[]>();
+	let parsedFields: string[] = [];
 
-	const body = colonAt === -1
+	const fingerprintBody = colonAt === -1
 		? ''
 		: fingerprint.slice(colonAt + 1);
 
-	for (const pair of splitUnescaped(body, '&')) {
+	for (const pair of splitUnescaped(fingerprintBody, '&')) {
 		if (pair === '') {
 			continue;
 		}
@@ -136,22 +136,22 @@ export function parseScopedCacheFingerprint(
 			continue;
 		}
 
-		const key = unescapeScopedCacheFingerprintToken(pair.slice(0, assignAt));
+		const pairKey = unescapeScopedCacheFingerprintToken(pair.slice(0, assignAt));
 
 		// The wrapping commas are separators, not values: `,a,b,` is two values.
-		const values = splitUnescaped(pair.slice(assignAt + 1), ',')
+		const pairValues = splitUnescaped(pair.slice(assignAt + 1), ',')
 			.slice(1, -1)
 			.map(unescapeScopedCacheFingerprintToken);
 
-		if (key === SCOPED_CACHE_FINGERPRINT_FIELDS) {
-			fields = values;
+		if (pairKey === SCOPED_CACHE_FINGERPRINT_FIELDS) {
+			parsedFields = pairValues;
 			continue;
 		}
 
-		pairs.set(key, values);
+		parsedPairs.set(pairKey, pairValues);
 	}
 
-	return { collection, pairs, fields };
+	return { collection: parsedCollection, pairs: parsedPairs, fields: parsedFields };
 }
 
 export function scopedCacheFingerprintCollection(
@@ -178,19 +178,19 @@ export function scopedCacheFingerprintFromTags(
 	tags: readonly ScopedCacheTag[],
 	fields: readonly string[] = [],
 ): ScopedCacheFingerprint {
-	const pairs = new Map<string, string[]>();
+	const taggedPairs = new Map<string, string[]>();
 
 	for (const tag of tags) {
 		if (tag.field === undefined) {
 			continue;
 		}
 
-		const values = pairs.get(tag.field) ?? [];
-		values.push(canonicalScopedCacheValue(tag.value, tag.type));
-		pairs.set(tag.field, values);
+		const fieldValues = taggedPairs.get(tag.field) ?? [];
+		fieldValues.push(canonicalScopedCacheValue(tag.value, tag.type));
+		taggedPairs.set(tag.field, fieldValues);
 	}
 
-	return renderScopedCacheFingerprint(collection, pairs, fields);
+	return renderScopedCacheFingerprint(collection, taggedPairs, fields);
 }
 
 /**
@@ -206,17 +206,17 @@ export function scopedCacheFingerprintLabels(
 	fingerprint: ScopedCacheFingerprint,
 ): string[] {
 	const { collection, pairs } = parseScopedCacheFingerprint(fingerprint);
-	const labels: string[] = [];
+	const tagLabels: string[] = [];
 
 	for (const [field, values] of pairs) {
 		for (const value of values) {
-			labels.push(`${collection}:${field}=${value}`);
+			tagLabels.push(`${collection}:${field}=${value}`);
 		}
 	}
 
-	return labels.length === 0
+	return tagLabels.length === 0
 		? [collection]
-		: labels;
+		: tagLabels;
 }
 
 /**
@@ -232,36 +232,36 @@ export function scopedCacheFingerprintLabels(
 export function scopedCacheTagsOfFingerprints(
 	fingerprints: readonly ScopedCacheFingerprint[],
 ): ScopedCacheTag[] {
-	const tags: ScopedCacheTag[] = [];
-	const seen = new Set<string>();
+	const derivedTags: ScopedCacheTag[] = [];
+	const seenTagKeys = new Set<string>();
 
-	const push = (tag: ScopedCacheTag): void => {
-		const key = scopedCacheTagKey(tag);
+	const pushTag = (tag: ScopedCacheTag): void => {
+		const derivedTagKey = scopedCacheTagKey(tag);
 
-		if (seen.has(key)) {
+		if (seenTagKeys.has(derivedTagKey)) {
 			return;
 		}
 
-		seen.add(key);
-		tags.push(tag);
+		seenTagKeys.add(derivedTagKey);
+		derivedTags.push(tag);
 	};
 
 	for (const fingerprint of fingerprints) {
 		const { collection, pairs } = parseScopedCacheFingerprint(fingerprint);
 
 		if (pairs.size === 0) {
-			push({ collection });
+			pushTag({ collection });
 			continue;
 		}
 
 		for (const [field, values] of pairs) {
 			for (const value of values) {
-				push({ collection, field, value });
+				pushTag({ collection, field, value });
 			}
 		}
 	}
 
-	return tags;
+	return derivedTags;
 }
 
 /**
@@ -279,17 +279,17 @@ export function scopedCacheFingerprintMatchesRow(
 	rowFingerprint: ScopedCacheFingerprint,
 ): boolean {
 	const { pairs } = parseScopedCacheFingerprint(fingerprint);
-	const row = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
+	const rowBody = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
 
 	for (const [field, values] of pairs) {
-		const key = escapeScopedCacheFingerprintToken(field);
+		const pairKey = escapeScopedCacheFingerprintToken(field);
 
-		const holds = values.some((value) => {
-			const token = escapeScopedCacheFingerprintToken(value);
-			return row.includes(`&${key}=,${token},`);
+		const pairHolds = values.some((value) => {
+			const valueToken = escapeScopedCacheFingerprintToken(value);
+			return rowBody.includes(`&${pairKey}=,${valueToken},`);
 		});
 
-		if (!holds) {
+		if (!pairHolds) {
 			return false;
 		}
 	}
@@ -329,10 +329,14 @@ export function scopedCacheFingerprintFieldsTouched(
 			return true;
 		}
 
-		const segments = field.split('.');
+		const fieldSegments = field.split('.');
 
-		for (let depth = segments.length - 1; depth > 0; depth--) {
-			if (queryCase.has(`${segments.slice(0, depth).join('.')}.*`)) {
+		for (
+			let segmentDepth = fieldSegments.length - 1;
+			segmentDepth > 0;
+			segmentDepth--
+		) {
+			if (queryCase.has(`${fieldSegments.slice(0, segmentDepth).join('.')}.*`)) {
 				return true;
 			}
 		}
@@ -367,23 +371,23 @@ export function scopedCacheFingerprintsByCollection(
 	queryCases: readonly (readonly ScopedCacheTag[])[],
 	fieldsByCollection: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ScopedCacheFingerprint[] {
-	const rendered = new Set<ScopedCacheFingerprint>();
+	const renderedFingerprints = new Set<ScopedCacheFingerprint>();
 
 	for (const queryCase of queryCases) {
-		const collection = queryCase[0]?.collection;
+		const queryCaseCollection = queryCase[0]?.collection;
 
-		if (collection === undefined) {
+		if (queryCaseCollection === undefined) {
 			continue;
 		}
 
-		rendered.add(scopedCacheFingerprintFromTags(
-			collection,
+		renderedFingerprints.add(scopedCacheFingerprintFromTags(
+			queryCaseCollection,
 			queryCase,
-			fieldsByCollection.get(collection) ?? [],
+			fieldsByCollection.get(queryCaseCollection) ?? [],
 		));
 	}
 
-	return [...rendered];
+	return [...renderedFingerprints];
 }
 
 /**
@@ -423,19 +427,19 @@ export function scopedCacheFingerprintPurgedBy(
 
 	// Escaped once for every row rather than once per row: a purge tests one
 	// fingerprint against every row of a batch, and the needles do not vary.
-	const needles = [...pairs].map(([field, values]) => {
-		const key = escapeScopedCacheFingerprintToken(field);
+	const pairNeedles = [...pairs].map(([field, values]) => {
+		const pairKey = escapeScopedCacheFingerprintToken(field);
 
-		return values.map((value) => {
-			return `&${key}=,${escapeScopedCacheFingerprintToken(value)},`;
+		return values.map((pairValue) => {
+			return `&${pairKey}=,${escapeScopedCacheFingerprintToken(pairValue)},`;
 		});
 	});
 
 	return rowFingerprints.some((rowFingerprint) => {
-		const row = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
+		const rowBody = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
 
-		return needles.every((alternatives) => {
-			return alternatives.some((needle) => row.includes(needle));
+		return pairNeedles.every((pairAlternatives) => {
+			return pairAlternatives.some((valueNeedle) => rowBody.includes(valueNeedle));
 		});
 	});
 }

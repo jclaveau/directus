@@ -71,25 +71,25 @@ export function scopedCacheChangedFields(
 	}
 
 	const rowsBefore = new Map(before.map(({ key, row }) => [String(key), row]));
-	const changed = new Set<string>();
+	const changedKeys = new Set<string>();
 
 	for (const { key, row } of after) {
-		const previous = rowsBefore.get(String(key));
+		const previousRow = rowsBefore.get(String(key));
 
-		if (previous === undefined || previous === null || row === null) {
+		if (previousRow === undefined || previousRow === null || row === null) {
 			return null;
 		}
 
-		const columns = new Set([...Object.keys(previous), ...Object.keys(row)]);
+		const columnNames = new Set([...Object.keys(previousRow), ...Object.keys(row)]);
 
-		for (const column of columns) {
-			if (sameStoredValue(previous[column], row[column]) === false) {
-				changed.add(column);
+		for (const column of columnNames) {
+			if (sameStoredValue(previousRow[column], row[column]) === false) {
+				changedKeys.add(column);
 			}
 		}
 	}
 
-	return [...changed].sort();
+	return [...changedKeys].sort();
 }
 
 /**

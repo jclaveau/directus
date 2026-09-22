@@ -1566,12 +1566,12 @@ implements AbstractService<Item> {
 				);
 			});
 
-			const unresolvable =
+			const unresolvableRows =
 				(someRowTakenOver && scopedCacheCollector.tags.length === 0) ||
 				oldScopedCacheCapture.tags === null ||
 				newScopedCacheCapture.tags === null;
 
-			const scopedCacheTags = unresolvable
+			const scopedCacheTags = unresolvableRows
 				? null
 				: [...oldScopedCacheCapture.tags!, ...newScopedCacheCapture.tags!];
 
@@ -1584,7 +1584,7 @@ implements AbstractService<Item> {
 					// An upsert's two sides never line up — an inserted row has no old
 					// side — so the diff reads as every field, which is what an insert
 					// means anyway.
-					rows: unresolvable
+					rows: unresolvableRows
 						? undefined
 						: scopedCacheUpdatedRows(
 							oldScopedCacheCapture,
@@ -1857,7 +1857,7 @@ implements AbstractService<Item> {
 		query.limit = 1;
 
 		const records = await this.readByQuery(query, opts);
-		const meta = readMeta(records) ?? scopedCacheReadMeta([]);
+		const singletonMeta = readMeta(records) ?? scopedCacheReadMeta([]);
 		const record = records[0];
 
 		if (!record) {
@@ -1881,10 +1881,10 @@ implements AbstractService<Item> {
 				}
 			}
 
-			return withMeta(defaults as Partial<Item>, meta);
+			return withMeta(defaults as Partial<Item>, singletonMeta);
 		}
 
-		return withMeta(record, meta);
+		return withMeta(record, singletonMeta);
 	}
 
 	/**

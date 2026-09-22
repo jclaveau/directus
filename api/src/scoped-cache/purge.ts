@@ -378,21 +378,24 @@ export async function indexScopedCacheEntry(
 	// fallback — still sweeps the sets above. Both index the same entry, so
 	// whichever a purge reaches it by, the entry goes.
 	for (const fingerprint of fingerprints) {
-		const collection = scopedCacheFingerprintCollection(fingerprint);
-		const bucketPath = bucketPaths.get(collection) ?? null;
+		const fingerprintCollection = scopedCacheFingerprintCollection(fingerprint);
+		const bucketPath = bucketPaths.get(fingerprintCollection) ?? null;
 
-		const members = [key, cacheExpiresAtKey(key), ...extraSiblings].map(
-			(member) => renderScopedCacheIndexMember(fingerprint, member),
+		const indexedMembers = [key, cacheExpiresAtKey(key), ...extraSiblings].map(
+			(indexedMember) => renderScopedCacheIndexMember(fingerprint, indexedMember),
 		);
 
 		for (const bucket of scopedCacheFingerprintBuckets(fingerprint, bucketPath)) {
-			const bucketKey = scopedCacheFingerprintIndexKey(collection, bucket);
+			const bucketKey = scopedCacheFingerprintIndexKey(
+				fingerprintCollection,
+				bucket,
+			);
 
 			if (ttlSeconds > 0) {
-				pipeline.scopedCacheTagExpiry(bucketKey, ttlSeconds, ...members);
+				pipeline.scopedCacheTagExpiry(bucketKey, ttlSeconds, ...indexedMembers);
 			}
 			else {
-				pipeline.sadd(bucketKey, ...members);
+				pipeline.sadd(bucketKey, ...indexedMembers);
 			}
 		}
 	}
@@ -632,27 +635,27 @@ async function purgeScopedCacheFingerprintIndex(
 	// about to prune.
 	await bumpScopedCacheEpochs([collection]);
 
-	const redis = useRedis();
+	const redisClient = useRedis();
 	const matchedByBucket = new Map<string, string[]>();
-	const keys: string[] = [];
+	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
 
 	for (const bucket of scopedCacheRowBuckets(rowFingerprints, bucketPath)) {
 		const bucketKey = scopedCacheFingerprintIndexKey(collection, bucket);
-		let cursor = '0';
+		let scanCursor = '0';
 
 		do {
-			const [next, members] = await redis.sscan(
+			const [next, indexedMembers] = await redisClient.sscan(
 				bucketKey,
-				cursor,
+				scanCursor,
 				'COUNT',
 				SCOPED_CACHE_INDEX_SCAN_COUNT,
 			);
 
-			cursor = next;
+			scanCursor = next;
 
-			for (const member of members) {
-				const { fingerprint, key } = parseScopedCacheIndexMember(member);
+			for (const indexedMember of indexedMembers) {
+				const { fingerprint, key } = parseScopedCacheIndexMember(indexedMember);
 
 				// A fingerprint pinning nothing is what the bare collection tag
 				// covers, so a mutation keeping that tag warm keeps these entries
@@ -673,61 +676,64 @@ async function purgeScopedCacheFingerprintIndex(
 					continue;
 				}
 
-				const matched = matchedByBucket.get(bucketKey) ?? [];
-				matched.push(member);
-				matchedByBucket.set(bucketKey, matched);
+				const matchedMembers = matchedByBucket.get(bucketKey) ?? [];
+				matchedMembers.push(indexedMember);
+				matchedByBucket.set(bucketKey, matchedMembers);
 
 				if (key !== '' && seenKeys.has(key) === false) {
 					seenKeys.add(key);
-					keys.push(key);
+					matchedKeys.push(key);
 				}
 			}
-		} while (cursor !== '0');
+		} while (scanCursor !== '0');
 	}
 
-	if (keys.length === 0) {
+	if (matchedKeys.length === 0) {
 		return 0;
 	}
 
 	// The entries apart from their sidecars, the way the tag sweep counts them: a
 	// sidecar is recognisable by its base key being matched beside it, and counting
 	// both would report every entry twice.
-	const present = new Set(keys);
+	const presentKeys = new Set(matchedKeys);
 
-	const entries = keys.filter((key) => {
-		const owner = cacheSidecarOwner(key);
+	const entries = matchedKeys.filter((key) => {
+		const sidecarOwner = cacheSidecarOwner(key);
 
-		return owner === null || present.has(owner) === false;
+		return sidecarOwner === null || presentKeys.has(sidecarOwner) === false;
 	});
 
 	const entryKeys = new Set(entries);
 
 	const [evicted] = await Promise.all([
 		dropCacheEntries(cache, entries),
-		dropCacheEntries(cache, keys.filter((key) => {
+		dropCacheEntries(cache, matchedKeys.filter((key) => {
 			return entryKeys.has(key) === false;
 		})),
-		pruneScopedCacheIndex(redis, matchedByBucket),
+		pruneScopedCacheIndex(redisClient, matchedByBucket),
 	]);
 
 	return evicted;
 }
 
 async function pruneScopedCacheIndex(
-	redis: Redis,
+	redisClient: Redis,
 	matchedByBucket: ReadonlyMap<string, string[]>,
 ): Promise<void> {
-	const pipeline = redis.pipeline();
+	const redisPipeline = redisClient.pipeline();
 
-	for (const [bucketKey, members] of matchedByBucket) {
+	for (const [bucketKey, indexedMembers] of matchedByBucket) {
 		for (
-			let at = 0;
-			at < members.length;
-			at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
+			let memberAt = 0;
+			memberAt < indexedMembers.length;
+			memberAt += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
 		) {
-			pipeline.srem(
+			redisPipeline.srem(
 				bucketKey,
-				...members.slice(at, at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS),
+				...indexedMembers.slice(
+					memberAt,
+					memberAt + SCOPED_CACHE_INDEX_CHUNK_MEMBERS,
+				),
 			);
 		}
 	}
@@ -735,14 +741,14 @@ async function pruneScopedCacheIndex(
 	// A refused prune leaves members naming keys that are already gone, which the
 	// next purge tests and finds nothing for. That costs a compare, never a stale
 	// hit, so it is logged rather than thrown into the mutation that triggered it.
-	const results = await pipeline.exec();
-	const failed = results?.find(([error]) => error !== null);
+	const pipelineResults = await redisPipeline.exec();
+	const failedResult = pipelineResults?.find(([error]) => error !== null);
 
-	if (failed) {
+	if (failedResult) {
 		useLogger().warn(
-			failed[0],
+			failedResult[0],
 			`[scoped-cache] pruning the fingerprint index failed; its members expire `
-			+ `with their set: ${failed[0]}`,
+			+ `with their set: ${failedResult[0]}`,
 		);
 	}
 }
@@ -1460,13 +1466,13 @@ export async function purgeScopedCache(
 	const rowDriven = new Set(
 		declaredScopedCacheTags
 			.map(scopedCacheTagKey)
-			.filter((key) => sweptAnyway.has(key) === false),
+			.filter((entryKey) => sweptAnyway.has(entryKey) === false),
 	);
 
 	const sweptScopedCacheTags = options.rowFingerprints === undefined
 		? resolvedScopedCacheTags
-		: resolvedScopedCacheTags.filter((tag) => {
-			return rowDriven.has(scopedCacheTagKey(tag)) === false;
+		: resolvedScopedCacheTags.filter((resolvedTag) => {
+			return rowDriven.has(scopedCacheTagKey(resolvedTag)) === false;
 		});
 
 	const tagKeys = [...new Set(sweptScopedCacheTags.map(scopedCacheTagKey))];

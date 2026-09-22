@@ -252,13 +252,13 @@ export class ScopedCacheReadPlan {
 
 		for (const entries of [this.fieldMap.read, this.fieldMap.other]) {
 			for (const { collection, fields } of entries.values()) {
-				const known = byCollection.get(collection) ?? new Set<string>();
+				const knownFields = byCollection.get(collection) ?? new Set<string>();
 
 				for (const field of fields) {
-					known.add(field);
+					knownFields.add(field);
 				}
 
-				byCollection.set(collection, known);
+				byCollection.set(collection, knownFields);
 			}
 		}
 

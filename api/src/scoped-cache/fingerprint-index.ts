@@ -47,7 +47,7 @@ export function scopedCacheBucketPath(
 	schema: SchemaOverview,
 	collection: CollectionKey,
 ): string | null {
-	const walk = (
+	const walkRelations = (
 		current: CollectionKey,
 		prefix: string,
 		visited: ReadonlySet<CollectionKey>,
@@ -56,8 +56,8 @@ export function scopedCacheBucketPath(
 			return null;
 		}
 
-		const seen = new Set(visited).add(current);
-		let deepest: string | null = null;
+		const seenCollections = new Set(visited).add(current);
+		let deepestPath: string | null = null;
 
 		for (const field of schema.collections[current]?.scopedCacheFields ?? []) {
 			// A composed path is already the chain, read off an ancestor rather than
@@ -66,33 +66,35 @@ export function scopedCacheBucketPath(
 				continue;
 			}
 
-			const path = prefix === ''
+			const relationPath = prefix === ''
 				? field
 				: `${prefix}.${field}`;
 
-			const target = schema.relations.find((relation) => {
+			const targetRelation = schema.relations.find((relation) => {
 				return relation.collection === current && relation.field === field;
 			})?.related_collection;
 
 			const targetScopes =
-				(schema.collections[target ?? '']?.scopedCacheFields ?? []).length > 0;
+				(schema.collections[targetRelation ?? '']?.scopedCacheFields ?? [])
+					.length > 0;
 
-			const candidate = targetScopes && target
-				? walk(target, path, seen) ?? path
-				: path;
+			const candidatePath = targetScopes && targetRelation
+				? walkRelations(targetRelation, relationPath, seenCollections)
+					?? relationPath
+				: relationPath;
 
 			if (
-				deepest === null
-				|| candidate.split('.').length > deepest.split('.').length
+				deepestPath === null
+				|| candidatePath.split('.').length > deepestPath.split('.').length
 			) {
-				deepest = candidate;
+				deepestPath = candidatePath;
 			}
 		}
 
-		return deepest;
+		return deepestPath;
 	};
 
-	return walk(collection, '', new Set());
+	return walkRelations(collection, '', new Set());
 }
 
 /**

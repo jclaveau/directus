@@ -288,16 +288,16 @@ export function scopedCacheNestedRowBindings(
 	fieldMap: FieldMap,
 	fieldNames: ReadonlyMap<string, string>,
 ): Map<CollectionKey, Set<string>> {
-	const bindings = new Map<CollectionKey, Set<string>>();
+	const boundFieldsByCollection = new Map<CollectionKey, Set<string>>();
 
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 		if (path === '') {
 			continue;
 		}
 
-		const segments = path.split('.');
-		const fields = scopedCacheUnaliasedPath(fieldNames, segments);
-		const aliasField = fields[fields.length - 1];
+		const pathSegments = path.split('.');
+		const unaliasedFields = scopedCacheUnaliasedPath(fieldNames, pathSegments);
+		const aliasField = unaliasedFields[unaliasedFields.length - 1];
 
 		if (aliasField === undefined) {
 			continue;
@@ -306,7 +306,7 @@ export function scopedCacheNestedRowBindings(
 		const parentCollection = scopedCacheCollectionAtPathEnd(
 			schema,
 			rootCollection,
-			fields.slice(0, -1),
+			unaliasedFields.slice(0, -1),
 		);
 
 		if (parentCollection === null) {
@@ -327,12 +327,14 @@ export function scopedCacheNestedRowBindings(
 			continue;
 		}
 
-		const bound = bindings.get(entry.collection) ?? new Set<string>();
-		bound.add(relation.field);
-		bindings.set(entry.collection, bound);
+		const boundFields = boundFieldsByCollection.get(entry.collection)
+			?? new Set<string>();
+
+		boundFields.add(relation.field);
+		boundFieldsByCollection.set(entry.collection, boundFields);
 	}
 
-	return bindings;
+	return boundFieldsByCollection;
 }
 
 /**
@@ -1281,18 +1283,18 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 			return [...left, ...right];
 		}
 
-		const merged: Map<string, Set<unknown>>[] = [];
+		const mergedQueryCases: Map<string, Set<unknown>>[] = [];
 
 		for (const one of left) {
 			for (const other of right) {
-				const both = new Map<string, Set<unknown>>();
-				unionTags(both, one);
-				unionTags(both, other);
-				merged.push(both);
+				const bothPairs = new Map<string, Set<unknown>>();
+				unionTags(bothPairs, one);
+				unionTags(bothPairs, other);
+				mergedQueryCases.push(bothPairs);
 			}
 		}
 
-		return merged;
+		return mergedQueryCases;
 	}
 
 	// A single `_eq`/`_in` (or relational `{ fk: { <pk>: { _eq | _in } } }`) leaf →
@@ -1448,16 +1450,16 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	// row satisfies every conjunct, so tags union and the node is covered if ANY
 	// conjunct covers the row.
 	function evalNode(node: Filter): Eval {
-		const result: Eval = {
+		const evalResult: Eval = {
 			tags: new Map<string, Set<unknown>>(),
 			queryCases: [],
 			covered: false,
 		};
 
 		function andIn(part: Eval): void {
-			unionTags(result.tags, part.tags);
-			result.queryCases = andQueryCases(result.queryCases, part.queryCases);
-			result.covered = result.covered || part.covered;
+			unionTags(evalResult.tags, part.tags);
+			evalResult.queryCases = andQueryCases(evalResult.queryCases, part.queryCases);
+			evalResult.covered = evalResult.covered || part.covered;
 		}
 
 		for (const [key, value] of Object.entries(node)) {
@@ -1475,21 +1477,21 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 			}
 		}
 
-		return result;
+		return evalResult;
 	}
 
 	const pinned = evalNode(filter);
 
 	return pinned.queryCases.map((queryCase) => {
-		const tags: ScopedCacheTag[] = [];
+		const pinnedTags: ScopedCacheTag[] = [];
 
 		for (const [field, values] of queryCase) {
 			for (const value of values) {
-				tags.push({ collection, field, value, type: fieldTypes[field] });
+				pinnedTags.push({ collection, field, value, type: fieldTypes[field] });
 			}
 		}
 
-		return tags;
+		return pinnedTags;
 	});
 }
 
