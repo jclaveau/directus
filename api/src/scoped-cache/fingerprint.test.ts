@@ -3,52 +3,66 @@ import { describe, expect, it } from 'vitest';
 import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
-	scopedCacheFingerprintCollection,
+	scopedCacheFingerprint,
 	scopedCacheFingerprintFieldsTouched,
 	scopedCacheFingerprintFromTags,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
 	scopedCacheFingerprintPurgedBy,
+	scopedCacheRowIndexGlobs,
 } from './fingerprint.js';
 
 describe('renderScopedCacheFingerprint', () => {
 	it('sorts the pairs and wraps every value in commas', () => {
-		expect(renderScopedCacheFingerprint(
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
 			'student_time_slot',
 			new Map([['user', ['A']], ['course_part', ['4821']]]),
 			['course_part', 'day', 'id'],
-		)).toBe(
+		))).toBe(
 			'student_time_slot:&course_part=,4821,&fields=,course_part,day,id,'
 			+ '&user=,A,&',
 		);
 	});
 
+	// The `*` of a read bound to every field is escaped like any other token: a
+	// field cannot be named `*`, so nothing is lost, and the escape rule stays one
+	// rule rather than one rule and an exception a pattern would have to know.
 	it('lists a multi-valued pair once, sorted and deduped', () => {
-		expect(renderScopedCacheFingerprint(
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
 			'student_time_slot',
 			new Map([['course_part', ['2', '1', '2']]]),
 			['*'],
-		)).toBe('student_time_slot:&course_part=,1,2,&fields=,*,&');
+		))).toBe('student_time_slot:&course_part=,1,2,&fields=,\\*,&');
 	});
 
-	it('leaves out the fields pair when the caller names none', () => {
-		expect(renderScopedCacheFingerprint(
+	it('leaves out the fields pair when the read names none', () => {
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
 			'student_time_slot',
 			new Map([['user', ['A']]]),
-		)).toBe('student_time_slot:&user=,A,&');
+		))).toBe('student_time_slot:&user=,A,&');
 	});
 
 	it('renders a collection bound to nothing', () => {
-		expect(renderScopedCacheFingerprint('student_time_slot', new Map()))
-			.toBe('student_time_slot:&');
+		expect(renderScopedCacheFingerprint(
+			scopedCacheFingerprint('student_time_slot'),
+		)).toBe('student_time_slot:&');
 	});
 
 	it('escapes a value carrying a separator', () => {
-		expect(renderScopedCacheFingerprint(
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
 			'note',
 			new Map([['title', ['a,b&c|d\\e']]]),
-		)).toBe('note:&title=,a\\,b\\&c\\|d\\\\e,&');
+		))).toBe('note:&title=,a\\,b\\&c\\|d\\\\e,&');
+	});
+
+	// A raw one would make the pattern a purge builds around this value match
+	// slices the value never named, which is a purge of somebody else's entries.
+	it('escapes a value carrying a glob metacharacter', () => {
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
+			'note',
+			new Map([['title', ['a*b?c[d]']]]),
+		))).toBe('note:&title=,a\\*b\\?c\\[d\\],&');
 	});
 });
 
@@ -74,6 +88,12 @@ describe('parseScopedCacheFingerprint', () => {
 		).pairs]).toEqual([['title', ['a,b&c|d\\e']]]);
 	});
 
+	it('unescapes a value carrying a glob metacharacter', () => {
+		expect([...parseScopedCacheFingerprint(
+			'note:&title=,a\\*b\\?c\\[d\\],&',
+		).pairs]).toEqual([['title', ['a*b?c[d]']]]);
+	});
+
 	it('reads back a collection bound to nothing', () => {
 		const parsed = parseScopedCacheFingerprint('student_time_slot:&');
 
@@ -81,12 +101,13 @@ describe('parseScopedCacheFingerprint', () => {
 		expect([...parsed.pairs]).toEqual([]);
 		expect(parsed.fields).toEqual([]);
 	});
-});
 
-describe('scopedCacheFingerprintCollection', () => {
-	it('reads the collection without parsing the pairs', () => {
-		expect(scopedCacheFingerprintCollection('note:&id=,1,&'))
-			.toBe('note');
+	it('reads back a value whose escapes only look like two values', () => {
+		expect([...parseScopedCacheFingerprint(
+			renderScopedCacheFingerprint(
+				scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+			),
+		).pairs]).toEqual([['owner', ['a,b']]]);
 	});
 });
 
@@ -100,7 +121,11 @@ describe('scopedCacheFingerprintFromTags', () => {
 				{ collection: 'note', field: 'id', value: 7, type: 'integer' },
 			],
 			['*'],
-		)).toBe('note:&fields=,*,&id=,7,&owner=,a,b,&');
+		)).toEqual(scopedCacheFingerprint(
+			'note',
+			new Map([['owner', ['a', 'b']], ['id', ['7']]]),
+			['*'],
+		));
 	});
 
 	it('canonicalizes each value the way the tag key does', () => {
@@ -110,21 +135,24 @@ describe('scopedCacheFingerprintFromTags', () => {
 				{ collection: 'note', field: 'id', value: '007', type: 'integer' },
 				{ collection: 'note', field: 'flag', value: 't', type: 'boolean' },
 			],
-		)).toBe('note:&flag=,true,&id=,7,&');
+		)).toEqual(scopedCacheFingerprint(
+			'note',
+			new Map([['id', ['7']], ['flag', ['true']]]),
+		));
 	});
 
 	it('drops a bare tag, which pins nothing', () => {
 		expect(scopedCacheFingerprintFromTags('note', [{ collection: 'note' }]))
-			.toBe('note:&');
+			.toEqual(scopedCacheFingerprint('note'));
 	});
 });
 
 describe('scopedCacheFingerprintLabels', () => {
 	it('renders one legacy label per value, without the fields pair', () => {
-		expect(scopedCacheFingerprintLabels(
+		expect(scopedCacheFingerprintLabels(parseScopedCacheFingerprint(
 			'entry:&account=,7,&account.org=,3,&account.org.owner=,acme,'
 			+ '&fields=,*,&id=,913,&',
-		)).toEqual([
+		))).toEqual([
 			'entry:account=7',
 			'entry:account.org=3',
 			'entry:account.org.owner=acme',
@@ -133,74 +161,70 @@ describe('scopedCacheFingerprintLabels', () => {
 	});
 
 	it('renders the bare collection when the fingerprint pins nothing', () => {
-		expect(scopedCacheFingerprintLabels('entry:&fields=,*,&'))
-			.toEqual(['entry']);
+		expect(scopedCacheFingerprintLabels(
+			parseScopedCacheFingerprint('entry:&fields=,*,&'),
+		)).toEqual(['entry']);
 	});
 });
 
 describe('scopedCacheFingerprintMatchesRow', () => {
-	const row = renderScopedCacheFingerprint(
-		'slot',
-		new Map([['owner', ['alpha']], ['method', ['spaced']], ['id', ['913']]]),
+	const row = parseScopedCacheFingerprint(
+		'slot:&id=,913,&method=,spaced,&owner=,alpha,&',
 	);
 
 	it('matches a row satisfying every pair', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			'slot:&fields=,*,&method=,spaced,&owner=,alpha,&',
+			parseScopedCacheFingerprint('slot:&fields=,*,&method=,spaced,&owner=,alpha,&'),
 			row,
 		)).toBe(true);
 	});
 
 	it('refuses a row satisfying one pair but not the other', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			'slot:&fields=,*,&method=,spaced,&owner=,beta,&',
+			parseScopedCacheFingerprint('slot:&fields=,*,&method=,spaced,&owner=,beta,&'),
 			row,
 		)).toBe(false);
 	});
 
 	it('matches a row on any value of a multi-valued pair', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			'slot:&owner=,alpha,beta,&',
+			parseScopedCacheFingerprint('slot:&owner=,alpha,beta,&'),
 			row,
 		)).toBe(true);
 	});
 
 	it('matches every row when the fingerprint pins nothing', () => {
-		expect(scopedCacheFingerprintMatchesRow('slot:&fields=,*,&', row))
-			.toBe(true);
-	});
-
-	it(oneLine`
-		refuses a row whose value merely starts with the pinned one, which the
-		wrapping commas are there to tell apart
-	`, () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			'slot:&owner=,alph,&',
+			parseScopedCacheFingerprint('slot:&fields=,*,&'),
 			row,
-		)).toBe(false);
-	});
-
-	it(oneLine`
-		refuses a row matching on another pair's suffix, which the leading
-		separator is there to tell apart
-	`, () => {
-		expect(scopedCacheFingerprintMatchesRow(
-			'slot:&ner=,alpha,&',
-			row,
-		)).toBe(false);
-	});
-
-	it('matches a value carrying a separator, escaped on both sides', () => {
-		expect(scopedCacheFingerprintMatchesRow(
-			renderScopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
-			renderScopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
 		)).toBe(true);
 	});
 
-	it('refuses a row whose escaped value only looks like two values', () => {
+	it('refuses a row whose value merely starts with the pinned one', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			renderScopedCacheFingerprint('slot', new Map([['owner', ['a']]])),
-			renderScopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+			parseScopedCacheFingerprint('slot:&owner=,alph,&'),
+			row,
+		)).toBe(false);
+	});
+
+	it('refuses a row carrying no pair of that name at all', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			parseScopedCacheFingerprint('slot:&ner=,alpha,&'),
+			row,
+		)).toBe(false);
+	});
+
+	it('matches a value carrying a separator', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+		)).toBe(true);
+	});
+
+	it('refuses a row whose value only looks like the pinned one', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			scopedCacheFingerprint('slot', new Map([['owner', ['a']]])),
+			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
 		)).toBe(false);
 	});
 });
@@ -257,7 +281,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 				[{ collection: 'zone', field: 'area', value: 'north' }],
 			],
 			new Map([['slot', ['id', 'owner']], ['zone', ['area']]]),
-		)).toEqual([
+		).map(renderScopedCacheFingerprint)).toEqual([
 			'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&',
 			'zone:&area=,north,&fields=,area,&',
 		]);
@@ -273,7 +297,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 				[{ collection: 'slot', field: 'dept', value: 'rh' }],
 			],
 			new Map([['slot', ['id']]]),
-		)).toEqual([
+		).map(renderScopedCacheFingerprint)).toEqual([
 			'slot:&fields=,id,&owner=,alpha,&',
 			'slot:&dept=,rh,&fields=,id,&',
 		]);
@@ -283,31 +307,33 @@ describe('scopedCacheFingerprintsByCollection', () => {
 		expect(scopedCacheFingerprintsByCollection(
 			[[{ collection: 'slot' }]],
 			new Map([['slot', ['id', 'note']]]),
-		)).toEqual(['slot:&fields=,id,note,&']);
+		).map(renderScopedCacheFingerprint)).toEqual(['slot:&fields=,id,note,&']);
 	});
 
 	it(oneLine`
 		renders a collection whose fields are unknown as one any write matches
 	`, () => {
-		expect(scopedCacheFingerprintsByCollection([[{ collection: 'slot' }]]))
-			.toEqual(['slot:&']);
+		expect(scopedCacheFingerprintsByCollection([[{ collection: 'slot' }]])
+			.map(renderScopedCacheFingerprint)).toEqual(['slot:&']);
 	});
 
 	it('carries the same query case once, however many times it is named', () => {
 		expect(scopedCacheFingerprintsByCollection([
 			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
 			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
-		])).toEqual(['slot:&owner=,alpha,&']);
+		]).map(renderScopedCacheFingerprint)).toEqual(['slot:&owner=,alpha,&']);
 	});
 });
 
 describe('scopedCacheFingerprintPurgedBy', () => {
-	const read = 'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&';
+	const read = parseScopedCacheFingerprint(
+		'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&',
+	);
 
 	it('purges when the row satisfies every pair and a bound field changed', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
-			['slot:&id=,1,&method=,spaced,&owner=,alpha,&'],
+			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&')],
 			['owner'],
 		)).toBe(true);
 	});
@@ -317,7 +343,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	`, () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
-			['slot:&id=,1,&method=,spaced,&owner=,beta,&'],
+			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,beta,&')],
 			['owner'],
 		)).toBe(false);
 	});
@@ -325,7 +351,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	it('leaves the read alone when the write changed no field it is bound to', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
-			['slot:&id=,1,&method=,spaced,&owner=,alpha,&'],
+			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&')],
 			['note'],
 		)).toBe(false);
 	});
@@ -336,8 +362,8 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	// survives a write that only rewrote the fk that path runs through.
 	it('purges on a pinned field the read never selected', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			'course:&fields=,id,name,&tu.owner.user=,7,&',
-			['course:&id=,1,&tu.owner.user=,7,&'],
+			parseScopedCacheFingerprint('course:&fields=,id,name,&tu.owner.user=,7,&'),
+			[parseScopedCacheFingerprint('course:&id=,1,&tu.owner.user=,7,&')],
 			['tu', 'tu.owner.user'],
 		)).toBe(true);
 	});
@@ -345,7 +371,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	it('purges on an insert, whichever columns the row carries', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
-			['slot:&id=,1,&method=,spaced,&owner=,alpha,&'],
+			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&')],
 			null,
 		)).toBe(true);
 	});
@@ -357,8 +383,8 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
 			[
-				'slot:&id=,1,&method=,spaced,&owner=,beta,&',
-				'slot:&id=,1,&method=,spaced,&owner=,alpha,&',
+				parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,beta,&'),
+				parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&'),
 			],
 			['owner'],
 		)).toBe(true);
@@ -370,8 +396,8 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
 			[
-				'slot:&id=,1,&method=,spaced,&owner=,alpha,&',
-				'slot:&id=,1,&method=,spaced,&owner=,sigma,&',
+				parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&'),
+				parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,sigma,&'),
 			],
 			['owner'],
 		)).toBe(true);
@@ -383,8 +409,8 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
 			[
-				'slot:&id=,1,&method=,massed,&owner=,alpha,&',
-				'slot:&id=,2,&method=,spaced,&owner=,beta,&',
+				parseScopedCacheFingerprint('slot:&id=,1,&method=,massed,&owner=,alpha,&'),
+				parseScopedCacheFingerprint('slot:&id=,2,&method=,spaced,&owner=,beta,&'),
 			],
 			null,
 		)).toBe(false);
@@ -392,16 +418,16 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 
 	it('purges a read pinning nothing on any write to its collection', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			'slot:&',
-			['slot:&id=,1,&owner=,beta,&'],
+			parseScopedCacheFingerprint('slot:&'),
+			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,beta,&')],
 			['note'],
 		)).toBe(true);
 	});
 
 	it('purges a read bounded to a list of owners by a write to either', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			'slot:&fields=,id,owner,&owner=,kappa,lambda,&',
-			['slot:&id=,1,&owner=,lambda,&'],
+			parseScopedCacheFingerprint('slot:&fields=,id,owner,&owner=,kappa,lambda,&'),
+			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,lambda,&')],
 			['owner'],
 		)).toBe(true);
 	});
@@ -410,17 +436,76 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		leaves a read bounded to a list of owners alone for a write outside it
 	`, () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			'slot:&fields=,id,owner,&owner=,mu,nu,&',
-			['slot:&id=,1,&owner=,xi,&'],
+			parseScopedCacheFingerprint('slot:&fields=,id,owner,&owner=,mu,nu,&'),
+			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,xi,&')],
 			['owner'],
 		)).toBe(false);
 	});
 
 	it('purges a read of every field on a change to any column', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			'slot:&fields=,*,&owner=,zeta,&',
-			['slot:&id=,1,&owner=,zeta,&'],
+			parseScopedCacheFingerprint('slot:&fields=,*,&owner=,zeta,&'),
+			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,zeta,&')],
 			['note'],
 		)).toBe(true);
+	});
+});
+
+describe('scopedCacheRowIndexGlobs', () => {
+	it('names one pattern per pair the row pins, and the two that pin none', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			parseScopedCacheFingerprint('slot:&id=,1,&owner=,alpha,&'),
+		])).toEqual([
+			'slot:&|*',
+			'slot:&fields=,*',
+			'slot:*&id=*,1,*',
+			'slot:*&owner=*,alpha,*',
+		]);
+	});
+
+	it('names each value of a multi-valued pair, once across the batch', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
+			parseScopedCacheFingerprint('slot:&owner=,beta,&'),
+			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
+		])).toEqual([
+			'slot:&|*',
+			'slot:&fields=,*',
+			'slot:*&owner=*,alpha,*',
+			'slot:*&owner=*,beta,*',
+		]);
+	});
+
+	// The value is stored escaped (`a\*b`), and a glob eats a backslash rather than
+	// matching one, so the pattern doubles what the serialiser wrote.
+	it('escapes a value carrying a glob metacharacter', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			scopedCacheFingerprint('slot', new Map([['owner', ['a*b']]])),
+		])).toEqual([
+			'slot:&|*',
+			'slot:&fields=,*',
+			'slot:*&owner=*,a\\\\\\*b,*',
+		]);
+	});
+
+	it('escapes a value carrying a separator', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+		])).toEqual([
+			'slot:&|*',
+			'slot:&fields=,*',
+			'slot:*&owner=*,a\\\\,b,*',
+		]);
+	});
+
+	it(oneLine`
+		gives up on filtering past the bound, so a wide batch reads its sets whole
+		instead of walking them once per slice
+	`, () => {
+		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
+			return scopedCacheFingerprint('slot', new Map([['id', [`${at}`]]]));
+		});
+
+		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);
 	});
 });

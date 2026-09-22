@@ -50,6 +50,7 @@ import {
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
+import { parseScopedCacheFingerprint } from '../scoped-cache/fingerprint.js';
 import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/tags.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
@@ -192,7 +193,11 @@ describe(oneLine`
 				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
 			],
 			rows: [
-				{ key: 1, row: null, fingerprint: 'articles:&id=,1,&' },
+				{
+					key: 1,
+					row: null,
+					fingerprint: parseScopedCacheFingerprint('articles:&id=,1,&'),
+				},
 			],
 		});
 	});

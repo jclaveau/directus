@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseScopedCacheFingerprint } from './fingerprint.js';
 import { purgeScopedCache } from './purge.js';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
@@ -104,7 +105,9 @@ const BARE = 'ns:scoped-cache-index:idx:slot:';
 const ALPHA = 'ns:scoped-cache-index:idx:slot:owner=alpha';
 
 // One row of `slot`, owned by alpha, whose `method` the write rewrote.
-const row = 'slot:&id=,1,&method=,spaced,&owner=,alpha,&';
+const row = parseScopedCacheFingerprint(
+	'slot:&id=,1,&method=,spaced,&owner=,alpha,&',
+);
 
 function purge(options: Record<string, unknown>) {
 	return purgeScopedCache(cache, 'slot', [], null, {
@@ -138,7 +141,8 @@ describe('a purge shown the rows it wrote', () => {
 	it('reads the bare set and the one its row owns, and no other', async () => {
 		await purge({});
 
-		expect(sscan.mock.calls.map(([key]) => key)).toEqual([BARE, ALPHA]);
+		expect([...new Set(sscan.mock.calls.map(([key]) => key))])
+			.toEqual([BARE, ALPHA]);
 	});
 
 	it(oneLine`
@@ -197,7 +201,17 @@ describe('a purge shown the rows it wrote', () => {
 
 		await purge({ bucketPath: null });
 
-		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual(['0', '7']);
+		// One pass per pattern the rows can drop something under — the two bare ones
+		// plus one per pair of `row` — and the first of them takes a second page.
+		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
+			'0',
+			'7',
+			'0',
+			'0',
+			'0',
+			'0',
+		]);
+
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-first');
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-second');
 	});

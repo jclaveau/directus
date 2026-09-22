@@ -3,6 +3,7 @@ import type { CollectionKey } from '../permissions/modules/process-ast/types.js'
 import {
 	escapeScopedCacheFingerprintToken,
 	parseScopedCacheFingerprint,
+	renderScopedCacheFingerprint,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import { scopedCacheIndexPrefix } from './tags.js';
@@ -118,8 +119,7 @@ export function scopedCacheFingerprintBuckets(
 		return [SCOPED_CACHE_BARE_BUCKET];
 	}
 
-	const bucketValues =
-		parseScopedCacheFingerprint(fingerprint).pairs.get(bucketPath);
+	const bucketValues = fingerprint.pairs.get(bucketPath);
 
 	if (bucketValues === undefined || bucketValues.length === 0) {
 		return [SCOPED_CACHE_BARE_BUCKET];
@@ -151,8 +151,7 @@ export function scopedCacheRowBuckets(
 	}
 
 	for (const rowFingerprint of rowFingerprints) {
-		const bucketValues = parseScopedCacheFingerprint(rowFingerprint).pairs
-			.get(bucketPath) ?? [];
+		const bucketValues = rowFingerprint.pairs.get(bucketPath) ?? [];
 
 		for (const bucketValue of bucketValues) {
 			buckets.add(
@@ -165,20 +164,23 @@ export function scopedCacheRowBuckets(
 }
 
 /**
- * A set member: the fingerprint that has to match, and the cache key it protects.
+ * A set member: the serialised fingerprint that has to match, and the cache key it
+ * protects.
  *
  * Both in one member so the match needs nothing but the set itself, and so a key
  * cached under two different query cases is two members rather than one entry
  * whose query cases have been merged into an OR.
  *
  * `|` splits them, and a fingerprint escapes every `|` it carries, so the split is
- * on the FIRST one however the cache key is spelled.
+ * on the FIRST one however the cache key is spelled. This is the one place a
+ * fingerprint leaves Node as a string; `parseScopedCacheIndexMember` is the one
+ * place it comes back.
  */
 export function renderScopedCacheIndexMember(
 	fingerprint: ScopedCacheFingerprint,
 	key: string,
 ): string {
-	return `${fingerprint}|${key}`;
+	return `${renderScopedCacheFingerprint(fingerprint)}|${key}`;
 }
 
 export function parseScopedCacheIndexMember(
@@ -187,11 +189,11 @@ export function parseScopedCacheIndexMember(
 	const splitAt = member.indexOf('|');
 
 	if (splitAt === -1) {
-		return { fingerprint: member, key: '' };
+		return { fingerprint: parseScopedCacheFingerprint(member), key: '' };
 	}
 
 	return {
-		fingerprint: member.slice(0, splitAt),
+		fingerprint: parseScopedCacheFingerprint(member.slice(0, splitAt)),
 		key: member.slice(splitAt + 1),
 	};
 }

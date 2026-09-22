@@ -9,6 +9,7 @@ import {
 	scopedCacheBucketPath,
 	scopedCacheRowBuckets,
 } from './fingerprint-index.js';
+import { parseScopedCacheFingerprint } from './fingerprint.js';
 
 vi.mock('@directus/env', () => {
 	return { useEnv: () => ({ CACHE_NAMESPACE: 'scalabus' }) };
@@ -82,33 +83,37 @@ describe('scopedCacheBucketPath', () => {
 describe('scopedCacheFingerprintBuckets', () => {
 	it('files a read under the bucket value it pinned', () => {
 		expect(scopedCacheFingerprintBuckets(
-			'slot:&fields=,id,&method=,spaced,&zone.region.owner=,ana,&',
+			parseScopedCacheFingerprint(
+				'slot:&fields=,id,&method=,spaced,&zone.region.owner=,ana,&',
+			),
 			'zone.region.owner',
 		)).toEqual(['zone.region.owner=ana']);
 	});
 
 	it('files a read bounded to a list of bucket values under each of them', () => {
 		expect(scopedCacheFingerprintBuckets(
-			'slot:&zone.region.owner=,ana,bo,&',
+			parseScopedCacheFingerprint('slot:&zone.region.owner=,ana,bo,&'),
 			'zone.region.owner',
 		)).toEqual(['zone.region.owner=ana', 'zone.region.owner=bo']);
 	});
 
 	it('files a read pinning every axis but the bucket value bare', () => {
 		expect(scopedCacheFingerprintBuckets(
-			'slot:&fields=,id,&method=,spaced,&',
+			parseScopedCacheFingerprint('slot:&fields=,id,&method=,spaced,&'),
 			'zone.region.owner',
 		)).toEqual(['']);
 	});
 
 	it('files every read of a collection with no bucket path bare', () => {
-		expect(scopedCacheFingerprintBuckets('loose:&fields=,id,&', null))
-			.toEqual(['']);
+		expect(scopedCacheFingerprintBuckets(
+			parseScopedCacheFingerprint('loose:&fields=,id,&'),
+			null,
+		)).toEqual(['']);
 	});
 
 	it('escapes a bucket value carrying a separator, so its set is its own', () => {
 		expect(scopedCacheFingerprintBuckets(
-			'slot:&zone.region.owner=,a\\,b,&',
+			parseScopedCacheFingerprint('slot:&zone.region.owner=,a\\,b,&'),
 			'zone.region.owner',
 		)).toEqual(['zone.region.owner=a\\,b']);
 	});
@@ -118,8 +123,12 @@ describe('scopedCacheRowBuckets', () => {
 	it('reads the bare set and the one each written row owns', () => {
 		expect(scopedCacheRowBuckets(
 			[
-				'slot:&id=,1,&method=,spaced,&zone.region.owner=,ana,&',
-				'slot:&id=,2,&method=,massed,&zone.region.owner=,bo,&',
+				parseScopedCacheFingerprint(
+					'slot:&id=,1,&method=,spaced,&zone.region.owner=,ana,&',
+				),
+				parseScopedCacheFingerprint(
+					'slot:&id=,2,&method=,massed,&zone.region.owner=,bo,&',
+				),
 			],
 			'zone.region.owner',
 		)).toEqual(['', 'zone.region.owner=ana', 'zone.region.owner=bo']);
@@ -128,41 +137,54 @@ describe('scopedCacheRowBuckets', () => {
 	it('reads one set for two rows of the same bucket value', () => {
 		expect(scopedCacheRowBuckets(
 			[
-				'slot:&id=,1,&zone.region.owner=,ana,&',
-				'slot:&id=,2,&zone.region.owner=,ana,&',
+				parseScopedCacheFingerprint('slot:&id=,1,&zone.region.owner=,ana,&'),
+				parseScopedCacheFingerprint('slot:&id=,2,&zone.region.owner=,ana,&'),
 			],
 			'zone.region.owner',
 		)).toEqual(['', 'zone.region.owner=ana']);
 	});
 
 	it('reads the bare set alone for a row whose bucket value never resolved', () => {
-		expect(scopedCacheRowBuckets(['slot:&id=,1,&'], 'zone.region.owner'))
-			.toEqual(['']);
+		expect(scopedCacheRowBuckets(
+			[parseScopedCacheFingerprint('slot:&id=,1,&')],
+			'zone.region.owner',
+		)).toEqual(['']);
 	});
 
 	it('reads the bare set alone for a collection with no bucket path', () => {
-		expect(scopedCacheRowBuckets(['loose:&id=,1,&'], null)).toEqual(['']);
+		expect(scopedCacheRowBuckets(
+			[parseScopedCacheFingerprint('loose:&id=,1,&')],
+			null,
+		)).toEqual(['']);
 	});
 });
 
 describe('renderScopedCacheIndexMember', () => {
 	it('carries the query case and the key it protects in one member', () => {
-		expect(renderScopedCacheIndexMember('slot:&method=,spaced,&', 'ns:abc'))
-			.toBe('slot:&method=,spaced,&|ns:abc');
+		expect(renderScopedCacheIndexMember(
+			parseScopedCacheFingerprint('slot:&method=,spaced,&'),
+			'ns:abc',
+		)).toBe('slot:&method=,spaced,&|ns:abc');
 	});
 
 	it('reads a member back, splitting on the fingerprint\'s own terminator', () => {
 		expect(parseScopedCacheIndexMember('slot:&method=,spaced,&|ns:abc'))
-			.toEqual({ fingerprint: 'slot:&method=,spaced,&', key: 'ns:abc' });
+			.toEqual({
+				fingerprint: parseScopedCacheFingerprint('slot:&method=,spaced,&'),
+				key: 'ns:abc',
+			});
 	});
 
 	it('reads a key carrying a pipe of its own back whole', () => {
 		expect(parseScopedCacheIndexMember('slot:&|ns:a|b'))
-			.toEqual({ fingerprint: 'slot:&', key: 'ns:a|b' });
+			.toEqual({
+				fingerprint: parseScopedCacheFingerprint('slot:&'),
+				key: 'ns:a|b',
+			});
 	});
 
 	it('reads a member holding no key as a fingerprint alone', () => {
 		expect(parseScopedCacheIndexMember('slot:&'))
-			.toEqual({ fingerprint: 'slot:&', key: '' });
+			.toEqual({ fingerprint: parseScopedCacheFingerprint('slot:&'), key: '' });
 	});
 });

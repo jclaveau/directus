@@ -45,9 +45,8 @@ import {
 	scopedCacheRowBuckets,
 } from './fingerprint-index.js';
 import {
-	parseScopedCacheFingerprint,
-	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintPurgedBy,
+	scopedCacheRowIndexGlobs,
 	scopedCacheTagsOfFingerprints,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
@@ -378,7 +377,7 @@ export async function indexScopedCacheEntry(
 	// fallback — still sweeps the sets above. Both index the same entry, so
 	// whichever a purge reaches it by, the entry goes.
 	for (const fingerprint of fingerprints) {
-		const fingerprintCollection = scopedCacheFingerprintCollection(fingerprint);
+		const fingerprintCollection = fingerprint.collection;
 		const bucketPath = bucketPaths.get(fingerprintCollection) ?? null;
 
 		const indexedMembers = [key, cacheExpiresAtKey(key), ...extraSiblings].map(
@@ -636,56 +635,81 @@ async function purgeScopedCacheFingerprintIndex(
 	await bumpScopedCacheEpochs([collection]);
 
 	const redisClient = useRedis();
-	const matchedByBucket = new Map<string, string[]>();
+	const matchedByBucket = new Map<string, Set<string>>();
 	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
 
+	// The patterns the rows can drop something under, or `null` to read the sets
+	// whole. A member matching none of them cannot be purged by these rows, so
+	// letting Redis skip it saves sending it; the test below still decides.
+	const globPatterns = scopedCacheRowIndexGlobs(collection, rowFingerprints);
+
 	for (const bucket of scopedCacheRowBuckets(rowFingerprints, bucketPath)) {
 		const bucketKey = scopedCacheFingerprintIndexKey(collection, bucket);
-		let scanCursor = '0';
 
-		do {
-			const [next, indexedMembers] = await redisClient.sscan(
-				bucketKey,
-				scanCursor,
-				'COUNT',
-				SCOPED_CACHE_INDEX_SCAN_COUNT,
-			);
+		// A member can match several patterns — one per pair it shares with the
+		// rows — and the passes overlap, so it is tested and SREMed once.
+		const testedMembers = new Set<string>();
 
-			scanCursor = next;
+		for (const globPattern of globPatterns ?? [null]) {
+			let scanCursor = '0';
 
-			for (const indexedMember of indexedMembers) {
-				const { fingerprint, key } = parseScopedCacheIndexMember(indexedMember);
+			do {
+				const [next, indexedMembers] = globPattern === null
+					? await redisClient.sscan(
+						bucketKey,
+						scanCursor,
+						'COUNT',
+						SCOPED_CACHE_INDEX_SCAN_COUNT,
+					)
+					: await redisClient.sscan(
+						bucketKey,
+						scanCursor,
+						'MATCH',
+						globPattern,
+						'COUNT',
+						SCOPED_CACHE_INDEX_SCAN_COUNT,
+					);
 
-				// A fingerprint pinning nothing is what the bare collection tag
-				// covers, so a mutation keeping that tag warm keeps these entries
-				// too — the global reads a write that opted out of the collection
-				// tag means to leave standing.
-				if (
-					includeCollectionTag === false
-					&& parseScopedCacheFingerprint(fingerprint).pairs.size === 0
-				) {
-					continue;
+				scanCursor = next;
+
+				for (const indexedMember of indexedMembers) {
+					if (testedMembers.has(indexedMember)) {
+						continue;
+					}
+
+					testedMembers.add(indexedMember);
+
+					const { fingerprint, key } =
+						parseScopedCacheIndexMember(indexedMember);
+
+					// A fingerprint pinning nothing is what the bare collection tag
+					// covers, so a mutation keeping that tag warm keeps these
+					// entries too — the global reads a write that opted out of the
+					// collection tag means to leave standing.
+					if (includeCollectionTag === false && fingerprint.pairs.size === 0) {
+						continue;
+					}
+
+					if (!scopedCacheFingerprintPurgedBy(
+						fingerprint,
+						rowFingerprints,
+						changed,
+					)) {
+						continue;
+					}
+
+					const matchedMembers = matchedByBucket.get(bucketKey) ?? new Set();
+					matchedMembers.add(indexedMember);
+					matchedByBucket.set(bucketKey, matchedMembers);
+
+					if (key !== '' && seenKeys.has(key) === false) {
+						seenKeys.add(key);
+						matchedKeys.push(key);
+					}
 				}
-
-				if (!scopedCacheFingerprintPurgedBy(
-					fingerprint,
-					rowFingerprints,
-					changed,
-				)) {
-					continue;
-				}
-
-				const matchedMembers = matchedByBucket.get(bucketKey) ?? [];
-				matchedMembers.push(indexedMember);
-				matchedByBucket.set(bucketKey, matchedMembers);
-
-				if (key !== '' && seenKeys.has(key) === false) {
-					seenKeys.add(key);
-					matchedKeys.push(key);
-				}
-			}
-		} while (scanCursor !== '0');
+			} while (scanCursor !== '0');
+		}
 	}
 
 	if (matchedKeys.length === 0) {
@@ -718,11 +742,13 @@ async function purgeScopedCacheFingerprintIndex(
 
 async function pruneScopedCacheIndex(
 	redisClient: Redis,
-	matchedByBucket: ReadonlyMap<string, string[]>,
+	matchedByBucket: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<void> {
 	const redisPipeline = redisClient.pipeline();
 
-	for (const [bucketKey, indexedMembers] of matchedByBucket) {
+	for (const [bucketKey, matchedMembers] of matchedByBucket) {
+		const indexedMembers = [...matchedMembers];
+
 		for (
 			let memberAt = 0;
 			memberAt < indexedMembers.length;

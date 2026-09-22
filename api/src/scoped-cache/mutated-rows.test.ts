@@ -1,5 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, it } from 'vitest';
+import { parseScopedCacheFingerprint } from './fingerprint.js';
 import {
 	scopedCacheChangedFields,
 	scopedCacheUpdatedRows,
@@ -8,7 +9,7 @@ import {
 
 // The fingerprint plays no part in the diff — it is the row that is compared —
 // so every case below carries the same one.
-const fingerprint = 'slot:&id=,1,&';
+const fingerprint = parseScopedCacheFingerprint('slot:&id=,1,&');
 
 describe('scopedCacheChangedFields', () => {
 	it('names the column the write rewrote, and no other', () => {
@@ -145,7 +146,7 @@ describe('scopedCacheWrittenRows', () => {
 		expect(scopedCacheWrittenRows({
 			tags: [{ collection: 'slot', field: 'id', value: 1 }],
 			rows: [{ key: 1, row: { id: 1 }, fingerprint }],
-		})).toEqual({ fingerprints: ['slot:&id=,1,&'], changed: null });
+		})).toEqual({ fingerprints: [fingerprint], changed: null });
 	});
 
 	it('shows nothing when the rows\' scope could not be resolved', () => {
@@ -162,13 +163,21 @@ describe('scopedCacheWrittenRows', () => {
 
 describe('scopedCacheUpdatedRows', () => {
 	it('shows both sides of the row, and the column that moved', () => {
+		const fingerprintAlpha = parseScopedCacheFingerprint(
+			'slot:&id=,1,&owner=,alpha,&',
+		);
+
+		const fingerprintBeta = parseScopedCacheFingerprint(
+			'slot:&id=,1,&owner=,beta,&',
+		);
+
 		expect(scopedCacheUpdatedRows(
 			{
 				tags: [],
 				rows: [{
 					key: 1,
 					row: { id: 1, owner: 'alpha' },
-					fingerprint: 'slot:&id=,1,&owner=,alpha,&',
+					fingerprint: fingerprintAlpha,
 				}],
 			},
 			{
@@ -176,11 +185,11 @@ describe('scopedCacheUpdatedRows', () => {
 				rows: [{
 					key: 1,
 					row: { id: 1, owner: 'beta' },
-					fingerprint: 'slot:&id=,1,&owner=,beta,&',
+					fingerprint: fingerprintBeta,
 				}],
 			},
 		)).toEqual({
-			fingerprints: ['slot:&id=,1,&owner=,alpha,&', 'slot:&id=,1,&owner=,beta,&'],
+			fingerprints: [fingerprintAlpha, fingerprintBeta],
 			changed: ['owner'],
 		});
 	});

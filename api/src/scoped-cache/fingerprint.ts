@@ -9,11 +9,15 @@ export const SCOPED_CACHE_FINGERPRINT_FIELDS = 'fields';
 /** The `fields` value a read of every column carries: any write touches it. */
 export const SCOPED_CACHE_ANY_FIELD = '*';
 
-// `&` separates pairs, `,` wraps and separates a pair's values, `|` joins a
-// fingerprint to its cache key inside an index member, and `\` escapes all four. A
-// value carrying one raw would end its pair early — or, worse, read as two values,
-// which widens the OR and purges entries no write reached.
-const RESERVED = /[\\,&|]/g;
+// In the serialised form `&` separates pairs, `,` wraps and separates a pair's
+// values, `|` joins a fingerprint to its cache key inside an index member, and `\`
+// escapes them all. A value carrying one raw would end its pair early — or, worse,
+// read as two values, which widens the OR and purges entries no write reached.
+//
+// `*`, `?` and `[` are escaped for the search rather than for the grammar: the
+// serialised form is what Redis glob-matches, so a value spelling one raw would
+// make a pattern built around it match slices it never named.
+const RESERVED = /[\\,&|*?[\]]/g;
 
 export function escapeScopedCacheFingerprintToken(token: string): string {
 	return token.replace(RESERVED, (reservedCharacter) => `\\${reservedCharacter}`);
@@ -21,6 +25,16 @@ export function escapeScopedCacheFingerprintToken(token: string): string {
 
 export function unescapeScopedCacheFingerprintToken(token: string): string {
 	return token.replace(/\\(.)/g, '$1');
+}
+
+// What Redis reads as a pattern rather than as text. A rendered token carries its
+// own escapes — `a,b` is stored as `a\,b` — and a glob eats a backslash instead of
+// matching it, so every one of them has to be doubled before the token can be
+// dropped into a pattern.
+const GLOB_RESERVED = /[\\*?[\]]/g;
+
+function escapeScopedCacheFingerprintGlob(rendered: string): string {
+	return rendered.replace(GLOB_RESERVED, (globCharacter) => `\\${globCharacter}`);
 }
 
 /**
@@ -60,22 +74,57 @@ function splitUnescaped(input: string, separator: string): string[] {
 }
 
 /**
- * Render a query case as a fingerprint. `fields` rides as a pair of its own so the
- * write side reads it back the same way it reads a pin, and is left out entirely
- * when the caller names none — a serialised ROW has pairs and no fields.
+ * A query case as the rest of the api holds it: the collection, the pairs that had
+ * to hold together, and the fields the read is bound to.
+ *
+ * Every consumer but Redis reads it open like this — a pair is a map lookup, not a
+ * substring search over a rendered string — so the serialiser below runs once, at
+ * the index write, and the parser once, at the index read.
  */
-export function renderScopedCacheFingerprint(
+export function scopedCacheFingerprint(
 	collection: string,
-	pairs: ReadonlyMap<string, readonly string[]>,
+	pairs: ReadonlyMap<string, readonly string[]> = new Map(),
 	fields: readonly string[] = [],
 ): ScopedCacheFingerprint {
-	const renderedPairs = new Map<string, readonly string[]>(pairs);
+	return {
+		collection,
+		pairs: new Map(
+			[...pairs].map(([field, values]) => [field, [...values]]),
+		),
+		fields: [...fields],
+	};
+}
 
-	if (fields.length > 0) {
-		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fields);
+/**
+ * The fingerprint of a read bound to nothing of a collection: no pair and no
+ * field, so every write to it matches. What a tag naming only a collection said.
+ */
+export function bareScopedCacheFingerprint(
+	collection: string,
+): ScopedCacheFingerprint {
+	return scopedCacheFingerprint(collection);
+}
+
+/**
+ * The form Redis holds: `<collection>:&<key>=,<v1>,<v2>,&…&`.
+ *
+ * Pairs are sorted and every token is wrapped in commas, which is what makes a
+ * PARTIAL fingerprint a well-formed glob — `*&course_part=,4821,*` names every
+ * entry pinned to that one value without naming `48210`. `fields` rides as a pair
+ * of its own so the write side reads it back the way it reads a pin, and is left
+ * out entirely when the read names none — a serialised ROW has pairs and no
+ * fields.
+ */
+export function renderScopedCacheFingerprint(
+	fingerprint: ScopedCacheFingerprint,
+): string {
+	const renderedPairs = new Map<string, readonly string[]>(fingerprint.pairs);
+
+	if (fingerprint.fields.length > 0) {
+		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fingerprint.fields);
 	}
 
-	let renderedFingerprint = `${collection}:`;
+	let renderedFingerprint = `${fingerprint.collection}:`;
 
 	for (const key of [...renderedPairs.keys()].sort()) {
 		const sortedValues = [
@@ -89,39 +138,22 @@ export function renderScopedCacheFingerprint(
 	return `${renderedFingerprint}&`;
 }
 
-/**
- * The fingerprint of a read bound to nothing of a collection: no pair and no
- * field, so every write to it matches. What a tag naming only a collection said.
- */
-export function bareScopedCacheFingerprint(
-	collection: string,
-): ScopedCacheFingerprint {
-	return renderScopedCacheFingerprint(collection, new Map());
-}
-
-export type ParsedScopedCacheFingerprint = {
-	collection: string;
-	/** Every pair but `fields`, values unescaped. */
-	pairs: Map<string, string[]>;
-	fields: string[];
-};
-
 export function parseScopedCacheFingerprint(
-	fingerprint: ScopedCacheFingerprint,
-): ParsedScopedCacheFingerprint {
+	serialized: string,
+): ScopedCacheFingerprint {
 	// On the FIRST colon: a collection name carries none, and a value may.
-	const colonAt = fingerprint.indexOf(':');
+	const colonAt = serialized.indexOf(':');
 
 	const parsedCollection = colonAt === -1
-		? fingerprint
-		: fingerprint.slice(0, colonAt);
+		? serialized
+		: serialized.slice(0, colonAt);
 
 	const parsedPairs = new Map<string, string[]>();
 	let parsedFields: string[] = [];
 
 	const fingerprintBody = colonAt === -1
 		? ''
-		: fingerprint.slice(colonAt + 1);
+		: serialized.slice(colonAt + 1);
 
 	for (const pair of splitUnescaped(fingerprintBody, '&')) {
 		if (pair === '') {
@@ -154,16 +186,6 @@ export function parseScopedCacheFingerprint(
 	return { collection: parsedCollection, pairs: parsedPairs, fields: parsedFields };
 }
 
-export function scopedCacheFingerprintCollection(
-	fingerprint: ScopedCacheFingerprint,
-): string {
-	const colonAt = fingerprint.indexOf(':');
-
-	return colonAt === -1
-		? fingerprint
-		: fingerprint.slice(0, colonAt);
-}
-
 /**
  * The fingerprint a set of one collection's tags composes to.
  *
@@ -190,7 +212,7 @@ export function scopedCacheFingerprintFromTags(
 		taggedPairs.set(tag.field, fieldValues);
 	}
 
-	return renderScopedCacheFingerprint(collection, taggedPairs, fields);
+	return scopedCacheFingerprint(collection, taggedPairs, fields);
 }
 
 /**
@@ -205,17 +227,16 @@ export function scopedCacheFingerprintFromTags(
 export function scopedCacheFingerprintLabels(
 	fingerprint: ScopedCacheFingerprint,
 ): string[] {
-	const { collection, pairs } = parseScopedCacheFingerprint(fingerprint);
 	const tagLabels: string[] = [];
 
-	for (const [field, values] of pairs) {
+	for (const [field, values] of fingerprint.pairs) {
 		for (const value of values) {
-			tagLabels.push(`${collection}:${field}=${value}`);
+			tagLabels.push(`${fingerprint.collection}:${field}=${value}`);
 		}
 	}
 
 	return tagLabels.length === 0
-		? [collection]
+		? [fingerprint.collection]
 		: tagLabels;
 }
 
@@ -246,9 +267,7 @@ export function scopedCacheTagsOfFingerprints(
 		derivedTags.push(tag);
 	};
 
-	for (const fingerprint of fingerprints) {
-		const { collection, pairs } = parseScopedCacheFingerprint(fingerprint);
-
+	for (const { collection, pairs } of fingerprints) {
 		if (pairs.size === 0) {
 			pushTag({ collection });
 			continue;
@@ -267,29 +286,22 @@ export function scopedCacheTagsOfFingerprints(
 /**
  * Whether every pair of the fingerprint holds on one row.
  *
- * The row is serialised as a fingerprint of its own (one value per pair, no
- * `fields`), so the test is a plain substring search per value: the wrapping
- * commas make `&owner=,alpha,` unable to match a row whose owner is `alphabet`,
- * and the leading `&` makes it unable to match a `parent.owner` pair. Which is
- * why the purge needs no globs and no cap over them: the compare is exact, so
- * there is nothing to widen and nothing to bound.
+ * The row is a fingerprint of its own — one value per pair, no `fields` — so the
+ * test is a map lookup per pair: the read is dropped when the row carries one of
+ * the values it pinned, on every field it pinned.
  */
 export function scopedCacheFingerprintMatchesRow(
 	fingerprint: ScopedCacheFingerprint,
 	rowFingerprint: ScopedCacheFingerprint,
 ): boolean {
-	const { pairs } = parseScopedCacheFingerprint(fingerprint);
-	const rowBody = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
+	for (const [field, values] of fingerprint.pairs) {
+		const rowValues = rowFingerprint.pairs.get(field);
 
-	for (const [field, values] of pairs) {
-		const pairKey = escapeScopedCacheFingerprintToken(field);
+		if (rowValues === undefined) {
+			return false;
+		}
 
-		const pairHolds = values.some((value) => {
-			const valueToken = escapeScopedCacheFingerprintToken(value);
-			return rowBody.includes(`&${pairKey}=,${valueToken},`);
-		});
-
-		if (!pairHolds) {
+		if (!values.some((value) => rowValues.includes(value))) {
 			return false;
 		}
 	}
@@ -363,15 +375,16 @@ export function scopedCacheFingerprintFieldsTouched(
  * fields still narrow it: a write touching none of them cannot change the
  * response, whether or not the read could say which rows it depends on.
  *
- * Query cases are rendered in the order they come in, deduplicated, so a read's
- * fingerprints come back stable without sorting what the caller may have ordered
- * on purpose.
+ * Query cases are kept in the order they come in, deduplicated on the form Redis
+ * files them under, so a read's fingerprints come back stable without sorting what
+ * the caller may have ordered on purpose.
  */
 export function scopedCacheFingerprintsByCollection(
 	queryCases: readonly (readonly ScopedCacheTag[])[],
 	fieldsByCollection: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ScopedCacheFingerprint[] {
-	const renderedFingerprints = new Set<ScopedCacheFingerprint>();
+	const composedFingerprints: ScopedCacheFingerprint[] = [];
+	const seenFingerprints = new Set<string>();
 
 	for (const queryCase of queryCases) {
 		const queryCaseCollection = queryCase[0]?.collection;
@@ -380,14 +393,23 @@ export function scopedCacheFingerprintsByCollection(
 			continue;
 		}
 
-		renderedFingerprints.add(scopedCacheFingerprintFromTags(
+		const composed = scopedCacheFingerprintFromTags(
 			queryCaseCollection,
 			queryCase,
 			fieldsByCollection.get(queryCaseCollection) ?? [],
-		));
+		);
+
+		const rendered = renderScopedCacheFingerprint(composed);
+
+		if (seenFingerprints.has(rendered)) {
+			continue;
+		}
+
+		seenFingerprints.add(rendered);
+		composedFingerprints.push(composed);
 	}
 
-	return [...renderedFingerprints];
+	return composedFingerprints;
 }
 
 /**
@@ -411,35 +433,80 @@ export function scopedCacheFingerprintPurgedBy(
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 	changed: readonly string[] | null,
 ): boolean {
-	const { pairs, fields } = parseScopedCacheFingerprint(fingerprint);
-
 	// Every field the read pinned to a value is a field it is bound to, whether or
 	// not it also selected it: a write moving a row across one of them moves it in
 	// or out of the result set, which is a changed response by itself. Added only
 	// beside declared fields, since naming none already means every field.
-	const queryCase = fields.length === 0
-		? fields
-		: [...fields, ...pairs.keys()];
+	const queryCase = fingerprint.fields.length === 0
+		? fingerprint.fields
+		: [...fingerprint.fields, ...fingerprint.pairs.keys()];
 
 	if (scopedCacheFingerprintFieldsTouched(queryCase, changed) === false) {
 		return false;
 	}
 
-	// Escaped once for every row rather than once per row: a purge tests one
-	// fingerprint against every row of a batch, and the needles do not vary.
-	const pairNeedles = [...pairs].map(([field, values]) => {
-		const pairKey = escapeScopedCacheFingerprintToken(field);
-
-		return values.map((pairValue) => {
-			return `&${pairKey}=,${escapeScopedCacheFingerprintToken(pairValue)},`;
-		});
-	});
-
 	return rowFingerprints.some((rowFingerprint) => {
-		const rowBody = rowFingerprint.slice(rowFingerprint.indexOf(':') + 1);
-
-		return pairNeedles.every((pairAlternatives) => {
-			return pairAlternatives.some((valueNeedle) => rowBody.includes(valueNeedle));
-		});
+		return scopedCacheFingerprintMatchesRow(fingerprint, rowFingerprint);
 	});
+}
+
+/**
+ * How many patterns a purge will ask Redis to filter its index sets by before it
+ * gives up and reads them whole. #531's match-side bound.
+ *
+ * Each pattern is one pass over the set, so a batch writing hundreds of distinct
+ * slices would otherwise trade the bytes it saves for passes it cannot afford. The
+ * fallback reads every member and tests it here, which is the exact same answer —
+ * only wider on the wire.
+ */
+export const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
+
+/**
+ * The Redis glob patterns naming every indexed fingerprint the written rows can
+ * drop, or `null` when there are too many to be worth filtering by.
+ *
+ * `SSCAN … MATCH` filters server-side, so the purge reads back the members it may
+ * have to drop rather than every member of the bucket. The filter is a SUPERSET on
+ * purpose: a glob cannot say "and no other pair", so the purge test above still
+ * decides, and a pattern letting a non-match through costs one compare.
+ *
+ * One pattern per pair the rows pin, plus the two shapes a fingerprint pinning
+ * nothing renders as. A read the rows can drop pins only pairs the rows carry, so
+ * one of its own pairs names it — which is why the patterns are a union over
+ * single pairs and not the 2^n subsets an exact filter would need.
+ */
+export function scopedCacheRowIndexGlobs(
+	collection: string,
+	rowFingerprints: readonly ScopedCacheFingerprint[],
+): string[] | null {
+	const collectionToken = escapeScopedCacheFingerprintGlob(collection);
+
+	const globPatterns = new Set<string>([
+		// Pins nothing at all, and pins nothing but its fields — the two ways a
+		// fingerprint every row matches comes out of the serialiser.
+		`${collectionToken}:&|*`,
+		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_FIELDS}=,*`,
+	]);
+
+	for (const rowFingerprint of rowFingerprints) {
+		for (const [field, values] of rowFingerprint.pairs) {
+			const pairKey = escapeScopedCacheFingerprintGlob(
+				escapeScopedCacheFingerprintToken(field),
+			);
+
+			for (const value of values) {
+				const valueToken = escapeScopedCacheFingerprintGlob(
+					escapeScopedCacheFingerprintToken(value),
+				);
+
+				globPatterns.add(`${collectionToken}:*&${pairKey}=*,${valueToken},*`);
+			}
+
+			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {
+				return null;
+			}
+		}
+	}
+
+	return [...globPatterns];
 }

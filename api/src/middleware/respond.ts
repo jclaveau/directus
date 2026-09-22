@@ -20,7 +20,6 @@ import {
 	mergedScopedCacheEpochs,
 	scopedCacheBucketPath,
 	scopedCacheCollectionsWithoutGuard,
-	scopedCacheFingerprintCollection,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
@@ -144,7 +143,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const scopedCacheFingerprints = countsWholeCollection && req.collection
 		? [
 			...readFingerprints.filter((readFingerprint) => {
-				return scopedCacheFingerprintCollection(readFingerprint) !== req.collection;
+				return readFingerprint.collection !== req.collection;
 			}),
 			...collectionFallbackFingerprints,
 		]
@@ -157,8 +156,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// write that has to find it read the same one.
 	const scopedCacheBucketPaths = new Map(
 		scopedCacheFingerprints.map((indexedFingerprint) => {
-			const fingerprintCollection =
-				scopedCacheFingerprintCollection(indexedFingerprint);
+			const fingerprintCollection = indexedFingerprint.collection;
 
 			return [
 				fingerprintCollection,

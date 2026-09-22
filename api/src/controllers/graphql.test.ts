@@ -1,7 +1,10 @@
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../scoped-cache.js';
+import {
+	parseScopedCacheFingerprint,
+	scopedCacheReadMeta,
+} from '../scoped-cache.js';
 
 // Stub the middleware + service the router pulls in so we can drive the bare async handlers without a
 // generated schema or a real express request lifecycle.
@@ -43,7 +46,7 @@ describe('graphql controller scopedCacheFingerprints', () => {
 	])(oneLine`
 		%s handler stamps scopedCacheFingerprints from the payload meta
 	`, async (_scope, getHandler) => {
-		const fingerprints = ['articles:&'];
+		const fingerprints = [parseScopedCacheFingerprint('articles:&')];
 
 		execute.mockResolvedValueOnce(
 			withMeta(

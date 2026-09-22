@@ -18,15 +18,33 @@ export interface ScopedCacheTag {
 }
 
 /**
- * One collection's whole dependency, in one token — `<collection>:&<key>=,<v>,&…`.
+ * One collection's whole dependency, in one value.
  *
  * A set of tags dies on ANY match, so every extra pin is an extra way to be
  * evicted: a read bounded to `owner=alpha AND method=spaced` is dropped by every
  * write carrying `method=spaced`, whoever owns it. A fingerprint carries the same
- * pins as ONE token, so a write purges it only when the row it wrote satisfies the
- * whole query case. The grammar and the matcher live in the api's `scoped-cache`.
+ * pins as ONE value, so a write purges it only when the row it wrote satisfies the
+ * whole query case.
+ *
+ * Node holds it open — a collection, its pairs and its fields — so every consumer
+ * reads a pair off a map instead of re-parsing a string. Redis holds it serialised
+ * as `<collection>:&<key>=,<v>,&…`, where the wrapping commas make a partial
+ * fingerprint a well-formed glob. The grammar, the serialiser and the matcher live
+ * in the api's `scoped-cache`.
  */
-export type ScopedCacheFingerprint = string;
+export interface ScopedCacheFingerprint {
+	collection: string;
+	/**
+	 * Field path to the values the read is pinned to. The values of one pair are an
+	 * OR — what an `_in` means — and the pairs together are an AND.
+	 */
+	pairs: Map<string, string[]>;
+	/**
+	 * The fields the read selected, sorted or filtered on. Empty names every field:
+	 * a read that cannot say which columns it depends on depends on all of them.
+	 */
+	fields: string[];
+}
 
 /** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
 type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];

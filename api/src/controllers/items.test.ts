@@ -2,7 +2,10 @@ import { ForbiddenError } from '@directus/errors';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../scoped-cache.js';
+import {
+	parseScopedCacheFingerprint,
+	scopedCacheReadMeta,
+} from '../scoped-cache.js';
 
 // Per-test service method spies; the ItemsService mock returns this same object so tests drive branches.
 const createOne = vi.fn();
@@ -177,8 +180,10 @@ describe('items controller', () => {
 		});
 
 		test('singleton read + stamps scopedCacheFingerprints', async () => {
+			const fingerprint = parseScopedCacheFingerprint('articles:&');
+
 			readSingleton.mockResolvedValueOnce(
-				withMeta({ id: 1 }, scopedCacheReadMeta(['articles:&'])),
+				withMeta({ id: 1 }, scopedCacheReadMeta([fingerprint])),
 			);
 
 			getMetaForQuery.mockResolvedValueOnce({ total_count: 1 });
@@ -187,7 +192,7 @@ describe('items controller', () => {
 			const next = vi.fn();
 			await handler()(req, res, next);
 			expect(res.locals['payload'].data).toBeDefined();
-			expect(res.locals['scopedCacheFingerprints']).toEqual(['articles:&']);
+			expect(res.locals['scopedCacheFingerprints']).toEqual([fingerprint]);
 			expect(next).toHaveBeenCalledOnce();
 		});
 
@@ -235,7 +240,7 @@ describe('items controller', () => {
 		// bare collection tag — so the key slice a single-item read pinned would be
 		// indexed under nothing, and any write to the collection would drop the entry.
 		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
-			const fingerprint = 'articles:&id=,1,&';
+			const fingerprint = parseScopedCacheFingerprint('articles:&id=,1,&');
 			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };
 
 			readOne.mockResolvedValueOnce(

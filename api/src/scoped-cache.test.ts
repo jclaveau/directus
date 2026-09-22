@@ -45,6 +45,7 @@ import {
 	dropScopedCacheIndex,
 	flushResponseCache,
 	indexScopedCacheEntry,
+	parseScopedCacheFingerprint,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	retryPendingScopedCachePurges,
@@ -670,7 +671,9 @@ describe('createScopedCacheCollector', () => {
 		const metricLookup = () => {
 			return withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta(['metric:&owner=,acme,&'], {
+				scopedCacheReadMeta([
+					parseScopedCacheFingerprint('metric:&owner=,acme,&'),
+				], {
 					scopedCacheEpochs: { metric: '4' },
 				}),
 			);
@@ -679,7 +682,9 @@ describe('createScopedCacheCollector', () => {
 		const auditLookup = () => {
 			return withMeta(
 				[{ id: 2 }],
-				scopedCacheReadMeta(['audit:&'], { scopedCacheEpochs: { audit: '7' } }),
+				scopedCacheReadMeta([parseScopedCacheFingerprint('audit:&')], {
+					scopedCacheEpochs: { audit: '7' },
+				}),
 			);
 		};
 
@@ -743,12 +748,16 @@ describe('createScopedCacheCollector', () => {
 
 			const before = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta(['metric:&'], { scopedCacheEpochs: { metric: '4' } }),
+				scopedCacheReadMeta([parseScopedCacheFingerprint('metric:&')], {
+					scopedCacheEpochs: { metric: '4' },
+				}),
 			);
 
 			const after = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta(['metric:&'], { scopedCacheEpochs: { metric: '5' } }),
+				scopedCacheReadMeta([parseScopedCacheFingerprint('metric:&')], {
+					scopedCacheEpochs: { metric: '5' },
+				}),
 			);
 
 			await scope.dependOn([after, before]);
@@ -790,8 +799,8 @@ describe('collection slice index', () => {
 		} as any);
 
 		await indexScopedCacheEntry('entry', [
-			'articles:&',
-			'articles:&author=,7,&',
+			parseScopedCacheFingerprint('articles:&'),
+			parseScopedCacheFingerprint('articles:&author=,7,&'),
 		]);
 
 		expect(indexPipeline.sadd)
@@ -971,7 +980,7 @@ describe('indexScopedCacheEntry', () => {
 		} as any);
 
 		await expect(indexScopedCacheEntry('entry', [
-			'articles:&author=,7,&',
+			parseScopedCacheFingerprint('articles:&author=,7,&'),
 		])).rejects.toBe(refused);
 	});
 
@@ -996,7 +1005,9 @@ describe('indexScopedCacheEntry', () => {
 		} as any);
 
 		try {
-			await indexScopedCacheEntry('entry', ['articles:&author=,7,&']);
+			await indexScopedCacheEntry('entry', [
+				parseScopedCacheFingerprint('articles:&author=,7,&'),
+			]);
 		}
 		finally {
 			delete env['CACHE_TTL'];
