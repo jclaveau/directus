@@ -224,6 +224,40 @@ export class ScopedCacheReadPlan {
 	}
 
 	/**
+	 * Every field each collection this read touched is bound to: what the read
+	 * selected of it, sorted on and filtered by. A write touching none of them
+	 * cannot change the response, whichever slice it lands in.
+	 *
+	 * Both halves of the field map, unioned: it splits by the permission each
+	 * field needs — `read` holds what the filters and sorts name, `other` what the
+	 * selection does — and a read depends on either the same way.
+	 *
+	 * A collection nested at several paths unions them, and the pins the caller
+	 * adds afterwards ride on top: a pinned path is a field the read is bound to
+	 * by definition, and the field map files it under the collection it belongs to
+	 * rather than the one pinning it.
+	 */
+	fieldsByCollection(): Map<CollectionKey, string[]> {
+		const byCollection = new Map<CollectionKey, Set<string>>();
+
+		for (const entries of [this.fieldMap.read, this.fieldMap.other]) {
+			for (const { collection, fields } of entries.values()) {
+				const known = byCollection.get(collection) ?? new Set<string>();
+
+				for (const field of fields) {
+					known.add(field);
+				}
+
+				byCollection.set(collection, known);
+			}
+		}
+
+		return new Map([...byCollection].map(([collection, fields]) => {
+			return [collection, [...fields].sort()];
+		}));
+	}
+
+	/**
 	 * The collections whose purge counters this read has to capture: the ones its
 	 * tags will name. Both are known before the query — the field map is built off
 	 * the AST and the keying off the filter — which is what lets the capture predate

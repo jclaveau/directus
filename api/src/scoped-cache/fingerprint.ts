@@ -304,3 +304,38 @@ export function scopedCacheFingerprintFieldsTouched(
 
 	return false;
 }
+
+/**
+ * One fingerprint per collection the tags name, each holding that collection's
+ * whole share of the read: the slices it was pinned to, and the fields the read
+ * is bound to there.
+ *
+ * A collection the tags name bare pins nothing, so its fingerprint carries no pair
+ * and every row of it matches — which is what a bare tag means. Its fields still
+ * narrow it: a write touching none of them cannot change the response, whether or
+ * not the read could say which rows it depends on.
+ *
+ * Collections are rendered in the order the tags first name them, so a read's
+ * fingerprints come back in a stable order without sorting what the caller may
+ * have ordered on purpose.
+ */
+export function scopedCacheFingerprintsByCollection(
+	tags: readonly ScopedCacheTag[],
+	fieldsByCollection: ReadonlyMap<string, readonly string[]> = new Map(),
+): ScopedCacheFingerprint[] {
+	const tagsByCollection = new Map<string, ScopedCacheTag[]>();
+
+	for (const tag of tags) {
+		const known = tagsByCollection.get(tag.collection) ?? [];
+		known.push(tag);
+		tagsByCollection.set(tag.collection, known);
+	}
+
+	return [...tagsByCollection].map(([collection, collectionTags]) => {
+		return scopedCacheFingerprintFromTags(
+			collection,
+			collectionTags,
+			fieldsByCollection.get(collection) ?? [],
+		);
+	});
+}

@@ -6,6 +6,7 @@ import {
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintFieldsTouched,
 	scopedCacheFingerprintFromTags,
+	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
 } from './fingerprint.js';
@@ -238,5 +239,38 @@ describe('scopedCacheFingerprintFieldsTouched', () => {
 
 	it('is touched when a read naming no field at all meets any write', () => {
 		expect(scopedCacheFingerprintFieldsTouched([], ['note'])).toBe(true);
+	});
+});
+
+describe('scopedCacheFingerprintsByCollection', () => {
+	it(oneLine`
+		folds a collection's pins into one fingerprint, and each collection into its
+		own
+	`, () => {
+		expect(scopedCacheFingerprintsByCollection(
+			[
+				{ collection: 'slot', field: 'owner', value: 'alpha' },
+				{ collection: 'zone', field: 'area', value: 'north' },
+				{ collection: 'slot', field: 'method', value: 'spaced' },
+			],
+			new Map([['slot', ['id', 'owner']], ['zone', ['area']]]),
+		)).toEqual([
+			'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&',
+			'zone:&area=,north,&fields=,area,&',
+		]);
+	});
+
+	it('renders a bare tag as a fingerprint pinning nothing but its fields', () => {
+		expect(scopedCacheFingerprintsByCollection(
+			[{ collection: 'slot' }],
+			new Map([['slot', ['id', 'note']]]),
+		)).toEqual(['slot:&fields=,id,note,&']);
+	});
+
+	it(oneLine`
+		renders a collection whose fields are unknown as one any write matches
+	`, () => {
+		expect(scopedCacheFingerprintsByCollection([{ collection: 'slot' }]))
+			.toEqual(['slot:&']);
 	});
 });
