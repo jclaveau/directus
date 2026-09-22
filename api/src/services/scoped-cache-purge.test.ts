@@ -794,7 +794,7 @@ describe(oneLine`
 		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
 
 		expect(readMeta(result)?.scopedCacheTags).toEqual([
-			{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			{ collection: 'test', field: 'student', value: 'a' },
 		]);
 	});
 
@@ -823,8 +823,8 @@ describe(oneLine`
 			(readMeta(result)?.scopedCacheTags ?? [])
 				.filter((tag) => tag.collection === 'holder'),
 		).toEqual([
-			{ collection: 'holder', field: 'id', value: 5, type: 'integer' },
-			{ collection: 'holder', field: 'owner', value: 9, type: 'integer' },
+			{ collection: 'holder', field: 'id', value: '5' },
+			{ collection: 'holder', field: 'owner', value: '9' },
 		]);
 	});
 
@@ -927,7 +927,7 @@ describe(oneLine`
 
 				expect(readMeta(result)?.scopedCacheTags).toEqual([
 					{ collection: 'test' },
-					authorsDependency,
+					{ collection: 'authors', field: 'id', value: '5' },
 				]);
 			}
 			finally {
@@ -1133,26 +1133,22 @@ describe(oneLine`
 					{
 						collection: 'student_course',
 						field: 'teaching_unit.discipline.enrollment.student',
-						value: 'A',
-						type: 'string',
+						value: 'a',
 					},
 					{
 						collection: 'student_teaching_unit',
 						field: 'discipline.enrollment.student',
-						value: 'A',
-						type: 'string',
+						value: 'a',
 					},
 					{
 						collection: 'student_discipline',
 						field: 'enrollment.student',
-						value: 'A',
-						type: 'string',
+						value: 'a',
 					},
 					{
 						collection: 'student_enrollment',
 						field: 'student',
-						value: 'A',
-						type: 'string',
+						value: 'a',
 					},
 				]);
 			}
@@ -1186,7 +1182,7 @@ describe(oneLine`
 
 				expect(readMeta(result)?.scopedCacheTags).toEqual([
 					{ collection: 'page' },
-					{ collection: 'course', field: 'unit.owner', value: 7, type: 'integer' },
+					{ collection: 'course', field: 'unit.owner', value: '7' },
 					{ collection: 'unit' },
 				]);
 			}
@@ -1576,7 +1572,7 @@ describe(oneLine`
 			const result = await unscopedService().readOne(1);
 
 			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: '1' },
 			]);
 		});
 
