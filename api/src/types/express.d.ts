@@ -24,7 +24,7 @@ declare global {
 		}
 
 		export interface Locals {
-			scopedCacheFingerprints?: ScopedCacheFingerprint[] | undefined;
+			scopedCacheFingerprints?: readonly ScopedCacheFingerprint[] | undefined;
 		}
 	}
 }

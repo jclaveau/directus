@@ -33,17 +33,17 @@ export interface ScopedCacheTag {
  * in the api's `scoped-cache`.
  */
 export interface ScopedCacheFingerprint {
-	collection: string;
+	readonly collection: string;
 	/**
 	 * Field path to the values the read is pinned to. The values of one pair are an
 	 * OR — what an `_in` means — and the pairs together are an AND.
 	 */
-	pairs: Map<string, string[]>;
+	readonly pairs: ReadonlyMap<string, readonly string[]>;
 	/**
 	 * The fields the read selected, sorted or filtered on. Empty names every field:
 	 * a read that cannot say which columns it depends on depends on all of them.
 	 */
-	fields: string[];
+	readonly fields: readonly string[];
 }
 
 /** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
@@ -240,7 +240,7 @@ export interface ReadMeta {
 	 * The whole dependency of the read, and what the fill files it in the index
 	 * under.
 	 */
-	scopedCacheFingerprints: ScopedCacheFingerprint[];
+	scopedCacheFingerprints: readonly ScopedCacheFingerprint[];
 
 	/**
 	 * The same dependency read as a flat tag list, derived from the fingerprints:

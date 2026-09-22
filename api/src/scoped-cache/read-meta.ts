@@ -20,7 +20,7 @@ type ScopedCacheReadMetaRest = Omit<
  * fill reading it after get the same array.
  */
 export function scopedCacheReadMeta(
-	scopedCacheFingerprints: ScopedCacheFingerprint[],
+	scopedCacheFingerprints: readonly ScopedCacheFingerprint[],
 	rest: ScopedCacheReadMetaRest = {},
 ): ReadMeta {
 	let derivedScopedCacheTags: ScopedCacheTag[] | undefined;

@@ -64,7 +64,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// went through a read (a hand-rolled /settings, GraphQL) carries no meta.
 	const payloadMeta = readMeta(res.locals['payload']?.data);
 
-	const readFingerprints: ScopedCacheFingerprint[] =
+	const readFingerprints: readonly ScopedCacheFingerprint[] =
 		res.locals['scopedCacheFingerprints']
 		?? payloadMeta?.scopedCacheFingerprints
 		?? [];
