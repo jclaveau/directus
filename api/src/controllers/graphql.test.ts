@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 
 // Stub the middleware + service the router pulls in so we can drive the bare async handlers without a
 // generated schema or a real express request lifecycle.
@@ -33,19 +34,22 @@ function itemsHandler() {
 	)!.handle;
 }
 
-describe('graphql controller scopedCacheTags', () => {
+describe('graphql controller scopedCacheFingerprints', () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	test.each([
 		['system', systemHandler],
 		['items', itemsHandler],
 	])(oneLine`
-		%s handler stamps scopedCacheTags from the payload meta
+		%s handler stamps scopedCacheFingerprints from the payload meta
 	`, async (_scope, getHandler) => {
-		const tags = [{ collection: 'articles' }];
+		const fingerprints = ['articles:&'];
 
 		execute.mockResolvedValueOnce(
-			withMeta({ data: { ok: true } }, { scopedCacheTags: tags }),
+			withMeta(
+				{ data: { ok: true } },
+				scopedCacheReadMeta(fingerprints),
+			),
 		);
 
 		const req = { accountability: null, schema: {} } as any;
@@ -54,7 +58,7 @@ describe('graphql controller scopedCacheTags', () => {
 
 		await getHandler()(req, res, next);
 
-		expect(res.locals['scopedCacheTags']).toEqual(tags);
+		expect(res.locals['scopedCacheFingerprints']).toEqual(fingerprints);
 		expect(res.locals['cache']).toBeUndefined();
 		expect(next).toHaveBeenCalledOnce();
 	});
@@ -66,7 +70,7 @@ describe('graphql controller scopedCacheTags', () => {
 		%s handler disables cache when the payload has errors
 	`, async (_scope, getHandler) => {
 		execute.mockResolvedValueOnce(
-			withMeta({ errors: [{ message: 'x' }] }, { scopedCacheTags: [] }),
+			withMeta({ errors: [{ message: 'x' }] }, scopedCacheReadMeta([])),
 		);
 
 		const req = { accountability: null, schema: {} } as any;

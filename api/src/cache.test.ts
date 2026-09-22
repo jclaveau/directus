@@ -126,9 +126,9 @@ const cacheHandlers = { ...busHandlers };
 
 const {
 	assertScopedCacheRedisSupported,
+	indexScopedCacheEntry,
 	purgeScopedCache,
 	scopedCachePurgeEnabled,
-	tagScopedCacheKeys,
 } = await import('./scoped-cache.js');
 
 function setEnv(values: Record<string, unknown>) {
@@ -308,13 +308,13 @@ describe('scoped cache purging', () => {
 		});
 	});
 
-	describe('tagScopedCacheKeys', () => {
+	describe('indexScopedCacheEntry', () => {
 		test(oneLine`
 			indexes the key + expires sibling under every collection-level tag, with a TTL
 		`, async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'articles' },
-				{ collection: 'directus_users' },
+			await indexScopedCacheEntry('resp-key', [
+				'articles:&',
+				'directus_users:&',
 			]);
 
 			// The members ride the script, which files them and moves the set's
@@ -337,10 +337,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test('scoped cache tags encode field=value into the tag key', async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 'A' },
-				{ collection: 'slots', field: 'student', value: 7 },
-			]);
+			await indexScopedCacheEntry('resp-key', ['slots:&student=,7,A,&']);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:tag:slots:student=A',
@@ -358,9 +355,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test('a null scope value serializes to a sentinel, not "null"', async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: null },
-			]);
+			await indexScopedCacheEntry('resp-key', ['slots:&student=,\x00null,&']);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
@@ -372,18 +367,15 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			numeric and string scope values collapse to one tag key (stable column type)
+			a scoped value indexes its tag set once (stable column type)
 		`, async () => {
-			// A read pinned off a REST `_eq=7` carries the value as the string '7';
-			// the row it came from holds the numeric 7. Both must land on the SAME
-			// tag set or the purge would miss the read.
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 7 },
-				{ collection: 'slots', field: 'student', value: '7' },
-			]);
+			// A read pinned off a REST `_eq=7` and one off a row holding the numeric 7
+			// both canonicalize to the fingerprint token '7' upstream (fingerprint.ts)
+			// — by the time it reaches indexing there is only one string to file.
+			await indexScopedCacheEntry('resp-key', ['slots:&student=,7,&']);
 
-			// One tag set, plus the one index entry filing it under its collection.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
+			// One tag set, one index entry filing it, plus the one fingerprint bucket.
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(3);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:tag:slots:student=7',
@@ -397,20 +389,25 @@ describe('scoped cache purging', () => {
 				600,
 				'scalabus:scoped-cache-index:tag:slots:student=7',
 			);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:idx:slots:',
+				600,
+				'slots:&student=,7,&|resp-key',
+				'slots:&student=,7,&|resp-key__expires_at',
+			);
 		});
 
 		test(oneLine`
 			every slice of one collection lands in a single index call, not one each
 		`, async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 'A' },
-				{ collection: 'slots', field: 'student', value: 'B' },
-			]);
+			await indexScopedCacheEntry('resp-key', ['slots:&student=,A,B,&']);
 
 			// The index set is the same key for both, and its expiry is the same
 			// value both times: sending it twice buys an EXISTS and a TTL for
-			// nothing. Two tag sets plus the one index call that names them.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(3);
+			// nothing. Two tag sets, the one index call that names them, plus the
+			// one fingerprint bucket (a single array entry, however many values).
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(4);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:slices:slots',
@@ -418,31 +415,49 @@ describe('scoped cache purging', () => {
 				'scalabus:scoped-cache-index:tag:slots:student=A',
 				'scalabus:scoped-cache-index:tag:slots:student=B',
 			);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:idx:slots:',
+				600,
+				'slots:&student=,A,B,&|resp-key',
+				'slots:&student=,A,B,&|resp-key__expires_at',
+			);
 		});
 
 		test('duplicate tags collapse to a single SADD', async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 'A' },
-				{ collection: 'slots', field: 'student', value: 'A' },
+			await indexScopedCacheEntry('resp-key', [
+				'slots:&student=,A,&',
+				'slots:&student=,A,&',
 			]);
 
-			// The tag set and its index entry, once each — not once per duplicate.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
+			// The legacy tag layer collapses the duplicate (one tag set, one index
+			// entry). The fingerprint-bucket layer keys off the array position, not
+			// the derived tag, so it re-sends the same bucket SADD once per
+			// duplicate — redundant but harmless, since a SADD of the same members
+			// twice leaves the set exactly as it was after the first.
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(4);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:idx:slots:',
+				600,
+				'slots:&student=,A,&|resp-key',
+				'slots:&student=,A,&|resp-key__expires_at',
+			);
 		});
 
 		test('no-op when no tags', async () => {
-			await tagScopedCacheKeys('resp-key', []);
+			await indexScopedCacheEntry('resp-key', []);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 
 		test('no-op in full mode', async () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
-			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }]);
+			await indexScopedCacheEntry('resp-key', ['articles:&']);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 
 		test('tags the extra siblings alongside the key', async () => {
-			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }], [
+			await indexScopedCacheEntry('resp-key', ['articles:&'], [
 				'resp-key__tags',
 			]);
 

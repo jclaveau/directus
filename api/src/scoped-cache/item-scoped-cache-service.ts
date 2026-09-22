@@ -5,13 +5,11 @@ import type {
 	PrimaryKey,
 	Query,
 	ScopedCacheCollector,
+	ScopedCacheFingerprint,
 	ScopedCachePath,
 	ScopedCacheTag,
 	SchemaOverview,
 } from '@directus/types';
-import type {
-	CollectionKey,
-} from '../permissions/modules/process-ast/types.js';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
@@ -39,7 +37,10 @@ import { ScopedCacheReadPlan } from './read-plan.js';
 import {
 	scopedCachePurgeEnabled,
 } from './config.js';
-import { scopedCacheFingerprintFromTags } from './fingerprint.js';
+import {
+	scopedCacheFingerprintFromTags,
+	scopedCacheFingerprintsByCollection,
+} from './fingerprint.js';
 import { scopedCacheBucketPath } from './fingerprint-index.js';
 import type {
 	ScopedCacheCapture,
@@ -792,12 +793,9 @@ export class ItemScopedCacheService {
 	 * reproducible on the `cache.purge` side or it leaks. Returns the tags plus any
 	 * unautopurgeable scopeTo tags respond.ts leaves the read uncached for.
 	 */
-	async readTags(inputs: ScopedCacheReadInputs): Promise<{
-		tags: ScopedCacheTag[];
-		queryCases: ScopedCacheTag[][];
+	async readFingerprints(inputs: ScopedCacheReadInputs): Promise<{
+		fingerprints: ScopedCacheFingerprint[];
 		unautopurgeable: ScopedCacheTag[];
-		queryCaseFields: Map<CollectionKey, string[]>;
-		bucketPaths: Map<CollectionKey, string | null>;
 	}> {
 		const {
 			ast,
@@ -811,13 +809,7 @@ export class ItemScopedCacheService {
 		let unautopurgeable: ScopedCacheTag[] = [];
 
 		if (!scopedCachePurgeEnabled()) {
-			return {
-				tags,
-				queryCases: [],
-				unautopurgeable,
-				queryCaseFields: new Map(),
-				bucketPaths: new Map(),
-			};
+			return { fingerprints: [], unautopurgeable };
 		}
 
 		const {
@@ -1483,35 +1475,35 @@ export class ItemScopedCacheService {
 			queryCaseFields.delete(tag.collection);
 		}
 
-		const bucketPaths = new Map(tags.map(({ collection }) => {
-			return [collection, scopedCacheBucketPath(this.schema, collection)];
-		}));
-
 		// The root's own filter is the one place several tags of a collection have
 		// to hold together — everywhere else a tag stands alone, the way the sweep
 		// reads it, so each is a query case of its own. Reading those as a
 		// conjunction would leave a read cached that a write to any one of their
 		// slices staled.
-		const rootQueryCaseKeys = new Set(
-			rootScopedCacheQueryCases.flat().map(scopedCacheTagKey),
-		);
-
-		const queryCases = tags
-			.filter((tag) => rootQueryCaseKeys.has(scopedCacheTagKey(tag)) === false)
-			.map((tag) => [tag]);
-
 		const rootTagKeys = new Set(tags.map(scopedCacheTagKey));
 
 		const rootQueryCases = rootScopedCacheQueryCases.filter((queryCase) => {
 			return queryCase.every((tag) => rootTagKeys.has(scopedCacheTagKey(tag)));
 		});
 
-		return {
-			tags,
-			queryCases: [...rootQueryCases, ...queryCases],
-			unautopurgeable,
+		// The tags the kept root query cases already carry. A root query case
+		// dropped just above leaves its tags here, each standing alone: losing the
+		// AND over-purges, losing the tag would serve stale.
+		const rootQueryCaseTagKeys = new Set(
+			rootQueryCases.flat().map(scopedCacheTagKey),
+		);
+
+		const standaloneQueryCases = tags
+			.filter((tag) => {
+				return rootQueryCaseTagKeys.has(scopedCacheTagKey(tag)) === false;
+			})
+			.map((tag) => [tag]);
+
+		const fingerprints = scopedCacheFingerprintsByCollection(
+			[...rootQueryCases, ...standaloneQueryCases],
 			queryCaseFields,
-			bucketPaths,
-		};
+		);
+
+		return { fingerprints, unautopurgeable };
 	}
 }

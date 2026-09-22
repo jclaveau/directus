@@ -214,22 +214,26 @@ export interface ScopedCachePath {
  */
 export interface ReadMeta {
 	/**
-	 * Scoped cache tags whose data fed this read (root scope tags + relation collection
-	 * tags); scope invalidation.
+	 * One token per way this read matches a collection: the pins that had to hold
+	 * TOGETHER and the fields it is bound to, composed. A root filter of
+	 * `owner=alpha AND method=spaced` is one fingerprint, an `_or` over those
+	 * fields is two, and every collection reached from anywhere else gets its own.
+	 *
+	 * The whole dependency of the read, and what the fill files it in the index
+	 * under.
 	 */
-	scopedCacheTags: ScopedCacheTag[];
+	scopedCacheFingerprints: ScopedCacheFingerprint[];
 
 	/**
-	 * The same tags, grouped by what had to hold TOGETHER: one entry per way the
-	 * read matches a collection. A root filter of `owner=alpha AND method=spaced`
-	 * is one query case of two tags, an `_or` over those fields is two query cases
-	 * of one, and every tag from anywhere else stands alone the way the sweep
-	 * reads it.
+	 * The same dependency read as a flat tag list, derived from the fingerprints:
+	 * what a read hook hands back to `purgeBy`/`scopeTo`, and what the dev headers
+	 * and the telemetry still speak.
 	 *
-	 * Each becomes one `ScopedCacheFingerprint` at fill time. Absent, the tags are
-	 * read one by one, which over-purges rather than serving stale.
+	 * The AND is what the derivation drops — an entry carrying a set of tags dies
+	 * on ANY of them — so a consumer reading these over-purges rather than serving
+	 * stale, and one that can carry the fingerprints should.
 	 */
-	scopedCacheQueryCases?: ScopedCacheTag[][];
+	readonly scopedCacheTags: ScopedCacheTag[];
 
 	/**
 	 * Tags a read hook scoped this response TO that are unautopurgeable — a value
@@ -238,23 +242,6 @@ export interface ReadMeta {
 	 * lists them as the `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
 	 */
 	scopedCacheUnautopurgeableTags?: ScopedCacheTag[];
-
-	/**
-	 * Every field each collection this read touched is bound to: what the read
-	 * selected of it, sorted on and filtered by. Folded into that collection's
-	 * `ScopedCacheFingerprint` at fill time, so a write touching none of them
-	 * leaves the entry alone whichever slice it landed in.
-	 *
-	 * A collection missing here is bound to all of its fields — the fail-safe
-	 * direction is the over-purge, never the stale hit.
-	 */
-	scopedCacheQueryCaseFields?: Record<string, string[]>;
-
-	/**
-	 * The path each of those collections' index sets is bucketed by, so the fill
-	 * files a fingerprint where the writes that can match it will look.
-	 */
-	scopedCacheBucketPaths?: Record<string, string | null>;
 
 	/**
 	 * The purge counters of the collections this read depends on, captured BEFORE its

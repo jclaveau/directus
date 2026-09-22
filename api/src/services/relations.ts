@@ -18,6 +18,10 @@ import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
+import {
+	bareScopedCacheFingerprint,
+	scopedCacheReadMeta,
+} from '../scoped-cache.js';
 import { withMeta } from '../utils/read-meta.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
@@ -133,9 +137,9 @@ export class RelationsService {
 		const allowed = await this.filterForbidden(results);
 
 		// TODO scope by the related collection's scoped_cache_fields
-		return withMeta(allowed, {
-			scopedCacheTags: [{ collection: 'directus_relations' }],
-		});
+		return withMeta(allowed, scopedCacheReadMeta([
+			bareScopedCacheFingerprint('directus_relations'),
+		]));
 	}
 
 	async readOne(collection: string, field: string): Promise<Relation> {
@@ -195,9 +199,9 @@ export class RelationsService {
 		}
 
 		// TODO scope by the related collection's scoped_cache_fields
-		return withMeta(results[0]!, {
-			scopedCacheTags: [{ collection: 'directus_relations' }],
-		});
+		return withMeta(results[0]!, scopedCacheReadMeta([
+			bareScopedCacheFingerprint('directus_relations'),
+		]));
 	}
 
 	/**

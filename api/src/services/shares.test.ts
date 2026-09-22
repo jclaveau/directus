@@ -5,6 +5,7 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 import { ItemsService } from './items.js';
 import type { EmailOptions } from './mail/index.js';
 import { SharesService } from './shares.js';
@@ -61,13 +62,13 @@ describe('Services / Shares', () => {
 			const readOne = vi.spyOn(ItemsService.prototype, 'readOne');
 
 			readOne.mockResolvedValueOnce(
-				withMeta({ collection: 'articles' }, { scopedCacheTags: [] }),
+				withMeta({ collection: 'articles' }, scopedCacheReadMeta([])),
 			);
 
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ first_name: 'Ada', last_name: 'Lovelace' },
-					{ scopedCacheTags: [] },
+					scopedCacheReadMeta([]),
 				),
 			);
 

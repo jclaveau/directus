@@ -48,6 +48,7 @@ import {
 	parseScopedCacheFingerprint,
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintPurgedBy,
+	scopedCacheTagsOfFingerprints,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import {
@@ -290,26 +291,19 @@ const SCOPED_CACHE_SWEEP_CHUNK_KEYS = 500;
  * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
  * left unbounded to match — a normal purge still drains them.
  */
-export async function tagScopedCacheKeys(
+export async function indexScopedCacheEntry(
 	key: string,
-	scopedCacheTags: Iterable<ScopedCacheTag>,
+	fingerprints: readonly ScopedCacheFingerprint[],
 	extraSiblings: string[] = [],
-	fingerprints: readonly ScopedCacheFingerprint[] = [],
 	bucketPaths: ReadonlyMap<string, string | null> = new Map(),
 ): Promise<void> {
-	if (!scopedCachePurgeEnabled()) {
+	if (!scopedCachePurgeEnabled() || fingerprints.length === 0) {
 		return;
 	}
 
-	const taggedKeys = new Set<string>();
-
-	for (const tag of scopedCacheTags) {
-		taggedKeys.add(scopedCacheTagKey(tag));
-	}
-
-	if (taggedKeys.size === 0 && fingerprints.length === 0) {
-		return;
-	}
+	// The legacy index still speaks one pin at a time, so the fingerprints are read
+	// back flat for it — the only place the AND is dropped on the way in.
+	const scopedCacheTags = scopedCacheTagsOfFingerprints(fingerprints);
 
 	const redis = useScriptedRedis();
 

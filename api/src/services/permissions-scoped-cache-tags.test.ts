@@ -2,6 +2,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 
 // Isolate from redis/bus; force scoped mode on.
 vi.mock('../cache.js', () => ({
@@ -43,9 +44,10 @@ describe('PermissionsService.readByQuery override', () => {
 	test('carries the cache-tag rider across the withAppMinimalPermissions rebuild', async () => {
 		// super.readByQuery returns a tagged array; the override rebuilds it (new array) and must
 		// re-attach the rider so permissions reads stay scoped-invalidatable (not TTL-only).
-		const tagged = withMeta([{ id: 1 }], {
-			scopedCacheTags: [{ collection: 'directus_permissions' }],
-		});
+		const tagged = withMeta(
+			[{ id: 1 }],
+			scopedCacheReadMeta(['directus_permissions:&']),
+		);
 
 		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(tagged);
 

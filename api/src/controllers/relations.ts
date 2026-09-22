@@ -23,7 +23,10 @@ router.get(
 
 		const relations = await service.readAll();
 		res.locals['payload'] = { data: relations || null };
-		res.locals['scopedCacheTags'] = readMeta(relations)?.scopedCacheTags;
+
+		res.locals['scopedCacheFingerprints'] =
+			readMeta(relations)?.scopedCacheFingerprints;
+
 		return next();
 	}),
 	respond,
@@ -41,7 +44,9 @@ router.get(
 		const relations = await service.readAll(req.params['collection']);
 
 		res.locals['payload'] = { data: relations || null };
-		res.locals['scopedCacheTags'] = readMeta(relations)?.scopedCacheTags;
+
+		res.locals['scopedCacheFingerprints'] =
+			readMeta(relations)?.scopedCacheFingerprints;
 
 		return next();
 	}),
@@ -60,7 +65,10 @@ router.get(
 		const relation = await service.readOne(req.params['collection']!, req.params['field']!);
 
 		res.locals['payload'] = { data: relation || null };
-		res.locals['scopedCacheTags'] = readMeta(relation)?.scopedCacheTags;
+
+		res.locals['scopedCacheFingerprints'] =
+			readMeta(relation)?.scopedCacheFingerprints;
+
 		return next();
 	}),
 	respond,

@@ -44,13 +44,14 @@ import {
 	type ScopedCacheFilterKeying,
 	dropScopedCacheIndex,
 	flushResponseCache,
+	indexScopedCacheEntry,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	retryPendingScopedCachePurges,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheReadMeta,
 	scopedCacheTagKey,
 	startScopedCachePurgeRecovery,
-	tagScopedCacheKeys,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -667,17 +668,19 @@ describe('createScopedCacheCollector', () => {
 		const acmeMetrics = { collection: 'metric', field: 'owner', value: 'acme' };
 
 		const metricLookup = () => {
-			return withMeta([{ id: 1 }], {
-				scopedCacheTags: [acmeMetrics],
-				scopedCacheEpochs: { metric: '4' },
-			});
+			return withMeta(
+				[{ id: 1 }],
+				scopedCacheReadMeta(['metric:&owner=,acme,&'], {
+					scopedCacheEpochs: { metric: '4' },
+				}),
+			);
 		};
 
 		const auditLookup = () => {
-			return withMeta([{ id: 2 }], {
-				scopedCacheTags: [{ collection: 'audit' }],
-				scopedCacheEpochs: { audit: '7' },
-			});
+			return withMeta(
+				[{ id: 2 }],
+				scopedCacheReadMeta(['audit:&'], { scopedCacheEpochs: { audit: '7' } }),
+			);
 		};
 
 		it('folds a pending lookup and hands its rows back', async () => {
@@ -738,15 +741,15 @@ describe('createScopedCacheCollector', () => {
 		`, async () => {
 			const { scope, epochs } = createScopedCacheCollector(emptySchema);
 
-			const before = withMeta([{ id: 1 }], {
-				scopedCacheTags: [{ collection: 'metric' }],
-				scopedCacheEpochs: { metric: '4' },
-			});
+			const before = withMeta(
+				[{ id: 1 }],
+				scopedCacheReadMeta(['metric:&'], { scopedCacheEpochs: { metric: '4' } }),
+			);
 
-			const after = withMeta([{ id: 1 }], {
-				scopedCacheTags: [{ collection: 'metric' }],
-				scopedCacheEpochs: { metric: '5' },
-			});
+			const after = withMeta(
+				[{ id: 1 }],
+				scopedCacheReadMeta(['metric:&'], { scopedCacheEpochs: { metric: '5' } }),
+			);
 
 			await scope.dependOn([after, before]);
 
@@ -786,9 +789,9 @@ describe('collection slice index', () => {
 			pipeline: () => indexPipeline,
 		} as any);
 
-		await tagScopedCacheKeys('entry', [
-			{ collection: 'articles' },
-			{ collection: 'articles', field: 'author', value: 7 },
+		await indexScopedCacheEntry('entry', [
+			'articles:&',
+			'articles:&author=,7,&',
 		]);
 
 		expect(indexPipeline.sadd)
@@ -943,7 +946,7 @@ function redisSweepDouble(members: () => Promise<string[]>) {
 	};
 }
 
-describe('tagScopedCacheKeys', () => {
+describe('indexScopedCacheEntry', () => {
 	it(oneLine`
 		throws the command error a pipeline REPLIED with, so its caller can skip
 		writing an entry that would be indexed under nothing
@@ -967,8 +970,8 @@ describe('tagScopedCacheKeys', () => {
 			},
 		} as any);
 
-		await expect(tagScopedCacheKeys('entry', [
-			{ collection: 'articles', field: 'author', value: 7 },
+		await expect(indexScopedCacheEntry('entry', [
+			'articles:&author=,7,&',
 		])).rejects.toBe(refused);
 	});
 
@@ -993,9 +996,7 @@ describe('tagScopedCacheKeys', () => {
 		} as any);
 
 		try {
-			await tagScopedCacheKeys('entry', [
-				{ collection: 'articles', field: 'author', value: 7 },
-			]);
+			await indexScopedCacheEntry('entry', ['articles:&author=,7,&']);
 		}
 		finally {
 			delete env['CACHE_TTL'];
@@ -2608,8 +2609,9 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	});
 
 	it('a sorted independent collection crosses despite a covering slice', () => {
-		// An `independent` collection is skipped in readTags (no slice pin), so its
-		// scope fields don't catch the reorder — the sort needs the bare tag.
+		// An `independent` collection is skipped in readFingerprints (no slice
+		// pin), so its scope fields don't catch the reorder — the sort needs the
+		// bare tag.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();

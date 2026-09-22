@@ -24,7 +24,11 @@ import { addFieldFlag, getRelations, toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
+import {
+	bareScopedCacheFingerprint,
+	flushResponseCache,
+	scopedCacheReadMeta,
+} from '../scoped-cache.js';
 import { ALIAS_TYPES, ALLOWED_DB_DEFAULT_FUNCTIONS } from '../constants.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import type { Helpers } from '../database/helpers/index.js';
@@ -270,9 +274,9 @@ export class FieldsService {
 		}
 
 		// TODO scope by the related collection's scoped_cache_fields
-		return withMeta(result, {
-			scopedCacheTags: [{ collection: 'directus_fields' }],
-		});
+		return withMeta(result, scopedCacheReadMeta([
+			bareScopedCacheFingerprint('directus_fields'),
+		]));
 	}
 
 	async readOne(collection: string, field: string): Promise<Record<string, any>> {
@@ -356,9 +360,9 @@ export class FieldsService {
 		};
 
 		// TODO scope by the related collection's scoped_cache_fields
-		return withMeta(data, {
-			scopedCacheTags: [{ collection: 'directus_fields' }],
-		});
+		return withMeta(data, scopedCacheReadMeta([
+			bareScopedCacheFingerprint('directus_fields'),
+		]));
 	}
 
 	async createField(

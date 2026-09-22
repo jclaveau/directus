@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'vitest';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 import { readMeta, withMeta } from './read-meta.js';
 
 describe('withMeta / readMeta', () => {
 	test('round-trips the metadata via getMeta()', () => {
-		const meta = {
-			scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }],
-		};
+		const meta = scopedCacheReadMeta(['articles:&', 'users:&']);
 
 		const result = withMeta([{ id: 1 }], meta);
 
@@ -18,7 +17,7 @@ describe('withMeta / readMeta', () => {
 	});
 
 	test('getMeta is non-enumerable — invisible to JSON and spread', () => {
-		const rows = withMeta([{ id: 1 }], { scopedCacheTags: [{ collection: 'articles' }] });
+		const rows = withMeta([{ id: 1 }], scopedCacheReadMeta(['articles:&']));
 
 		expect(JSON.stringify(rows)).toBe('[{"id":1}]');
 		expect(Object.keys(rows)).toEqual(['0']);
@@ -27,7 +26,7 @@ describe('withMeta / readMeta', () => {
 	});
 
 	test('works on a single object as well as an array', () => {
-		const item = withMeta({ id: 1 }, { scopedCacheTags: [{ collection: 'articles' }] });
+		const item = withMeta({ id: 1 }, scopedCacheReadMeta(['articles:&']));
 		expect(readMeta(item)!.scopedCacheTags).toEqual([{ collection: 'articles' }]);
 	});
 

@@ -115,14 +115,11 @@ const readHandler = asyncHandler(async (req, res, next) => {
 	};
 
 	const resultMeta = readMeta(result);
-	res.locals['scopedCacheTags'] = resultMeta?.scopedCacheTags;
+	res.locals['scopedCacheFingerprints'] = resultMeta?.scopedCacheFingerprints;
 
 	res.locals['scopedCacheUnautopurgeableTags'] =
 		resultMeta?.scopedCacheUnautopurgeableTags;
 
-	res.locals['scopedCacheQueryCases'] = resultMeta?.scopedCacheQueryCases;
-	res.locals['scopedCacheQueryCaseFields'] = resultMeta?.scopedCacheQueryCaseFields;
-	res.locals['scopedCacheBucketPaths'] = resultMeta?.scopedCacheBucketPaths;
 	res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 
 	return next();
@@ -156,17 +153,11 @@ router.get(
 		// back to the bare collection tag, so the key slice this read pinned would never
 		// reach the tag index and any write to the collection would drop the entry.
 		const resultMeta = readMeta(result);
-		res.locals['scopedCacheTags'] = resultMeta?.scopedCacheTags;
+		res.locals['scopedCacheFingerprints'] = resultMeta?.scopedCacheFingerprints;
 
 		res.locals['scopedCacheUnautopurgeableTags'] =
 			resultMeta?.scopedCacheUnautopurgeableTags;
 
-		res.locals['scopedCacheQueryCases'] = resultMeta?.scopedCacheQueryCases;
-
-		res.locals['scopedCacheQueryCaseFields'] =
-			resultMeta?.scopedCacheQueryCaseFields;
-
-		res.locals['scopedCacheBucketPaths'] = resultMeta?.scopedCacheBucketPaths;
 		res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 
 		return next();

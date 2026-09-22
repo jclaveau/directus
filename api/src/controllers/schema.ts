@@ -21,7 +21,7 @@ router.get(
 		const currentSnapshot = await service.snapshot();
 		res.locals['payload'] = { data: currentSnapshot };
 		const snapshotMeta = readMeta(currentSnapshot);
-		res.locals['scopedCacheTags'] = snapshotMeta?.scopedCacheTags;
+		res.locals['scopedCacheFingerprints'] = snapshotMeta?.scopedCacheFingerprints;
 		res.locals['scopedCacheEpochs'] = snapshotMeta?.scopedCacheEpochs;
 
 		return next();

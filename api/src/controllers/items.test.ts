@@ -2,6 +2,7 @@ import { ForbiddenError } from '@directus/errors';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 
 // Per-test service method spies; the ItemsService mock returns this same object so tests drive branches.
 const createOne = vi.fn();
@@ -175,9 +176,9 @@ describe('items controller', () => {
 			expect(await nextError(handler(), req)).toBeInstanceOf(ForbiddenError);
 		});
 
-		test('singleton read + stamps scopedCacheTags', async () => {
+		test('singleton read + stamps scopedCacheFingerprints', async () => {
 			readSingleton.mockResolvedValueOnce(
-				withMeta({ id: 1 }, { scopedCacheTags: [{ collection: 'articles' }] }),
+				withMeta({ id: 1 }, scopedCacheReadMeta(['articles:&'])),
 			);
 
 			getMetaForQuery.mockResolvedValueOnce({ total_count: 1 });
@@ -186,7 +187,7 @@ describe('items controller', () => {
 			const next = vi.fn();
 			await handler()(req, res, next);
 			expect(res.locals['payload'].data).toBeDefined();
-			expect(res.locals['scopedCacheTags']).toEqual([{ collection: 'articles' }]);
+			expect(res.locals['scopedCacheFingerprints']).toEqual(['articles:&']);
 			expect(next).toHaveBeenCalledOnce();
 		});
 
@@ -234,20 +235,22 @@ describe('items controller', () => {
 		// bare collection tag — so the key slice a single-item read pinned would be
 		// indexed under nothing, and any write to the collection would drop the entry.
 		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
-			const pin = { collection: 'articles', field: 'id', value: 1 };
+			const fingerprint = 'articles:&id=,1,&';
 			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };
 
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ id: 1 },
-					{ scopedCacheTags: [pin], scopedCacheUnautopurgeableTags: [orphan] },
+					scopedCacheReadMeta([fingerprint], {
+						scopedCacheUnautopurgeableTags: [orphan],
+					}),
 				),
 			);
 
 			const res = { locals: {} } as any;
 			await handler()(makeReq(), res, vi.fn());
 
-			expect(res.locals['scopedCacheTags']).toEqual([pin]);
+			expect(res.locals['scopedCacheFingerprints']).toEqual([fingerprint]);
 			expect(res.locals['scopedCacheUnautopurgeableTags']).toEqual([orphan]);
 		});
 	});

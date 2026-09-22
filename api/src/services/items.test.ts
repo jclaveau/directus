@@ -11,7 +11,7 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
-import { purgeScopedCache } from '../scoped-cache.js';
+import { purgeScopedCache, scopedCacheReadMeta } from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -186,7 +186,7 @@ describe('Integration Tests', () => {
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
 				service.readByQuery = vi.fn(async () => {
-					return withMeta([], { scopedCacheTags: [] });
+					return withMeta([], scopedCacheReadMeta([]));
 				});
 
 				const error = await service.readOne(999).catch((err) => err);
@@ -1629,8 +1629,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tags).toContainEqual({
 				collection: 'owner',
 				field: 'id',
-				value: 100,
-				type: 'integer',
+				value: '100',
 			});
 
 			// The regression this exists for: a bare tag beside the pin would make any
@@ -1662,8 +1661,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(readMeta(result)?.scopedCacheTags).toContainEqual({
 				collection: 'owner',
 				field: 'id',
-				value: 100,
-				type: 'integer',
+				value: '100',
 			});
 
 			expect(result).toEqual([{ label: 'a', owner: { space: 's' } }]);
@@ -1687,8 +1685,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tags).toContainEqual({
 				collection: 'owned_item',
 				field: 'id',
-				value: 1,
-				type: 'integer',
+				value: '1',
 			});
 
 			expect(tags).not.toContainEqual({ collection: 'owned_item' });
@@ -1719,8 +1716,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tags).not.toContainEqual({
 				collection: 'owned_sub_item',
 				field: 'id',
-				value: 7,
-				type: 'integer',
+				value: '7',
 			});
 		});
 	});

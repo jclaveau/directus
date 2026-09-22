@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { ScopedCacheTag } from '@directus/types';
+import type { ScopedCacheFingerprint, ScopedCacheTag } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
@@ -15,14 +15,16 @@ import {
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
+	bareScopedCacheFingerprint,
+	indexScopedCacheEntry,
 	mergedScopedCacheEpochs,
+	scopedCacheBucketPath,
 	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFingerprintCollection,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
-	scopedCacheQueryCasesFromTags,
-	scopedCacheFingerprintsByCollection,
 	scopedCacheTagLabel,
-	tagScopedCacheKeys,
+	scopedCacheTagsOfFingerprints,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
 import {
@@ -63,28 +65,15 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// went through a read (a hand-rolled /settings, GraphQL) carries no meta.
 	const payloadMeta = readMeta(res.locals['payload']?.data);
 
-	const readTags: ScopedCacheTag[] | undefined =
-		res.locals['scopedCacheTags'] ?? payloadMeta?.scopedCacheTags;
+	const readFingerprints: ScopedCacheFingerprint[] =
+		res.locals['scopedCacheFingerprints']
+		?? payloadMeta?.scopedCacheFingerprints
+		?? [];
 
-	// The same pinning grouped by what had to hold together — one entry per way the
-	// read matches a collection, each rendered as one fingerprint below. A read that
-	// carries none is read tag by tag, which over-purges rather than serving stale.
-	const readQueryCases: ScopedCacheTag[][] | undefined =
-		res.locals['scopedCacheQueryCases'] ?? payloadMeta?.scopedCacheQueryCases;
-
-	// The fields each of those collections is bound to, and the path its index is
-	// bucketed by. Composed with the query cases below into the fingerprints the
-	// purge matches a written row against. A collection missing from either is
-	// bound to all of its fields and filed in the bare bucket.
-	const readQueryCaseFields: Record<string, string[]> =
-		res.locals['scopedCacheQueryCaseFields']
-		?? payloadMeta?.scopedCacheQueryCaseFields
-		?? {};
-
-	const readBucketPaths: Record<string, string | null> =
-		res.locals['scopedCacheBucketPaths']
-		?? payloadMeta?.scopedCacheBucketPaths
-		?? {};
+	// The same dependency read one pin at a time: what the dev headers, the audit
+	// header and the legacy tag sets speak. Derived here rather than carried, so
+	// the AND survives everywhere that can hold it.
+	const readTags = scopedCacheTagsOfFingerprints(readFingerprints);
 
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
 	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
@@ -130,57 +119,53 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 	}
 
-	// A response with no read tags at all (a hand-rolled /settings) falls back to
-	// the bare collection tag so a mutation there still purges it (settings reask).
-	const collectionFallbackTags: ScopedCacheTag[] = req.collection
-		? [{ collection: req.collection }]
+	// A response with no pin at all (a hand-rolled /settings) falls back to the bare
+	// collection fingerprint so a mutation there still purges it (settings reask).
+	const collectionFallbackFingerprints: ScopedCacheFingerprint[] = req.collection
+		? [bareScopedCacheFingerprint(req.collection)]
 		: [];
 
 	// `total_count` drops the query filter and counts the whole collection
 	// (`MetaService.totalCount`), so a response carrying it depends on every row —
 	// including rows the read's own pins never bounded. An insert into another key
-	// slice moves the number, and no pinned tag can express that. Such a response
-	// keeps the bare collection tag beside its pins so any write drops it.
+	// slice moves the number, and no pin can express that.
 	const countsWholeCollection =
 		req.sanitizedQuery.meta?.includes(Meta.TOTAL_COUNT) === true;
 
-	const scopedCacheTags = readTags?.length && countsWholeCollection === false
-		? readTags
-		: [...(readTags ?? []), ...collectionFallbackTags];
+	// Such a response is bound to nothing of that collection, so its fingerprint has
+	// to carry no pair and no field — any write drops the entry. The bare one says
+	// exactly that, so it REPLACES this read's pins on the collection rather than
+	// joining them: kept beside it they would narrow nothing and read as a
+	// dependency the count does not have.
+	const pinnedFingerprints = readFingerprints.length > 0
+		? readFingerprints
+		: collectionFallbackFingerprints;
 
-	// A response depending on the WHOLE collection is bound to nothing there, so its
-	// fingerprint has to carry no pair and no field — any write drops the entry. The
-	// bare tag alone says that, but composing it beside this read's pins would keep
-	// them and hold a stale count, so the pins go first.
-	const queryCaseFieldsByCollection = new Map(Object.entries(readQueryCaseFields));
-
-	const readOrTagQueryCases = readQueryCases?.length
-		? readQueryCases
-		: scopedCacheQueryCasesFromTags(readTags ?? []);
-
-	const fingerprintQueryCases = countsWholeCollection && req.collection
+	const scopedCacheFingerprints = countsWholeCollection && req.collection
 		? [
-			...readOrTagQueryCases.filter((queryCase) => {
-				return queryCase[0]?.collection !== req.collection;
+			...readFingerprints.filter((fingerprint) => {
+				return scopedCacheFingerprintCollection(fingerprint) !== req.collection;
 			}),
-			...scopedCacheQueryCasesFromTags(collectionFallbackTags),
+			...collectionFallbackFingerprints,
 		]
-		: [
-			...readOrTagQueryCases,
-			...scopedCacheQueryCasesFromTags(
-				readTags?.length
-					? []
-					: collectionFallbackTags,
-			),
-		];
+		: pinnedFingerprints;
 
-	if (countsWholeCollection && req.collection) {
-		queryCaseFieldsByCollection.delete(req.collection);
-	}
+	const scopedCacheTags = scopedCacheTagsOfFingerprints(scopedCacheFingerprints);
 
-	const scopedCacheFingerprints = scopedCacheFingerprintsByCollection(
-		fingerprintQueryCases,
-		queryCaseFieldsByCollection,
+	// The bucket each fingerprint is filed in, off the schema the request carries: a
+	// path derived from the collection, never from the read, so the fill and the
+	// write that has to find it read the same one.
+	const scopedCacheBucketPaths = new Map(
+		scopedCacheFingerprints.map((fingerprint) => {
+			const collection = scopedCacheFingerprintCollection(fingerprint);
+
+			return [
+				collection,
+				req.schema === undefined
+					? null
+					: scopedCacheBucketPath(req.schema, collection),
+			];
+		}),
 	);
 
 	// The tags a fill of this request would be indexed under, in the form the
@@ -286,14 +271,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// written costs one miss on the purge's `del`, while a value written
 			// under no tag is unreachable to every purge and serves stale for its
 			// whole TTL. So tag first and let a throw here skip the value entirely.
-			await tagScopedCacheKeys(
+			await indexScopedCacheEntry(
 				redisKey,
-				scopedCacheTags,
+				scopedCacheFingerprints,
 				env['CACHE_TAGS_HEADER']
 					? [cacheTagsKey(redisKey)]
 					: [],
-				scopedCacheFingerprints,
-				new Map(Object.entries(readBucketPaths)),
+				scopedCacheBucketPaths,
 			);
 
 			// Handed over together rather than awaited in turn: node-redis corks its

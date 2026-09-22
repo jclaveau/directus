@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { withMeta } from '../utils/read-meta.js';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 import { ItemsService, MailService, UsersService } from './index.js';
 import { SettingsService } from './settings.js';
 
@@ -522,7 +523,7 @@ describe('Integration Tests', () => {
 		describe('registerUser', () => {
 			it('should reject when public registration is disabled (users.ts L464)', async () => {
 				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce(
-					withMeta({ public_registration: false }, { scopedCacheTags: [] }),
+					withMeta({ public_registration: false }, scopedCacheReadMeta([])),
 				);
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
@@ -538,7 +539,7 @@ describe('Integration Tests', () => {
 						public_registration_email_filter: {
 							email: { _ends_with: '@allowed.com' },
 						},
-					}, { scopedCacheTags: [] }),
+					}, scopedCacheReadMeta([])),
 				);
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });

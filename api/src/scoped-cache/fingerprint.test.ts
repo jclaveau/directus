@@ -6,7 +6,6 @@ import {
 	scopedCacheFingerprintCollection,
 	scopedCacheFingerprintFieldsTouched,
 	scopedCacheFingerprintFromTags,
-	scopedCacheQueryCasesFromTags,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
@@ -299,18 +298,6 @@ describe('scopedCacheFingerprintsByCollection', () => {
 			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
 			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
 		])).toEqual(['slot:&owner=,alpha,&']);
-	});
-});
-
-describe('scopedCacheQueryCasesFromTags', () => {
-	it('reads each tag as a way of its own, which is how a sweep reads them', () => {
-		expect(scopedCacheQueryCasesFromTags([
-			{ collection: 'slot', field: 'owner', value: 'alpha' },
-			{ collection: 'slot', field: 'method', value: 'spaced' },
-		])).toEqual([
-			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
-			[{ collection: 'slot', field: 'method', value: 'spaced' }],
-		]);
 	});
 });
 

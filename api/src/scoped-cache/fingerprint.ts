@@ -1,5 +1,5 @@
 import type { ScopedCacheFingerprint, ScopedCacheTag } from '@directus/types';
-import { canonicalScopedCacheValue } from './tags.js';
+import { canonicalScopedCacheValue, scopedCacheTagKey } from './tags.js';
 
 export type { ScopedCacheFingerprint } from '@directus/types';
 
@@ -87,6 +87,16 @@ export function renderScopedCacheFingerprint(
 	}
 
 	return `${fingerprint}&`;
+}
+
+/**
+ * The fingerprint of a read bound to nothing of a collection: no pair and no
+ * field, so every write to it matches. What a tag naming only a collection said.
+ */
+export function bareScopedCacheFingerprint(
+	collection: string,
+): ScopedCacheFingerprint {
+	return renderScopedCacheFingerprint(collection, new Map());
 }
 
 export type ParsedScopedCacheFingerprint = {
@@ -210,6 +220,51 @@ export function scopedCacheFingerprintLabels(
 }
 
 /**
+ * The tags a set of fingerprints composes, one per value, `fields` dropped, and
+ * the bare collection for a fingerprint that pins nothing.
+ *
+ * What the round trip loses is the AND — which is the whole point of the
+ * fingerprint — so this is for the consumers that never had it: the legacy tag
+ * sets, the dev headers, the telemetry, and the `scopedCacheTags` a hook reads
+ * off `getMeta()` to hand to `purgeBy`. A token is already canonical, so the tag
+ * it yields keys the same slice a write emits.
+ */
+export function scopedCacheTagsOfFingerprints(
+	fingerprints: readonly ScopedCacheFingerprint[],
+): ScopedCacheTag[] {
+	const tags: ScopedCacheTag[] = [];
+	const seen = new Set<string>();
+
+	const push = (tag: ScopedCacheTag): void => {
+		const key = scopedCacheTagKey(tag);
+
+		if (seen.has(key)) {
+			return;
+		}
+
+		seen.add(key);
+		tags.push(tag);
+	};
+
+	for (const fingerprint of fingerprints) {
+		const { collection, pairs } = parseScopedCacheFingerprint(fingerprint);
+
+		if (pairs.size === 0) {
+			push({ collection });
+			continue;
+		}
+
+		for (const [field, values] of pairs) {
+			for (const value of values) {
+				push({ collection, field, value });
+			}
+		}
+	}
+
+	return tags;
+}
+
+/**
  * Whether every pair of the fingerprint holds on one row.
  *
  * The row is serialised as a fingerprint of its own (one value per pair, no
@@ -329,20 +384,6 @@ export function scopedCacheFingerprintsByCollection(
 	}
 
 	return [...rendered];
-}
-
-/**
- * A flat tag list read as query cases: each tag on its own, which is how a tag
- * sweep reads them — any one of them reproduced by a write drops the entry.
- *
- * What a caller with no query cases of its own hands over, and the fail-safe
- * direction: a conjunction read this way over-purges, while query cases read as a
- * conjunction that was never one serves stale.
- */
-export function scopedCacheQueryCasesFromTags(
-	tags: readonly ScopedCacheTag[],
-): ScopedCacheTag[][] {
-	return tags.map((tag) => [tag]);
 }
 
 /**

@@ -4,6 +4,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
+import { scopedCacheReadMeta } from '../../scoped-cache.js';
 import { GraphQLExecutionError } from './errors/index.js';
 
 // Keep graphql's rule set / error classes real; stub the heavy validate + execute so we can drive
@@ -55,34 +56,36 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }],
-				});
+				return withMeta(
+					[{ id: 1 }],
+					scopedCacheReadMeta(['articles:&', 'users:&']),
+				);
 			},
 		} as any);
 
 		await gql.read('articles', {});
 
-		expect(gql.scopedCacheTags.map((tag) => tag.collection).sort()).toEqual([
-			'articles',
-			'users',
+		expect(gql.scopedCacheFingerprints.sort()).toEqual([
+			'articles:&',
+			'users:&',
 		]);
 
 		// a second read on another collection adds to the same per-request union
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'directus_files' }],
-				});
+				return withMeta(
+					[{ id: 2 }],
+					scopedCacheReadMeta(['directus_files:&']),
+				);
 			},
 		} as any);
 
 		await gql.read('files', {});
 
-		expect(gql.scopedCacheTags.map((tag) => tag.collection).sort()).toEqual([
-			'articles',
-			'directus_files',
-			'users',
+		expect(gql.scopedCacheFingerprints.sort()).toEqual([
+			'articles:&',
+			'directus_files:&',
+			'users:&',
 		]);
 	});
 
@@ -94,10 +97,9 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+				return withMeta([{ id: 1 }], scopedCacheReadMeta(['articles:&'], {
 					scopedCacheEpochs: { articles: '7', users: '3', '*': '1' },
-				});
+				}));
 			},
 		} as any);
 
@@ -108,10 +110,9 @@ describe('GraphQLService scoped cache tags', () => {
 		// at fill time and cache the response the purge invalidated.
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+				return withMeta([{ id: 2 }], scopedCacheReadMeta(['articles:&'], {
 					scopedCacheEpochs: { articles: '8', files: null, '*': '2' },
-				});
+				}));
 			},
 		} as any);
 
@@ -135,10 +136,9 @@ describe('GraphQLService scoped cache tags', () => {
 		// time and cache a response the purge between the two already invalidated.
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+				return withMeta([{ id: 1 }], scopedCacheReadMeta(['articles:&'], {
 					scopedCacheEpochs: { articles: '9', '*': '4' },
-				});
+				}));
 			},
 		} as any);
 
@@ -146,10 +146,9 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+				return withMeta([{ id: 2 }], scopedCacheReadMeta(['articles:&'], {
 					scopedCacheEpochs: { articles: '2', '*': '4' },
-				});
+				}));
 			},
 		} as any);
 
@@ -166,10 +165,9 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+				return withMeta([{ id: 1 }], scopedCacheReadMeta(['articles:&'], {
 					scopedCacheEpochs: { articles: '3' },
-				});
+				}));
 			},
 		} as any);
 
@@ -177,10 +175,9 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+				return withMeta([{ id: 2 }], scopedCacheReadMeta(['articles:&'], {
 					scopedCacheEpochs: { articles: null },
-				});
+				}));
 			},
 		} as any);
 
@@ -197,9 +194,7 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
-				});
+				return withMeta([{ id: 1 }], scopedCacheReadMeta(['articles:&']));
 			},
 		} as any);
 
@@ -236,7 +231,7 @@ describe('GraphQLService scoped cache tags', () => {
 		const gql = makeService({});
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 
-		gql.scopedCacheTags.push({ collection: 'articles' }, { collection: 'users' });
+		gql.scopedCacheFingerprints.push('articles:&', 'users:&');
 
 		const result = await gql.execute({
 			query: '',

@@ -28,6 +28,7 @@ import {
 	ItemScopedCacheService,
 	readScopedCacheEpochs,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheReadMeta,
 	scopedCacheUpdatedRows,
 	scopedCacheWrittenRows,
 	stripScopedCacheOwnershipInjections,
@@ -819,15 +820,13 @@ implements AbstractService<Item> {
 				)
 				: records;
 
-		// Scope this read for cache purging (see ItemScopedCacheService.readTags);
-		// bounded to this read — it rides the result via `getMeta()`, not a field.
+		// Scope this read for cache purging (see
+		// ItemScopedCacheService.readFingerprints); bounded to this read — it rides
+		// the result via `getMeta()`, not a field.
 		const {
-			tags: scopedCacheTags,
-			queryCases: scopedCacheQueryCases,
+			fingerprints: scopedCacheFingerprints,
 			unautopurgeable: scopedCacheUnautopurgeableTags,
-			queryCaseFields: scopedCacheQueryCaseFields,
-			bucketPaths: scopedCacheBucketPaths,
-		} = await this.scopedCache.readTags({
+		} = await this.scopedCache.readFingerprints({
 				ast,
 				plan: scopedCachePlan,
 				updatedQuery,
@@ -866,19 +865,18 @@ implements AbstractService<Item> {
 		// its rows for revisions takes the whole update down with it. The write path
 		// validates its own filter returns (`payloadAfterHooks === null`); this one
 		// does not. Covered as it stands by read-hook-null.test.ts.
-		return withMeta(filteredRecords as Item[], {
-			scopedCacheTags,
-			scopedCacheQueryCases,
-			scopedCacheUnautopurgeableTags,
-			scopedCacheQueryCaseFields: Object.fromEntries(scopedCacheQueryCaseFields),
-			scopedCacheBucketPaths: Object.fromEntries(scopedCacheBucketPaths),
-			// A `scopeTo` names a collection the pre-query capture could not know
-			// about, and hands over the counter its own dependent read took.
-			scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
-				scopedCacheEpochs,
-				scopedCacheCollector.epochs,
-			),
-		});
+		return withMeta(filteredRecords as Item[], scopedCacheReadMeta(
+			scopedCacheFingerprints,
+			{
+				scopedCacheUnautopurgeableTags,
+				// A `scopeTo` names a collection the pre-query capture could not know
+				// about, and hands over the counter its own dependent read took.
+				scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
+					scopedCacheEpochs,
+					scopedCacheCollector.epochs,
+				),
+			},
+		));
 	}
 
 	/**
@@ -907,7 +905,7 @@ implements AbstractService<Item> {
 		}
 
 		// Carry the read's metadata onto the single returned item.
-		return withMeta(results[0]!, readMeta(results) ?? { scopedCacheTags: [] });
+		return withMeta(results[0]!, readMeta(results) ?? scopedCacheReadMeta([]));
 	}
 
 	/**
@@ -1859,7 +1857,7 @@ implements AbstractService<Item> {
 		query.limit = 1;
 
 		const records = await this.readByQuery(query, opts);
-		const meta = readMeta(records) ?? { scopedCacheTags: [] };
+		const meta = readMeta(records) ?? scopedCacheReadMeta([]);
 		const record = records[0];
 
 		if (!record) {

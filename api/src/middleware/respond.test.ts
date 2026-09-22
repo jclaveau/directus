@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { scopedCacheReadMeta } from '../scoped-cache.js';
 
 // Hoisted, because `scoped-cache.js` is now imported for real (see its mock
 // below) and reads `useEnv()` at module scope — which runs while the mock
@@ -21,7 +22,7 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 const mocks = vi.hoisted(() => {
 	return {
 		mockCache: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-		tagScopedCacheKeys: vi.fn(),
+		indexScopedCacheEntry: vi.fn(),
 		scopedCachePurgeEnabled: vi.fn(() => false),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
@@ -46,7 +47,13 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-const { mockCache, tagScopedCacheKeys, warn, permissionsCachable, transform } = mocks;
+const {
+	mockCache,
+	indexScopedCacheEntry,
+	warn,
+	permissionsCachable,
+	transform,
+} = mocks;
 
 vi.mock('../cache.js', () => {
 	return {
@@ -59,17 +66,22 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('../scoped-cache.js')>();
 
 	return {
-		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
+		indexScopedCacheEntry: mocks.indexScopedCacheEntry,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
 		// Real, so the unguarded cases below assert the predicate rather than a
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
-		// Real for the same reason: composing the tags into fingerprints is pure,
-		// and a stand-in would agree with the assertions rather than the grammar.
-		scopedCacheQueryCasesFromTags: actual.scopedCacheQueryCasesFromTags,
-		scopedCacheFingerprintsByCollection: actual.scopedCacheFingerprintsByCollection,
+		// Real for the same reason: composing fingerprints into a flat tag set is
+		// pure, and a stand-in would agree with the assertions rather than the
+		// grammar.
+		bareScopedCacheFingerprint: actual.bareScopedCacheFingerprint,
+		scopedCacheBucketPath: actual.scopedCacheBucketPath,
+		scopedCacheFingerprintCollection: actual.scopedCacheFingerprintCollection,
+		scopedCacheTagsOfFingerprints: actual.scopedCacheTagsOfFingerprints,
+		// Used only to build fixtures below — pure, reaches no Redis.
+		scopedCacheReadMeta: actual.scopedCacheReadMeta,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -180,7 +192,7 @@ function makeReq(
 		method: 'GET',
 		originalUrl: '/items/articles',
 		sanitizedQuery: {},
-		schema: {},
+		schema: { collections: {}, relations: [] },
 		accountability: null,
 		collection: 'articles',
 		...overrides,
@@ -209,7 +221,7 @@ describe('respond middleware', () => {
 	`, async () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{ scopedCacheFingerprints: ['articles:&'] },
 		);
 
 		const req = makeReq();
@@ -239,10 +251,13 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		// #205 scoped-cache tagging fires with the request's tags
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [
-			{ collection: 'articles' },
-		], [], ['articles:&'], new Map());
+		// #205 scoped-cache tagging fires with the request's fingerprints
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
+			'cache-key',
+			['articles:&'],
+			[],
+			new Map([['articles', null]]),
+		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
@@ -255,7 +270,7 @@ describe('respond middleware', () => {
 		await respond(makeReq(), makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: ['articles:&'],
 				httpRequestCacheKey: {
 					redisKey: 'middleware-key',
 					cacheKey: 'middleware-hash',
@@ -277,7 +292,7 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: ['articles:&'],
 				requestStart: Date.now() - 10,
 			},
 		);
@@ -340,7 +355,7 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: ['articles:&'],
 				requestStart: 900,
 			},
 		);
@@ -366,7 +381,7 @@ describe('respond middleware', () => {
 		mocks.stringByteSize.mockClear();
 
 		const payload = { data: [{ id: 1, blob: 'x'.repeat(200) }] };
-		const res = makeRes(payload, { scopedCacheTags: [{ collection: 'articles' }] });
+		const res = makeRes(payload, { scopedCacheFingerprints: ['articles:&'] });
 
 		await respond(makeReq(), res, next);
 
@@ -383,7 +398,7 @@ describe('respond middleware', () => {
 	test('a graphql fill captures a blank url and the graphql query', async () => {
 		const res = makeRes(
 			{ data: { me: 1 } },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{ scopedCacheFingerprints: ['articles:&'] },
 		);
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
@@ -405,42 +420,35 @@ describe('respond middleware', () => {
 
 		// A controller that set no tags → the bare `{ collection }` tag, so a mutation
 		// on that collection still purges the cached response (the settings fix).
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles' }],
-			[],
 			['articles:&'],
-			new Map(),
+			[],
+			new Map([['articles', null]]),
 		);
 	});
 
 	test(oneLine`
-		reads the tags off the payload when the controller forwarded none — a system
-		route hands over the service's result as is, and the relations it nested
-		would otherwise be invisible to every purge (#505)
+		reads the fingerprints off the payload when the controller forwarded none — a
+		system route hands over the service's result as is, and the relations it
+		nested would otherwise be invisible to every purge (#505)
 	`, async () => {
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes({
-				data: withMeta({ id: 'u1', student_profile: [] }, {
-					scopedCacheTags: [
-						{ collection: 'directus_users', field: 'id', value: 'u1', type: 'uuid' },
-						{ collection: 'student' },
-					],
-				}),
+				data: withMeta(
+					{ id: 'u1', student_profile: [] },
+					scopedCacheReadMeta(['directus_users:&id=,u1,&', 'student:&']),
+				),
 			}),
 			next,
 		);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[
-				{ collection: 'directus_users', field: 'id', value: 'u1', type: 'uuid' },
-				{ collection: 'student' },
-			],
-			[],
 			['directus_users:&id=,u1,&', 'student:&'],
-			new Map(),
+			[],
+			new Map([['directus_users', null], ['student', null]]),
 		);
 	});
 
@@ -454,13 +462,12 @@ describe('respond middleware', () => {
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes(
 				{
-					data: withMeta({ id: 'u1' }, {
-						scopedCacheTags: [
-							{ collection: 'directus_users' },
-							{ collection: 'student' },
-						],
-						scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' },
-					}),
+					data: withMeta(
+						{ id: 'u1' },
+						scopedCacheReadMeta(['directus_users:&', 'student:&'], {
+							scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' },
+						}),
+					),
 				},
 				{ scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' } },
 			),
@@ -483,12 +490,14 @@ describe('respond middleware', () => {
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes({
-				data: withMeta({ id: 'u1' }, {
-					scopedCacheTags: [{ collection: 'directus_users' }],
-					scopedCacheUnautopurgeableTags: [
-						{ collection: 'student', field: 'level', value: 3, type: 'integer' },
-					],
-				}),
+				data: withMeta(
+					{ id: 'u1' },
+					scopedCacheReadMeta(['directus_users:&'], {
+						scopedCacheUnautopurgeableTags: [
+							{ collection: 'student', field: 'level', value: 3, type: 'integer' },
+						],
+					}),
+				),
 			}),
 			next,
 		);
@@ -508,28 +517,20 @@ describe('respond middleware', () => {
 	`, async () => {
 		const res = makeRes(
 			{ meta: { total_count: 2 }, data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				],
-			},
+			{ scopedCacheFingerprints: ['articles:&id=,1,&'] },
 		);
 
 		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } });
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[
-				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'articles' },
-			],
-			[],
-			// The count drops the filter, so the fingerprint drops the pins with it:
+			// The count drops the filter, so the fingerprint drops the pin with it:
 			// bound to nothing, any write to the collection moves the number.
 			['articles:&'],
-			new Map(),
+			[],
+			new Map([['articles', null]]),
 		);
 	});
 
@@ -539,23 +540,18 @@ describe('respond middleware', () => {
 	`, async () => {
 		const res = makeRes(
 			{ meta: { filter_count: 1 }, data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				],
-			},
+			{ scopedCacheFingerprints: ['articles:&id=,1,&'] },
 		);
 
 		const req = makeReq({ sanitizedQuery: { meta: ['filter_count'] } });
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', field: 'id', value: 1, type: 'integer' }],
-			[],
 			['articles:&id=,1,&'],
-			new Map(),
+			[],
+			new Map([['articles', null]]),
 		);
 	});
 
@@ -565,11 +561,7 @@ describe('respond middleware', () => {
 	`, async () => {
 		const res = makeRes(
 			{ meta: { total_count: 2, filter_count: 1 }, data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				],
-			},
+			{ scopedCacheFingerprints: ['articles:&id=,1,&'] },
 		);
 
 		// The shape `sanitizeMeta` produces for `*`, which is where the expansion
@@ -580,17 +572,13 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[
-				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'articles' },
-			],
-			[],
-			// The count drops the filter, so the fingerprint drops the pins with it:
+			// The count drops the filter, so the fingerprint drops the pin with it:
 			// bound to nothing, any write to the collection moves the number.
 			['articles:&'],
-			new Map(),
+			[],
+			new Map([['articles', null]]),
 		);
 	});
 
@@ -603,12 +591,11 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles' }],
-			[],
 			['articles:&'],
-			new Map(),
+			[],
+			new Map([['articles', null]]),
 		);
 	});
 
@@ -621,10 +608,7 @@ describe('respond middleware', () => {
 			{ data: [{ id: 1 }] },
 			{
 				cache: false,
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'owner', value: 'U1' },
-					{ collection: 'authors' },
-				],
+				scopedCacheFingerprints: ['articles:&owner=,U1,&', 'authors:&'],
 			},
 		);
 
@@ -637,7 +621,7 @@ describe('respond middleware', () => {
 
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
-		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
 	});
 
 	test(oneLine`
@@ -662,7 +646,7 @@ describe('respond middleware', () => {
 		// No tags AND no collection under scoped purge → nothing could target it, so
 		// it is not cached (rather than orphan a stale entry no purge can drop).
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
-		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
 	});
 
 	test('caches a collection-less response in full-purge mode', async () => {
@@ -675,8 +659,8 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
-		expect(tagScopedCacheKeys)
-			.toHaveBeenCalledWith('cache-key', [], [], [], new Map());
+		expect(indexScopedCacheEntry)
+			.toHaveBeenCalledWith('cache-key', [], [], new Map());
 	});
 
 	test(oneLine`
@@ -687,7 +671,7 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: ['articles:&'],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -717,7 +701,7 @@ describe('respond middleware', () => {
 		mocks.evictCacheEntry.mockResolvedValueOnce(false);
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles', field: 'author', value: 7 }],
+			scopedCacheFingerprints: ['articles:&author=,7,&'],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -745,7 +729,7 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: ['articles:&'],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -765,7 +749,7 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: ['articles:&'],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -784,7 +768,7 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue(undefined);
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheFingerprints: ['articles:&'],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -801,10 +785,7 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [
-				{ collection: 'articles' },
-				{ collection: 'authors' },
-			],
+			scopedCacheFingerprints: ['articles:&', 'authors:&'],
 			scopedCacheEpochs: { articles: '7', '*': '1' },
 		}), next);
 
@@ -824,10 +805,7 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [
-				{ collection: 'articles' },
-				{ collection: 'authors' },
-			],
+			scopedCacheFingerprints: ['articles:&', 'authors:&'],
 			scopedCacheEpochs: { articles: '7', authors: '4', '*': '1' },
 		}), next);
 
@@ -860,7 +838,7 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'articles' }, { collection: 'authors' }],
+			scopedCacheFingerprints: ['articles:&', 'authors:&'],
 			scopedCacheEpochsAtRequest: { articles: '7', '*': '1' },
 			scopedCacheEpochs: { articles: '8', authors: '4', '*': '1' },
 		}), next);
@@ -880,7 +858,7 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheTags: [{ collection: 'authors' }],
+			scopedCacheFingerprints: ['authors:&'],
 			scopedCacheEpochs: {},
 		}), next);
 
@@ -891,7 +869,7 @@ describe('respond middleware', () => {
 		a refused tag index leaves NO value cached: an untagged entry is unreachable to
 		every purge and would serve stale for its whole TTL
 	`, async () => {
-		vi.mocked(tagScopedCacheKeys).mockRejectedValueOnce(new Error('OOM'));
+		vi.mocked(indexScopedCacheEntry).mockRejectedValueOnce(new Error('OOM'));
 		const res = makeRes({ data: [] });
 		const req = makeReq();
 
@@ -990,6 +968,7 @@ describe('respond middleware', () => {
 
 	const scopedSchema = {
 		collections: { articles: { scopedCacheFields: ['owner_field'] } },
+		relations: [],
 	} as unknown as Request['schema'];
 
 	test(oneLine`
@@ -1001,7 +980,7 @@ describe('respond middleware', () => {
 		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{ scopedCacheFingerprints: ['articles:&'] },
 		);
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
@@ -1019,11 +998,7 @@ describe('respond middleware', () => {
 		// A value slice (field set) is a precise pin — not a coarse fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'owner_field', value: 'u1' },
-				],
-			},
+			{ scopedCacheFingerprints: ['articles:&owner_field=,u1,&'] },
 		);
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
@@ -1045,11 +1020,7 @@ describe('respond middleware', () => {
 		// would fail to join back to this entry and its purge count would read 0.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'active', value: 1, type: 'boolean' },
-				],
-			},
+			{ scopedCacheFingerprints: ['articles:&active=,true,&'] },
 		);
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
@@ -1065,7 +1036,7 @@ describe('respond middleware', () => {
 		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles' }] },
+			{ scopedCacheFingerprints: ['articles:&'] },
 		);
 
 		await respond(makeReq(), res, next);
@@ -1108,7 +1079,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
 	});
 
@@ -1145,12 +1116,11 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		// falsy payload → size 0, under the limit, so caching still proceeds and 204 flushes
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles' }],
-			[],
 			['articles:&'],
-			new Map(),
+			[],
+			new Map([['articles', null]]),
 		);
 
 		expect(res.status).toHaveBeenCalledWith(204);
@@ -1212,11 +1182,7 @@ describe('respond middleware', () => {
 
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [
-					{ collection: 'articles', field: 'owner', value: 'U1' },
-				],
-			},
+			{ scopedCacheFingerprints: ['articles:&owner=,U1,&'] },
 		);
 
 		await respond(makeReq(), res, next);
@@ -1233,12 +1199,11 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', field: 'owner', value: 'U1' }],
-			['cache-key__tags'],
 			['articles:&owner=,U1,&'],
-			new Map(),
+			['cache-key__tags'],
+			new Map([['articles', null]]),
 		);
 	});
 
@@ -1298,7 +1263,7 @@ describe('respond middleware', () => {
 
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: pins, scopedCachePurged: pins },
+			{ scopedCacheFingerprints: ['a:&b=,1,2,&'], scopedCachePurged: pins },
 		);
 
 		await respond(makeReq(), res, next);
@@ -1328,7 +1293,7 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [] },
 			{
-				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCacheFingerprints: ['articles:&'],
 				scopedCachePurged: [{ collection: 'articles' }],
 			},
 		);

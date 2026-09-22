@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	ScopedCacheFingerprint,
 	ScopedCacheTag,
 	GraphQLParams,
 	GQLScope,
@@ -15,7 +16,10 @@ import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
-import { mergeScopedCacheEpochs } from '../../scoped-cache.js';
+import {
+	mergeScopedCacheEpochs,
+	scopedCacheReadMeta,
+} from '../../scoped-cache.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -36,16 +40,20 @@ export class GraphQLService {
 	schema: SchemaOverview;
 	scope: GQLScope;
 	/**
-	 * Union of cache tags across every read in this GraphQL request — a `/graphql` response is one
-	 * cached entry assembled from many reads, so this aggregate is by design (unlike a per-query read,
-	 * whose tags ride its result via `getMeta()`). Stamped onto the execute() result.
+	 * Union of the cache fingerprints of every read in this GraphQL request — a
+	 * `/graphql` response is one cached entry assembled from many reads, so this
+	 * aggregate is by design (unlike a per-query read, whose fingerprints ride its
+	 * result via `getMeta()`). Stamped onto the execute() result.
+	 *
+	 * Each read's own AND survives the union: the entry dies when a write matches
+	 * any ONE of them whole, which is what "assembled from many reads" means.
 	 */
-	scopedCacheTags: ScopedCacheTag[];
+	scopedCacheFingerprints: ScopedCacheFingerprint[];
 
 	/**
 	 * Unautopurgeable scope tags across every read in this request. Non-empty → the
 	 * whole `/graphql` entry can't be safely cached, so respond.ts skips it (and names
-	 * them in the anomaly). Aggregated like `scopedCacheTags` (one entry, many reads).
+	 * them in the anomaly). Aggregated like the fingerprints (one entry, many reads).
 	 */
 	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
 
@@ -69,7 +77,7 @@ export class GraphQLService {
 		this.knex = options?.knex || getDatabase();
 		this.schema = options.schema;
 		this.scope = options.scope;
-		this.scopedCacheTags = [];
+		this.scopedCacheFingerprints = [];
 		this.scopedCacheUnautopurgeableTags = [];
 		this.scopedCacheEpochs = {};
 	}
@@ -121,11 +129,13 @@ export class GraphQLService {
 			formattedResult.extensions = result['extensions'];
 		}
 
-		return withMeta(formattedResult, {
-			scopedCacheTags: this.scopedCacheTags,
-			scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
-			scopedCacheEpochs: this.scopedCacheEpochs,
-		});
+		return withMeta(formattedResult, scopedCacheReadMeta(
+			this.scopedCacheFingerprints,
+			{
+				scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
+				scopedCacheEpochs: this.scopedCacheEpochs,
+			},
+		));
 	}
 
 	/**
@@ -153,7 +163,10 @@ export class GraphQLService {
 			: await service.readByQuery(query, { stripNonRequested: false });
 
 		const resultMeta = readMeta(result);
-		this.scopedCacheTags.push(...(resultMeta?.scopedCacheTags ?? []));
+
+		this.scopedCacheFingerprints.push(
+			...(resultMeta?.scopedCacheFingerprints ?? []),
+		);
 
 		this.scopedCacheUnautopurgeableTags.push(
 			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
