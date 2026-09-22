@@ -814,8 +814,12 @@ implements AbstractService<Item> {
 
 		// Scope this read for cache purging (see ItemScopedCacheService.readTags);
 		// bounded to this read — it rides the result via `getMeta()`, not a field.
-		const { tags: scopedCacheTags, unautopurgeable: scopedCacheUnautopurgeableTags }
-			= await this.scopedCache.readTags({
+		const {
+			tags: scopedCacheTags,
+			unautopurgeable: scopedCacheUnautopurgeableTags,
+			boundFields: scopedCacheBoundFields,
+			ownerPaths: scopedCacheOwnerPaths,
+		} = await this.scopedCache.readTags({
 				ast,
 				plan: scopedCachePlan,
 				updatedQuery,
@@ -857,6 +861,8 @@ implements AbstractService<Item> {
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
+			scopedCacheBoundFields: Object.fromEntries(scopedCacheBoundFields),
+			scopedCacheOwnerPaths: Object.fromEntries(scopedCacheOwnerPaths),
 			// A `scopeTo` names a collection the pre-query capture could not know
 			// about, and hands over the counter its own dependent read took.
 			scopedCacheEpochs: foldHandedOverScopedCacheEpochs(

@@ -19,6 +19,7 @@ import {
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
+	scopedCacheFingerprintsByCollection,
 	scopedCacheTagLabel,
 	tagScopedCacheKeys,
 	type ScopedCacheEpochs,
@@ -63,6 +64,20 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const readTags: ScopedCacheTag[] | undefined =
 		res.locals['scopedCacheTags'] ?? payloadMeta?.scopedCacheTags;
+
+	// The fields each of those collections is bound to, and the path its index is
+	// bucketed by. Composed with the tags below into one fingerprint per collection
+	// — the form the purge matches a written row against. A collection missing from
+	// either is bound to all of its fields and filed in the bare bucket.
+	const readBoundFields: Record<string, string[]> =
+		res.locals['scopedCacheBoundFields']
+		?? payloadMeta?.scopedCacheBoundFields
+		?? {};
+
+	const readOwnerPaths: Record<string, string | null> =
+		res.locals['scopedCacheOwnerPaths']
+		?? payloadMeta?.scopedCacheOwnerPaths
+		?? {};
 
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
 	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
@@ -125,6 +140,30 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const scopedCacheTags = readTags?.length && countsWholeCollection === false
 		? readTags
 		: [...(readTags ?? []), ...collectionFallbackTags];
+
+	// A response depending on the WHOLE collection is bound to nothing there, so its
+	// fingerprint has to carry no pair and no field — any write drops the entry. The
+	// bare tag alone says that, but composing it beside this read's pins would keep
+	// them and hold a stale count, so the pins go first.
+	const boundByCollection = new Map(Object.entries(readBoundFields));
+
+	const fingerprintTags = countsWholeCollection && req.collection
+		? [
+			...scopedCacheTags.filter(({ collection }) => {
+				return collection !== req.collection;
+			}),
+			...collectionFallbackTags,
+		]
+		: scopedCacheTags;
+
+	if (countsWholeCollection && req.collection) {
+		boundByCollection.delete(req.collection);
+	}
+
+	const scopedCacheFingerprints = scopedCacheFingerprintsByCollection(
+		fingerprintTags,
+		boundByCollection,
+	);
 
 	// The tags a fill of this request would be indexed under, in the form the
 	// entry-tags table records — what the audit diffs against the tags the entry
@@ -235,6 +274,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				env['CACHE_TAGS_HEADER']
 					? [cacheTagsKey(redisKey)]
 					: [],
+				scopedCacheFingerprints,
+				new Map(Object.entries(readOwnerPaths)),
 			);
 
 			// Handed over together rather than awaited in turn: node-redis corks its

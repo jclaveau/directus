@@ -1,26 +1,7 @@
-import type { ScopedCacheTag } from '@directus/types';
+import type { ScopedCacheFingerprint, ScopedCacheTag } from '@directus/types';
 import { canonicalScopedCacheValue } from './tags.js';
 
-/**
- * One collection's whole dependency, in one token.
- *
- * A read used to carry a SET of tags and die on ANY match, so every extra pin was
- * an extra way to be evicted: a read bounded to `owner=alpha AND method=spaced`
- * was dropped by every write carrying `method=spaced`, whoever owned it. A
- * fingerprint carries the same pins as ONE tag, so a write purges it only when the
- * row it wrote satisfies the read's whole bound.
- *
- * ```
- * 'student_time_slot:&course_part=,4821,&fields=,course_part,day,id,&user=,A,&'
- *  └ collection ───┘ └ pair ──────────┘ └ the fields the read is bound to ──┘
- * ```
- *
- * The grammar is the URL one: `&` separates pairs (AND), and a pair's values are
- * comma-wrapped (OR), the form a repeated query key takes. Keys are sorted and
- * values deduped and sorted, so one bound has one spelling whichever order the
- * pinners produced it in.
- */
-export type ScopedCacheFingerprint = string;
+export type { ScopedCacheFingerprint } from '@directus/types';
 
 /** The pair naming what the read selected, sorted or filtered on. */
 export const SCOPED_CACHE_FINGERPRINT_FIELDS = 'fields';

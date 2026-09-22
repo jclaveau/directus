@@ -17,6 +17,17 @@ export interface ScopedCacheTag {
 	type?: Type | undefined;
 }
 
+/**
+ * One collection's whole dependency, in one token — `<collection>:&<key>=,<v>,&…`.
+ *
+ * A set of tags dies on ANY match, so every extra pin is an extra way to be
+ * evicted: a read bounded to `owner=alpha AND method=spaced` is dropped by every
+ * write carrying `method=spaced`, whoever owns it. A fingerprint carries the same
+ * pins as ONE token, so a write purges it only when the row it wrote satisfies the
+ * whole bound. The grammar and the matcher live in the api's `scoped-cache`.
+ */
+export type ScopedCacheFingerprint = string;
+
 /** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
 type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
 
@@ -215,6 +226,23 @@ export interface ReadMeta {
 	 * lists them as the `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
 	 */
 	scopedCacheUnautopurgeableTags?: ScopedCacheTag[];
+
+	/**
+	 * Every field each collection this read touched is bound to: what the read
+	 * selected of it, sorted on and filtered by. Folded into that collection's
+	 * `ScopedCacheFingerprint` at fill time, so a write touching none of them
+	 * leaves the entry alone whichever slice it landed in.
+	 *
+	 * A collection missing here is bound to all of its fields — the fail-safe
+	 * direction is the over-purge, never the stale hit.
+	 */
+	scopedCacheBoundFields?: Record<string, string[]>;
+
+	/**
+	 * The path each of those collections' index sets is bucketed by, so the fill
+	 * files a fingerprint where the writes that can match it will look.
+	 */
+	scopedCacheOwnerPaths?: Record<string, string | null>;
 
 	/**
 	 * The purge counters of the collections this read depends on, captured BEFORE its

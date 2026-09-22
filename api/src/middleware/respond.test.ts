@@ -66,6 +66,9 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
+		// Real for the same reason: composing the tags into fingerprints is pure,
+		// and a stand-in would agree with the assertions rather than the grammar.
+		scopedCacheFingerprintsByCollection: actual.scopedCacheFingerprintsByCollection,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -238,7 +241,7 @@ describe('respond middleware', () => {
 		// #205 scoped-cache tagging fires with the request's tags
 		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [
 			{ collection: 'articles' },
-		], []);
+		], [], ['articles:&'], new Map());
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
@@ -405,6 +408,8 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+			['articles:&'],
+			new Map(),
 		);
 	});
 
@@ -433,6 +438,8 @@ describe('respond middleware', () => {
 				{ collection: 'student' },
 			],
 			[],
+			['directus_users:&id=,u1,&', 'student:&'],
+			new Map(),
 		);
 	});
 
@@ -518,6 +525,10 @@ describe('respond middleware', () => {
 				{ collection: 'articles' },
 			],
 			[],
+			// The count drops the filter, so the fingerprint drops the pins with it:
+			// bound to nothing, any write to the collection moves the number.
+			['articles:&'],
+			new Map(),
 		);
 	});
 
@@ -542,6 +553,8 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', field: 'id', value: 1, type: 'integer' }],
 			[],
+			['articles:&id=,1,&'],
+			new Map(),
 		);
 	});
 
@@ -573,6 +586,10 @@ describe('respond middleware', () => {
 				{ collection: 'articles' },
 			],
 			[],
+			// The count drops the filter, so the fingerprint drops the pins with it:
+			// bound to nothing, any write to the collection moves the number.
+			['articles:&'],
+			new Map(),
 		);
 	});
 
@@ -589,6 +606,8 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+			['articles:&'],
+			new Map(),
 		);
 	});
 
@@ -654,7 +673,7 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], [], [], new Map());
 	});
 
 	test(oneLine`
@@ -1127,6 +1146,8 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+			['articles:&'],
+			new Map(),
 		);
 
 		expect(res.status).toHaveBeenCalledWith(204);
@@ -1213,6 +1234,8 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', field: 'owner', value: 'U1' }],
 			['cache-key__tags'],
+			['articles:&owner=,U1,&'],
+			new Map(),
 		);
 	});
 

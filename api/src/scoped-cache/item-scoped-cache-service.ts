@@ -40,6 +40,7 @@ import {
 	scopedCacheFingerprintFromTags,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
+import { scopedCacheOwnerPath } from './fingerprint-index.js';
 import {
 	purgeScopedCache,
 } from './purge.js';
@@ -750,6 +751,8 @@ export class ItemScopedCacheService {
 	async readTags(inputs: ScopedCacheReadInputs): Promise<{
 		tags: ScopedCacheTag[];
 		unautopurgeable: ScopedCacheTag[];
+		boundFields: Map<CollectionKey, string[]>;
+		ownerPaths: Map<CollectionKey, string | null>;
 	}> {
 		const {
 			ast,
@@ -763,7 +766,12 @@ export class ItemScopedCacheService {
 		let unautopurgeable: ScopedCacheTag[] = [];
 
 		if (!scopedCachePurgeEnabled()) {
-			return { tags, unautopurgeable };
+			return {
+				tags,
+				unautopurgeable,
+				boundFields: new Map(),
+				ownerPaths: new Map(),
+			};
 		}
 
 		const {
@@ -1409,6 +1417,22 @@ export class ItemScopedCacheService {
 			);
 		});
 
-		return { tags, unautopurgeable };
+		// The fields each collection is bound to, folded into its fingerprint at
+		// fill time. Attached only for a collection whose tags are ALL computed: a
+		// hook's tag comes from enrichment outside the AST, so which fields that
+		// enrichment read is unknown, and a `fields` pair narrower than the truth
+		// would keep an entry a write did change. A collection left out is bound to
+		// all of its fields, which every write touches.
+		const boundFields = plan.fieldsByCollection();
+
+		for (const tag of hookAddedTags.values()) {
+			boundFields.delete(tag.collection);
+		}
+
+		const ownerPaths = new Map(tags.map(({ collection }) => {
+			return [collection, scopedCacheOwnerPath(this.schema, collection)];
+		}));
+
+		return { tags, unautopurgeable, boundFields, ownerPaths };
 	}
 }
