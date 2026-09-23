@@ -45,6 +45,8 @@ import {
 	scopedCacheRowIndexKeys,
 } from './fingerprint-index.js';
 import {
+	scopedCacheFingerprintHolds,
+	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
 	scopedCacheRowIndexGlobs,
 	scopedCacheTagsOfFingerprints,
@@ -640,21 +642,178 @@ async function purgeScopedCacheFingerprintIndex(
 	// about to prune.
 	await bumpScopedCacheEpochs([collection]);
 
+	return purgeScopedCacheIndexWhere(
+		cache,
+		scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
+		// The patterns the rows can drop something under, or `null` to read the sets
+		// whole. A member matching none of them cannot be purged by these rows, so
+		// letting Redis skip it saves sending it; the test still decides.
+		scopedCacheRowIndexGlobs(collection, rowFingerprints),
+		(fingerprint) => {
+			// A fingerprint pinning nothing is what the bare collection tag covers,
+			// so a mutation keeping that tag warm keeps these entries too — the
+			// global reads a write that opted out of the collection tag means to
+			// leave standing.
+			if (
+				includeCollectionTag === false
+				&& Object.keys(fingerprint.pinnedScope).length === 0
+			) {
+				return false;
+			}
+
+			return scopedCacheFingerprintPurgedBy(
+				fingerprint,
+				rowFingerprints,
+				changed,
+			);
+		},
+	);
+}
+
+/**
+ * Drop every entry of a collection that a declared pin could have changed.
+ *
+ * What a hook's own `purgeBy` resolves to, and the one purge driven by no rows: it
+ * holds a pin, not a row, so `scopedCacheFingerprintHolds` is the test rather than
+ * `scopedCacheFingerprintPurgedBy`.
+ *
+ * The sets it reads are the declared pins' own when the pin IS what the index is
+ * split by — the same two a write of those values would read — and every set the
+ * collection owns otherwise, since a pin off the index path says nothing about
+ * which split holds it. No glob narrowing either way: a declared pin matches
+ * entries by what they do NOT pin as much as by what they do, and a pattern can
+ * only select on what is written.
+ */
+async function purgeScopedCacheDeclaredPins(
+	cache: Keyv,
+	collection: string,
+	declared: readonly ScopedCacheFingerprint[],
+	indexPath: string | null,
+): Promise<number> {
+	const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {
+		return fingerprint.pinnedScope[indexPath] !== undefined;
+	});
+
+	const indexKeys = pinsIndexPath
+		? scopedCacheRowIndexKeys(collection, declared, indexPath)
+		: await scopedCacheCollectionIndexKeys(collection);
+
+	return purgeScopedCacheIndexWhere(cache, indexKeys, null, (fingerprint) => {
+		return declared.some((declaredFingerprint) => {
+			// A declared pin naming no field is the bare collection tag, and it keeps
+			// the reach it always had: the reads that could not be narrowed. Read as a
+			// constraint it holds of every entry, which is the collection purge — a
+			// different operation, with its own mode and its own record.
+			if (Object.keys(declaredFingerprint.pinnedScope).length === 0) {
+				return Object.keys(fingerprint.pinnedScope).length === 0;
+			}
+
+			return scopedCacheFingerprintHolds(fingerprint, declaredFingerprint);
+		});
+	});
+}
+
+/**
+ * Purge the tags a mutation could not resolve off the rows it wrote — a hook's own
+ * `purgeBy`, and whatever the `cache.purge` filter added to the list.
+ *
+ * Grouped by the collection each tag names, because a hook is free to declare a tag
+ * on another collection entirely and the index is per collection. Only the
+ * mutation's own collection has a known index path; a foreign one is read whole,
+ * which is what not knowing how it is split costs.
+ */
+async function purgeScopedCacheDeclaredTags(
+	cache: Keyv,
+	collection: string,
+	declaredTags: readonly ScopedCacheTag[],
+	indexPath: string | null,
+): Promise<number> {
+	if (declaredTags.length === 0) {
+		return 0;
+	}
+
+	const declaredByCollection = new Map<string, ScopedCacheFingerprint[]>();
+
+	for (const declaredTag of declaredTags) {
+		const declared = declaredByCollection.get(declaredTag.collection) ?? [];
+
+		declared.push(
+			scopedCacheFingerprintOf(declaredTag.collection, [declaredTag]),
+		);
+
+		declaredByCollection.set(declaredTag.collection, declared);
+	}
+
+	// Before anything is read, and in a call of its own rather than inside the
+	// scans: a purge that is refused still has to leave the counters moved, so a
+	// read in flight declines instead of caching under an index this purge was about
+	// to prune and will prune on retry.
+	await bumpScopedCacheEpochs([...declaredByCollection.keys()]);
+
+	let evicted = 0;
+
+	for (const [declaredCollection, declared] of declaredByCollection) {
+		const declaredIndexPath = declaredCollection === collection
+			? indexPath
+			: null;
+
+		evicted += await purgeScopedCacheDeclaredPins(
+			cache,
+			declaredCollection,
+			declared,
+			declaredIndexPath,
+		);
+	}
+
+	return evicted;
+}
+
+/** Every set one collection's fingerprints are filed in, read off the keyspace. */
+async function scopedCacheCollectionIndexKeys(
+	collection: string,
+): Promise<string[]> {
+	const indexKeys: string[] = [];
+
+	for await (const batch of scanScopedCacheKeys(
+		scopedCacheCollectionIndexGlob(collection),
+	)) {
+		// One at a time rather than spread: a SCAN is free to answer with more than
+		// its COUNT, and a spread long enough throws before the array is touched
+		// (https://github.com/jclaveau/directus/issues/397).
+		for (const indexKey of batch) {
+			indexKeys.push(indexKey);
+		}
+	}
+
+	return indexKeys;
+}
+
+/**
+ * Read a set of index sets, keep the members whose fingerprint `purges` accepts,
+ * and drop the cache entries they name.
+ *
+ * Matched members are SREMed from the set they were found in: nothing else prunes
+ * them, and a purged entry left named by the index would be re-tested by every
+ * later write to that index value for as long as the set lives. A member of a
+ * SECOND set — an entry bounded to a list of index values — is left behind for
+ * its own set's expiry, since finding it would cost a scan of every set to save a
+ * string compare.
+ *
+ * The counter bump is the caller's: what has to precede the reads here is one move
+ * per collection, and only the caller knows which collections it is about to touch.
+ */
+async function purgeScopedCacheIndexWhere(
+	cache: Keyv,
+	indexKeys: readonly string[],
+	globPatterns: readonly string[] | null,
+	purges: (fingerprint: ScopedCacheFingerprint) => boolean,
+): Promise<number> {
 	const redisClient = useRedis();
 	const matchedByIndexKey = new Map<string, Set<string>>();
 	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
 
-	// The patterns the rows can drop something under, or `null` to read the sets
-	// whole. A member matching none of them cannot be purged by these rows, so
-	// letting Redis skip it saves sending it; the test below still decides.
-	const globPatterns = scopedCacheRowIndexGlobs(collection, rowFingerprints);
-
-	for (const indexKey of scopedCacheRowIndexKeys(
-		collection,
-		rowFingerprints,
-		indexPath,
-	)) {
+	for (const indexKey of indexKeys) {
 
 		// A member can match several patterns — one per pair it shares with the
 		// rows — and the passes overlap, so it is tested and SREMed once.
@@ -692,22 +851,7 @@ async function purgeScopedCacheFingerprintIndex(
 					const { fingerprint, key } =
 						parseScopedCacheIndexMember(indexedMember);
 
-					// A fingerprint pinning nothing is what the bare collection tag
-					// covers, so a mutation keeping that tag warm keeps these
-					// entries too — the global reads a write that opted out of the
-					// collection tag means to leave standing.
-					if (
-						includeCollectionTag === false
-						&& Object.keys(fingerprint.pinnedScope).length === 0
-					) {
-						continue;
-					}
-
-					if (!scopedCacheFingerprintPurgedBy(
-						fingerprint,
-						rowFingerprints,
-						changed,
-					)) {
+					if (purges(fingerprint) === false) {
 						continue;
 					}
 
@@ -728,29 +872,14 @@ async function purgeScopedCacheFingerprintIndex(
 		return 0;
 	}
 
-	// The entries apart from their sidecars, the way the tag sweep counts them: a
-	// sidecar is recognisable by its base key being matched beside it, and counting
-	// both would report every entry twice.
-	const presentKeys = new Set(matchedKeys);
-
-	const entries = matchedKeys.filter((key) => {
-		const sidecarOwner = cacheSidecarOwner(key);
-
-		return sidecarOwner === null || presentKeys.has(sidecarOwner) === false;
-	});
-
-	const entryKeys = new Set(entries);
-
 	const [evicted] = await Promise.all([
-		dropCacheEntries(cache, entries),
-		dropCacheEntries(cache, matchedKeys.filter((key) => {
-			return entryKeys.has(key) === false;
-		})),
+		dropSweptScopedCacheEntries(cache, matchedKeys),
 		pruneScopedCacheIndex(redisClient, matchedByIndexKey),
 	]);
 
 	return evicted;
 }
+
 
 async function pruneScopedCacheIndex(
 	redisClient: Redis,
@@ -1581,7 +1710,12 @@ export async function purgeScopedCache(
 						options.indexPath ?? null,
 						options.includeCollectionTag !== false,
 					),
-				purgeScopedCacheTagKeys(cache, tagKeys),
+				purgeScopedCacheDeclaredTags(
+					cache,
+					collection,
+					sweptScopedCacheTags,
+					options.indexPath ?? null,
+				),
 			]);
 
 			evicted = bound + swept;

@@ -63,6 +63,14 @@ const sscan = vi.fn(async (key: string, _cursor: string) => {
 	return ['0', members[key] ?? []];
 });
 
+// A purge holding no rows reads the collection's sets off the keyspace, so the
+// scan answers with the sets the case declared under that collection.
+const scan = vi.fn(async (_cursor: string, _match: string, pattern: string) => {
+	const prefix = pattern.slice(0, -1);
+
+	return ['0', Object.keys(members).filter((key) => key.startsWith(prefix))];
+});
+
 const evalScript = vi.fn(async (
 	_script: string,
 	numKeys: number,
@@ -83,6 +91,7 @@ beforeEach(() => {
 
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
+		scan,
 		eval: evalScript,
 		pipeline: () => {
 			const chain: any = {
@@ -282,9 +291,13 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
-		still sweeps a tag a hook declared: it names a slice, not the rows the
-		mutation wrote, and nothing read back can resolve it
+		still purges what a hook declared: it names a pin, not the rows the mutation
+		wrote, and nothing read back can resolve it
 	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:other:': ['other:&x=,y,&|ns:entry-x'],
+		};
+
 		await purgeScopedCache(
 			cache,
 			'slot',
@@ -307,13 +320,53 @@ describe('a purge shown the rows it wrote', () => {
 			},
 		);
 
-		expect(swept).toEqual([['ns:scoped-cache-index:tag:other:x=y']]);
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-x');
 	});
 
 	it(oneLine`
-		sweeps its tags whole when it is shown no rows, which is what a purge that
-		knows none can do
+		leaves an entry bound to another value of the field a hook declared: no row
+		carrying that pin is in it
 	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:other:': [
+				'other:&x=,z,&|ns:entry-z',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'slot',
+			[{ collection: 'other', field: 'x', value: 'y' }],
+			null,
+			{
+				rowFingerprints: [{
+					collection: 'slot',
+					pinnedScope: { owner: ['alpha'] },
+					viewFields: [],
+				}],
+				changed: null,
+				indexPath: 'owner',
+				sweepScopedCacheTags: [
+					{ collection: 'other', field: 'x', value: 'y' },
+				],
+			},
+		);
+
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-z');
+	});
+
+	it(oneLine`
+		purges by the pins it holds when it is shown no rows, which is what a purge
+		that knows none can do: the declared pin, and the bare tag's own reach
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&id=,1,&owner=,alpha,&|ns:entry-one',
+				'slot:&id=,2,&owner=,alpha,&|ns:entry-two',
+			],
+		};
+
 		await purgeScopedCache(
 			cache,
 			'slot',
@@ -321,11 +374,11 @@ describe('a purge shown the rows it wrote', () => {
 			null,
 		);
 
-		expect(sscan).not.toHaveBeenCalled();
-
-		expect(swept).toEqual([[
-			'ns:scoped-cache-index:tag:slot',
-			'ns:scoped-cache-index:tag:slot:id=1',
-		]]);
+		// The bare tag it carries covers the read that could not be narrowed, and
+		// the declared pin covers the entry bound to that value — the entry bound to
+		// another value of the same field stands.
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bare');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-two');
 	});
 });

@@ -379,6 +379,32 @@ export function scopedCacheFingerprintsByCollection(
 }
 
 /**
+ * Whether a row carrying every pin `declared` names could be inside `entry`.
+ *
+ * The question a purge asks when it holds a pin rather than a row — a hook's own
+ * `purgeBy`, which says "anything bound to tenant=acme" and knows nothing of what
+ * was written. It is the row test read the other way round: there, the row has to
+ * answer every pin the entry carries; here, the entry only has to leave room for
+ * the row.
+ *
+ * So an entry bound to other values at that field stands — no row of this pin is
+ * in it — while an entry that never pinned the field goes, since nothing about its
+ * query case rules the row out. Pins the entry carries at OTHER fields say nothing
+ * either way: the declared pin is silent about them, and silence is not exclusion.
+ */
+export function scopedCacheFingerprintHolds(
+	entry: ScopedCacheFingerprint,
+	declared: ScopedCacheFingerprint,
+): boolean {
+	return Object.entries(declared.pinnedScope).every(([field, declaredTokens]) => {
+		const boundTokens = entry.pinnedScope[field];
+
+		return boundTokens === undefined
+			|| boundTokens.some((token) => declaredTokens.includes(token));
+	});
+}
+
+/**
  * Whether a write purges a read: the whole write-side rule, in one call.
  *
  * Two tests, both of which have to hold.
