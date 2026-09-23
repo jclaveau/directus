@@ -3,7 +3,7 @@ import type {
 	Filter,
 	Item,
 	SchemaOverview,
-	ScopedCacheTag,
+	ScopedCacheCollectionPin,
 } from '@directus/types';
 import { toArray } from '@directus/utils';
 import {
@@ -25,9 +25,9 @@ import {
 	type ScopedCacheFilterKeying,
 } from './paths.js';
 import {
-	pinnedScopedCacheTagsFromKeyedFilters,
-	pinnedScopedCacheTagsFromM2oParents,
-	pinnedScopedCacheTagsFromO2mChildren,
+	scopedCachePinsFromKeyedFilters,
+	scopedCachePinsFromM2oParents,
+	scopedCachePinsFromO2mChildren,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheFieldNamesByAliasedPath,
 	scopedCacheNestedRowBindings,
@@ -35,25 +35,26 @@ import {
 	scopedCacheRowsAtPathEnd,
 	scopedCacheUnaliasedPath,
 	type ScopedCacheSortDeferral,
-} from './read-tags.js';
+} from './read-pins.js';
 
 const NO_FIELD_MAP: FieldMap = { read: new Map(), other: new Map() };
 
 /**
- * What one read's tags are assembled from, in the two halves the query splits it
- * into: what the AST alone decides, and what only the returned rows can say.
+ * What one read's fingerprints are assembled from, in the two halves the query
+ * splits it into: what the AST alone decides, and what only the returned rows can
+ * say.
  *
  * The split is why this is an object rather than one call. The pins that read rows
  * have to be filled from INSIDE `run-ast` — it is the only place the temporary
  * primary keys still exist — while everything else must be derived before it,
  * because `run-ast` returns early on an empty result and never reaches that
- * callback. Deriving the field map there too would drop every collection's tag on
- * exactly the reads that returned nothing.
+ * callback. Deriving the field map there too would bare every collection's
+ * fingerprint on exactly the reads that returned nothing.
  */
 export class ScopedCacheReadPlan {
 	readonly fieldMap: FieldMap;
 	readonly filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
-	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheTag[]>;
+	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheCollectionPin[]>;
 	readonly beyondNestedRows: Set<CollectionKey>;
 	// The field behind each nested path, which the field map files under its alias.
 	readonly fieldNames: ReadonlyMap<string, string>;
@@ -66,8 +67,8 @@ export class ScopedCacheReadPlan {
 	// What bounds each node's rows, per collection — its filter and its cases.
 	readonly nodeBounds: ReadonlyMap<CollectionKey, Array<Filter | null>>;
 
-	m2oParentPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
-	o2mChildPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
+	m2oParentPins: Map<CollectionKey, ScopedCacheCollectionPin[]> = new Map();
+	o2mChildPins: Map<CollectionKey, ScopedCacheCollectionPin[]> = new Map();
 	readonly o2mConflicted = new Set<CollectionKey>();
 
 	constructor(
@@ -92,7 +93,7 @@ export class ScopedCacheReadPlan {
 			? scopedCacheFilterKeyingByCollection(schema, ast)
 			: new Map();
 
-		this.keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
+		this.keyedFilterPins = scopedCachePinsFromKeyedFilters(
 			schema,
 			collection,
 			this.filterKeying,
@@ -113,7 +114,7 @@ export class ScopedCacheReadPlan {
 
 		// An injected ancestor is nested to pin by key, and the case gating its node
 		// is decided on the row that carries the fk — a write to that row purges its
-		// own tags — so a partial `whenCase` alone must not bare it. A filter, sort
+		// own slices — so a partial `whenCase` alone must not bare it. A filter, sort
 		// or group reaching the ancestor still does: those depend on its rows beyond
 		// the nested ones, whichever way it came to be nested.
 		const injectedAncestors = new Set<CollectionKey>();
@@ -149,7 +150,7 @@ export class ScopedCacheReadPlan {
 	 * `run-ast` injects every level's primary key for the nesting to work and strips
 	 * it again before the response, so this is the one moment a parent row can be
 	 * pinned BY that key. Not called for an empty result, which needs no pin: with
-	 * no row nested, the bare tag is already what each collection deserves.
+	 * no row nested, the bare fingerprint is already what each collection deserves.
 	 */
 	pinFromRows(rows: Item | Item[]): void {
 		if (!scopedCachePurgeEnabled()) {
@@ -158,7 +159,7 @@ export class ScopedCacheReadPlan {
 
 		this.markSortsCutByALimit(toArray(rows));
 
-		this.m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
+		this.m2oParentPins = scopedCachePinsFromM2oParents(
 			this.schema,
 			this.collection,
 			this.fieldMap,
@@ -166,7 +167,7 @@ export class ScopedCacheReadPlan {
 			this.fieldNames,
 		);
 
-		this.o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
+		this.o2mChildPins = scopedCachePinsFromO2mChildren(
 			this.schema,
 			this.collection,
 			this.fieldMap,
@@ -269,9 +270,9 @@ export class ScopedCacheReadPlan {
 
 	/**
 	 * The collections whose purge counters this read has to capture: the ones its
-	 * tags will name. Both are known before the query — the field map is built off
-	 * the AST and the keying off the filter — which is what lets the capture predate
-	 * any purge racing the read.
+	 * fingerprints will name. Both are known before the query — the field map is
+	 * built off the AST and the keying off the filter — which is what lets the
+	 * capture predate any purge racing the read.
 	 */
 	collectionsToGuard(): string[] {
 		return [

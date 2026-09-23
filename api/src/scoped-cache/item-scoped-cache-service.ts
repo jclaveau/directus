@@ -8,7 +8,7 @@ import type {
 	ScopedCacheFingerprint,
 	ScopedCachePath,
 	ScopedCacheScopePin,
-	ScopedCacheTag,
+	ScopedCacheCollectionPin,
 	SchemaOverview,
 } from '@directus/types';
 import type Keyv from 'keyv';
@@ -52,17 +52,17 @@ import {
 } from './purge.js';
 import {
 	pinnedScopedCacheQueryCasesFromFilter,
-	pinnedScopedCacheTagsFromFilter,
+	scopedCachePinsFromFilter,
 	scopedCacheNestedCollections,
 	scopedCachePathReversesChain,
-	scopedCacheTagsOfQueryCases,
-} from './read-tags.js';
+	scopedCachePinsOfQueryCases,
+} from './read-pins.js';
 import {
 	scopedCacheMaxPinsPerCollection,
-	scopedCacheTagKey,
-	scopedCacheTagsFromRows,
+	scopedCachePinKey,
+	scopedCachePinsFromRows,
 	type FieldTypesByField,
-} from './tags.js';
+} from './pins.js';
 
 
 export type ScopedCacheReadInputs = {
@@ -127,9 +127,10 @@ export class ItemScopedCacheService {
 			this.fields.filter((field) => !field.includes('.'));
 	}
 
-	// The multi-hop paths this collection pins by: explicit dotted entries PLUS paths
-	// auto-derived from local scope fields (see `composeScopedCachePaths`). Each is
-	// re-resolved so a to-many/unknown hop drops it → bare tag both sides. Deduped.
+	// The multi-hop paths this collection pins by: explicit dotted entries PLUS
+	// paths auto-derived from local scope fields (see `composeScopedCachePaths`).
+	// Each is re-resolved so a to-many/unknown hop drops it → bare fingerprint both
+	// sides. Deduped.
 	get paths(): ScopedCachePath[] {
 		if (this.pathsMemo) {
 			return this.pathsMemo;
@@ -301,7 +302,7 @@ export class ItemScopedCacheService {
 		// This ran behind a "no scope fields declared" early return until the key axis
 		// made it run for every mutation, so it now meets collections absent from the
 		// schema. Such a collection resolves no key and no scope field either, and the
-		// bare collection tag the purge always carries still drops its reads.
+		// bare collection fingerprint the purge always carries still drops its reads.
 		if (primaryKeyField === undefined) {
 			return { canResolveSlicesFromRows: true, rows: [] };
 		}
@@ -381,7 +382,7 @@ export class ItemScopedCacheService {
 				// and a row that somehow lost one is better pinned by the rest of
 				// itself than dropped — the fingerprint then matches MORE reads,
 				// never fewer.
-				const rowPins = scopedCacheTagsFromRows(
+				const rowPins = scopedCachePinsFromRows(
 					this.collection,
 					pinnableFields,
 					[row],
@@ -510,7 +511,7 @@ export class ItemScopedCacheService {
 	/**
 	 * The dotted scope paths that still resolve to a terminal value. A path whose
 	 * chain has gained a to-many hop resolves to nothing and pins nothing, which is
-	 * what makes it drop to the bare collection tag on both sides.
+	 * what makes it drop to the bare collection fingerprint on both sides.
 	 */
 	private resolvablePathFields(): string[] {
 		return this.paths
@@ -570,8 +571,8 @@ export class ItemScopedCacheService {
 
 	/**
 	 * Ownership ancestors to nest into the read so the scope pins them by key rather
-	 * than by the bare tag a `fields: ['*']` read would over-purge on. Stripped from
-	 * the response again once the tags are built.
+	 * than by the bare fingerprint a `fields: ['*']` read would over-purge on.
+	 * Stripped from the response again once the tags are built.
 	 */
 	ownershipInjections(query: Query): ScopedCacheOwnershipInjection[] {
 		if (!scopedCachePurgeEnabled()) {
@@ -618,11 +619,11 @@ export class ItemScopedCacheService {
 		collector?: Pick<ScopedCacheCollector, 'purgeFingerprints'>,
 		changedCollections: string[] = [],
 		{
-			// `false` leaves this collection's bare tag warm: a filter-cancel wrote
-			// nothing, so its global reads stay; a mutation opting out through
-			// `purgeCollectionTag` keeps them on purpose and drops the rows' own
-			// slices.
-			includeCollectionTag = true,
+			// `false` leaves this collection's bare fingerprint warm: a
+			// filter-cancel wrote nothing, so its global reads stay; a mutation
+			// opting out through `purgeBareFingerprint` keeps them on purpose and
+			// drops the rows' own slices.
+			includeBareFingerprint = true,
 			// The rows the mutation wrote, as they were AND as they became, with the
 			// fields it rewrote. Given them, an entry of this collection is dropped
 			// only when one of those rows satisfies its whole fingerprint — which is
@@ -631,7 +632,7 @@ export class ItemScopedCacheService {
 			// cascade), every entry the tags reach is dropped as before.
 			rows,
 		}: {
-			includeCollectionTag?: boolean;
+			includeBareFingerprint?: boolean;
 			rows?: ScopedCacheMutatedWrite | undefined;
 		} = {},
 	): Promise<ScopedCacheFingerprint[] | null> {
@@ -679,11 +680,11 @@ export class ItemScopedCacheService {
 		const declared = { declaredFingerprints: hookFingerprints };
 
 		if (ownFingerprints !== null && otherCollections.length === 0) {
-			// Spelled twice rather than passing `{ includeCollectionTag }`: the option
+			// Spelled twice rather than passing `{ includeBareFingerprint }`: the option
 			// object is what a caller reads as "this purge is doing something unusual",
 			// and every assertion on the common call would have to carry a default it
 			// never asked for.
-			if (includeCollectionTag) {
+			if (includeBareFingerprint) {
 				return purgeScopedCache(
 					cache,
 					this.collection,
@@ -698,7 +699,7 @@ export class ItemScopedCacheService {
 				this.collection,
 				ownFingerprints,
 				context,
-				{ ...boundToRows, ...declared, includeCollectionTag: false },
+				{ ...boundToRows, ...declared, includeBareFingerprint: false },
 			);
 		}
 
@@ -716,19 +717,19 @@ export class ItemScopedCacheService {
 				this.collection,
 				ownFingerprints,
 				context,
-				includeCollectionTag
+				includeBareFingerprint
 					? { ...boundToRows, ...declared, scopedCachePurgeId }
 					: {
 						...boundToRows,
 						...declared,
-						includeCollectionTag: false,
+						includeBareFingerprint: false,
 						scopedCachePurgeId,
 					},
 			));
 		}
 		else {
 			// A `null` list means this collection's own slices are unresolvable →
-			// coarse whole-collection purge (bare tag + every slice).
+			// coarse whole-collection purge (bare fingerprint + every slice).
 			purgedFingerprintSets.push(await purgeScopedCache(
 				cache,
 				this.collection,
@@ -739,23 +740,25 @@ export class ItemScopedCacheService {
 
 			// What a hook declared via `context.scopedCache` is often for OTHER
 			// collections the coarse pass never reaches, so purge it too — but with
-			// `includeCollectionTag: false`, since the coarse pass already owns this
-			// collection's bare tag (else it's purged twice and doubled in the header).
+			// `includeBareFingerprint: false`, since the coarse pass already owns
+			// this collection's bare fingerprint (else it's purged twice and doubled
+			// in the header).
 			if (hookFingerprints.length > 0) {
 				purgedFingerprintSets.push(await purgeScopedCache(
 					cache,
 					this.collection,
 					[],
 					context,
-					{ ...declared, includeCollectionTag: false, scopedCachePurgeId },
+					{ ...declared, includeBareFingerprint: false, scopedCachePurgeId },
 				));
 			}
 		}
 
 		// A collection the database changed under this mutation. Which of its slices
-		// moved is unresolvable — those rows were never read — and its bare tag indexes
-		// none of them (a read bounded to one value is filed under that slice alone), so
-		// each takes the collection-wide purge rather than a tag that cannot reach it.
+		// moved is unresolvable — those rows were never read — and its bare
+		// fingerprint indexes none of them (a read bounded to one value is filed
+		// under that slice alone), so each takes the collection-wide purge rather
+		// than a tag that cannot reach it.
 		purgedFingerprintSets.push(...await Promise.all(
 			otherCollections.map((changedCollection) => {
 				return purgeScopedCache(
@@ -778,7 +781,7 @@ export class ItemScopedCacheService {
 	/**
 	 * The scoped-cache tags this read depends on. The root collection gets value
 	 * slices only when the query filter *bounds* it to those values
-	 * (`pinnedScopedCacheTagsFromFilter`), so one owner's/partition's later write
+	 * (`scopedCachePinsFromFilter`), so one owner's/partition's later write
 	 * drops only their entries. An unbounded root (no scope-field filter — e.g. an
 	 * admin list) and every other touched collection fall back to a bare collection
 	 * tag, so any write to them invalidates the read (a value-slice tag would miss
@@ -800,8 +803,8 @@ export class ItemScopedCacheService {
 			collector: scopedCacheCollector,
 		} = inputs;
 
-		let tags: ScopedCacheTag[] = [];
-		let unautopurgeableTags: ScopedCacheTag[] = [];
+		let readPins: ScopedCacheCollectionPin[] = [];
+		let unautopurgeablePins: ScopedCacheCollectionPin[] = [];
 
 		if (!scopedCachePurgeEnabled()) {
 			return { fingerprints: [], unautopurgeable: [] };
@@ -825,7 +828,7 @@ export class ItemScopedCacheService {
 		// rows the root filter doesn't bound — a parent/child can belong to any
 		// slice — so a write to another slice would leave this read stale. Detect
 		// it (the root collection at more than one field-map path) and fall back to
-		// the bare collection tag. It guards the implicit primary-key axis too:
+		// the bare collection pin. It guards the implicit primary-key axis too:
 		// `readOne(1, { fields: ['*', 'children.*'] })` embeds rows whose own keys
 		// the `<pk>._eq 1` filter never bounded.
 		const rootPaths = new Set<string>();
@@ -846,8 +849,8 @@ export class ItemScopedCacheService {
 		// unions an `_or`'s slices when every branch binds a pinnable field — same
 		// field or different ones (the multi-policy case) — else falls back to bare.
 		//
-		// Kept as query cases as well as tags: the tags say which slices the read
-		// sits in, and the query cases say which of them had to hold TOGETHER — an
+		// Kept as query cases as well as pins: the pins say which slices the read sits
+		// in, and the query cases say which of them had to hold TOGETHER — an
 		// `_and` of two fields is one query case of two pins, an `_or` of them is
 		// two query cases.
 		const rootScopedCacheQueryCases = rootPaths.size > 1
@@ -862,15 +865,15 @@ export class ItemScopedCacheService {
 				this.schema.collections[this.collection]?.primary,
 			);
 
-		const rootScopedCacheTags =
-			scopedCacheTagsOfQueryCases(rootScopedCacheQueryCases);
+		const rootScopedCachePins =
+			scopedCachePinsOfQueryCases(rootScopedCacheQueryCases);
 
 		// A filter reaching a collection only through an operator on the
 		// relational key itself (`{ rel: { _gt: X } }`) leaves it out of the
 		// field map: `flattenFilter` stops at the `_`-prefixed key, so the path
 		// never reaches the related context. The join is real either way, so the
 		// collections come from the keying too — whether it named keys there or
-		// not. Without this such a read carries NO tag for a table it joins,
+		// not. Without this such a read carries NO pin for a table it joins,
 		// and no write to that table can drop it.
 		const taggedCollections = new Set([
 			...collectionsInFieldMap(fieldMap),
@@ -916,7 +919,7 @@ export class ItemScopedCacheService {
 		// key never named.
 		const rootKeyPins = rootPaths.size > 1 || rootPrimary === undefined
 			? []
-			: pinnedScopedCacheTagsFromFilter(
+			: scopedCachePinsFromFilter(
 				this.collection,
 				[],
 				effectiveFilter,
@@ -995,7 +998,7 @@ export class ItemScopedCacheService {
 		// A filter that keyed the collection somewhere ELSE cannot stand in: its keys
 		// name rows reached by a hop this collection never takes, which is the
 		// wrong-scope-value stale hit `cache-ancestor-slice-wrong-value` forbids.
-		const sliceTagsFor = (collection: string): ScopedCacheTag[] => {
+		const slicePinsFor = (collection: string): ScopedCacheCollectionPin[] => {
 			if (collection === this.collection) {
 				return [];
 			}
@@ -1068,7 +1071,7 @@ export class ItemScopedCacheService {
 						: undefined;
 				})();
 
-				const queryCase = new Map<string, ScopedCacheTag>();
+				const queryCase = new Map<string, ScopedCacheCollectionPin>();
 				let everyPathBound = true;
 
 				// By field, not alias: a filter names fields, and so do the paths the
@@ -1081,7 +1084,7 @@ export class ItemScopedCacheService {
 						? {}
 						: { [prefixed]: relatedPk };
 
-					const tags = pinnedScopedCacheTagsFromFilter(
+					const pathPins = scopedCachePinsFromFilter(
 						this.collection,
 						[],
 						effectiveFilter,
@@ -1093,14 +1096,14 @@ export class ItemScopedCacheService {
 						}],
 					);
 
-					if (tags.length === 0) {
+					if (pathPins.length === 0) {
 						everyPathBound = false;
 						break;
 					}
 
-					for (const { value } of tags) {
+					for (const { value } of pathPins) {
 						const sliced = { collection, field: slice.field, value, type };
-						queryCase.set(scopedCacheTagKey(sliced), sliced);
+						queryCase.set(scopedCachePinKey(sliced), sliced);
 					}
 				}
 
@@ -1126,7 +1129,7 @@ export class ItemScopedCacheService {
 		// a row entering or leaving the slice is a write that emits it. It names the
 		// NESTED rows only; a filter, sort or group reaching the collection depends
 		// on rows beyond them, which the caller settles first.
-		const nodeBoundTagsFor = (collection: string): ScopedCacheTag[] => {
+		const nodeBoundPinsFor = (collection: string): ScopedCacheCollectionPin[] => {
 			const bounds = plan.nodeBounds.get(collection) ?? [];
 
 			if (collection === this.collection || bounds.length === 0) {
@@ -1134,12 +1137,12 @@ export class ItemScopedCacheService {
 			}
 
 			const related = relatedServiceOf(collection);
-			const queryCase = new Map<string, ScopedCacheTag>();
+			const queryCase = new Map<string, ScopedCacheCollectionPin>();
 
 			for (const nodeBound of bounds) {
-				const nodeTags = nodeBound === null
+				const nodePins = nodeBound === null
 					? []
-					: pinnedScopedCacheTagsFromFilter(
+					: scopedCachePinsFromFilter(
 						collection,
 						related.flatFields,
 						nodeBound,
@@ -1149,12 +1152,12 @@ export class ItemScopedCacheService {
 						this.schema.collections[collection]?.primary,
 					);
 
-				if (nodeTags.length === 0) {
+				if (nodePins.length === 0) {
 					return [];
 				}
 
-				for (const tag of nodeTags) {
-					queryCase.set(scopedCacheTagKey(tag), tag);
+				for (const pin of nodePins) {
+					queryCase.set(scopedCachePinKey(pin), pin);
 				}
 			}
 
@@ -1164,34 +1167,34 @@ export class ItemScopedCacheService {
 		};
 
 		// The nodes' slice names the nested rows and rides beside the pins a
-		// filter named; short of one, the bare tag stands for both.
+		// filter named; short of one, the bare pin stands for both.
 		const pushNodeBoundOrBare = (
 			collection: string,
-			pins: Map<string, ScopedCacheTag>,
+			pins: Map<string, ScopedCacheCollectionPin>,
 		): void => {
-			const nodeTags = nodeBoundTagsFor(collection);
+			const nodePins = nodeBoundPinsFor(collection);
 
-			if (nodeTags.length === 0) {
-				tags.push({ collection });
+			if (nodePins.length === 0) {
+				readPins.push({ collection });
 				return;
 			}
 
-			for (const tag of nodeTags) {
-				pins.set(scopedCacheTagKey(tag), tag);
+			for (const pin of nodePins) {
+				pins.set(scopedCachePinKey(pin), pin);
 			}
 
-			tags.push(...pins.values());
+			readPins.push(...pins.values());
 		};
 
 		// A slice bounding the whole collection stands alone, ahead of the nodes'.
 		const pushSliceOrBare = (
 			collection: string,
-			pins: Map<string, ScopedCacheTag>,
+			pins: Map<string, ScopedCacheCollectionPin>,
 		): void => {
-			const sliceTags = sliceTagsFor(collection);
+			const slicePins = slicePinsFor(collection);
 
-			if (sliceTags.length > 0) {
-				tags.push(...sliceTags);
+			if (slicePins.length > 0) {
+				readPins.push(...slicePins);
 				return;
 			}
 
@@ -1199,8 +1202,8 @@ export class ItemScopedCacheService {
 		};
 
 		for (const collection of taggedCollections) {
-			if (collection === this.collection && rootScopedCacheTags.length > 0) {
-				tags.push(...rootScopedCacheTags);
+			if (collection === this.collection && rootScopedCachePins.length > 0) {
+				readPins.push(...rootScopedCachePins);
 				continue;
 			}
 
@@ -1209,18 +1212,18 @@ export class ItemScopedCacheService {
 			// that filter named. Both may hold at once — a collection nested AND
 			// filtered depends on the union, since the filter reaches rows the
 			// response never carried and vice versa. Named by neither, it keeps the
-			// bare tag that any write to it drops.
+			// bare pin that any write to it drops.
 			//
-			// Keyed by tag so a slice both sides name is carried once: the tag
+			// Keyed by pin so a slice both sides name is carried once: the pin
 			// index dedups on that key, but the header and its count do not.
-			const pins = new Map<string, ScopedCacheTag>();
+			const pins = new Map<string, ScopedCacheCollectionPin>();
 
 			for (const pin of [
 				...m2oParentPins.get(collection) ?? [],
 				...o2mChildPins.get(collection) ?? [],
 				...keyedFilterPins.get(collection) ?? [],
 			]) {
-				pins.set(scopedCacheTagKey(pin), pin);
+				pins.set(scopedCachePinKey(pin), pin);
 			}
 
 			// Conflicted reverse fks: a branch's M2O/keyed pin misses the rows nested
@@ -1230,7 +1233,7 @@ export class ItemScopedCacheService {
 			// nested rows alone: depended on beyond them, it is bare.
 			if (o2mConflicted.has(collection)) {
 				if (beyondNestedRows.has(collection)) {
-					tags.push({ collection });
+					readPins.push({ collection });
 					continue;
 				}
 
@@ -1240,9 +1243,9 @@ export class ItemScopedCacheService {
 
 			// Named by an M2O filter the near row's own column answers, reached
 			// no other way: no write to it can change what this read returns,
-			// so it needs no tag at all — not even a bare one. Nested, sorted
+			// so it needs no pin at all — not even a bare one. Nested, sorted
 			// or grouped on, it is depended on for more than that key and
-			// falls through to the tags below.
+			// falls through to the pins below.
 			if (
 				collection !== this.collection &&
 				filterKeying.get(collection)?.kind === 'independent' &&
@@ -1255,20 +1258,20 @@ export class ItemScopedCacheService {
 			// Depended on beyond the rows it nested — a filter, sort or group reaching
 			// it, or a case gating it per row. The pins name the nested rows and
 			// nothing more; only a slice bounding the whole collection names the rest,
-			// so it rides beside them, or the bare tag stands for both halves.
+			// so it rides beside them, or the bare pin stands for both halves.
 			if (beyondNestedRows.has(collection)) {
-				const sliceTags = sliceTagsFor(collection);
+				const slicePins = slicePinsFor(collection);
 
-				if (sliceTags.length === 0) {
-					tags.push({ collection });
+				if (slicePins.length === 0) {
+					readPins.push({ collection });
 					continue;
 				}
 
-				for (const tag of sliceTags) {
-					pins.set(scopedCacheTagKey(tag), tag);
+				for (const pin of slicePins) {
+					pins.set(scopedCachePinKey(pin), pin);
 				}
 
-				tags.push(...pins.values());
+				readPins.push(...pins.values());
 				continue;
 			}
 
@@ -1276,14 +1279,14 @@ export class ItemScopedCacheService {
 			// response returns: a chain reaching its rows pins them by key, and one
 			// reaching none — a null hop, or a parent the node's case withheld —
 			// leaves the response exactly as it was. What a filter or case elsewhere
-			// keyed it on is the whole dependency, and no tag at all is the rest.
+			// keyed it on is the whole dependency, and no pin at all is the rest.
 			const paths = pathsTo(collection);
 
 			if (
 				paths.length > 0 &&
 				paths.every((path) => plan.injectedAncestorPaths.has(path))
 			) {
-				tags.push(...pins.values());
+				readPins.push(...pins.values());
 				continue;
 			}
 
@@ -1292,7 +1295,7 @@ export class ItemScopedCacheService {
 			// the O2M child's parent-fk key. Where BOTH declined — an A2O hop, an
 			// O2M nested under another to-many, or no row to read a key from — the
 			// filter's keys cover one half of the dependency and say nothing about
-			// the other: a slice bounding the rows stands in, or the bare tag.
+			// the other: a slice bounding the rows stands in, or the bare pin.
 			if (
 				nestedCollections.has(collection) &&
 				!m2oParentPins.has(collection) &&
@@ -1307,19 +1310,19 @@ export class ItemScopedCacheService {
 				continue;
 			}
 
-			tags.push(...pins.values());
+			readPins.push(...pins.values());
 		}
 
 		// Keys of what the pinners computed: sound by construction, so the audit below
-		// examines only what a HOOK added — and a hook re-stating a computed tag is
+		// examines only what a HOOK added — and a hook re-stating a computed pin is
 		// not flagged for it.
-		const computedTagKeys = new Set(tags.map(scopedCacheTagKey));
+		const computedPinKeys = new Set(readPins.map(scopedCachePinKey));
 
-		tags = (await emitter.emitFilter(
+		readPins = (await emitter.emitFilter(
 			'cache.scope',
-			tags,
+			readPins,
 			// `records` are the post-`items.read` rows, so a hook that enriched the
-			// response from another collection can derive value-level tags off the
+			// response from another collection can derive value-level pins off the
 			// actual data it pulled.
 			{ collection: this.collection, query: updatedQuery, records: filteredRecords },
 			{
@@ -1327,102 +1330,102 @@ export class ItemScopedCacheService {
 				schema: this.schema,
 				accountability: this.accountability,
 			},
-		)) as ScopedCacheTag[];
+		)) as ScopedCacheCollectionPin[];
 
-		// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
-		tags.push(...scopedCacheCollector.tags);
+		// Fold in pins an `items.read` hook added via `context.scopedCache.scopeTo`.
+		readPins.push(...scopedCacheCollector.pins);
 
 		// A hook naming a dotted slice (`course:unit.owner=O`) declares a dependency
 		// the purge answers from the course side only: a unit moved under another
 		// owner emits the unit's own slices and nothing of the course's. The read
-		// side carries the crossed collections itself when it derives such a tag,
+		// side carries the crossed collections itself when it derives such a pin,
 		// so a hook's gets the same: each collection the path crosses, under the
-		// suffix slice it emits, or bare when it emits none. The tag's own type is
+		// suffix slice it emits, or bare when it emits none. The pin's own type is
 		// the terminal column's, which a hook rarely knows and the key needs.
-		const seenTagKeys = new Set(tags.map(scopedCacheTagKey));
-		const crossedTags: ScopedCacheTag[] = [];
+		const seenPinKeys = new Set(readPins.map(scopedCachePinKey));
+		const crossedPins: ScopedCacheCollectionPin[] = [];
 
-		tags = tags.map((tag) => {
+		readPins = readPins.map((pin) => {
 			if (
-				tag.field === undefined ||
-				!tag.field.includes('.') ||
-				!slicesOf(tag.collection).some(({ field }) => field === tag.field)
+				pin.field === undefined ||
+				!pin.field.includes('.') ||
+				!slicesOf(pin.collection).some(({ field }) => field === pin.field)
 			) {
-				return tag;
+				return pin;
 			}
 
 			const resolved = new ItemScopedCacheService(
-				tag.collection,
+				pin.collection,
 				this.schema,
 				this.knex,
 				this.cache,
 				this.accountability,
-			).resolvePath(tag.field);
+			).resolvePath(pin.field);
 
 			if (resolved === null) {
-				return tag;
+				return pin;
 			}
 
 			const { segments, joins, terminalCollection, terminalField } = resolved;
 
-			const type = tag.type
+			const type = pin.type
 				?? this.schema.collections[terminalCollection]?.fields[terminalField]?.type;
 
 			for (const [hop, join] of joins.entries()) {
 				const crossed = join.relatedCollection;
 				const suffix = segments.slice(hop + 1).join('.');
 
-				const crossedTag: ScopedCacheTag = slicesOf(crossed)
+				const crossedPin: ScopedCacheCollectionPin = slicesOf(crossed)
 					.some(({ field }) => field === suffix)
-					? { collection: crossed, field: suffix, value: tag.value, type }
+					? { collection: crossed, field: suffix, value: pin.value, type }
 					: { collection: crossed };
 
-				const crossedKey = scopedCacheTagKey(crossedTag);
+				const crossedKey = scopedCachePinKey(crossedPin);
 
-				if (!seenTagKeys.has(crossedKey)) {
-					seenTagKeys.add(crossedKey);
-					crossedTags.push(crossedTag);
+				if (!seenPinKeys.has(crossedKey)) {
+					seenPinKeys.add(crossedKey);
+					crossedPins.push(crossedPin);
 				}
 			}
 
 			return type === undefined
-				? tag
-				: { ...tag, type };
+				? pin
+				: { ...pin, type };
 		});
 
-		tags.push(...crossedTags);
+		readPins.push(...crossedPins);
 
-		// A hook tag on a field its collection isn't scoped on can't be reproduced by
+		// A hook pin on a field its collection isn't scoped on can't be reproduced by
 		// that collection's auto-purge — the read would go stale — unless the hook
-		// marked it `manuallyPurged` (it reproduces the tag via its own purgeBy). List
+		// marked it `manuallyPurged` (it reproduces the pin via its own purgeBy). List
 		// them so respond.ts leaves the read uncached + names them in the anomaly.
 		//
 		// Both hook channels are audited: `scopeTo` through the collector, and
 		// whatever `cache.scope` returned beyond the computed set. Auditing only the
-		// collector let the same unpurgeable tag through the other door.
-		const hookAddedTags = new Map<string, ScopedCacheTag>();
+		// collector let the same unpurgeable pin through the other door.
+		const hookAddedPins = new Map<string, ScopedCacheCollectionPin>();
 
-		for (const tag of tags) {
-			const tagKey = scopedCacheTagKey(tag);
+		for (const pin of readPins) {
+			const pinKey = scopedCachePinKey(pin);
 
-			if (!computedTagKeys.has(tagKey)) {
-				hookAddedTags.set(tagKey, tag);
+			if (!computedPinKeys.has(pinKey)) {
+				hookAddedPins.set(pinKey, pin);
 			}
 		}
 
-		// Whether a WRITE to this tag's collection reproduces it, and so drops any
+		// Whether a WRITE to this pin's collection reproduces it, and so drops any
 		// entry filed under it.
-		const reproducedByAWrite = (tag: ScopedCacheTag): boolean => {
-			// The bare collection tag is what every write to it emits.
-			if (tag.field === undefined) {
+		const reproducedByAWrite = (pin: ScopedCacheCollectionPin): boolean => {
+			// The bare collection pin is what every write to it emits.
+			if (pin.field === undefined) {
 				return true;
 			}
 
-			const collectionSchema = this.schema.collections[tag.collection];
+			const collectionSchema = this.schema.collections[pin.collection];
 
 			// Every collection auto-purges its primary-key slice, so a hook pinning
 			// a foreign row by its key needs no `manuallyPurged` claim.
-			if (tag.field === collectionSchema?.primary) {
+			if (pin.field === collectionSchema?.primary) {
 				return true;
 			}
 
@@ -1431,68 +1434,68 @@ export class ItemScopedCacheService {
 			// the ancestor's scopes — as long as it resolves to an M2O chain, which is
 			// what `paths` already filters on. Anything else is never emitted however
 			// the read arrived at it.
-			if (tag.field.includes('.')) {
-				return slicesOf(tag.collection).some(({ field }) => field === tag.field);
+			if (pin.field.includes('.')) {
+				return slicesOf(pin.collection).some(({ field }) => field === pin.field);
 			}
 
-			return collectionSchema?.scopedCacheFields?.includes(tag.field) === true;
+			return collectionSchema?.scopedCacheFields?.includes(pin.field) === true;
 		};
 
-		// Per COLLECTION, not per tag: purging is a union, so an entry filed under
-		// several tags of one collection goes as soon as a write reproduces any ONE of
-		// them. A finer tag no write emits — an ownership-ancestor path a read derived
-		// for itself, say — is then harmless freight beside a reproducible sibling,
-		// and refusing to cache over it costs the response for nothing.
+		// Per COLLECTION, not per pin: purging is a union, so an entry filed under
+		// several pins of one collection goes as soon as a write reproduces any ONE
+		// of them. A finer pin no write emits — an ownership-ancestor path a read
+		// derived for itself, say — is then harmless freight beside a reproducible
+		// sibling, and refusing to cache over it costs the response for nothing.
 		//
-		// Computed tags count as cover: what matters is that the ENTRY is reachable
-		// from a write to that collection, not which channel put the tag there.
+		// Computed pins count as cover: what matters is that the ENTRY is reachable
+		// from a write to that collection, not which channel put the pin there.
 		const collectionsAWriteReaches = new Set(
-			tags.filter(reproducedByAWrite).map((tag) => tag.collection),
+			readPins.filter(reproducedByAWrite).map((pin) => pin.collection),
 		);
 
-		unautopurgeableTags = [...hookAddedTags.values()].filter((tag) => {
+		unautopurgeablePins = [...hookAddedPins.values()].filter((pin) => {
 			return (
-				reproducedByAWrite(tag) === false &&
-				collectionsAWriteReaches.has(tag.collection) === false &&
-				!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
+				reproducedByAWrite(pin) === false &&
+				collectionsAWriteReaches.has(pin.collection) === false &&
+				!scopedCacheCollector.manuallyPurgedKeys.has(scopedCachePinKey(pin))
 			);
 		});
 
 		// The fields each collection is bound to, folded into its fingerprint at
-		// fill time. Attached only for a collection whose tags are ALL computed: a
-		// hook's tag comes from enrichment outside the AST, so which fields that
+		// fill time. Attached only for a collection whose pins are ALL computed: a
+		// hook's pin comes from enrichment outside the AST, so which fields that
 		// enrichment read is unknown, and a `fields` pair narrower than the truth
 		// would keep an entry a write did change. A collection left out is bound to
 		// all of its fields, which every write touches.
 		const queryCaseFields = plan.fieldsByCollection();
 
-		for (const tag of hookAddedTags.values()) {
-			queryCaseFields.delete(tag.collection);
+		for (const pin of hookAddedPins.values()) {
+			queryCaseFields.delete(pin.collection);
 		}
 
-		// The root's own filter is the one place several tags of a collection have
-		// to hold together — everywhere else a tag stands alone, the way the sweep
+		// The root's own filter is the one place several pins of a collection have
+		// to hold together — everywhere else a pin stands alone, the way the sweep
 		// reads it, so each is a query case of its own. Reading those as a
 		// conjunction would leave a read cached that a write to any one of their
 		// slices staled.
-		const rootTagKeys = new Set(tags.map(scopedCacheTagKey));
+		const rootPinKeys = new Set(readPins.map(scopedCachePinKey));
 
 		const rootQueryCases = rootScopedCacheQueryCases.filter((queryCase) => {
-			return queryCase.every((tag) => rootTagKeys.has(scopedCacheTagKey(tag)));
+			return queryCase.every((pin) => rootPinKeys.has(scopedCachePinKey(pin)));
 		});
 
-		// The tags the kept root query cases already carry. A root query case
-		// dropped just above leaves its tags here, each standing alone: losing the
-		// AND over-purges, losing the tag would serve stale.
-		const rootQueryCaseTagKeys = new Set(
-			rootQueryCases.flat().map(scopedCacheTagKey),
+		// The pins the kept root query cases already carry. A root query case
+		// dropped just above leaves its pins here, each standing alone: losing the
+		// AND over-purges, losing the pin would serve stale.
+		const rootQueryCasePinKeys = new Set(
+			rootQueryCases.flat().map(scopedCachePinKey),
 		);
 
-		const standaloneQueryCases = tags
-			.filter((tag) => {
-				return rootQueryCaseTagKeys.has(scopedCacheTagKey(tag)) === false;
+		const standaloneQueryCases = readPins
+			.filter((pin) => {
+				return rootQueryCasePinKeys.has(scopedCachePinKey(pin)) === false;
 			})
-			.map((tag) => [tag]);
+			.map((pin) => [pin]);
 
 		const readFingerprints = scopedCacheFingerprintsByCollection(
 			[...rootQueryCases, ...standaloneQueryCases],
@@ -1501,10 +1504,10 @@ export class ItemScopedCacheService {
 
 		return {
 			fingerprints: readFingerprints,
-			// One pin each: a hook's tag stands alone, and what respond.ts needs off
+			// One pin each: a hook's pin stands alone, and what respond.ts needs off
 			// it is the collection and field it names.
-			unautopurgeable: unautopurgeableTags.map((tag) => {
-				return scopedCacheFingerprintOf(tag.collection, [tag]);
+			unautopurgeable: unautopurgeablePins.map((pin) => {
+				return scopedCacheFingerprintOf(pin.collection, [pin]);
 			}),
 		};
 	}

@@ -30,9 +30,9 @@ import {
 	isPinnableScopeType,
 	mergeScopedCacheEpochs,
 	mergedScopedCacheEpochs,
-	pinnedScopedCacheTagsFromKeyedFilters,
-	pinnedScopedCacheTagsFromM2oParents,
-	pinnedScopedCacheTagsFromO2mChildren,
+	scopedCachePinsFromKeyedFilters,
+	scopedCachePinsFromM2oParents,
+	scopedCachePinsFromO2mChildren,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	readScopedCacheEpochs,
@@ -49,7 +49,7 @@ import {
 	scopedCachePathReversesChain,
 	scopedCacheReadMeta,
 	scopedCacheSweptDuringFill,
-	scopedCacheTagKey,
+	scopedCachePinKey,
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
 	startScopedCachePurgeRecovery,
@@ -216,17 +216,17 @@ describe('the tag display form', () => {
 	});
 
 	// countScopedCacheTagMembers reads a fingerprint's token back against this
-	// string and the entry/purge tag rows join on it, so escaping it here would
-	// count zero instead.
-	it('keeps a null scope byte-identical to the tag\'s identity', () => {
+	// string and the entry/purge tag rows join on it, so escaping the null byte
+	// here would count zero instead.
+	it('keeps a null scope on the null-byte sentinel', () => {
 		const nullSlice = {
 			collection: 'student_method_range',
 			field: 'method',
 			value: null,
 		};
 
-		expect(scopedCacheTagKey(nullSlice))
-		.toBe(`ns:scoped-cache-index:tag:${scopedCacheTagLabel(nullSlice)}`);
+		expect(scopedCachePinKey(nullSlice))
+		.toBe('student_method_range:method=\x00null');
 	});
 });
 
@@ -521,7 +521,7 @@ describe('countScopedCacheTagMembers', () => {
 
 describe('createScopedCacheCollector', () => {
 	// The collector fills a declared tag's missing type from the schema; these cases
-	// name collections it does not carry, so their tags pass through as written.
+	// name collections it does not carry, so their pins pass through as written.
 	const emptySchema = new SchemaBuilder().build();
 
 	// A uuid key is where a missing type bites hardest: `canonicalScopedCacheValue`
@@ -534,8 +534,8 @@ describe('createScopedCacheCollector', () => {
 		})
 		.build();
 
-	it('records a key whose purge a hook skipped, without adding a tag', () => {
-		const { purge, tags, purgeSkippedKeys } =
+	it('records a key whose purge a hook skipped, without adding a pin', () => {
+		const { purge, pins, purgeSkippedKeys } =
 			createScopedCacheCollector(emptySchema);
 
 		purge.skipPurgeFor(7);
@@ -544,7 +544,7 @@ describe('createScopedCacheCollector', () => {
 
 		// Declaring nothing to purge must not read as declaring a purge: the
 		// takeover check keys on the tag count.
-		expect(tags).toEqual([]);
+		expect(pins).toEqual([]);
 	});
 
 	it(oneLine`
@@ -597,12 +597,12 @@ describe('createScopedCacheCollector', () => {
 		leaves the counters empty for a scopeTo that handed none over, so respond can
 		tell a declared collection apart from a guarded one
 	`, () => {
-		const { scope, epochs, tags } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs, pins } = createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' });
 
 		expect(epochs).toEqual({});
-		expect(tags).toEqual([{ collection: 'authors' }]);
+		expect(pins).toEqual([{ collection: 'authors' }]);
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
@@ -615,16 +615,16 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('scopeTo and purgeBy fill sinks of their own', () => {
-		const { scope, purge, tags, purgeFingerprints } =
+		const { scope, purge, pins, purgeFingerprints } =
 			createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
 		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
-		// The same slice through both handles, and it lands twice: a read's tags are
+		// The same slice through both handles, and it lands twice: a read's pins are
 		// an OR over slices, a purge's fingerprint an AND over a scope, so folding
 		// one into the other would purge by whichever tag matched first.
-		expect(tags).toEqual([{ collection: 'articles', field: 'author', value: 5 }]);
+		expect(pins).toEqual([{ collection: 'articles', field: 'author', value: 5 }]);
 
 		expect(purgeFingerprints).toEqual([{
 			collection: 'articles',
@@ -661,8 +661,8 @@ describe('createScopedCacheCollector', () => {
 		]);
 	});
 
-	it('accepts a batch, deduping within it and against prior tags', () => {
-		const { scope, tags } = createScopedCacheCollector(emptySchema);
+	it('accepts a batch, deduping within it and against prior pins', () => {
+		const { scope, pins } = createScopedCacheCollector(emptySchema);
 		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
 		const authorsTable = { collection: 'authors' };
 
@@ -670,18 +670,18 @@ describe('createScopedCacheCollector', () => {
 		scope.scopeTo([{ ...authorSlice }, authorsTable, authorsTable]);
 
 		// authorSlice repeats the prior tag, authorsTable appears twice → each once.
-		expect(tags).toEqual([authorSlice, authorsTable]);
+		expect(pins).toEqual([authorSlice, authorsTable]);
 	});
 
 	it('dedups on the canonical tag key — field order and value type collapse', () => {
-		const { scope, tags } = createScopedCacheCollector(emptySchema);
+		const { scope, pins } = createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', field: 'author', value: 7 });
 		// Same slice: keys in a different order AND the value as a string. A raw JSON
 		// compare would keep both; the canonical key collapses them to one.
 		scope.scopeTo({ field: 'author', value: '7', collection: 'articles' });
 
-		expect(tags).toHaveLength(1);
+		expect(pins).toHaveLength(1);
 	});
 
 	it(oneLine`
@@ -691,19 +691,19 @@ describe('createScopedCacheCollector', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		const { scope, purge, tags, purgeFingerprints } =
+		const { scope, purge, pins, purgeFingerprints } =
 			createScopedCacheCollector(notesSchema);
 
 		scope.scopeTo({ collection: 'notes', field: 'id', value: upper });
 		// The spelling the driver hands the purge side for the very same row.
 		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
-		expect(tags).toEqual([
+		expect(pins).toEqual([
 			{ collection: 'notes', field: 'id', value: upper, type: 'uuid' },
 		]);
 
-		expect(scopedCacheTagKey(tags[0]!)).toBe(
-			`ns:scoped-cache-index:tag:notes:id=${upper.toLowerCase()}`,
+		expect(scopedCachePinKey(pins[0]!)).toBe(
+			`notes:id=${upper.toLowerCase()}`,
 		);
 
 		// A fingerprint's tokens are canonicalized the same way, so the pin and the
@@ -719,12 +719,12 @@ describe('createScopedCacheCollector', () => {
 		leaves a tag whose type the hook DID declare alone, and a bare collection tag
 		has no field to look up
 	`, () => {
-		const { scope, tags } = createScopedCacheCollector(notesSchema);
+		const { scope, pins } = createScopedCacheCollector(notesSchema);
 
 		scope.scopeTo({ collection: 'notes', field: 'id', value: 7, type: 'integer' });
 		scope.scopeTo({ collection: 'notes' });
 
-		expect(tags).toEqual([
+		expect(pins).toEqual([
 			{ collection: 'notes', field: 'id', value: 7, type: 'integer' },
 			{ collection: 'notes' },
 		]);
@@ -734,12 +734,12 @@ describe('createScopedCacheCollector', () => {
 		leaves a tag naming a collection or field the schema doesn't know untyped
 		rather than inventing one
 	`, () => {
-		const { scope, tags } = createScopedCacheCollector(notesSchema);
+		const { scope, pins } = createScopedCacheCollector(notesSchema);
 
 		scope.scopeTo({ collection: 'ghosts', field: 'id', value: 'A' });
 		scope.scopeTo({ collection: 'notes', field: 'ghost', value: 'A' });
 
-		expect(tags).toEqual([
+		expect(pins).toEqual([
 			{ collection: 'ghosts', field: 'id', value: 'A' },
 			{ collection: 'notes', field: 'ghost', value: 'A' },
 		]);
@@ -751,7 +751,7 @@ describe('createScopedCacheCollector', () => {
 
 		scope.scopeTo(slice, { manuallyPurged: true });
 
-		expect(manuallyPurgedKeys.has(scopedCacheTagKey(slice))).toBe(true);
+		expect(manuallyPurgedKeys.has(scopedCachePinKey(slice))).toBe(true);
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
@@ -765,7 +765,7 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	describe('dependOn', () => {
-		// A lookup as `readByQuery` returns it: rows carrying the tags they resolved
+		// A lookup as `readByQuery` returns it: rows carrying the pins they resolved
 		// and the counters the lookup took before its query.
 		const acmeMetrics = { collection: 'metric', field: 'owner', value: 'acme' };
 
@@ -798,21 +798,21 @@ describe('createScopedCacheCollector', () => {
 		};
 
 		it('folds a pending lookup and hands its rows back', async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
 
 			const rows = await scope.dependOn(Promise.resolve(metricLookup()));
 
 			expect(rows).toEqual([{ id: 1 }]);
-			expect(tags).toEqual([acmeMetrics]);
+			expect(pins).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
 		it('takes an already-resolved lookup the same way', async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
 
 			await scope.dependOn(metricLookup());
 
-			expect(tags).toEqual([acmeMetrics]);
+			expect(pins).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
@@ -820,14 +820,14 @@ describe('createScopedCacheCollector', () => {
 			walks a Promise.all batch — a result is itself an array, so the meta rider is
 			what tells one lookup from the batch holding it
 		`, async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
 
 			const batch = await scope.dependOn(
 				Promise.all([metricLookup(), auditLookup()]),
 			);
 
 			expect(batch).toHaveLength(2);
-			expect(tags).toEqual([acmeMetrics, { collection: 'audit' }]);
+			expect(pins).toEqual([acmeMetrics, { collection: 'audit' }]);
 
 			expect(epochs).toEqual({ metric: '4', audit: '7' });
 		});
@@ -836,7 +836,7 @@ describe('createScopedCacheCollector', () => {
 			folds the fulfilled verdicts of a Promise.allSettled batch and passes the
 			rejected one through for the caller to judge
 		`, async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
 
 			const verdicts = await scope.dependOn(
 				Promise.allSettled([metricLookup(), Promise.reject(new Error('gone'))]),
@@ -845,7 +845,7 @@ describe('createScopedCacheCollector', () => {
 			expect(verdicts.map((verdict) => verdict.status))
 				.toEqual(['fulfilled', 'rejected']);
 
-			expect(tags).toEqual([acmeMetrics]);
+			expect(pins).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
@@ -891,12 +891,12 @@ describe('createScopedCacheCollector', () => {
 		});
 
 		it('adds nothing for a value carrying no meta rider', async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
 
 			const rows = await scope.dependOn([{ id: 1 }]);
 
 			expect(rows).toEqual([{ id: 1 }]);
-			expect(tags).toEqual([]);
+			expect(pins).toEqual([]);
 			expect(epochs).toEqual({});
 		});
 	});
@@ -1111,12 +1111,12 @@ describe('dropScopedCacheIndex', () => {
 	`, async () => {
 		const { scan, unlink } = mockScan(
 			['4', [
-				'ns:scoped-cache-index:tag:articles',
+				'ns:scoped-cache-index:fingerprint:articles',
 				'ns:scoped-cache-index:slices:articles',
 			]],
 			['0', [
-				'ns:scoped-cache-index:tag:articles:id=1',
-				'ns:scoped-cache-index:tag:authors',
+				'ns:scoped-cache-index:fingerprint:articles:id=1',
+				'ns:scoped-cache-index:fingerprint:authors',
 			]],
 		);
 
@@ -1150,13 +1150,13 @@ describe('dropScopedCacheIndex', () => {
 		// One call per scan page, not one for the lot: collecting first would put
 		// the whole index in this process's heap to delete it from Redis.
 		expect(unlink).toHaveBeenNthCalledWith(1, [
-			'ns:scoped-cache-index:tag:articles',
+			'ns:scoped-cache-index:fingerprint:articles',
 			'ns:scoped-cache-index:slices:articles',
 		]);
 
 		expect(unlink).toHaveBeenNthCalledWith(2, [
-			'ns:scoped-cache-index:tag:articles:id=1',
-			'ns:scoped-cache-index:tag:authors',
+			'ns:scoped-cache-index:fingerprint:articles:id=1',
+			'ns:scoped-cache-index:fingerprint:authors',
 		]);
 
 		expect(dropped).toEqual({ dropped: 4, refused: 0 });
@@ -1165,7 +1165,7 @@ describe('dropScopedCacheIndex', () => {
 	it(oneLine`
 		moves no counter of its own — \`clearResponseCache\` has, before it
 	`, async () => {
-		const { scan } = mockScan(['0', ['ns:scoped-cache-index:tag:articles']]);
+		const { scan } = mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
 		const { incr } = vi.mocked(useRedis)().pipeline();
 
 		await dropScopedCacheIndex();
@@ -1246,7 +1246,10 @@ describe('dropScopedCacheIndex', () => {
 
 	it('counts what Redis removed, not what it was handed', async () => {
 		const { unlink } = mockScan(
-			['0', ['ns:scoped-cache-index:tag:a', 'ns:scoped-cache-index:tag:b']],
+			['0', [
+				'ns:scoped-cache-index:fingerprint:a',
+				'ns:scoped-cache-index:fingerprint:b',
+			]],
 		);
 
 		// A pipeline reports per command, so a chunk that failed is a chunk still
@@ -1267,7 +1270,7 @@ describe('dropScopedCacheIndex', () => {
 	it('splits the drop into chunked commands', async () => {
 		const keys = Array.from(
 			{ length: 2500 },
-			(_, at) => `ns:scoped-cache-index:tag:c:id=${at}`,
+			(_, at) => `ns:scoped-cache-index:fingerprint:c:id=${at}`,
 		);
 
 		const { unlink } = mockScan(['0', keys]);
@@ -1304,7 +1307,7 @@ describe('dropScopedCacheIndex', () => {
 	// The keys the pre-scoped-cache-index layout wrote go once, in
 	// `20260911A-drop-the-pre-scoped-cache-index-layout`, not on every flush.
 	it('walks the index prefix and nothing else', async () => {
-		const { scan } = mockScan(['0', ['ns:scoped-cache-index:tag:articles']]);
+		const { scan } = mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
 
 		await dropScopedCacheIndex();
 
@@ -1338,7 +1341,7 @@ describe('flushResponseCache', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: async () => {
 				calls.push('scan');
-				return ['0', ['ns:scoped-cache-index:tag:articles']];
+				return ['0', ['ns:scoped-cache-index:fingerprint:articles']];
 			},
 			pipeline: () => pipeline,
 		} as any);
@@ -2223,7 +2226,7 @@ describe('a purge that fails after its mutation committed', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromM2oParents', () => {
+describe('scopedCachePinsFromM2oParents', () => {
 	// owner <- owned_item <- owned_sub_item, each child naming its parent, so a read
 	// rooted at the sub-item reaches both ancestors through M2O hops only.
 	const schema = new SchemaBuilder()
@@ -2267,7 +2270,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	`, () => {
 		// Two sub-items under distinct items but ONE owner: the owner tag must not
 		// come out twice, and the item tags must not collapse to one.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -2296,7 +2299,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	});
 
 	it('leaves the root collection to its own filter', () => {
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -2309,7 +2312,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	it('keeps a collection reached across a to-many hop bare', () => {
 		// An INSERT into `owned_item` creates a row this read would have listed, and
 		// no key tag covers a key that did not exist when the entry was filled.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owner',
 			fieldMapOf(['', 'owner'], ['owned_items', 'owned_item']),
@@ -2324,7 +2327,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	`, () => {
 		// Reached twice: directly by M2O, and back down the owner's to-many. The
 		// weakest path decides, or the read goes stale on an insert.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			fieldMapOf(
@@ -2346,7 +2349,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	});
 
 	it('skips a row whose parent link is empty, pinning its siblings', () => {
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -2370,7 +2373,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		// never the payload. Pinning nothing there would list the collection by
 		// nothing at all, and no write to it would ever drop the read.
 		expect(
-			pinnedScopedCacheTagsFromM2oParents(
+			scopedCachePinsFromM2oParents(
 				schema,
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
@@ -2381,7 +2384,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 	it('falls back to bare when a parent row carries no key', () => {
 		// Half a key set pins half the rows and silently serves the rest stale.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			fieldMapOf(['owned_item', 'owned_item']),
@@ -2405,7 +2408,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			})
 			.build();
 
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			a2oSchema,
 			'note',
 			fieldMapOf(['subject:owner', 'owner']),
@@ -2428,7 +2431,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			.build();
 
 		expect(
-			pinnedScopedCacheTagsFromM2oParents(
+			scopedCachePinsFromM2oParents(
 				selfSchema,
 				'owned_item',
 				fieldMapOf(['parent', 'owned_item']),
@@ -2441,7 +2444,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		// Nothing merged a parent in, so the response cannot answer the path and the
 		// walk refuses to read a key off a number.
 		expect(
-			pinnedScopedCacheTagsFromM2oParents(
+			scopedCachePinsFromM2oParents(
 				schema,
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
@@ -2486,7 +2489,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
 
-			const pinned = pinnedScopedCacheTagsFromM2oParents(
+			const pinned = scopedCachePinsFromM2oParents(
 				slicedSchema,
 				'owned_item',
 				ownerFieldMap,
@@ -2515,7 +2518,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
 
 			expect(
-				pinnedScopedCacheTagsFromM2oParents(
+				scopedCachePinsFromM2oParents(
 					slicedSchema,
 					'owned_item',
 					ownerFieldMap,
@@ -2546,7 +2549,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			];
 
 			expect(
-				pinnedScopedCacheTagsFromM2oParents(
+				scopedCachePinsFromM2oParents(
 					dottedSchema,
 					'owned_item',
 					ownerFieldMap,
@@ -2563,7 +2566,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		});
 
 		it('goes bare when the collection declares no slice to fall back on', () => {
-			const pinned = pinnedScopedCacheTagsFromM2oParents(
+			const pinned = scopedCachePinsFromM2oParents(
 				schema,
 				'owned_item',
 				ownerFieldMap,
@@ -2576,7 +2579,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		it('still pins the same set exactly at the ceiling', () => {
 			// Non-vacuity: the two cases above degrade because of the COUNT, not
 			// because this shape was never pinnable.
-			const pinned = pinnedScopedCacheTagsFromM2oParents(
+			const pinned = scopedCachePinsFromM2oParents(
 				schema,
 				'owned_item',
 				ownerFieldMap,
@@ -2717,7 +2720,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 
 	it('spares a collection the root filter names by key', () => {
 		// The rows it reaches are exactly that key, which
-		// `pinnedScopedCacheTagsFromKeyedFilters` pins; nothing forces bare.
+		// `scopedCachePinsFromKeyedFilters` pins; nothing forces bare.
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(
 				schema,
@@ -3185,7 +3188,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 			spares itself when its own columns decide and its parent's key pins it
 		`, () => {
 			// Every write to a course of the student emits `course:student=<id>`,
-			// the pin `pinnedScopedCacheTagsFromO2mChildren` puts on this read.
+			// the pin `scopedCachePinsFromO2mChildren` puts on this read.
 			expect([...scopedCacheCollectionsBeyondNestedRows(
 				toManySchema(),
 				studentReading({
@@ -3841,7 +3844,7 @@ describe('scopedCacheOwnershipNestedPkPaths', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromO2mChildren', () => {
+describe('scopedCachePinsFromO2mChildren', () => {
 	// `child` hangs off `parent` twice, over two different fks, so one read can
 	// reach it by two names. `grandchild` sits a second to-many hop down, and
 	// `root` reaches the parent through an M2O so a prefix has something to walk.
@@ -3893,7 +3896,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		fieldMap: FieldMap,
 		records: Item[],
 	) {
-		return pinnedScopedCacheTagsFromO2mChildren(
+		return scopedCachePinsFromO2mChildren(
 			schema,
 			rootCollection,
 			fieldMap,
@@ -3988,7 +3991,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		// ownership slice covers rows reached by two disagreeing reverse fks.
 		const conflicted = new Set<CollectionKey>();
 
-		pinnedScopedCacheTagsFromO2mChildren(
+		scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child'], ['alt_children', 'child']),
@@ -4005,7 +4008,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	`, () => {
 		const conflicted = new Set<CollectionKey>();
 
-		const pinned = pinnedScopedCacheTagsFromO2mChildren(
+		const pinned = scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child'], ['favorite', 'child']),
@@ -4023,7 +4026,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	`, () => {
 		const conflicted = new Set<CollectionKey>();
 
-		const pinned = pinnedScopedCacheTagsFromO2mChildren(
+		const pinned = scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child'], ['drafts', 'child']),
@@ -4038,7 +4041,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	it('leaves conflictedOut empty for a child keyed on one fk', () => {
 		const conflicted = new Set<CollectionKey>();
 
-		pinnedScopedCacheTagsFromO2mChildren(
+		scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child']),
@@ -4156,7 +4159,7 @@ describe('scopedCachePathReversesChain', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
+describe('scopedCachePinsFromKeyedFilters', () => {
 	const schema = new SchemaBuilder()
 		.collection('owner', (c) => {
 			c.field('id').id();
@@ -4171,7 +4174,7 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 	function pinsFor(
 		keying: Map<CollectionKey, ScopedCacheFilterKeying>,
 	) {
-		return pinnedScopedCacheTagsFromKeyedFilters(schema, 'owned_item', keying);
+		return scopedCachePinsFromKeyedFilters(schema, 'owned_item', keying);
 	}
 
 	it('pins one primary-key tag per key the filter named', () => {

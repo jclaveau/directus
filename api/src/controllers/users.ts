@@ -183,7 +183,7 @@ router.patch(
 		await service.updateOne(
 			req.accountability.user,
 			{ last_page: req.body.last_page },
-			{ autoPurgeCache: scopedCachePurgeEnabled(), purgeCollectionTag: false },
+			{ autoPurgeCache: scopedCachePurgeEnabled(), purgeBareFingerprint: false },
 		);
 
 		return next();

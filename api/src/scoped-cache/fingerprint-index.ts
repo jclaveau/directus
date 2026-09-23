@@ -7,7 +7,7 @@ import {
 	renderScopedCacheFingerprint,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
-import { scopedCacheIndexPrefix } from './tags.js';
+import { scopedCacheIndexPrefix } from './pins.js';
 
 /**
  * The key of the set a fingerprint is filed in, and of the set a write reads back.

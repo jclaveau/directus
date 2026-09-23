@@ -67,7 +67,7 @@ import {
 } from './fill-guard.js';
 import {
 	scopedCacheIndexPrefix,
-} from './tags.js';
+} from './pins.js';
 
 const env = useEnv();
 
@@ -404,15 +404,15 @@ async function purgeScopedCacheFingerprintIndex(
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 	changed: readonly string[] | null,
 	indexPath: string | null,
-	includeCollectionTag: boolean,
+	includeBareFingerprint: boolean,
 ): Promise<number> {
 	if (rowFingerprints.length === 0) {
 		return 0;
 	}
 
-	// Before anything is read, for the reason the tag sweep bumps them first: a
-	// read in flight has to decline rather than cache under an index this purge is
-	// about to prune.
+	// Before anything is read, for the reason the fingerprint sweep bumps them
+	// first: a read in flight has to decline rather than cache under an index this
+	// purge is about to prune.
 	await bumpScopedCacheEpochs([collection]);
 
 	const { evicted } = await purgeScopedCacheIndexWhere(
@@ -423,12 +423,12 @@ async function purgeScopedCacheFingerprintIndex(
 		// letting Redis skip it saves sending it; the test still decides.
 		scopedCacheRowIndexGlobs(collection, rowFingerprints),
 		(fingerprint) => {
-			// A fingerprint pinning nothing is what the bare collection tag covers,
-			// so a mutation keeping that tag warm keeps these entries too — the
-			// global reads a write that opted out of the collection tag means to
+			// A fingerprint pinning nothing is what the bare collection fingerprint
+			// covers, so a mutation keeping that tag warm keeps these entries too —
+			// the global reads a write that opted out of the collection tag means to
 			// leave standing.
 			if (
-				includeCollectionTag === false
+				includeBareFingerprint === false
 				&& Object.keys(fingerprint.pinnedScope).length === 0
 			) {
 				return false;
@@ -640,9 +640,9 @@ async function purgeScopedCacheIndexWhere(
 
 
 /**
- * Drop every scoped-cache index key: the tag SETs
- * (`<namespace>:scoped-cache-index:tag:*`) and the per-collection slice indexes
- * (`<namespace>:scoped-cache-index:slices:*`). These are
+ * Drop every scoped-cache index key: the fingerprint SETs
+ * (`<namespace>:scoped-cache-index:fingerprint:*`) and the per-collection slice
+ * indexes (`<namespace>:scoped-cache-index:slices:*`). These are
  * written direct via ioredis `sadd`, outside any Keyv namespace, so a response
  * `cache.clear()` never reaches them — they would linger as orphan pointers until
  * their `ttl*2` self-expiry, or forever when `CACHE_TTL` is unset and they are
@@ -655,9 +655,10 @@ async function purgeScopedCacheIndexWhere(
  * still there (https://github.com/jclaveau/directus/issues/468).
  *
  * Runs AFTER `clearResponseCache`, always: that is where the wholesale counter
- * moves, and a read that captured it earlier and files its tags between the unlink
- * below and a move made after it would compare equal, keep its entry, and leave it
- * indexed by a set this function just deleted — reachable to no later purge.
+ * moves, and a read that captured it earlier and files its fingerprints between
+ * the unlink below and a move made after it would compare equal, keep its entry,
+ * and leave it indexed by a set this function just deleted — reachable to no later
+ * purge.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!redisConfigAvailable()) {
@@ -771,11 +772,12 @@ async function purgeScopedCacheCollectionIndex(
 }
 
 /**
- * Purge every cached read of `collection` — its bare collection tag plus all its
- * value slices — without full-flushing the namespace. The fallback when a mutation's
- * scope values are unresolvable (e.g. an upsert mixing inserts and updates): which
- * slices changed is unknown, but only reads touching THIS collection can be stale,
- * so scope the flush to its tag sets and spare every other collection's entries.
+ * Purge every cached read of `collection` — its bare collection fingerprint plus all
+ * its value slices — without full-flushing the namespace. The fallback when a
+ * mutation's scope values are unresolvable (e.g. an upsert mixing inserts and
+ * updates): which slices changed is unknown, but only reads touching THIS collection
+ * can be stale, so scope the flush to its tag sets and spare every other
+ * collection's entries.
  */
 export async function purgeCollectionScopedCache(
 	cache: Keyv,
@@ -1234,8 +1236,8 @@ async function reportRecoveredScopedCacheEntries(
  * read pinned to a slice (an owner, or its primary key) is filed under that slice
  * alone, so it survives.
  *
- * `includeCollectionTag: false` drops the bare fingerprint from the purge — for a
- * cancelled mutation nothing in `collection` changed, so only the hook's own
+ * `includeBareFingerprint: false` drops the bare fingerprint from the purge — for
+ * a cancelled mutation nothing in `collection` changed, so only the hook's own
  * declared (usually foreign) slices should drop, not this collection's global
  * reads.
  */
@@ -1245,7 +1247,7 @@ export async function purgeScopedCache(
 	scopedCacheFingerprints: ScopedCacheFingerprint[] | null = [],
 	context: EventContext | null = null,
 	options: {
-		includeCollectionTag?: boolean;
+		includeBareFingerprint?: boolean;
 		// One mutation can need more than one purge operation — the coarse
 		// collection fallback plus the tags a hook declared. Sharing an id across
 		// them is what keeps `COUNT(DISTINCT purge_id)` reporting one purge per
@@ -1256,7 +1258,7 @@ export async function purgeScopedCache(
 		// serialised as a fingerprint of its own. Given them, the purge asks each
 		// cached read its own question — does one of these rows satisfy everything
 		// I depend on — instead of dropping every entry filed under any slice the
-		// write touched. Absent, it falls back to the tag sweep, which is what a
+		// write touched. Absent, it falls back to the fingerprint sweep, which is what a
 		// purge that knows no rows can do: a hook's own `purgeBy`, a collection-wide
 		// fallback, a write whose rows could not be read back.
 		rowFingerprints?: readonly ScopedCacheFingerprint[];
@@ -1326,7 +1328,7 @@ export async function purgeScopedCache(
 		return [scopedCacheFingerprintOf(collection, [])];
 	}
 
-	const declaredScopedCacheFingerprints = options.includeCollectionTag === false
+	const declaredScopedCacheFingerprints = options.includeBareFingerprint === false
 		? [...scopedCacheFingerprints]
 		: [scopedCacheFingerprintOf(collection, []), ...scopedCacheFingerprints];
 
@@ -1403,7 +1405,7 @@ export async function purgeScopedCache(
 	// fingerprint names a value, and a pin naming a value cannot reach an entry
 	// bound to none.
 	const recordedCollectionTag =
-		options.rowFingerprints !== undefined && options.includeCollectionTag !== false
+		options.rowFingerprints !== undefined && options.includeBareFingerprint !== false
 			? [scopedCacheFingerprintOf(collection, [])]
 			: [];
 
@@ -1424,7 +1426,7 @@ export async function purgeScopedCache(
 						options.rowFingerprints,
 						options.changed ?? null,
 						options.indexPath ?? null,
-						options.includeCollectionTag !== false,
+						options.includeBareFingerprint !== false,
 					),
 				purgeScopedCacheDeclaredFingerprints(
 					cache,

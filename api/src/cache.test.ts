@@ -1304,7 +1304,7 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:tag:articles:id=1']],
+			['0', ['scalabus:scoped-cache-index:fingerprint:articles:id=1']],
 		);
 
 		await flushCaches(true);
@@ -1322,7 +1322,9 @@ describe('flushCaches', () => {
 		);
 
 		expect(redis._pipeline.unlink)
-			.toHaveBeenCalledWith(['scalabus:scoped-cache-index:tag:articles:id=1']);
+			.toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:fingerprint:articles:id=1',
+			]);
 	});
 
 	test(oneLine`
@@ -1336,8 +1338,8 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(['0', [
-			'scalabus:scoped-cache-index:tag:articles',
-			'scalabus:scoped-cache-index:tag:articles:id=1',
+			'scalabus:scoped-cache-index:fingerprint:articles',
+			'scalabus:scoped-cache-index:fingerprint:articles:id=1',
 		]]);
 
 		await flushCaches(true);
@@ -1477,7 +1479,7 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:tag:articles']],
+			['0', ['scalabus:scoped-cache-index:fingerprint:articles']],
 		);
 
 		redis._pipeline.exec.mockResolvedValueOnce([
@@ -1525,8 +1527,14 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan
-		.mockResolvedValueOnce(['42', ['scalabus:scoped-cache-index:tag:articles']])
-		.mockResolvedValueOnce(['0', ['scalabus:scoped-cache-index:tag:authors']]);
+		.mockResolvedValueOnce([
+			'42',
+			['scalabus:scoped-cache-index:fingerprint:articles'],
+		])
+		.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:authors'],
+		]);
 
 		await flushCaches(true);
 
@@ -1680,7 +1688,7 @@ describe('clearCacheTargets', () => {
 
 	function refuseTheIndexUnlink() {
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:tag:articles']],
+			['0', ['scalabus:scoped-cache-index:fingerprint:articles']],
 		);
 
 		redis._pipeline.exec.mockResolvedValueOnce([

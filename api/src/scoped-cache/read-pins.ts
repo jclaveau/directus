@@ -19,7 +19,7 @@ import type {
 	Query,
 	SchemaOverview,
 	ScopedCachePath,
-	ScopedCacheTag,
+	ScopedCacheCollectionPin,
 	Type,
 } from '@directus/types';
 import {
@@ -35,9 +35,9 @@ import {
 	isPinnableScopeType,
 	scopedCacheMaxPinsPerCollection,
 	scopedCacheMaxQueryCases,
-	scopedCacheTagKey,
-	scopedCacheTagsFromRows,
-} from './tags.js';
+	scopedCachePinKey,
+	scopedCachePinsFromRows,
+} from './pins.js';
 
 /**
  * Whether a keyed filter's keys become pins: a field to canonicalize against
@@ -65,28 +65,28 @@ export function keyedFilterPinnable(
 
 /**
  * Scope a read's joined collections off the keys its filters named — the third
- * pinner beside `pinnedScopedCacheTagsFromFilter`, which bounds the root off the
- * same filter, and `pinnedScopedCacheTagsFromM2oParents`, which pins the nested
+ * pinner beside `scopedCachePinsFromFilter`, which bounds the root off the
+ * same filter, and `scopedCachePinsFromM2oParents`, which pins the nested
  * ones off the rows they carried.
  *
- * A collection reached ONLY through a filter is nested nowhere, so neither of
- * those two can say anything about it and it has always fallen through to the
- * bare tag — one write anywhere in it dropping every read that merely joined it.
+ * A collection reached ONLY through a filter is nested nowhere, so neither of those
+ * two can say anything about it and it has always fallen through to the bare
+ * fingerprint — one write anywhere in it dropping every read that merely joined it.
  * When the filter named its rows by key, the read depends on those rows and no
- * others, so `<collection>:<pk>=<key>` is exactly right and the write side
- * already emits it: `snapshotScopedCacheTags` writes the key slice of every
- * mutated row of every collection, declared scope fields or not.
+ * others, so `<collection>:<pk>=<key>` is exactly right and the write side already
+ * emits it: `snapshotScopedCachePins` writes the key slice of every mutated row of
+ * every collection, declared scope fields or not.
  *
  * The root is left out: its own filter bounds it through
- * `pinnedScopedCacheTagsFromFilter`, under a self-reference guard this analysis
+ * `scopedCachePinsFromFilter`, under a self-reference guard this analysis
  * does not reproduce.
  */
-export function pinnedScopedCacheTagsFromKeyedFilters(
+export function scopedCachePinsFromKeyedFilters(
 	schema: SchemaOverview,
 	rootCollection: CollectionKey,
 	keyingByCollection: Map<CollectionKey, ScopedCacheFilterKeying>,
-): Map<CollectionKey, ScopedCacheTag[]> {
-	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
+): Map<CollectionKey, ScopedCacheCollectionPin[]> {
+	const pinned = new Map<CollectionKey, ScopedCacheCollectionPin[]>();
 
 	for (const [collection, keying] of keyingByCollection) {
 		if (
@@ -97,7 +97,7 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 		}
 
 		const type = scopedCacheKeyedFieldType(schema, collection, keying.field)!;
-		const tags: ScopedCacheTag[] = [];
+		const tags: ScopedCacheCollectionPin[] = [];
 
 		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
 		// collapse to the one slice the write side emits for that row.
@@ -127,7 +127,7 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
  * A nested collection is depended on for the rows it CARRIED, not only for the
  * ones a filter named: `mergeWithParentItems` writes what the nested query
  * returned, so an insert that joins it changes the response. Only
- * `pinnedScopedCacheTagsFromM2oParents` can name that half, and it declines a
+ * `scopedCachePinsFromM2oParents` can name that half, and it declines a
  * to-many or A2O hop. Naming them here lets the caller keep such a collection
  * bare even when its filter named keys — those keys cover the filter's half of
  * the dependency and say nothing about the nested one.
@@ -376,7 +376,7 @@ export type ScopedCacheSortDeferral = {
  * - A query FILTERS on a path into it that names no key (`keyingByCollection`),
  *   same reason. A filter that does name keys is the one case that survives:
  *   the rows it reaches are exactly those keys, which
- *   `pinnedScopedCacheTagsFromKeyedFilters` pins alongside whatever the response
+ *   `scopedCachePinsFromKeyedFilters` pins alongside whatever the response
  *   nested. Read off EVERY node's query, not only the root's: a nested node's
  *   filter withholds rows, and which ones it withholds is decided by every
  *   collection that filter reads — each of them one the response may have nested
@@ -391,7 +391,7 @@ export type ScopedCacheSortDeferral = {
 export function scopedCacheCollectionsBeyondNestedRows(
 	schema: SchemaOverview,
 	ast: AST,
-	// The same analysis `pinnedScopedCacheTagsFromKeyedFilters` pins from, so
+	// The same analysis `scopedCachePinsFromKeyedFilters` pins from, so
 	// what this one exempts is exactly what that one covers. A caller holding it
 	// already passes it rather than paying for a second walk of the AST.
 	keyingByCollection = scopedCacheFilterKeyingByCollection(schema, ast),
@@ -526,9 +526,9 @@ export function scopedCacheCollectionsBeyondNestedRows(
 
 			// A sort only reorders a collection's rows; a per-slice pin catches the
 			// reorder because a write to the collection emits its slice. So a sort
-			// costs the bare tag only where NO covering slice exists. A group or
+			// costs the bare fingerprint only where NO covering slice exists. A group or
 			// aggregate collapses rows across slices and always crosses.
-			// `independent` is skipped in readTags, so its scope fields pin nothing.
+			// `independent` is skipped in readPins, so its scope fields pin nothing.
 			const hasCoveringSlice =
 				(schema.collections[queried]?.scopedCacheFields ?? []).length > 0
 				&& kind !== 'independent';
@@ -657,30 +657,30 @@ export function scopedCacheCollectionsBeyondNestedRows(
 
 /**
  * Scope a read's NON-root collections off the parent rows it nested — the other
- * half of `pinnedScopedCacheTagsFromFilter`, which bounds the root.
+ * half of `scopedCachePinsFromFilter`, which bounds the root.
  *
  * Per touched collection, the first of these that holds:
  *
- * - `<pk>=<key>` per parent row — M2O hops only. An INSERT lands a key this
- *   response cannot have nested, so the pin cannot go stale.
- * - its own declared scope slices — past the ceiling. One tag per distinct value.
- * - the bare collection tag — a to-many hop or A2O anywhere on one of its paths, no
- *   parent row nested, or a row missing its key.
+ * - `<pk>=<key>` per parent row — M2O hops only. An INSERT lands a key this response
+ * cannot have nested, so the pin cannot go stale. - its own declared scope slices —
+ * past the ceiling. One tag per distinct value. - the bare collection fingerprint —
+ * a to-many hop or A2O anywhere on one of its paths, no parent row nested, or a row
+ * missing its key.
  *
- * Returns the pinned collections only; the bare tag is the caller's default, so a
- * collection absent here keeps the tag it has always carried. Each fallback
- * over-purges, none serves stale. The pins name the NESTED rows and nothing more:
- * a read depending on a collection beyond them
+ * Returns the pinned collections only; the bare fingerprint is the caller's default,
+ * so a collection absent here keeps the tag it has always carried. Each fallback
+ * over-purges, none serves stale. The pins name the NESTED rows and nothing more: a
+ * read depending on a collection beyond them
  * (`scopedCacheCollectionsBeyondNestedRows`) owes that half to the caller.
  */
-export function pinnedScopedCacheTagsFromM2oParents(
+export function scopedCachePinsFromM2oParents(
 	schema: SchemaOverview,
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
 	records: Item[],
 	// What each aliased path is the field of; the rows keep the alias.
 	fieldNames: ReadonlyMap<string, string> = new Map(),
-): Map<CollectionKey, ScopedCacheTag[]> {
+): Map<CollectionKey, ScopedCacheCollectionPin[]> {
 	// A set per collection: the field map carries the same path under both its read
 	// and its other group, and walking one path twice would double every row.
 	const pathsByCollection = new Map<CollectionKey, Set<QueryPath[number]>>();
@@ -699,7 +699,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		pathsByCollection.set(entry.collection, paths);
 	}
 
-	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
+	const pinned = new Map<CollectionKey, ScopedCacheCollectionPin[]>();
 
 	for (const [collection, paths] of pathsByCollection) {
 		const primaryKeyField = schema.collections[collection]?.primary;
@@ -776,10 +776,10 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		}
 
 		// `coarse`, not `skip`: one row without its key must take the whole
-		// collection down to the bare tag. Skipping it would pin the rows that DID
-		// carry a key and leave that one covered by nothing — stale, where the bare
-		// tag only over-purges.
-		const keyTags = scopedCacheTagsFromRows(
+		// collection down to the bare fingerprint. Skipping it would pin the rows
+		// that DID carry a key and leave that one covered by nothing — stale, where
+		// the bare tag only over-purges.
+		const keyPins = scopedCachePinsFromRows(
 			collection,
 			[primaryKeyField],
 			rows,
@@ -788,10 +788,10 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		);
 
 		if (
-			keyTags !== null &&
-			keyTags.length <= scopedCacheMaxPinsPerCollection()
+			keyPins !== null &&
+			keyPins.length <= scopedCacheMaxPinsPerCollection()
 		) {
-			pinned.set(collection, keyTags);
+			pinned.set(collection, keyPins);
 			continue;
 		}
 
@@ -810,7 +810,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			sliceFieldTypes[field] = collectionFields[field]?.type;
 		}
 
-		const sliceTags = scopedCacheTagsFromRows(
+		const slicePins = scopedCachePinsFromRows(
 			collection,
 			sliceFields,
 			rows,
@@ -819,10 +819,10 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		);
 
 		if (
-			sliceTags !== null &&
-			sliceTags.length <= scopedCacheMaxPinsPerCollection()
+			slicePins !== null &&
+			slicePins.length <= scopedCacheMaxPinsPerCollection()
 		) {
-			pinned.set(collection, sliceTags);
+			pinned.set(collection, slicePins);
 		}
 	}
 
@@ -911,14 +911,14 @@ export function scopedCacheRowsAtPathEnd(
 }
 
 /**
- * The to-many twin of `pinnedScopedCacheTagsFromM2oParents`. A read that EMBEDS a
+ * The to-many twin of `scopedCachePinsFromM2oParents`. A read that EMBEDS a
  * to-many child set depends on every child WHERE `child.<fk> = parent.pk`, so it
  * pins each such collection by that reverse fk = the parent's key — one tag per
  * surfaced parent row. A write to a child of another parent no longer evicts it.
  *
  * The purge side already emits the identical `<child>:<fk>=<value>` shallow tag
  * from the mutated row's own fk column (the flat scope-field branch of
- * `snapshotScopedCacheTags`), so read and write agree by construction — no field
+ * `snapshotScopedCachePins`), so read and write agree by construction — no field
  * injection, no response strip, no deep chain. The read never needs the child's fk
  * value: it equals the parent pk by definition of the O2M join.
  *
@@ -926,15 +926,15 @@ export function scopedCacheRowsAtPathEnd(
  * O2M whose reverse fk is a flat scope field (else the purge emits no match), and
  * the prefix descends to parent rows carrying their key — through a to-many too,
  * so a deep pivot under an all-O2M chain slices. Past the per-collection pin ceiling
- * it falls back to the bare tag; an A2O anywhere on the path keeps it bare.
+ * it falls back to the bare fingerprint; an A2O anywhere on the path keeps it bare.
  *
  * Every path to the child must pin, or none does: the rows another path nested —
  * the same collection reached through an M2O, or through an o2m whose reverse fk
  * is not scoped — lie outside every parent-key slice, and the M2O pinner declines
  * a collection it shares with a to-many hop. Such a collection is reported through
- * `conflictedOut`, since only the bare tag covers it.
+ * `conflictedOut`, since only the bare fingerprint covers it.
  */
-export function pinnedScopedCacheTagsFromO2mChildren(
+export function scopedCachePinsFromO2mChildren(
 	schema: SchemaOverview,
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
@@ -945,7 +945,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	conflictedOut?: Set<CollectionKey>,
 	// What each aliased path is the field of; the rows keep the alias.
 	fieldNames: ReadonlyMap<string, string> = new Map(),
-): Map<CollectionKey, ScopedCacheTag[]> {
+): Map<CollectionKey, ScopedCacheCollectionPin[]> {
 	// One entry per child collection: it can be nested under several paths, and
 	// every parent key it is keyed by must be gathered before the cap so no path
 	// masks another. `conflicted` drops a collection reached by two reverse fks —
@@ -1069,10 +1069,10 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		keying.prefixes.add(fields.slice(0, -1).join('.'));
 
 		for (const parentRow of parentRows) {
-			// Carry the parent key under the child's fk name so `scopedCacheTagsFromRows`
+			// Carry the parent key under the child's fk name so `scopedCachePinsFromRows`
 			// reads it as that field's value. A surfaced parent without its key leaves
 			// part of the set unpinned; one such row takes the whole collection to the
-			// bare tag (the `coarse` mode returns null on a missing field).
+			// bare fingerprint (the `coarse` mode returns null on a missing field).
 			keying.rows.push(
 				parentPkField in parentRow
 					? { [reverseFk]: parentRow[parentPkField] }
@@ -1102,7 +1102,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		}
 	}
 
-	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
+	const pinned = new Map<CollectionKey, ScopedCacheCollectionPin[]>();
 
 	for (const [collection, keying] of keyingByChild) {
 		const conflicted = keying.conflicted || reachedUnpinnably.has(collection);
@@ -1115,7 +1115,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			continue;
 		}
 
-		const keyTags = scopedCacheTagsFromRows(
+		const keyPins = scopedCachePinsFromRows(
 			collection,
 			[keying.reverseFk],
 			keying.rows,
@@ -1124,10 +1124,10 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		);
 
 		if (
-			keyTags !== null &&
-			keyTags.length <= scopedCacheMaxPinsPerCollection()
+			keyPins !== null &&
+			keyPins.length <= scopedCacheMaxPinsPerCollection()
 		) {
-			pinned.set(collection, keyTags);
+			pinned.set(collection, keyPins);
 		}
 	}
 
@@ -1187,7 +1187,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	relatedPrimaryKeys: Record<string, string> = {},
 	scopedCachePaths: ScopedCachePath[] = [],
 	primaryKeyField?: string,
-): ScopedCacheTag[][] {
+): ScopedCacheCollectionPin[][] {
 	const fieldSet = new Set(fields);
 
 	if (primaryKeyField !== undefined) {
@@ -1219,10 +1219,10 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	// bound a pinnable field covers its rows; an uncovered node's rows carry no pinned
 	// tag (would be stale).
 	//
-	// `queryCases` is the same pinning read as a disjunction: one entry per way a row
-	// can match the node, each holding every field that way binds. `tags` flattens
-	// it, losing which values had to hold together — which is all a tag sweep can
-	// use, and not enough for a composite one.
+	// `queryCases` is the same pinning read as a disjunction: one entry per way a
+	// row can match the node, each holding every field that way binds. `tags`
+	// flattens it, losing which values had to hold together — which is all a
+	// fingerprint sweep can use, and not enough for a composite one.
 	type Eval = {
 		tags: Map<string, Set<unknown>>;
 		queryCases: Map<string, Set<unknown>>[];
@@ -1230,7 +1230,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	};
 
 	// Union `source`'s values into `target` in place (shared by AND and OR).
-	function unionTags(
+	function unionPins(
 		target: Map<string, Set<unknown>>,
 		source: Map<string, Set<unknown>>,
 	): void {
@@ -1280,8 +1280,8 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 		for (const one of left) {
 			for (const other of right) {
 				const bothPairs = new Map<string, Set<unknown>>();
-				unionTags(bothPairs, one);
-				unionTags(bothPairs, other);
+				unionPins(bothPairs, one);
+				unionPins(bothPairs, other);
 				mergedQueryCases.push(bothPairs);
 			}
 		}
@@ -1431,7 +1431,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 		const queryCases: Map<string, Set<unknown>>[] = [];
 
 		for (const branch of branches) {
-			unionTags(tags, branch.tags);
+			unionPins(tags, branch.tags);
 			queryCases.push(...branch.queryCases);
 		}
 
@@ -1449,7 +1449,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 		};
 
 		function andIn(part: Eval): void {
-			unionTags(evalResult.tags, part.tags);
+			unionPins(evalResult.tags, part.tags);
 			evalResult.queryCases = andQueryCases(evalResult.queryCases, part.queryCases);
 			evalResult.covered = evalResult.covered || part.covered;
 		}
@@ -1475,44 +1475,44 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	const pinned = evalNode(filter);
 
 	return pinned.queryCases.map((queryCase) => {
-		const pinnedTags: ScopedCacheTag[] = [];
+		const queryCasePins: ScopedCacheCollectionPin[] = [];
 
 		for (const [field, values] of queryCase) {
 			for (const value of values) {
-				pinnedTags.push({ collection, field, value, type: fieldTypes[field] });
+				queryCasePins.push({ collection, field, value, type: fieldTypes[field] });
 			}
 		}
 
-		return pinnedTags;
+		return queryCasePins;
 	});
 }
 
 /**
- * Query cases flattened: every tag any of them names, deduplicated. What a tag
- * sweep files an entry under, where each tag stands alone and any one of them
- * reproduced by a write drops the entry.
+ * Query cases flattened: every pin any of them names, deduplicated — the axes a
+ * read touched, with the AND between them dropped. What the label rendering and
+ * the anomaly detail speak; the invalidation itself keeps the query cases.
  */
-export function scopedCacheTagsOfQueryCases(
-	queryCases: readonly (readonly ScopedCacheTag[])[],
-): ScopedCacheTag[] {
-	const tags = new Map<string, ScopedCacheTag>();
+export function scopedCachePinsOfQueryCases(
+	queryCases: readonly (readonly ScopedCacheCollectionPin[])[],
+): ScopedCacheCollectionPin[] {
+	const pins = new Map<string, ScopedCacheCollectionPin>();
 
 	for (const queryCase of queryCases) {
-		for (const tag of queryCase) {
-			tags.set(scopedCacheTagKey(tag), tag);
+		for (const pin of queryCase) {
+			pins.set(scopedCachePinKey(pin), pin);
 		}
 	}
 
-	return [...tags.values()];
+	return [...pins.values()];
 }
 
 /**
- * The same pinning as `pinnedScopedCacheQueryCasesFromFilter`, read as a tag list.
+ * The same pinning as `pinnedScopedCacheQueryCasesFromFilter`, read as a pin list.
  */
-export function pinnedScopedCacheTagsFromFilter(
+export function scopedCachePinsFromFilter(
 	...inputs: Parameters<typeof pinnedScopedCacheQueryCasesFromFilter>
-): ScopedCacheTag[] {
-	return scopedCacheTagsOfQueryCases(
+): ScopedCacheCollectionPin[] {
+	return scopedCachePinsOfQueryCases(
 		pinnedScopedCacheQueryCasesFromFilter(...inputs),
 	);
 }

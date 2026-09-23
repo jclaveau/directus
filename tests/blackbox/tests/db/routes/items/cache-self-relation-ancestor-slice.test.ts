@@ -15,8 +15,8 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// RED until fixed. `readTags` bares the root when it appears at more than one
-// field-map path, then reaches it again with an empty `rootScopedCacheTags`, falls
+// RED until fixed. `readPins` bares the root when it appears at more than one
+// field-map path, then reaches it again with an empty `rootScopedCachePins`, falls
 // through to `pushAncestorSliceOrBare` and takes the slice of an ancestor the
 // filter keyed — undoing the guard it just applied. The ancestor has to be KEYED
 // rather than answered by the near row's own fk column, so the filter reaches ORG

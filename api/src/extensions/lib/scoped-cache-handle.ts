@@ -11,7 +11,7 @@ import {
 	scopedCacheFingerprintOf,
 	scopedCacheIndexPath,
 	scopedCachePurgeEnabled,
-	scopedCacheTagsFromRows,
+	scopedCachePinsFromRows,
 } from '../../scoped-cache.js';
 
 /**
@@ -86,7 +86,7 @@ export function createScopedCacheExtensionHandle(
 			const rowFingerprints: ScopedCacheFingerprint[] = [];
 
 			for (const mutatedRow of mutatedRows) {
-				const rowTags = scopedCacheTagsFromRows(
+				const rowTags = scopedCachePinsFromRows(
 					collection,
 					pinnedFields,
 					[mutatedRow],

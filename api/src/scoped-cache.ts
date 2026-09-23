@@ -1,6 +1,6 @@
 export * from './scoped-cache/config.js';
 export * from './scoped-cache/collector.js';
-export * from './scoped-cache/tags.js';
+export * from './scoped-cache/pins.js';
 export * from './scoped-cache/fill-guard.js';
 export * from './scoped-cache/fingerprint.js';
 export * from './scoped-cache/fingerprint-index.js';
@@ -8,7 +8,7 @@ export * from './scoped-cache/mutated-rows.js';
 export * from './scoped-cache/ownership-injection.js';
 export * from './scoped-cache/paths.js';
 export * from './scoped-cache/read-meta.js';
-export * from './scoped-cache/read-tags.js';
+export * from './scoped-cache/read-pins.js';
 export * from './scoped-cache/read-plan.js';
 export * from './scoped-cache/purge.js';
 export * from './scoped-cache/item-scoped-cache-service.js';

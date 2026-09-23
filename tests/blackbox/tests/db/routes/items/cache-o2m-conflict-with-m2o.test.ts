@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // it skips the nested-bare branch (~759) for the union branch (~781) — which emits
 // its keyed slice `note:id=<pinnedNote>` and no bare tag. The fix forces bare on
 // `o2mConflicted` first (~731). Filters, not nesting: a nested conflicted note can't
-// reach the union branch, since `pinnedScopedCacheTagsFromM2oParents` drops any
+// reach the union branch, since `scopedCachePinsFromM2oParents` drops any
 // collection carrying an o2m-terminal path, so it is never m2o-pinned.
 const ENROLLMENT = 'o2m_m2o_enrollment';
 const NOTE = 'o2m_m2o_note';
@@ -72,7 +72,7 @@ describe(oneLine`
 						collection: NOTE,
 						// Both reverse fks declared, so each O2M path clears the "the write
 						// side emits this shallow tag" gate on its own and the refusal is
-						// about the disagreement, not the gate (read-tags.ts ~645-651).
+						// about the disagreement, not the gate (read-pins.ts ~645-651).
 						meta: {
 							scoped_cache_fields: ['discipline_id', 'teaching_unit_id'],
 						},

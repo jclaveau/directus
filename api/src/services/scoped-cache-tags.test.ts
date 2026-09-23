@@ -8,9 +8,9 @@ import {
 	canonicalScopedCacheValue,
 	composeScopedCachePaths,
 	pinnedScopedCacheQueryCasesFromFilter,
-	pinnedScopedCacheTagsFromFilter,
+	scopedCachePinsFromFilter,
 	scopedCacheNestedRowBindings,
-	scopedCacheTagsFromRows,
+	scopedCachePinsFromRows,
 	serializeScopedCacheTags,
 } from '../scoped-cache.js';
 
@@ -154,8 +154,8 @@ describe('canonicalScopedCacheValue', () => {
 
 // The field type must ride onto derived tags so key canonicalization sees it on both sides.
 describe('scope-tag type propagation', () => {
-	test('scopedCacheTagsFromRows stamps each tag with its field type', () => {
-		const tags = scopedCacheTagsFromRows(
+	test('scopedCachePinsFromRows stamps each tag with its field type', () => {
+		const tags = scopedCachePinsFromRows(
 			'slots',
 			['active'],
 			[{ active: 1 }],
@@ -169,9 +169,9 @@ describe('scope-tag type propagation', () => {
 	});
 
 	test(oneLine`
-		pinnedScopedCacheTagsFromFilter stamps the pinned tag with its field type
+		scopedCachePinsFromFilter stamps the pinned tag with its field type
 	`, () => {
-		const tags = pinnedScopedCacheTagsFromFilter(
+		const tags = scopedCachePinsFromFilter(
 			'slots',
 			['active'],
 			{ active: { _eq: true } },
@@ -186,7 +186,7 @@ describe('scope-tag type propagation', () => {
 
 // Pure scope-tag derivation behind update-payload / create tagging
 // (onUnresolvable picks coarse-fallback vs skip on a missing field).
-describe('scopedCacheTagsFromRows', () => {
+describe('scopedCachePinsFromRows', () => {
 	test('one tag per distinct value per field', () => {
 		const rows = [
 			{ student: 'A', course: 'math' },
@@ -195,7 +195,7 @@ describe('scopedCacheTagsFromRows', () => {
 		];
 
 		expect(
-			scopedCacheTagsFromRows('slots', ['student', 'course'], rows, 'coarse'),
+			scopedCachePinsFromRows('slots', ['student', 'course'], rows, 'coarse'),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
@@ -208,7 +208,7 @@ describe('scopedCacheTagsFromRows', () => {
 		const rows = [{ student: 7 }, { student: '7' }];
 
 		expect(
-			scopedCacheTagsFromRows('slots', ['student'], rows, 'coarse', {
+			scopedCachePinsFromRows('slots', ['student'], rows, 'coarse', {
 				student: 'integer',
 			}),
 		).toEqual([
@@ -219,7 +219,7 @@ describe('scopedCacheTagsFromRows', () => {
 	test('null and numeric values are kept distinct', () => {
 		const rows = [{ student: null }, { student: 0 }, { student: null }];
 
-		expect(scopedCacheTagsFromRows('slots', ['student'], rows, 'coarse')).toEqual([
+		expect(scopedCachePinsFromRows('slots', ['student'], rows, 'coarse')).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 			{ collection: 'slots', field: 'student', value: 0 },
 		]);
@@ -231,7 +231,7 @@ describe('scopedCacheTagsFromRows', () => {
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(scopedCacheTagsFromRows('slots', ['student'], rows, 'coarse')).toBeNull();
+		expect(scopedCachePinsFromRows('slots', ['student'], rows, 'coarse')).toBeNull();
 	});
 
 	test(oneLine`
@@ -240,7 +240,7 @@ describe('scopedCacheTagsFromRows', () => {
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(scopedCacheTagsFromRows('slots', ['student'], rows, 'skip')).toEqual([
+		expect(scopedCachePinsFromRows('slots', ['student'], rows, 'skip')).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
 	});
@@ -249,7 +249,7 @@ describe('scopedCacheTagsFromRows', () => {
 		a field present but holding null is resolvable (distinct from being absent)
 	`, () => {
 		expect(
-			scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], 'coarse'),
+			scopedCachePinsFromRows('slots', ['student'], [{ student: null }], 'coarse'),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 		]);
@@ -259,12 +259,12 @@ describe('scopedCacheTagsFromRows', () => {
 		empty rows resolve to an empty tag list, not null (caller falls back to a
 		collection-level tag)
 	`, () => {
-		expect(scopedCacheTagsFromRows('slots', ['student'], [], 'coarse')).toEqual([]);
+		expect(scopedCachePinsFromRows('slots', ['student'], [], 'coarse')).toEqual([]);
 	});
 
 	test('no configured fields yields no scoped cache tags', () => {
 		expect(
-			scopedCacheTagsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
+			scopedCachePinsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
 		).toEqual([]);
 	});
 });
@@ -272,10 +272,10 @@ describe('scopedCacheTagsFromRows', () => {
 // Read-side scoping: only a filter that BOUNDS the read to a scope value may scope it
 // (else an insert of a new value would silently miss the cached read). An empty result
 // means "not bounded → bare tag".
-describe('pinnedScopedCacheTagsFromFilter', () => {
+describe('scopedCachePinsFromFilter', () => {
 	test('_eq on a scope field pins that value', () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _eq: 'A' } }),
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _eq: 'A' } }),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
@@ -286,7 +286,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		scope (matches the null-value purge tag)
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _eq: null } }),
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _eq: null } }),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 		]);
@@ -296,7 +296,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		_in on a scope field pins every listed value (even those with no rows yet)
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], {
+			scopedCachePinsFromFilter('slots', ['student'], {
 				student: { _in: ['A', 'B'] },
 			}),
 		).toEqual([
@@ -309,7 +309,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		const filter = { _and: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'course', value: 'math' },
@@ -322,7 +322,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	`, () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
 
-		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
 		]);
@@ -333,7 +333,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		branch carries a value outside the union
 	`, () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
-		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([]);
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([]);
 	});
 
 	test('an _or unions the fk value for a relational branch', () => {
@@ -345,7 +345,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		};
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['owner'], filter, {}, { owner: 'id' }),
+			scopedCachePinsFromFilter('slots', ['owner'], filter, {}, { owner: 'id' }),
 		).toEqual([
 			{ collection: 'slots', field: 'owner', value: 'A' },
 			{ collection: 'slots', field: 'owner', value: 'B' },
@@ -362,7 +362,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		};
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([
 			{ collection: 'slots', field: 'course', value: 'math' },
 			{ collection: 'slots', field: 'student', value: 'A' },
@@ -372,7 +372,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 
 	test('an empty _or pins nothing', () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], { _or: [] }),
+			scopedCachePinsFromFilter('slots', ['student'], { _or: [] }),
 		).toEqual([]);
 	});
 
@@ -381,7 +381,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 			_or: [{ student: { _eq: 'A' } }, { student: { _in: ['A', 'B'] } }],
 		};
 
-		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
 		]);
@@ -393,7 +393,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	`, () => {
 		const filter = { _and: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
 
-		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
 		]);
@@ -404,7 +404,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		later insert of any value is caught by the bare collection tag)
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _in: [] } }),
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _in: [] } }),
 		).toEqual([]);
 	});
 
@@ -415,7 +415,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'course', value: 'math' },
@@ -435,7 +435,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		};
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
 		).toEqual([]);
 	});
 
@@ -444,7 +444,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		on it yields no pin — the read falls back to the bare collection tag
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['starts_at'],
 				{ starts_at: { _eq: '2026-01-01T00:00:00Z' } },
@@ -459,7 +459,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		};
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student', 'starts_at'], filter, {
+			scopedCachePinsFromFilter('slots', ['student', 'starts_at'], filter, {
 				student: 'string',
 				starts_at: 'date',
 			}),
@@ -470,7 +470,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 
 	test('a non-equality operator (_gt) does not bound the read', () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _gt: 'A' } }),
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _gt: 'A' } }),
 		).toEqual([]);
 	});
 
@@ -479,7 +479,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		tag)
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
+			scopedCachePinsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
 		).toEqual([]);
 	});
 
@@ -488,7 +488,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		form queries and permission rules use, e.g. { user_created: { id: { _eq } } }
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['student'],
 				{ student: { id: { _eq: 'A' } } },
@@ -502,7 +502,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 
 	test('a relational _in on the related primary key pins every value', () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['student'],
 				{ student: { id: { _in: ['A', 'B'] } } },
@@ -519,7 +519,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		const filter = { _and: [{ student: { id: { _eq: 'A' } } }] };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], filter, {}, {
+			scopedCachePinsFromFilter('slots', ['student'], filter, {}, {
 				student: 'id',
 			}),
 		).toEqual([
@@ -532,7 +532,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		undetermined, so the read falls back to the bare collection tag
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['student'],
 				{ student: { email: { _eq: 'a@b.c' } } },
@@ -547,7 +547,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		shape does not pin
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], {
+			scopedCachePinsFromFilter('slots', ['student'], {
 				student: { id: { _eq: 'A' } },
 			}),
 		).toEqual([]);
@@ -557,7 +557,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		const filter = { _and: [{ _and: [{ student: { id: { _eq: 'A' } } }] }] };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', ['student'], filter, {}, {
+			scopedCachePinsFromFilter('slots', ['student'], filter, {}, {
 				student: 'id',
 			}),
 		).toEqual([
@@ -570,7 +570,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		bounds the hop, not the fk value, so the read falls back to the bare tag
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['student'],
 				{ student: { school: { id: { _eq: 'A' } } } },
@@ -582,7 +582,7 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 
 	test('a non-id related primary key is unwrapped by the passed key', () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['student'],
 				{ student: { code: { _eq: 'A' } } },
@@ -595,8 +595,8 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	});
 
 	test('empty / null filter yields no pin', () => {
-		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
-		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
+		expect(scopedCachePinsFromFilter('slots', ['student'], null)).toEqual([]);
+		expect(scopedCachePinsFromFilter('slots', ['student'], {})).toEqual([]);
 	});
 });
 
@@ -604,10 +604,10 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 // query: `readOne` bounds the read to one key, and only that row's own write can
 // change it. An inserted row carries a different key, so the insert-blindness that
 // bars a value slice elsewhere cannot apply here.
-describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
+describe('scopedCachePinsFromFilter — implicit primary key', () => {
 	// `slots` declares no scope field here: the pin comes from the key alone.
 	const unscoped = (filter: Filter) => {
-		return pinnedScopedCacheTagsFromFilter(
+		return scopedCachePinsFromFilter(
 			'slots',
 			[],
 			filter,
@@ -654,7 +654,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 		const filter = { _and: [{ id: { _eq: 7 } }, { student: { _eq: 'A' } }] };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['student'],
 				filter,
@@ -674,7 +674,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 		purge side dedups its projection for the same reason
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				['id'],
 				{ id: { _eq: 7 } },
@@ -693,7 +693,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 		reaches only callers that opt in, so no other pinner gains it silently
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter('slots', [], { id: { _eq: 7 } }),
+			scopedCachePinsFromFilter('slots', [], { id: { _eq: 7 } }),
 		).toEqual([]);
 	});
 
@@ -703,7 +703,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		const pinned = pinnedScopedCacheTagsFromFilter(
+		const pinned = scopedCachePinsFromFilter(
 			'notes',
 			[],
 			{ id: { _eq: upper } },
@@ -713,7 +713,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 			'id',
 		);
 
-		const purged = scopedCacheTagsFromRows(
+		const purged = scopedCachePinsFromRows(
 			'notes',
 			['id'],
 			[{ id: upper.toLowerCase() }],
@@ -729,7 +729,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 		read↔purge symmetry on an integer key: a padded URL key and the driver's number
 		resolve ONE slice
 	`, () => {
-		const pinned = pinnedScopedCacheTagsFromFilter(
+		const pinned = scopedCachePinsFromFilter(
 			'notes',
 			[],
 			{ id: { _eq: '007' } },
@@ -739,7 +739,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 			'id',
 		);
 
-		const purged = scopedCacheTagsFromRows(
+		const purged = scopedCachePinsFromRows(
 			'notes',
 			['id'],
 			[{ id: 7 }],
@@ -756,7 +756,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 		same PIN_UNSAFE_SCOPE_TYPES gate
 	`, () => {
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'slots',
 				[],
 				{ stamped_at: { _eq: '2026-01-02T03:04:05.000Z' } },
@@ -769,7 +769,7 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () => {
+describe('scopedCachePinsFromFilter — relational paths (multi-hop)', () => {
 	const enrollmentPath = [
 		{
 			field: 'enrollment.student.user',
@@ -785,7 +785,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		];
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, paths),
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, paths),
 		).toEqual([
 			{ collection: 'disc', field: 'enrollment.student', value: 'S1' },
 		]);
@@ -795,7 +795,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		const filter = { enrollment: { student: { user: { _eq: 'U1' } } } };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
 		).toEqual([
 			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
 		]);
@@ -805,7 +805,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		const filter = { enrollment: { student: { user: { _in: ['U1', 'U2'] } } } };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
 		).toEqual([
 			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
 			{ collection: 'disc', field: 'enrollment.student.user', value: 'U2' },
@@ -816,7 +816,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		const filter = { enrollment: { student: { user: { id: { _eq: 'U1' } } } } };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'disc',
 				[],
 				filter,
@@ -833,7 +833,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		const filter = { enrollment: { student: { _eq: 'S1' } } };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
 		).toEqual([]);
 	});
 
@@ -841,7 +841,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		const filter = { enrollment: { student: { user: { _gt: 'U1' } } } };
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
 		).toEqual([]);
 	});
 
@@ -856,7 +856,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		];
 
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'disc',
 				[],
 				filter,
@@ -876,7 +876,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		};
 
 		expect(
-			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
 		).toEqual([
 			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
 			{ collection: 'disc', field: 'enrollment.student.user', value: 'U2' },
@@ -890,7 +890,7 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 		};
 
 		expect(
-			pinnedScopedCacheTagsFromFilter(
+			scopedCachePinsFromFilter(
 				'disc',
 				['term'],
 				filter,

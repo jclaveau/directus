@@ -32,7 +32,7 @@ import type {
 } from '@directus/types';
 import {
 	isPinnableScopeType,
-} from './tags.js';
+} from './pins.js';
 
 export type ScopedCacheM2oJoin = {
 	field: string;
@@ -44,7 +44,7 @@ export type ScopedCacheM2oJoin = {
  * Resolve a dotted path into the chain of M2O joins it crosses, from `collection`
  * down. Null on anything that is not an M2O — a to-many hop, an unknown field, or an
  * A2O, whose relation names no single related collection — and every caller then
- * degrades to the bare collection tag.
+ * degrades to the bare collection fingerprint.
  *
  * A row maps to exactly one parent across an M2O, so what such a join reaches is
  * fully determined by the rows already in hand. Shared, so the two sides that ask
@@ -82,9 +82,9 @@ export function resolveScopedCacheM2oJoinChainFromPath(
 }
 
 /**
- * Field paths to inject so a read's ownership ANCESTORS — the collections its
- * scope chain crosses toward the owner — come back as rows and pin by key, not
- * the bare tag a read that nested none of them (`fields: ['*']`) over-purges on.
+ * Field paths to inject so a read's ownership ANCESTORS — the collections its scope
+ * chain crosses toward the owner — come back as rows and pin by key, not the bare
+ * fingerprint a read that nested none of them (`fields: ['*']`) over-purges on.
  *
  * Walks the same flat-field M2O chain `composeScopedCachePaths` does: each
  * collection names its parent, so ownership composes hop by hop. A path per
@@ -150,8 +150,8 @@ export function scopedCacheOwnershipNestedPkPaths(
  * replaced at every hop, so the rows passed through on the way out are not returned.
  *
  * Null when the response cannot answer the path — a segment it never carried, or an
- * array where an M2O promised one row — so the caller falls back to the bare tag
- * rather than pin a set it only half read.
+ * array where an M2O promised one row — so the caller falls back to the bare
+ * fingerprint rather than pin a set it only half read.
  */
 export function m2oParentRowsAtPathEnd(
 	records: Item[],
@@ -537,7 +537,7 @@ function scopedCacheFilterKeyingByAlias(
 		// A function key reads the related rows through a transform: `count`
 		// totals every one of them, so the value it is compared against is a
 		// cardinality rather than a key. The hop is joined all the same, so the
-		// collection is reported — wholesale, which is the bare tag.
+		// collection is reported — wholesale, which is the bare fingerprint.
 		if (relatedCollection !== null && functionName !== undefined) {
 			collectionByAlias.set(childAlias, relatedCollection);
 
@@ -806,9 +806,9 @@ function isScopedCacheKeyableField(
  * describes rows by what they are NOT. A function key (`year(created_on)`)
  * reads the column through a transform, so it names nothing either.
  *
- * An empty `_in` matches no row and so depends on none, but it is reported
- * unkeyed rather than as an empty key set: pinning a collection to nothing would
- * drop its tag altogether, and a bare tag is the cheaper way to be right about a
+ * An empty `_in` matches no row and so depends on none, but it is reported unkeyed
+ * rather than as an empty key set: pinning a collection to nothing would drop its
+ * tag altogether, and a bare fingerprint is the cheaper way to be right about a
  * query that returns nothing.
  */
 function keyingOfColumnConditions(
@@ -855,9 +855,9 @@ function keyingOfColumnConditions(
  * union of what each path named. Each node folds its own aliases, since alias
  * `''` means a different collection in every one of them.
  *
- * Shared by the two sides that must agree on it — the tags a keyed collection
- * pins, and the collections that consequently need NOT fall back to the bare tag
- * — so neither can drift from the other's answer.
+ * Shared by the two sides that must agree on it — the tags a keyed collection pins,
+ * and the collections that consequently need NOT fall back to the bare fingerprint —
+ * so neither can drift from the other's answer.
  */
 export function scopedCacheFilterKeyingByCollection(
 	schema: SchemaOverview,
@@ -947,7 +947,7 @@ export function scopedCacheFilterKeyingByCollection(
  * own and, transitively, its derived. So `team` scoped by `owner_ref` + `member`
  * scoped by `team` yields `team.owner_ref`, no config naming another collection's
  * relation. Cycle-guarded (`visited`); the caller re-resolves each path (a to-many
- * hop drops to the bare tag).
+ * hop drops to the bare fingerprint).
  */
 export function composeScopedCachePaths(
 	schema: Pick<SchemaOverview, 'collections' | 'relations'>,

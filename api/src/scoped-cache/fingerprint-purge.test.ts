@@ -288,7 +288,7 @@ describe('a purge shown the rows it wrote', () => {
 			}],
 			changed: ['method'],
 			indexPath: 'owner',
-			includeCollectionTag: false,
+			includeBareFingerprint: false,
 		});
 
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bare');
@@ -403,7 +403,7 @@ describe('a purge shown the rows it wrote', () => {
 			'slot',
 			[scopedCacheFingerprintOf('slot', [{ field: 'owner', value: 'alpha' }])],
 			null,
-			{ includeCollectionTag: false },
+			{ includeBareFingerprint: false },
 		);
 
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bare');

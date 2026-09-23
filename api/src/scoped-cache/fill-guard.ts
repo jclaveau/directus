@@ -5,10 +5,10 @@ import {
 import {
 	redisConfigAvailable,
 } from '../redis/index.js';
-import type { ScopedCacheTag } from '@directus/types';
+import type { ScopedCacheCollectionPin } from '@directus/types';
 import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
-import { earlierScopedCacheEpoch } from './tags.js';
+import { earlierScopedCacheEpoch } from './pins.js';
 
 const env = useEnv();
 
@@ -23,7 +23,7 @@ export type ScopedCacheEpochs = Record<string, string | null>;
 const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
 
 /**
- * A per-collection purge counter, bumped every time that collection's tags are
+ * A per-collection purge counter, bumped every time that collection's entries are
  * dropped. `*` is the wholesale entry, bumped by a flush that names no collection.
  * Kept outside `scoped-cache-index:`: a flush bumps `*` and then unlinks that
  * whole segment, and the counter has to survive the flush it counts.
@@ -35,11 +35,12 @@ function scopedCacheEpochKey(collection: string): string {
 /**
  * Read the purge counters of the collections a read depends on.
  *
- * A read's tags reach the index only in `respond`, long after the rows were fetched:
- * a purge landing in between finds nothing to drop, and the fill then stores rows it
- * already superseded — stale for the whole TTL, and (its tag sets having just been
- * deleted) unreachable to every later purge. Comparing the counter captured before
- * the query against the one at fill time is what closes that window.
+ * A read's fingerprints reach the index only in `respond`, long after the rows
+ * were fetched: a purge landing in between finds nothing to drop, and the fill then
+ * stores rows it already superseded — stale for the whole TTL, and (its index
+ * members having just been deleted) unreachable to every later purge. Comparing the
+ * counter captured before the query against the one at fill time is what closes
+ * that window.
  */
 export async function readScopedCacheEpochs(
 	collections: Iterable<string>,
@@ -76,10 +77,10 @@ export async function readScopedCacheEpochs(
 }
 
 /**
- * Bump the counters of the collections a purge just dropped tags for. Expiring, so
- * a collection nothing writes to stops costing a key; a read whose counter expired
- * between capture and fill reads `null` on both sides and caches, which is right —
- * nothing purged it in between.
+ * Bump the counters of the collections a purge just dropped entries for. Expiring,
+ * so a collection nothing writes to stops costing a key; a read whose counter
+ * expired between capture and fill reads `null` on both sides and caches, which is
+ * right — nothing purged it in between.
  */
 export async function bumpScopedCacheEpochs(
 	collections: Iterable<string>,
@@ -199,13 +200,13 @@ export function mergedScopedCacheEpochs(
  */
 export function scopedCacheCollectionsWithoutGuard(
 	captured: ScopedCacheEpochs | undefined,
-	tags: readonly ScopedCacheTag[],
+	pins: readonly ScopedCacheCollectionPin[],
 ): string[] {
 	if (captured === undefined || '*' in captured === false) {
 		return [];
 	}
 
-	return [...new Set(tags.map((tag) => tag.collection))].filter(
+	return [...new Set(pins.map((pin) => pin.collection))].filter(
 		(collection) => collection in captured === false,
 	);
 }
@@ -215,7 +216,7 @@ export function scopedCacheCollectionsWithoutGuard(
  * `undefined` when none did.
  *
  * Called AFTER the entry is written, which is the comparison that closes the
- * window: a purge that started after the pre-fill check either read the tag sets
+ * window: a purge that started after the pre-fill check either read the index
  * before this key was filed, or deleted the key between the value and its sidecar,
  * and either way the entry outlives it. A purge bumps the counters BEFORE it
  * sweeps, so re-reading them here catches every such interleaving.

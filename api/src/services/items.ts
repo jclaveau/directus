@@ -713,7 +713,7 @@ implements AbstractService<Item> {
 				scopedCacheCollector,
 				[],
 				{
-					includeCollectionTag: opts.purgeCollectionTag !== false,
+					includeBareFingerprint: opts.purgeBareFingerprint !== false,
 					rows: scopedCacheWrittenRows(scopedCacheSnapshot),
 				},
 			);
@@ -1045,7 +1045,7 @@ implements AbstractService<Item> {
 					scopedCacheCollector,
 					[],
 					{
-						includeCollectionTag: opts.purgeCollectionTag !== false,
+						includeBareFingerprint: opts.purgeBareFingerprint !== false,
 						rows: scopedCacheUpdatedRows(
 							oldScopedCacheSnapshot,
 							newScopedCacheSnapshot,
@@ -1141,7 +1141,7 @@ implements AbstractService<Item> {
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
 			// (parity with create's cancel); a plain validation cancel is a no-op (the
 			// guard keeps an empty collector from reaching the purge). The cancel purges
-			// only the declared tags — `includeCollectionTag: false` leaves this
+			// only the declared tags — `includeBareFingerprint: false` leaves this
 			// collection's own bare tag (its global reads) warm, since nothing changed.
 			if (
 				scopedCacheCollector.purgeFingerprints.length > 0 &&
@@ -1151,7 +1151,7 @@ implements AbstractService<Item> {
 					[],
 					scopedCacheCollector,
 					[],
-					{ includeCollectionTag: false },
+					{ includeBareFingerprint: false },
 				);
 			}
 
@@ -1207,7 +1207,7 @@ implements AbstractService<Item> {
 					[],
 					scopedCacheCollector,
 					[],
-					{ includeCollectionTag: false },
+					{ includeBareFingerprint: false },
 				);
 			}
 
@@ -1435,7 +1435,7 @@ implements AbstractService<Item> {
 				scopedCacheCollector,
 				[],
 				{
-					includeCollectionTag: opts.purgeCollectionTag !== false,
+					includeBareFingerprint: opts.purgeBareFingerprint !== false,
 					rows: scopedCacheUpdatedRows(
 						oldScopedCacheSnapshot,
 						newScopedCacheSnapshot,
@@ -1578,7 +1578,7 @@ implements AbstractService<Item> {
 				scopedCacheCollector,
 				[],
 				{
-					includeCollectionTag: opts.purgeCollectionTag !== false,
+					includeBareFingerprint: opts.purgeBareFingerprint !== false,
 					// An upsert's two sides never line up — an inserted row has no old
 					// side — so the diff reads as every field, which is what an insert
 					// means anyway.
@@ -1686,7 +1686,7 @@ implements AbstractService<Item> {
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
 			// (parity with create's cancel); a plain validation cancel is a no-op (the
 			// guard keeps an empty collector from reaching the purge). The cancel purges
-			// only the declared tags — `includeCollectionTag: false` leaves this
+			// only the declared tags — `includeBareFingerprint: false` leaves this
 			// collection's own bare tag (its global reads) warm, since nothing changed.
 			if (
 				scopedCacheCollector.purgeFingerprints.length > 0 &&
@@ -1696,7 +1696,7 @@ implements AbstractService<Item> {
 					[],
 					scopedCacheCollector,
 					[],
-					{ includeCollectionTag: false },
+					{ includeBareFingerprint: false },
 				);
 			}
 
@@ -1801,7 +1801,7 @@ implements AbstractService<Item> {
 					this.collection,
 				),
 				{
-					includeCollectionTag: opts.purgeCollectionTag !== false,
+					includeBareFingerprint: opts.purgeBareFingerprint !== false,
 					// The deleted rows as they last were, plus both sides of the rows
 					// the delete rewrote through a self-relation. No `changed`: a row
 					// leaving the result set takes every field with it.

@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import type {
 	PrimaryKey,
+	ScopedCacheCollectionPin,
 	ScopedCacheTag,
 	Type,
 } from '@directus/types';
@@ -154,8 +155,8 @@ export type FieldTypesByField = Record<string, Type | undefined>;
 // to the same token across drivers/timezones: a naive `dateTime`/`timestamp` column
 // comes back as a local `Date` from the driver but as an ISO string (possibly with
 // an explicit `Z`) from a filter, so the epoch-ms canonical can diverge. The read
-// side never pins these — it falls back to the bare collection tag so any write to
-// the collection invalidates the read (over-purge, never stale).
+// side never pins these — it falls back to the bare collection fingerprint so any
+// write to the collection invalidates the read (over-purge, never stale).
 export const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>([
 	'date',
 	'dateTime',
@@ -191,29 +192,30 @@ export function scopedCacheIndexPrefix(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-index:`;
 }
 
-export function scopedCacheTagKeyPrefix(): string {
-	return `${scopedCacheIndexPrefix()}tag:`;
-}
-
-export function scopedCacheTagKey(tag: ScopedCacheTag): string {
-	const base = `${scopedCacheTagKeyPrefix()}${tag.collection}`;
-	return tag.field === undefined
-		? base
-		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
-}
-
-// Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
-// key suffix (no `<namespace>:scoped-cache-index:tag:` prefix) — `collection`, or
-// `collection:field=value` for a pinned slice (same canonical value as the Redis
-// key). Comma-joined.
-export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
-	if (tag.field === undefined) {
-		return tag.collection;
+/**
+ * What identifies a pin: its collection, its field, and the value canonicalized —
+ * so `7` and `'7'`, `TRUE` and `t` key one slice. Every set that dedups pins keys
+ * on this, and nothing else, so two spellings of one slice cannot both be carried.
+ *
+ * No Redis prefix on it: the index is keyed by fingerprint, and a pin is only ever
+ * an identity in memory.
+ */
+export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
+	if (pin.field === undefined) {
+		return pin.collection;
 	}
 
-	return `${tag.collection}:${tag.field}=${
-		canonicalScopedCacheValue(tag.value, tag.type)
+	return `${pin.collection}:${pin.field}=${
+		canonicalScopedCacheValue(pin.value, pin.type)
 	}`;
+}
+
+// What a tag reads as in the dev-only `X-Scoped-Cache-*` headers and the telemetry
+// tag lists: `collection`, or `collection:field=value` for a pinned slice. A tag is
+// one pin, so the rendering is the pin's own identity under the name the outside
+// uses for it.
+export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
+	return scopedCachePinKey(tag);
 }
 
 export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
@@ -230,39 +232,39 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
  * `'coarse'` returns `null` so the caller can fall back to a collection-wide purge
  * rather than leave a slice stale; `'skip'` best-effort skips just that row's
  * contribution. - The `'coarse'` path triggers for a caller feeding *unprojected*
- * rows. The purge side (`snapshotScopedCacheTags`) reads rows via an explicit
+ * rows. The purge side (`snapshotScopedCachePins`) reads rows via an explicit
  * projected `select`, so every field key is always present and it never returns
  * `null` there — an update/delete/create snapshot always resolves. A create whose
  * committed rows can't be trusted is caught upstream by the row-count check
  * (`someRowTakenOver`), not here. - The read side
- * (`pinnedScopedCacheTagsFromM2oParents`) is the caller that depends on the `null`:
+ * (`scopedCachePinsFromM2oParents`) is the caller that depends on the `null`:
  * one parent row missing its key has to take its whole collection down to the bare
  * tag, since pinning the rest would leave that row covered by nothing. -
  * `fieldTypes`: each field's schema type, so the tag value canonicalizes the same
  * way the read side's filter value does.
  */
-export function scopedCacheTagsFromRows(
+export function scopedCachePinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'skip',
 	fieldTypes?: FieldTypesByField,
-): ScopedCacheTag[];
-export function scopedCacheTagsFromRows(
+): ScopedCacheCollectionPin[];
+export function scopedCachePinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse',
 	fieldTypes?: FieldTypesByField,
-): ScopedCacheTag[] | null;
-export function scopedCacheTagsFromRows(
+): ScopedCacheCollectionPin[] | null;
+export function scopedCachePinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse' | 'skip',
 	fieldTypes: FieldTypesByField = {},
-): ScopedCacheTag[] | null {
-	const tags: ScopedCacheTag[] = [];
+): ScopedCacheCollectionPin[] | null {
+	const pins: ScopedCacheCollectionPin[] = [];
 
 	for (const field of fields) {
 		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a
@@ -287,11 +289,11 @@ export function scopedCacheTagsFromRows(
 			}
 
 			seen.add(token);
-			tags.push({ collection, field, value, type: fieldTypes[field] });
+			pins.push({ collection, field, value, type: fieldTypes[field] });
 		}
 	}
 
-	return tags;
+	return pins;
 }
 
 /**

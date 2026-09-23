@@ -16,7 +16,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // A sort across a relation is kept out of `beyond` when the sorted collection
-// declares scope fields — `read-tags.ts` reads a sort as a reorder the collection's
+// declares scope fields — `read-pins.ts` reads a sort as a reorder the collection's
 // own slice catches, rather than a change of membership. What makes that sound is
 // not the declaration: it is that the exemption is only ever reached by a
 // collection the filter already NAMED by key (`namedByFilter`), and a keyed filter

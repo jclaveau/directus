@@ -29,9 +29,9 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 
 vi.mock('../database/run-ast/run-ast.js', () => ({ runAst: vi.fn(async () => []) }));
 
-vi.mock('../scoped-cache/tags.js', async (importOriginal) => {
+vi.mock('../scoped-cache/pins.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache/tags.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/pins.js')>()),
 		scopedCacheMaxPinsPerCollection: vi.fn(() => 250),
 	};
 });
@@ -50,7 +50,7 @@ import {
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
-import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/tags.js';
+import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/pins.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 

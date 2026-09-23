@@ -1,15 +1,16 @@
 import type {
 	ScopedCacheDeclaredFingerprint,
 	ScopedCacheFingerprint,
+	ScopedCacheCollectionPin,
 	ScopedCacheScopePin,
 	ScopedCacheTag,
 	SchemaOverview,
 } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
-	scopedCacheTagKey,
+	scopedCachePinKey,
 	scopedCacheTagLabel,
-} from './tags.js';
+} from './pins.js';
 
 export type { ScopedCacheFingerprint } from '@directus/types';
 
@@ -225,7 +226,7 @@ export function scopedCacheTagsOfFingerprints(
 	const seenTagKeys = new Set<string>();
 
 	const pushTag = (tag: ScopedCacheTag): void => {
-		const derivedTagKey = scopedCacheTagKey(tag);
+		const derivedTagKey = scopedCachePinKey(tag);
 
 		if (seenTagKeys.has(derivedTagKey)) {
 			return;
@@ -375,11 +376,11 @@ export function scopedCacheViewFieldsAreTouched(
  * response, and one fingerprint ANDing them would match neither.
  *
  * The tags a collection carries from anywhere else — a nested node's slice, an
- * ancestor's key, a hook's own tag — each stand alone the way a tag sweep reads
- * them, so each is a query case of its own.
+ * ancestor's key, a hook's own tag — each stand alone the way a fingerprint sweep
+ * reads them, so each is a query case of its own.
  *
  * A query case naming no field pins nothing, so its fingerprint carries an empty
- * scope and every row of that collection matches — which is what a bare tag
+ * scope and every row of that collection matches — which is what a bare fingerprint
  * means. Its view fields still narrow it: a write touching none of them cannot
  * change the response, whether or not the read could say which rows it depends
  * on.
@@ -389,7 +390,7 @@ export function scopedCacheViewFieldsAreTouched(
  * the caller may have ordered on purpose.
  */
 export function scopedCacheFingerprintsByCollection(
-	queryCases: readonly (readonly ScopedCacheTag[])[],
+	queryCases: readonly (readonly ScopedCacheCollectionPin[])[],
 	fieldsByCollection: ReadonlyMap<string, readonly string[]> = new Map(),
 ): ScopedCacheFingerprint[] {
 	const composedFingerprints: ScopedCacheFingerprint[] = [];

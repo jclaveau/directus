@@ -201,7 +201,7 @@ describe(oneLine`
 	it(oneLine`
 		updateMany purges old ∪ new — a row moved student A→B drops both slices
 	`, async () => {
-		// snapshotScopedCacheTags reads the pre-update row (old = A), then re-reads the
+		// snapshotScopedCachePins reads the pre-update row (old = A), then re-reads the
 		// committed row after the write (new = B) — the stored row is authoritative, not the
 		// payload, so a trigger/coercion rewrite still resolves the right slice. old ∪ new.
 		tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
@@ -255,7 +255,7 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		updateMany with purgeCollectionTag:false drops the row's own slices and leaves
+		updateMany with purgeBareFingerprint:false drops the row's own slices and leaves
 		the bare tag warm — the reads it names never decided on the written column
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
@@ -264,7 +264,7 @@ describe(oneLine`
 		await service().updateMany(
 			[1],
 			{ name: 'renamed' },
-			{ purgeCollectionTag: false },
+			{ purgeBareFingerprint: false },
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
@@ -281,12 +281,12 @@ describe(oneLine`
 			expect.anything(),
 			// The rows the mutation wrote ride in the same options object; what this
 			// case is about is the bare tag the purge is told to leave warm.
-			expect.objectContaining({ includeCollectionTag: false }),
+			expect.objectContaining({ includeBareFingerprint: false }),
 		);
 	});
 
 	it(oneLine`
-		purgeCollectionTag:false holds through a delete that cascades into another
+		purgeBareFingerprint:false holds through a delete that cascades into another
 		collection — the child takes its coarse purge, the parent keeps its bare tag
 	`, async () => {
 		purgeScopedCache.mockResolvedValue([]);
@@ -295,7 +295,7 @@ describe(oneLine`
 
 		await service(cascadeChildSchema).deleteMany(
 			[1],
-			{ purgeCollectionTag: false },
+			{ purgeBareFingerprint: false },
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(2);
@@ -308,7 +308,7 @@ describe(oneLine`
 			]),
 			expect.anything(),
 			expect.objectContaining({
-				includeCollectionTag: false,
+				includeBareFingerprint: false,
 				scopedCachePurgeId: expect.any(String),
 			}),
 		);
@@ -326,8 +326,9 @@ describe(oneLine`
 		updateMany falls back to a coarse purge (null) when a pre-update row is missing
 		the scope field
 	`, async () => {
-		// snapshotScopedCacheTags needs every row to resolve all scope fields; a row missing
-		// `student` makes the old value unknowable → null → coarse collection-wide purge.
+		// snapshotScopedCachePins needs every row to resolve all scope fields; a row
+		// missing `student` makes the old value unknowable → null → coarse
+		// collection-wide purge.
 		tracker.on.select('test').response([{ id: 1 }]);
 		tracker.on.update('test').response(1);
 
@@ -1385,7 +1386,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a hook that declares a slice then cancels (null) purges only that slice —
-			includeCollectionTag:false keeps the cancelled collection's bare tag warm,
+			includeBareFingerprint:false keeps the cancelled collection's bare tag warm,
 			since nothing in it changed
 		`, async () => {
 			// updateMany snapshots the pre-update rows before the filter runs (old ∪ new),
@@ -1415,7 +1416,7 @@ describe(oneLine`
 					[],
 					expect.anything(),
 					{
-						includeCollectionTag: false,
+						includeBareFingerprint: false,
 						declaredFingerprints: [authorsFingerprint],
 					},
 				);
@@ -1427,7 +1428,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only
-			that slice — includeCollectionTag:false keeps the cancelled
+			that slice — includeBareFingerprint:false keeps the cancelled
 			collection's bare tag warm, since nothing in it was deleted
 		`, async () => {
 			// deleteMany snapshots rows AFTER the filter, so a cancel returns
@@ -1451,7 +1452,7 @@ describe(oneLine`
 					[],
 					expect.anything(),
 					{
-						includeCollectionTag: false,
+						includeBareFingerprint: false,
 						declaredFingerprints: [authorsFingerprint],
 					},
 				);
@@ -1496,7 +1497,7 @@ describe(oneLine`
 				);
 
 				// Coarse already flushed this collection's bare tag + every slice, so the
-				// hook purge must NOT re-add it: includeCollectionTag:false (else the bare
+				// hook purge must NOT re-add it: includeBareFingerprint:false (else the bare
 				// tag is purged twice and doubled in the debug header).
 				expect(purgeScopedCache).toHaveBeenNthCalledWith(
 					2,
@@ -1505,7 +1506,7 @@ describe(oneLine`
 					[],
 					expect.anything(),
 					{
-						includeCollectionTag: false,
+						includeBareFingerprint: false,
 						declaredFingerprints: [authorsFingerprint],
 						scopedCachePurgeId: expect.any(String),
 					},

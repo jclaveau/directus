@@ -19,15 +19,25 @@ export interface ScopedCacheScopePin {
 }
 
 /**
- * A unit of cache scope. A collection-level tag (no `field`) covers every entry that
- * read the collection — the coarse bucket holding "global" reads that couldn't be
- * narrowed. A `field`+`value` tag pins a single slice so one owner's/partition's writes
- * drop only their own entries. `type` is the field's schema type, used to canonicalize
- * `value` so a filter value and the native DB row value resolve the same slice.
+ * One pin, in the collection it is an axis of — what a read resolves a dozen of
+ * before they are composed into that collection's fingerprint, and what a row
+ * writes one of per scoped field.
+ *
+ * A pin naming no `field` names the collection whole: the coarse bucket holding
+ * the reads that could not be narrowed.
  */
-export interface ScopedCacheTag extends ScopedCacheScopePin {
+export interface ScopedCacheCollectionPin extends ScopedCacheScopePin {
 	collection: string;
 }
+
+/**
+ * A fingerprint as the OUTSIDE spells one: a single collection/field/value, which
+ * is all the dev headers, the telemetry tag lists and the blackbox assertions can
+ * say. The AND a fingerprint carries is exactly what this form loses, so nothing
+ * inside the scoped-cache layer invalidates by it — it is a rendering, taken at
+ * the last moment (`scopedCacheTagsOfFingerprints`).
+ */
+export type ScopedCacheTag = ScopedCacheCollectionPin;
 
 /**
  * One collection's whole dependency, in one value.
@@ -254,22 +264,23 @@ export interface ScopedCacheExtensionHandle {
 }
 
 /**
- * A per-operation sink collecting tags from `context.scopedCache`. A batch/upsert
- * parent injects one via `MutationOptions.scopedCacheCollector` so its children (run
- * with autoPurgeCache off) accumulate into it and the parent drains it once.
+ * A per-operation sink collecting what `context.scopedCache` declares. A
+ * batch/upsert parent injects one via `MutationOptions.scopedCacheCollector` so its
+ * children (run with autoPurgeCache off) accumulate into it and the parent drains
+ * it once.
  */
 export interface ScopedCacheCollector {
 	scope: ScopedCacheScopeHandle;
 	purge: ScopedCachePurgeHandle;
-	tags: ScopedCacheTag[];
+	pins: ScopedCacheCollectionPin[];
 	/**
 	 * What a mutation hook declared through `purgeBy`, canonicalized against the
-	 * schema. Its own sink rather than the tag list above: a tag is one axis and a
+	 * schema. Its own sink rather than the pin list above: a pin is one axis and a
 	 * fingerprint is a whole query case, and flattening one into the other is
 	 * exactly the over-purge the fingerprint exists to stop.
 	 */
 	purgeFingerprints: ScopedCacheFingerprint[];
-	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
+	/** Canonical keys of pins a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
 	manuallyPurgedKeys: Set<string>;
 	/**
 	 * Purge counters handed over with a `scopeTo`, merged into the read's own so

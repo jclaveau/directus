@@ -57,12 +57,13 @@ export type MutationOptions = {
 	autoPurgeCache?: boolean | undefined;
 
 	/**
-	 * `false` keeps the collection's bare tag out of the scoped purge: the mutated
-	 * rows' own slices drop, the reads the bare tag names (unpinned listings,
-	 * relational hops) keep serving the pre-write rows. For a write whose column no
-	 * such read decides on, issued at a rate that would otherwise drain them.
+	 * `false` keeps the collection's bare fingerprint out of the scoped purge: the
+	 * mutated rows' own slices drop, the reads the bare fingerprint names (unpinned
+	 * listings, relational hops) keep serving the pre-write rows. For a write whose
+	 * column no such read decides on, issued at a rate that would otherwise drain
+	 * them.
 	 */
-	purgeCollectionTag?: boolean | undefined;
+	purgeBareFingerprint?: boolean | undefined;
 
 	/**
 	 * Flag to disable the auto purging of the system cache.
