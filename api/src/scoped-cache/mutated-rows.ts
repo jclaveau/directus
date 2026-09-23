@@ -25,12 +25,14 @@ export type ScopedCacheMutatedRow = {
 };
 
 /**
- * One read of the rows a mutation touches: the scope tags they sit in, and the
- * rows themselves. `tags: null` means their scope is unresolvable, so their
- * collection is purged whole.
+ * One read of the rows a mutation touches: the rows themselves, and the flat
+ * `ScopedCacheTag` slices they sit in — the legacy index this branch still
+ * double-writes, kept beside the fingerprints until it retires.
+ * `legacyTags: null` means their scope is unresolvable, so their collection is
+ * purged whole.
  */
 export type ScopedCacheCapture = {
-	tags: ScopedCacheTag[] | null;
+	legacyTags: ScopedCacheTag[] | null;
 	rows: ScopedCacheMutatedRow[];
 };
 
@@ -127,7 +129,7 @@ function sameStoredValue(before: unknown, after: unknown): boolean {
 export function scopedCacheWrittenRows(
 	capture: ScopedCacheCapture,
 ): ScopedCacheMutatedWrite | undefined {
-	if (capture.tags === null || capture.rows.length === 0) {
+	if (capture.legacyTags === null || capture.rows.length === 0) {
 		return undefined;
 	}
 
@@ -145,7 +147,7 @@ export function scopedCacheUpdatedRows(
 	before: ScopedCacheCapture,
 	after: ScopedCacheCapture,
 ): ScopedCacheMutatedWrite | undefined {
-	if (before.tags === null || after.tags === null) {
+	if (before.legacyTags === null || after.legacyTags === null) {
 		return undefined;
 	}
 

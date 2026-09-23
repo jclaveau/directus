@@ -707,7 +707,7 @@ implements AbstractService<Item> {
 				: await this.scopedCache.capture(changedKeys);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheCapture?.tags ?? null,
+				scopedCacheCapture?.legacyTags ?? null,
 				scopedCacheCollector,
 				[],
 				{
@@ -1038,9 +1038,13 @@ implements AbstractService<Item> {
 				const newScopedCacheCapture = await this.scopedCache.capture(batchKeys);
 
 				const scopedCacheTags =
-					oldScopedCacheCapture.tags === null || newScopedCacheCapture.tags === null
+					oldScopedCacheCapture.legacyTags === null
+					|| newScopedCacheCapture.legacyTags === null
 						? null
-						: [...oldScopedCacheCapture.tags, ...newScopedCacheCapture.tags];
+						: [
+							...oldScopedCacheCapture.legacyTags,
+							...newScopedCacheCapture.legacyTags,
+						];
 
 				this.scopedCachePurged = await this.scopedCache.purge(
 					scopedCacheTags,
@@ -1430,9 +1434,13 @@ implements AbstractService<Item> {
 			const newScopedCacheCapture = await this.scopedCache.capture(keys);
 
 			const scopedCacheTags =
-				oldScopedCacheCapture.tags === null || newScopedCacheCapture.tags === null
+				oldScopedCacheCapture.legacyTags === null
+				|| newScopedCacheCapture.legacyTags === null
 					? null
-					: [...oldScopedCacheCapture.tags, ...newScopedCacheCapture.tags];
+					: [
+						...oldScopedCacheCapture.legacyTags,
+						...newScopedCacheCapture.legacyTags,
+					];
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheTags,
@@ -1568,12 +1576,15 @@ implements AbstractService<Item> {
 
 			const unresolvableRows =
 				(someRowTakenOver && scopedCacheCollector.tags.length === 0) ||
-				oldScopedCacheCapture.tags === null ||
-				newScopedCacheCapture.tags === null;
+				oldScopedCacheCapture.legacyTags === null ||
+				newScopedCacheCapture.legacyTags === null;
 
 			const scopedCacheTags = unresolvableRows
 				? null
-				: [...oldScopedCacheCapture.tags!, ...newScopedCacheCapture.tags!];
+				: [
+					...oldScopedCacheCapture.legacyTags!,
+					...newScopedCacheCapture.legacyTags!,
+				];
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheTags,
@@ -1793,12 +1804,12 @@ implements AbstractService<Item> {
 				await this.scopedCache.capture(selfRelationSurvivorKeys);
 
 			const scopedCacheTags =
-				oldScopedCacheCapture.tags === null
-				|| survivorScopedCacheCapture.tags === null
+				oldScopedCacheCapture.legacyTags === null
+				|| survivorScopedCacheCapture.legacyTags === null
 					? null
 					: [
-						...oldScopedCacheCapture.tags,
-						...survivorScopedCacheCapture.tags,
+						...oldScopedCacheCapture.legacyTags,
+						...survivorScopedCacheCapture.legacyTags,
 					];
 
 			this.scopedCachePurged = await this.scopedCache.purge(

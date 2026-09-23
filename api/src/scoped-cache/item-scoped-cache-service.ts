@@ -289,12 +289,12 @@ export class ItemScopedCacheService {
 	 * and a read pinning an axis the write never emits is never purged — stale, which
 	 * is worse than any hit ratio. It costs no query, since the keys are already here.
 	 *
-	 * `tags: null` is the fail-safe: the scope of these rows is unresolvable, so
+	 * `legacyTags: null` is the fail-safe: the scope of these rows is unresolvable, so
 	 * their collection is purged whole.
 	 */
 	async capture(keys: PrimaryKey[]): Promise<ScopedCacheCapture> {
 		if (!scopedCachePurgeEnabled() || keys.length === 0) {
-			return { tags: [], rows: [] };
+			return { legacyTags: [], rows: [] };
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]?.primary;
@@ -304,12 +304,12 @@ export class ItemScopedCacheService {
 		// schema. Such a collection resolves no key and no scope field either, and the
 		// bare collection tag the purge always carries still drops its reads.
 		if (primaryKeyField === undefined) {
-			return { tags: [], rows: [] };
+			return { legacyTags: [], rows: [] };
 		}
 
 		const fieldTypes = this.fieldTypes;
 
-		const tags: ScopedCacheTag[] = keys.map((key) => {
+		const keyTags: ScopedCacheTag[] = keys.map((key) => {
 			return {
 				collection: this.collection,
 				field: primaryKeyField,
@@ -331,8 +331,8 @@ export class ItemScopedCacheService {
 		// as it did before.
 		if (flatFields.length === 0 && pathFields.length === 0) {
 			return {
-				tags,
-				rows: tags.map((tag) => {
+				legacyTags: keyTags,
+				rows: keyTags.map((tag) => {
 					return {
 						key: tag.value as PrimaryKey,
 						row: null,
@@ -368,7 +368,7 @@ export class ItemScopedCacheService {
 		//   without the arms the purge would silently narrow rather than
 		//   widen: a stale cache instead of a slow one.
 		if (flatTags === null) {
-			return { tags: null, rows: [] };
+			return { legacyTags: null, rows: [] };
 		}
 
 		tags.push(...flatTags);

@@ -47,10 +47,6 @@ schema.collections['item']!.scopedCacheFields = [
 	'parent.area',
 ];
 
-function serviceFor(collection: string) {
-	return new ItemScopedCacheService(collection, schema, db, null, null);
-}
-
 describe('capture', () => {
 	it(oneLine`
 		captures one row as one fingerprint, holding every axis it sits on
@@ -59,8 +55,11 @@ describe('capture', () => {
 			{ id: 1, owner: 'alpha', method: 'spaced', parent: 9, '#path0': 'north' },
 		]);
 
-		expect(await serviceFor('item').capture([1])).toEqual({
-			tags: [
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		expect(await scopedCache.capture([1])).toEqual({
+			legacyTags: [
 				{ collection: 'item', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'item', field: 'owner', value: 'alpha', type: 'string' },
 				{ collection: 'item', field: 'method', value: 'spaced', type: 'string' },
@@ -107,7 +106,10 @@ describe('capture', () => {
 			{ id: 2, owner: 'beta', method: 'slow', parent: 8, '#path0': 'south' },
 		]);
 
-		const { rows } = await serviceFor('item').capture([1, 2]);
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		const { rows } = await scopedCache.capture([1, 2]);
 
 		expect(rows).toEqual([
 			{
@@ -160,7 +162,10 @@ describe('capture', () => {
 			{ id: 3, owner: null, method: 'spaced', parent: null, '#path0': null },
 		]);
 
-		const { rows } = await serviceFor('item').capture([3]);
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		const { rows } = await scopedCache.capture([3]);
 
 		expect(rows).toEqual([
 			{
@@ -191,8 +196,11 @@ describe('capture', () => {
 	// columns are never read — no query is issued at all — so the row rides as
 	// `null` and every update of it reads as touching every field.
 	it('captures the key axis of a collection scoping on nothing', async () => {
-		expect(await serviceFor('zone').capture([7])).toEqual({
-			tags: [
+		const scopedCache =
+			new ItemScopedCacheService('zone', schema, db, null, null);
+
+		expect(await scopedCache.capture([7])).toEqual({
+			legacyTags: [
 				{ collection: 'zone', field: 'id', value: 7, type: 'integer' },
 			],
 			rows: [
@@ -212,7 +220,11 @@ describe('capture', () => {
 	it(oneLine`
 		captures nothing for no keys, which a collection-wide purge already covers
 	`, async () => {
-		expect(await serviceFor('item').capture([])).toEqual({ tags: [], rows: [] });
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		expect(await scopedCache.capture([]))
+			.toEqual({ legacyTags: [], rows: [] });
 	});
 
 	it(oneLine`
@@ -220,12 +232,19 @@ describe('capture', () => {
 	`, async () => {
 		purgeEnabled = false;
 
-		expect(await serviceFor('item').capture([1])).toEqual({ tags: [], rows: [] });
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		expect(await scopedCache.capture([1]))
+			.toEqual({ legacyTags: [], rows: [] });
 	});
 
 	it('captures nothing for a collection absent from the schema', async () => {
-		expect(await serviceFor('unknown').capture([1])).toEqual({
-			tags: [],
+		const scopedCache =
+			new ItemScopedCacheService('unknown', schema, db, null, null);
+
+		expect(await scopedCache.capture([1])).toEqual({
+			legacyTags: [],
 			rows: [],
 		});
 	});

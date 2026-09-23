@@ -147,20 +147,20 @@ describe('scopedCacheChangedFields', () => {
 describe('scopedCacheWrittenRows', () => {
 	it('shows the rows it wrote, and every field with them', () => {
 		expect(scopedCacheWrittenRows({
-			tags: [{ collection: 'slot', field: 'id', value: 1 }],
+			legacyTags: [{ collection: 'slot', field: 'id', value: 1 }],
 			rows: [{ key: 1, row: { id: 1 }, fingerprint }],
 		})).toEqual({ fingerprints: [fingerprint], changed: null });
 	});
 
 	it('shows nothing when the rows\' scope could not be resolved', () => {
 		expect(scopedCacheWrittenRows({
-			tags: null,
+			legacyTags: null,
 			rows: [{ key: 1, row: { id: 1 }, fingerprint }],
 		})).toBe(undefined);
 	});
 
 	it('shows nothing when no row was read back', () => {
-		expect(scopedCacheWrittenRows({ tags: [], rows: [] })).toBe(undefined);
+		expect(scopedCacheWrittenRows({ legacyTags: [], rows: [] })).toBe(undefined);
 	});
 });
 
@@ -180,7 +180,7 @@ describe('scopedCacheUpdatedRows', () => {
 
 		expect(scopedCacheUpdatedRows(
 			{
-				tags: [],
+				legacyTags: [],
 				rows: [{
 					key: 1,
 					row: { id: 1, owner: 'alpha' },
@@ -188,7 +188,7 @@ describe('scopedCacheUpdatedRows', () => {
 				}],
 			},
 			{
-				tags: [],
+				legacyTags: [],
 				rows: [{
 					key: 1,
 					row: { id: 1, owner: 'beta' },
@@ -203,15 +203,15 @@ describe('scopedCacheUpdatedRows', () => {
 
 	it('shows nothing when either side could not be resolved', () => {
 		expect(scopedCacheUpdatedRows(
-			{ tags: null, rows: [] },
-			{ tags: [], rows: [{ key: 1, row: { id: 1 }, fingerprint }] },
+			{ legacyTags: null, rows: [] },
+			{ legacyTags: [], rows: [{ key: 1, row: { id: 1 }, fingerprint }] },
 		)).toBe(undefined);
 	});
 
 	it('shows nothing when neither side read a row back', () => {
 		expect(scopedCacheUpdatedRows(
-			{ tags: [], rows: [] },
-			{ tags: [], rows: [] },
+			{ legacyTags: [], rows: [] },
+			{ legacyTags: [], rows: [] },
 		)).toBe(undefined);
 	});
 });
