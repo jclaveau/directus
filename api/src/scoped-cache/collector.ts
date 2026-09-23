@@ -2,11 +2,12 @@ import type {
 	MaybeWithMeta,
 	ReadMeta,
 	SchemaOverview,
+	ScopedCacheCollectionPin,
 	ScopedCacheCollector,
 	ScopedCacheDeclaredFingerprint,
 	ScopedCacheDependency,
 	ScopedCacheFingerprint,
-	ScopedCacheCollectionPin,
+	ScopedCacheFingerprintInput,
 	WithMeta,
 } from '@directus/types';
 import {
@@ -53,15 +54,15 @@ function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
  * A per-operation collector backing the `context.scopedCache` hook handle. The
  * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
  * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
- * the service drains `pins` into the read's scope, `purgeFingerprints` into the
- * mutation's purge. Both are idempotent sinks. Safe with purging off (then neither
- * is read).
+ * the service drains `scopeQueryCases` into the read's scope, `purgeFingerprints`
+ * into the mutation's purge. Both are idempotent sinks. Safe with purging off
+ * (then neither is read).
  */
 export function createScopedCacheCollector(
 	schema: SchemaOverview,
 ): ScopedCacheCollector {
-	const pins: ScopedCacheCollectionPin[] = [];
-	const seen = new Set<string>();
+	const scopeQueryCases: ScopedCacheCollectionPin[][] = [];
+	const seenScopeQueryCases = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
 	const epochs: Record<string, string | null> = {};
 	const purgeSkippedKeys = new Set<string>();
@@ -69,25 +70,8 @@ export function createScopedCacheCollector(
 	const purgeFingerprints: ScopedCacheFingerprint[] = [];
 	const seenPurgeFingerprints = new Set<string>();
 
-	// A hook names a slice by collection/field/value and rarely knows the column's
-	// type, but the type is what canonicalizes the value: `uuid` lowercases and
-	// `integer` strips a leading zero, so a type-less pin and the schema-typed one
-	// the purge side emits resolve DIFFERENT keys for the SAME row — a pin nothing
-	// ever purges. Fill it from the schema so both sides agree.
-	function withSchemaType(pin: ScopedCacheCollectionPin): ScopedCacheCollectionPin {
-		if (pin.type !== undefined || pin.field === undefined) {
-			return pin;
-		}
-
-		const schemaType = schema.collections[pin.collection]?.fields[pin.field]?.type;
-
-		return schemaType === undefined
-			? pin
-			: { ...pin, type: schemaType };
-	}
-
 	function add(
-		input: ScopedCacheCollectionPin | readonly ScopedCacheCollectionPin[],
+		input: ScopedCacheFingerprintInput,
 		manuallyPurged = false,
 		declaredEpochs?: Record<string, string | null>,
 	): void {
@@ -99,30 +83,48 @@ export function createScopedCacheCollector(
 
 		const batch = Array.isArray(input)
 			? input
-			: [input];
+			: [input as ScopedCacheDeclaredFingerprint];
 
-		for (const declaredPin of batch) {
-			const pin = withSchemaType(declaredPin);
+		for (const declared of batch) {
+			// One query case per declared fingerprint: its axes typed off the schema,
+			// kept together. A hook names a slice by field and value and rarely knows
+			// the column's type, but the type is what canonicalizes the value — `uuid`
+			// lowercases and `integer` strips a leading zero — so a type-less axis and
+			// the schema-typed one the purge side emits would resolve DIFFERENT slices
+			// of the SAME row.
+			const queryCase = scopedCacheDeclaredPins(declared, schema)
+				.map((pin) => ({ ...pin, collection: declared.collection }));
+
+			// The values a read is pinned to are its own; a declared fingerprint
+			// naming none is the collection whole, which is one axis pinning nothing.
+			const axes = queryCase.length > 0
+				? queryCase
+				: [{ collection: declared.collection }];
+
+			// Record the accept regardless of dedup: if ANY scopeTo of this axis marked
+			// it manuallyPurged, it's exempt from the unautopurgeable-scope anomaly.
+			if (manuallyPurged) {
+				for (const pin of axes) {
+					manuallyPurgedKeys.add(scopedCachePinKey(pin));
+				}
+			}
 
 			// Idempotent: a hook looping over rows that resolve the same slice — or a
 			// batch/upsert parent's shared collector fed by many children — must not
-			// inflate the set. Key on the canonical pin key (the same one the purge side
-			// dedups on), so field order and value/type variants (7 vs '7') can't slip a
-			// duplicate past a raw JSON compare.
-			const key = scopedCachePinKey(pin);
+			// inflate the set. Key on the canonical pin keys of the whole case, so
+			// field order and value/type variants (7 vs '7') can't slip a duplicate
+			// past a raw JSON compare.
+			const key = axes
+				.map(scopedCachePinKey)
+				.sort()
+				.join('&');
 
-			// Record the accept regardless of dedup: if ANY scopeTo of this pin marked it
-			// manuallyPurged, it's exempt from the unautopurgeable-scope anomaly.
-			if (manuallyPurged) {
-				manuallyPurgedKeys.add(key);
-			}
-
-			if (seen.has(key)) {
+			if (seenScopeQueryCases.has(key)) {
 				continue;
 			}
 
-			seen.add(key);
-			pins.push(pin);
+			seenScopeQueryCases.add(key);
+			scopeQueryCases.push(axes);
 		}
 	}
 
@@ -159,7 +161,7 @@ export function createScopedCacheCollector(
 	}
 
 	return {
-		pins,
+		scopeQueryCases,
 		purgeFingerprints,
 		manuallyPurgedKeys,
 		purgeSkippedKeys,
@@ -173,7 +175,7 @@ export function createScopedCacheCollector(
 				const resolved = await lookup;
 
 				for (const meta of readMetasOf(resolved)) {
-					add(meta.scopedCacheTags, false, meta.scopedCacheEpochs);
+					add(meta.scopedCacheFingerprints, false, meta.scopedCacheEpochs);
 				}
 
 				return resolved;

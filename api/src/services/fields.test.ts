@@ -109,8 +109,8 @@ describe('Services / Fields', () => {
 			const service = new FieldsService({ knex: db, schema });
 			const result = await service.readAll();
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'directus_fields' },
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
+				{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
 			]);
 		});
 

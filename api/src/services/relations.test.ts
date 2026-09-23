@@ -100,8 +100,8 @@ describe('Services / Relations', () => {
 			const service = new RelationsService({ knex: db, schema });
 			const result = await service.readAll();
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'directus_relations' },
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
+				{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
 			]);
 		});
 	});
@@ -136,8 +136,8 @@ describe('Services / Relations', () => {
 
 			const result = await service.readOne('test', 'related');
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'directus_relations' },
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
+				{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
 			]);
 		});
 

@@ -75,18 +75,14 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
-		// Real for the same reason: composing fingerprints into a flat tag set is
-		// pure, and a stand-in would agree with the assertions rather than the
-		// grammar.
 		scopedCacheIndexPath: actual.scopedCacheIndexPath,
-		scopedCacheTagsOfFingerprints: actual.scopedCacheTagsOfFingerprints,
 		// Used only to build fixtures below — pure, reaches no Redis.
 		scopedCacheReadMeta: actual.scopedCacheReadMeta,
-		// The real one, not a stand-in. The descriptor assertion reads the tag
+		// The real one, not a stand-in. The descriptor assertion reads the label
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
-		scopedCacheTagLabel: actual.scopedCacheTagLabel,
+		scopedCacheFingerprintLabels: actual.scopedCacheFingerprintLabels,
 		// Same reason, for the form a recorded purge is retried from.
 		renderScopedCacheFingerprint: actual.renderScopedCacheFingerprint,
 	};

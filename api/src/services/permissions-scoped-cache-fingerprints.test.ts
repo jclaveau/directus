@@ -61,8 +61,8 @@ describe('PermissionsService.readByQuery override', () => {
 		// rebuilt (app-minimal appended) AND the rider survived
 		expect(result).toHaveLength(2);
 
-		expect(readMeta(result)?.scopedCacheTags ?? []).toEqual([
-			{ collection: 'directus_permissions' },
+		expect(readMeta(result)?.scopedCacheFingerprints ?? []).toEqual([
+			{ collection: 'directus_permissions', pinnedScope: {}, viewFields: [] },
 		]);
 	});
 });

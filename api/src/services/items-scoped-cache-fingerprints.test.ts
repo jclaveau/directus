@@ -45,8 +45,8 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 });
 
 import {
+	scopedCacheFingerprintLabels,
 	scopedCachePurgeEnabled,
-	serializeScopedCacheTags,
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
@@ -80,7 +80,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(result)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -90,7 +92,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const result = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(result)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles']);
 	});
 
@@ -102,11 +106,15 @@ describe('readByQuery scoped cache tag accumulation', () => {
 
 		// Each result carries only its own query's tags — the earlier read is not polluted by the later.
 		expect(
-			(readMeta(shallow)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(shallow)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles']);
 
 		expect(
-			(readMeta(deep)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(deep)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -117,7 +125,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const one = await service.readOne(1, { fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(one)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(one)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -128,7 +138,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const record = await service.readSingleton({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(record)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(record)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -139,7 +151,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const defaults = await service.readSingleton({ fields: ['*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(defaults)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(defaults)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles']);
 	});
 
@@ -149,7 +163,7 @@ describe('readByQuery scoped cache tag accumulation', () => {
 
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(readMeta(result)?.scopedCacheTags.length).toBe(0);
+		expect(readMeta(result)?.scopedCacheFingerprints.length).toBe(0);
 	});
 });
 
@@ -225,9 +239,9 @@ describe('read tags at the merge', () => {
 	): Promise<string[]> => {
 		const result = await service.readByQuery(query, { emitEvents: false });
 
-		return serializeScopedCacheTags(readMeta(result)?.scopedCacheTags ?? [])
-			.split(', ')
-			.sort();
+		return scopedCacheFingerprintLabels(
+			readMeta(result)?.scopedCacheFingerprints ?? [],
+		).sort();
 	};
 
 	beforeEach(() => {

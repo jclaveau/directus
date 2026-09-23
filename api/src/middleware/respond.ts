@@ -23,8 +23,6 @@ import {
 	scopedCachePurgeEnabled,
 	scopedCacheFingerprintLabels,
 	scopedCacheSweptDuringFill,
-	scopedCacheTagLabel,
-	scopedCacheTagsOfFingerprints,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
 import {
@@ -70,10 +68,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		?? payloadMeta?.scopedCacheFingerprints
 		?? [];
 
-	// The same dependency read one pin at a time: what the dev headers, the audit
-	// header and the legacy tag sets speak. Derived here rather than carried, so
-	// the AND survives everywhere that can hold it.
-	const readTags = scopedCacheTagsOfFingerprints(readFingerprints);
+	// The same dependency spelled one pinned value at a time: what the dev headers,
+	// the audit header and the stored tag lists speak. Rendered here, at the last
+	// moment, so the AND a fingerprint holds survives everywhere that can hold it.
+	const readLabels = scopedCacheFingerprintLabels(readFingerprints);
 
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
 	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
@@ -83,11 +81,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
 	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
 	if (env['CACHE_TAGS_HEADER']) {
-		if (Array.isArray(readTags) && readTags.length) {
+		if (readLabels.length > 0) {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_TAGS_HEADER']}`,
-				readTags.map(scopedCacheTagLabel),
+				readLabels,
 			);
 		}
 	}
@@ -150,7 +148,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		]
 		: pinnedFingerprints;
 
-	const scopedCacheTags = scopedCacheTagsOfFingerprints(scopedCacheFingerprints);
+	const scopedCacheLabels = scopedCacheFingerprintLabels(scopedCacheFingerprints);
 
 	// The path each fingerprint's index set is split by, off the schema the request
 	// carries: derived from the collection, never from the read, so the fill and the
@@ -175,9 +173,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	if (isCacheAuditReplay(req)) {
 		res.setHeader(
 			CACHE_AUDIT_TAGS_HEADER,
-			printableScopedCacheTags(
-				scopedCacheTags.map(scopedCacheTagLabel).join(','),
-			),
+			printableScopedCacheTags(scopedCacheLabels.join(',')),
 		);
 	}
 
@@ -185,7 +181,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// scoped purge can never target it; caching would orphan a stale entry. Skip it.
 	// Full mode's cache.clear() can't orphan, so it still caches.
 	const orphansInScopedMode =
-		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
+		scopedCacheFingerprints.length === 0 && scopedCachePurgeEnabled();
 
 	// A read hook scoped this response to unautopurgeable fingerprints (value slices
 	// on fields the target collection isn't scoped on) without `manuallyPurged`: no
@@ -230,7 +226,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
 		capturedEpochs,
-		scopedCacheTags,
+		scopedCacheFingerprints,
 	);
 
 	const unguardedScope = unguardedScopeCollections.length > 0;
@@ -358,14 +354,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
-				if (Array.isArray(readTags) && readTags.length) {
+				if (readLabels.length > 0) {
 					// An object: setCacheValue's compress expects a CacheValue. The
 					// labels as a list, so a value holding the separator reads back
 					// as the one tag it is.
 					await setCacheValue(
 						cache,
 						cacheTagsKey(redisKey),
-						{ tags: readTags.map(scopedCacheTagLabel) },
+						{ tags: readLabels },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}
@@ -397,9 +393,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					const coarse =
 						scopedCachePurgeEnabled() &&
 						scopedFields.length > 0 &&
-						scopedCacheTags.some(
-							(tag) => tag.collection === req.collection && tag.field === undefined,
-						);
+						scopedCacheFingerprints.some((fingerprint) => {
+							return fingerprint.collection === req.collection
+								&& Object.keys(fingerprint.pinnedScope).length === 0;
+						});
 
 					// Compute cost of this miss: request entry (cache mw) → entry written.
 					const fillMs = Math.max(
@@ -430,7 +427,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						// The scoped cache tags the key was just indexed under, so a
 						// later purge of any of them is attributable back to this
 						// request.
-						scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
+						scopedCacheTags: scopedCacheLabels,
 					}).catch(() => {});
 
 					// The same fill latency as a timestamped event (kind 'f') so the

@@ -11,7 +11,11 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
-import { purgeScopedCache, scopedCacheReadMeta } from '../scoped-cache.js';
+import {
+	purgeScopedCache,
+	scopedCacheFingerprintLabels,
+	scopedCacheReadMeta,
+} from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -1299,7 +1303,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const record = await service.readSingleton({ fields: ['*'] });
 
 			expect(record).toEqual({ id: null, theme: 'auto' });
-			expect(readMeta(record)?.scopedCacheTags).toBeDefined();
+			expect(readMeta(record)?.scopedCacheFingerprints).toBeDefined();
 		});
 
 		it('readSingleton returns the existing record when present', async () => {
@@ -1548,7 +1552,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const service = new ItemsService('sub', { knex: db, schema: pathSchema });
 			const result = await service.readByQuery({ fields: ['*'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toBeDefined();
+			expect(readMeta(result)?.scopedCacheFingerprints).toBeDefined();
 		});
 	});
 
@@ -1603,12 +1607,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(result).toEqual([]);
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCacheFingerprintLabels(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
 			// Nothing was nested, so nothing is pinned — but both collections the read
-			// touched have to carry the tag a write to them drops.
-			expect(tags).toContainEqual({ collection: 'owned_item' });
-			expect(tags).toContainEqual({ collection: 'owner' });
+			// touched have to carry the bare slice a write to them drops.
+			expect(pinned).toContain('owned_item');
+			expect(pinned).toContain('owner');
 		});
 
 		it('pins an M2O parent by the key the response nested', async () => {
@@ -1625,20 +1631,18 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owner.id', 'owner.space'],
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCacheFingerprintLabels(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({
-				collection: 'owner',
-				field: 'id',
-				value: '100',
-			});
+			expect(pinned).toContain('owner:id=100');
 
-			// The regression this exists for: a bare tag beside the pin would make any
+			// The regression this exists for: a bare slice beside the pin would make any
 			// write to any owner drop the read, which is what the pin is here to stop.
-			expect(tags).not.toContainEqual({ collection: 'owner' });
+			expect(pinned).not.toContain('owner');
 
-			// The root keeps its bare tag — its filter bounds nothing.
-			expect(tags).toContainEqual({ collection: 'owned_item' });
+			// The root keeps its bare slice — its filter bounds nothing.
+			expect(pinned).toContain('owned_item');
 		});
 
 		it(oneLine`
@@ -1659,17 +1663,15 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestedSchema,
 			}).readByQuery({ fields: ['label', 'owner.space'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toContainEqual({
-				collection: 'owner',
-				field: 'id',
-				value: '100',
-			});
+			expect(scopedCacheFingerprintLabels(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			)).toContain('owner:id=100');
 
 			expect(result).toEqual([{ label: 'a', owner: { space: 's' } }]);
 		});
 
-		it('leaves a value-pinned root without its bare tag', async () => {
-			// The bare tag is what any write to the collection drops, so emitting it
+		it('leaves a value-pinned root without its bare slice', async () => {
+			// The bare slice is what any write to the collection drops, so emitting it
 			// beside the root's own slices would undo the root pin entirely.
 			tracker.on.select('owned_item').response([{ id: 1, label: 'a' }]);
 
@@ -1681,15 +1683,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				filter: { id: { _eq: 1 } },
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCacheFingerprintLabels(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({
-				collection: 'owned_item',
-				field: 'id',
-				value: '1',
-			});
-
-			expect(tags).not.toContainEqual({ collection: 'owned_item' });
+			expect(pinned).toContain('owned_item:id=1');
+			expect(pinned).not.toContain('owned_item');
 		});
 
 		it('keeps a collection it reached across a to-many hop bare', async () => {
@@ -1710,15 +1709,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owned_sub_items.id'],
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCacheFingerprintLabels(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({ collection: 'owned_sub_item' });
-
-			expect(tags).not.toContainEqual({
-				collection: 'owned_sub_item',
-				field: 'id',
-				value: '7',
-			});
+			expect(pinned).toContain('owned_sub_item');
+			expect(pinned).not.toContain('owned_sub_item:id=7');
 		});
 	});
 });

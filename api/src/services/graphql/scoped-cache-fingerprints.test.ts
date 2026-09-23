@@ -267,7 +267,9 @@ describe('GraphQLService scoped cache tags', () => {
 		expect(result.data).toEqual({ ok: true });
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(result)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 

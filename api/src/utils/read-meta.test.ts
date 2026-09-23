@@ -15,9 +15,9 @@ describe('withMeta / readMeta', () => {
 
 		expect(readMeta(result)).toBe(meta);
 
-		expect(readMeta(result)!.scopedCacheTags).toEqual([
-			{ collection: 'articles' },
-			{ collection: 'users' },
+		expect(readMeta(result)!.scopedCacheFingerprints).toEqual([
+			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			{ collection: 'users', pinnedScope: {}, viewFields: [] },
 		]);
 	});
 
@@ -45,7 +45,9 @@ describe('withMeta / readMeta', () => {
 				pinnedScope: {},
 				viewFields: [],
 			}]),
-		))!.scopedCacheTags).toEqual([{ collection: 'articles' }]);
+		))!.scopedCacheFingerprints).toEqual([
+			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+		]);
 	});
 
 	test('readMeta is safe on values without metadata', () => {

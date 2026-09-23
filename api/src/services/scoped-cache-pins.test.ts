@@ -11,7 +11,7 @@ import {
 	scopedCachePinsFromFilter,
 	scopedCacheNestedRowBindings,
 	scopedCachePinsFromRows,
-	serializeScopedCacheTags,
+	scopedCachePinKey,
 } from '../scoped-cache.js';
 
 // The read side derives a scope value from a (string-ish) query filter, the purge side from a
@@ -721,8 +721,11 @@ describe('scopedCachePinsFromFilter — implicit primary key', () => {
 			{ id: 'uuid' },
 		);
 
-		expect(serializeScopedCacheTags(pinned))
-			.toBe(serializeScopedCacheTags(purged ?? []));
+		expect(pinned.map(scopedCachePinKey))
+			.toEqual(['notes:id=07d1af3c-4b4e-4d6e-9c2a-2f1e0b8a5c31']);
+
+		expect((purged ?? []).map(scopedCachePinKey))
+			.toEqual(['notes:id=07d1af3c-4b4e-4d6e-9c2a-2f1e0b8a5c31']);
 	});
 
 	test(oneLine`
@@ -747,8 +750,8 @@ describe('scopedCachePinsFromFilter — implicit primary key', () => {
 			{ id: 'integer' },
 		);
 
-		expect(serializeScopedCacheTags(pinned))
-			.toBe(serializeScopedCacheTags(purged ?? []));
+		expect(pinned.map(scopedCachePinKey)).toEqual(['notes:id=7']);
+		expect((purged ?? []).map(scopedCachePinKey)).toEqual(['notes:id=7']);
 	});
 
 	test(oneLine`
@@ -905,52 +908,35 @@ describe('scopedCachePinsFromFilter — relational paths (multi-hop)', () => {
 	});
 });
 
-// The dev-only `X-Scoped-Cache-*` headers render tags as their key suffix (no
-// namespace prefix), via canonicalScopedCacheValue so it matches the tag key.
-describe('serializeScopedCacheTags', () => {
+// A pin's key is what the fingerprint index, the dev `X-Scoped-Cache-*` headers
+// and the stored tag lists all spell it as — the collection alone, or the slice it
+// pins, with the value canonicalized exactly as the index writes it.
+describe('scopedCachePinKey', () => {
 	test(oneLine`
-		a bare tag (no field) renders as just the collection
+		a pin naming no field renders as just the collection
 	`, () => {
-		expect(
-			serializeScopedCacheTags([{ collection: 'article' }]),
-		).toBe('article');
+		expect(scopedCachePinKey({ collection: 'article' })).toBe('article');
 	});
 
 	test(oneLine`
 		a pinned slice renders as collection:field=value
 	`, () => {
-		expect(
-			serializeScopedCacheTags([
-				{ collection: 'article', field: 'author', value: 'U1' },
-			]),
-		).toBe('article:author=U1');
+		expect(scopedCachePinKey({
+			collection: 'article',
+			field: 'author',
+			value: 'U1',
+		})).toBe('article:author=U1');
 	});
 
 	test(oneLine`
-		the value is canonicalized like the tag key (boolean 1 collapses to true)
+		the value is canonicalized like the index key (boolean 1 collapses to true)
 	`, () => {
-		expect(
-			serializeScopedCacheTags([
-				{ collection: 'a', field: 'live', value: 1, type: 'boolean' },
-			]),
-		).toBe('a:live=true');
-	});
-
-	test(oneLine`
-		multiple tags join with ", " and mix bare + sliced
-	`, () => {
-		expect(
-			serializeScopedCacheTags([
-				{ collection: 'article', field: 'author', value: 'U1' },
-				{ collection: 'banner' },
-			]),
-		).toBe('article:author=U1, banner');
-	});
-
-	test(oneLine`
-		an empty tag list renders as an empty string
-	`, () => {
-		expect(serializeScopedCacheTags([])).toBe('');
+		expect(scopedCachePinKey({
+			collection: 'a',
+			field: 'live',
+			value: 1,
+			type: 'boolean',
+		})).toBe('a:live=true');
 	});
 });
 

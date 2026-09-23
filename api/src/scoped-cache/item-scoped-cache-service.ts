@@ -1332,8 +1332,19 @@ export class ItemScopedCacheService {
 			},
 		)) as ScopedCacheCollectionPin[];
 
-		// Fold in pins an `items.read` hook added via `context.scopedCache.scopeTo`.
-		readPins.push(...scopedCacheCollector.pins);
+		// Fold in what an `items.read` hook declared through `scopedCache.scopeTo`.
+		// Flattened into `readPins` so a declared axis crosses a dotted path and gets
+		// audited exactly like a computed one, and sliced back out below by the sizes
+		// recorded here: the crossing maps one-to-one, so a declared case's axes stay
+		// at the offsets they went in at.
+		const declaredCasesStart = readPins.length;
+
+		const declaredCaseSizes = scopedCacheCollector.scopeQueryCases
+			.map((queryCase) => queryCase.length);
+
+		for (const queryCase of scopedCacheCollector.scopeQueryCases) {
+			readPins.push(...queryCase);
+		}
 
 		// A hook naming a dotted slice (`course:unit.owner=O`) declares a dependency
 		// the purge answers from the course side only: a unit moved under another
@@ -1394,6 +1405,20 @@ export class ItemScopedCacheService {
 		});
 
 		readPins.push(...crossedPins);
+
+		// The declared cases back out of `readPins`, each one whole. A hook naming
+		// two axes means the rows hold BOTH, so they stay one case: filed apart, the
+		// read would die on a write to either.
+		const declaredQueryCases: ScopedCacheCollectionPin[][] = [];
+		let declaredCaseOffset = declaredCasesStart;
+
+		for (const size of declaredCaseSizes) {
+			declaredQueryCases.push(
+				readPins.slice(declaredCaseOffset, declaredCaseOffset + size),
+			);
+
+			declaredCaseOffset += size;
+		}
 
 		// A hook pin on a field its collection isn't scoped on can't be reproduced by
 		// that collection's auto-purge — the read would go stale — unless the hook
@@ -1491,14 +1516,28 @@ export class ItemScopedCacheService {
 			rootQueryCases.flat().map(scopedCachePinKey),
 		);
 
+		// Same for the declared cases, except where a pinner computed the same axis:
+		// that one stands alone on its own account, and dropping its standalone case
+		// would leave it purgeable only as part of the hook's conjunction.
+		const declaredCasePinKeys = new Set(
+			declaredQueryCases.flat().map(scopedCachePinKey),
+		);
+
 		const standaloneQueryCases = readPins
 			.filter((pin) => {
-				return rootQueryCasePinKeys.has(scopedCachePinKey(pin)) === false;
+				const pinKey = scopedCachePinKey(pin);
+
+				if (rootQueryCasePinKeys.has(pinKey)) {
+					return false;
+				}
+
+				return declaredCasePinKeys.has(pinKey) === false
+					|| computedPinKeys.has(pinKey);
 			})
 			.map((pin) => [pin]);
 
 		const readFingerprints = scopedCacheFingerprintsByCollection(
-			[...rootQueryCases, ...standaloneQueryCases],
+			[...rootQueryCases, ...declaredQueryCases, ...standaloneQueryCases],
 			queryCaseFields,
 		);
 

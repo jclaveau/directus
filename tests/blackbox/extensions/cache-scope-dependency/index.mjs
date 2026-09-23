@@ -2,12 +2,12 @@
 // on `metric` rows it summarises, but the two are separate collections — a metric
 // write would not invalidate a cached report on its own. This hook runs a custom
 // readByQuery over the metric slice the report depends on and passes THAT read's own
-// returned `scopedCacheTags` to `context.scopedCache.scopeTo`, folding the
-// metric[owner] slice into the report read's cache tags. Now a create in that metric
+// returned `scopedCacheFingerprints` to `context.scopedCache.scopeTo`, folding the
+// metric[owner] slice into the report read's own scope. Now a create in that metric
 // slice invalidates the cached report too.
 //
-// It reuses the lookup's returned tags rather than build one, so the declared
-// dependency can't drift from the slice the lookup actually pinned.
+// It reuses the lookup's returned fingerprints rather than build one, so the
+// declared dependency can't drift from the slice the lookup actually pinned.
 
 const REPORT = 'test_items_report';
 const METRIC = 'test_items_metric';
@@ -26,12 +26,14 @@ export default function registerHooks({ filter }, { services }) {
 			{ emitEvents: false },
 		);
 
-		// The metric read's own purge counters ride along with its tags: the host
-		// captured `report`'s before its query and cannot have captured `metric`'s,
-		// so without this the report response is left uncached (`unguarded_scope`).
-		context.scopedCache?.scopeTo(result.getMeta?.()?.scopedCacheTags ?? [], {
-			epochs: result.getMeta?.()?.scopedCacheEpochs,
-		});
+		// The metric read's own purge counters ride along with its fingerprints: the
+		// host captured `report`'s before its query and cannot have captured
+		// `metric`'s, so without this the report response is left uncached
+		// (`unguarded_scope`).
+		context.scopedCache?.scopeTo(
+			result.getMeta?.()?.scopedCacheFingerprints ?? [],
+			{ epochs: result.getMeta?.()?.scopedCacheEpochs },
+		);
 
 		return records;
 	});

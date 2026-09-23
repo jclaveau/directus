@@ -2,7 +2,6 @@ import { useEnv } from '@directus/env';
 import type {
 	PrimaryKey,
 	ScopedCacheCollectionPin,
-	ScopedCacheTag,
 	Type,
 } from '@directus/types';
 
@@ -208,20 +207,6 @@ export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
 	return `${pin.collection}:${pin.field}=${
 		canonicalScopedCacheValue(pin.value, pin.type)
 	}`;
-}
-
-// What a tag reads as in the dev-only `X-Scoped-Cache-*` headers and the telemetry
-// tag lists: `collection`, or `collection:field=value` for a pinned slice. A tag is
-// one pin, so the rendering is the pin's own identity under the name the outside
-// uses for it.
-export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
-	return scopedCachePinKey(tag);
-}
-
-export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
-	return tags
-		.map(scopedCacheTagLabel)
-		.join(', ');
 }
 
 /**

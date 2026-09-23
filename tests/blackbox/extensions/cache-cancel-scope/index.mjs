@@ -8,8 +8,9 @@
 //   - body 'spam'    → veto, declare nothing → no purge (slice stays warm).
 //   - body 'flagged' → veto, but declare the channel slice → precise purge.
 //
-// The 'flagged' branch reuses a lookup's own `scopedCacheTags` (like the dedup hook)
-// rather than build a tag, so the declaration can't drift from the cached slice.
+// The 'flagged' branch reuses a lookup's own `scopedCacheFingerprints` (like the
+// dedup hook) rather than build one, so the declaration can't drift from the
+// cached slice.
 
 const MODERATED = 'test_items_moderated';
 

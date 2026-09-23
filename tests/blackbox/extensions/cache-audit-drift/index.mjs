@@ -25,7 +25,7 @@ export default function registerHooks({ filter }, { services }) {
 		}
 
 		context.scopedCache?.scopeTo(
-			{ collection: DRIFT_DEP, field: 'owner', value: dependency.owner },
+			{ collection: DRIFT_DEP, pinnedScope: { owner: [dependency.owner] } },
 			{ epochs: dependencies.getMeta?.()?.scopedCacheEpochs },
 		);
 

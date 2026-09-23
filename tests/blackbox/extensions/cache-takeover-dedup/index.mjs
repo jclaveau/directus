@@ -5,7 +5,7 @@
 // take-over) rather than insert a duplicate that would hit UNIQUE(article, author).
 //
 // The dedup is READ-ONLY — it never moves a row — so it also declares the slice it
-// depends on (the lookup's own `scopedCacheTags`), opting the take-over out of the
+// depends on (the lookup's own `scopedCacheFingerprints`), opting it out of the
 // coarse fallback and into a precise, scoped purge.
 //
 // The lookup runs on `context.database` (the mutation trx) so a junction row created

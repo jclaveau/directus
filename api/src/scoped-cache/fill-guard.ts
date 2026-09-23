@@ -5,7 +5,7 @@ import {
 import {
 	redisConfigAvailable,
 } from '../redis/index.js';
-import type { ScopedCacheCollectionPin } from '@directus/types';
+import type { ScopedCacheFingerprint } from '@directus/types';
 import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
 import { earlierScopedCacheEpoch } from './pins.js';
@@ -200,13 +200,15 @@ export function mergedScopedCacheEpochs(
  */
 export function scopedCacheCollectionsWithoutGuard(
 	captured: ScopedCacheEpochs | undefined,
-	pins: readonly ScopedCacheCollectionPin[],
+	fingerprints: readonly ScopedCacheFingerprint[],
 ): string[] {
 	if (captured === undefined || '*' in captured === false) {
 		return [];
 	}
 
-	return [...new Set(pins.map((pin) => pin.collection))].filter(
+	const collections = fingerprints.map((fingerprint) => fingerprint.collection);
+
+	return [...new Set(collections)].filter(
 		(collection) => collection in captured === false,
 	);
 }

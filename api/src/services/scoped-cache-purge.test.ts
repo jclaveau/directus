@@ -63,7 +63,17 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
-const { createScopedCacheCollector } = await import('../scoped-cache.js');
+
+const { createScopedCacheCollector, scopedCacheFingerprintLabels } =
+	await import('../scoped-cache.js');
+
+// What a read ended up pinned to, as the dev headers and the telemetry spell it:
+// `collection`, or `collection:field=value` for a value slice.
+const pinnedSlices = (result: unknown): string[] => {
+	return scopedCacheFingerprintLabels(
+		readMeta(result)?.scopedCacheFingerprints ?? [],
+	);
+};
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -774,30 +784,29 @@ describe(oneLine`
 
 	// Regression: the `cache.scope` filter returns its payload unchanged when no
 	// extension listens, i.e. the SAME array reference. The read must still carry
-	// the bare collection tag — a clear-and-refill of that reference would wipe it,
-	// leaving every read untagged and unpurgeable (stale HIT after a write).
+	// the bare collection slice — a clear-and-refill of that reference would wipe
+	// it, leaving every read unpinned and unpurgeable (stale HIT after a write).
 	it(oneLine`
-		an unfiltered read carries the bare collection tag through the cache.scope filter
+		an unfiltered read carries the bare collection slice through the cache.scope
+		filter
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 		const result = await service().readByQuery({});
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+		expect(pinnedSlices(result)).toEqual(['test']);
 	});
 
 	// A filter that bounds the read to one scope value pins the value slice instead of the
-	// bare collection tag, so only that owner's/partition's writes purge it.
+	// bare collection, so only that owner's/partition's writes purge it.
 	it(oneLine`
-		a read filtered to a scope value carries the value-slice tag, not the bare collection
+		a read filtered to a scope value carries the value slice, not the bare collection
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([
-			{ collection: 'test', field: 'student', value: 'a' },
-		]);
+		expect(pinnedSlices(result)).toEqual(['test:student=a']);
 	});
 
 	// The ancestor slice's LAST hop lands on a collection the filter names by primary
@@ -822,12 +831,8 @@ describe(oneLine`
 		});
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? [])
-				.filter((tag) => tag.collection === 'holder'),
-		).toEqual([
-			{ collection: 'holder', field: 'id', value: '5' },
-			{ collection: 'holder', field: 'owner', value: '9' },
-		]);
+			pinnedSlices(result).filter((slice) => slice.startsWith('holder')),
+		).toEqual(['holder:id=5', 'holder:owner=9']);
 	});
 
 	// A self-referential relation pulls rows of the root collection the root filter can't
@@ -835,7 +840,7 @@ describe(oneLine`
 	// leave the read stale after a write to another slice. The root falls back to bare.
 	it(oneLine`
 		a self-referential read does not pin the root — the nested same-collection rows are
-		unbounded, so it tags the bare collection
+		unbounded, so it carries the bare collection
 	`, async () => {
 		tracker.on
 			.select('test')
@@ -848,10 +853,10 @@ describe(oneLine`
 			fields: ['*', 'parent.*'],
 		});
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+		expect(pinnedSlices(result)).toEqual(['test']);
 	});
 
-	// A `cache.scope` listener can derive data-level tags: it receives the
+	// A `cache.scope` listener can derive data-level pins: it receives the
 	// post-`items.read` records and can append a value slice that the bare AST
 	// scoping wouldn't produce (e.g. an enriched related row).
 	it(oneLine`
@@ -889,12 +894,12 @@ describe(oneLine`
 				{ id: 2, student: 'B' },
 			]);
 
-			// The `cache.scope` listener adds these tags itself (no schema type on hand), so
-			// they stay untyped — an extension owns both sides of its own tags.
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'test' },
-				{ collection: 'test', field: 'student', value: 'A' },
-				{ collection: 'test', field: 'student', value: 'B' },
+			// The `cache.scope` listener adds these pins itself (no schema type on hand),
+			// so they stay untyped — an extension owns both sides of its own pins.
+			expect(pinnedSlices(result)).toEqual([
+				'test',
+				'test:student=A',
+				'test:student=B',
 			]);
 		}
 		finally {
@@ -908,12 +913,9 @@ describe(oneLine`
 	// rider, declared fingerprints beside the mutation's own purge.
 	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
 		// A cross-collection dependency a hook declares (a read enriched from an authors
-		// row); shared so the hook's tag and the assertion can't drift.
-		const authorsDependency = { collection: 'authors', field: 'id', value: 5 };
-
-		// The same dependency as a MUTATION names it: `purgeBy` takes a fingerprint,
-		// whose pins are one AND, where `scopeTo` takes a tag that matches on its own.
-		const authorsPurge = { collection: 'authors', pinnedScope: { id: [5] } };
+		// row); shared so the hook's declaration and the assertion can't drift. Both
+		// handles take the same shape — a read scopes to it, a mutation purges by it.
+		const authorsDependency = { collection: 'authors', pinnedScope: { id: [5] } };
 
 		// What the collector canonicalizes that declaration to.
 		const authorsFingerprint = {
@@ -938,10 +940,7 @@ describe(oneLine`
 			try {
 				const result = await service().readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheTags).toEqual([
-					{ collection: 'test' },
-					{ collection: 'authors', field: 'id', value: '5' },
-				]);
+				expect(pinnedSlices(result)).toEqual(['test', 'authors:id=5']);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -959,7 +958,11 @@ describe(oneLine`
 			// no write reaches this entry through it. On the read's OWN collection the
 			// same tag would be harmless freight beside its computed slice.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo({ collection: 'other', field: 'ghost', value: 'g' });
+				ctx.scopedCache.scopeTo({
+					collection: 'other',
+					pinnedScope: { ghost: ['g'] },
+				});
+
 				return payload;
 			};
 
@@ -985,7 +988,7 @@ describe(oneLine`
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo(
-					{ collection: 'other', field: 'ghost', value: 'g' },
+					{ collection: 'other', pinnedScope: { ghost: ['g'] } },
 					{ manuallyPurged: true },
 				);
 
@@ -1012,8 +1015,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'test',
-					field: 'student',
-					value: 'A',
+					pinnedScope: { student: ['A'] },
 				});
 
 				return payload;
@@ -1039,7 +1041,7 @@ describe(oneLine`
 			// `test` is scoped on `student` only, so `id` reads as an undeclared field
 			// and used to be flagged — the key axis is what makes it reproducible.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo({ collection: 'test', field: 'id', value: 1 });
+				ctx.scopedCache.scopeTo({ collection: 'test', pinnedScope: { id: [1] } });
 				return payload;
 			};
 
@@ -1063,8 +1065,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'A',
+					pinnedScope: { 'teaching_unit.discipline.enrollment.student': ['A'] },
 				});
 
 				return payload;
@@ -1093,8 +1094,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'student_course',
-					field: 'teaching_unit.id',
-					value: 10,
+					pinnedScope: { 'teaching_unit.id': [10] },
 				});
 
 				return payload;
@@ -1130,8 +1130,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'A',
+					pinnedScope: { 'teaching_unit.discipline.enrollment.student': ['A'] },
 				});
 
 				return payload;
@@ -1145,28 +1144,12 @@ describe(oneLine`
 					schema: composedChainSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheTags).toEqual([
-					{ collection: 'student_enrollment' },
-					{
-						collection: 'student_course',
-						field: 'teaching_unit.discipline.enrollment.student',
-						value: 'a',
-					},
-					{
-						collection: 'student_teaching_unit',
-						field: 'discipline.enrollment.student',
-						value: 'a',
-					},
-					{
-						collection: 'student_discipline',
-						field: 'enrollment.student',
-						value: 'a',
-					},
-					{
-						collection: 'student_enrollment',
-						field: 'student',
-						value: 'a',
-					},
+				expect(pinnedSlices(result)).toEqual([
+					'student_enrollment',
+					'student_course:teaching_unit.discipline.enrollment.student=a',
+					'student_teaching_unit:discipline.enrollment.student=a',
+					'student_discipline:enrollment.student=a',
+					'student_enrollment:student=a',
 				]);
 			}
 			finally {
@@ -1182,8 +1165,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'course',
-					field: 'unit.owner',
-					value: 7,
+					pinnedScope: { 'unit.owner': [7] },
 				});
 
 				return payload;
@@ -1197,10 +1179,10 @@ describe(oneLine`
 					schema: declaredDottedSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheTags).toEqual([
-					{ collection: 'page' },
-					{ collection: 'course', field: 'unit.owner', value: '7' },
-					{ collection: 'unit' },
+				expect(pinnedSlices(result)).toEqual([
+					'page',
+					'course:unit.owner=7',
+					'unit',
 				]);
 			}
 			finally {
@@ -1238,7 +1220,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return payload;
 			};
 
@@ -1274,7 +1256,7 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return payload;
 			};
 
@@ -1311,7 +1293,7 @@ describe(oneLine`
 			tracker.on.delete('test').response(1);
 
 			const declare = async (keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return keys;
 			};
 
@@ -1349,7 +1331,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return 99;
 			};
 
@@ -1394,7 +1376,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declareThenCancel = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return null; // cancel the update
 			};
 
@@ -1434,7 +1416,7 @@ describe(oneLine`
 			// deleteMany snapshots rows AFTER the filter, so a cancel returns
 			// before any select — only the hook-declared slice is purged.
 			const declareThenCancel = async (_keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return null; // cancel the delete
 			};
 
@@ -1473,7 +1455,7 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsPurge);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return payload;
 			};
 
@@ -1592,16 +1574,14 @@ describe(oneLine`
 		};
 
 		it(oneLine`
-			readOne pins the row it is bounded to instead of the bare collection tag, on a
+			readOne pins the row it is bounded to instead of the bare collection, on a
 			collection declaring no scope field
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			const result = await unscopedService().readOne(1);
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'test', field: 'id', value: '1' },
-			]);
+			expect(pinnedSlices(result)).toEqual(['test:id=1']);
 		});
 
 		it(oneLine`
@@ -1619,7 +1599,7 @@ describe(oneLine`
 
 			const result = await selfRefService.readOne(1, { fields: ['*', 'parent.*'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+			expect(pinnedSlices(result)).toEqual(['test']);
 		});
 
 		it(oneLine`

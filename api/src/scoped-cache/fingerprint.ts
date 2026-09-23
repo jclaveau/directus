@@ -3,13 +3,11 @@ import type {
 	ScopedCacheFingerprint,
 	ScopedCacheCollectionPin,
 	ScopedCacheScopePin,
-	ScopedCacheTag,
 	SchemaOverview,
 } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
 	scopedCachePinKey,
-	scopedCacheTagLabel,
 } from './pins.js';
 
 export type { ScopedCacheFingerprint } from '@directus/types';
@@ -211,48 +209,6 @@ export function scopedCacheFingerprintOf(
 }
 
 /**
- * The tags a set of fingerprints composes, one per value, `view` dropped, and
- * the bare collection for a fingerprint that pins nothing.
- *
- * What the round trip loses is the AND — which is the whole point of the
- * fingerprint — so this is for the consumers that never had it: the dev headers
- * and the telemetry, which report a purge as the slices it reached. A token is
- * already canonical, so the tag it yields keys the same slice a write emits.
- */
-export function scopedCacheTagsOfFingerprints(
-	fingerprints: readonly ScopedCacheFingerprint[],
-): ScopedCacheTag[] {
-	const derivedTags: ScopedCacheTag[] = [];
-	const seenTagKeys = new Set<string>();
-
-	const pushTag = (tag: ScopedCacheTag): void => {
-		const derivedTagKey = scopedCachePinKey(tag);
-
-		if (seenTagKeys.has(derivedTagKey)) {
-			return;
-		}
-
-		seenTagKeys.add(derivedTagKey);
-		derivedTags.push(tag);
-	};
-
-	for (const { collection, pinnedScope } of fingerprints) {
-		if (Object.keys(pinnedScope).length === 0) {
-			pushTag({ collection });
-			continue;
-		}
-
-		for (const [field, values] of Object.entries(pinnedScope)) {
-			for (const value of values) {
-				pushTag({ collection, field, value });
-			}
-		}
-	}
-
-	return derivedTags;
-}
-
-/**
  * The pins a declared fingerprint spells, typed off the schema.
  *
  * A declaration holds its values the way the code that wrote it does — a number,
@@ -278,16 +234,45 @@ export function scopedCacheDeclaredPins(
 
 /**
  * What a set of fingerprints is called where a fingerprint cannot be written: the
- * dev headers, and the tag lists the telemetry stores.
+ * dev `X-Scoped-Cache-*` headers, and the tag lists the telemetry stores.
  *
- * A label is `collection` or `collection:field=value`, and the stats stream joins
- * a list of them with a comma — so a rendered fingerprint, whose own grammar is
- * built on commas, cannot go there. This is the one form that can.
+ * One label per pinned value, `viewFields` dropped, and the bare collection for a
+ * fingerprint pinning nothing — `collection` or `collection:field=value`. The AND
+ * does not survive it, which is why nothing invalidates by a label: the stats
+ * stream joins them with a comma, and a rendered fingerprint's own grammar is
+ * built on commas, so this is the one form that can go there.
  */
 export function scopedCacheFingerprintLabels(
 	fingerprints: readonly ScopedCacheFingerprint[],
 ): string[] {
-	return scopedCacheTagsOfFingerprints(fingerprints).map(scopedCacheTagLabel);
+	const labels: string[] = [];
+	const seenLabels = new Set<string>();
+
+	const pushLabel = (pin: ScopedCacheCollectionPin): void => {
+		const label = scopedCachePinKey(pin);
+
+		if (seenLabels.has(label)) {
+			return;
+		}
+
+		seenLabels.add(label);
+		labels.push(label);
+	};
+
+	for (const { collection, pinnedScope } of fingerprints) {
+		if (Object.keys(pinnedScope).length === 0) {
+			pushLabel({ collection });
+			continue;
+		}
+
+		for (const [field, values] of Object.entries(pinnedScope)) {
+			for (const value of values) {
+				pushLabel({ collection, field, value });
+			}
+		}
+	}
+
+	return labels;
 }
 
 /**

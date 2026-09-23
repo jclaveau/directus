@@ -31,15 +31,6 @@ export interface ScopedCacheCollectionPin extends ScopedCacheScopePin {
 }
 
 /**
- * A fingerprint as the OUTSIDE spells one: a single collection/field/value, which
- * is all the dev headers, the telemetry tag lists and the blackbox assertions can
- * say. The AND a fingerprint carries is exactly what this form loses, so nothing
- * inside the scoped-cache layer invalidates by it — it is a rendering, taken at
- * the last moment (`scopedCacheTagsOfFingerprints`).
- */
-export type ScopedCacheTag = ScopedCacheCollectionPin;
-
-/**
  * One collection's whole dependency, in one value.
  *
  * A set of tags dies on ANY match, so every extra pin is an extra way to be
@@ -80,9 +71,6 @@ export interface ScopedCacheFingerprint {
 	readonly viewFields: readonly string[];
 }
 
-/** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
-type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
-
 /**
  * A fingerprint as a hook spells one: the collection it names, the scope it pins
  * and, for a read's own, the fields its view is built from.
@@ -108,7 +96,7 @@ export interface ScopedCacheDeclaredFingerprint {
  * One fingerprint, or a batch — `result.getMeta().scopedCacheFingerprints` handed
  * straight back.
  */
-type ScopedCacheFingerprintInput =
+export type ScopedCacheFingerprintInput =
 	ScopedCacheDeclaredFingerprint | readonly ScopedCacheDeclaredFingerprint[];
 
 /**
@@ -123,37 +111,39 @@ export type ScopedCacheDependency = unknown;
 /**
  * Shape of `context.scopedCache` on an `items.read` *filter* hook. Mirrors the
  * `cache.scope` event: scope the cached response TO extra slices it needs, so a
- * later purge of any of them invalidates it. Additive to the framework tags.
+ * later purge of any of them invalidates it. Additive to what the host derived.
  *
- * A declared tag only invalidates the read if a write reproduces its EXACT key — the
- * same field AND the same value canonicalization (pass `type` for a non-string
- * field); else it won't match. The `manuallyPurged`/anomaly check below only covers
- * the coarser "field the collection isn't scoped on" case, not value drift.
+ * A declared fingerprint only invalidates the read if a write reproduces its EXACT
+ * scope — the same fields AND the same value canonicalization, which the host runs
+ * against the schema; else it won't match. The `manuallyPurged`/anomaly check below
+ * only covers the coarser "field the collection isn't scoped on" case, not value
+ * drift.
  *
- * `manuallyPurged`: assert that a value-slice tag on a field the target collection
- * isn't scoped on is nonetheless reproduced by the author's own `purgeBy`. Without
- * it, such a tag is unautopurgeable — the framework can't invalidate the read on a
+ * `manuallyPurged`: assert that a scope on a field the target collection isn't
+ * scoped on is nonetheless reproduced by the author's own `purgeBy`. Without it,
+ * such a scope is unautopurgeable — the framework can't invalidate the read on a
  * write to that collection — so the response is left uncached (an
  * `unautopurgeable_scope` anomaly) rather than served stale. True opts out of that.
- * Applies to every tag in the SAME call — pass a reproducible framework tag and a
+ * Applies to every fingerprint in the SAME call — pass a reproducible one and a
  * custom unautopurgeable one in separate calls if only one is manuallyPurged.
  *
  * It does NOT stand in for `epochs`, and the two answer different questions: this
- * one says a WRITE will reproduce the tag, `epochs` says whether a purge already
- * landed while this read was running. A tag naming a collection with no counter
- * is left uncached whatever this flag says — see `epochs` below.
+ * one says a WRITE will reproduce the scope, `epochs` says whether a purge already
+ * landed while this read was running. A fingerprint naming a collection with no
+ * counter is left uncached whatever this flag says — see `epochs` below.
  */
 export interface ScopedCacheScopeHandle {
 	scopeTo(
-		tags: ScopedCacheTagInput,
+		fingerprints: ScopedCacheFingerprintInput,
 		options?: {
 			manuallyPurged?: boolean;
 			/**
-			 * The purge counters the read these tags came from captured BEFORE its own
-			 * query — `result.getMeta()?.scopedCacheEpochs` of the dependent read.
+			 * The purge counters the read these fingerprints came from captured BEFORE
+			 * its own query — `result.getMeta()?.scopedCacheEpochs` of the dependent
+			 * read.
 			 *
 			 * The host captures the counters of the collections it can name up front,
-			 * and a hook's tag arrives long after that, on a collection nothing
+			 * and a hook's declaration arrives long after that, on a collection nothing
 			 * captured: a purge of it landing mid-read would then pass the post-fill
 			 * comparison unnoticed and the response would be stored already stale.
 			 * There is no capturing it late — the check needs a value from before the
@@ -162,18 +152,18 @@ export interface ScopedCacheScopeHandle {
 			 *
 			 * Handing the dependent read's own capture over is what keeps it cacheable,
 			 * and it is the right value by construction: that read took it before the
-			 * rows these tags describe were fetched.
+			 * rows these fingerprints describe were fetched.
 			 */
 			epochs?: Record<string, string | null>;
 		},
 	): void;
 
 	/**
-	 * Make this read depend on a lookup it ran: fold the lookup's own tags AND the
-	 * purge counters it took before its query into this read, the pair `scopeTo`
-	 * needs spelled out. Takes the lookup as returned — still pending, one, several,
-	 * or `allSettled` verdicts — and hands it back resolved, so the call wraps the
-	 * lookup where it happens:
+	 * Make this read depend on a lookup it ran: fold the lookup's own fingerprints
+	 * AND the purge counters it took before its query into this read, the pair
+	 * `scopeTo` needs spelled out. Takes the lookup as returned — still pending,
+	 * one, several, or `allSettled` verdicts — and hands it back resolved, so the
+	 * call wraps the lookup where it happens:
 	 *
 	 *   const rows = await context.scopedCache.dependOn(service.readByQuery(query));
 	 *
@@ -181,8 +171,8 @@ export interface ScopedCacheScopeHandle {
 	 * the caller's call. Each fulfilled lookup is folded on its own, so two lookups
 	 * of one collection straddling a purge are judged on the earlier counter.
 	 *
-	 * Nothing here is `manuallyPurged`: a lookup's returned tags are the ones the
-	 * host itself derives, which a write to that collection reproduces.
+	 * Nothing here is `manuallyPurged`: a lookup's returned fingerprints are the
+	 * ones the host itself derives, which a write to that collection reproduces.
 	 */
 	dependOn<T extends ScopedCacheDependency>(lookup: T | Promise<T>): Promise<T>;
 }
@@ -272,12 +262,22 @@ export interface ScopedCacheExtensionHandle {
 export interface ScopedCacheCollector {
 	scope: ScopedCacheScopeHandle;
 	purge: ScopedCachePurgeHandle;
-	pins: ScopedCacheCollectionPin[];
+	/**
+	 * What a read hook declared through `scopeTo`, one query case per declared
+	 * fingerprint: its axes, typed off the schema, kept together. Not canonicalized
+	 * here — the read composes them with its own query cases, and the composition is
+	 * where every value becomes a token.
+	 *
+	 * Grouped rather than flat because the grouping IS the declaration: a hook
+	 * saying `{ owner: ['alpha'], method: ['spaced'] }` depends on the rows holding
+	 * both, and a flat list would drop the read on a write to either.
+	 */
+	scopeQueryCases: ScopedCacheCollectionPin[][];
 	/**
 	 * What a mutation hook declared through `purgeBy`, canonicalized against the
-	 * schema. Its own sink rather than the pin list above: a pin is one axis and a
-	 * fingerprint is a whole query case, and flattening one into the other is
-	 * exactly the over-purge the fingerprint exists to stop.
+	 * schema. Canonical already because nothing composes it further: a purge is
+	 * answered by the scope alone, where a read's is folded into the fields its
+	 * view is built from first.
 	 */
 	purgeFingerprints: ScopedCacheFingerprint[];
 	/** Canonical keys of pins a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
@@ -322,21 +322,6 @@ export interface ReadMeta {
 	 * under.
 	 */
 	scopedCacheFingerprints: readonly ScopedCacheFingerprint[];
-
-	/**
-	 * The same dependency read as a flat tag list, derived from the fingerprints:
-	 * what a read hook hands back to `purgeBy`/`scopeTo`, and what the dev headers
-	 * and the telemetry still speak.
-	 *
-	 * The AND is what the derivation drops — an entry carrying a set of tags dies
-	 * on ANY of them — so a consumer reading these over-purges rather than serving
-	 * stale, and one that can carry the fingerprints should.
-	 *
-	 * `type` goes with it: a fingerprint holds values already canonicalized, and
-	 * canonicalizing a canonical token again with no type returns it unchanged, so
-	 * the keys these derive still match the ones the read filed.
-	 */
-	readonly scopedCacheTags: ScopedCacheTag[];
 
 	/**
 	 * Fingerprints a read hook scoped this response TO that are unautopurgeable — a

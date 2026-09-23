@@ -49,9 +49,8 @@ import {
 	scopedCachePathReversesChain,
 	scopedCacheReadMeta,
 	scopedCacheSweptDuringFill,
+	scopedCacheFingerprintLabels,
 	scopedCachePinKey,
-	scopedCacheTagLabel,
-	serializeScopedCacheTags,
 	startScopedCachePurgeRecovery,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
@@ -163,14 +162,14 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-// The one spelling of a tag that the entry index, the purge index and the dev
-// headers all share — if these two drift, a purge stops matching the entries it
+// The one spelling of a pin that the fingerprint index, the purge attribution and
+// the dev headers all share — if these drift, a purge stops matching the entries it
 // actually dropped and the attribution silently reads zero.
-describe('the tag display form', () => {
+describe('the label form', () => {
 	it('renders a bare collection and a pinned slice', () => {
-		expect(scopedCacheTagLabel({ collection: 'articles' })).toBe('articles');
+		expect(scopedCachePinKey({ collection: 'articles' })).toBe('articles');
 
-		expect(scopedCacheTagLabel({
+		expect(scopedCachePinKey({
 			collection: 'articles',
 			field: 'author',
 			value: 7,
@@ -179,7 +178,7 @@ describe('the tag display form', () => {
 
 	it('canonicalises the value the same way the Redis key does', () => {
 		// A filter's `true` and a driver's `1` must resolve one slice, not two.
-		expect(scopedCacheTagLabel({
+		expect(scopedCachePinKey({
 			collection: 'slots',
 			field: 'active',
 			value: 1,
@@ -188,10 +187,10 @@ describe('the tag display form', () => {
 	});
 
 	it('joins a set for the header form', () => {
-		expect(serializeScopedCacheTags([
-			{ collection: 'articles' },
-			{ collection: 'articles', field: 'author', value: 7 },
-		])).toBe('articles, articles:author=7');
+		expect(scopedCacheFingerprintLabels([
+			scopedCacheFingerprintOf('articles', []),
+			scopedCacheFingerprintOf('articles', [{ field: 'author', value: 7 }]),
+		]).join(', ')).toBe('articles, articles:author=7');
 	});
 
 	// MySQL/MariaDB (`utf8mb4_*_ci`) and MSSQL (`*_CI_AS`) compare strings
@@ -201,7 +200,7 @@ describe('the tag display form', () => {
 	// `uuid` branch already folds away. On a case-sensitive vendor the folding merges
 	// two slices into one instead: an over-purge, never a stale hit.
 	it('folds a string slice to one case, as a case-insensitive vendor does', () => {
-		expect(scopedCacheTagLabel({
+		expect(scopedCachePinKey({
 			collection: 'orgs',
 			field: 'tenant',
 			value: 'Acme',
@@ -234,9 +233,11 @@ describe('the tag display form', () => {
 // rejects the NUL, so both exits render the tag through this one escaper.
 describe('the exit form', () => {
 	it('escapes the NULL token', () => {
-		expect(printableScopedCacheTags(serializeScopedCacheTags([
-			{ collection: 'student_method_range', field: 'method', value: null },
-		]))).toBe('student_method_range:method=%00null');
+		expect(printableScopedCacheTags(scopedCacheFingerprintLabels([
+			scopedCacheFingerprintOf('student_method_range', [
+				{ field: 'method', value: null },
+			]),
+		]).join(', '))).toBe('student_method_range:method=%00null');
 	});
 
 	it('escapes any control byte a string scope value carries', () => {
@@ -494,7 +495,7 @@ describe('countScopedCacheTagMembers', () => {
 			],
 		};
 
-		const nullSlice = scopedCacheTagLabel({
+		const nullSlice = scopedCachePinKey({
 			collection: 'articles',
 			field: 'author',
 			value: null,
@@ -535,7 +536,7 @@ describe('createScopedCacheCollector', () => {
 		.build();
 
 	it('records a key whose purge a hook skipped, without adding a pin', () => {
-		const { purge, pins, purgeSkippedKeys } =
+		const { purge, scopeQueryCases, purgeSkippedKeys } =
 			createScopedCacheCollector(emptySchema);
 
 		purge.skipPurgeFor(7);
@@ -543,8 +544,8 @@ describe('createScopedCacheCollector', () => {
 		expect([...purgeSkippedKeys]).toEqual(['7']);
 
 		// Declaring nothing to purge must not read as declaring a purge: the
-		// takeover check keys on the tag count.
-		expect(pins).toEqual([]);
+		// takeover check keys on the declaration count.
+		expect(scopeQueryCases).toEqual([]);
 	});
 
 	it(oneLine`
@@ -597,12 +598,13 @@ describe('createScopedCacheCollector', () => {
 		leaves the counters empty for a scopeTo that handed none over, so respond can
 		tell a declared collection apart from a guarded one
 	`, () => {
-		const { scope, epochs, pins } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs, scopeQueryCases } =
+			createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' });
 
 		expect(epochs).toEqual({});
-		expect(pins).toEqual([{ collection: 'authors' }]);
+		expect(scopeQueryCases).toEqual([[{ collection: 'authors' }]]);
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
@@ -615,16 +617,18 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('scopeTo and purgeBy fill sinks of their own', () => {
-		const { scope, purge, pins, purgeFingerprints } =
+		const { scope, purge, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheCollector(emptySchema);
 
-		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
-		// The same slice through both handles, and it lands twice: a read's pins are
-		// an OR over slices, a purge's fingerprint an AND over a scope, so folding
-		// one into the other would purge by whichever tag matched first.
-		expect(pins).toEqual([{ collection: 'articles', field: 'author', value: 5 }]);
+		// The same slice through both handles, and it lands twice: the read side is
+		// composed with the read's own query cases before it becomes a fingerprint,
+		// so folding one into the other would purge by a scope nothing declared.
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'articles', field: 'author', value: 5 }],
+		]);
 
 		expect(purgeFingerprints).toEqual([{
 			collection: 'articles',
@@ -661,27 +665,49 @@ describe('createScopedCacheCollector', () => {
 		]);
 	});
 
-	it('accepts a batch, deduping within it and against prior pins', () => {
-		const { scope, pins } = createScopedCacheCollector(emptySchema);
-		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
+	it('accepts a batch, deduping within it and against prior declarations', () => {
+		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
+		const authorSlice = { collection: 'articles', pinnedScope: { author: [5] } };
 		const authorsTable = { collection: 'authors' };
 
 		scope.scopeTo(authorSlice);
 		scope.scopeTo([{ ...authorSlice }, authorsTable, authorsTable]);
 
-		// authorSlice repeats the prior tag, authorsTable appears twice → each once.
-		expect(pins).toEqual([authorSlice, authorsTable]);
+		// authorSlice repeats the prior one, authorsTable appears twice → each once.
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'articles', field: 'author', value: 5 }],
+			[{ collection: 'authors' }],
+		]);
 	});
 
-	it('dedups on the canonical tag key — field order and value type collapse', () => {
-		const { scope, pins } = createScopedCacheCollector(emptySchema);
+	it(oneLine`
+		keeps the axes of one declared fingerprint together, so the read dies only on
+		a write reproducing the whole of it
+	`, () => {
+		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
 
-		scope.scopeTo({ collection: 'articles', field: 'author', value: 7 });
-		// Same slice: keys in a different order AND the value as a string. A raw JSON
-		// compare would keep both; the canonical key collapses them to one.
-		scope.scopeTo({ field: 'author', value: '7', collection: 'articles' });
+		scope.scopeTo({
+			collection: 'articles',
+			pinnedScope: { author: [5], status: ['published'] },
+		});
 
-		expect(pins).toHaveLength(1);
+		expect(scopeQueryCases).toEqual([[
+			{ collection: 'articles', field: 'author', value: 5 },
+			{ collection: 'articles', field: 'status', value: 'published' },
+		]]);
+	});
+
+	it(oneLine`
+		dedups on the canonical axis keys — field order and value type collapse
+	`, () => {
+		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
+
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [7] } });
+		// Same slice, the value as a string. A raw JSON compare would keep both; the
+		// canonical key collapses them to one.
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: ['7'] } });
+
+		expect(scopeQueryCases).toHaveLength(1);
 	});
 
 	it(oneLine`
@@ -691,18 +717,18 @@ describe('createScopedCacheCollector', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		const { scope, purge, pins, purgeFingerprints } =
+		const { scope, purge, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheCollector(notesSchema);
 
-		scope.scopeTo({ collection: 'notes', field: 'id', value: upper });
+		scope.scopeTo({ collection: 'notes', pinnedScope: { id: [upper] } });
 		// The spelling the driver hands the purge side for the very same row.
 		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
-		expect(pins).toEqual([
-			{ collection: 'notes', field: 'id', value: upper, type: 'uuid' },
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'notes', field: 'id', value: upper, type: 'uuid' }],
 		]);
 
-		expect(scopedCachePinKey(pins[0]!)).toBe(
+		expect(scopedCachePinKey(scopeQueryCases[0]![0]!)).toBe(
 			`notes:id=${upper.toLowerCase()}`,
 		);
 
@@ -716,58 +742,47 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it(oneLine`
-		leaves a tag whose type the hook DID declare alone, and a bare collection tag
-		has no field to look up
+		leaves a declaration naming a collection or field the schema doesn't know
+		untyped rather than inventing one, and a bare one has no field to look up
 	`, () => {
-		const { scope, pins } = createScopedCacheCollector(notesSchema);
+		const { scope, scopeQueryCases } = createScopedCacheCollector(notesSchema);
 
-		scope.scopeTo({ collection: 'notes', field: 'id', value: 7, type: 'integer' });
+		scope.scopeTo({ collection: 'ghosts', pinnedScope: { id: ['A'] } });
+		scope.scopeTo({ collection: 'notes', pinnedScope: { ghost: ['A'] } });
 		scope.scopeTo({ collection: 'notes' });
 
-		expect(pins).toEqual([
-			{ collection: 'notes', field: 'id', value: 7, type: 'integer' },
-			{ collection: 'notes' },
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'ghosts', field: 'id', value: 'A' }],
+			[{ collection: 'notes', field: 'ghost', value: 'A' }],
+			[{ collection: 'notes' }],
 		]);
 	});
 
-	it(oneLine`
-		leaves a tag naming a collection or field the schema doesn't know untyped
-		rather than inventing one
-	`, () => {
-		const { scope, pins } = createScopedCacheCollector(notesSchema);
-
-		scope.scopeTo({ collection: 'ghosts', field: 'id', value: 'A' });
-		scope.scopeTo({ collection: 'notes', field: 'ghost', value: 'A' });
-
-		expect(pins).toEqual([
-			{ collection: 'ghosts', field: 'id', value: 'A' },
-			{ collection: 'notes', field: 'ghost', value: 'A' },
-		]);
-	});
-
-	it('records a manuallyPurged scopeTo tag key (anomaly-exempt)', () => {
+	it('records the axis keys of a manuallyPurged scopeTo (anomaly-exempt)', () => {
 		const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
-		const slice = { collection: 'articles', field: 'author', value: 5 };
 
-		scope.scopeTo(slice, { manuallyPurged: true });
+		scope.scopeTo(
+			{ collection: 'articles', pinnedScope: { author: [5] } },
+			{ manuallyPurged: true },
+		);
 
-		expect(manuallyPurgedKeys.has(scopedCachePinKey(slice))).toBe(true);
+		expect([...manuallyPurgedKeys]).toEqual(['articles:author=5']);
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
 		const { scope, purge, manuallyPurgedKeys } =
 			createScopedCacheCollector(emptySchema);
 
-		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 		purge.purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
 	});
 
 	describe('dependOn', () => {
-		// A lookup as `readByQuery` returns it: rows carrying the pins they resolved
-		// and the counters the lookup took before its query.
-		const acmeMetrics = { collection: 'metric', field: 'owner', value: 'acme' };
+		// A lookup as `readByQuery` returns it: rows carrying the fingerprints they
+		// resolved and the counters the lookup took before its query.
+		const acmeMetrics = [{ collection: 'metric', field: 'owner', value: 'acme' }];
 
 		const metricLookup = () => {
 			return withMeta(
@@ -798,21 +813,23 @@ describe('createScopedCacheCollector', () => {
 		};
 
 		it('folds a pending lookup and hands its rows back', async () => {
-			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheCollector(emptySchema);
 
 			const rows = await scope.dependOn(Promise.resolve(metricLookup()));
 
 			expect(rows).toEqual([{ id: 1 }]);
-			expect(pins).toEqual([acmeMetrics]);
+			expect(scopeQueryCases).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
 		it('takes an already-resolved lookup the same way', async () => {
-			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheCollector(emptySchema);
 
 			await scope.dependOn(metricLookup());
 
-			expect(pins).toEqual([acmeMetrics]);
+			expect(scopeQueryCases).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
@@ -820,14 +837,15 @@ describe('createScopedCacheCollector', () => {
 			walks a Promise.all batch — a result is itself an array, so the meta rider is
 			what tells one lookup from the batch holding it
 		`, async () => {
-			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheCollector(emptySchema);
 
 			const batch = await scope.dependOn(
 				Promise.all([metricLookup(), auditLookup()]),
 			);
 
 			expect(batch).toHaveLength(2);
-			expect(pins).toEqual([acmeMetrics, { collection: 'audit' }]);
+			expect(scopeQueryCases).toEqual([acmeMetrics, [{ collection: 'audit' }]]);
 
 			expect(epochs).toEqual({ metric: '4', audit: '7' });
 		});
@@ -836,7 +854,8 @@ describe('createScopedCacheCollector', () => {
 			folds the fulfilled verdicts of a Promise.allSettled batch and passes the
 			rejected one through for the caller to judge
 		`, async () => {
-			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheCollector(emptySchema);
 
 			const verdicts = await scope.dependOn(
 				Promise.allSettled([metricLookup(), Promise.reject(new Error('gone'))]),
@@ -845,7 +864,7 @@ describe('createScopedCacheCollector', () => {
 			expect(verdicts.map((verdict) => verdict.status))
 				.toEqual(['fulfilled', 'rejected']);
 
-			expect(pins).toEqual([acmeMetrics]);
+			expect(scopeQueryCases).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
@@ -882,7 +901,7 @@ describe('createScopedCacheCollector', () => {
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
-		it('never marks a folded tag manuallyPurged', async () => {
+		it('never marks a folded declaration manuallyPurged', async () => {
 			const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
 
 			await scope.dependOn(metricLookup());
@@ -891,12 +910,13 @@ describe('createScopedCacheCollector', () => {
 		});
 
 		it('adds nothing for a value carrying no meta rider', async () => {
-			const { scope, pins, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheCollector(emptySchema);
 
 			const rows = await scope.dependOn([{ id: 1 }]);
 
 			expect(rows).toEqual([{ id: 1 }]);
-			expect(pins).toEqual([]);
+			expect(scopeQueryCases).toEqual([]);
 			expect(epochs).toEqual({});
 		});
 	});
@@ -4375,10 +4395,13 @@ describe('the purge counters a fill is guarded by', () => {
 		)).toEqual({ articles: '7', authors: '4', '*': '1' });
 	});
 
-	it('names the tagged collections no capture covered', () => {
+	it('names the scoped collections no capture covered', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{ articles: '7', '*': '1' },
-			[{ collection: 'articles' }, { collection: 'authors' }],
+			[
+				scopedCacheFingerprintOf('articles', []),
+				scopedCacheFingerprintOf('authors', []),
+			],
 		)).toEqual(['authors']);
 	});
 
@@ -4387,12 +4410,12 @@ describe('the purge counters a fill is guarded by', () => {
 	it('names nothing when no capture ran at all', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{},
-			[{ collection: 'authors' }],
+			[scopedCacheFingerprintOf('authors', [])],
 		)).toEqual([]);
 
 		expect(scopedCacheCollectionsWithoutGuard(
 			undefined,
-			[{ collection: 'authors' }],
+			[scopedCacheFingerprintOf('authors', [])],
 		)).toEqual([]);
 	});
 });
@@ -4482,10 +4505,10 @@ describe('reading and bumping the purge counters', () => {
 
 		expect(captured).toEqual({});
 
-		// The tags name a collection the capture never covered, and with no `*` the
+		// The read names a collection the capture never covered, and with no `*` the
 		// guard reports itself off rather than claiming to have covered it.
 		expect(scopedCacheCollectionsWithoutGuard(captured, [
-			{ collection: 'articles' },
+			scopedCacheFingerprintOf('articles', []),
 		])).toEqual([]);
 	});
 
