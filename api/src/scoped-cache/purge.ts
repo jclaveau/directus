@@ -40,6 +40,7 @@ import {
 import {
 	parseScopedCacheIndexMember,
 	renderScopedCacheIndexMember,
+	scopedCacheCollectionIndexGlob,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheRowIndexKeys,
 } from './fingerprint-index.js';
@@ -491,21 +492,8 @@ function sliceIndexPruningsOf(tagKeys: readonly string[]): string[] {
  * Shared by the scoped purge (specific value slices) and the collection-wide
  * fallback (every slice).
  *
- * Returns how many cache ENTRIES it actually deleted, which is neither how many keys
- * it deleted nor how many the tag sets named.
- *
- * Not the key count, because a tag set holds each entry alongside its `__expires_at`
- * sibling and any extra sibling (`__tags`), so counting members would report every
- * entry twice over. A sidecar is recognisable by its base key being in the set
- * beside it — the `sadd` writes them together — which stays right as siblings are
- * added.
- *
- * Not the membership count either, because nothing ever SREMs: a member that expired
- * by TTL stays named by the set until the set itself is dropped here. On the
- * workload this fork exists for — per-user keys, so high cardinality, TTLs shorter
- * than the gap between mutations — most of a set can be entries that were already
- * gone, and counting them would inflate every purge figure on the page. So what the
- * store freed decides; `dropCacheEntries` is where that answer comes from.
+ * Returns how many cache entries the store freed, counted by
+ * `dropSweptScopedCacheEntries`.
  */
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
@@ -560,11 +548,32 @@ async function purgeScopedCacheTagKeys(
 		}
 	}
 
+	return dropSweptScopedCacheEntries(cache, members);
+}
+
+/**
+ * Drop the cache keys a swept index named, and report how many ENTRIES went — which
+ * is neither how many keys were deleted nor how many the index named.
+ *
+ * Not the key count, because an index set holds each entry alongside its
+ * `__expires_at` sibling and any extra sibling (`__tags`), so counting keys would
+ * report every entry twice over. A sidecar is recognisable by its base key being in
+ * the set beside it — the `sadd` writes them together — which stays right as
+ * siblings are added.
+ *
+ * Not the membership count either, because nothing ever SREMs on the way out: a
+ * member that expired by TTL stays named by the set until the set itself is dropped.
+ * On the workload this fork exists for — per-user keys, so high cardinality, TTLs
+ * shorter than the gap between mutations — most of a set can be entries that were
+ * already gone, and counting them would inflate every purge figure on the page. So
+ * what the store freed decides; `dropCacheEntries` is where that answer comes from.
+ */
+async function dropSweptScopedCacheEntries(
+	cache: Keyv,
+	members: readonly string[],
+): Promise<number> {
 	const present = new Set(members);
 
-	// A tag set holds each entry alongside its `__expires_at` sibling and any extra
-	// one, so the two are counted apart: only the entries are evidence of how wide
-	// the purge reached, and counting members would draw that line at double.
 	const entries = members.filter((member) => {
 		const owner = cacheSidecarOwner(member);
 
@@ -984,6 +993,63 @@ export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 }
 
 /**
+ * Drop every fingerprint the collection owns, whatever it is bound to, and the sets
+ * that named them.
+ *
+ * The fallback, so it asks no question: a purge reaching here has no rows to match
+ * against — an upsert mixing inserts and updates, a write whose rows could not be
+ * read back — and cannot tell a stale entry from a warm one. Every other
+ * collection's entries still stand, which is the whole of what it is scoped to.
+ *
+ * Reports the entries it freed and the sets it dropped apart: the first is how wide
+ * the purge reached, the second is how split the collection's index was, and only
+ * the first is comparable to a row-driven purge's figure.
+ */
+async function purgeScopedCacheCollectionIndex(
+	cache: Keyv,
+	collection: string,
+): Promise<{ evicted: number; indexKeys: number }> {
+	const redis = useRedis();
+	const keys: string[] = [];
+	const seenKeys = new Set<string>();
+	let indexKeys = 0;
+
+	for await (const batch of scanScopedCacheKeys(
+		scopedCacheCollectionIndexGlob(collection),
+	)) {
+		indexKeys += batch.length;
+
+		for (let at = 0; at < batch.length; at += SCOPED_CACHE_SWEEP_CHUNK_KEYS) {
+			const chunk = batch.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
+
+			// The same script the tag sweep runs, and for the same reason: a read
+			// filing its key into one of these sets between the read and the drop
+			// would otherwise have its set deleted underneath it. No prunings — a
+			// fingerprint set is named by nothing but this scan.
+			const swept = await redis.eval(
+				scopedCacheSweepScript,
+				chunk.length,
+				...chunk,
+			) as string[];
+
+			for (const indexedMember of swept) {
+				// The fingerprint half is read past rather than parsed: this purge
+				// drops the key whichever query case filed it, so the two members an
+				// entry cached under two cases has collapse to one key here.
+				const { key } = parseScopedCacheIndexMember(indexedMember);
+
+				if (seenKeys.has(key) === false) {
+					seenKeys.add(key);
+					keys.push(key);
+				}
+			}
+		}
+	}
+
+	return { evicted: await dropSweptScopedCacheEntries(cache, keys), indexKeys };
+}
+
+/**
  * Purge every cached read of `collection` — its bare collection tag plus all its
  * value slices — without full-flushing the namespace. The fallback when a mutation's
  * scope values are unresolvable (e.g. an upsert mixing inserts and updates): which
@@ -1005,17 +1071,12 @@ export async function purgeCollectionScopedCache(
 	// declines to cache instead of surviving under a slice nothing swept.
 	await bumpScopedCacheEpochs([collection]);
 
-	// Read off the index each slice files itself into, rather than walking the whole
-	// keyspace for keys that a collection owning none can never yield.
 	const startedAt = Date.now();
 
-	const sliceKeys = await useRedis().smembers(
-		scopedCacheCollectionSlicesKey(collection),
+	const { evicted, indexKeys } = await purgeScopedCacheCollectionIndex(
+		cache,
+		collection,
 	);
-
-	const tagKeys = [`${scopedCacheTagKeyPrefix()}${collection}`, ...sliceKeys];
-
-	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
 	// The expensive mode, and the one nothing else records: every slice of the
 	// collection went, because which slices actually changed was unresolvable.
@@ -1026,7 +1087,7 @@ export async function purgeCollectionScopedCache(
 		collection,
 		mode: 'collection',
 		scopedCacheTags: null,
-		scopedCacheTagCount: tagKeys.length,
+		scopedCacheTagCount: indexKeys,
 		evicted,
 		durationMs: options.retried === true
 			? null

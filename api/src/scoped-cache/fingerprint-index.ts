@@ -1,6 +1,7 @@
 import type { SchemaOverview } from '@directus/types';
 import type { CollectionKey } from '../permissions/modules/process-ast/types.js';
 import {
+	escapeScopedCacheFingerprintGlob,
 	escapeScopedCacheFingerprintToken,
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
@@ -31,6 +32,27 @@ function scopedCacheIndexKey(
 	indexPin: string,
 ): string {
 	return `${scopedCacheIndexPrefix()}fingerprint:${collection}:${indexPin}`;
+}
+
+/**
+ * The glob matching every set one collection's fingerprints are filed in — the
+ * bare one and every split the index path produced.
+ *
+ * What a collection-wide purge reads, and the reason it needs no registry of the
+ * sets a collection owns: a registry would be a second write on every fill, which
+ * is the cost the split exists to avoid, and this purge is the fail-safe rather
+ * than the hot path.
+ *
+ * The trailing colon bounds it. The key is `fingerprint:<collection>:<indexPin>`
+ * and a collection name carries no colon, so a pattern ending at that one cannot
+ * reach a longer name this one is a prefix of.
+ */
+export function scopedCacheCollectionIndexGlob(
+	collection: CollectionKey,
+): string {
+	const matched = escapeScopedCacheFingerprintGlob(collection);
+
+	return `${scopedCacheIndexPrefix()}fingerprint:${matched}:*`;
 }
 
 /**

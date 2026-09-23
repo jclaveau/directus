@@ -37,7 +37,7 @@ export function unescapeScopedCacheFingerprintToken(token: string): string {
 // dropped into a pattern.
 const GLOB_RESERVED = /[\\*?[\]]/g;
 
-function escapeScopedCacheFingerprintGlob(rendered: string): string {
+export function escapeScopedCacheFingerprintGlob(rendered: string): string {
 	return rendered.replace(GLOB_RESERVED, (globCharacter) => `\\${globCharacter}`);
 }
 

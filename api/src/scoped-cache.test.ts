@@ -833,12 +833,9 @@ describe('collection slice index', () => {
 		);
 	});
 
-	it('reads a collection purge off the index, not a keyspace scan', async () => {
-		const smembers = vi.fn()
-			.mockResolvedValueOnce(['ns:scoped-cache-index:tag:articles:author=7'])
-			.mockResolvedValue([]);
-
-		const scan = vi.fn();
+	it('reads a collection purge off the collection\'s fingerprint sets', async () => {
+		const scan = vi.fn().mockResolvedValue(['0', []]);
+		const smembers = vi.fn();
 
 		vi.mocked(useRedis).mockReturnValue({
 			smembers,
@@ -850,14 +847,21 @@ describe('collection slice index', () => {
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
-		expect(smembers).toHaveBeenCalledWith('ns:scoped-cache-index:slices:articles');
-		expect(scan).not.toHaveBeenCalled();
+		expect(scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'ns:scoped-cache-index:fingerprint:articles:*',
+			'COUNT',
+			1000,
+		);
+
+		expect(smembers).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
-		bumps the counter BEFORE reading the slice index — a read filing a new slice
-		between that read and the sweep is missed by this purge, and the bump is what
-		makes it decline instead of surviving under a slice nothing swept
+		bumps the counter BEFORE scanning the collection's sets — a read filing a new
+		fingerprint between that scan and the sweep is missed by this purge, and the
+		bump is what makes it decline instead of surviving under a set nothing swept
 	`, async () => {
 		const calls: string[] = [];
 
@@ -874,9 +878,9 @@ describe('collection slice index', () => {
 		};
 
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: async (key: string) => {
-				calls.push(`smembers ${key}`);
-				return [];
+			scan: async (_cursor: string, _match: string, pattern: string) => {
+				calls.push(`scan ${pattern}`);
+				return ['0', ['ns:scoped-cache-index:fingerprint:articles:']];
 			},
 			del: vi.fn(),
 			srem: vi.fn(),
@@ -892,9 +896,7 @@ describe('collection slice index', () => {
 		expect(calls).toEqual([
 			'incr ns:scoped-cache-epoch:articles',
 			'exec',
-			'smembers ns:scoped-cache-index:slices:articles',
-			'incr ns:scoped-cache-epoch:articles',
-			'exec',
+			'scan ns:scoped-cache-index:fingerprint:articles:*',
 			'eval',
 		]);
 	});
