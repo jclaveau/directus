@@ -1825,7 +1825,7 @@ implements AbstractService<Item> {
 					// the delete rewrote through a self-relation. No `changed`: a row
 					// leaving the result set takes every field with it.
 					rows: scopedCacheWrittenRows({
-						tags: scopedCacheTags,
+						legacyTags: scopedCacheTags,
 						rows: [
 							...oldScopedCacheCapture.rows,
 							...survivorScopedCacheCapture.rows,

@@ -1,4 +1,5 @@
 import { ForbiddenError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
@@ -270,6 +271,7 @@ describe('items controller', () => {
 			await handler()(makeReq(), res, vi.fn());
 
 			expect(res.locals['scopedCacheFingerprints']).toEqual([fingerprint]);
+
 			expect(res.locals['scopedCacheUnautopurgeableFingerprints'])
 				.toEqual([orphan]);
 		});

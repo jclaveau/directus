@@ -371,10 +371,10 @@ export class ItemScopedCacheService {
 			return { legacyTags: null, rows: [] };
 		}
 
-		tags.push(...flatTags);
+		keyTags.push(...flatTags);
 
 		for (const field of pathFields) {
-			tags.push(...scopedCacheTagsFromRows(
+			keyTags.push(...scopedCacheTagsFromRows(
 				this.collection,
 				[field],
 				scopedRows,
@@ -393,7 +393,7 @@ export class ItemScopedCacheService {
 		])];
 
 		return {
-			tags,
+			legacyTags: keyTags,
 			rows: scopedRows.map((row) => {
 				// 'skip' over 'coarse': every field below is projected by the select,
 				// and a row that somehow lost one is better pinned by the rest of

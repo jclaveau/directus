@@ -179,19 +179,19 @@ export function scopedCacheFingerprintFromLegacyTags(
 ): ScopedCacheFingerprint {
 	// Null-prototyped for the reason the parser is: a tag's field is a column name,
 	// and `__proto__` is a legal one.
-	const taggedScope: Record<string, string[]> = Object.create(null);
+	const pinnedScope: Record<string, string[]> = Object.create(null);
 
 	for (const tag of tags) {
 		if (tag.field === undefined) {
 			continue;
 		}
 
-		const fieldValues = taggedScope[tag.field] ?? [];
+		const fieldValues = pinnedScope[tag.field] ?? [];
 		fieldValues.push(canonicalScopedCacheValue(tag.value, tag.type));
-		taggedScope[tag.field] = fieldValues;
+		pinnedScope[tag.field] = fieldValues;
 	}
 
-	return { collection, pinnedScope: taggedScope, viewFields };
+	return { collection, pinnedScope, viewFields };
 }
 
 /**
