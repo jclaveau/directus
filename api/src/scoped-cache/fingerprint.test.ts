@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
-	scopedCacheViewFieldsTouched,
+	scopedCacheViewFieldsAreTouched,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintMatchesRow,
@@ -261,41 +261,41 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 	});
 });
 
-describe('scopedCacheViewFieldsTouched', () => {
+describe('scopedCacheViewFieldsAreTouched', () => {
 	it('is touched by an insert or a delete, whichever fields it names', () => {
-		expect(scopedCacheViewFieldsTouched(['id'], null)).toBe(true);
+		expect(scopedCacheViewFieldsAreTouched(['id'], null)).toBe(true);
 	});
 
 	it('is touched by any column when the read selected every one', () => {
-		expect(scopedCacheViewFieldsTouched(['*'], ['note'])).toBe(true);
+		expect(scopedCacheViewFieldsAreTouched(['*'], ['note'])).toBe(true);
 	});
 
 	it('is touched by a column it names', () => {
-		expect(scopedCacheViewFieldsTouched(['id', 'day'], ['day']))
+		expect(scopedCacheViewFieldsAreTouched(['id', 'day'], ['day']))
 			.toBe(true);
 	});
 
 	it('is left alone by a column it never named', () => {
-		expect(scopedCacheViewFieldsTouched(['id', 'day'], ['note']))
+		expect(scopedCacheViewFieldsAreTouched(['id', 'day'], ['note']))
 			.toBe(false);
 	});
 
 	it('is touched by a nested change under a wildcard it names', () => {
-		expect(scopedCacheViewFieldsTouched(
+		expect(scopedCacheViewFieldsAreTouched(
 			['method_range.*'],
 			['method_range.method'],
 		)).toBe(true);
 	});
 
 	it('is left alone by a nested change under the fk column alone', () => {
-		expect(scopedCacheViewFieldsTouched(
+		expect(scopedCacheViewFieldsAreTouched(
 			['method_range'],
 			['method_range.method'],
 		)).toBe(false);
 	});
 
 	it('is touched when a read naming no field at all meets any write', () => {
-		expect(scopedCacheViewFieldsTouched([], ['note'])).toBe(true);
+		expect(scopedCacheViewFieldsAreTouched([], ['note'])).toBe(true);
 	});
 });
 

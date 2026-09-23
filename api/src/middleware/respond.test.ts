@@ -403,15 +403,13 @@ describe('respond middleware', () => {
 
 		const payload = { data: [{ id: 1, blob: 'x'.repeat(200) }] };
 
-		const res = makeRes(payload, {
+		await respond(makeReq(), makeRes(payload, {
 			scopedCacheFingerprints: [{
 				collection: 'articles',
 				pinnedScope: {},
 				viewFields: [],
 			}],
-		});
-
-		await respond(makeReq(), res, next);
+		}), next);
 
 		// The size cap + the descriptor bytes share ONE payload serialization, not two.
 		expect(mocks.stringByteSize).toHaveBeenCalledTimes(1);
@@ -504,18 +502,22 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
-		const readMetaOfPayload = scopedCacheReadMeta(
-			[
-				{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
-				{ collection: 'student', pinnedScope: {}, viewFields: [] },
-			],
-			{ scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' } },
-		);
-
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes(
-				{ data: withMeta({ id: 'u1' }, readMetaOfPayload) },
+				{
+					data: withMeta({ id: 'u1' }, scopedCacheReadMeta(
+						[
+							{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
+							{ collection: 'student', pinnedScope: {}, viewFields: [] },
+						],
+						{
+							scopedCacheEpochs: {
+								directus_users: '4', student: '5', '*': '1',
+							},
+						},
+					)),
+				},
 				{ scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' } },
 			),
 			next,
@@ -534,20 +536,20 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
-		const readMetaOfPayload = scopedCacheReadMeta(
-			[{ collection: 'directus_users', pinnedScope: {}, viewFields: [] }],
-			{
-				scopedCacheUnautopurgeableFingerprints: [{
-					collection: 'student',
-					pinnedScope: { level: ['3'] },
-					viewFields: [],
-				}],
-			},
-		);
-
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
-			makeRes({ data: withMeta({ id: 'u1' }, readMetaOfPayload) }),
+			makeRes({
+				data: withMeta({ id: 'u1' }, scopedCacheReadMeta(
+					[{ collection: 'directus_users', pinnedScope: {}, viewFields: [] }],
+					{
+						scopedCacheUnautopurgeableFingerprints: [{
+							collection: 'student',
+							pinnedScope: { level: ['3'] },
+							viewFields: [],
+						}],
+					},
+				)),
+			}),
 			next,
 		);
 

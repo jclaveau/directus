@@ -1075,29 +1075,27 @@ describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 	// The multi-policy case: a row carrying either value is in the read's result
 	// set, so reading the two as one conjunction would match neither's write.
 	test('an _or over two fields is two ways, one per branch', () => {
-		const filter = {
-			_or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }],
-		};
-
-		expect(
-			pinnedScopedCacheQueryCasesFromFilter('slots', ['student', 'course'], filter),
-		).toEqual([
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{ _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] },
+		)).toEqual([
 			[{ collection: 'slots', field: 'student', value: 'A' }],
 			[{ collection: 'slots', field: 'course', value: 'math' }],
 		]);
 	});
 
 	test('an _and over an _or distributes, one way per branch', () => {
-		const filter = {
-			_and: [
-				{ student: { _eq: 'A' } },
-				{ _or: [{ course: { _eq: 'math' } }, { course: { _eq: 'art' } }] },
-			],
-		};
-
-		expect(
-			pinnedScopedCacheQueryCasesFromFilter('slots', ['student', 'course'], filter),
-		).toEqual([
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				_and: [
+					{ student: { _eq: 'A' } },
+					{ _or: [{ course: { _eq: 'math' } }, { course: { _eq: 'art' } }] },
+				],
+			},
+		)).toEqual([
 			[
 				{ collection: 'slots', field: 'student', value: 'A' },
 				{ collection: 'slots', field: 'course', value: 'math' },
@@ -1114,17 +1112,15 @@ describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 	`, () => {
 		const values = Array.from({ length: 5 }, (_, at) => `s${at}`);
 
-		const filter = {
-			_and: [
-				{ _or: values.map((value) => ({ student: { _eq: value } })) },
-				{ _or: values.map((value) => ({ course: { _eq: value } })) },
-			],
-		};
-
 		const queryCases = pinnedScopedCacheQueryCasesFromFilter(
 			'slots',
 			['student', 'course'],
-			filter,
+			{
+				_and: [
+					{ _or: values.map((value) => ({ student: { _eq: value } })) },
+					{ _or: values.map((value) => ({ course: { _eq: value } })) },
+				],
+			},
 		);
 
 		expect(queryCases.length).toBe(10);
@@ -1156,43 +1152,47 @@ describe('scopedCacheNestedRowBindings', () => {
 	} as unknown as SchemaOverview;
 
 	test('binds a nested child by the fk the to-many reads it back through', () => {
-		const fieldMap = {
-			read: new Map([
-				['parts', { collection: 'part', fields: new Set(['id']) }],
-			]),
-			other: new Map(),
-		} as unknown as FieldMap;
-
-		expect(scopedCacheNestedRowBindings(schema, 'course', fieldMap, new Map()))
-			.toEqual(new Map([['part', new Set(['course'])]]));
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					['parts', { collection: 'part', fields: new Set(['id']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['part', new Set(['course'])]]));
 	});
 
 	test(oneLine`
 		binds nothing through an M2O: the fk is a field of the collection holding it,
 		and the row it names is reached by its own key
 	`, () => {
-		const fieldMap = {
-			read: new Map([
-				['course', { collection: 'course', fields: new Set(['title']) }],
-			]),
-			other: new Map(),
-		} as unknown as FieldMap;
-
-		expect(scopedCacheNestedRowBindings(schema, 'part', fieldMap, new Map()))
-			.toEqual(new Map());
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'part',
+			{
+				read: new Map([
+					['course', { collection: 'course', fields: new Set(['title']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map());
 	});
 
 	test('reads the path through the alias the read named it by', () => {
-		const fieldMap = {
-			read: new Map([
-				['chapters', { collection: 'part', fields: new Set(['id']) }],
-			]),
-			other: new Map(),
-		} as unknown as FieldMap;
-
-		const fieldNames = new Map([['chapters', 'parts']]);
-
-		expect(scopedCacheNestedRowBindings(schema, 'course', fieldMap, fieldNames))
-			.toEqual(new Map([['part', new Set(['course'])]]));
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					['chapters', { collection: 'part', fields: new Set(['id']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map([['chapters', 'parts']]),
+		)).toEqual(new Map([['part', new Set(['course'])]]));
 	});
 });

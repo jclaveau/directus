@@ -284,7 +284,7 @@ export function scopedCacheFingerprintMatchesRow(
  * wildcard of any of its prefixes (`method_range.*`), or by `*`; a bare
  * `method_range` — the fk column alone — is not it.
  */
-export function scopedCacheViewFieldsTouched(
+export function scopedCacheViewFieldsAreTouched(
 	viewFields: readonly string[],
 	changed: readonly string[] | null,
 ): boolean {
@@ -294,14 +294,14 @@ export function scopedCacheViewFieldsTouched(
 		return true;
 	}
 
-	const queryCase = new Set(viewFields);
+	const boundFields = new Set(viewFields);
 
-	if (queryCase.has(SCOPED_CACHE_ANY_FIELD)) {
+	if (boundFields.has(SCOPED_CACHE_ANY_FIELD)) {
 		return true;
 	}
 
 	for (const field of changed) {
-		if (queryCase.has(field)) {
+		if (boundFields.has(field)) {
 			return true;
 		}
 
@@ -312,7 +312,7 @@ export function scopedCacheViewFieldsTouched(
 			segmentDepth > 0;
 			segmentDepth--
 		) {
-			if (queryCase.has(`${fieldSegments.slice(0, segmentDepth).join('.')}.*`)) {
+			if (boundFields.has(`${fieldSegments.slice(0, segmentDepth).join('.')}.*`)) {
 				return true;
 			}
 		}
@@ -432,7 +432,7 @@ export function scopedCacheFingerprintPurgedBy(
 		? fingerprint.viewFields
 		: [...fingerprint.viewFields, ...Object.keys(fingerprint.pinnedScope)];
 
-	if (scopedCacheViewFieldsTouched(queryCase, changed) === false) {
+	if (scopedCacheViewFieldsAreTouched(queryCase, changed) === false) {
 		return false;
 	}
 

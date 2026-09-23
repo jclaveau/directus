@@ -38,16 +38,14 @@ describe('withMeta / readMeta', () => {
 	});
 
 	test('works on a single object as well as an array', () => {
-		const item = withMeta(
+		expect(readMeta(withMeta(
 			{ id: 1 },
 			scopedCacheReadMeta([{
 				collection: 'articles',
 				pinnedScope: {},
 				viewFields: [],
 			}]),
-		);
-
-		expect(readMeta(item)!.scopedCacheTags).toEqual([{ collection: 'articles' }]);
+		))!.scopedCacheTags).toEqual([{ collection: 'articles' }]);
 	});
 
 	test('readMeta is safe on values without metadata', () => {
