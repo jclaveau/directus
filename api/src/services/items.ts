@@ -97,8 +97,9 @@ implements AbstractService<Item> {
 	cache: Keyv<any> | null;
 	nested: string[];
 
-	// Tags purged by the latest mutation on this (per-request) service, surfaced by
-	// the controllers as the CACHE_PURGED_TAGS_HEADER response header. Mutation
+	// The fingerprints the latest mutation on this (per-request) service purged,
+	// surfaced by the controllers as the CACHE_PURGED_TAGS_HEADER response header
+	// (rendered to labels there). Mutation
 	// methods return bare primary keys — no object for a `withMeta` rider (as reads
 	// use) — so the purged set rides the instance. `null` until a mutation purges.
 	scopedCachePurged: ScopedCacheFingerprint[] | null = null;
@@ -670,13 +671,14 @@ implements AbstractService<Item> {
 			// its footprint opts back into a precise purge by declaring it via
 			// `scopedCache.purgeBy` (a read-only dedup declares its one slice; an
 			// upsert-move declares old + new) — then we trust it and narrow to the
-			// snapshot ∪ declared tags.
+			// snapshot ∪ declared fingerprints.
 			//
 			// That holds on a collection declaring no scope field too. A takeover cannot
 			// move a row between primary-key slices — the key it returned IS the slice —
 			// but the key it returned is not the only row it may have written, and every
 			// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
-			// them stale. Before the key axis the bare tag covered them by accident.
+			// them stale. Before the key axis the bare fingerprint covered them by
+			// accident.
 			const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
 
 			const changedKeys = liveKeys.filter((key) => {
@@ -690,8 +692,8 @@ implements AbstractService<Item> {
 				scopedCacheCollector.purgeFingerprints.length === declaredPurgesAtStart
 			) {
 				// Nothing written and nothing declared: no entry can have gone stale.
-				// Returning rather than purging an empty tag set, which would still
-				// take this collection's bare tag and drop its global reads.
+				// Returning rather than purging nothing, which would still take this
+				// collection's bare fingerprint and drop its global reads.
 				return results;
 			}
 
@@ -787,7 +789,7 @@ implements AbstractService<Item> {
 			// strips it again before the response. The scope pins each parent row BY
 			// that key, so it reads them from the one place they still exist. Not
 			// called for an empty result, which needs no pin: with no row nested,
-			// the bare tag is already what each collection deserves.
+			// the bare fingerprint is already what each collection deserves.
 			onRowsWithTemporaryFields: (rows) => scopedCachePlan.pinFromRows(rows),
 		});
 
@@ -796,7 +798,7 @@ implements AbstractService<Item> {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
 
-		// An `items.read` hook adds scope tags via `context.scopedCache.scopeTo`, same
+		// An `items.read` hook adds fingerprints via `context.scopedCache.scopeTo`, same
 		// channel as `cache.scope`; drained below.
 		const scopedCacheCollector = createScopedCacheCollector(this.schema);
 
@@ -1101,7 +1103,8 @@ implements AbstractService<Item> {
 		const payload: Partial<AnyItem> = cloneDeep(data);
 		const nestedActionEvents: ActionEventParams[] = [];
 
-		// An `items.update` hook can add purge tags via `context.scopedCache.purgeBy`;
+		// An `items.update` hook can add purge fingerprints via
+		// `context.scopedCache.purgeBy`;
 		// drained into the purge below.
 		const scopedCacheCollector =
 			opts.scopedCacheCollector ?? createScopedCacheCollector(this.schema);
@@ -1141,8 +1144,8 @@ implements AbstractService<Item> {
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
 			// (parity with create's cancel); a plain validation cancel is a no-op (the
 			// guard keeps an empty collector from reaching the purge). The cancel purges
-			// only the declared tags — `includeBareFingerprint: false` leaves this
-			// collection's own bare tag (its global reads) warm, since nothing changed.
+			// only the declared fingerprints — `includeBareFingerprint: false` leaves
+			// this collection's own bare one (its global reads) warm, nothing changed.
 			if (
 				scopedCacheCollector.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
@@ -1647,7 +1650,8 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
-		// An `items.delete` hook can add purge tags via `context.scopedCache.purgeBy`;
+		// An `items.delete` hook can add purge fingerprints via
+		// `context.scopedCache.purgeBy`;
 		// drained into the purge below.
 		const scopedCacheCollector =
 			opts.scopedCacheCollector ?? createScopedCacheCollector(this.schema);
@@ -1686,8 +1690,8 @@ implements AbstractService<Item> {
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
 			// (parity with create's cancel); a plain validation cancel is a no-op (the
 			// guard keeps an empty collector from reaching the purge). The cancel purges
-			// only the declared tags — `includeBareFingerprint: false` leaves this
-			// collection's own bare tag (its global reads) warm, since nothing changed.
+			// only the declared fingerprints — `includeBareFingerprint: false` leaves
+			// this collection's own bare one (its global reads) warm, nothing changed.
 			if (
 				scopedCacheCollector.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)

@@ -13,12 +13,13 @@ import {
 	type MockedFunction,
 } from 'vitest';
 
-// A scoped-mode read must tag every collection whose DATA feeds the response, so a
-// later write to any of them purges the cached entry. These pin that the read-side
-// field-map → tag derivation (`collectionsInFieldMap(fieldMapFromAst(ast))`) covers
-// every relation type — a regression that silently dropped a relation from the tag
-// set would leave reads joining it stale (HIT after a write). Tags come from the AST,
-// not the rows, so empty tracker responses are enough.
+// A scoped-mode read must fingerprint every collection whose DATA feeds the
+// response, so a later write to any of them purges the cached entry. These pin that
+// the read-side field-map → fingerprint derivation
+// (`collectionsInFieldMap(fieldMapFromAst(ast))`) covers every relation type — a
+// regression that silently dropped a relation from the set would leave reads joining
+// it stale (HIT after a write). Fingerprints come from the AST, not the rows, so
+// empty tracker responses are enough.
 const env: Record<string, any> = {
 	CACHE_AUTO_PURGE: true,
 	CACHE_AUTO_PURGE_IGNORE_LIST: [],
@@ -164,7 +165,7 @@ const m2aThenM2o = new SchemaBuilder()
 	})
 	.build();
 
-describe('scoped cache read tagging across relation types', () => {
+describe('scoped cache read fingerprints across relation types', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
 
@@ -180,64 +181,65 @@ describe('scoped cache read tagging across relation types', () => {
 
 	afterEach(() => tracker.reset());
 
-	async function taggedForQuery(collection: string, schema: any, query: any) {
+	async function fingerprintedForQuery(collection: string, schema: any, query: any) {
 		const service = new ItemsService(collection, { knex: db, schema });
 		const result = await service.readByQuery(query);
 		const fingerprints = readMeta(result)?.scopedCacheFingerprints ?? [];
 		return [...new Set(fingerprints.map((f: any) => f.collection))].sort();
 	}
 
-	const taggedCollections = (collection: string, schema: any, fields: string[]) =>
-		taggedForQuery(collection, schema, { fields });
+	const fingerprintedCollections = (
+		collection: string,
+		schema: any,
+		fields: string[],
+	) => fingerprintedForQuery(collection, schema, { fields });
 
-	it('m2o: tags the root and the related collection', async () => {
-		expect(await taggedCollections('cities', m2o, ['*', 'country.*'])).toEqual([
-			'cities',
-			'countries',
-		]);
+	it('m2o: fingerprints the root and the related collection', async () => {
+		expect(
+			await fingerprintedCollections('cities', m2o, ['*', 'country.*']),
+		).toEqual(['cities', 'countries']);
 	});
 
-	it('o2m: tags the root and the related collection', async () => {
-		expect(await taggedCollections('countries', o2m, ['*', 'cities.*'])).toEqual([
-			'cities',
-			'countries',
-		]);
+	it('o2m: fingerprints the root and the related collection', async () => {
+		expect(
+			await fingerprintedCollections('countries', o2m, ['*', 'cities.*']),
+		).toEqual(['cities', 'countries']);
 	});
 
 	it(oneLine`
-		m2m shallow (junction fields only): tags root + junction, not the unread target
+		m2m shallow (junction fields only): fingerprints root + junction, not the
+		unread target
 	`, async () => {
 		// `tags.*` resolves junction rows, not tag data — so the target need not be
-		// tagged, but the junction must be (a link add/remove is a junction write
-		// that has to invalidate the read).
-		expect(await taggedCollections('articles', m2m, ['*', 'tags.*'])).toEqual([
-			'articles',
-			'articles_tags_junction',
-		]);
-	});
-
-	it('m2m deep (target fields read): tags root + junction + target', async () => {
-		expect(await taggedCollections('articles', m2m, ['*', 'tags.tags_id.*'])).toEqual([
-			'articles',
-			'articles_tags_junction',
-			'tags',
-		]);
+		// fingerprinted, but the junction must be (a link add/remove is a junction
+		// write that has to invalidate the read).
+		expect(
+			await fingerprintedCollections('articles', m2m, ['*', 'tags.*']),
+		).toEqual(['articles', 'articles_tags_junction']);
 	});
 
 	it(oneLine`
-		m2a shallow (junction only): tags root + junction, not the unread targets
-	`, async () => {
-		expect(await taggedCollections('blog', m2a, ['*', 'blocks.*'])).toEqual([
-			'blog',
-			'blog_builder',
-		]);
-	});
-
-	it(oneLine`
-		m2a deep (item:collection fields): tags root + junction + every read target
+		m2m deep (target fields read): fingerprints root + junction + target
 	`, async () => {
 		expect(
-			await taggedCollections('blog', m2a, [
+			await fingerprintedCollections('articles', m2m, ['*', 'tags.tags_id.*']),
+		).toEqual(['articles', 'articles_tags_junction', 'tags']);
+	});
+
+	it(oneLine`
+		m2a shallow (junction only): fingerprints root + junction, not the unread targets
+	`, async () => {
+		expect(
+			await fingerprintedCollections('blog', m2a, ['*', 'blocks.*']),
+		).toEqual(['blog', 'blog_builder']);
+	});
+
+	it(oneLine`
+		m2a deep (item:collection fields): fingerprints root + junction + every read
+		target
+	`, async () => {
+		expect(
+			await fingerprintedCollections('blog', m2a, [
 				'*',
 				'blocks.item:text.*',
 				'blocks.item:image.*',
@@ -245,88 +247,120 @@ describe('scoped cache read tagging across relation types', () => {
 		).toEqual(['blog', 'blog_builder', 'image', 'text']);
 	});
 
-	// A relational path used only in filter/sort (never selected) still tags the
-	// related collection — EXCEPT where the filter is answered by the near row's
+	// A relational path used only in filter/sort (never selected) still fingerprints
+	// the related collection — EXCEPT where the filter is answered by the near row's
 	// own foreign key column, which is the case below.
 	it(oneLine`
-		deep filter terminating on an M2O key tags no related collection
+		deep filter terminating on an M2O key fingerprints no related collection
 	`, async () => {
 		// `cities.country = 1` reads a column the city already holds, and behind
 		// the constraint the country cannot be deleted without writing the city.
 		// So no write to `countries` can change this result.
-		const tags = await taggedForQuery('cities', m2o, {
+		const collections = await fingerprintedForQuery('cities', m2o, {
 			fields: ['id'],
 			filter: { country: { id: { _eq: 1 } } },
 		});
 
-		expect(tags).toEqual(['cities']);
+		expect(collections).toEqual(['cities']);
 	});
 
-	// The contrast: a sort reads rows no key named, so the collection stays tagged.
-	it('sort on a relational path (not selected) tags the related collection', async () => {
-		const tags = await taggedForQuery('cities', m2o, {
+	// The contrast: a sort reads rows no key named, so the collection keeps its
+	// fingerprint.
+	it(oneLine`
+		sort on a relational path (not selected) fingerprints the related collection
+	`, async () => {
+		const collections = await fingerprintedForQuery('cities', m2o, {
 			fields: ['id'],
 			sort: ['country.id'],
 		});
 
-		expect(tags).toEqual(['cities', 'countries']);
+		expect(collections).toEqual(['cities', 'countries']);
 	});
 
 	// Two hops deep: a regression that recursed only one level would drop the leaf
 	// collection (`continents` / `cities`) and leave the read stale after a leaf write.
-	it('m2o chain (3 levels): tags every collection down the nested path', async () => {
+	it(oneLine`
+		m2o chain (3 levels): fingerprints every collection down the nested path
+	`, async () => {
 		expect(
-			await taggedCollections('cities', m2oChain, ['*', 'country.continent.*']),
+			await fingerprintedCollections('cities', m2oChain, [
+				'*',
+				'country.continent.*',
+			]),
 		).toEqual(['cities', 'continents', 'countries']);
 	});
 
-	it('o2m chain (3 levels): tags every collection down the nested path', async () => {
+	it(oneLine`
+		o2m chain (3 levels): fingerprints every collection down the nested path
+	`, async () => {
 		expect(
-			await taggedCollections('continents', o2mChain, ['*', 'countries.cities.*']),
+			await fingerprintedCollections('continents', o2mChain, [
+				'*',
+				'countries.cities.*',
+			]),
 		).toEqual(['cities', 'continents', 'countries']);
 	});
 
 	// A filter nested two relations deep still walks the whole chain — proves the
 	// query walker, not just the field walker, recurses past hop one. The LEAF drops
 	// out for the same reason as above: the last hop is answered by the country's own
-	// `continent` column. The collection hopped THROUGH keeps its tag, because which
-	// country a city points at, and that country's column, both decide the result.
+	// `continent` column. The collection hopped THROUGH keeps its fingerprint,
+	// because which country a city points at, and that country's column, both decide
+	// the result.
 	it(oneLine`
-		deep filter two relations down tags the path but not its leaf
+		deep filter two relations down fingerprints the path but not its leaf
 	`, async () => {
-		const tags = await taggedForQuery('cities', m2oChain, {
+		const collections = await fingerprintedForQuery('cities', m2oChain, {
 			fields: ['id'],
 			filter: { country: { continent: { id: { _eq: 1 } } } },
 		});
 
-		expect(tags).toEqual(['cities', 'countries']);
+		expect(collections).toEqual(['cities', 'countries']);
 	});
 
-	it('mixed chain o2m→m2o: tags every collection across the type change', async () => {
+	it(oneLine`
+		mixed chain o2m→m2o: fingerprints every collection across the type change
+	`, async () => {
 		expect(
-			await taggedCollections('authors', o2mThenM2o, ['*', 'books.publisher.*']),
+			await fingerprintedCollections('authors', o2mThenM2o, [
+				'*',
+				'books.publisher.*',
+			]),
 		).toEqual(['authors', 'books', 'publishers']);
 	});
 
-	it('mixed chain m2o→o2m: tags every collection across the type change', async () => {
+	it(oneLine`
+		mixed chain m2o→o2m: fingerprints every collection across the type change
+	`, async () => {
 		expect(
-			await taggedCollections('reviews', m2oThenO2m, ['*', 'book.chapters.*']),
+			await fingerprintedCollections('reviews', m2oThenO2m, [
+				'*',
+				'book.chapters.*',
+			]),
 		).toEqual(['books', 'chapters', 'reviews']);
 	});
 
 	it(oneLine`
-		mixed chain m2m(deep)→m2o: tags root + junction + target + the target's further m2o
+		mixed chain m2m(deep)→m2o: fingerprints root + junction + target
+		+ the target's further m2o
 	`, async () => {
 		expect(
-			await taggedCollections('articles', m2mThenM2o, ['*', 'tags.tags_id.category.*']),
+			await fingerprintedCollections('articles', m2mThenM2o, [
+				'*',
+				'tags.tags_id.category.*',
+			]),
 		).toEqual(['articles', 'articles_tags_junction', 'categories', 'tags']);
 	});
 
 	it(oneLine`
-		mixed chain m2a(deep)→m2o: tags root + junction + target + the target's further m2o
+		mixed chain m2a(deep)→m2o: fingerprints root + junction + target
+		+ the target's further m2o
 	`, async () => {
 		expect(
-			await taggedCollections('blog', m2aThenM2o, ['*', 'blocks.item:text.author.*']),
+			await fingerprintedCollections('blog', m2aThenM2o, [
+				'*',
+				'blocks.item:text.author.*',
+			]),
 		).toEqual(['authors', 'blog', 'blog_builder', 'text']);
 	});
 });

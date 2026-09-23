@@ -76,7 +76,7 @@ export type ScopedCacheReadInputs = {
 /**
  * Stateless read-side metadata for a collection's scoped cache. Derives the flat
  * fields, dotted paths, terminal types and related primary keys the snapshot and
- * read-tag assembly consume. Every member is a pure function of (collection,
+ * read-fingerprint assembly consume. Every member is a pure function of (collection,
  * schema), both fixed for the owning ItemsService, so the getters memoize on
  * first access.
  */
@@ -166,7 +166,8 @@ export class ItemScopedCacheService {
 	// Resolve a dotted scope field into the M2O join chain reaching its terminal.
 	// Every INTERMEDIATE segment must be M2O (a row maps to exactly one parent); a
 	// to-many hop or unknown field returns null → the caller degrades to the bare
-	// tag. The terminal is a plain column on the last collection (scalar or fk).
+	// fingerprint. The terminal is a plain column on the last collection (a scalar
+	// or a foreign key).
 	resolvePath(path: string): {
 		segments: string[];
 		joins: ScopedCacheM2oJoin[];
@@ -418,7 +419,7 @@ export class ItemScopedCacheService {
 	 * the flat columns read the same as they did on their own query.
 	 *
 	 * Each path terminal comes back under the path's own dotted name, which is what
-	 * both callers tag it as. The query selects it positionally instead — two paths
+	 * both callers name it as. The query selects it positionally instead — two paths
 	 * ending on the same terminal field would collide under that name in SQL.
 	 */
 	private async scopeValueRows(keys: PrimaryKey[]): Promise<Item[]> {
@@ -572,7 +573,7 @@ export class ItemScopedCacheService {
 	/**
 	 * Ownership ancestors to nest into the read so the scope pins them by key rather
 	 * than by the bare fingerprint a `fields: ['*']` read would over-purge on.
-	 * Stripped from the response again once the tags are built.
+	 * Stripped from the response again once the fingerprints are built.
 	 */
 	ownershipInjections(query: Query): ScopedCacheOwnershipInjection[] {
 		if (!scopedCachePurgeEnabled()) {
@@ -587,7 +588,8 @@ export class ItemScopedCacheService {
 	}
 
 	/**
-	 * Everything this read's tags need that the AST alone decides, resolved before
+	 * Everything this read's fingerprints need that the AST alone decides, resolved
+	 * before
 	 * the query runs. The plan fills its own row-dependent half from inside it.
 	 */
 	planRead(
@@ -604,7 +606,7 @@ export class ItemScopedCacheService {
 
 	/**
 	 * Event context handed to the `cache.purge` filter so extensions can resolve their
-	 * own tags.
+	 * own fingerprints.
 	 */
 	purgeContext(): EventContext {
 		return {
@@ -628,8 +630,8 @@ export class ItemScopedCacheService {
 			// fields it rewrote. Given them, an entry of this collection is dropped
 			// only when one of those rows satisfies its whole fingerprint — which is
 			// the narrowing this whole thing is for. Left out (a purge with no rows
-			// to show for it: a hook's declared tags, a collection changed by a
-			// cascade), every entry the tags reach is dropped as before.
+			// to show for it: a hook's declared fingerprints, a collection changed
+			// by a cascade), every entry they reach is dropped as before.
 			rows,
 		}: {
 			includeBareFingerprint?: boolean;
@@ -758,7 +760,7 @@ export class ItemScopedCacheService {
 		// moved is unresolvable — those rows were never read — and its bare
 		// fingerprint indexes none of them (a read bounded to one value is filed
 		// under that slice alone), so each takes the collection-wide purge rather
-		// than a tag that cannot reach it.
+		// than a fingerprint that cannot reach it.
 		purgedFingerprintSets.push(...await Promise.all(
 			otherCollections.map((changedCollection) => {
 				return purgeScopedCache(
@@ -779,17 +781,18 @@ export class ItemScopedCacheService {
 	}
 
 	/**
-	 * The scoped-cache tags this read depends on. The root collection gets value
-	 * slices only when the query filter *bounds* it to those values
+	 * The scoped-cache fingerprints this read depends on. The root collection gets
+	 * value slices only when the query filter *bounds* it to those values
 	 * (`scopedCachePinsFromFilter`), so one owner's/partition's later write
 	 * drops only their entries. An unbounded root (no scope-field filter — e.g. an
 	 * admin list) and every other touched collection fall back to a bare collection
-	 * tag, so any write to them invalidates the read (a value-slice tag would miss
-	 * an insert of a brand-new value). The `cache.scope` filter lets extensions
-	 * augment these (resolve M2M owners, or tag a collection an `items.read` hook
-	 * enriched from); it receives the enriched `records`. Whatever they add must be
-	 * reproducible on the `cache.purge` side or it leaks. Returns the tags plus any
-	 * unautopurgeable scopeTo fingerprints respond.ts leaves the read uncached for.
+	 * fingerprint, so any write to them invalidates the read (a value-sliced one
+	 * would miss an insert of a brand-new value). The `cache.scope` filter lets
+	 * extensions augment these (resolve M2M owners, or name a collection an
+	 * `items.read` hook enriched from); it receives the enriched `records`. Whatever
+	 * they add must be reproducible on the `cache.purge` side or it leaks. Returns
+	 * the fingerprints plus any unautopurgeable scopeTo ones respond.ts leaves the
+	 * read uncached for.
 	 */
 	async readFingerprints(inputs: ScopedCacheReadInputs): Promise<{
 		fingerprints: ScopedCacheFingerprint[];
@@ -875,7 +878,7 @@ export class ItemScopedCacheService {
 		// collections come from the keying too — whether it named keys there or
 		// not. Without this such a read carries NO pin for a table it joins,
 		// and no write to that table can drop it.
-		const taggedCollections = new Set([
+		const fingerprintedCollections = new Set([
 			...collectionsInFieldMap(fieldMap),
 			...filterKeying.keys(),
 		]);
@@ -1201,7 +1204,7 @@ export class ItemScopedCacheService {
 			pushNodeBoundOrBare(collection, pins);
 		};
 
-		for (const collection of taggedCollections) {
+		for (const collection of fingerprintedCollections) {
 			if (collection === this.collection && rootScopedCachePins.length > 0) {
 				readPins.push(...rootScopedCachePins);
 				continue;
@@ -1536,8 +1539,35 @@ export class ItemScopedCacheService {
 			})
 			.map((pin) => [pin]);
 
+		// A query case takes the place of its earliest pin, so the fingerprints come
+		// back in the order the read derived them: what it pinned itself, then what a
+		// hook declared, then the collections crossing a dotted declaration reached.
+		// Concatenating the three groups instead would read a hook's dependency
+		// before the collection that was actually read.
+		const pinOrder = new Map<string, number>();
+
+		readPins.forEach((pin, index) => {
+			const pinKey = scopedCachePinKey(pin);
+
+			if (!pinOrder.has(pinKey)) {
+				pinOrder.set(pinKey, index);
+			}
+		});
+
+		const derivedAt = (queryCase: readonly ScopedCacheCollectionPin[]) => {
+			return queryCase.reduce((earliest, pin) => {
+				return Math.min(earliest, pinOrder.get(scopedCachePinKey(pin)) ?? Infinity);
+			}, Infinity);
+		};
+
+		const orderedQueryCases = [
+			...rootQueryCases,
+			...declaredQueryCases,
+			...standaloneQueryCases,
+		].sort((left, right) => derivedAt(left) - derivedAt(right));
+
 		const readFingerprints = scopedCacheFingerprintsByCollection(
-			[...rootQueryCases, ...declaredQueryCases, ...standaloneQueryCases],
+			orderedQueryCases,
 			queryCaseFields,
 		);
 

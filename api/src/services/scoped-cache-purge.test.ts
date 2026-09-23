@@ -228,10 +228,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['b'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -254,10 +260,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -283,10 +295,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			// The rows the mutation wrote ride in the same options object; what this
@@ -313,9 +331,13 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+			[
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+			],
 			expect.anything(),
 			expect.objectContaining({
 				includeBareFingerprint: false,
@@ -373,10 +395,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -413,12 +441,21 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -451,8 +488,11 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -475,9 +515,18 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+			[
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+			],
 			expect.anything(),
 			expect.anything(),
 		);
@@ -505,10 +554,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -540,12 +595,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -593,8 +652,11 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['b'] },
+						viewFields: [],
+					},
 				],
 				expect.anything(),
 				expect.anything(),
@@ -620,12 +682,10 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{
 					collection: 'test',
-					field: 'student',
-					value: 'default-owner',
-					type: 'string',
+					pinnedScope: { 'id': ['1'], 'student': ['default-owner'] },
+					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -650,8 +710,11 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: null, type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['\x00null'] },
+					viewFields: [],
+				},
 			],
 			expect.anything(),
 			expect.anything(),
@@ -736,8 +799,11 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+						viewFields: [],
+					},
 				],
 				expect.anything(),
 				expect.anything(),
@@ -768,10 +834,16 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'C', type: 'string' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+						viewFields: [],
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['c'] },
+						viewFields: [],
+					},
 				],
 				expect.anything(),
 				expect.anything(),
@@ -1233,8 +1305,11 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['a'] },
+							viewFields: [],
+						},
 					],
 					expect.anything(),
 					expect.objectContaining({
@@ -1269,10 +1344,16 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['a'] },
+							viewFields: [],
+						},
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['b'] },
+							viewFields: [],
+						},
 					],
 					expect.anything(),
 					expect.objectContaining({
@@ -1306,8 +1387,11 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['a'] },
+							viewFields: [],
+						},
 					],
 					expect.anything(),
 					expect.objectContaining({
@@ -1344,8 +1428,11 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['99'], 'student': ['z'] },
+							viewFields: [],
+						},
 					],
 					expect.anything(),
 					expect.objectContaining({
@@ -1616,8 +1703,16 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'] },
+						viewFields: [],
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'] },
+						viewFields: [],
+					},
 				],
 				expect.anything(),
 				expect.anything(),
@@ -1686,7 +1781,13 @@ describe(oneLine`
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[{ collection: 'test', field: 'id', value: 99, type: 'integer' }],
+					[
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['99'] },
+							viewFields: [],
+						},
+					],
 					expect.anything(),
 					expect.objectContaining({
 						declaredFingerprints: [{
@@ -1878,55 +1979,27 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 			expect.anything(),
 			'student_course',
 			[
-				{ collection: 'student_course', field: 'id', value: 1, type: 'integer' },
 				{
 					collection: 'student_course',
-					field: 'teaching_unit',
-					value: 10,
-					type: 'integer',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['10'],
+						'teaching_unit.discipline': ['20'],
+						'teaching_unit.discipline.enrollment': ['30'],
+						'teaching_unit.discipline.enrollment.student': ['a'],
+					},
+					viewFields: [],
 				},
 				{
 					collection: 'student_course',
-					field: 'teaching_unit.discipline',
-					value: 20,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment',
-					value: 30,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'A',
-					type: 'string',
-				},
-				{ collection: 'student_course', field: 'id', value: 1, type: 'integer' },
-				{
-					collection: 'student_course',
-					field: 'teaching_unit',
-					value: 11,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline',
-					value: 21,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment',
-					value: 31,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'B',
-					type: 'string',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['11'],
+						'teaching_unit.discipline': ['21'],
+						'teaching_unit.discipline.enrollment': ['31'],
+						'teaching_unit.discipline.enrollment.student': ['b'],
+					},
+					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -1955,20 +2028,16 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 			expect.anything(),
 			'note',
 			[
-				{ collection: 'note', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'note', field: 'left_ref', value: 7, type: 'integer' },
-				{ collection: 'note', field: 'right_ref', value: 8, type: 'integer' },
 				{
 					collection: 'note',
-					field: 'left_ref.owner',
-					value: 'left-owner',
-					type: 'string',
-				},
-				{
-					collection: 'note',
-					field: 'right_ref.owner',
-					value: 'right-owner',
-					type: 'string',
+					pinnedScope: {
+						id: ['1'],
+						left_ref: ['7'],
+						right_ref: ['8'],
+						'left_ref.owner': ['left-owner'],
+						'right_ref.owner': ['right-owner'],
+					},
+					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2030,64 +2099,26 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			`student_course`,
 			[
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['10'],
+						'teaching_unit.discipline': ['11'],
+						'teaching_unit.discipline.enrollment': ['12'],
+						'teaching_unit.discipline.enrollment.student': ['a'],
+					},
+					viewFields: [],
 				},
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 2,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 10,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 20,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: 11,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: 21,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: 12,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: 22,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: `A`,
-					type: `string`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: `B`,
-					type: `string`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['2'],
+						teaching_unit: ['20'],
+						'teaching_unit.discipline': ['21'],
+						'teaching_unit.discipline.enrollment': ['22'],
+						'teaching_unit.discipline.enrollment.student': ['b'],
+					},
+					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2117,70 +2148,37 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			`student_course`,
 			[
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['10'],
+						'teaching_unit.discipline': ['11'],
+						'teaching_unit.discipline.enrollment': ['12'],
+						'teaching_unit.discipline.enrollment.student': ['a'],
+					},
+					viewFields: [],
 				},
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 2,
-					type: `integer`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['2'],
+						teaching_unit: ['\x00null'],
+						'teaching_unit.discipline': ['\x00null'],
+						'teaching_unit.discipline.enrollment': ['\x00null'],
+						'teaching_unit.discipline.enrollment.student': ['\x00null'],
+					},
+					viewFields: [],
 				},
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 3,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 10,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: null,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: 11,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: null,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: 12,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: null,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: `A`,
-					type: `string`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: null,
-					type: `string`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['3'],
+						teaching_unit: ['\x00null'],
+						'teaching_unit.discipline': ['\x00null'],
+						'teaching_unit.discipline.enrollment': ['\x00null'],
+						'teaching_unit.discipline.enrollment.student': ['\x00null'],
+					},
+					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2206,22 +2204,13 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			`note`,
 			[
 				{
-					collection: `note`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
-				},
-				{
-					collection: `note`,
-					field: `holder`,
-					value: 7,
-					type: `integer`,
-				},
-				{
-					collection: `note`,
-					field: `holder.owner`,
-					value: `owner-a`,
-					type: `string`,
+					collection: 'note',
+					pinnedScope: {
+						id: ['1'],
+						holder: ['7'],
+						'holder.owner': ['owner-a'],
+					},
+					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2247,12 +2236,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			expect.anything(),
 			`student_course`,
 			[
-				{
-					collection: `student_course`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
-				},
 			],
 			expect.anything(),
 			expect.anything(),

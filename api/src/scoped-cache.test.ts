@@ -2210,7 +2210,7 @@ describe('a purge that fails after its mutation committed', () => {
 		} as any);
 
 		expect(await purgeScopedCache(cache as any, 'articles', null))
-			.toEqual([{ collection: 'articles' }]);
+			.toEqual([{ collection: 'articles', pinnedScope: {}, viewFields: [] }]);
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
 			{ mode: 'collection', collection: 'articles', scopedCacheFingerprints: [] },

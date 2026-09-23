@@ -1345,7 +1345,11 @@ describe('respond middleware', () => {
 			{ data: { id: 1 } },
 			{
 				scopedCachePurged: [
-					{ collection: 'articles', field: 'owner', value: 'U2' },
+					{
+						collection: 'articles',
+						pinnedScope: { owner: ['U2'] },
+						viewFields: [],
+					},
 				],
 			},
 		);
@@ -1367,7 +1371,11 @@ describe('respond middleware', () => {
 			{ data: { id: 1 } },
 			{
 				scopedCachePurged: [
-					{ collection: 'articles', field: 'owner', value: null },
+					{
+						collection: 'articles',
+						pinnedScope: { owner: ['\x00null'] },
+						viewFields: [],
+					},
 				],
 			},
 		);
@@ -1387,9 +1395,9 @@ describe('respond middleware', () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
 
-		const pins = [
-			{ collection: 'a', field: 'b', value: '1' },
-			{ collection: 'a', field: 'b', value: '2' },
+		const purgedFingerprints = [
+			{ collection: 'a', pinnedScope: { b: ['1'] }, viewFields: [] },
+			{ collection: 'a', pinnedScope: { b: ['2'] }, viewFields: [] },
 		];
 
 		const res = makeRes(
@@ -1398,7 +1406,7 @@ describe('respond middleware', () => {
 				scopedCacheFingerprints: [
 					{ collection: 'a', pinnedScope: { b: ['1', '2'] }, viewFields: [] },
 				],
-				scopedCachePurged: pins,
+				scopedCachePurged: purgedFingerprints,
 			},
 		);
 
