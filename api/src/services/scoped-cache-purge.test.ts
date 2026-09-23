@@ -985,18 +985,6 @@ describe(oneLine`
 	// `purgeBy`. Additive to what the framework derived — read tags into the meta
 	// rider, declared fingerprints beside the mutation's own purge.
 	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
-		// A cross-collection dependency a hook declares (a read enriched from an authors
-		// row); shared so the hook's declaration and the assertion can't drift. Both
-		// handles take the same shape — a read scopes to it, a mutation purges by it.
-		const authorsDependency = { collection: 'authors', pinnedScope: { id: [5] } };
-
-		// What the collector canonicalizes that declaration to.
-		const authorsFingerprint = {
-			collection: 'authors',
-			pinnedScope: { id: ['5'] },
-			viewFields: [],
-		};
-
 		it(oneLine`
 			an items.read hook scopes the response to a cross-collection tag, unioned with
 			the auto-derived collection tag on the meta rider
@@ -1004,7 +992,11 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo(authorsDependency);
+				ctx.scopedCache.scopeTo({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
@@ -1293,7 +1285,11 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
@@ -1314,7 +1310,11 @@ describe(oneLine`
 					],
 					expect.anything(),
 					expect.objectContaining({
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 					}),
 				);
 			}
@@ -1332,7 +1332,11 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
@@ -1358,7 +1362,11 @@ describe(oneLine`
 					],
 					expect.anything(),
 					expect.objectContaining({
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 					}),
 				);
 			}
@@ -1375,7 +1383,11 @@ describe(oneLine`
 			tracker.on.delete('test').response(1);
 
 			const declare = async (keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return keys;
 			};
 
@@ -1396,7 +1408,11 @@ describe(oneLine`
 					],
 					expect.anything(),
 					expect.objectContaining({
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 					}),
 				);
 			}
@@ -1416,7 +1432,11 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return 99;
 			};
 
@@ -1437,7 +1457,11 @@ describe(oneLine`
 					],
 					expect.anything(),
 					expect.objectContaining({
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 					}),
 				);
 
@@ -1464,7 +1488,11 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declareThenCancel = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return null; // cancel the update
 			};
 
@@ -1487,7 +1515,11 @@ describe(oneLine`
 					expect.anything(),
 					{
 						includeBareFingerprint: false,
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 					},
 				);
 			}
@@ -1504,7 +1536,11 @@ describe(oneLine`
 			// deleteMany snapshots rows AFTER the filter, so a cancel returns
 			// before any select — only the hook-declared slice is purged.
 			const declareThenCancel = async (_keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return null; // cancel the delete
 			};
 
@@ -1523,7 +1559,11 @@ describe(oneLine`
 					expect.anything(),
 					{
 						includeBareFingerprint: false,
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 					},
 				);
 			}
@@ -1543,13 +1583,19 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
 			purgeScopedCache
 				.mockResolvedValueOnce([{ collection: 'test' }])
-				.mockResolvedValueOnce([authorsDependency]);
+				.mockResolvedValueOnce([
+					{ collection: 'authors', pinnedScope: { id: [5] } },
+				]);
 
 			emitter.onFilter('test.items.update', declare);
 
@@ -1577,7 +1623,11 @@ describe(oneLine`
 					expect.anything(),
 					{
 						includeBareFingerprint: false,
-						declaredFingerprints: [authorsFingerprint],
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
 						scopedCachePurgeId: expect.any(String),
 					},
 				);
@@ -1592,7 +1642,7 @@ describe(oneLine`
 
 				expect(svc.scopedCachePurged).toEqual([
 					{ collection: 'test' },
-					authorsDependency,
+					{ collection: 'authors', pinnedScope: { id: [5] } },
 				]);
 			}
 			finally {

@@ -1066,11 +1066,11 @@ describe('composeScopedCachePaths — auto-derived multi-hop paths', () => {
 
 describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 	test('an _and of two fields is one way to match, holding both', () => {
-		const filter = { student: { _eq: 'A' }, course: { _eq: 'math' } };
-
-		expect(
-			pinnedScopedCacheQueryCasesFromFilter('slots', ['student', 'course'], filter),
-		).toEqual([
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{ student: { _eq: 'A' }, course: { _eq: 'math' } },
+		)).toEqual([
 			[
 				{ collection: 'slots', field: 'student', value: 'A' },
 				{ collection: 'slots', field: 'course', value: 'math' },
@@ -1134,10 +1134,11 @@ describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 	});
 
 	test('an unbound branch drops the pin, as it does for tags', () => {
-		const filter = { _or: [{ student: { _eq: 'A' } }, { note: { _eq: 'x' } }] };
-
-		expect(pinnedScopedCacheQueryCasesFromFilter('slots', ['student'], filter))
-			.toEqual([]);
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student'],
+			{ _or: [{ student: { _eq: 'A' } }, { note: { _eq: 'x' } }] },
+		)).toEqual([]);
 	});
 });
 

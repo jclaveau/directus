@@ -120,22 +120,6 @@ describe.each(vendors)('%s', (vendor) => {
 			.set('Authorization', auth);
 	}
 
-	/**
-	 * Fill the entry this scenario is about, over an otherwise empty cache.
-	 *
-	 * The MISS then HIT is the witness that there is an entry to purge at all: a
-	 * scenario asserting a later HIT would pass just as well against a read that was
-	 * never cacheable.
-	 */
-	async function fillCache(query: Record<string, string>) {
-		await request(getUrl(vendor, env))
-			.post('/utils/cache/clear')
-			.set('Authorization', auth);
-
-		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe('MISS');
-		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe('HIT');
-	}
-
 	async function expectCacheStatus(
 		query: Record<string, string>,
 		status: 'HIT' | 'MISS',
@@ -143,47 +127,41 @@ describe.each(vendors)('%s', (vendor) => {
 		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe(status);
 	}
 
-	/**
-	 * The schema the scenarios read against, asserted rather than created here: the
-	 * instance reads `scoped_cache_fields` off the schema it boots on, so `beforeAll`
-	 * creates the collection before the spawn. The feature still states it, and a
-	 * drift between the two fails the Background instead of a purge assertion.
-	 */
-	async function expectSlotSchema(table: Record<string, string>[]) {
-		const fields = await request(getUrl(vendor, env))
-			.get(`/fields/${SLOT}`)
-			.set('Authorization', auth);
-
-		const collection = await request(getUrl(vendor, env))
-			.get(`/collections/${SLOT}`)
-			.set('Authorization', auth);
-
-		const scopedCacheFields: string[]
-			= collection.body.data.meta.scoped_cache_fields;
-
-		const declaredFields = fields.body.data
-			.filter((field: { field: string }) => field.field !== 'id')
-			.map((field: { field: string; type: string }) => {
-				return {
-					field: field.field,
-					type: field.type,
-					scoped_cache_field: scopedCacheFields.includes(field.field)
-						? 'yes'
-						: 'no',
-				};
-			});
-
-		expect(declaredFields).toEqual(expect.arrayContaining(table));
-		expect(declaredFields).toHaveLength(table.length);
-	}
-
 	function defineGivenSteps(
 		{ given, and }: StepFunctions,
 		ids: Map<string, number>,
 		readQuery: Record<string, string>,
 	) {
+		// The schema the scenarios read against, asserted rather than created here:
+		// the instance reads `scoped_cache_fields` off the schema it boots on, so
+		// `beforeAll` creates the collection before the spawn. The feature still
+		// states it, and a drift fails the Background, not a purge assertion.
 		given('the slot collection:', async (table: Record<string, string>[]) => {
-			await expectSlotSchema(table);
+			const fields = await request(getUrl(vendor, env))
+				.get(`/fields/${SLOT}`)
+				.set('Authorization', auth);
+
+			const collection = await request(getUrl(vendor, env))
+				.get(`/collections/${SLOT}`)
+				.set('Authorization', auth);
+
+			const scopedCacheFields: string[]
+				= collection.body.data.meta.scoped_cache_fields;
+
+			const declaredFields = fields.body.data
+				.filter((field: { field: string }) => field.field !== 'id')
+				.map((field: { field: string; type: string }) => {
+					return {
+						field: field.field,
+						type: field.type,
+						scoped_cache_field: scopedCacheFields.includes(field.field)
+							? 'yes'
+							: 'no',
+					};
+				});
+
+			expect(declaredFields).toEqual(expect.arrayContaining(table));
+			expect(declaredFields).toHaveLength(table.length);
 		});
 
 		and('the slots:', async (table: Record<string, string>[]) => {
@@ -197,7 +175,18 @@ describe.each(vendors)('%s', (vendor) => {
 				readQuery[row['param']!] = row['value']!;
 			}
 
-			await fillCache(readQuery);
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// The MISS then HIT is the witness that there is an entry to purge at
+			// all: a scenario asserting a later HIT would pass just as well against
+			// a read that was never cacheable.
+			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
+				.toBe('MISS');
+
+			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
+				.toBe('HIT');
 		});
 	}
 

@@ -180,14 +180,10 @@ describe('items controller', () => {
 		});
 
 		test('singleton read + stamps scopedCacheFingerprints', async () => {
-			const fingerprint = {
-				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
-			};
-
 			readSingleton.mockResolvedValueOnce(
-				withMeta({ id: 1 }, scopedCacheReadMeta([fingerprint])),
+				withMeta({ id: 1 }, scopedCacheReadMeta([
+					{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+				])),
 			);
 
 			getMetaForQuery.mockResolvedValueOnce({ total_count: 1 });
@@ -196,7 +192,11 @@ describe('items controller', () => {
 			const next = vi.fn();
 			await handler()(req, res, next);
 			expect(res.locals['payload'].data).toBeDefined();
-			expect(res.locals['scopedCacheFingerprints']).toEqual([fingerprint]);
+
+			expect(res.locals['scopedCacheFingerprints']).toEqual([
+				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			]);
+
 			expect(next).toHaveBeenCalledOnce();
 		});
 
@@ -246,34 +246,40 @@ describe('items controller', () => {
 		test(oneLine`
 			stamps the read's pins and its unautopurgeable fingerprints
 		`, async () => {
-			const fingerprint = {
-				collection: 'articles',
-				pinnedScope: { id: ['1'] },
-				viewFields: [],
-			};
-
-			const orphan = {
-				collection: 'authors',
-				pinnedScope: { ghost: ['g'] },
-				viewFields: [],
-			};
-
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ id: 1 },
-					scopedCacheReadMeta([fingerprint], {
-						scopedCacheUnautopurgeableFingerprints: [orphan],
-					}),
+					scopedCacheReadMeta(
+						[{
+							collection: 'articles',
+							pinnedScope: { id: ['1'] },
+							viewFields: [],
+						}],
+						{
+							scopedCacheUnautopurgeableFingerprints: [{
+								collection: 'authors',
+								pinnedScope: { ghost: ['g'] },
+								viewFields: [],
+							}],
+						},
+					),
 				),
 			);
 
 			const res = { locals: {} } as any;
 			await handler()(makeReq(), res, vi.fn());
 
-			expect(res.locals['scopedCacheFingerprints']).toEqual([fingerprint]);
+			expect(res.locals['scopedCacheFingerprints']).toEqual([{
+				collection: 'articles',
+				pinnedScope: { id: ['1'] },
+				viewFields: [],
+			}]);
 
-			expect(res.locals['scopedCacheUnautopurgeableFingerprints'])
-				.toEqual([orphan]);
+			expect(res.locals['scopedCacheUnautopurgeableFingerprints']).toEqual([{
+				collection: 'authors',
+				pinnedScope: { ghost: ['g'] },
+				viewFields: [],
+			}]);
 		});
 	});
 

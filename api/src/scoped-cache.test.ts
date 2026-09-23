@@ -667,13 +667,15 @@ describe('createScopedCacheCollector', () => {
 
 	it('accepts a batch, deduping within it and against prior declarations', () => {
 		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
-		const authorSlice = { collection: 'articles', pinnedScope: { author: [5] } };
-		const authorsTable = { collection: 'authors' };
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 
-		scope.scopeTo(authorSlice);
-		scope.scopeTo([{ ...authorSlice }, authorsTable, authorsTable]);
+		scope.scopeTo([
+			{ collection: 'articles', pinnedScope: { author: [5] } },
+			{ collection: 'authors' },
+			{ collection: 'authors' },
+		]);
 
-		// authorSlice repeats the prior one, authorsTable appears twice → each once.
+		// The articles slice repeats the prior one, authors appears twice → each once.
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'articles', field: 'author', value: 5 }],
 			[{ collection: 'authors' }],
