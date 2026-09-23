@@ -323,7 +323,7 @@ export class ItemScopedCacheService {
 
 		// A collection scoping on nothing has no slice to read and no query to pay
 		// for it — its primary key alone completes each row's fingerprint, since the
-		// pairs a read can pin there are its keys and nothing else.
+		// scope a read can pin there is its keys and nothing else.
 		//
 		// The columns stay unread: they would only buy the `changed` diff, and
 		// buying it here would put a SELECT on every mutation of every collection in
@@ -380,7 +380,7 @@ export class ItemScopedCacheService {
 			));
 		}
 
-		// The axes a read can pin itself to, which is what a fingerprint's pairs are.
+		// The axes a read can pin itself to — a fingerprint's pinned scope.
 		// Every OTHER column the row carries stays out of them and rides the row
 		// instead: it can only ever be a field the read is bound to, never a slice.
 		const pinnableFields = [...new Set([
@@ -853,7 +853,7 @@ export class ItemScopedCacheService {
 		//
 		// Kept as query cases as well as tags: the tags say which slices the read
 		// sits in, and the query cases say which of them had to hold TOGETHER — an
-		// `_and` of two fields is one query case of two pairs, an `_or` of them is
+		// `_and` of two fields is one query case of two pins, an `_or` of them is
 		// two query cases.
 		const rootScopedCacheQueryCases = rootPaths.size > 1
 			? []

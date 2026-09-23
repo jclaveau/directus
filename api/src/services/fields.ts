@@ -274,7 +274,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(result, scopedCacheReadMeta([
-			{ collection: 'directus_fields', pairs: new Map(), fields: [] },
+			{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
 		]));
 	}
 
@@ -360,7 +360,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(data, scopedCacheReadMeta([
-			{ collection: 'directus_fields', pairs: new Map(), fields: [] },
+			{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
 		]));
 	}
 

@@ -179,7 +179,11 @@ describe('items controller', () => {
 		});
 
 		test('singleton read + stamps scopedCacheFingerprints', async () => {
-			const fingerprint = { collection: 'articles', pairs: new Map(), fields: [] };
+			const fingerprint = {
+				collection: 'articles',
+				pinnedScope: {},
+				viewFields: [],
+			};
 
 			readSingleton.mockResolvedValueOnce(
 				withMeta({ id: 1 }, scopedCacheReadMeta([fingerprint])),
@@ -241,8 +245,8 @@ describe('items controller', () => {
 		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
 			const fingerprint = {
 				collection: 'articles',
-				pairs: new Map([['id', ['1']]]),
-				fields: [],
+				pinnedScope: { id: ['1'] },
+				viewFields: [],
 			};
 
 			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };

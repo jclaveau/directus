@@ -197,8 +197,8 @@ describe(oneLine`
 					row: null,
 					fingerprint: {
 						collection: 'articles',
-						pairs: new Map([['id', ['1']]]),
-						fields: [],
+						pinnedScope: { id: ['1'] },
+						viewFields: [],
 					},
 				},
 			],

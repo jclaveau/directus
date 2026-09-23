@@ -14,8 +14,8 @@ import type {
  * filtered on, and any of them can be a column no scope ever names.
  *
  * `row: null` is a row whose columns were never read — a collection scoping on
- * nothing, whose fingerprint its primary key alone completes. Its pairs are
- * whole, so the purge still matches it exactly; only the `changed` diff is
+ * nothing, whose fingerprint its primary key alone completes. Its pinned scope
+ * is whole, so the purge still matches it exactly; only the `changed` diff is
  * unavailable, and an unknown diff reads as every field.
  */
 export type ScopedCacheMutatedRow = {

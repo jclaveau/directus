@@ -50,8 +50,8 @@ describe('PermissionsService.readByQuery override', () => {
 			[{ id: 1 }],
 			scopedCacheReadMeta([{
 				collection: 'directus_permissions',
-				pairs: new Map(),
-				fields: [],
+				pinnedScope: {},
+				viewFields: [],
 			}]),
 		);
 

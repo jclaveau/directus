@@ -117,6 +117,22 @@ describe('scopedCacheFingerprintBuckets', () => {
 			'zone.region.owner',
 		)).toEqual(['zone.region.owner=a\\,b']);
 	});
+
+	// A collection may declare a column named after an Object member, and the
+	// bucket path is looked up by column name.
+	it('files a read pinning nothing bare, whatever the bucket path is named', () => {
+		expect(scopedCacheFingerprintBuckets(
+			{ collection: 'slot', pinnedScope: {}, viewFields: [] },
+			'constructor',
+		)).toEqual(['']);
+	});
+
+	it('files a read under a bucket path named after an object member', () => {
+		expect(scopedCacheFingerprintBuckets(
+			parseScopedCacheFingerprint('slot:&constructor=,ana,&'),
+			'constructor',
+		)).toEqual(['constructor=ana']);
+	});
 });
 
 describe('scopedCacheRowBuckets', () => {
@@ -149,6 +165,22 @@ describe('scopedCacheRowBuckets', () => {
 			[parseScopedCacheFingerprint('slot:&id=,1,&')],
 			'zone.region.owner',
 		)).toEqual(['']);
+	});
+
+	// A collection may declare a column named after an Object member, and the
+	// bucket path is looked up by column name.
+	it('reads the bare set alone for a row pinning nothing, on any path', () => {
+		expect(scopedCacheRowBuckets(
+			[{ collection: 'slot', pinnedScope: {}, viewFields: [] }],
+			'constructor',
+		)).toEqual(['']);
+	});
+
+	it('reads the bucket set of a bucket path named after an object member', () => {
+		expect(scopedCacheRowBuckets(
+			[parseScopedCacheFingerprint('slot:&constructor=,ana,&')],
+			'constructor',
+		)).toEqual(['', 'constructor=ana']);
 	});
 
 	it('reads the bare set alone for a collection with no bucket path', () => {

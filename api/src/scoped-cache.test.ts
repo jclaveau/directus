@@ -673,8 +673,8 @@ describe('createScopedCacheCollector', () => {
 				scopedCacheReadMeta([
 					{
 						collection: 'metric',
-						pairs: new Map([['owner', ['acme']]]),
-						fields: [],
+						pinnedScope: { owner: ['acme'] },
+						viewFields: [],
 					},
 				], {
 					scopedCacheEpochs: { metric: '4' },
@@ -687,8 +687,8 @@ describe('createScopedCacheCollector', () => {
 				[{ id: 2 }],
 				scopedCacheReadMeta([{
 					collection: 'audit',
-					pairs: new Map(),
-					fields: [],
+					pinnedScope: {},
+					viewFields: [],
 				}], {
 					scopedCacheEpochs: { audit: '7' },
 				}),
@@ -757,8 +757,8 @@ describe('createScopedCacheCollector', () => {
 				[{ id: 1 }],
 				scopedCacheReadMeta([{
 					collection: 'metric',
-					pairs: new Map(),
-					fields: [],
+					pinnedScope: {},
+					viewFields: [],
 				}], {
 					scopedCacheEpochs: { metric: '4' },
 				}),
@@ -768,8 +768,8 @@ describe('createScopedCacheCollector', () => {
 				[{ id: 1 }],
 				scopedCacheReadMeta([{
 					collection: 'metric',
-					pairs: new Map(),
-					fields: [],
+					pinnedScope: {},
+					viewFields: [],
 				}], {
 					scopedCacheEpochs: { metric: '5' },
 				}),
@@ -814,8 +814,8 @@ describe('collection slice index', () => {
 		} as any);
 
 		await indexScopedCacheEntry('entry', [
-			{ collection: 'articles', pairs: new Map(), fields: [] },
-			{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
+			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
 		]);
 
 		expect(indexPipeline.sadd)
@@ -995,7 +995,7 @@ describe('indexScopedCacheEntry', () => {
 		} as any);
 
 		await expect(indexScopedCacheEntry('entry', [
-			{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
+			{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
 		])).rejects.toBe(refused);
 	});
 
@@ -1021,7 +1021,7 @@ describe('indexScopedCacheEntry', () => {
 
 		try {
 			await indexScopedCacheEntry('entry', [
-				{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
+				{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
 			]);
 		}
 		finally {

@@ -62,8 +62,8 @@ describe('GraphQLService scoped cache tags', () => {
 				return withMeta(
 					[{ id: 1 }],
 					scopedCacheReadMeta([
-						{ collection: 'articles', pairs: new Map(), fields: [] },
-						{ collection: 'users', pairs: new Map(), fields: [] },
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'users', pinnedScope: {}, viewFields: [] },
 					]),
 				);
 			},
@@ -82,8 +82,8 @@ describe('GraphQLService scoped cache tags', () => {
 					[{ id: 2 }],
 					scopedCacheReadMeta([{
 						collection: 'directus_files',
-						pairs: new Map(),
-						fields: [],
+						pinnedScope: {},
+						viewFields: [],
 					}]),
 				);
 			},
@@ -105,7 +105,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pairs: new Map(), fields: [] }],
+					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 					{ scopedCacheEpochs: { articles: '7', users: '3', '*': '1' } },
 				));
 			},
@@ -119,7 +119,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pairs: new Map(), fields: [] }],
+					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 					{ scopedCacheEpochs: { articles: '8', files: null, '*': '2' } },
 				));
 			},
@@ -146,7 +146,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pairs: new Map(), fields: [] }],
+					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 					{ scopedCacheEpochs: { articles: '9', '*': '4' } },
 				));
 			},
@@ -157,7 +157,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pairs: new Map(), fields: [] }],
+					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 					{ scopedCacheEpochs: { articles: '2', '*': '4' } },
 				));
 			},
@@ -177,7 +177,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pairs: new Map(), fields: [] }],
+					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 					{ scopedCacheEpochs: { articles: '3' } },
 				));
 			},
@@ -188,7 +188,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pairs: new Map(), fields: [] }],
+					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 					{ scopedCacheEpochs: { articles: null } },
 				));
 			},
@@ -211,8 +211,8 @@ describe('GraphQLService scoped cache tags', () => {
 					[{ id: 1 }],
 					scopedCacheReadMeta([{
 						collection: 'articles',
-						pairs: new Map(),
-						fields: [],
+						pinnedScope: {},
+						viewFields: [],
 					}]),
 				);
 			},
@@ -252,8 +252,8 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 
 		gql.scopedCacheFingerprints.push(
-			{ collection: 'articles', pairs: new Map(), fields: [] },
-			{ collection: 'users', pairs: new Map(), fields: [] },
+			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			{ collection: 'users', pinnedScope: {}, viewFields: [] },
 		);
 
 		const result = await gql.execute({

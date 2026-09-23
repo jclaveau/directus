@@ -50,7 +50,7 @@ export class SchemaService {
 
 		return withMeta(currentSnapshot, scopedCacheReadMeta(
 			snapshotCollections.map((collection) => {
-				return { collection, pairs: new Map(), fields: [] };
+				return { collection, pinnedScope: {}, viewFields: [] };
 			}),
 			{ scopedCacheEpochs },
 		));

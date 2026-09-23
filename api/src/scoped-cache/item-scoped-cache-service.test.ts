@@ -85,13 +85,13 @@ describe('capture', () => {
 					},
 					fingerprint: {
 						collection: 'item',
-						pairs: new Map([
-							['id', ['1']],
-							['method', ['spaced']],
-							['owner', ['alpha']],
-							['parent.area', ['north']],
-						]),
-						fields: [],
+						pinnedScope: {
+							id: ['1'],
+							method: ['spaced'],
+							owner: ['alpha'],
+							'parent.area': ['north'],
+						},
+						viewFields: [],
 					},
 				},
 			],
@@ -121,13 +121,13 @@ describe('capture', () => {
 				},
 				fingerprint: {
 					collection: 'item',
-					pairs: new Map([
-						['id', ['1']],
-						['method', ['spaced']],
-						['owner', ['alpha']],
-						['parent.area', ['north']],
-					]),
-					fields: [],
+					pinnedScope: {
+						id: ['1'],
+						method: ['spaced'],
+						owner: ['alpha'],
+						'parent.area': ['north'],
+					},
+					viewFields: [],
 				},
 			},
 			{
@@ -141,13 +141,13 @@ describe('capture', () => {
 				},
 				fingerprint: {
 					collection: 'item',
-					pairs: new Map([
-						['id', ['2']],
-						['method', ['slow']],
-						['owner', ['beta']],
-						['parent.area', ['south']],
-					]),
-					fields: [],
+					pinnedScope: {
+						id: ['2'],
+						method: ['slow'],
+						owner: ['beta'],
+						'parent.area': ['south'],
+					},
+					viewFields: [],
 				},
 			},
 		]);
@@ -174,13 +174,13 @@ describe('capture', () => {
 				},
 				fingerprint: {
 					collection: 'item',
-					pairs: new Map([
-						['id', ['3']],
-						['method', ['spaced']],
-						['owner', ['\x00null']],
-						['parent.area', ['\x00null']],
-					]),
-					fields: [],
+					pinnedScope: {
+						id: ['3'],
+						method: ['spaced'],
+						owner: ['\x00null'],
+						'parent.area': ['\x00null'],
+					},
+					viewFields: [],
 				},
 			},
 		]);
@@ -201,8 +201,8 @@ describe('capture', () => {
 					row: null,
 					fingerprint: {
 						collection: 'zone',
-						pairs: new Map([['id', ['7']]]),
-						fields: [],
+						pinnedScope: { id: ['7'] },
+						viewFields: [],
 					},
 				},
 			],

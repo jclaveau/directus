@@ -26,8 +26,9 @@ export interface ScopedCacheTag {
  * pins as ONE value, so a write purges it only when the row it wrote satisfies the
  * whole query case.
  *
- * Node holds it open — a collection, its pairs and its fields — so every consumer
- * reads a pair off a map instead of re-parsing a string. Redis holds it serialised
+ * Node holds it open — a collection, the scope it is pinned to and the fields its
+ * view is built from — so every consumer reads a pin off an object instead of
+ * re-parsing a string. Redis holds it serialised
  * as `<collection>:&<key>=,<v>,&…`, where the wrapping commas make a partial
  * fingerprint a well-formed glob. The grammar, the serialiser and the matcher live
  * in the api's `scoped-cache`.
@@ -35,23 +36,26 @@ export interface ScopedCacheTag {
 export interface ScopedCacheFingerprint {
 	readonly collection: string;
 	/**
-	 * Field path to the values the read is pinned to. The values of one pair are an
-	 * OR — what an `_in` means — and the pairs together are an AND.
+	 * Field path to the values the read is pinned to. The values of one field are an
+	 * OR — what an `_in` means — and the fields together are an AND.
 	 *
-	 * Empty pins nothing, so there is no pair left to fail and every write to the
-	 * collection matches — `{ collection, pairs: new Map(), fields: [] }` is what a
-	 * tag naming only a collection said.
+	 * Empty pins nothing, so there is nothing left to fail and every write to the
+	 * collection matches — `{ collection, pinnedScope: {}, viewFields: [] }` is what
+	 * a tag naming only a collection said.
 	 */
-	readonly pairs: ReadonlyMap<string, readonly string[]>;
+	readonly pinnedScope: Readonly<Record<string, readonly string[]>>;
 	/**
-	 * The fields the read selected, sorted or filtered on. Empty names every field:
-	 * a read that cannot say which columns it depends on depends on all of them.
+	 * The fields the read's view is built from: what it selected, sorted on,
+	 * filtered by, grouped or aggregated on, plus the reverse key of every to-many
+	 * it descended. Empty names every field: a read that cannot say which columns it
+	 * depends on depends on all of them.
 	 *
-	 * `limit` is not one of them: it already varies the cache key, so two page sizes
-	 * are two entries, and a nested node cut by a limit is tagged bare rather than
-	 * pinned (`read-plan.ts`) — the rows past the cut are named by nothing.
+	 * `limit` shapes the view too but names no field, so it is not one of them: it
+	 * already varies the cache key, so two page sizes are two entries, and a nested
+	 * node cut by a limit is tagged bare rather than pinned (`read-plan.ts`) — the
+	 * rows past the cut are named by nothing.
 	 */
-	readonly fields: readonly string[];
+	readonly viewFields: readonly string[];
 }
 
 /** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
@@ -241,7 +245,7 @@ export interface ScopedCachePath {
 export interface ReadMeta {
 	/**
 	 * One token per way this read matches a collection: the pins that had to hold
-	 * TOGETHER and the fields it is bound to, composed. A root filter of
+	 * TOGETHER and the fields its view is built from, composed. A root filter of
 	 * `owner=alpha AND method=spaced` is one fingerprint, an `_or` over those
 	 * fields is two, and every collection reached from anywhere else gets its own.
 	 *

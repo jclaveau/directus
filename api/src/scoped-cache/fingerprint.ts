@@ -86,10 +86,12 @@ function splitUnescaped(input: string, separator: string): string[] {
 export function renderScopedCacheFingerprint(
 	fingerprint: ScopedCacheFingerprint,
 ): string {
-	const renderedPairs = new Map<string, readonly string[]>(fingerprint.pairs);
+	const renderedPairs = new Map<string, readonly string[]>(
+		Object.entries(fingerprint.pinnedScope),
+	);
 
-	if (fingerprint.fields.length > 0) {
-		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fingerprint.fields);
+	if (fingerprint.viewFields.length > 0) {
+		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fingerprint.viewFields);
 	}
 
 	let renderedFingerprint = `${fingerprint.collection}:`;
@@ -116,7 +118,10 @@ export function parseScopedCacheFingerprint(
 		? serialized
 		: serialized.slice(0, colonAt);
 
-	const parsedPairs = new Map<string, string[]>();
+	// Null-prototyped: the keys come off the wire, and a collection may declare a
+	// field named `__proto__` — an own key here, the object's prototype anywhere
+	// else, which would drop the pin rather than fail the match.
+	const parsedScope: Record<string, string[]> = Object.create(null);
 	let parsedFields: string[] = [];
 
 	const fingerprintBody = colonAt === -1
@@ -148,10 +153,14 @@ export function parseScopedCacheFingerprint(
 			continue;
 		}
 
-		parsedPairs.set(pairKey, pairValues);
+		parsedScope[pairKey] = pairValues;
 	}
 
-	return { collection: parsedCollection, pairs: parsedPairs, fields: parsedFields };
+	return {
+		collection: parsedCollection,
+		pinnedScope: parsedScope,
+		viewFields: parsedFields,
+	};
 }
 
 /**
@@ -160,27 +169,29 @@ export function parseScopedCacheFingerprint(
  * The pinners still derive tags — a read's query case is assembled from a dozen
  * different places, each of which knows one slice — and this is where those
  * slices stop being an OR and become the AND they always described. Several tags
- * on the SAME field are one pair listing both values, which is what an `_in`
+ * on the SAME field are one pin listing both values, which is what an `_in`
  * filter and a set of nested parent keys both mean.
  */
 export function scopedCacheFingerprintFromTags(
 	collection: string,
 	tags: readonly ScopedCacheTag[],
-	fields: readonly string[] = [],
+	viewFields: readonly string[] = [],
 ): ScopedCacheFingerprint {
-	const taggedPairs = new Map<string, string[]>();
+	// Null-prototyped for the reason the parser is: a tag's field is a column name,
+	// and `__proto__` is a legal one.
+	const taggedScope: Record<string, string[]> = Object.create(null);
 
 	for (const tag of tags) {
 		if (tag.field === undefined) {
 			continue;
 		}
 
-		const fieldValues = taggedPairs.get(tag.field) ?? [];
+		const fieldValues = taggedScope[tag.field] ?? [];
 		fieldValues.push(canonicalScopedCacheValue(tag.value, tag.type));
-		taggedPairs.set(tag.field, fieldValues);
+		taggedScope[tag.field] = fieldValues;
 	}
 
-	return { collection, pairs: taggedPairs, fields };
+	return { collection, pinnedScope: taggedScope, viewFields };
 }
 
 /**
@@ -197,7 +208,7 @@ export function scopedCacheFingerprintLabels(
 ): string[] {
 	const tagLabels: string[] = [];
 
-	for (const [field, values] of fingerprint.pairs) {
+	for (const [field, values] of Object.entries(fingerprint.pinnedScope)) {
 		for (const value of values) {
 			tagLabels.push(`${fingerprint.collection}:${field}=${value}`);
 		}
@@ -235,13 +246,13 @@ export function scopedCacheTagsOfFingerprints(
 		derivedTags.push(tag);
 	};
 
-	for (const { collection, pairs } of fingerprints) {
-		if (pairs.size === 0) {
+	for (const { collection, pinnedScope } of fingerprints) {
+		if (Object.keys(pinnedScope).length === 0) {
 			pushTag({ collection });
 			continue;
 		}
 
-		for (const [field, values] of pairs) {
+		for (const [field, values] of Object.entries(pinnedScope)) {
 			for (const value of values) {
 				pushTag({ collection, field, value });
 			}
@@ -252,18 +263,20 @@ export function scopedCacheTagsOfFingerprints(
 }
 
 /**
- * Whether every pair of the fingerprint holds on one row.
+ * Whether the whole pinned scope of the fingerprint holds on one row.
  *
- * The row is a fingerprint of its own — one value per pair, no `fields` — so the
- * test is a map lookup per pair: the read is dropped when the row carries one of
- * the values it pinned, on every field it pinned.
+ * The row is a fingerprint of its own — one value per field, no view fields — so
+ * the test is a lookup per pinned field: the read is dropped when the row carries
+ * one of the values it pinned, on every field it pinned.
  */
 export function scopedCacheFingerprintMatchesRow(
 	fingerprint: ScopedCacheFingerprint,
 	rowFingerprint: ScopedCacheFingerprint,
 ): boolean {
-	for (const [field, values] of fingerprint.pairs) {
-		const rowValues = rowFingerprint.pairs.get(field);
+	for (const [field, values] of Object.entries(fingerprint.pinnedScope)) {
+		const rowValues = Object.hasOwn(rowFingerprint.pinnedScope, field)
+			? rowFingerprint.pinnedScope[field]
+			: undefined;
 
 		if (rowValues === undefined) {
 			return false;
@@ -289,16 +302,16 @@ export function scopedCacheFingerprintMatchesRow(
  * `method_range` — the fk column alone — is not it.
  */
 export function scopedCacheFingerprintFieldsTouched(
-	fields: readonly string[],
+	viewFields: readonly string[],
 	changed: readonly string[] | null,
 ): boolean {
 	// A read naming no field is bound to all of them: the fail-safe direction is
 	// the over-purge, never the stale hit.
-	if (changed === null || fields.length === 0) {
+	if (changed === null || viewFields.length === 0) {
 		return true;
 	}
 
-	const queryCase = new Set(fields);
+	const queryCase = new Set(viewFields);
 
 	if (queryCase.has(SCOPED_CACHE_ANY_FIELD)) {
 		return true;
@@ -329,7 +342,7 @@ export function scopedCacheFingerprintFieldsTouched(
  * One fingerprint per way the read matches — per query case, not per collection.
  *
  * A query case holds the tags that had to hold TOGETHER on one collection: a
- * filter of `owner=alpha AND method=spaced` is one query case of two pairs, and
+ * filter of `owner=alpha AND method=spaced` is one query case of two pins, and
  * the entry it files is dropped only by a write satisfying both. An `_or` across
  * two fields is two query cases instead, since a row matching either changes the
  * response, and one fingerprint ANDing them would match neither.
@@ -338,10 +351,11 @@ export function scopedCacheFingerprintFieldsTouched(
  * ancestor's key, a hook's own tag — each stand alone the way a tag sweep reads
  * them, so each is a query case of its own.
  *
- * A query case naming no field pins nothing, so its fingerprint carries no pair
- * and every row of that collection matches — which is what a bare tag means. Its
- * fields still narrow it: a write touching none of them cannot change the
- * response, whether or not the read could say which rows it depends on.
+ * A query case naming no field pins nothing, so its fingerprint carries an empty
+ * scope and every row of that collection matches — which is what a bare tag
+ * means. Its view fields still narrow it: a write touching none of them cannot
+ * change the response, whether or not the read could say which rows it depends
+ * on.
  *
  * Query cases are kept in the order they come in, deduplicated on the form Redis
  * files them under, so a read's fingerprints come back stable without sorting what
@@ -405,9 +419,9 @@ export function scopedCacheFingerprintPurgedBy(
 	// not it also selected it: a write moving a row across one of them moves it in
 	// or out of the result set, which is a changed response by itself. Added only
 	// beside declared fields, since naming none already means every field.
-	const queryCase = fingerprint.fields.length === 0
-		? fingerprint.fields
-		: [...fingerprint.fields, ...fingerprint.pairs.keys()];
+	const queryCase = fingerprint.viewFields.length === 0
+		? fingerprint.viewFields
+		: [...fingerprint.viewFields, ...Object.keys(fingerprint.pinnedScope)];
 
 	if (scopedCacheFingerprintFieldsTouched(queryCase, changed) === false) {
 		return false;
@@ -438,10 +452,10 @@ export const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
  * purpose: a glob cannot say "and no other pair", so the purge test above still
  * decides, and a pattern letting a non-match through costs one compare.
  *
- * One pattern per pair the rows pin, plus the two shapes a fingerprint pinning
- * nothing renders as. A read the rows can drop pins only pairs the rows carry, so
- * one of its own pairs names it — which is why the patterns are a union over
- * single pairs and not the 2^n subsets an exact filter would need.
+ * One pattern per field the rows pin, plus the two shapes a fingerprint pinning
+ * nothing renders as. A read the rows can drop pins only values the rows carry, so
+ * one of its own pins names it — which is why the patterns are a union over single
+ * pins and not the 2^n subsets an exact filter would need.
  */
 export function scopedCacheRowIndexGlobs(
 	collection: string,
@@ -457,7 +471,7 @@ export function scopedCacheRowIndexGlobs(
 	]);
 
 	for (const rowFingerprint of rowFingerprints) {
-		for (const [field, values] of rowFingerprint.pairs) {
+		for (const [field, values] of Object.entries(rowFingerprint.pinnedScope)) {
 			const pairKey = escapeScopedCacheFingerprintGlob(
 				escapeScopedCacheFingerprintToken(field),
 			);

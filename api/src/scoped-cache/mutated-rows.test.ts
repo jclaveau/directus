@@ -10,8 +10,8 @@ import {
 // so every case below carries the same one.
 const fingerprint = {
 	collection: 'slot',
-	pairs: new Map([['id', ['1']]]),
-	fields: [],
+	pinnedScope: { id: ['1'] },
+	viewFields: [],
 };
 
 describe('scopedCacheChangedFields', () => {
@@ -168,20 +168,14 @@ describe('scopedCacheUpdatedRows', () => {
 	it('shows both sides of the row, and the column that moved', () => {
 		const fingerprintAlpha = {
 			collection: 'slot',
-			pairs: new Map([
-				['id', ['1']],
-				['owner', ['alpha']],
-			]),
-			fields: [],
+			pinnedScope: { id: ['1'], owner: ['alpha'] },
+			viewFields: [],
 		};
 
 		const fingerprintBeta = {
 			collection: 'slot',
-			pairs: new Map([
-				['id', ['1']],
-				['owner', ['beta']],
-			]),
-			fields: [],
+			pinnedScope: { id: ['1'], owner: ['beta'] },
+			viewFields: [],
 		};
 
 		expect(scopedCacheUpdatedRows(

@@ -13,11 +13,11 @@ import {
 } from './fingerprint.js';
 
 describe('renderScopedCacheFingerprint', () => {
-	it('sorts the pairs and wraps every value in commas', () => {
+	it('sorts the pins and wraps every value in commas', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
-			pairs: new Map([['user', ['A']], ['course_part', ['4821']]]),
-			fields: ['course_part', 'day', 'id'],
+			pinnedScope: { user: ['A'], course_part: ['4821'] },
+			viewFields: ['course_part', 'day', 'id'],
 		})).toBe(
 			'student_time_slot:&course_part=,4821,&fields=,course_part,day,id,'
 			+ '&user=,A,&',
@@ -30,30 +30,30 @@ describe('renderScopedCacheFingerprint', () => {
 	it('lists a multi-valued pair once, sorted and deduped', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
-			pairs: new Map([['course_part', ['2', '1', '2']]]),
-			fields: ['*'],
+			pinnedScope: { course_part: ['2', '1', '2'] },
+			viewFields: ['*'],
 		})).toBe('student_time_slot:&course_part=,1,2,&fields=,\\*,&');
 	});
 
 	it('leaves out the fields pair when the read names none', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
-			pairs: new Map([['user', ['A']]]),
-			fields: [],
+			pinnedScope: { user: ['A'] },
+			viewFields: [],
 		})).toBe('student_time_slot:&user=,A,&');
 	});
 
 	it('renders a collection bound to nothing', () => {
 		expect(renderScopedCacheFingerprint(
-			{ collection: 'student_time_slot', pairs: new Map(), fields: [] },
+			{ collection: 'student_time_slot', pinnedScope: {}, viewFields: [] },
 		)).toBe('student_time_slot:&');
 	});
 
 	it('escapes a value carrying a separator', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'note',
-			pairs: new Map([['title', ['a,b&c|d\\e']]]),
-			fields: [],
+			pinnedScope: { title: ['a,b&c|d\\e'] },
+			viewFields: [],
 		})).toBe('note:&title=,a\\,b\\&c\\|d\\\\e,&');
 	});
 
@@ -62,54 +62,67 @@ describe('renderScopedCacheFingerprint', () => {
 	it('escapes a value carrying a glob metacharacter', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'note',
-			pairs: new Map([['title', ['a*b?c[d]']]]),
-			fields: [],
+			pinnedScope: { title: ['a*b?c[d]'] },
+			viewFields: [],
 		})).toBe('note:&title=,a\\*b\\?c\\[d\\],&');
 	});
 });
 
 describe('parseScopedCacheFingerprint', () => {
-	it('reads the collection, the pairs and the fields back', () => {
+	it('reads the collection, the scope and the fields back', () => {
 		const parsed = parseScopedCacheFingerprint(
 			'student_time_slot:&course_part=,1,2,&fields=,day,id,&user=,A,&',
 		);
 
 		expect(parsed.collection).toBe('student_time_slot');
 
-		expect([...parsed.pairs]).toEqual([
-			['course_part', ['1', '2']],
-			['user', ['A']],
-		]);
+		expect(parsed.pinnedScope).toEqual({
+			course_part: ['1', '2'],
+			user: ['A'],
+		});
 
-		expect(parsed.fields).toEqual(['day', 'id']);
+		expect(parsed.viewFields).toEqual(['day', 'id']);
 	});
 
 	it('unescapes a value carrying a separator', () => {
-		expect([...parseScopedCacheFingerprint(
+		expect(parseScopedCacheFingerprint(
 			'note:&title=,a\\,b\\&c\\|d\\\\e,&',
-		).pairs]).toEqual([['title', ['a,b&c|d\\e']]]);
+		).pinnedScope).toEqual({ title: ['a,b&c|d\\e'] });
 	});
 
 	it('unescapes a value carrying a glob metacharacter', () => {
-		expect([...parseScopedCacheFingerprint(
+		expect(parseScopedCacheFingerprint(
 			'note:&title=,a\\*b\\?c\\[d\\],&',
-		).pairs]).toEqual([['title', ['a*b?c[d]']]]);
+		).pinnedScope).toEqual({ title: ['a*b?c[d]'] });
 	});
 
 	it('reads back a collection bound to nothing', () => {
 		const parsed = parseScopedCacheFingerprint('student_time_slot:&');
 
 		expect(parsed.collection).toBe('student_time_slot');
-		expect([...parsed.pairs]).toEqual([]);
-		expect(parsed.fields).toEqual([]);
+		expect(parsed.pinnedScope).toEqual({});
+		expect(parsed.viewFields).toEqual([]);
+	});
+
+	it('reads back a field named after an object member', () => {
+		const parsed = parseScopedCacheFingerprint(
+			'slot:&__proto__=,alpha,&constructor=,beta,&',
+		);
+
+		// Read through `entries`, since `{ __proto__: … }` in the expectation would
+		// set the prototype rather than declare the key under test.
+		expect(Object.entries(parsed.pinnedScope)).toEqual([
+			['__proto__', ['alpha']],
+			['constructor', ['beta']],
+		]);
 	});
 
 	it('reads back a value whose escapes only look like two values', () => {
-		expect([...parseScopedCacheFingerprint(
+		expect(parseScopedCacheFingerprint(
 			renderScopedCacheFingerprint(
-				{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
+				{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
 			),
-		).pairs]).toEqual([['owner', ['a,b']]]);
+		).pinnedScope).toEqual({ owner: ['a,b'] });
 	});
 });
 
@@ -125,8 +138,8 @@ describe('scopedCacheFingerprintFromTags', () => {
 			['*'],
 		)).toEqual({
 			collection: 'note',
-			pairs: new Map([['owner', ['a', 'b']], ['id', ['7']]]),
-			fields: ['*'],
+			pinnedScope: { owner: ['a', 'b'], id: ['7'] },
+			viewFields: ['*'],
 		});
 	});
 
@@ -139,14 +152,21 @@ describe('scopedCacheFingerprintFromTags', () => {
 			],
 		)).toEqual({
 			collection: 'note',
-			pairs: new Map([['id', ['7']], ['flag', ['true']]]),
-			fields: [],
+			pinnedScope: { id: ['7'], flag: ['true'] },
+			viewFields: [],
 		});
+	});
+
+	it('pins a field named after an object member', () => {
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprintFromTags(
+			'note',
+			[{ collection: 'note', field: '__proto__', value: 'a', type: 'string' }],
+		))).toBe('note:&__proto__=,a,&');
 	});
 
 	it('drops a bare tag, which pins nothing', () => {
 		expect(scopedCacheFingerprintFromTags('note', [{ collection: 'note' }]))
-			.toEqual({ collection: 'note', pairs: new Map(), fields: [] });
+			.toEqual({ collection: 'note', pinnedScope: {}, viewFields: [] });
 	});
 });
 
@@ -219,15 +239,45 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 
 	it('matches a value carrying a separator', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
-			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
 		)).toBe(true);
 	});
 
 	it('refuses a row whose value only looks like the pinned one', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			{ collection: 'slot', pairs: new Map([['owner', ['a']]]), fields: [] },
-			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a'] }, viewFields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+		)).toBe(false);
+	});
+
+	// Nothing forbids a collection a column named after an Object member, and the
+	// scope is keyed by column name.
+	it('refuses a row carrying no pin named after an object member', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			parseScopedCacheFingerprint('slot:&constructor=,alpha,&'),
+			row,
+		)).toBe(false);
+	});
+
+	it('matches a row on a pin named after an object member', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			parseScopedCacheFingerprint('slot:&constructor=,alpha,&'),
+			parseScopedCacheFingerprint('slot:&constructor=,alpha,&'),
+		)).toBe(true);
+	});
+
+	it('matches a row on a pin named `__proto__`', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			parseScopedCacheFingerprint('slot:&__proto__=,alpha,&'),
+			parseScopedCacheFingerprint('slot:&__proto__=,alpha,&'),
+		)).toBe(true);
+	});
+
+	it('refuses a row whose pin named `__proto__` holds another value', () => {
+		expect(scopedCacheFingerprintMatchesRow(
+			parseScopedCacheFingerprint('slot:&__proto__=,alpha,&'),
+			parseScopedCacheFingerprint('slot:&__proto__=,beta,&'),
 		)).toBe(false);
 	});
 });
@@ -483,7 +533,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 	// matching one, so the pattern doubles what the serialiser wrote.
 	it('escapes a value carrying a glob metacharacter', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
-			{ collection: 'slot', pairs: new Map([['owner', ['a*b']]]), fields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a*b'] }, viewFields: [] },
 		])).toEqual([
 			'slot:&|*',
 			'slot:&fields=,*',
@@ -493,7 +543,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 
 	it('escapes a value carrying a separator', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
-			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
 		])).toEqual([
 			'slot:&|*',
 			'slot:&fields=,*',
@@ -506,7 +556,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 		instead of walking them once per slice
 	`, () => {
 		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
-			return { collection: 'slot', pairs: new Map([['id', [`${at}`]]]), fields: [] };
+			return { collection: 'slot', pinnedScope: { id: [`${at}`] }, viewFields: [] };
 		});
 
 		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);

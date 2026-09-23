@@ -687,7 +687,10 @@ async function purgeScopedCacheFingerprintIndex(
 					// covers, so a mutation keeping that tag warm keeps these
 					// entries too — the global reads a write that opted out of the
 					// collection tag means to leave standing.
-					if (includeCollectionTag === false && fingerprint.pairs.size === 0) {
+					if (
+						includeCollectionTag === false
+						&& Object.keys(fingerprint.pinnedScope).length === 0
+					) {
 						continue;
 					}
 

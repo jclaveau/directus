@@ -119,7 +119,9 @@ export function scopedCacheFingerprintBuckets(
 		return [SCOPED_CACHE_BARE_BUCKET];
 	}
 
-	const bucketValues = fingerprint.pairs.get(bucketPath);
+	const bucketValues = Object.hasOwn(fingerprint.pinnedScope, bucketPath)
+		? fingerprint.pinnedScope[bucketPath]
+		: undefined;
 
 	if (bucketValues === undefined || bucketValues.length === 0) {
 		return [SCOPED_CACHE_BARE_BUCKET];
@@ -151,7 +153,9 @@ export function scopedCacheRowBuckets(
 	}
 
 	for (const rowFingerprint of rowFingerprints) {
-		const bucketValues = rowFingerprint.pairs.get(bucketPath) ?? [];
+		const bucketValues = Object.hasOwn(rowFingerprint.pinnedScope, bucketPath)
+			? rowFingerprint.pinnedScope[bucketPath] ?? []
+			: [];
 
 		for (const bucketValue of bucketValues) {
 			buckets.add(

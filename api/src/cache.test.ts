@@ -313,8 +313,8 @@ describe('scoped cache purging', () => {
 			indexes the key + expires sibling under every collection-level tag, with a TTL
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'articles', pairs: new Map(), fields: [] },
-				{ collection: 'directus_users', pairs: new Map(), fields: [] },
+				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+				{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
 			]);
 
 			// The members ride the script, which files them and moves the set's
@@ -340,8 +340,8 @@ describe('scoped cache purging', () => {
 			await indexScopedCacheEntry('resp-key', [
 				{
 					collection: 'slots',
-					pairs: new Map([['student', ['7', 'A']]]),
-					fields: [],
+					pinnedScope: { student: ['7', 'A'] },
+					viewFields: [],
 				},
 			]);
 
@@ -364,8 +364,8 @@ describe('scoped cache purging', () => {
 			await indexScopedCacheEntry('resp-key', [
 				{
 					collection: 'slots',
-					pairs: new Map([['student', ['\x00null']]]),
-					fields: [],
+					pinnedScope: { student: ['\x00null'] },
+					viewFields: [],
 				},
 			]);
 
@@ -385,7 +385,7 @@ describe('scoped cache purging', () => {
 			// both canonicalize to the fingerprint token '7' upstream (fingerprint.ts)
 			// — by the time it reaches indexing there is only one string to file.
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'slots', pairs: new Map([['student', ['7']]]), fields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['7'] }, viewFields: [] },
 			]);
 
 			// One tag set, one index entry filing it, plus the one fingerprint bucket.
@@ -418,8 +418,8 @@ describe('scoped cache purging', () => {
 			await indexScopedCacheEntry('resp-key', [
 				{
 					collection: 'slots',
-					pairs: new Map([['student', ['A', 'B']]]),
-					fields: [],
+					pinnedScope: { student: ['A', 'B'] },
+					viewFields: [],
 				},
 			]);
 
@@ -446,8 +446,8 @@ describe('scoped cache purging', () => {
 
 		test('duplicate tags collapse to a single SADD', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'slots', pairs: new Map([['student', ['A']]]), fields: [] },
-				{ collection: 'slots', pairs: new Map([['student', ['A']]]), fields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
 			]);
 
 			// The legacy tag layer collapses the duplicate (one tag set, one index
@@ -474,7 +474,7 @@ describe('scoped cache purging', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'articles', pairs: new Map(), fields: [] },
+				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
 			]);
 
 			expect(redis.pipeline).not.toHaveBeenCalled();
@@ -482,7 +482,7 @@ describe('scoped cache purging', () => {
 
 		test('tags the extra siblings alongside the key', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'articles', pairs: new Map(), fields: [] },
+				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
 			], [
 				'resp-key__tags',
 			]);

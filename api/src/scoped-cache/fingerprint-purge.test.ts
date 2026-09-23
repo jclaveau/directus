@@ -106,12 +106,8 @@ const ALPHA = 'ns:scoped-cache-index:idx:slot:owner=alpha';
 // One row of `slot`, owned by alpha, whose `method` the write rewrote.
 const row = {
 	collection: 'slot',
-	pairs: new Map([
-		['id', ['1']],
-		['method', ['spaced']],
-		['owner', ['alpha']],
-	]),
-	fields: [],
+	pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+	viewFields: [],
 };
 
 function purge(options: Record<string, unknown>) {

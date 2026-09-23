@@ -7,8 +7,8 @@ import { readMeta, withMeta } from './read-meta.js';
 describe('withMeta / readMeta', () => {
 	test('round-trips the metadata via getMeta()', () => {
 		const meta = scopedCacheReadMeta([
-			{ collection: 'articles', pairs: new Map(), fields: [] },
-			{ collection: 'users', pairs: new Map(), fields: [] },
+			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			{ collection: 'users', pinnedScope: {}, viewFields: [] },
 		]);
 
 		const result = withMeta([{ id: 1 }], meta);
@@ -26,8 +26,8 @@ describe('withMeta / readMeta', () => {
 			[{ id: 1 }],
 			scopedCacheReadMeta([{
 				collection: 'articles',
-				pairs: new Map(),
-				fields: [],
+				pinnedScope: {},
+				viewFields: [],
 			}]),
 		);
 
@@ -42,8 +42,8 @@ describe('withMeta / readMeta', () => {
 			{ id: 1 },
 			scopedCacheReadMeta([{
 				collection: 'articles',
-				pairs: new Map(),
-				fields: [],
+				pinnedScope: {},
+				viewFields: [],
 			}]),
 		);
 

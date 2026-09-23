@@ -137,7 +137,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(allowed, scopedCacheReadMeta([
-			{ collection: 'directus_relations', pairs: new Map(), fields: [] },
+			{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
 		]));
 	}
 
@@ -199,7 +199,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(results[0]!, scopedCacheReadMeta([
-			{ collection: 'directus_relations', pairs: new Map(), fields: [] },
+			{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
 		]));
 	}
 
