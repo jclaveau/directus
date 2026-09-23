@@ -65,7 +65,7 @@ describe(oneLine`
 				}),
 			});
 
-			// Independent seeds → one round-trip. Capture the order PKs to update later.
+			// Independent seeds → one round-trip. Snapshot the order PKs to update later.
 			const [orders] = await Promise.all([
 				CreateItem(vendor, {
 					collection: ORDER,

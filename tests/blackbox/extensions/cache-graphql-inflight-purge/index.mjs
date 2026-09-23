@@ -1,5 +1,5 @@
 // The REST sibling of this window (cache-read-inflight-purge) is closed by comparing
-// the purge counters a read captured before its query against the ones at fill time.
+// the purge counters a read snapshotted before its query against the fill-time ones.
 // A `/graphql` response is one cached entry assembled from several reads, and the
 // aggregate GraphQLService hands to `respond` carries the tags of all of them — so
 // unless it carries their counters too, the comparison has nothing to compare and

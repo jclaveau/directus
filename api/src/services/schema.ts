@@ -36,7 +36,7 @@ export class SchemaService {
 
 		// A snapshot is the whole SCHEMA. Tag by the system collections it derives from,
 		// so a schema mutation purges the response, not a business-row write. Their
-		// purge counters are captured first, so a schema change landing mid-read
+		// purge counters are snapshotted first, so a schema change landing mid-read
 		// refuses the fill (`fill-guard.ts`).
 		const snapshotCollections = [
 			'directus_collections',

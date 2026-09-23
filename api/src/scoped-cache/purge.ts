@@ -17,9 +17,6 @@ import {
 	useLogger,
 } from '../logger/index.js';
 import {
-	redisConfigAvailable,
-} from '../redis/index.js';
-import {
 	type PendingScopedCachePurge,
 	clearPendingScopedCachePurges,
 	countFailedScopedCachePurgeRetry,
@@ -38,6 +35,7 @@ import type { Keyv } from 'keyv';
 import { dropCacheEntries } from '../cache-drop.js';
 import {
 	scopedCachePurgeEnabled,
+	scopedCacheIndexStoreAvailable,
 } from './config.js';
 import {
 	useScopedCacheStore,
@@ -655,13 +653,13 @@ async function purgeScopedCacheIndexWhere(
  * still there (https://github.com/jclaveau/directus/issues/468).
  *
  * Runs AFTER `clearResponseCache`, always: that is where the wholesale counter
- * moves, and a read that captured it earlier and files its fingerprints between
+ * moves, and a read that snapshotted it earlier and files its fingerprints between
  * the unlink below and a move made after it would compare equal, keep its entry,
  * and leave it indexed by a set this function just deleted — reachable to no later
  * purge.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
-	if (!redisConfigAvailable()) {
+	if (!scopedCacheIndexStoreAvailable()) {
 		return { dropped: 0, refused: 0 };
 	}
 
@@ -674,7 +672,7 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 
 /**
  * Drop every cached response, the way a read in flight can notice. The wholesale
- * counter — the one every read captures, named for no collection — moves BEFORE
+ * counter — the one every read snapshots, named for no collection — moves BEFORE
  * the clear, as every purge's counters move before its sweep: a fill that rechecks
  * after the move declines, and one that rechecked before it had written its entry
  * before the clear, which takes it. A clear that moved the counter after itself
@@ -926,7 +924,7 @@ export function retryPendingScopedCachePurges(): Promise<number> {
  * it and the operator reads the table, not the grouping.
  */
 async function drainPendingScopedCachePurges(): Promise<number> {
-	if (!redisConfigAvailable()) {
+	if (!scopedCacheIndexStoreAvailable()) {
 		return 0;
 	}
 
@@ -1108,7 +1106,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
  * that blocked on it would be held up by the same Redis that is still down.
  */
 export function startScopedCachePurgeRecovery(): void {
-	if (!redisConfigAvailable()) {
+	if (!scopedCacheIndexStoreAvailable()) {
 		return;
 	}
 

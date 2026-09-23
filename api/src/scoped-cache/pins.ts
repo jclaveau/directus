@@ -10,12 +10,12 @@ const env = useEnv();
 /**
  * Of two readings of one collection's purge counter, the one taken EARLIER.
  *
- * Merging captures cannot be "whichever arrived first". Reads that contribute them
+ * Merging snapshots cannot be "whichever arrived first". Reads that contribute them
  * run concurrently — GraphQL resolves its root fields in parallel, and a hook can
- * fan its dependency lookups out with `allSettled` — so arrival order is not capture
- * order. Keep the later of two and a purge that landed between them compares equal
- * at fill time and the response is cached already stale, which is the whole thing
- * the counters exist to catch.
+ * fan its dependency lookups out with `allSettled` — so arrival order is not
+ * snapshot order. Keep the later of two and a purge that landed between them
+ * compares equal at fill time and the response is cached already stale, which is
+ * the whole thing the counters exist to catch.
  *
  * Absent beats every count: a counter that did not exist yet is the earliest reading
  * there is, and any number later on proves a purge created it in between. A value
@@ -147,7 +147,7 @@ export function canonicalScopedCacheValue(
 }
 
 /** Each field of a collection mapped to its schema type, or undefined when the
- * schema does not carry it. What canonicalizes a tag value on both sides. */
+ * schema does not carry it. What canonicalizes a pin value on both sides. */
 export type FieldTypesByField = Record<string, Type | undefined>;
 
 // Types whose filter value and stored row value are NOT guaranteed to canonicalize
@@ -210,7 +210,7 @@ export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
 }
 
 /**
- * Build scoped cache tags from the distinct scope values present across `rows` — the
+ * Build scoped cache pins from the distinct scope values present across `rows` — the
  * purge side.
  *
  * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*.
@@ -224,8 +224,8 @@ export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
  * (`someRowTakenOver`), not here. - The read side
  * (`scopedCachePinsFromM2oParents`) is the caller that depends on the `null`:
  * one parent row missing its key has to take its whole collection down to the bare
- * tag, since pinning the rest would leave that row covered by nothing. -
- * `fieldTypes`: each field's schema type, so the tag value canonicalizes the same
+ * fingerprint, since pinning the rest would leave that row covered by nothing. -
+ * `fieldTypes`: each field's schema type, so the pin value canonicalizes the same
  * way the read side's filter value does.
  */
 export function scopedCachePinsFromRows(
@@ -253,7 +253,7 @@ export function scopedCachePinsFromRows(
 
 	for (const field of fields) {
 		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a
-		// boolean stored as `1`/`'t'`) collapse to one tag instead of emitting redundant
+		// boolean stored as `1`/`'t'`) collapse to one pin instead of emitting redundant
 		// slices.
 		const seen = new Set<string>();
 
@@ -282,8 +282,9 @@ export function scopedCachePinsFromRows(
 }
 
 /**
- * How many slices one nested collection may pin on a single read. Every tag costs
- * a Redis set plus a slice-index member, and the write side deletes them one by one.
+ * How many slices one nested collection may pin on a single read. Every pin costs
+ * a set in the store plus a slice-index member, and the write side deletes them one
+ * by one.
  *
  * Sized above a default page of nested parents (the default `limit` is 100), below
  * an import-sized one. NOT the bound
@@ -298,7 +299,7 @@ export function scopedCachePinsFromRows(
  *   one response loses its pin and is still cached.
  *
  * Operator-tunable because the right number is deployment-specific — it weighs
- * Redis memory against the hit ratio the pin buys, and a pin costs a tag set plus a
+ * store memory against the hit ratio the pin buys, and a pin costs one set plus a
  * member of the collection's slice index (130 B measured, on a TTL every write
  * refreshes). No setting of it can serve a stale row.
  */

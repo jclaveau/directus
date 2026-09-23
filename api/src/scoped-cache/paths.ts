@@ -194,14 +194,14 @@ export function m2oParentRowsAtPathEnd(
  *   operator other than `_eq`/`_in`, or a hop THROUGH it to a further
  *   collection, which reads the foreign key of every row that could be joined.
  *   A write to any of its rows can then change the result, so only the bare
- *   collection tag covers it.
+ *   collection fingerprint covers it.
  * - `independent` — a condition reaches it, and the read still depends on none of
  *   its rows. Only an M2O path terminating on the related primary key qualifies,
  *   and only behind an enforced foreign key: the condition is answered by the
  *   near row's own column, and every way the far row can disappear writes the
  *   near row too (`CASCADE`/`SET NULL`/`SET DEFAULT`), or is refused
- *   (`RESTRICT`/`NO ACTION`). The near collection's own tag then covers it, so
- *   this collection needs no tag at all — not even a bare one.
+ *   (`RESTRICT`/`NO ACTION`). The near collection's own pin then covers it, so
+ *   this collection needs no fingerprint at all — not even a bare one.
  * - `absent` — no condition reaches it, and it owes the filters nothing.
  */
 export type ScopedCacheFilterKeying =
@@ -217,7 +217,7 @@ const KEYING_ABSENT: ScopedCacheFilterKeying = { kind: 'absent' };
 // The keys of every keyed/independent part with the one field they all key by — or
 // 'conflict' when parts key DIFFERENT fields (their keys are not one slice axis, so
 // nothing pins the alias), or null when none keyed. `independent` carries its keys
-// too: it needs no tag of its own, but a sibling reading the same joined row does.
+// too: it needs no pin of its own, but a sibling reading the same joined row does.
 function keyedAxisAcross(
 	parts: ScopedCacheFilterKeying[],
 ): { field: string; keys: Set<unknown> } | 'conflict' | null {
@@ -264,7 +264,7 @@ function keyingOfEveryCondition(
 	}
 
 	// A sibling that DOES read the joined row pulls the alias back to needing a
-	// tag — pinned by the key if one was named, bare otherwise.
+	// fingerprint — pinned by the key if one was named, bare otherwise.
 	if (parts.some((part) => part.kind === 'unkeyed')) {
 		return axis === null
 			? KEYING_UNKEYED
@@ -304,7 +304,7 @@ function keyingOfAnyCondition(
 		return KEYING_UNKEYED;
 	}
 
-	// One branch needing a tag makes the whole disjunction need one; the keys the
+	// One branch needing a pin makes the whole disjunction need one; the keys the
 	// independent branches named are unioned in, since a row may arrive by either.
 	if (axis !== null && parts.some((part) => part.kind === 'keyed')) {
 		return { kind: 'keyed', field: axis.field, keys: axis.keys };
@@ -521,7 +521,7 @@ function scopedCacheFilterKeyingByAlias(
 
 		// The scope is request text naming the table to join, so one naming no
 		// collection of this schema joins nothing — reporting it would put a
-		// collection that cannot exist in the response's tag header.
+		// collection that cannot exist in the response's label header.
 		if (pathScope !== undefined && schema.collections[pathScope] === undefined) {
 			parts.push(new Map([[alias, KEYING_UNKEYED]]));
 			continue;
@@ -551,7 +551,7 @@ function scopedCacheFilterKeyingByAlias(
 			// An M2O ending on the related primary key is answered by the near
 			// row's own foreign key column — the join only re-reads the value it
 			// already holds. Behind an enforced constraint the far row cannot
-			// vanish without writing the near row, so the near collection's tag
+			// vanish without writing the near row, so the near collection's pin
 			// covers it and this one needs none.
 			const nearRowKeys = nearRowAnswerKeys(
 				schema,
@@ -667,7 +667,7 @@ function scopePathKeying(
 
 		// A leaf under a named key is a node by now (`expandRelatedKeyFilters`
 		// wrapped it in `_eq`), and a path carrying on past a column fails the
-		// query before any tag is derived; a string handed straight to the
+		// query before any pin is derived; a string handed straight to the
 		// service would still walk here, `Object.keys` indexing its first
 		// character over and over until `segments` overflows.
 		if (!isFilterNode(next)) {
@@ -808,7 +808,7 @@ function isScopedCacheKeyableField(
  *
  * An empty `_in` matches no row and so depends on none, but it is reported unkeyed
  * rather than as an empty key set: pinning a collection to nothing would drop its
- * tag altogether, and a bare fingerprint is the cheaper way to be right about a
+ * pin altogether, and a bare fingerprint is the cheaper way to be right about a
  * query that returns nothing.
  */
 function keyingOfColumnConditions(
@@ -855,7 +855,7 @@ function keyingOfColumnConditions(
  * union of what each path named. Each node folds its own aliases, since alias
  * `''` means a different collection in every one of them.
  *
- * Shared by the two sides that must agree on it — the tags a keyed collection pins,
+ * Shared by the two sides that must agree on it — the keys a keyed collection pins,
  * and the collections that consequently need NOT fall back to the bare fingerprint —
  * so neither can drift from the other's answer.
  */

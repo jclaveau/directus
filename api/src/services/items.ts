@@ -194,8 +194,8 @@ implements AbstractService<Item> {
 		// permissions check for the keys, so we don't have to make this an authenticated read
 		//
 		// No response is built from these keys, so the purge counters this read would
-		// capture are read by nobody. Every other `readByQuery` keeps capturing them:
-		// a missed capture costs staleness, and only a call site that owns the whole
+		// snapshot are read by nobody. Every other `readByQuery` keeps snapshotting
+		// them: a missed snapshot costs staleness, and only a call site owning the whole
 		// round trip can know its rows never reach the cache.
 		const items = await itemsService.readByQuery(readQuery, {
 			skipScopedCacheEpochs: true,
@@ -665,7 +665,7 @@ implements AbstractService<Item> {
 			//
 			// A row a hook *took over* (returned an existing PK) is the unsafe case: it
 			// can be an update-in-disguise — the hook moved that row between slices — and
-			// the create path has no old∪new capture, so the post-commit re-read sees
+			// the create path has no old∪new snapshot, so the post-commit re-read sees
 			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
 			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
 			// its footprint opts back into a precise purge by declaring it via
@@ -871,7 +871,7 @@ implements AbstractService<Item> {
 			scopedCacheFingerprints,
 			{
 				scopedCacheUnautopurgeableFingerprints,
-				// A `scopeTo` names a collection the pre-query capture could not know
+				// A `scopeTo` names a collection the pre-query snapshot could not know
 				// about, and hands over the counter its own dependent read took.
 				scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
 					scopedCacheEpochs,
@@ -1421,7 +1421,7 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Old slices from the pre-update capture, plus the new value re-read from the
+			// Old slices from the pre-update snapshot, plus the new value re-read from the
 			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
 			// type coercion can rewrite the scope column on write, so the stored row is
 			// authoritative, the payload isn't (same rule as createMany). "Committed"
@@ -1718,7 +1718,7 @@ implements AbstractService<Item> {
 		//
 		// With them, the rows the delete rewrites through a self-relation: the database
 		// moves those between slices under the delete, so they take an update's old ∪
-		// new capture, the new half re-read once the rows are committed.
+		// new snapshot, the new half re-read once the rows are committed.
 		const selfRelationSurvivorKeys =
 			await this.scopedCache.selfRelationSurvivorKeys(keys);
 

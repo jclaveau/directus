@@ -58,15 +58,15 @@ export class GraphQLService {
 	scopedCacheUnautopurgeableFingerprints: ScopedCacheFingerprint[];
 
 	/**
-	 * The scoped cache purge counters this request's reads captured, merged across
+	 * The scoped cache purge counters this request's reads snapshotted, merged across
 	 * every root. A `/graphql` response is ONE cached entry assembled from several
 	 * reads, and `respond` compares these after the fill to detect a purge that
 	 * landed while they were running — so an entry the aggregate never mentions is
 	 * filled with no such check at all.
 	 *
-	 * The EARLIEST capture wins per collection: a root reading `E+1` where another
+	 * The EARLIEST snapshot wins per collection: a root reading `E+1` where another
 	 * read `E` means a purge landed between them, and only the earlier value makes
-	 * the post-fill comparison notice. By capture, not by arrival — graphql-js
+	 * the post-fill comparison notice. By snapshot, not by arrival — graphql-js
 	 * resolves root fields in parallel, so the first result back is not the first
 	 * counter taken.
 	 */

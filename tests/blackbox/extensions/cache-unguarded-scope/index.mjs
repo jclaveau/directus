@@ -1,14 +1,14 @@
 // A read hook can scope a response TO any collection, and it runs long after the
-// host captured the purge counters of the collections it could name itself. The tag
-// it adds therefore names a collection no counter covers, and a purge of it landing
-// mid-read passes the post-fill comparison unnoticed — the entry is stored already
-// stale, under an index that purge has just swept.
+// host snapshotted the purge counters of the collections it could name itself. The
+// tag it adds therefore names a collection no counter covers, and a purge of it
+// landing mid-read passes the post-fill comparison unnoticed — the entry is stored
+// already stale, under an index that purge has just swept.
 //
 //   - UNGUARDED_READ: scopes to a foreign collection with no counters handed over,
 //     and writes to it from inside the read. The enrichment in the payload is the
 //     pre-write value by construction, so caching it serves that value on.
 //   - GUARDED_READ: the same dependency, declared with the counters its own
-//     dependent read captured. The control: this one must still cache, and must
+//     dependent read snapshotted. The control: this one must still cache, and must
 //     still be invalidated by an ordinary write to the dependency.
 
 const UNGUARDED_READ = 'unguarded_read';
@@ -37,7 +37,7 @@ export default function registerHooks({ filter }, { services }) {
 			record.dep_label = label;
 		}
 
-		// No `epochs`: the collection this response now depends on has no captured
+		// No `epochs`: the collection this response now depends on has no snapshotted
 		// counter, so nothing can tell whether the write below beat the fill.
 		context.scopedCache?.scopeTo({ collection: UNGUARDED_DEP });
 
@@ -68,7 +68,7 @@ export default function registerHooks({ filter }, { services }) {
 			record.dep_label = dep[0]?.label ?? null;
 		}
 
-		// The counters that read captured BEFORE its own query — the right value by
+		// The counters that read snapshotted BEFORE its own query — the right value by
 		// construction, and what keeps this response cacheable.
 		context.scopedCache?.scopeTo(
 			[{ collection: GUARDED_DEP }],

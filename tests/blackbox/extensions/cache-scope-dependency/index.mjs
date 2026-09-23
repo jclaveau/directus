@@ -27,7 +27,7 @@ export default function registerHooks({ filter }, { services }) {
 		);
 
 		// The metric read's own purge counters ride along with its fingerprints: the
-		// host captured `report`'s before its query and cannot have captured
+		// host snapshotted `report`'s before its query and cannot have snapshotted
 		// `metric`'s, so without this the report response is left uncached
 		// (`unguarded_scope`).
 		context.scopedCache?.scopeTo(

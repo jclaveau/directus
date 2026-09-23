@@ -102,7 +102,7 @@ export interface ScopedCacheStore {
 
 	/**
 	 * The purge counters of these keys, in the order asked, or `null` when the
-	 * store could not answer at all — which the caller reads as "no capture
+	 * store could not answer at all — which the caller reads as "no snapshot
 	 * taken", leaving the fill unguarded exactly as it is with no store.
 	 */
 	readCounterValues(

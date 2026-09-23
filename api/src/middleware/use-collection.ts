@@ -11,9 +11,9 @@ const useCollection = (collection: string): RequestHandler => {
 		req.collection = collection;
 
 		// The system controllers behind this middleware hand `respond` a payload with
-		// no capture of their own, and the fill guard needs one taken BEFORE the rows
+		// no snapshot of their own, and the fill guard needs one taken BEFORE the rows
 		// are read (`fill-guard.ts`). This is the earliest point that knows the
-		// collection every such response is tagged with, so the capture lives here.
+		// collection every such response is tagged with, so the snapshot lives here.
 		if (req.method === 'GET') {
 			res.locals['scopedCacheEpochsAtRequest'] =
 				await readScopedCacheEpochs([collection]);

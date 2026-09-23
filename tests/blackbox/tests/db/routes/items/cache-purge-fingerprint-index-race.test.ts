@@ -22,8 +22,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // later purge can reach. The sweep this replaced could: it SUNIONed the tag sets,
 // deleted the entries they named, and only then DELETED THE SETS, so a fill landing
 // between those two steps kept its entry and lost its index for the rest of its TTL
-// — and the counter guard cannot help, because the read captured AFTER the bump and
-// is right to cache.
+// — and the counter guard cannot help, because the read snapshotted AFTER the bump
+// and is right to cache.
 //
 // The pass is as long as the set is wide, which is why this inflates the index set
 // first: every member costs a parse and a compare, so ~120k of them take long enough
@@ -50,7 +50,7 @@ const readHoldMs = 400;
 // Reads fired at staggered offsets into the purge, so one of them files its
 // fingerprint mid-pass wherever the runner's real pass happens to start and end.
 // They start late enough that the counters were already bumped — a read that
-// captured before the bump is undone by the guard and never reaches the assertion
+// snapshotted before the bump is undone by the guard and never reaches the assertion
 // anyway. Each carries a distinct `limit`, so each is its own cache entry rather
 // than overwriting the last.
 const readLeadsMs = [300, 500, 700, 900, 1100];

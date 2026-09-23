@@ -2,9 +2,6 @@ import { useEnv } from '@directus/env';
 import {
 	useLogger,
 } from '../logger/index.js';
-import {
-	redisConfigAvailable,
-} from '../redis/index.js';
 import type { ScopedCacheFingerprint } from '@directus/types';
 import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
@@ -13,12 +10,12 @@ import { earlierScopedCacheEpoch } from './pins.js';
 const env = useEnv();
 
 /**
- * The purge counters a read captured, by collection. `*` is the wholesale entry,
- * and its presence is what says a capture was taken at all.
+ * The purge counters a read snapshotted, by collection. `*` is the wholesale entry,
+ * and its presence is what says a snapshot was taken at all.
  */
 export type ScopedCacheEpochs = Record<string, string | null>;
 
-// Long enough that no read outlives its own capture, short enough that a
+// Long enough that no read outlives its own snapshot, short enough that a
 // collection nobody writes to stops holding a key.
 const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
 
@@ -39,7 +36,7 @@ function scopedCacheEpochKey(collection: string): string {
  * were fetched: a purge landing in between finds nothing to drop, and the fill then
  * stores rows it already superseded — stale for the whole TTL, and (its index
  * members having just been deleted) unreachable to every later purge. Comparing the
- * counter captured before the query against the one at fill time is what closes
+ * counter snapshotted before the query against the one at fill time is what closes
  * that window.
  */
 export async function readScopedCacheEpochs(
@@ -47,25 +44,21 @@ export async function readScopedCacheEpochs(
 ): Promise<ScopedCacheEpochs> {
 	// Every read pays this round trip, so it is skipped wherever its answer cannot
 	// matter: nothing is filled with the response cache off.
-	if (
-		!env['CACHE_ENABLED'] ||
-		!scopedCachePurgeEnabled() ||
-		!redisConfigAvailable()
-	) {
+	if (!env['CACHE_ENABLED'] || !scopedCachePurgeEnabled()) {
 		return {};
 	}
 
 	// `*` rides along so a wholesale flush invalidates an in-flight read too.
 	const names = [...new Set([...collections, '*'])];
 
-	// A read that cannot reach the counters still has to answer. Capturing nothing
-	// leaves the fill unguarded, exactly as it is with no redis at all — the same
+	// A read that cannot reach the counters still has to answer. Snapshotting nothing
+	// leaves the fill unguarded, exactly as it is with no store at all — the same
 	// trade the response cache makes everywhere else.
 	const values = await useScopedCacheStore()
 		.readCounterValues(names.map(scopedCacheEpochKey));
 
 	// Nothing, rather than a counter reading of `null` per collection: `*` is what
-	// says a capture was taken, and filling it in from a read that never happened
+	// says a snapshot was taken, and filling it in from a read that never happened
 	// would report the guard as running over collections nothing was read for.
 	if (values === null) {
 		return {};
@@ -79,13 +72,13 @@ export async function readScopedCacheEpochs(
 /**
  * Bump the counters of the collections a purge just dropped entries for. Expiring,
  * so a collection nothing writes to stops costing a key; a read whose counter
- * expired between capture and fill reads `null` on both sides and caches, which is
+ * expired between snapshot and fill reads `null` on both sides and caches, which is
  * right — nothing purged it in between.
  */
 export async function bumpScopedCacheEpochs(
 	collections: Iterable<string>,
 ): Promise<void> {
-	if (!scopedCachePurgeEnabled() || !redisConfigAvailable()) {
+	if (!scopedCachePurgeEnabled()) {
 		return;
 	}
 
@@ -121,20 +114,20 @@ export async function bumpScopedCacheEpochs(
 }
 
 /**
- * Fold in the counters a read hook handed over, keeping the read's OWN capture
+ * Fold in the counters a read hook handed over, keeping the read's OWN snapshot
  * wherever it has one.
  *
  * Not the rule the collector uses to merge two DECLARED counters, and it does not
- * need to be: the read's capture was taken before its query, so it is earlier than
+ * need to be: the read's snapshot was taken before its query, so it is earlier than
  * anything a hook could hand over, with no comparison required. A collection the
- * capture never named has no such guarantee, which is why the hook's value is taken
+ * snapshot never named has no such guarantee, which is why the hook's value is taken
  * there and compared where two of them meet.
  */
 export function foldHandedOverScopedCacheEpochs(
-	captured: ScopedCacheEpochs,
+	snapshot: ScopedCacheEpochs,
 	handedOver: ScopedCacheEpochs,
 ): ScopedCacheEpochs {
-	const folded = { ...captured };
+	const folded = { ...snapshot };
 
 	for (const [collection, epoch] of Object.entries(handedOver)) {
 		if (collection in folded === false) {
@@ -146,7 +139,7 @@ export function foldHandedOverScopedCacheEpochs(
 }
 
 /**
- * Merge the captures of two reads whose results become ONE cached entry — the roots
+ * Merge the snapshots of two reads whose results become ONE cached entry — the roots
  * of a GraphQL query, say. The EARLIER reading wins per collection: a root reading
  * `E+1` where another read `E` means a purge landed between them, and only the
  * earlier value makes the post-fill comparison notice.
@@ -163,14 +156,14 @@ export function mergeScopedCacheEpochs(
 }
 
 /**
- * The two captures one response may carry, folded into one — `undefined` when it
+ * The two snapshots one response may carry, folded into one — `undefined` when it
  * carries neither, which is how the guard tells an unguarded read from a guarded
  * one that read nothing.
  */
 export function mergedScopedCacheEpochs(
-	...captures: Array<ScopedCacheEpochs | undefined>
+	...snapshots: Array<ScopedCacheEpochs | undefined>
 ): ScopedCacheEpochs | undefined {
-	const taken = captures.filter((capture) => capture !== undefined);
+	const taken = snapshots.filter((snapshot) => snapshot !== undefined);
 
 	if (taken.length === 0) {
 		return undefined;
@@ -178,43 +171,43 @@ export function mergedScopedCacheEpochs(
 
 	const merged: ScopedCacheEpochs = {};
 
-	for (const capture of taken) {
-		mergeScopedCacheEpochs(merged, capture);
+	for (const snapshot of taken) {
+		mergeScopedCacheEpochs(merged, snapshot);
 	}
 
 	return merged;
 }
 
 /**
- * The collections a response is tagged with that its capture never covered — so a
+ * The collections a response is tagged with that its snapshot never covered — so a
  * purge of them landing mid-read passes the post-fill comparison unnoticed, and the
  * entry would be stored already stale under an index that purge has swept.
  *
  * A read hook's `scopeTo` is how one gets there: it names any collection it likes,
- * and it runs after the capture was taken. There is no capturing it late, since the
- * check needs a value from BEFORE the query — so the caller refuses the fill.
+ * and it runs after the snapshot was taken. There is no snapshotting it late, since
+ * the check needs a value from BEFORE the query — so the caller refuses the fill.
  *
- * `*` rides every capture, so its presence is what says the guard ran at all.
+ * `*` rides every snapshot, so its presence is what says the guard ran at all.
  * Without it (no redis, purging off, a read that opted out) nothing is guarded
  * anyway, and refusing the whole cache over that would be a far worse trade.
  */
 export function scopedCacheCollectionsWithoutGuard(
-	captured: ScopedCacheEpochs | undefined,
+	snapshot: ScopedCacheEpochs | undefined,
 	fingerprints: readonly ScopedCacheFingerprint[],
 ): string[] {
-	if (captured === undefined || '*' in captured === false) {
+	if (snapshot === undefined || '*' in snapshot === false) {
 		return [];
 	}
 
 	const collections = fingerprints.map((fingerprint) => fingerprint.collection);
 
 	return [...new Set(collections)].filter(
-		(collection) => collection in captured === false,
+		(collection) => collection in snapshot === false,
 	);
 }
 
 /**
- * The collection whose counter moved between a read's capture and now, or
+ * The collection whose counter moved between a read's snapshot and now, or
  * `undefined` when none did.
  *
  * Called AFTER the entry is written, which is the comparison that closes the
@@ -224,11 +217,11 @@ export function scopedCacheCollectionsWithoutGuard(
  * sweeps, so re-reading them here catches every such interleaving.
  */
 export async function scopedCacheSweptDuringFill(
-	captured: ScopedCacheEpochs,
+	snapshot: ScopedCacheEpochs,
 ): Promise<string | undefined> {
-	const afterFill = await readScopedCacheEpochs(Object.keys(captured));
+	const afterFill = await readScopedCacheEpochs(Object.keys(snapshot));
 
-	return Object.entries(captured).find(([collection, epoch]) => {
+	return Object.entries(snapshot).find(([collection, epoch]) => {
 		return afterFill[collection] !== epoch;
 	})?.[0];
 }

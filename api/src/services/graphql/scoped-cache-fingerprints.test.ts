@@ -137,11 +137,11 @@ describe('GraphQLService scoped cache tags', () => {
 
 	test(oneLine`
 		keeps the earliest counter even when it ARRIVES second — graphql-js resolves
-		root fields in parallel, so the first result back is not the first capture
+		root fields in parallel, so the first result back is not the first snapshot
 	`, async () => {
 		const gql = makeService({ collections: { articles: { singleton: false } } });
 
-		// The later capture resolves first. Keeping it would compare equal at fill
+		// The later snapshot resolves first. Keeping it would compare equal at fill
 		// time and cache a response the purge between the two already invalidated.
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {

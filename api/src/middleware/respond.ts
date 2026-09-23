@@ -56,7 +56,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const { cache } = getCache();
 
-	// A read service rides its tags, its unautopurgeable ones and its epoch capture
+	// A read service rides its tags, its unautopurgeable ones and its epoch snapshot
 	// on what it returns (`withMeta`). The items controller copies them into
 	// `res.locals`; a system controller hands the result over as the payload and
 	// nothing else, so they are read off the payload here. Only a payload that never
@@ -216,16 +216,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	// Taken before the read's query; what it guards against, and why it is compared
 	// after the fill rather than before, is in `fill-guard.ts`. A read service hands
-	// its capture over through the controller or on the payload; a system route's
+	// its snapshot over through the controller or on the payload; a system route's
 	// also comes from `useCollection`, taken for the collection its fallback tag
 	// names. Where both exist the earlier reading wins per collection.
-	const capturedEpochs = mergedScopedCacheEpochs(
+	const epochSnapshot = mergedScopedCacheEpochs(
 		res.locals['scopedCacheEpochsAtRequest'] as ScopedCacheEpochs | undefined,
 		res.locals['scopedCacheEpochs'] ?? payloadMeta?.scopedCacheEpochs,
 	);
 
 	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
-		capturedEpochs,
+		epochSnapshot,
 		scopedCacheFingerprints,
 	);
 
@@ -302,9 +302,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// serialization before it is most of it.
 			const filledAt = Date.now();
 
-			if (capturedEpochs) {
+			if (epochSnapshot) {
 				const sweptDuringFill =
-					await scopedCacheSweptDuringFill(capturedEpochs);
+					await scopedCacheSweptDuringFill(epochSnapshot);
 
 				if (sweptDuringFill !== undefined) {
 					// This is the one purge that knows precisely which key is stale, and

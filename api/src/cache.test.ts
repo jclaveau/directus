@@ -134,7 +134,7 @@ const {
 const cacheHandlers = { ...busHandlers };
 
 const {
-	assertScopedCacheRedisSupported,
+	assertScopedCacheStoreSupported,
 	indexScopedCacheEntry,
 	purgeScopedCache,
 	scopedCacheFingerprintOf,
@@ -293,7 +293,7 @@ describe('scoped cache purging', () => {
 		});
 	});
 
-	describe('assertScopedCacheRedisSupported', () => {
+	describe('assertScopedCacheStoreSupported', () => {
 		afterEach(() => {
 			redis.isCluster = false;
 		});
@@ -303,18 +303,18 @@ describe('scoped cache purging', () => {
 			(SCAN/DEL are single-node)
 		`, () => {
 			redis.isCluster = true;
-			expect(() => assertScopedCacheRedisSupported()).toThrow(/cluster/i);
+			expect(() => assertScopedCacheStoreSupported()).toThrow(/cluster/i);
 		});
 
 		test('no-op on a standalone client', () => {
 			redis.isCluster = false;
-			expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+			expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 		});
 
 		test('no-op in full mode even against a cluster client', () => {
 			redis.isCluster = true;
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
-			expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+			expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 		});
 	});
 
@@ -1722,7 +1722,7 @@ describe('clearCacheTargets', () => {
 });
 
 // A flush, like every purge, has to move the counters BEFORE it drops anything: a
-// read that captured earlier and rechecks between the clear and a bump made after
+// read that snapshotted earlier and rechecks between the clear and a bump made after
 // it compares equal, keeps the entry it just wrote, and the index drop that follows
 // unlinks the tag sets it was filed under — stale for its TTL, reachable to no
 // later purge. The clear is the first drop, so the bump goes in front of it.

@@ -17,7 +17,7 @@ import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	type ScopedCacheFilterKeying,
-	assertScopedCacheRedisSupported,
+	assertScopedCacheStoreSupported,
 	bumpScopedCacheEpochs,
 	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
@@ -1396,7 +1396,7 @@ describe('flushResponseCache', () => {
 
 	it(oneLine`
 		moves the counter with no cache to clear — the reads in flight are what the
-		move is for, and they captured it whether or not anything was stored
+		move is for, and they snapshot it whether or not anything was stored
 	`, async () => {
 		const { calls } = recordFlush();
 
@@ -1413,7 +1413,7 @@ describe('flushResponseCache', () => {
 
 	it(oneLine`
 		clears and nothing more with scoped purging off — there is no counter a read
-		captured and no index to drop, and the scan would still walk the whole
+		snapshot and no index to drop, and the scan would still walk the whole
 		keyspace on every permission, field or collection change
 	`, async () => {
 		const { calls, cache } = recordFlush();
@@ -4345,12 +4345,12 @@ describe('scopedCacheNestedCollections', () => {
 
 
 describe('the purge counters a fill is guarded by', () => {
-	// Two merge rules, and they are not the same rule. A read's own capture was
+	// Two merge rules, and they are not the same rule. A read's own snapshot was
 	// taken before its query, so it is earlier than anything a hook can hand over
-	// and wins without a comparison. Two captures that become ONE entry have no
+	// and wins without a comparison. Two snapshots that become ONE entry have no
 	// such ordering, so the earlier reading has to be found.
 	it(oneLine`
-		keeps the read's own capture over a counter a hook handed for the same
+		keeps the read's own snapshot over a counter a hook handed for the same
 		collection
 	`, () => {
 		expect(foldHandedOverScopedCacheEpochs(
@@ -4360,7 +4360,7 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		takes a handed-over counter for a collection the capture never named, since
+		takes a handed-over counter for a collection the snapshot never named, since
 		that is the only reading of it there is
 	`, () => {
 		expect(foldHandedOverScopedCacheEpochs({}, { authors: '4' }))
@@ -4373,7 +4373,7 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		merges two captures of one entry down to the EARLIER reading, so a purge
+		merges two snapshots of one entry down to the EARLIER reading, so a purge
 		between them is still visible at fill time
 	`, () => {
 		const merged = { articles: '9', authors: '2' };
@@ -4383,8 +4383,8 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		folds the captures one response carries into one, or none when it carries
-		none — an empty capture is a guard that ran, undefined is one that did not
+		folds the snapshots one response carries into one, or none when it carries
+		none — an empty snapshot is a guard that ran, undefined is one that did not
 	`, () => {
 		expect(mergedScopedCacheEpochs(undefined, undefined)).toBeUndefined();
 		expect(mergedScopedCacheEpochs({}, undefined)).toEqual({});
@@ -4395,7 +4395,7 @@ describe('the purge counters a fill is guarded by', () => {
 		)).toEqual({ articles: '7', authors: '4', '*': '1' });
 	});
 
-	it('names the scoped collections no capture covered', () => {
+	it('names the scoped collections no snapshot covered', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{ articles: '7', '*': '1' },
 			[
@@ -4405,9 +4405,9 @@ describe('the purge counters a fill is guarded by', () => {
 		)).toEqual(['authors']);
 	});
 
-	// `*` rides every capture, so its absence says no capture ran — with nothing
+	// `*` rides every snapshot, so its absence says no snapshot ran — with nothing
 	// guarded either way, refusing here would take the whole cache down.
-	it('names nothing when no capture ran at all', () => {
+	it('names nothing when no snapshot ran at all', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{},
 			[scopedCacheFingerprintOf('authors', [])],
@@ -4420,10 +4420,10 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 });
 
-// The counters themselves, as opposed to the merge rules above: what a capture asks
+// The counters themselves, as opposed to the merge rules above: what a snapshot asks
 // Redis for, and what it answers when it cannot ask. Every arm below is a failure or
-// a configuration one, so none of them has a blackbox witness — a read that captures
-// nothing looks exactly like a read that captured and found nothing moved.
+// a configuration one, so none of them has a blackbox witness — a read that
+// snapshots nothing looks exactly like one that found nothing moved.
 describe('reading and bumping the purge counters', () => {
 	const mget = vi.fn();
 
@@ -4483,7 +4483,7 @@ describe('reading and bumping the purge counters', () => {
 		['there is no Redis configured', () => {
 			vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		}],
-	])('captures nothing, and asks nothing, when %s', async (_case, disable) => {
+	])('snapshots nothing, and asks nothing, when %s', async (_case, disable) => {
 		disable();
 
 		expect(await readScopedCacheEpochs(['articles'])).toEqual({});
@@ -4492,22 +4492,22 @@ describe('reading and bumping the purge counters', () => {
 
 	// A read that cannot reach the counters still has to answer, and the fill is
 	// left unguarded exactly as it is with no Redis at all. What it must NOT do is
-	// answer with a counter reading per collection: `*` is what says a capture was
+	// answer with a counter reading per collection: `*` is what says a snapshot was
 	// taken, so filling it in from a read that never happened reports the guard as
 	// covering collections nothing was read for.
 	it(oneLine`
-		captures nothing at all when the counters cannot be read, rather than a
+		snapshots nothing at all when the counters cannot be read, rather than a
 		reading of null per collection
 	`, async () => {
 		mget.mockRejectedValue(new Error('connection is closed'));
 
-		const captured = await readScopedCacheEpochs(['articles']);
+		const snapshot = await readScopedCacheEpochs(['articles']);
 
-		expect(captured).toEqual({});
+		expect(snapshot).toEqual({});
 
-		// The read names a collection the capture never covered, and with no `*` the
+		// The read names a collection the snapshot never covered, and with no `*` the
 		// guard reports itself off rather than claiming to have covered it.
-		expect(scopedCacheCollectionsWithoutGuard(captured, [
+		expect(scopedCacheCollectionsWithoutGuard(snapshot, [
 			scopedCacheFingerprintOf('articles', []),
 		])).toEqual([]);
 	});
@@ -4542,7 +4542,7 @@ describe('reading and bumping the purge counters', () => {
 	});
 
 	// An expiring counter, so a collection nothing writes to stops costing a key. A
-	// read whose counter expired between capture and fill reads null on both sides
+	// read whose counter expired between snapshot and fill reads null on both sides
 	// and caches, which is right — nothing purged it in between.
 	it('bumps each collection once and gives the counter a day', async () => {
 		await bumpScopedCacheEpochs(['articles', 'articles', 'authors']);
@@ -4648,14 +4648,14 @@ describe('the Redis client scoped purging requires', () => {
 	it('refuses a cluster client while scoped purging is on', () => {
 		vi.mocked(useRedis).mockReturnValue({ isCluster: true } as any);
 
-		expect(() => assertScopedCacheRedisSupported())
+		expect(() => assertScopedCacheStoreSupported())
 			.toThrow(/not implemented for Redis cluster/);
 	});
 
 	it('accepts a standalone client', () => {
 		vi.mocked(useRedis).mockReturnValue({ isCluster: false } as any);
 
-		expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+		expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 	});
 
 	// Outside scoped mode the purge is a full flush, which a cluster takes.
@@ -4663,7 +4663,7 @@ describe('the Redis client scoped purging requires', () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'full';
 		vi.mocked(useRedis).mockReturnValue({ isCluster: true } as any);
 
-		expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+		expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 	});
 });
 

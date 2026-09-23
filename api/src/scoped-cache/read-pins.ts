@@ -97,7 +97,7 @@ export function scopedCachePinsFromKeyedFilters(
 		}
 
 		const type = scopedCacheKeyedFieldType(schema, collection, keying.field)!;
-		const tags: ScopedCacheCollectionPin[] = [];
+		const pins: ScopedCacheCollectionPin[] = [];
 
 		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
 		// collapse to the one slice the write side emits for that row.
@@ -111,10 +111,10 @@ export function scopedCachePinsFromKeyedFilters(
 			}
 
 			seen.add(token);
-			tags.push({ collection, field: keying.field, value, type });
+			pins.push({ collection, field: keying.field, value, type });
 		}
 
-		pinned.set(collection, tags);
+		pinned.set(collection, pins);
 	}
 
 	return pinned;
@@ -342,7 +342,7 @@ export function scopedCacheNestedRowBindings(
  * The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
  * flat scope field; otherwise a child write emits just its pk slice, which an
  * INSERT of a new child never carries — so a pin on the parent's key would serve
- * stale. Pin only when the matching shallow tag is guaranteed on the write.
+ * stale. Pin only when the matching shallow pin is guaranteed on the write.
  */
 function scopedCacheO2mChildPinnedByParentKey(
 	schema: SchemaOverview,
@@ -663,14 +663,14 @@ export function scopedCacheCollectionsBeyondNestedRows(
  *
  * - `<pk>=<key>` per parent row — M2O hops only. An INSERT lands a key this response
  * cannot have nested, so the pin cannot go stale. - its own declared scope slices —
- * past the ceiling. One tag per distinct value. - the bare collection fingerprint —
+ * past the ceiling. One pin per distinct value. - the bare collection fingerprint —
  * a to-many hop or A2O anywhere on one of its paths, no parent row nested, or a row
  * missing its key.
  *
  * Returns the pinned collections only; the bare fingerprint is the caller's default,
- * so a collection absent here keeps the tag it has always carried. Each fallback
- * over-purges, none serves stale. The pins name the NESTED rows and nothing more: a
- * read depending on a collection beyond them
+ * so a collection absent here keeps the fingerprint it has always carried. Each
+ * fallback over-purges, none serves stale. The pins name the NESTED rows and
+ * nothing more: a read depending on a collection beyond them
  * (`scopedCacheCollectionsBeyondNestedRows`) owes that half to the caller.
  */
 export function scopedCachePinsFromM2oParents(
@@ -778,7 +778,7 @@ export function scopedCachePinsFromM2oParents(
 		// `coarse`, not `skip`: one row without its key must take the whole
 		// collection down to the bare fingerprint. Skipping it would pin the rows
 		// that DID carry a key and leave that one covered by nothing — stale, where
-		// the bare tag only over-purges.
+		// the bare fingerprint only over-purges.
 		const keyPins = scopedCachePinsFromRows(
 			collection,
 			[primaryKeyField],
@@ -913,10 +913,10 @@ export function scopedCacheRowsAtPathEnd(
 /**
  * The to-many twin of `scopedCachePinsFromM2oParents`. A read that EMBEDS a
  * to-many child set depends on every child WHERE `child.<fk> = parent.pk`, so it
- * pins each such collection by that reverse fk = the parent's key — one tag per
+ * pins each such collection by that reverse fk = the parent's key — one pin per
  * surfaced parent row. A write to a child of another parent no longer evicts it.
  *
- * The purge side already emits the identical `<child>:<fk>=<value>` shallow tag
+ * The purge side already emits the identical `<child>:<fk>=<value>` shallow pin
  * from the mutated row's own fk column (the flat scope-field branch of
  * `snapshotScopedCachePins`), so read and write agree by construction — no field
  * injection, no response strip, no deep chain. The read never needs the child's fk
@@ -1049,7 +1049,7 @@ export function scopedCachePinsFromO2mChildren(
 		}
 
 		// The child's own fk column type, so the pinned value canonicalizes the way
-		// the purge side does the mutated row's fk — or the two tag strings diverge.
+		// the purge side does the mutated row's fk — or the two pin keys diverge.
 		const fieldType = schema.collections[childCollection]?.fields[reverseFk]?.type;
 
 		const keying = keyingByChild.get(childCollection) ?? {
@@ -1152,31 +1152,31 @@ function descendFilterSegment(
 }
 
 /**
- * Scope a read's root cache tags off a filter — the read side. A read is soundly
+ * Scope a read's root pins off a filter — the read side. A read is soundly
  * scoped to a value slice only when the filter *bounds* it to that value: a future
  * insert with a new scope value must be excluded by the same filter, or the read
- * would silently miss it. Tags come from `_eq`/`_in` on a scoped field (flat or
- * relational `{ fk: { <pk>: … } }`). Each node reports its tags plus whether it
+ * would silently miss it. Pins come from `_eq`/`_in` on a scoped field (flat or
+ * relational `{ fk: { <pk>: … } }`). Each node reports its pins plus whether it
  * *covers* every row it matches (i.e. binds a pinnable field on that row), combined
  * by operator: - `_and`/root union a field's values and are covered if ANY conjunct
  * is (a row satisfies every conjunct); the value union over-approximates the
  * intersection — over-purges, never stale. - `_or` is sound only when EVERY branch
- * is covered (else a row matching an uncovered branch carries no pinned tag →
- * stale); then its tags are the union across branches — a matching row satisfies one
- * branch, whose covering tag lies in that union. This holds across *different*
+ * is covered (else a row matching an uncovered branch carries no pin → stale);
+ * then its pins are the union across branches — a matching row satisfies one
+ * branch, whose covering pin lies in that union. This holds across *different*
  * fields too: `{ _or: [{ owner }, { dept }] }` pins both, purged if a write touches
  * either. This is what scopes a permission-isolated read: the caller passes
  * `joinFilterWithCases(query.filter, ast.cases)`, whose `{ _or: cases }` is unioned
  * by that rule (one case = its own values; a case that leaves ALL fields unbound →
  * bare). No pinned field → `[]`, and the caller falls back to the bare collection
- * tag. `fieldTypes` canonicalizes a value the way the purge side does and skips
- * date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
+ * fingerprint. `fieldTypes` canonicalizes a value the way the purge side does and
+ * skips date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
  *
  * `primaryKeyField` joins the declared fields implicitly and always, no config: -
  * Every row has a primary key, so this axis always resolves. - An inserted row
  * carries a different key, so it can never join a `<pk>._eq` or `<pk>._in` read's
  * result set — the insert-blindness that bars a value slice elsewhere cannot bite
- * here. - The purge side emits the same tag from the keys it already holds, so read
+ * here. - The purge side emits the same pin from the keys it already holds, so read
  * and write agree without either paying a query for it.
  */
 export function pinnedScopedCacheQueryCasesFromFilter(
@@ -1215,16 +1215,16 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 		pathsByHead.set(head, group);
 	}
 
-	// A node's pinned tags plus whether it *covers* every row it matches — a leaf that
-	// bound a pinnable field covers its rows; an uncovered node's rows carry no pinned
-	// tag (would be stale).
+	// A node's pinned values plus whether it *covers* every row it matches — a leaf
+	// that bound a pinnable field covers its rows; an uncovered node's rows carry no
+	// pin (would be stale).
 	//
 	// `queryCases` is the same pinning read as a disjunction: one entry per way a
-	// row can match the node, each holding every field that way binds. `tags`
-	// flattens it, losing which values had to hold together — which is all a
-	// fingerprint sweep can use, and not enough for a composite one.
+	// row can match the node, each holding every field that way binds.
+	// `pinnedValues` flattens it, losing which values had to hold together — which
+	// is all a flat sweep can use, and not enough for a composite fingerprint.
 	type Eval = {
-		tags: Map<string, Set<unknown>>;
+		pinnedValues: Map<string, Set<unknown>>;
 		queryCases: Map<string, Set<unknown>>[];
 		covered: boolean;
 	};
@@ -1247,11 +1247,11 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 
 	/** A node's own pinned fields as the one way its rows match it. */
 	function queryCasesOf(
-		tags: Map<string, Set<unknown>>,
+		pinnedValues: Map<string, Set<unknown>>,
 	): Map<string, Set<unknown>>[] {
-		return tags.size === 0
+		return pinnedValues.size === 0
 			? []
-			: [tags];
+			: [pinnedValues];
 	}
 
 	// AND of two disjunctions: every pairing of one way to match each side, each
@@ -1293,7 +1293,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	// its value set. Covered iff it bound a pinnable scope field; a
 	// non-scope/date/non-`_eq`/`_in` key covers nothing.
 	function evalLeaf(field: string, value: unknown): Eval {
-		const tags = new Map<string, Set<unknown>>();
+		const pinnedValues = new Map<string, Set<unknown>>();
 
 		if (
 			!fieldSet.has(field) ||
@@ -1301,16 +1301,16 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 			value === null ||
 			typeof value !== 'object'
 		) {
-			return { tags, queryCases: [], covered: false };
+			return { pinnedValues, queryCases: [], covered: false };
 		}
 
 		const ops = value as Record<string, unknown>;
 
 		if ('_eq' in ops) {
-			tags.set(field, new Set([ops['_eq']]));
+			pinnedValues.set(field, new Set([ops['_eq']]));
 		}
 		else if ('_in' in ops && Array.isArray(ops['_in'])) {
-			tags.set(field, new Set(ops['_in']));
+			pinnedValues.set(field, new Set(ops['_in']));
 		}
 		else {
 			// Relational: a filter on the related PK bounds the fk to the value the write
@@ -1326,15 +1326,19 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 				const innerOps = inner as Record<string, unknown>;
 
 				if ('_eq' in innerOps) {
-					tags.set(field, new Set([innerOps['_eq']]));
+					pinnedValues.set(field, new Set([innerOps['_eq']]));
 				}
 				else if ('_in' in innerOps && Array.isArray(innerOps['_in'])) {
-					tags.set(field, new Set(innerOps['_in']));
+					pinnedValues.set(field, new Set(innerOps['_in']));
 				}
 			}
 		}
 
-		return { tags, queryCases: queryCasesOf(tags), covered: tags.size > 0 };
+		return {
+			pinnedValues,
+			queryCases: queryCasesOf(pinnedValues),
+			covered: pinnedValues.size > 0,
+		};
 	}
 
 	// Follow a declared path's segments down the nested filter to the terminal ops
@@ -1392,11 +1396,11 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 	// Every declared path whose head segment is this filter key → its terminal values.
 	// Covered iff a path bound (terminal `_eq`/`_in` present, type pin-safe).
 	function evalPathsAt(headField: string, value: unknown): Eval {
-		const tags = new Map<string, Set<unknown>>();
+		const pinnedValues = new Map<string, Set<unknown>>();
 		const paths = pathsByHead.get(headField);
 
 		if (!paths || value === null || typeof value !== 'object') {
-			return { tags, queryCases: [], covered: false };
+			return { pinnedValues, queryCases: [], covered: false };
 		}
 
 		for (const { field, segments } of paths) {
@@ -1407,49 +1411,53 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 			const values = pathTerminalValues(segments, value, relatedPrimaryKeys[field]);
 
 			if (values !== null && values.size > 0) {
-				tags.set(field, values);
+				pinnedValues.set(field, values);
 			}
 		}
 
-		return { tags, queryCases: queryCasesOf(tags), covered: tags.size > 0 };
+		return {
+			pinnedValues,
+			queryCases: queryCasesOf(pinnedValues),
+			covered: pinnedValues.size > 0,
+		};
 	}
 
 	// OR: a row matches at least one branch. Sound to pin only when EVERY branch
-	// covers its own rows (else a row matching an uncovered branch carries no pinned
-	// tag → stale); then the tags are the union across branches — a matching row's
-	// covering tag lies in it, across different fields too.
+	// covers its own rows (else a row matching an uncovered branch carries no pin →
+	// stale); then the values are the union across branches — a matching row's
+	// covering value lies in it, across different fields too.
 	function evalOr(branches: Eval[]): Eval {
 		if (branches.length === 0 || !branches.every((branch) => branch.covered)) {
 			return {
-				tags: new Map<string, Set<unknown>>(),
+				pinnedValues: new Map<string, Set<unknown>>(),
 				queryCases: [],
 				covered: false,
 			};
 		}
 
-		const tags = new Map<string, Set<unknown>>();
+		const pinnedValues = new Map<string, Set<unknown>>();
 		const queryCases: Map<string, Set<unknown>>[] = [];
 
 		for (const branch of branches) {
-			unionPins(tags, branch.tags);
+			unionPins(pinnedValues, branch.pinnedValues);
 			queryCases.push(...branch.queryCases);
 		}
 
-		return { tags, queryCases, covered: true };
+		return { pinnedValues, queryCases, covered: true };
 	}
 
 	// Every key at an object level is AND-combined (the root and `_and` share this): a
-	// row satisfies every conjunct, so tags union and the node is covered if ANY
-	// conjunct covers the row.
+	// row satisfies every conjunct, so the values union and the node is covered if
+	// ANY conjunct covers the row.
 	function evalNode(node: Filter): Eval {
 		const evalResult: Eval = {
-			tags: new Map<string, Set<unknown>>(),
+			pinnedValues: new Map<string, Set<unknown>>(),
 			queryCases: [],
 			covered: false,
 		};
 
 		function andIn(part: Eval): void {
-			unionPins(evalResult.tags, part.tags);
+			unionPins(evalResult.pinnedValues, part.pinnedValues);
 			evalResult.queryCases = andQueryCases(evalResult.queryCases, part.queryCases);
 			evalResult.covered = evalResult.covered || part.covered;
 		}

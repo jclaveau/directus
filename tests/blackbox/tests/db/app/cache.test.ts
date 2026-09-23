@@ -68,7 +68,7 @@ describe('App Caching Tests', () => {
 			// The Redis instance (localhost:6108) is shared across vendors, so the cache
 			// namespace — and thus the stats stream/flag/tables keyed off it — must carry
 			// the vendor, or one vendor's flush drains another's events and a stats toggle
-			// on one disables capture on the others.
+			// on one disables snapshot on the others.
 			const nsPrefix = `${cacheNamespacePrefix}-${vendor}`;
 
 			const envMem = cloneDeep(config.envs);
@@ -1068,7 +1068,7 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		Value-scoped update moving a row across slices drops both the old and the new slice
-		(old ∪ new capture), sparing an untouched third slice
+		(old ∪ new snapshot), sparing an untouched third slice
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -1117,9 +1117,9 @@ describe('App Caching Tests', () => {
 			expect(warmCtl.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
 
-			// Move the row src → dst. The pre-update capture holds src, the committed re-read
-			// holds dst; their union purges both slices (+ bare), leaving the control slice — and
-			// every other collection — warm.
+			// Move the row src → dst. The pre-update snapshot holds src, the committed
+			// re-read holds dst; their union purges both slices (+ bare), leaving the
+			// control slice — and every other collection — warm.
 			await request(url)
 				.patch(`/items/${collectionScoped}/${moved.id}`)
 				.send({ owner_field: dstOwner })
@@ -1151,8 +1151,8 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		Value-scoped delete drops the removed row's slice (captured pre-delete) but spares
-		an untouched slice
+		Value-scoped delete drops the removed row's slice (snapshotted pre-delete) but
+		spares an untouched slice
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -1198,7 +1198,8 @@ describe('App Caching Tests', () => {
 			expect(warmCtl.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
 
-			// After the delete the row's scope value is gone, so it's captured before the delete.
+			// After the delete the row's scope value is gone, so it is snapshotted
+			// before the delete.
 			await request(url)
 				.delete(`/items/${collectionScoped}/${doomed.id}`)
 				.set('Authorization', auth);
@@ -2829,7 +2830,7 @@ describe('App Caching Tests', () => {
 
 	describe('Recommends a TTL from the re-request age p95 (Postgres only)', () => {
 		// Seed the tables directly so percentile_cont is asserted on known inputs — the
-		// capture path can't produce controlled ages/gaps. Non-pg skips the ordered-set
+		// snapshot path can't produce controlled ages/gaps. Non-pg skips the ordered-set
 		// aggregate, so recommendedTtlMs is null there.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedis;
@@ -3101,7 +3102,7 @@ describe('App Caching Tests', () => {
 			await request(url).get(`/items/${collectionFirst}?sort=-id&limit=80`)
 				.set('Authorization', auth);
 
-			// The capture path buffers to Redis and drains to Postgres on a schedule, so
+			// The snapshot path buffers to Redis and drains to Postgres on a schedule, so
 			// the listing is eventually-consistent — poll until both reasons land.
 			let anomalies: any[] = [];
 			let byReason = new Map<string, any>();
@@ -3272,7 +3273,7 @@ describe('App Caching Tests', () => {
 		events land in the LAST bucket, not dropped (Postgres only)
 	`, () => {
 		// Seed directus_cache_stats_events / _anomalies directly at chosen times so
-		// the SQL bucketing is asserted on controlled inputs — the capture path
+		// the SQL bucketing is asserted on controlled inputs — the snapshot path
 		// can't stamp a `time`. The query filters by time only (no cache_key), so
 		// clear the window
 		// first, leaving just these rows. Regression guard for the off-by-one that put

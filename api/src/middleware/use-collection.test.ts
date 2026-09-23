@@ -28,7 +28,7 @@ beforeEach(() => {
 
 describe('useCollection', () => {
 	test(oneLine`
-		sets the collection and, on a GET, captures its purge counter first
+		sets the collection and, on a GET, snapshots its purge counter first
 	`, async () => {
 		const { req, res, next } = await run('GET');
 
@@ -41,7 +41,7 @@ describe('useCollection', () => {
 		expect(next).toHaveBeenCalled();
 	});
 
-	test('captures nothing on a mutation, which fills no cache', async () => {
+	test('snapshots nothing on a mutation, which fills no cache', async () => {
 		const { res } = await run('PATCH');
 
 		expect(mocks.readScopedCacheEpochs).not.toHaveBeenCalled();

@@ -10,7 +10,7 @@ const DRIFT_DEP = 'test_cache_audit_drift_dep';
 export default function registerHooks({ filter }, { services }) {
 	filter(`${DRIFT}.items.read`, async (records, _meta, context) => {
 		// Through the service, not raw knex: the pin below names a collection the
-		// host captured no purge counter for, and only a read's own capture, handed
+		// host snapshotted no purge counter for, and only a read's own snapshot, handed
 		// over with the tag, keeps the response cacheable (`unguarded_scope`).
 		const dependencies = await new services.ItemsService(DRIFT_DEP, {
 			schema: context.schema,

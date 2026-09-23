@@ -73,7 +73,7 @@ describe(oneLine`
 				],
 			});
 
-			// Independent seeds → one round-trip. Capture the PKs the hooks act on.
+			// Independent seeds → one round-trip. Snapshot the PKs the hooks act on.
 			const [editables, removables] = await Promise.all([
 				CreateItem(vendor, {
 					collection: EDITABLE,

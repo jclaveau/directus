@@ -15,9 +15,9 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // The REST path refuses to cache a read a write invalidated while it was in flight,
-// by comparing the purge counters captured before the query against the ones at fill
-// time. GraphQLService aggregates its reads' TAGS into one entry and used to drop
-// their counters, so `respond` had nothing to compare and every `/graphql` entry was
+// by comparing the purge counters snapshotted before the query against the ones at
+// fill time. GraphQLService aggregates its reads' TAGS into one entry and used to
+// drop their counters, so `respond` had nothing to compare and every `/graphql` was
 // filled with no such check — this asserts the aggregate carries them.
 
 const COLLECTION = 'gql_inflight_purge';

@@ -142,7 +142,7 @@ cascadeChildSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
 // asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
 // itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
-// (capture-before-write, old ∪ new for update/delete/upsert).
+// (snapshot-before-write, old ∪ new for update/delete/upsert).
 describe(oneLine`
 	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
 `, () => {
@@ -223,7 +223,7 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		// Each snapshot also emits the mutated row's primary-key slice, so it appears
-		// once per capture (old and new) — the real purge dedups on the tag key.
+		// once per snapshot (old and new) — the real purge dedups on the tag key.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
@@ -245,8 +245,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		updateMany that leaves the scope field untouched still purges the captured slice —
-		old and re-read new both resolve to A
+		updateMany that leaves the scope field untouched still purges the snapshotted
+		slice — old and re-read new both resolve to A
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
@@ -378,7 +378,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		deleteMany purges the scope slices of the rows it deleted (captured before delete)
+		deleteMany purges the scope slices of the rows it deleted (snapshotted
+		before delete)
 	`, async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
@@ -416,7 +417,7 @@ describe(oneLine`
 		it rewrites, old slice and new
 	`, async () => {
 		// Row 2 hangs off the deleted row 1 through `parent`; the database rewrites
-		// it under the delete, so it is captured like an update: before, and again
+		// it under the delete, so it is snapshotted like an update: before, and again
 		// once committed.
 		tracker.on.select('test').responseOnce([{ id: 2 }]);
 
@@ -500,7 +501,7 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		upsertMany (update) captures the pre-update slice — a keyed payload snapshots old
+		upsertMany (update) snapshots the pre-update slice — a keyed payload takes old
 		before the write (old ∪ new)
 	`, async () => {
 		// The payload carries the key → upsertOne takes the update path; the pre-snapshot
@@ -726,7 +727,7 @@ describe(oneLine`
 		an update-in-disguise whose OLD slice the create path can't recover
 	`, async () => {
 		// The hook returns a PK but declares nothing. It might have moved that row
-		// between slices (an upsert), and createMany has no old∪new capture → the old
+		// between slices (an upsert), and createMany has no old∪new snapshot → the old
 		// slice would leak. So without a declaration the purge is coarse (null).
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
