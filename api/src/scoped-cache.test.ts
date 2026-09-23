@@ -213,8 +213,9 @@ describe('the tag display form', () => {
 		expect(canonicalScopedCacheValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
 	});
 
-	// countScopedCacheTagMembers rebuilds the Redis key from this string and the
-	// entry/purge tag rows join on it, so escaping it here would read zero instead.
+	// countScopedCacheTagMembers reads a fingerprint's token back against this
+	// string and the entry/purge tag rows join on it, so escaping it here would
+	// count zero instead.
 	it('keeps a null scope byte-identical to its Redis key', () => {
 		const nullSlice = {
 			collection: 'student_method_range',
@@ -412,42 +413,96 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 });
 
 describe('countScopedCacheTagMembers', () => {
-	it('scards each tag set and maps the reply to per-tag counts', async () => {
-		pipeline.exec.mockResolvedValue([
-			[null, 3],
-			[null, 7],
-		]);
+	// A label names a pin, not a set, so the count is read off the collection's
+	// fingerprint sets the way the purge that answers for that label reads them.
+	let countedMembers: Record<string, string[]>;
 
-		const counts = await countScopedCacheTagMembers([
-			'articles',
-			'articles:id=5',
-		]);
+	beforeEach(() => {
+		countedMembers = {};
 
-		expect(pipeline.scard)
-			.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles');
+		vi.mocked(useRedis).mockReturnValue({
+			sscan: vi.fn(async (indexKey: string) => {
+				return ['0', countedMembers[indexKey] ?? []];
+			}),
+			scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
+				const scanned = pattern.slice(0, -1);
 
-		expect(pipeline.scard)
-			.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles:id=5');
-
-		expect(counts).toEqual({ 'articles': 3, 'articles:id=5': 7 });
+				return [
+					'0',
+					Object.keys(countedMembers).filter((indexKey) => {
+						return indexKey.startsWith(scanned);
+					}),
+				];
+			}),
+		} as any);
 	});
 
-	it('scards the raw key of a null scope slice', async () => {
-		pipeline.exec.mockResolvedValue([[null, 2]]);
+	it(oneLine`
+		counts the entries each label reaches: the bare one the reads no value
+		narrows, a pinned one the entries bound to that value
+	`, async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&|ns:entry-bare',
+				'articles:&id=,5,&|ns:entry-five',
+				'articles:&id=,9,&|ns:entry-nine',
+			],
+		};
 
-		await countScopedCacheTagMembers([scopedCacheTagLabel({
+		expect(await countScopedCacheTagMembers(['articles', 'articles:id=5']))
+		.toEqual({ 'articles': 1, 'articles:id=5': 1 });
+	});
+
+	it(oneLine`
+		counts an entry named by two sets once: a purge frees it once, whatever the
+		index files it under
+	`, async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:author=1': [
+				'articles:&author=,1,2,&|ns:entry-both',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:author=2': [
+				'articles:&author=,1,2,&|ns:entry-both',
+			],
+		};
+
+		expect(await countScopedCacheTagMembers(['articles:author=1']))
+		.toEqual({ 'articles:author=1': 1 });
+	});
+
+	// The purge's own `evicted` counts entries, and a blast radius that counted
+	// each one's `__expires_at` and `__tags` siblings too would claim three.
+	it('leaves an entry\'s sidecars out of its own blast radius', async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,5,&|ns:entry-five',
+				'articles:&id=,5,&|ns:entry-five__expires_at',
+				'articles:&id=,5,&|ns:entry-five__tags',
+			],
+		};
+
+		expect(await countScopedCacheTagMembers(['articles:id=5']))
+		.toEqual({ 'articles:id=5': 1 });
+	});
+
+	it('reads a null scope slice by the label\'s own byte', async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&author=,\u0000null,&|ns:entry-unassigned',
+			],
+		};
+
+		const nullSlice = scopedCacheTagLabel({
 			collection: 'articles',
 			field: 'author',
 			value: null,
-		})]);
+		});
 
-		expect(pipeline.scard)
-		.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles:author=\u0000null');
+		expect(await countScopedCacheTagMembers([nullSlice]))
+		.toEqual({ [nullSlice]: 1 });
 	});
 
-	it('treats a missing pipeline reply as a zero count', async () => {
-		pipeline.exec.mockResolvedValue([undefined]);
-
+	it('counts a label its collection holds nothing for as zero', async () => {
 		expect(await countScopedCacheTagMembers(['orphan'])).toEqual({ orphan: 0 });
 	});
 
@@ -455,12 +510,10 @@ describe('countScopedCacheTagMembers', () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'full';
 
 		expect(await countScopedCacheTagMembers(['articles'])).toEqual({});
-		expect(pipeline.scard).not.toHaveBeenCalled();
 	});
 
 	it('returns {} for an empty tag list', async () => {
 		expect(await countScopedCacheTagMembers([])).toEqual({});
-		expect(pipeline.scard).not.toHaveBeenCalled();
 	});
 });
 

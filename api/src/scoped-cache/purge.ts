@@ -60,7 +60,6 @@ import {
 import {
 	scopedCacheIndexPrefix,
 	scopedCacheTagKey,
-	scopedCacheTagKeyPrefix,
 	scopedCacheTagLabel,
 } from './tags.js';
 
@@ -416,10 +415,18 @@ export async function indexScopedCacheEntry(
 }
 
 /**
- * How many cache entries each scoped tag currently indexes — the blast radius of
- * purging that tag. Keyed by the tag's display string (`collection` or
- * `collection:field=value`, which maps 1:1 to the
- * `<namespace>:scoped-cache-index:tag:<…>` set key).
+ * How many cache entries each scoped tag would purge — the blast radius the cache
+ * page's drawer reports beside the tags an entry carries. Keyed by the tag's
+ * display string (`collection` or `collection:field=value`).
+ *
+ * Read the way the purge that answers for that tag reads: a label names a pin,
+ * not a set, so the count is the entries of its collection whose fingerprint that
+ * pin reaches. One pass over the collection's sets answers every label naming it,
+ * since a member is parsed once and tested against each.
+ *
+ * Counts entries rather than members: an entry is named alongside its
+ * `__expires_at` and `__tags` siblings, so counting members reported the same
+ * entry two or three times over — the inflation the `SCARD` this replaced carried.
  */
 export async function countScopedCacheTagMembers(
 	displayTags: readonly string[],
@@ -428,21 +435,130 @@ export async function countScopedCacheTagMembers(
 		return {};
 	}
 
-	const redis = useRedis();
-	const pipeline = redis.pipeline();
-
-	for (const tag of displayTags) {
-		pipeline.scard(scopedCacheTagKeyFromLabel(tag));
-	}
-
-	const results = await pipeline.exec();
 	const counts: Record<string, number> = {};
 
-	displayTags.forEach((tag, index) => {
-		counts[tag] = Number(results?.[index]?.[1] ?? 0);
-	});
+	const labelledByCollection = new Map<string, {
+		displayTag: string;
+		declared: ScopedCacheFingerprint;
+	}[]>();
+
+	for (const displayTag of displayTags) {
+		counts[displayTag] = 0;
+
+		const declared = scopedCacheFingerprintFromLabel(displayTag);
+		const labelled = labelledByCollection.get(declared.collection) ?? [];
+
+		labelled.push({ displayTag, declared });
+		labelledByCollection.set(declared.collection, labelled);
+	}
+
+	const redisClient = useRedis();
+
+	for (const [collection, labelled] of labelledByCollection) {
+		// The keys each label reached, not a running total: an entry bound to a list
+		// of index values is named by one set per value, and a blast radius counting
+		// it once per set would claim a purge frees more than it can.
+		const reachedByTag = new Map<string, Set<string>>();
+
+		for (const indexKey of await scopedCacheCollectionIndexKeys(collection)) {
+			let scanCursor = '0';
+
+			do {
+				const [next, indexedMembers] = await redisClient.sscan(
+					indexKey,
+					scanCursor,
+					'COUNT',
+					SCOPED_CACHE_INDEX_SCAN_COUNT,
+				);
+
+				scanCursor = next;
+
+				for (const indexedMember of indexedMembers) {
+					const { fingerprint, key } =
+						parseScopedCacheIndexMember(indexedMember);
+
+					if (key === '' || cacheSidecarOwner(key) !== null) {
+						continue;
+					}
+
+					for (const { displayTag, declared } of labelled) {
+						if (scopedCacheFingerprintReachedByPin(fingerprint, declared)) {
+							const reached = reachedByTag.get(displayTag) ?? new Set();
+							reached.add(key);
+							reachedByTag.set(displayTag, reached);
+						}
+					}
+				}
+			} while (scanCursor !== '0');
+		}
+
+		for (const [displayTag, reached] of reachedByTag) {
+			counts[displayTag] = reached.size;
+		}
+	}
 
 	return counts;
+}
+
+/**
+ * The fingerprint a display label stands for. The label is namespace-free on
+ * purpose, so it resolves against whatever the collection's index holds now rather
+ * than against the set key it named when the label was written.
+ *
+ * Its value is already canonical — the label is rendered from a canonical token —
+ * so it is taken as written rather than canonicalised a second time.
+ */
+function scopedCacheFingerprintFromLabel(label: string): ScopedCacheFingerprint {
+	const pinnedScope: Record<string, string[]> = Object.create(null);
+	const fieldAt = label.indexOf(':');
+
+	if (fieldAt === -1) {
+		return { collection: label, pinnedScope, viewFields: [] };
+	}
+
+	const pin = label.slice(fieldAt + 1);
+	const valueAt = pin.indexOf('=');
+
+	if (valueAt === -1) {
+		return { collection: label.slice(0, fieldAt), pinnedScope, viewFields: [] };
+	}
+
+	pinnedScope[pin.slice(0, valueAt)] = [pin.slice(valueAt + 1)];
+
+	return {
+		collection: label.slice(0, fieldAt),
+		pinnedScope,
+		viewFields: [],
+	};
+}
+
+/**
+ * Whether a declared pin — a hook's `purgeBy`, a `cache.purge` addition, a label
+ * the drawer is sizing — reaches an entry.
+ *
+ * Two arms, because a pin naming nothing and a pin naming a value are different
+ * claims. The bare one is the collection tag, and it keeps the reach it always
+ * had: the reads that could not be narrowed, and only those — read as a constraint
+ * holding of every entry it would be the collection purge, a different operation
+ * with its own mode and its own record.
+ *
+ * A pin naming a value is the converse. `scopedCacheFingerprintHolds` is vacuously
+ * true of an entry that pins nothing, so without this it would drop the global
+ * reads too — exactly what a declaring cancel states did NOT change (#292).
+ */
+function scopedCacheFingerprintReachedByPin(
+	fingerprint: ScopedCacheFingerprint,
+	declared: ScopedCacheFingerprint,
+): boolean {
+	if (Object.keys(declared.pinnedScope).length === 0) {
+		return Object.keys(fingerprint.pinnedScope).length === 0;
+	}
+
+	if (Object.keys(fingerprint.pinnedScope).length === 0) {
+		return false;
+	}
+
+	return scopedCacheFingerprintHolds(fingerprint, declared);
 }
 
 /**
@@ -594,24 +710,7 @@ async function purgeScopedCacheDeclaredPins(
 
 	return purgeScopedCacheIndexWhere(cache, indexKeys, null, (fingerprint) => {
 		return declared.some((declaredFingerprint) => {
-			// A declared pin naming no field is the bare collection tag, and it keeps
-			// the reach it always had: the reads that could not be narrowed. Read as a
-			// constraint it holds of every entry, which is the collection purge — a
-			// different operation, with its own mode and its own record.
-			if (Object.keys(declaredFingerprint.pinnedScope).length === 0) {
-				return Object.keys(fingerprint.pinnedScope).length === 0;
-			}
-
-			// And the converse: an entry pinning nothing holds every pin vacuously,
-			// so a declared pin would reach the global reads that no value narrows.
-			// Only the bare declared fingerprint above may, which is what a mutation
-			// keeping its collection tag sends and a declaring cancel does not — it
-			// states that one slice moved, not that the collection did (#292).
-			if (Object.keys(fingerprint.pinnedScope).length === 0) {
-				return false;
-			}
-
-			return scopedCacheFingerprintHolds(fingerprint, declaredFingerprint);
+			return scopedCacheFingerprintReachedByPin(fingerprint, declaredFingerprint);
 		});
 	});
 }
@@ -1171,15 +1270,6 @@ async function purgeOrRecord(
 		await recordPendingScopedCachePurge(pending, error);
 		return false;
 	}
-}
-
-/**
- * Rebuild a tag key from the display label a pending purge stored. The label is
- * namespace-free on purpose, so this resolves against whatever `CACHE_NAMESPACE`
- * is at retry time rather than the one that was set when the purge failed.
- */
-function scopedCacheTagKeyFromLabel(label: string): string {
-	return `${scopedCacheTagKeyPrefix()}${label}`;
 }
 
 /**
