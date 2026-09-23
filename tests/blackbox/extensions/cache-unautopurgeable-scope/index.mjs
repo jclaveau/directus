@@ -91,7 +91,7 @@ export default function registerHooks({ filter }, { services }) {
 	});
 
 	// The OTHER door into the same audit: `cache.scope` returns the pin list itself,
-	// so a pin appended here never passes through the collector `scopeTo` fills. It
+	// so a pin appended here never passes through the declarations `scopeTo` fills. It
 	// names CANCEL_DEP, a collection nothing on this response covers — on the
 	// read's own collection its computed slice would already make it purgeable.
 	filter('cache.scope', (tags, meta) => {

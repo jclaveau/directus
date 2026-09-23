@@ -2,7 +2,7 @@ import type { EventContext } from './events.js';
 import type { UserIntegrityCheckFlag } from './users.js';
 import type { PermissionsAction } from './permissions.js';
 import type { DirectusError } from './error.js';
-import type { ScopedCacheCollector } from './read-meta.js';
+import type { ScopedCacheHookDeclarations } from './read-meta.js';
 
 export type Item = Record<string, any>;
 
@@ -110,10 +110,10 @@ export type MutationOptions = {
 	allowFilterCancel?: boolean | undefined;
 
 	/**
-	 * A shared scoped-cache fingerprint collector injected by a batch/upsert parent
-	 * so child mutations' `purgeBy` survives to the parent's single deferred purge.
+	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so
+	 * child mutations' `purgeBy` survives to the parent's single deferred purge.
 	 */
-	scopedCacheCollector?: ScopedCacheCollector | undefined;
+	scopedCacheHookDeclarations?: ScopedCacheHookDeclarations | undefined;
 
 	bypassAutoIncrementSequenceReset?: boolean;
 

@@ -17,11 +17,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //   - a pure veto (declares nothing) purges NOTHING and leaves the row unchanged /
 //     undeleted — a cancel changed nothing, so the slice stays warm.
 //   - a veto that declares its slice via `purgeBy` purges precisely — pinning the
-//     parity fix that drains the collector on the update/delete cancel path (before
-//     the fix these early-returned and dropped the declaration).
+//     parity fix that drains the declarations on the update/delete cancel path
+//     (before the fix these early-returned and dropped the declaration).
 //   - a pure veto's GLOBAL (unscoped) read stays warm too: the cancel changed
 //     nothing, so not even the bare collection tag is purged (a pure cancel must
-//     not drain the collector, else every rejected write flushes all global reads).
+//     not drain the declarations, else every rejected write flushes all global
+//     reads).
 
 const EDITABLE = 'test_items_editable';
 const REMOVABLE = 'test_items_removable';

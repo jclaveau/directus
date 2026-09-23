@@ -319,7 +319,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an unautopurgeable tag appended by a cache.scope hook cancels caching too —
-			the audit reads both hook channels, not just the collector (#428)
+			the audit reads both hook channels, not just the declarations (#428)
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -330,7 +330,7 @@ describe(oneLine`
 			const first = await readSlice(SCOPE_HOOK_READ, 'z');
 			const second = await readSlice(SCOPE_HOOK_READ, 'z');
 
-			// RED until fixed: auditing only the collector let this tag through, so the
+			// RED until fixed: auditing only the declarations let this tag through, so the
 			// second read HIT an entry no write can ever purge. The tag names a foreign
 			// collection so nothing else on the response makes the entry reachable.
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');

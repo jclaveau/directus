@@ -117,11 +117,11 @@ export async function bumpScopedCacheEpochs(
  * Fold in the counters a read hook handed over, keeping the read's OWN snapshot
  * wherever it has one.
  *
- * Not the rule the collector uses to merge two DECLARED counters, and it does not
- * need to be: the read's snapshot was taken before its query, so it is earlier than
- * anything a hook could hand over, with no comparison required. A collection the
- * snapshot never named has no such guarantee, which is why the hook's value is taken
- * there and compared where two of them meet.
+ * Not the rule the hook declarations use to merge two DECLARED counters, and it
+ * does not need to be: the read's snapshot was taken before its query, so it is
+ * earlier than anything a hook could hand over, with no comparison required. A
+ * collection the snapshot never named has no such guarantee, which is why the
+ * hook's value is taken there and compared where two of them meet.
  */
 export function foldHandedOverScopedCacheEpochs(
 	snapshot: ScopedCacheEpochs,

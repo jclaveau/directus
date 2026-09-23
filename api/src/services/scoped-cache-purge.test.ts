@@ -64,7 +64,7 @@ const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
 
-const { createScopedCacheCollector, scopedCacheLegacyTags } =
+const { createScopedCacheHookDeclarations, scopedCacheLegacyTags } =
 	await import('../scoped-cache.js');
 
 // What a read ended up pinned to, as the dev headers and the telemetry spell it:
@@ -1659,7 +1659,7 @@ describe(oneLine`
 			// it as if an earlier child already declared a slice; a later child that takes
 			// over a row but declares nothing ITSELF must still fall back to coarse — else
 			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
-			const shared = createScopedCacheCollector(schema);
+			const shared = createScopedCacheHookDeclarations(schema);
 			shared.purge.purgeBy({ collection: 'siblings', pinnedScope: { id: [1] } });
 
 			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
@@ -1674,7 +1674,7 @@ describe(oneLine`
 			try {
 				await service().createMany(
 					[{ name: 'x', student: 'A' }],
-					{ scopedCacheCollector: shared },
+					{ scopedCacheHookDeclarations: shared },
 				);
 
 				// Coarse (null) despite the pre-seeded collector.

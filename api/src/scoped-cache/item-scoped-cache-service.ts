@@ -4,8 +4,8 @@ import type {
 	Item,
 	PrimaryKey,
 	Query,
-	ScopedCacheCollector,
 	ScopedCacheFingerprint,
+	ScopedCacheHookDeclarations,
 	ScopedCachePath,
 	ScopedCacheScopePin,
 	ScopedCacheCollectionPin,
@@ -70,7 +70,7 @@ export type ScopedCacheReadInputs = {
 	plan: ScopedCacheReadPlan;
 	updatedQuery: Query;
 	filteredRecords: Item[];
-	collector: ScopedCacheCollector;
+	hookDeclarations: ScopedCacheHookDeclarations;
 };
 
 /**
@@ -618,7 +618,7 @@ export class ItemScopedCacheService {
 
 	async purge(
 		scopedCacheFingerprints: ScopedCacheFingerprint[] | null,
-		collector?: Pick<ScopedCacheCollector, 'purgeFingerprints'>,
+		hookDeclarations?: Pick<ScopedCacheHookDeclarations, 'purgeFingerprints'>,
 		changedCollections: string[] = [],
 		{
 			// `false` leaves this collection's bare fingerprint warm: a
@@ -649,7 +649,7 @@ export class ItemScopedCacheService {
 		}
 
 		const context = this.purgeContext();
-		const hookFingerprints = collector?.purgeFingerprints ?? [];
+		const hookFingerprints = hookDeclarations?.purgeFingerprints ?? [];
 
 		// A rule reaching back into this collection leaves its own slices unresolvable
 		// too, so it takes the collection-wide purge — whose reach already covers the
@@ -803,7 +803,7 @@ export class ItemScopedCacheService {
 			plan,
 			updatedQuery,
 			filteredRecords,
-			collector: scopedCacheCollector,
+			hookDeclarations,
 		} = inputs;
 
 		let readPins: ScopedCacheCollectionPin[] = [];
@@ -1342,10 +1342,10 @@ export class ItemScopedCacheService {
 		// at the offsets they went in at.
 		const declaredCasesStart = readPins.length;
 
-		const declaredCaseSizes = scopedCacheCollector.scopeQueryCases
+		const declaredCaseSizes = hookDeclarations.scopeQueryCases
 			.map((queryCase) => queryCase.length);
 
-		for (const queryCase of scopedCacheCollector.scopeQueryCases) {
+		for (const queryCase of hookDeclarations.scopeQueryCases) {
 			readPins.push(...queryCase);
 		}
 
@@ -1428,9 +1428,9 @@ export class ItemScopedCacheService {
 		// marked it `manuallyPurged` (it reproduces the pin via its own purgeBy). List
 		// them so respond.ts leaves the read uncached + names them in the anomaly.
 		//
-		// Both hook channels are audited: `scopeTo` through the collector, and
+		// Both hook channels are audited: `scopeTo` through the declarations, and
 		// whatever `cache.scope` returned beyond the computed set. Auditing only the
-		// collector let the same unpurgeable pin through the other door.
+		// declarations let the same unpurgeable pin through the other door.
 		const hookAddedPins = new Map<string, ScopedCacheCollectionPin>();
 
 		for (const pin of readPins) {
@@ -1485,7 +1485,7 @@ export class ItemScopedCacheService {
 			return (
 				reproducedByAWrite(pin) === false &&
 				collectionsAWriteReaches.has(pin.collection) === false &&
-				!scopedCacheCollector.manuallyPurgedKeys.has(scopedCachePinKey(pin))
+				!hookDeclarations.manuallyPurgedKeys.has(scopedCachePinKey(pin))
 			);
 		});
 

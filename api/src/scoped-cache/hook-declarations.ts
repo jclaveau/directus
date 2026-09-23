@@ -3,11 +3,11 @@ import type {
 	ReadMeta,
 	SchemaOverview,
 	ScopedCacheCollectionPin,
-	ScopedCacheCollector,
 	ScopedCacheDeclaredFingerprint,
 	ScopedCacheDependency,
 	ScopedCacheFingerprint,
 	ScopedCacheFingerprintInput,
+	ScopedCacheHookDeclarations,
 	WithMeta,
 } from '@directus/types';
 import {
@@ -51,16 +51,16 @@ function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
 }
 
 /**
- * A per-operation collector backing the `context.scopedCache` hook handle. The
+ * The per-operation sink backing the `context.scopedCache` hook handle. The
  * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
  * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
  * the service drains `scopeQueryCases` into the read's scope, `purgeFingerprints`
  * into the mutation's purge. Both are idempotent sinks. Safe with purging off
  * (then neither is read).
  */
-export function createScopedCacheCollector(
+export function createScopedCacheHookDeclarations(
 	schema: SchemaOverview,
-): ScopedCacheCollector {
+): ScopedCacheHookDeclarations {
 	const scopeQueryCases: ScopedCacheCollectionPin[][] = [];
 	const seenScopeQueryCases = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
@@ -110,7 +110,7 @@ export function createScopedCacheCollector(
 			}
 
 			// Idempotent: a hook looping over rows that resolve the same slice — or a
-			// batch/upsert parent's shared collector fed by many children — must not
+			// batch/upsert parent's shared declarations fed by many children — must not
 			// inflate the set. Key on the canonical pin keys of the whole case, so
 			// field order and value/type variants (7 vs '7') can't slip a duplicate
 			// past a raw JSON compare.

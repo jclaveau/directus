@@ -1,5 +1,5 @@
 export * from './scoped-cache/config.js';
-export * from './scoped-cache/collector.js';
+export * from './scoped-cache/hook-declarations.js';
 export * from './scoped-cache/pins.js';
 export * from './scoped-cache/fill-guard.js';
 export * from './scoped-cache/fingerprint.js';

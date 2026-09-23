@@ -255,12 +255,12 @@ export interface ScopedCacheExtensionHandle {
 }
 
 /**
- * A per-operation sink collecting what `context.scopedCache` declares. A
- * batch/upsert parent injects one via `MutationOptions.scopedCacheCollector` so its
- * children (run with autoPurgeCache off) accumulate into it and the parent drains
- * it once.
+ * A per-operation sink holding what a hook declared through `context.scopedCache`.
+ * A batch/upsert parent injects one via
+ * `MutationOptions.scopedCacheHookDeclarations` so its children (run with
+ * autoPurgeCache off) accumulate into it and the parent drains it once.
  */
-export interface ScopedCacheCollector {
+export interface ScopedCacheHookDeclarations {
 	scope: ScopedCacheScopeHandle;
 	purge: ScopedCachePurgeHandle;
 	/**
@@ -294,7 +294,7 @@ export interface ScopedCacheCollector {
 	purgeSkippedKeys: Set<string>;
 	/**
 	 * Keys a create-filter take-over returned instead of inserting, as
-	 * `collection:key` so a shared collector's children can't collide on `1`.
+	 * `collection:key` so a shared parent's children can't collide on `1`.
 	 */
 	takenOverKeys: Set<string>;
 }

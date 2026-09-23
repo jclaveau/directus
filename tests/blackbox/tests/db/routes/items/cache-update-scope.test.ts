@@ -202,7 +202,7 @@ describe(oneLine`
 			expect(warmGlobex.headers[cacheStatusHeader]).toBe('HIT');
 
 			// Array body → updateBatch: each row forks an autoPurgeCache-off child, so a
-			// purgeBy lands only via a shared collector threaded through the batch.
+			// purgeBy lands only via shared declarations threaded through the batch.
 			await request(url)
 				.patch(`/items/${ORDER}`)
 				.send([

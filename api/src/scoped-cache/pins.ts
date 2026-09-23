@@ -167,7 +167,7 @@ export function isPinnableScopeType(type: Type | undefined): boolean {
 }
 
 /**
- * How a row a create hook took over is named in the collector's set. Recorded
+ * How a row a create hook took over is named in the hook declarations' set. Recorded
  * where the take-over happens and read back in another method entirely, so the
  * two spellings have to come from one place or the lookup silently misses.
  */

@@ -21,7 +21,7 @@ import {
 	bumpScopedCacheEpochs,
 	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
-	createScopedCacheCollector,
+	createScopedCacheHookDeclarations,
 	dropScopedCacheIndex,
 	earlierScopedCacheEpoch,
 	flushResponseCache,
@@ -520,7 +520,7 @@ describe('countScopedCacheTagMembers', () => {
 	});
 });
 
-describe('createScopedCacheCollector', () => {
+describe('createScopedCacheHookDeclarations', () => {
 	// The collector fills a declared tag's missing type from the schema; these cases
 	// name collections it does not carry, so their pins pass through as written.
 	const emptySchema = new SchemaBuilder().build();
@@ -537,7 +537,7 @@ describe('createScopedCacheCollector', () => {
 
 	it('records a key whose purge a hook skipped, without adding a pin', () => {
 		const { purge, scopeQueryCases, purgeSkippedKeys } =
-			createScopedCacheCollector(emptySchema);
+			createScopedCacheHookDeclarations(emptySchema);
 
 		purge.skipPurgeFor(7);
 
@@ -552,7 +552,7 @@ describe('createScopedCacheCollector', () => {
 		keeps the EARLIEST counter a scopeTo handed over per collection — a second
 		dependent read straddling a purge must not overwrite the value that shows it
 	`, () => {
-		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo(
 			{ collection: 'authors' },
@@ -574,7 +574,7 @@ describe('createScopedCacheCollector', () => {
 		its lookups out with allSettled hands them over in completion order, which is
 		not the order they were taken in
 	`, () => {
-		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '9' } });
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '2' } });
@@ -586,7 +586,7 @@ describe('createScopedCacheCollector', () => {
 		an absent counter beats any count — that lookup found the collection with no
 		counter at all, so a number beside it proves a purge created one in between
 	`, () => {
-		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '4' } });
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: null } });
@@ -599,7 +599,7 @@ describe('createScopedCacheCollector', () => {
 		tell a declared collection apart from a guarded one
 	`, () => {
 		const { scope, epochs, scopeQueryCases } =
-			createScopedCacheCollector(emptySchema);
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' });
 
@@ -608,7 +608,8 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, purgeSkippedKeys } = createScopedCacheCollector(emptySchema);
+		const { purge, purgeSkippedKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		purge.skipPurgeFor(7);
 		purge.skipPurgeFor('7');
@@ -618,7 +619,7 @@ describe('createScopedCacheCollector', () => {
 
 	it('scopeTo and purgeBy fill sinks of their own', () => {
 		const { scope, purge, scopeQueryCases, purgeFingerprints } =
-			createScopedCacheCollector(emptySchema);
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
@@ -641,7 +642,8 @@ describe('createScopedCacheCollector', () => {
 		takes a fingerprint batch, dropping the viewFields a read's own carries: they
 		say which columns a read depends on, and no purge reads them
 	`, () => {
-		const { purge, purgeFingerprints } = createScopedCacheCollector(emptySchema);
+		const { purge, purgeFingerprints } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		purge.purgeBy([
 			{
@@ -666,7 +668,9 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('accepts a batch, deduping within it and against prior declarations', () => {
-		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
+
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 
 		scope.scopeTo([
@@ -686,7 +690,8 @@ describe('createScopedCacheCollector', () => {
 		keeps the axes of one declared fingerprint together, so the read dies only on
 		a write reproducing the whole of it
 	`, () => {
-		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({
 			collection: 'articles',
@@ -702,7 +707,8 @@ describe('createScopedCacheCollector', () => {
 	it(oneLine`
 		dedups on the canonical axis keys — field order and value type collapse
 	`, () => {
-		const { scope, scopeQueryCases } = createScopedCacheCollector(emptySchema);
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [7] } });
 		// Same slice, the value as a string. A raw JSON compare would keep both; the
@@ -720,7 +726,7 @@ describe('createScopedCacheCollector', () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
 		const { scope, purge, scopeQueryCases, purgeFingerprints } =
-			createScopedCacheCollector(notesSchema);
+			createScopedCacheHookDeclarations(notesSchema);
 
 		scope.scopeTo({ collection: 'notes', pinnedScope: { id: [upper] } });
 		// The spelling the driver hands the purge side for the very same row.
@@ -747,7 +753,8 @@ describe('createScopedCacheCollector', () => {
 		leaves a declaration naming a collection or field the schema doesn't know
 		untyped rather than inventing one, and a bare one has no field to look up
 	`, () => {
-		const { scope, scopeQueryCases } = createScopedCacheCollector(notesSchema);
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(notesSchema);
 
 		scope.scopeTo({ collection: 'ghosts', pinnedScope: { id: ['A'] } });
 		scope.scopeTo({ collection: 'notes', pinnedScope: { ghost: ['A'] } });
@@ -761,7 +768,8 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('records the axis keys of a manuallyPurged scopeTo (anomaly-exempt)', () => {
-		const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
+		const { scope, manuallyPurgedKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo(
 			{ collection: 'articles', pinnedScope: { author: [5] } },
@@ -773,7 +781,7 @@ describe('createScopedCacheCollector', () => {
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
 		const { scope, purge, manuallyPurgedKeys } =
-			createScopedCacheCollector(emptySchema);
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 		purge.purgeBy({ collection: 'authors' });
@@ -816,7 +824,7 @@ describe('createScopedCacheCollector', () => {
 
 		it('folds a pending lookup and hands its rows back', async () => {
 			const { scope, scopeQueryCases, epochs } =
-				createScopedCacheCollector(emptySchema);
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const rows = await scope.dependOn(Promise.resolve(metricLookup()));
 
@@ -827,7 +835,7 @@ describe('createScopedCacheCollector', () => {
 
 		it('takes an already-resolved lookup the same way', async () => {
 			const { scope, scopeQueryCases, epochs } =
-				createScopedCacheCollector(emptySchema);
+				createScopedCacheHookDeclarations(emptySchema);
 
 			await scope.dependOn(metricLookup());
 
@@ -840,7 +848,7 @@ describe('createScopedCacheCollector', () => {
 			what tells one lookup from the batch holding it
 		`, async () => {
 			const { scope, scopeQueryCases, epochs } =
-				createScopedCacheCollector(emptySchema);
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const batch = await scope.dependOn(
 				Promise.all([metricLookup(), auditLookup()]),
@@ -857,7 +865,7 @@ describe('createScopedCacheCollector', () => {
 			rejected one through for the caller to judge
 		`, async () => {
 			const { scope, scopeQueryCases, epochs } =
-				createScopedCacheCollector(emptySchema);
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const verdicts = await scope.dependOn(
 				Promise.allSettled([metricLookup(), Promise.reject(new Error('gone'))]),
@@ -874,7 +882,7 @@ describe('createScopedCacheCollector', () => {
 			folds each lookup on its own, so two lookups of one collection straddling a
 			purge are judged on the earlier counter
 		`, async () => {
-			const { scope, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 			const before = withMeta(
 				[{ id: 1 }],
@@ -904,7 +912,8 @@ describe('createScopedCacheCollector', () => {
 		});
 
 		it('never marks a folded declaration manuallyPurged', async () => {
-			const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
+			const { scope, manuallyPurgedKeys } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			await scope.dependOn(metricLookup());
 
@@ -913,7 +922,7 @@ describe('createScopedCacheCollector', () => {
 
 		it('adds nothing for a value carrying no meta rider', async () => {
 			const { scope, scopeQueryCases, epochs } =
-				createScopedCacheCollector(emptySchema);
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const rows = await scope.dependOn([{ id: 1 }]);
 
