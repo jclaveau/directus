@@ -97,3 +97,22 @@ back to 2 (supervisor logged `0:online:0%, 1:online:0%` at the moment of the rea
 415 tests in the shard passed; `gh run rerun <run> --failed` cleared it with no code change.
 Nothing to do with the diff under test — a scoped-cache/comment-only branch cannot move the
 autoscaler.
+
+**Seventh signature — `app/deployment-namespace.test.ts` MONITOR connection
+(2026-09-23, PR #534 shard 6).** `beforeAll` calls `redis.monitor()` on the Redis every
+suite of the shard shares, so a shard-mate's traffic lands on that connection and ioredis
+throws `Error: Command queue state error` with `Last reply: … "publish"
+"blackbox-prewarm-load-postgres:bus:logs"`. The suite aborts mid-`beforeAll`, so `afterAll`
+then trips on `TypeError: Cannot read properties of undefined (reading 'kill')` at
+`instances[vendor]!.kill()` — that second error is the symptom, not the cause. 402 of 405
+passed; `gh run rerun <run> --failed` cleared it. The file is old and untouched by the
+branch it fails on.
+
+**Eighth signature — an unasserted seed write read back much later (2026-09-23, PR #534
+shard 5).** `cache-o2m-and-m2o-same-collection.test.ts:159` failed with `TypeError: Cannot
+read properties of null (reading 'body')` on `after.body.data.featured_comment.body`, while
+the cache assertion on the same read (MISS) passed. The M2O value is set by a raw supertest
+PATCH in `beforeAll` whose status nothing checked, so a seed write that did not land reads
+as a cache bug 100 lines away. Cleared on rerun; the seed now carries `.expect(200)`. A raw
+`request(...)` in a seed needs `.expect(200)` — the `Create*` helpers already throw on
+non-2xx ([[project_directus_blackbox_silent_write_failures]]).
