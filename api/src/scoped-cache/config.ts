@@ -1,8 +1,8 @@
 import { useEnv } from '@directus/env';
 import {
 	redisConfigAvailable,
-	useRedis,
 } from '../redis/index.js';
+import { useScopedCacheStore } from './store.js';
 
 const env = useEnv();
 
@@ -24,18 +24,13 @@ export function scopedCachePurgeEnabled(): boolean {
 }
 
 /**
- * Fail fast at startup: scoped cache purging drives Redis SCAN + multi-key DEL over
- * a single node, so it only works on a standalone client. A cluster client would
- * silently under-purge (keys on other nodes never scanned) and leave stale slices.
- * `useRedis()` always builds a standalone `Redis` in core, so this only bites a
- * custom override — surface it at boot rather than as a mid-request stale HIT.
+ * Fail fast at startup on a store that cannot hold the index — what that means is
+ * the store's own answer (`assertStoreSupported`), since only it knows which of
+ * its clients can answer for the whole keyspace. Surfaced at boot rather than as a
+ * mid-request stale HIT.
  */
 export function assertScopedCacheRedisSupported(): void {
-	if (scopedCachePurgeEnabled() && useRedis().isCluster) {
-		throw new Error(
-			'CACHE_AUTO_PURGE_MODE=scoped is not implemented for Redis cluster clients '
-			+ '(SCAN and multi-key DEL are single-node). Use a standalone Redis or '
-			+ 'CACHE_AUTO_PURGE_MODE=full.',
-		);
+	if (scopedCachePurgeEnabled()) {
+		useScopedCacheStore().assertStoreSupported();
 	}
 }

@@ -18,7 +18,6 @@ import {
 } from '../logger/index.js';
 import {
 	redisConfigAvailable,
-	useRedis,
 } from '../redis/index.js';
 import {
 	type PendingScopedCachePurge,
@@ -30,13 +29,17 @@ import {
 import {
 	getMilliseconds,
 } from '../utils/get-milliseconds.js';
-import type { ChainableCommander, Redis } from 'ioredis';
 import type { EventContext, SchemaOverview, ScopedCacheTag } from '@directus/types';
 import type { Keyv } from 'keyv';
 import { dropCacheEntries } from '../cache-drop.js';
 import {
 	scopedCachePurgeEnabled,
 } from './config.js';
+import {
+	useScopedCacheStore,
+	type ScopedCacheIndexEntry,
+	type ScopedCacheUnlinkTally,
+} from './store.js';
 import {
 	parseScopedCacheIndexMember,
 	renderScopedCacheIndexMember,
@@ -144,141 +147,6 @@ export function scopedCacheCollectionsChangedByOnDelete(
 const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
 
 /**
- * How many tag keys one slice-index call files at once.
- *
- * The members are spread into the call and `unpack`ed inside the script, and both
- * of those have a stack ceiling well below the number of slices one read can be
- * pinned to. The expiry the call carries is the same value for every chunk, so
- * splitting changes nothing but how many calls it takes.
- */
-const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
-
-
-/**
- * File a key under a tag set and give that set an expiry that only ever moves OUT.
- *
- * A bare `EXPIRE` overwrites, and a tag set is SHARED by every entry pinned to that
- * slice: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
- * indexing an entry cached for an hour, leaving that entry unreachable to every
- * purge for the rest of its life. Redis 7 has `EXPIRE … GT`, but GT reads a key
- * carrying no TTL as infinite: it refuses the very first expiry a fresh tag set
- * needs, and cannot tell that set from one deliberately left unbounded. So the
- * comparison runs as a script — atomic, one pipeline slot, and `EXISTS` telling
- * those two apart.
- *
- * A set that already carries NO expiry outlives every entry by construction, so it
- * keeps none — only a freshly created set takes one unconditionally.
- */
-export const scopedCacheTagExpiryScript = `
-local existed = redis.call('EXISTS', KEYS[1])
-redis.call('SADD', KEYS[1], unpack(ARGV, 2))
-local want = tonumber(ARGV[1])
-if existed == 0 then
-	redis.call('EXPIRE', KEYS[1], want)
-	return 1
-end
-local ttl = redis.call('TTL', KEYS[1])
-if ttl >= 0 and ttl < want then
-	redis.call('EXPIRE', KEYS[1], want)
-end
-return 0
-`;
-
-type ScopedCacheTagExpiryCommand = {
-	scopedCacheTagExpiry(
-		tagKey: string,
-		ttlSeconds: number,
-		...members: string[]
-	): ChainableCommander;
-};
-
-type ScopedCacheTagPipeline = ChainableCommander & ScopedCacheTagExpiryCommand;
-
-const clientsCarryingScripts = new WeakSet<Redis>();
-
-/**
- * The shared client, with the tag-expiry script registered as a command on it.
- *
- * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
- * `NOSCRIPT` — so the 316-byte script crosses the wire once per server rather than
- * once per tag. A read pinned to 200 slices files 402 of these in one pipeline, and
- * as `EVAL` that is 124 KB of Lua per fill against 193 KB sent in total.
- *
- * Registration is per client and idempotent, but `defineCommand` rebuilds the
- * command each time, so the set keeps it to the first call per connection.
- */
-function useScriptedRedis(): Redis & ScopedCacheTagExpiryCommand {
-	const redis = useRedis();
-
-	if (! clientsCarryingScripts.has(redis)) {
-		redis.defineCommand('scopedCacheTagExpiry', {
-			numberOfKeys: 1,
-			lua: scopedCacheTagExpiryScript,
-		});
-
-		clientsCarryingScripts.add(redis);
-	}
-
-	return redis as Redis & ScopedCacheTagExpiryCommand;
-}
-
-/**
- * Read a set of tag sets, drop them, and prune the slice index that names them — as
- * one step, so no other client can act between any two of those. A read filing its
- * key into one of those sets between the read and the drop would otherwise have that
- * set deleted underneath it, leaving a correct entry indexed by nothing.
- *
- * Members are gathered with a `SMEMBERS` per key and deduped in Lua rather than by
- * `SUNION`: the union has to be built before the sets are dropped anyway, and
- * `unpack`ing a key list into one call overflows Lua's stack.
- *
- * KEYS are the tag sets; ARGV is `sliceIndexKey, tagKey` pairs for the prunings. The
- * counter bumps are NOT in here — they are one pipeline of their own, sent first, so
- * they still land when the sweep behind them is refused.
- */
-export const scopedCacheSweepScript = `
-local seen = {}
-local members = {}
-
-for i = 1, #KEYS do
-	local batch = redis.call('SMEMBERS', KEYS[i])
-
-	for j = 1, #batch do
-		local member = batch[j]
-
-		if not seen[member] then
-			seen[member] = true
-			members[#members + 1] = member
-		end
-	end
-
-	redis.call('UNLINK', KEYS[i])
-end
-
-for i = 1, #ARGV, 2 do
-	redis.call('SREM', ARGV[i], ARGV[i + 1])
-end
-
-return members
-`;
-
-/**
- * How many tag sets one sweep call carries.
- *
- * Two bounds, same number. A key list is spread into the `eval` call, and a spread
- * long enough throws `RangeError` before Redis is reached
- * (https://github.com/jclaveau/directus/issues/397) — measured between 125k and 200k
- * arguments, and stack-dependent, so the cap has to be well under any runner's.
- * And a script blocks the whole server while it runs, so the batch also bounds how
- * long one purge can hold Redis away from everything else.
- *
- * Chunking costs the race nothing: each chunk is atomic on its own, and a fill into
- * a set in a later chunk is read and swept by that chunk, while a fill into a set
- * already swept makes a fresh set the next purge finds.
- */
-const SCOPED_CACHE_SWEEP_CHUNK_KEYS = 500;
-
-/**
  * Index a freshly-cached response key under the query case it was read with, so a
  * later mutation can drop just the entries that case answers for instead of the
  * whole namespace. Both the payload key and its `__expires_at` sibling are indexed.
@@ -298,12 +166,10 @@ export async function indexScopedCacheEntry(
 		return;
 	}
 
-	const redis = useScriptedRedis();
-
 	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
 		* SCOPED_CACHE_TAG_TTL_FACTOR;
 
-	const pipeline = redis.pipeline() as ScopedCacheTagPipeline;
+	const indexEntries: ScopedCacheIndexEntry[] = [];
 
 	// One set per collection the read touched, split by its index path, holding the
 	// entry and its siblings under the whole query case the read was bound to. A
@@ -322,27 +188,13 @@ export async function indexScopedCacheEntry(
 			fingerprint,
 			indexPath,
 		)) {
-			if (ttlSeconds > 0) {
-				pipeline.scopedCacheTagExpiry(indexKey, ttlSeconds, ...indexedMembers);
-			}
-			else {
-				pipeline.sadd(indexKey, ...indexedMembers);
-			}
+			indexEntries.push({ indexKey, members: indexedMembers });
 		}
 	}
 
-	// ioredis resolves `[[err, result], …]` and only REJECTS on a connection-level
-	// failure: a per-command refusal (maxmemory/noeviction on the `sadd`, a
-	// WRONGTYPE) resolves as an entry error. Swallowing it would leave the entry
-	// its caller is about to write indexed under nothing, so no purge could ever
-	// reach it — surface it and let the caller skip the write.
-	const results = await pipeline.exec();
-
-	const failed = results?.find(([error]) => error !== null);
-
-	if (failed) {
-		throw failed[0];
-	}
+	// Throws when the store refuses any of it, so the caller skips the write rather
+	// than storing an entry indexed under nothing — no purge could ever reach it.
+	await useScopedCacheStore().addIndexMembers(indexEntries, ttlSeconds);
 }
 
 /**
@@ -383,7 +235,7 @@ export async function countScopedCacheTagMembers(
 		labelledByCollection.set(declared.collection, labelled);
 	}
 
-	const redisClient = useRedis();
+	const store = useScopedCacheStore();
 
 	for (const [collection, labelled] of labelledByCollection) {
 		// The keys each label reached, not a running total: an entry bound to a list
@@ -392,18 +244,7 @@ export async function countScopedCacheTagMembers(
 		const reachedByTag = new Map<string, Set<string>>();
 
 		for (const indexKey of await scopedCacheCollectionIndexKeys(collection)) {
-			let scanCursor = '0';
-
-			do {
-				const [next, indexedMembers] = await redisClient.sscan(
-					indexKey,
-					scanCursor,
-					'COUNT',
-					SCOPED_CACHE_INDEX_SCAN_COUNT,
-				);
-
-				scanCursor = next;
-
+			for await (const indexedMembers of store.scanIndexMembers(indexKey, null)) {
 				for (const indexedMember of indexedMembers) {
 					const { fingerprint, key } =
 						parseScopedCacheIndexMember(indexedMember);
@@ -420,7 +261,7 @@ export async function countScopedCacheTagMembers(
 						}
 					}
 				}
-			} while (scanCursor !== '0');
+			}
 		}
 
 		for (const [displayTag, reached] of reachedByTag) {
@@ -532,16 +373,6 @@ async function dropSweptScopedCacheEntries(
 
 	return evicted;
 }
-
-/**
- * How many members one `SSCAN` of an index set is asked to look at per round trip.
- *
- * The set is read in pages rather than whole: a collection's bare set holds every
- * cached read that pinned no index value, and `SMEMBERS` on it would put the
- * whole thing in this process's memory — and hold Redis for the length of the
- * reply — to keep the handful the write actually matched.
- */
-const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
 
 /**
  * Drop the entries whose whole query case the written rows satisfy, and nothing
@@ -706,12 +537,12 @@ async function scopedCacheCollectionIndexKeys(
 ): Promise<string[]> {
 	const indexKeys: string[] = [];
 
-	for await (const batch of scanScopedCacheKeys(
+	for await (const batch of useScopedCacheStore().scanIndexKeys(
 		scopedCacheCollectionIndexGlob(collection),
 	)) {
-		// One at a time rather than spread: a SCAN is free to answer with more than
-		// its COUNT, and a spread long enough throws before the array is touched
-		// (https://github.com/jclaveau/directus/issues/397).
+		// One at a time rather than spread: a scan is free to answer with more than
+		// one page's worth, and a spread long enough throws before the array is
+		// touched (https://github.com/jclaveau/directus/issues/397).
 		for (const indexKey of batch) {
 			indexKeys.push(indexKey);
 		}
@@ -749,7 +580,7 @@ async function purgeScopedCacheIndexWhere(
 	globPatterns: readonly string[] | null,
 	purges: (fingerprint: ScopedCacheFingerprint) => boolean,
 ): Promise<ScopedCachePurgeSweep> {
-	const redisClient = useRedis();
+	const store = useScopedCacheStore();
 	const matchedByIndexKey = new Map<string, Set<string>>();
 	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
@@ -761,27 +592,10 @@ async function purgeScopedCacheIndexWhere(
 		const testedMembers = new Set<string>();
 
 		for (const globPattern of globPatterns ?? [null]) {
-			let scanCursor = '0';
-
-			do {
-				const [next, indexedMembers] = globPattern === null
-					? await redisClient.sscan(
-						indexKey,
-						scanCursor,
-						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
-					)
-					: await redisClient.sscan(
-						indexKey,
-						scanCursor,
-						'MATCH',
-						globPattern,
-						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
-					);
-
-				scanCursor = next;
-
+			for await (const indexedMembers of store.scanIndexMembers(
+				indexKey,
+				globPattern,
+			)) {
 				for (const indexedMember of indexedMembers) {
 					if (testedMembers.has(indexedMember)) {
 						continue;
@@ -805,7 +619,7 @@ async function purgeScopedCacheIndexWhere(
 						matchedKeys.push(key);
 					}
 				}
-			} while (scanCursor !== '0');
+			}
 		}
 	}
 
@@ -815,168 +629,12 @@ async function purgeScopedCacheIndexWhere(
 
 	const [evicted] = await Promise.all([
 		dropSweptScopedCacheEntries(cache, matchedKeys),
-		pruneScopedCacheIndex(redisClient, matchedByIndexKey),
+		store.removeIndexMembers(matchedByIndexKey),
 	]);
 
 	return { evicted, matchedKeys };
 }
 
-
-async function pruneScopedCacheIndex(
-	redisClient: Redis,
-	matchedByIndexKey: ReadonlyMap<string, ReadonlySet<string>>,
-): Promise<void> {
-	const redisPipeline = redisClient.pipeline();
-
-	for (const [indexKey, matchedMembers] of matchedByIndexKey) {
-		const indexedMembers = [...matchedMembers];
-
-		for (
-			let memberAt = 0;
-			memberAt < indexedMembers.length;
-			memberAt += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
-		) {
-			redisPipeline.srem(
-				indexKey,
-				...indexedMembers.slice(
-					memberAt,
-					memberAt + SCOPED_CACHE_INDEX_CHUNK_MEMBERS,
-				),
-			);
-		}
-	}
-
-	// A refused prune leaves members naming keys that are already gone, which the
-	// next purge tests and finds nothing for. That costs a compare, never a stale
-	// hit, so it is logged rather than thrown into the mutation that triggered it.
-	const pipelineResults = await redisPipeline.exec();
-	const failedResult = pipelineResults?.find(([error]) => error !== null);
-
-	if (failedResult) {
-		useLogger().warn(
-			failedResult[0],
-			`[scoped-cache] pruning the fingerprint index failed; its members expire `
-			+ `with their set: ${failedResult[0]}`,
-		);
-	}
-}
-
-// How many keys a SCAN is asked to look at per round trip. `@keyv/redis` uses 1000
-// for the namespace clears that run beside these, and the 250 this replaced bought
-// nothing for 4x the round trips: SCAN filters server-side, so the pass costs the
-// whole keyspace whatever the COUNT, and only the number of RTTs moves.
-const SCOPED_CACHE_SCAN_COUNT = 1000;
-
-// How many keys one delete command is allowed to carry. Redis runs commands one at a
-// time, so a single command deleting every key of a full flush holds the server for
-// its whole duration — a latency event for every client, not just the caller.
-const SCOPED_CACHE_UNLINK_CHUNK = 1000;
-
-/**
- * Delete index keys without stalling the server.
- *
- * `UNLINK` rather than `DEL`: these are SETs, so a delete is O(members) as well as
- * O(keys), and UNLINK does that reclaim on a background thread instead of on the one
- * thread that answers everyone else.
- *
- * Chunked rather than one command, because UNLINK still unlinks synchronously and
- * that part is O(keys). The chunks go in one pipeline — Redis can serve other
- * clients between two commands of a pipeline, but not inside one — so the cost is a
- * single round trip either way.
- *
- * Reports what Redis said it removed and how many commands it refused, rather than
- * what it was handed: a pipeline answers per command, so a chunk that failed is a
- * chunk still there, and a count on its own cannot be told from an index that was
- * already empty.
- */
-export interface ScopedCacheUnlinkTally {
-	dropped: number;
-	refused: number;
-}
-
-async function unlinkScopedCacheKeys(
-	keys: string[],
-): Promise<ScopedCacheUnlinkTally> {
-	// `unlink()` with no keys throws, and a flush with nothing to drop is normal.
-	if (keys.length === 0) {
-		return { dropped: 0, refused: 0 };
-	}
-
-	const pipeline = useRedis().pipeline();
-
-	for (let at = 0; at < keys.length; at += SCOPED_CACHE_UNLINK_CHUNK) {
-		// Array form, never a spread: this list is a whole-keyspace scan, so it is
-		// the longest of them.
-		pipeline.unlink(keys.slice(at, at + SCOPED_CACHE_UNLINK_CHUNK));
-	}
-
-	const results = await pipeline.exec();
-	const tally: ScopedCacheUnlinkTally = { dropped: 0, refused: 0 };
-
-	for (const [error, removed] of results ?? []) {
-		if (error) {
-			tally.refused += 1;
-		}
-		else {
-			tally.dropped += Number(removed ?? 0);
-		}
-	}
-
-	return tally;
-}
-
-/**
- * Unlink every key under a prefix, a scan batch at a time.
- *
- * Batch by batch rather than collecting first: the list a full flush would collect
- * is the one thing here that grows with the cache, and holding all of it to delete
- * all of it puts the whole index in this process's heap for no gain — the deletes
- * are per-batch round trips either way.
- */
-async function unlinkScopedCacheKeysMatching(
-	match: string,
-): Promise<ScopedCacheUnlinkTally> {
-	const tally = { dropped: 0, refused: 0 };
-
-	for await (const batch of scanScopedCacheKeys(match)) {
-		const batchTally = await unlinkScopedCacheKeys(batch);
-
-		tally.dropped += batchTally.dropped;
-		tally.refused += batchTally.refused;
-	}
-
-	return tally;
-}
-
-/**
- * Cursor-scan every key under a prefix.
- *
- * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the whole
- * keyspace however few keys match — but only the matches cross the wire, which is
- * why the prefix is worth having.
- *
- * A single-node SCAN only covers the whole keyspace on a standalone client; a
- * cluster would miss keys on other nodes. Scoped mode is refused on a cluster at
- * startup (`assertScopedCacheRedisSupported`), so the client is always standalone.
- */
-async function* scanScopedCacheKeys(match: string): AsyncGenerator<string[]> {
-	const redis = useRedis();
-	let cursor = '0';
-
-	do {
-		const [next, batch] = await redis.scan(
-			cursor,
-			'MATCH',
-			match,
-			'COUNT',
-			SCOPED_CACHE_SCAN_COUNT,
-		);
-
-		cursor = next;
-		yield batch;
-	}
-	while (cursor !== '0');
-}
 
 /**
  * Drop every scoped-cache index key: the tag SETs
@@ -1005,7 +663,9 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 
 	// The keys the pre-scoped-cache-index layout left behind are not swept here:
 	// they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
-	return unlinkScopedCacheKeysMatching(`${scopedCacheIndexPrefix()}*`);
+	return useScopedCacheStore().dropIndexKeysMatching(
+		`${scopedCacheIndexPrefix()}*`,
+	);
 }
 
 /**
@@ -1079,39 +739,27 @@ async function purgeScopedCacheCollectionIndex(
 	cache: Keyv,
 	collection: string,
 ): Promise<{ evicted: number; indexKeys: number }> {
-	const redis = useRedis();
+	const store = useScopedCacheStore();
 	const keys: string[] = [];
 	const seenKeys = new Set<string>();
 	let indexKeys = 0;
 
-	for await (const batch of scanScopedCacheKeys(
+	for await (const batch of store.scanIndexKeys(
 		scopedCacheCollectionIndexGlob(collection),
 	)) {
 		indexKeys += batch.length;
 
-		for (let at = 0; at < batch.length; at += SCOPED_CACHE_SWEEP_CHUNK_KEYS) {
-			const chunk = batch.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
+		// Taken rather than read then dropped: a read filing its key into one of
+		// these sets in between would otherwise have its set deleted underneath it.
+		for (const indexedMember of await store.takeIndexMembers(batch)) {
+			// The fingerprint half is read past rather than parsed: this purge drops
+			// the key whichever query case filed it, so the two members an entry
+			// cached under two cases has collapse to one key here.
+			const { key } = parseScopedCacheIndexMember(indexedMember);
 
-			// The same script the tag sweep runs, and for the same reason: a read
-			// filing its key into one of these sets between the read and the drop
-			// would otherwise have its set deleted underneath it. No prunings — a
-			// fingerprint set is named by nothing but this scan.
-			const swept = await redis.eval(
-				scopedCacheSweepScript,
-				chunk.length,
-				...chunk,
-			) as string[];
-
-			for (const indexedMember of swept) {
-				// The fingerprint half is read past rather than parsed: this purge
-				// drops the key whichever query case filed it, so the two members an
-				// entry cached under two cases has collapse to one key here.
-				const { key } = parseScopedCacheIndexMember(indexedMember);
-
-				if (seenKeys.has(key) === false) {
-					seenKeys.add(key);
-					keys.push(key);
-				}
+			if (seenKeys.has(key) === false) {
+				seenKeys.add(key);
+				keys.push(key);
 			}
 		}
 	}
@@ -1468,7 +1116,7 @@ export function startScopedCachePurgeRecovery(): void {
 			});
 	};
 
-	useRedis().on('ready', recover);
+	useScopedCacheStore().onStoreReady(recover);
 
 	// A purge can also fail with the link UP — `OOM command not allowed` under
 	// maxmemory/noeviction, a WRONGTYPE, a LOADING replica — and then no `ready`

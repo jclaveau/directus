@@ -4,10 +4,10 @@ import {
 } from '../logger/index.js';
 import {
 	redisConfigAvailable,
-	useRedis,
 } from '../redis/index.js';
 import type { ScopedCacheTag } from '@directus/types';
 import { scopedCachePurgeEnabled } from './config.js';
+import { useScopedCacheStore } from './store.js';
 import { earlierScopedCacheEpoch } from './tags.js';
 
 const env = useEnv();
@@ -60,9 +60,8 @@ export async function readScopedCacheEpochs(
 	// A read that cannot reach the counters still has to answer. Capturing nothing
 	// leaves the fill unguarded, exactly as it is with no redis at all — the same
 	// trade the response cache makes everywhere else.
-	const values = await useRedis()
-		.mget(names.map(scopedCacheEpochKey))
-		.catch((): null => null);
+	const values = await useScopedCacheStore()
+		.readCounterValues(names.map(scopedCacheEpochKey));
 
 	// Nothing, rather than a counter reading of `null` per collection: `*` is what
 	// says a capture was taken, and filling it in from a read that never happened
@@ -100,30 +99,15 @@ export async function bumpScopedCacheEpochs(
 	// trading every entry it was about to drop for the one racing fill the counter
 	// would have refused.
 	try {
-		const pipeline = useRedis().pipeline();
-
-		for (const name of names) {
-			pipeline.incr(scopedCacheEpochKey(name));
-
-			pipeline.expire(
-				scopedCacheEpochKey(name),
-				SCOPED_CACHE_EPOCH_TTL_SECONDS,
-			);
-		}
-
-		const results = await pipeline.exec();
-
-		// Best effort is not the same as unobserved. `exec` rejects only on a
-		// connection-level failure, so an `INCR` refused on its own — maxmemory with
-		// noeviction, a WRONGTYPE — resolves as an entry error. The purge then sweeps
-		// with the counter unmoved, and a fill racing it compares equal and stores
-		// rows that purge already superseded. Nothing here can stop the sweep, but a
-		// guard that silently stopped guarding must not also be silent.
-		const refused = results?.find(([error]) => error !== null)?.[0];
-
-		if (refused) {
-			throw refused;
-		}
+		// Best effort is not the same as unobserved. The store throws on a counter it
+		// could not move — maxmemory with noeviction, a WRONGTYPE — and a purge then
+		// sweeps with that counter unmoved, so a fill racing it compares equal and
+		// stores rows the purge already superseded. Nothing here can stop the sweep,
+		// but a guard that silently stopped guarding must not also be silent.
+		await useScopedCacheStore().bumpCounterValues(
+			names.map(scopedCacheEpochKey),
+			SCOPED_CACHE_EPOCH_TTL_SECONDS,
+		);
 	}
 	catch (error: any) {
 		// See above: the sweep behind this is what makes the cache correct.
