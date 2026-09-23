@@ -9,7 +9,7 @@ export type EventContext = {
 	schema: SchemaOverview | null;
 	accountability: Accountability | null;
 	/**
-	 * Scoped-cache tag channel, carrying ONLY the methods for this filter's event:
+	 * Scoped-cache fingerprint channel, carrying ONLY the methods for this event:
 	 * `scopeTo` and `dependOn` on `items.read`, `purgeBy` on
 	 * `items.create`/`update`/`delete`. Absent on every other event. A hook does not
 	 * see this union: `register.filter` hands a read handler `ReadEventContext` and a

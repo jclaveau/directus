@@ -110,8 +110,8 @@ export type MutationOptions = {
 	allowFilterCancel?: boolean | undefined;
 
 	/**
-	 * A shared scoped-cache tag collector injected by a batch/upsert parent so child
-	 * mutations' `purgeBy` tags survive to the parent's single deferred purge.
+	 * A shared scoped-cache fingerprint collector injected by a batch/upsert parent
+	 * so child mutations' `purgeBy` survives to the parent's single deferred purge.
 	 */
 	scopedCacheCollector?: ScopedCacheCollector | undefined;
 

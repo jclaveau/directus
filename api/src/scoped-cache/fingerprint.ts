@@ -234,7 +234,7 @@ export function scopedCacheDeclaredPins(
 
 /**
  * What a set of fingerprints is called where a fingerprint cannot be written: the
- * dev `X-Scoped-Cache-*` headers, and the tag lists the telemetry stores.
+ * dev `X-Scoped-Cache-*` headers, and the label lists the telemetry stores.
  *
  * One label per pinned value, `viewFields` dropped, and the bare collection for a
  * fingerprint pinning nothing — `collection` or `collection:field=value`. The AND
@@ -354,15 +354,15 @@ export function scopedCacheViewFieldsAreTouched(
 /**
  * One fingerprint per way the read matches — per query case, not per collection.
  *
- * A query case holds the tags that had to hold TOGETHER on one collection: a
+ * A query case holds the pins that had to hold TOGETHER on one collection: a
  * filter of `owner=alpha AND method=spaced` is one query case of two pins, and
  * the entry it files is dropped only by a write satisfying both. An `_or` across
  * two fields is two query cases instead, since a row matching either changes the
  * response, and one fingerprint ANDing them would match neither.
  *
- * The tags a collection carries from anywhere else — a nested node's slice, an
- * ancestor's key, a hook's own tag — each stand alone the way a fingerprint sweep
- * reads them, so each is a query case of its own.
+ * The pins a collection carries from anywhere else — a nested node's slice, an
+ * ancestor's key, a hook's own declaration — each stand alone the way a fingerprint
+ * sweep reads them, so each is a query case of its own.
  *
  * A query case naming no field pins nothing, so its fingerprint carries an empty
  * scope and every row of that collection matches — which is what a bare fingerprint

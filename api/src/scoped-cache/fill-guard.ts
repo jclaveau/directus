@@ -179,7 +179,7 @@ export function mergedScopedCacheEpochs(
 }
 
 /**
- * The collections a response is tagged with that its snapshot never covered — so a
+ * The collections a response depends on that its snapshot never covered — so a
  * purge of them landing mid-read passes the post-fill comparison unnoticed, and the
  * entry would be stored already stale under an index that purge has swept.
  *

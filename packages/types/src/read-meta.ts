@@ -65,8 +65,8 @@ export interface ScopedCacheFingerprint {
 	 *
 	 * `limit` shapes the view too but names no field, so it is not one of them: it
 	 * already varies the cache key, so two page sizes are two entries, and a nested
-	 * node cut by a limit is tagged bare rather than pinned (`read-plan.ts`) — the
-	 * rows past the cut are named by nothing.
+	 * node cut by a limit gets a bare fingerprint rather than a pin
+	 * (`read-plan.ts`) — the rows past the cut are named by nothing.
 	 */
 	readonly viewFields: readonly string[];
 }
@@ -138,19 +138,19 @@ export interface ScopedCacheScopeHandle {
 		options?: {
 			manuallyPurged?: boolean;
 			/**
-			 * The purge counters the read these fingerprints came from captured BEFORE
-			 * its own query — `result.getMeta()?.scopedCacheEpochs` of the dependent
-			 * read.
+			 * The purge counters the read these fingerprints came from snapshotted
+			 * BEFORE its own query — `result.getMeta()?.scopedCacheEpochs` of the
+			 * dependent read.
 			 *
-			 * The host captures the counters of the collections it can name up front,
+			 * The host snapshots the counters of the collections it can name up front,
 			 * and a hook's declaration arrives long after that, on a collection nothing
-			 * captured: a purge of it landing mid-read would then pass the post-fill
+			 * snapshotted: a purge of it landing mid-read would then pass the post-fill
 			 * comparison unnoticed and the response would be stored already stale.
-			 * There is no capturing it late — the check needs a value from before the
-			 * data was read — so a scoped-to collection with no counter leaves the
+			 * There is no snapshotting it late — the check needs a value from before
+			 * the data was read — so a scoped-to collection with no counter leaves the
 			 * response uncached (an `unguarded_scope` anomaly).
 			 *
-			 * Handing the dependent read's own capture over is what keeps it cacheable,
+			 * Handing the dependent read's own snapshot over is what keeps it cacheable,
 			 * and it is the right value by construction: that read took it before the
 			 * rows these fingerprints describe were fetched.
 			 */
@@ -219,17 +219,18 @@ export interface ScopedCachePurgeHandle {
  * write done OUTSIDE `ItemsService` (e.g. a raw `knex` bulk update for performance),
  * which gets no automatic scoped purge. Row-based: pass the rows you wrote and the
  * host derives touched per-user slices from the collection's `scopedCacheFields`,
- * then purges this collection's bare tag (global reads) + those slices — sparing
- * every other collection. Scoped purging off (memory store / CI) → falls back to a
- * full `cache.clear()`. No admin gate — a cache-maintenance op on trusted server
- * code, matching `purgeBy`.
+ * then purges this collection's bare fingerprint (global reads) + those slices —
+ * sparing every other collection. Scoped purging off (memory store / CI) → falls
+ * back to a full `cache.clear()`. No admin gate — a cache-maintenance op on
+ * trusted server code, matching `purgeBy`.
  *
  * Each row must carry the collection's primary key and its flat scope fields; a row
  * missing one, or a collection scoped through a relation (a dotted/M2O field whose
  * terminal a raw row can't resolve), degrades to a collection-wide purge (this
- * collection's bare tag + every slice, still sparing others) rather than risk a
- * stale slice. The primary key is required because every collection pins that slice,
- * so a read of a single row depends on it even with no scope field declared.
+ * collection's bare fingerprint + every slice, still sparing others) rather than
+ * risk a stale slice. The primary key is required because every collection pins
+ * that slice, so a read of a single row depends on it even with no scope field
+ * declared.
  *
  * Footgun: a manual purge decouples "what changed" from "what's dropped" — they can
  * silently drift into a stale read, the exact poison scoped cache prevents. Prefer
@@ -333,11 +334,11 @@ export interface ReadMeta {
 	scopedCacheUnautopurgeableFingerprints?: ScopedCacheFingerprint[];
 
 	/**
-	 * The purge counters of the collections this read depends on, captured BEFORE its
-	 * query ran. `respond` re-reads them at fill time: a counter that moved means a
-	 * purge landed while the read was in flight, so the rows it holds are already
-	 * superseded and the entry it would write could never be invalidated — its tags
-	 * were not in the index for that purge to find.
+	 * The purge counters of the collections this read depends on, snapshotted BEFORE
+	 * its query ran. `respond` re-reads them at fill time: a counter that moved
+	 * means a purge landed while the read was in flight, so the rows it holds are
+	 * already superseded and the entry it would write could never be invalidated —
+	 * its fingerprints were not in the index for that purge to find.
 	 */
 	scopedCacheEpochs?: Record<string, string | null>;
 }
