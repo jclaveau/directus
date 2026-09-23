@@ -18,7 +18,6 @@ import {
 	indexScopedCacheEntry,
 	mergedScopedCacheEpochs,
 	renderScopedCacheFingerprint,
-	scopedCacheIndexPath,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
 	scopedCacheLegacyTags,
@@ -151,22 +150,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const indexedLegacyTags = scopedCacheLegacyTags(scopedCacheFingerprints);
 
-	// The path each collection's index may be split by, off the schema the request
-	// carries: derived from the collection, never from the read, so the fill and the
-	// write that has to find it hand the store the same one.
-	const scopedCacheIndexPaths = Object.fromEntries(
-		scopedCacheFingerprints.map((indexedFingerprint) => {
-			const fingerprintCollection = indexedFingerprint.collection;
-
-			return [
-				fingerprintCollection,
-				req.schema === undefined
-					? null
-					: scopedCacheIndexPath(req.schema, fingerprintCollection),
-			];
-		}),
-	);
-
 	// The tags a fill of this request would be indexed under, in the form the
 	// entry-tags table records — what the audit diffs against the tags the entry
 	// was filled under. Always set on a replay, even empty: its presence is how
@@ -275,7 +258,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				env['CACHE_TAGS_HEADER']
 					? [cacheTagsKey(redisKey)]
 					: [],
-				scopedCacheIndexPaths,
+				req.schema,
 			);
 
 			// Handed over together rather than awaited in turn: node-redis corks its

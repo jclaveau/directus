@@ -56,6 +56,7 @@ import {
 import {
 	bumpScopedCacheEpochs,
 } from './fill-guard.js';
+import { scopedCacheIndexPath } from './index-path.js';
 
 const env = useEnv();
 
@@ -151,7 +152,7 @@ export async function indexScopedCacheEntry(
 	key: string,
 	fingerprints: readonly ScopedCacheFingerprint[],
 	extraSiblings: string[] = [],
-	indexPaths: Readonly<Record<string, string | null>> = {},
+	schema?: SchemaOverview,
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled() || fingerprints.length === 0) {
 		return;
@@ -166,16 +167,15 @@ export async function indexScopedCacheEntry(
 	// files ONE fingerprint per collection, so a shared column cannot act as a
 	// global pin.
 	const filings: ScopedCacheIndexFiling[] = fingerprints.map((fingerprint) => {
-		const fingerprintCollection = fingerprint.collection;
-
 		return {
 			fingerprint,
 			keys: [key, cacheExpiresAtKey(key), ...extraSiblings],
-			// What the store may split its index by. Handed over rather than read
-			// there, since only the request carries the schema it is derived from.
-			indexPath: Object.hasOwn(indexPaths, fingerprintCollection)
-				? indexPaths[fingerprintCollection] ?? null
-				: null,
+			// What the store may split its index by, read off the collection the
+			// fingerprint names: derived from the schema, never from the read, so a
+			// fill and the write that has to find it hand the store the same one.
+			indexPath: schema === undefined
+				? null
+				: scopedCacheIndexPath(schema, fingerprint.collection),
 		};
 	});
 

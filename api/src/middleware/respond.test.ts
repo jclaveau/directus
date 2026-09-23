@@ -75,7 +75,6 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
-		scopedCacheIndexPath: actual.scopedCacheIndexPath,
 		// Used only to build fixtures below — pure, reaches no Redis.
 		scopedCacheReadMeta: actual.scopedCacheReadMeta,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
@@ -254,14 +253,14 @@ describe('respond middleware', () => {
 		);
 
 		// #205 scoped-cache tagging fires with the request's fingerprints, the legacy
-		// flat tags the old index is still written under, and the path each
-		// collection's index set is split by — `null` for a collection the schema
-		// declares no scope field on, whose fingerprints all go in the bare set.
+		// flat tags the old index is still written under, and the schema the index
+		// path of each collection is read off — this one declares no scope field, so
+		// every fingerprint goes in the bare set.
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
@@ -450,7 +449,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 	});
 
@@ -488,7 +487,7 @@ describe('respond middleware', () => {
 				{ collection: 'student', pinnedScope: {}, viewFields: [] },
 			],
 			[],
-			{ directus_users: null, student: null },
+			{ collections: {}, relations: [] },
 		);
 	});
 
@@ -581,7 +580,7 @@ describe('respond middleware', () => {
 			// bound to nothing, any write to the collection moves the number.
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 	});
 
@@ -606,7 +605,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: { id: ['1'] }, viewFields: [] }],
 			[],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 	});
 
@@ -637,9 +636,9 @@ describe('respond middleware', () => {
 			// bound to nothing, any write to the collection moves the number.
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			// The index path `articles` is split by: `null`, since the schema this
-			// request carries declares no scope field on it.
-			{ articles: null },
+			// The schema the index path is read off: this one declares no scope
+			// field on `articles`, so it is filed in the bare set.
+			{ collections: {}, relations: [] },
 		);
 	});
 
@@ -656,7 +655,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 	});
 
@@ -727,8 +726,12 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
-		expect(indexScopedCacheEntry)
-			.toHaveBeenCalledWith('cache-key', [], [], {});
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
+			'cache-key',
+			[],
+			[],
+			{ collections: {}, relations: [] },
+		);
 	});
 
 	test(oneLine`
@@ -1243,7 +1246,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 
 		expect(res.status).toHaveBeenCalledWith(204);
@@ -1334,7 +1337,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: { owner: ['U1'] }, viewFields: [] }],
 			['cache-key__tags'],
-			{ articles: null },
+			{ collections: {}, relations: [] },
 		);
 	});
 

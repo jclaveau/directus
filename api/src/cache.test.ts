@@ -1,3 +1,4 @@
+import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import type { ScopedCacheDeclaredFingerprint } from '@directus/types';
 import type Keyv from 'keyv';
@@ -387,6 +388,15 @@ describe('scoped cache purging', () => {
 		test(oneLine`
 			files a read into the set its index value owns, and no other
 		`, async () => {
+			const schema = new SchemaBuilder()
+				.collection('slots', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+				})
+				.build();
+
+			schema.collections['slots']!.scopedCacheFields = ['student'];
+
 			await indexScopedCacheEntry(
 				'resp-key',
 				[{
@@ -395,7 +405,7 @@ describe('scoped cache purging', () => {
 					viewFields: [],
 				}],
 				[],
-				{ slots: 'student' },
+				schema,
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledOnce();
@@ -412,6 +422,15 @@ describe('scoped cache purging', () => {
 			files a read bound to a LIST of index values under each of them: a write of
 			either value has to find it
 		`, async () => {
+			const schema = new SchemaBuilder()
+				.collection('slots', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+				})
+				.build();
+
+			schema.collections['slots']!.scopedCacheFields = ['student'];
+
 			await indexScopedCacheEntry(
 				'resp-key',
 				[{
@@ -420,7 +439,7 @@ describe('scoped cache purging', () => {
 					viewFields: [],
 				}],
 				[],
-				{ slots: 'student' },
+				schema,
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
