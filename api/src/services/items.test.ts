@@ -1757,8 +1757,9 @@ describe('Services / Items / purgeScopedCache', () => {
 			[{ collection: 'test' }],
 			expect.anything(),
 			// A purge shown no rows carries none of their narrowing and sweeps its
-			// tags whole, as it did before composite tags.
-			{},
+			// tags whole, as it did before composite tags. The declared list is the
+			// hooks' channel, and this purge answers for no hook.
+			{ declaredFingerprints: [] },
 		);
 	});
 });
