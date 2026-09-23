@@ -42,6 +42,10 @@ export interface ScopedCacheFingerprint {
 	/**
 	 * The fields the read selected, sorted or filtered on. Empty names every field:
 	 * a read that cannot say which columns it depends on depends on all of them.
+	 *
+	 * `limit` is not one of them: it already varies the cache key, so two page sizes
+	 * are two entries, and a nested node cut by a limit is tagged bare rather than
+	 * pinned (`read-plan.ts`) — the rows past the cut are named by nothing.
 	 */
 	readonly fields: readonly string[];
 }
@@ -250,6 +254,10 @@ export interface ReadMeta {
 	 * The AND is what the derivation drops — an entry carrying a set of tags dies
 	 * on ANY of them — so a consumer reading these over-purges rather than serving
 	 * stale, and one that can carry the fingerprints should.
+	 *
+	 * `type` goes with it: a fingerprint holds values already canonicalized, and
+	 * canonicalizing a canonical token again with no type returns it unchanged, so
+	 * the keys these derive still match the ones the read filed.
 	 */
 	readonly scopedCacheTags: ScopedCacheTag[];
 

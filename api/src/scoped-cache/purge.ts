@@ -302,7 +302,7 @@ export async function indexScopedCacheEntry(
 
 	// The legacy index still speaks one pin at a time, so the fingerprints are read
 	// back flat for it — the only place the AND is dropped on the way in.
-	const scopedCacheTags = scopedCacheTagsOfFingerprints(fingerprints);
+	const legacyScopedCacheTags = scopedCacheTagsOfFingerprints(fingerprints);
 
 	const redis = useScriptedRedis();
 
@@ -318,7 +318,7 @@ export async function indexScopedCacheEntry(
 	// value every time. Gathered here and sent below, after the tag sets they name.
 	const indexedTagKeys = new Map<string, string[]>();
 
-	for (const tag of scopedCacheTags) {
+	for (const tag of legacyScopedCacheTags) {
 		const tagKey = scopedCacheTagKey(tag);
 
 		if (filedKeys.has(tagKey)) {
