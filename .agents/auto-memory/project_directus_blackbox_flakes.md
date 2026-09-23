@@ -88,3 +88,12 @@ and asserts the create event; `batch-insert.test.ts` imports `collectionArtists`
 flake** — reruns will not clear it. Fixed by putting the WRITER in the `after` chain.
 When a WS assertion sees a plausible row that is not its own, look for a sibling file
 importing the same seed, not at the transport.
+
+**Sixth signature — `app/autoscale-churn.test.ts` instance-count race (2026-09-23,
+PR #534 shard 4).** `holds a churning pool at the ceiling instead of releasing it`:
+`expected [ 2, 1 ] to deeply equal [ 2 ]` — the assertion records the DISTINCT instance
+counts pm2 reports in order, and a transient `1` slipped in while the pool was on its way
+back to 2 (supervisor logged `0:online:0%, 1:online:0%` at the moment of the read). 414 of
+415 tests in the shard passed; `gh run rerun <run> --failed` cleared it with no code change.
+Nothing to do with the diff under test — a scoped-cache/comment-only branch cannot move the
+autoscaler.
