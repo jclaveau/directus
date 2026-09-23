@@ -612,14 +612,51 @@ describe('createScopedCacheCollector', () => {
 		expect([...purgeSkippedKeys]).toEqual(['7']);
 	});
 
-	it('scopeTo and purgeBy feed one idempotent tag set', () => {
-		const { scope, purge, tags } = createScopedCacheCollector(emptySchema);
-		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
+	it('scopeTo and purgeBy fill sinks of their own', () => {
+		const { scope, purge, tags, purgeFingerprints } =
+			createScopedCacheCollector(emptySchema);
 
-		scope.scopeTo(authorSlice);
-		purge.purgeBy({ ...authorSlice }); // same slice via the other handle → deduped
+		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
+		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
-		expect(tags).toEqual([authorSlice]);
+		// The same slice through both handles, and it lands twice: a read's tags are
+		// an OR over slices, a purge's fingerprint an AND over a scope, so folding
+		// one into the other would purge by whichever tag matched first.
+		expect(tags).toEqual([{ collection: 'articles', field: 'author', value: 5 }]);
+
+		expect(purgeFingerprints).toEqual([{
+			collection: 'articles',
+			pinnedScope: { author: ['5'] },
+			viewFields: [],
+		}]);
+	});
+
+	it(oneLine`
+		takes a fingerprint batch, dropping the viewFields a read's own carries: they
+		say which columns a read depends on, and no purge reads them
+	`, () => {
+		const { purge, purgeFingerprints } = createScopedCacheCollector(emptySchema);
+
+		purge.purgeBy([
+			{
+				collection: 'articles',
+				pinnedScope: { author: [5] },
+				viewFields: ['title'],
+			},
+			{
+				collection: 'articles',
+				pinnedScope: { author: ['5'] },
+				viewFields: ['body'],
+			},
+			{ collection: 'authors' },
+		]);
+
+		// Two views of one slice are one thing to purge, and a fingerprint pinning
+		// nothing is the whole collection.
+		expect(purgeFingerprints).toEqual([
+			{ collection: 'articles', pinnedScope: { author: ['5'] }, viewFields: [] },
+			{ collection: 'authors', pinnedScope: {}, viewFields: [] },
+		]);
 	});
 
 	it('accepts a batch, deduping within it and against prior tags', () => {
@@ -635,12 +672,12 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('dedups on the canonical tag key — field order and value type collapse', () => {
-		const { scope, purge, tags } = createScopedCacheCollector(emptySchema);
+		const { scope, tags } = createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', field: 'author', value: 7 });
 		// Same slice: keys in a different order AND the value as a string. A raw JSON
 		// compare would keep both; the canonical key collapses them to one.
-		purge.purgeBy({ field: 'author', value: '7', collection: 'articles' });
+		scope.scopeTo({ field: 'author', value: '7', collection: 'articles' });
 
 		expect(tags).toHaveLength(1);
 	});
@@ -651,11 +688,13 @@ describe('createScopedCacheCollector', () => {
 		different key from the lowercase one the purge side emits for the same row
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
-		const { scope, purge, tags } = createScopedCacheCollector(notesSchema);
+
+		const { scope, purge, tags, purgeFingerprints } =
+			createScopedCacheCollector(notesSchema);
 
 		scope.scopeTo({ collection: 'notes', field: 'id', value: upper });
 		// The spelling the driver hands the purge side for the very same row.
-		purge.purgeBy({ collection: 'notes', field: 'id', value: upper.toLowerCase() });
+		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
 		expect(tags).toEqual([
 			{ collection: 'notes', field: 'id', value: upper, type: 'uuid' },
@@ -664,6 +703,14 @@ describe('createScopedCacheCollector', () => {
 		expect(scopedCacheTagKey(tags[0]!)).toBe(
 			`ns:scoped-cache-index:tag:notes:id=${upper.toLowerCase()}`,
 		);
+
+		// A fingerprint's tokens are canonicalized the same way, so the pin and the
+		// purge name one slice.
+		expect(purgeFingerprints).toEqual([{
+			collection: 'notes',
+			pinnedScope: { id: [upper.toLowerCase()] },
+			viewFields: [],
+		}]);
 	});
 
 	it(oneLine`

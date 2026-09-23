@@ -902,12 +902,23 @@ describe(oneLine`
 
 	// `context.scopedCache` carries only the event's method: an `items.read` filter
 	// scopes the response via `scopeTo`; a create/update/delete filter purges via
-	// `purgeBy`. Additive to the framework tags — read tags into the meta rider,
-	// mutation tags into the purge.
+	// `purgeBy`. Additive to what the framework derived — read tags into the meta
+	// rider, declared fingerprints beside the mutation's own purge.
 	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
 		// A cross-collection dependency a hook declares (a read enriched from an authors
 		// row); shared so the hook's tag and the assertion can't drift.
 		const authorsDependency = { collection: 'authors', field: 'id', value: 5 };
+
+		// The same dependency as a MUTATION names it: `purgeBy` takes a fingerprint,
+		// whose pins are one AND, where `scopeTo` takes a tag that matches on its own.
+		const authorsPurge = { collection: 'authors', pinnedScope: { id: [5] } };
+
+		// What the collector canonicalizes that declaration to.
+		const authorsFingerprint = {
+			collection: 'authors',
+			pinnedScope: { id: ['5'] },
+			viewFields: [],
+		};
 
 		it(oneLine`
 			an items.read hook scopes the response to a cross-collection tag, unioned with
@@ -1218,14 +1229,14 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an items.create hook adds a tag, unioned after the committed-row slice in the
-			purge
+			an items.create hook declares a fingerprint, purged beside the committed-row
+			slice rather than inside its tag list
 		`, async () => {
 			tracker.on.insert('test').response([1]);
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return payload;
 			};
 
@@ -1240,10 +1251,11 @@ describe(oneLine`
 					[
 						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						authorsDependency,
 					],
 					expect.anything(),
-					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [authorsFingerprint],
+					}),
 				);
 			}
 			finally {
@@ -1252,15 +1264,15 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an items.update hook adds a tag, unioned after the old ∪ new slices in the
-			purge
+			an items.update hook declares a fingerprint, purged beside the old ∪ new
+			slices rather than inside their tag list
 		`, async () => {
 			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
 			tracker.on.select('test').responseOnce([{ id: 1, student: 'B' }]);
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return payload;
 			};
 
@@ -1277,10 +1289,11 @@ describe(oneLine`
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
-						authorsDependency,
 					],
 					expect.anything(),
-					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [authorsFingerprint],
+					}),
 				);
 			}
 			finally {
@@ -1289,14 +1302,14 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an items.delete hook adds a tag, unioned after the deleted rows' slices in the
-			purge
+			an items.delete hook declares a fingerprint, purged beside the deleted rows'
+			slices rather than inside their tag list
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 			tracker.on.delete('test').response(1);
 
 			const declare = async (keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return keys;
 			};
 
@@ -1311,10 +1324,11 @@ describe(oneLine`
 					[
 						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						authorsDependency,
 					],
 					expect.anything(),
-					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [authorsFingerprint],
+					}),
 				);
 			}
 			finally {
@@ -1323,17 +1337,17 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a take-over that DECLARES its footprint via addTag narrows to a precise purge —
-			the declaration opts out of the safe coarse fallback
+			a take-over that DECLARES its footprint narrows to a precise purge — the
+			declaration opts out of the safe coarse fallback
 		`, async () => {
 			// A take-over is coarse BY DEFAULT (old slice unrecoverable in the create
-			// path). Declaring a tag asserts the hook knows its footprint, so we trust it
-			// and narrow: the taken-over row's re-read slice (Z) UNION the declared tag —
-			// never the coarse null flush.
+			// path). A declaration asserts the hook knows its footprint, so we trust it
+			// and narrow: the taken-over row's re-read slice (Z) plus the declared
+			// fingerprint — never the coarse null flush.
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return 99;
 			};
 
@@ -1348,10 +1362,11 @@ describe(oneLine`
 					[
 						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
-						authorsDependency,
 					],
 					expect.anything(),
-					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [authorsFingerprint],
+					}),
 				);
 
 				expect(purgeScopedCache).not.toHaveBeenCalledWith(
@@ -1377,7 +1392,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declareThenCancel = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return null; // cancel the update
 			};
 
@@ -1390,15 +1405,18 @@ describe(oneLine`
 					{ allowFilterCancel: true },
 				);
 
-				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				// Only the declared fingerprint, and the 5th arg excludes the bare tag.
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[authorsDependency],
+					[],
 					expect.anything(),
-					{ includeCollectionTag: false },
+					{
+						includeCollectionTag: false,
+						declaredFingerprints: [authorsFingerprint],
+					},
 				);
 			}
 			finally {
@@ -1414,7 +1432,7 @@ describe(oneLine`
 			// deleteMany snapshots rows AFTER the filter, so a cancel returns
 			// before any select — only the hook-declared slice is purged.
 			const declareThenCancel = async (_keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return null; // cancel the delete
 			};
 
@@ -1423,15 +1441,18 @@ describe(oneLine`
 			try {
 				await service().deleteMany([1], { allowFilterCancel: true });
 
-				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				// Only the declared fingerprint, and the 5th arg excludes the bare tag.
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[authorsDependency],
+					[],
 					expect.anything(),
-					{ includeCollectionTag: false },
+					{
+						includeCollectionTag: false,
+						declaredFingerprints: [authorsFingerprint],
+					},
 				);
 			}
 			finally {
@@ -1440,7 +1461,7 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a coarse (null) purge carrying hook-declared tags reflects BOTH in the debug
+			a coarse (null) purge carrying a hook declaration reflects BOTH in the debug
 			header — the hook purge's result is unioned in, not dropped
 		`, async () => {
 			// Re-read missing `student` → snapshot null → coarse purge; the hook also
@@ -1450,7 +1471,7 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsPurge);
 				return payload;
 			};
 
@@ -1480,10 +1501,11 @@ describe(oneLine`
 					2,
 					expect.anything(),
 					'test',
-					[authorsDependency],
+					[],
 					expect.anything(),
 					{
 						includeCollectionTag: false,
+						declaredFingerprints: [authorsFingerprint],
 						scopedCachePurgeId: expect.any(String),
 					},
 				);
@@ -1516,7 +1538,7 @@ describe(oneLine`
 			// over a row but declares nothing ITSELF must still fall back to coarse — else
 			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
 			const shared = createScopedCacheCollector(schema);
-			shared.purge.purgeBy({ collection: 'siblings', field: 'id', value: 1 });
+			shared.purge.purgeBy({ collection: 'siblings', pinnedScope: { id: [1] } });
 
 			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
 			// module returns arrays, so give the spy an iterable (args are the check).
@@ -1668,9 +1690,7 @@ describe(oneLine`
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.purgeBy({
 					collection: 'test',
-					field: 'id',
-					value: 5,
-					type: 'integer',
+					pinnedScope: { id: [5] },
 				});
 
 				return 99;
@@ -1684,12 +1704,15 @@ describe(oneLine`
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[
-						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
-						{ collection: 'test', field: 'id', value: 5, type: 'integer' },
-					],
+					[{ collection: 'test', field: 'id', value: 99, type: 'integer' }],
 					expect.anything(),
-					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'test',
+							pinnedScope: { id: ['5'] },
+							viewFields: [],
+						}],
+					}),
 				);
 			}
 			finally {

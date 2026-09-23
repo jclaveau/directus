@@ -317,8 +317,8 @@ describe('a purge shown the rows it wrote', () => {
 				}],
 				changed: ['method'],
 				indexPath: 'owner',
-				sweepScopedCacheTags: [
-					{ collection: 'other', field: 'x', value: 'y' },
+				declaredFingerprints: [
+					{ collection: 'other', pinnedScope: { x: ['y'] }, viewFields: [] },
 				],
 			},
 		);
@@ -349,8 +349,8 @@ describe('a purge shown the rows it wrote', () => {
 				}],
 				changed: null,
 				indexPath: 'owner',
-				sweepScopedCacheTags: [
-					{ collection: 'other', field: 'x', value: 'y' },
+				declaredFingerprints: [
+					{ collection: 'other', pinnedScope: { x: ['y'] }, viewFields: [] },
 				],
 			},
 		);

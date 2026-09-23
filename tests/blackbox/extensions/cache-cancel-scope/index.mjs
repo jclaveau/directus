@@ -31,7 +31,9 @@ export default function registerHooks({ filter }, { services }) {
 				{ emitEvents: false },
 			);
 
-			context.scopedCache?.purgeBy(result.getMeta?.()?.scopedCacheTags ?? []);
+			context.scopedCache?.purgeBy(
+				result.getMeta?.()?.scopedCacheFingerprints ?? [],
+			);
 		}
 
 		// Veto the row: Directus cancels it. 'spam' declared nothing; 'flagged' declared

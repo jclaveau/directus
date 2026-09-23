@@ -633,7 +633,7 @@ export class ItemScopedCacheService {
 
 	async purge(
 		tags: ScopedCacheTag[] | null,
-		collector?: Pick<ScopedCacheCollector, 'tags'>,
+		collector?: Pick<ScopedCacheCollector, 'purgeFingerprints'>,
 		changedCollections: string[] = [],
 		{
 			// `false` leaves this collection's bare tag warm: a filter-cancel wrote
@@ -664,7 +664,7 @@ export class ItemScopedCacheService {
 		}
 
 		const context = this.purgeContext();
-		const hookTags = collector?.tags ?? [];
+		const hookFingerprints = collector?.purgeFingerprints ?? [];
 
 		// A rule reaching back into this collection leaves its own slices unresolvable
 		// too, so it takes the collection-wide purge — whose reach already covers the
@@ -689,12 +689,14 @@ export class ItemScopedCacheService {
 				rowFingerprints: rows.fingerprints,
 				changed: rows.changed,
 				indexPath: scopedCacheIndexPath(this.schema, this.collection),
-				sweepScopedCacheTags: hookTags,
 			};
 
-		if (ownTags !== null && otherCollections.length === 0) {
-			const ownAndHookTags = [...ownTags, ...hookTags];
+		// What a hook declared rides beside the mutation's own purge rather than in
+		// its tag list: it names a query case, not a row, so the rows this mutation
+		// wrote answer for none of it.
+		const declared = { declaredFingerprints: hookFingerprints };
 
+		if (ownTags !== null && otherCollections.length === 0) {
 			// Spelled twice rather than passing `{ includeCollectionTag }`: the option
 			// object is what a caller reads as "this purge is doing something unusual",
 			// and every assertion on the common call would have to carry a default it
@@ -703,18 +705,18 @@ export class ItemScopedCacheService {
 				return purgeScopedCache(
 					cache,
 					this.collection,
-					ownAndHookTags,
+					ownTags,
 					context,
-					boundToRows,
+					{ ...boundToRows, ...declared },
 				);
 			}
 
 			return purgeScopedCache(
 				cache,
 				this.collection,
-				ownAndHookTags,
+				ownTags,
 				context,
-				{ ...boundToRows, includeCollectionTag: false },
+				{ ...boundToRows, ...declared, includeCollectionTag: false },
 			);
 		}
 
@@ -730,11 +732,16 @@ export class ItemScopedCacheService {
 			purgedTagSets.push(await purgeScopedCache(
 				cache,
 				this.collection,
-				[...ownTags, ...hookTags],
+				ownTags,
 				context,
 				includeCollectionTag
-					? { ...boundToRows, scopedCachePurgeId }
-					: { ...boundToRows, includeCollectionTag: false, scopedCachePurgeId },
+					? { ...boundToRows, ...declared, scopedCachePurgeId }
+					: {
+						...boundToRows,
+						...declared,
+						includeCollectionTag: false,
+						scopedCachePurgeId,
+					},
 			));
 		}
 		else {
@@ -748,17 +755,17 @@ export class ItemScopedCacheService {
 				{ scopedCachePurgeId },
 			));
 
-			// Tags a hook added via `context.scopedCache` are often for OTHER collections
-			// the coarse pass never reaches, so purge them too — but with
+			// What a hook declared via `context.scopedCache` is often for OTHER
+			// collections the coarse pass never reaches, so purge it too — but with
 			// `includeCollectionTag: false`, since the coarse pass already owns this
 			// collection's bare tag (else it's purged twice and doubled in the header).
-			if (hookTags.length > 0) {
+			if (hookFingerprints.length > 0) {
 				purgedTagSets.push(await purgeScopedCache(
 					cache,
 					this.collection,
-					hookTags,
+					[],
 					context,
-					{ includeCollectionTag: false, scopedCachePurgeId },
+					{ ...declared, includeCollectionTag: false, scopedCachePurgeId },
 				));
 			}
 		}

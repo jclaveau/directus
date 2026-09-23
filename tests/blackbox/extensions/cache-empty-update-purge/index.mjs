@@ -20,7 +20,7 @@ export default function registerHooks({ filter }, { services }) {
 			{ emitEvents: false },
 		);
 
-		context.scopedCache?.purgeBy(result.getMeta?.()?.scopedCacheTags ?? []);
+		context.scopedCache?.purgeBy(result.getMeta?.()?.scopedCacheFingerprints ?? []);
 
 		// Empty payload — not null — so it is a no-op update, not a filter cancel.
 		return {};

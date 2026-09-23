@@ -1,4 +1,5 @@
 export * from './scoped-cache/config.js';
+export * from './scoped-cache/collector.js';
 export * from './scoped-cache/tags.js';
 export * from './scoped-cache/fill-guard.js';
 export * from './scoped-cache/fingerprint.js';

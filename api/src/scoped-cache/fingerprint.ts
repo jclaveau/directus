@@ -208,10 +208,9 @@ export function scopedCacheFingerprintOf(
  * the bare collection for a fingerprint that pins nothing.
  *
  * What the round trip loses is the AND — which is the whole point of the
- * fingerprint — so this is for the consumers that never had it: the legacy tag
- * sets, the dev headers, the telemetry, and the `scopedCacheTags` a hook reads
- * off `getMeta()` to hand to `purgeBy`. A token is already canonical, so the tag
- * it yields keys the same slice a write emits.
+ * fingerprint — so this is for the consumers that never had it: the dev headers
+ * and the telemetry, which report a purge as the slices it reached. A token is
+ * already canonical, so the tag it yields keys the same slice a write emits.
  */
 export function scopedCacheTagsOfFingerprints(
 	fingerprints: readonly ScopedCacheFingerprint[],

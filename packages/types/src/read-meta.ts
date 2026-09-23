@@ -74,6 +74,34 @@ export interface ScopedCacheFingerprint {
 type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
 
 /**
+ * A fingerprint as a hook spells one: the collection it names, the scope it pins
+ * and, for a read's own, the fields its view is built from.
+ *
+ * Looser than the fingerprint the host builds, in the two ways a declaration is:
+ * `pinnedScope` is optional, since naming a collection and nothing else is the
+ * whole collection — what a bare tag said; and its values are whatever the hook
+ * holds, since the host canonicalizes them against the schema (a `7` and a `'7'`
+ * name one slice, and only the column's type says so).
+ *
+ * `viewFields` is there to be ignored: they say which columns a READ depends on,
+ * and no purge reads them. A fingerprint off `getMeta()` carries them, so the field
+ * is accepted and dropped — two reads of one slice through different columns are
+ * one thing to purge.
+ */
+export interface ScopedCacheDeclaredFingerprint {
+	readonly collection: string;
+	readonly pinnedScope?: Readonly<Record<string, readonly unknown[]>>;
+	readonly viewFields?: readonly string[];
+}
+
+/**
+ * One fingerprint, or a batch — `result.getMeta().scopedCacheFingerprints` handed
+ * straight back.
+ */
+type ScopedCacheFingerprintInput =
+	ScopedCacheDeclaredFingerprint | readonly ScopedCacheDeclaredFingerprint[];
+
+/**
  * What a read can depend on through `dependOn`: a read result carrying its meta, a
  * batch of them (`Promise.all`), or `Promise.allSettled`'s verdicts over them. A
  * result is itself an array, so the rider is what tells one lookup from a batch —
@@ -152,13 +180,24 @@ export interface ScopedCacheScopeHandle {
 /**
  * Shape of `context.scopedCache` on an `items.create`/`update`/`delete` *filter*
  * hook. Mirrors the `cache.purge` event: purge cached responses BY extra slices this
- * mutation touched. Additive to the framework purge tags.
+ * mutation touched. Additive to what the mutation's own rows purge.
  *
  * Only the *filter* hook can purge: on update/delete the purge runs before the
- * action hook, so an action-hook tag would arrive too late.
+ * action hook, so an action-hook declaration would arrive too late.
  */
 export interface ScopedCachePurgeHandle {
-	purgeBy(tags: ScopedCacheTagInput): void;
+	/**
+	 * Purge every entry a fingerprint reaches: the entries whose own pinned scope
+	 * this one holds of, and — for a fingerprint pinning nothing — the reads of
+	 * that collection that could not be narrowed.
+	 *
+	 * A fingerprint, not a tag, because a set of tags is an OR and the scope a
+	 * write touched is an AND: `{ owner: ['alpha'], method: ['spaced'] }` purges
+	 * the entries bound to BOTH, where two tags would purge every entry bound to
+	 * either. What a read returns is already in this shape, so a hook purging what
+	 * a lookup read hands `result.getMeta().scopedCacheFingerprints` over whole.
+	 */
+	purgeBy(fingerprints: ScopedCacheFingerprintInput): void;
 	/**
 	 * This create was swallowed into a row the payload never named AND nothing was
 	 * written, so no entry can have gone stale and the take-over needs no purge —
@@ -223,6 +262,13 @@ export interface ScopedCacheCollector {
 	scope: ScopedCacheScopeHandle;
 	purge: ScopedCachePurgeHandle;
 	tags: ScopedCacheTag[];
+	/**
+	 * What a mutation hook declared through `purgeBy`, canonicalized against the
+	 * schema. Its own sink rather than the tag list above: a tag is one axis and a
+	 * fingerprint is a whole query case, and flattening one into the other is
+	 * exactly the over-purge the fingerprint exists to stop.
+	 */
+	purgeFingerprints: ScopedCacheFingerprint[];
 	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
 	manuallyPurgedKeys: Set<string>;
 	/**

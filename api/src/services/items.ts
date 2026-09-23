@@ -250,14 +250,15 @@ implements AbstractService<Item> {
 
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
-		// An `items.create` hook can add purge tags via `context.scopedCache.purgeBy`;
-		// drained into the purge below. Declared outside the transaction to outlive it.
+		// An `items.create` hook can declare its own purge via
+		// `context.scopedCache.purgeBy`; drained into the purge below. Declared outside
+		// the transaction to outlive it.
 		const scopedCacheCollector =
 			opts.scopedCacheCollector ?? createScopedCacheCollector(this.schema);
 
 		// Baseline so the take-over fallback (below) keys off THIS call's own hook
-		// declarations, not tags an injected shared collector already held.
-		const scopedCacheTagsAtStart = scopedCacheCollector.tags.length;
+		// declarations, not ones an injected shared collector already held.
+		const declaredPurgesAtStart = scopedCacheCollector.purgeFingerprints.length;
 
 		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
@@ -685,7 +686,7 @@ implements AbstractService<Item> {
 
 			if (
 				changedKeys.length === 0 &&
-				scopedCacheCollector.tags.length === scopedCacheTagsAtStart
+				scopedCacheCollector.purgeFingerprints.length === declaredPurgesAtStart
 			) {
 				// Nothing written and nothing declared: no entry can have gone stale.
 				// Returning rather than purging an empty tag set, which would still
@@ -697,7 +698,7 @@ implements AbstractService<Item> {
 
 			const takeoverUndeclared =
 				someRowTakenOver &&
-				scopedCacheCollector.tags.length === scopedCacheTagsAtStart;
+				scopedCacheCollector.purgeFingerprints.length === declaredPurgesAtStart;
 
 			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
 			// collection, so an undeclared take-over leaves the other rows' key slices
@@ -1150,7 +1151,7 @@ implements AbstractService<Item> {
 			// only the declared tags — `includeCollectionTag: false` leaves this
 			// collection's own bare tag (its global reads) warm, since nothing changed.
 			if (
-				scopedCacheCollector.tags.length > 0 &&
+				scopedCacheCollector.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
 				this.scopedCachePurged = await this.scopedCache.purge(
@@ -1206,7 +1207,7 @@ implements AbstractService<Item> {
 			// A hook declared a purge for this update; the declaration stands even though
 			// nothing changes, so drain it here as the cancel path does.
 			if (
-				scopedCacheCollector.tags.length > 0 &&
+				scopedCacheCollector.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
 				this.scopedCachePurged = await this.scopedCache.purge(
@@ -1575,7 +1576,8 @@ implements AbstractService<Item> {
 			});
 
 			const unresolvableRows =
-				(someRowTakenOver && scopedCacheCollector.tags.length === 0) ||
+				(someRowTakenOver
+					&& scopedCacheCollector.purgeFingerprints.length === 0) ||
 				oldScopedCacheCapture.legacyTags === null ||
 				newScopedCacheCapture.legacyTags === null;
 
@@ -1702,7 +1704,7 @@ implements AbstractService<Item> {
 			// only the declared tags — `includeCollectionTag: false` leaves this
 			// collection's own bare tag (its global reads) warm, since nothing changed.
 			if (
-				scopedCacheCollector.tags.length > 0 &&
+				scopedCacheCollector.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
 				this.scopedCachePurged = await this.scopedCache.purge(

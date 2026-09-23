@@ -1,14 +1,8 @@
 import { useEnv } from '@directus/env';
 import type {
-	MaybeWithMeta,
 	PrimaryKey,
-	ReadMeta,
-	SchemaOverview,
-	ScopedCacheCollector,
-	ScopedCacheDependency,
 	ScopedCacheTag,
 	Type,
-	WithMeta,
 } from '@directus/types';
 
 const env = useEnv();
@@ -47,144 +41,6 @@ export function earlierScopedCacheEpoch(
 	return leftCount <= rightCount
 		? left
 		: right;
-}
-
-/**
- * The meta of every fulfilled lookup inside a `dependOn` argument. A read result is
- * an array carrying a non-enumerable `getMeta`, so the rider is checked before the
- * array shape: with it, the value is one lookup; without it, a batch to walk, whose
- * entries are lookups or `allSettled` verdicts over them.
- */
-function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
-	if (dependency === null || typeof dependency !== 'object') {
-		return;
-	}
-
-	if (typeof (dependency as MaybeWithMeta<object>).getMeta === 'function') {
-		yield (dependency as WithMeta<object>).getMeta();
-		return;
-	}
-
-	if (!Array.isArray(dependency)) {
-		return;
-	}
-
-	for (const entry of dependency) {
-		if (entry !== null && typeof entry === 'object' && 'status' in entry) {
-			if (entry.status === 'fulfilled') {
-				yield* readMetasOf(entry.value);
-			}
-
-			continue;
-		}
-
-		yield* readMetasOf(entry);
-	}
-}
-
-/**
- * A per-operation collector backing the `context.scopedCache` hook handle. The
- * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
- * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
- * the service drains `tags` into the read's scope or the mutation's purge tags. Both
- * are the same idempotent sink. Safe with purging off (then `tags` is unread).
- */
-export function createScopedCacheCollector(
-	schema: SchemaOverview,
-): ScopedCacheCollector {
-	const tags: ScopedCacheTag[] = [];
-	const seen = new Set<string>();
-	const manuallyPurgedKeys = new Set<string>();
-	const epochs: Record<string, string | null> = {};
-	const purgeSkippedKeys = new Set<string>();
-	const takenOverKeys = new Set<string>();
-
-	// A hook names a slice by collection/field/value and rarely knows the column's
-	// type, but the type is what canonicalizes the value: `uuid` lowercases and
-	// `integer` strips a leading zero, so a type-less tag and the schema-typed one
-	// the purge side emits resolve DIFFERENT keys for the SAME row — a pin nothing
-	// ever purges. Fill it from the schema so both sides agree.
-	function withSchemaType(tag: ScopedCacheTag): ScopedCacheTag {
-		if (tag.type !== undefined || tag.field === undefined) {
-			return tag;
-		}
-
-		const schemaType = schema.collections[tag.collection]?.fields[tag.field]?.type;
-
-		return schemaType === undefined
-			? tag
-			: { ...tag, type: schemaType };
-	}
-
-	function add(
-		input: ScopedCacheTag | readonly ScopedCacheTag[],
-		manuallyPurged = false,
-		declaredEpochs?: Record<string, string | null>,
-	): void {
-		for (const [collection, epoch] of Object.entries(declaredEpochs ?? {})) {
-			epochs[collection] = collection in epochs
-				? earlierScopedCacheEpoch(epochs[collection], epoch)
-				: epoch;
-		}
-
-		const batch = Array.isArray(input)
-			? input
-			: [input];
-
-		for (const declaredTag of batch) {
-			const tag = withSchemaType(declaredTag);
-
-			// Idempotent: a hook looping over rows that resolve the same slice — or a
-			// batch/upsert parent's shared collector fed by many children — must not
-			// inflate the set. Key on the canonical tag key (the same one the purge side
-			// dedups on), so field order and value/type variants (7 vs '7') can't slip a
-			// duplicate past a raw JSON compare.
-			const key = scopedCacheTagKey(tag);
-
-			// Record the accept regardless of dedup: if ANY scopeTo of this tag marked it
-			// manuallyPurged, it's exempt from the unautopurgeable-scope anomaly.
-			if (manuallyPurged) {
-				manuallyPurgedKeys.add(key);
-			}
-
-			if (seen.has(key)) {
-				continue;
-			}
-
-			seen.add(key);
-			tags.push(tag);
-		}
-	}
-
-	return {
-		tags,
-		manuallyPurgedKeys,
-		purgeSkippedKeys,
-		takenOverKeys,
-		epochs,
-		scope: {
-			scopeTo: (input, options) => {
-				add(input, options?.manuallyPurged, options?.epochs);
-			},
-			dependOn: async (lookup) => {
-				const resolved = await lookup;
-
-				for (const meta of readMetasOf(resolved)) {
-					add(meta.scopedCacheTags, false, meta.scopedCacheEpochs);
-				}
-
-				return resolved;
-			},
-		},
-		purge: {
-			purgeBy: (input) => add(input),
-			// Deliberately not a tag: the take-over check reads the tag count, and
-			// declaring nothing to purge must not read as declaring a purge.
-			skipPurgeFor: (key) => {
-				purgeSkippedKeys.add(String(key));
-			},
-		},
-	};
 }
 
 // Canonicalize a scope value to a driver-stable token so a REST/GraphQL filter value

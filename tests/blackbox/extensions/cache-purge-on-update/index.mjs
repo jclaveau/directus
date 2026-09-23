@@ -40,7 +40,9 @@ export default function registerHooks({ filter }, { services }) {
 			{ emitEvents: false },
 		);
 
-		context.scopedCache?.purgeBy(affected.getMeta?.()?.scopedCacheTags ?? []);
+		context.scopedCache?.purgeBy(
+			affected.getMeta?.()?.scopedCacheFingerprints ?? [],
+		);
 
 		return payload;
 	});

@@ -51,6 +51,7 @@ import {
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
 	scopedCacheRowIndexGlobs,
+	scopedCacheTagsOfFingerprints,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import {
@@ -646,34 +647,31 @@ async function purgeScopedCacheDeclaredPins(
 }
 
 /**
- * Purge the tags a mutation could not resolve off the rows it wrote — a hook's own
- * `purgeBy`, and whatever the `cache.purge` filter added to the list.
+ * Purge what a mutation could not resolve off the rows it wrote — a hook's own
+ * `purgeBy`, and whatever the `cache.purge` filter added to the tag list.
  *
- * Grouped by the collection each tag names, because a hook is free to declare a tag
- * on another collection entirely and the index is per collection. Only the
- * mutation's own collection has a known index path; a foreign one is read whole,
- * which is what not knowing how it is split costs.
+ * Grouped by the collection each fingerprint names, because a hook is free to
+ * declare one on another collection entirely and the index is per collection. Only
+ * the mutation's own collection has a known index path; a foreign one is read
+ * whole, which is what not knowing how it is split costs.
  */
-async function purgeScopedCacheDeclaredTags(
+async function purgeScopedCacheDeclaredFingerprints(
 	cache: Keyv,
 	collection: string,
-	declaredTags: readonly ScopedCacheTag[],
+	declaredFingerprints: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
 ): Promise<number> {
-	if (declaredTags.length === 0) {
+	if (declaredFingerprints.length === 0) {
 		return 0;
 	}
 
 	const declaredByCollection = new Map<string, ScopedCacheFingerprint[]>();
 
-	for (const declaredTag of declaredTags) {
-		const declared = declaredByCollection.get(declaredTag.collection) ?? [];
+	for (const fingerprint of declaredFingerprints) {
+		const declared = declaredByCollection.get(fingerprint.collection) ?? [];
 
-		declared.push(
-			scopedCacheFingerprintOf(declaredTag.collection, [declaredTag]),
-		);
-
-		declaredByCollection.set(declaredTag.collection, declared);
+		declared.push(fingerprint);
+		declaredByCollection.set(fingerprint.collection, declared);
 	}
 
 	// Before anything is read, and in a call of its own rather than inside the
@@ -1610,10 +1608,11 @@ export async function purgeScopedCache(
 		// The path the collection's index is split by, so the purge reads back
 		// the sets its rows own instead of every set the collection has.
 		indexPath?: string | null;
-		// The tags in the list that the rows do NOT answer for, and so keep their
-		// tag sweep: a hook's `purgeBy` names a slice, not the rows it wrote, and
-		// nothing the mutation read back can resolve it.
-		sweepScopedCacheTags?: readonly ScopedCacheTag[];
+		// What a hook's `purgeBy` declared, and anything else purged by pin rather
+		// than by row. Each names a query case the mutation's own rows cannot answer
+		// for — a slice on another collection, a slice the write never touched — so
+		// it is purged by what it pins, not by what was written.
+		declaredFingerprints?: readonly ScopedCacheFingerprint[];
 	} = {},
 ): Promise<ScopedCacheTag[] | null> {
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
@@ -1698,18 +1697,10 @@ export async function purgeScopedCache(
 	}
 
 	// Row-driven: the fingerprints answer for every tag the mutation itself
-	// declared, so only what a hook declared and what the `cache.purge` filter
-	// ADDED is still swept by tag — each of those names a slice, not the rows the
-	// mutation wrote, and nothing else can resolve it.
-	const sweptAnyway = new Set(
-		(options.sweepScopedCacheTags ?? []).map(scopedCacheTagKey),
-	);
-
-	const rowDriven = new Set(
-		declaredScopedCacheTags
-			.map(scopedCacheTagKey)
-			.filter((entryKey) => sweptAnyway.has(entryKey) === false),
-	);
+	// resolved, so only what the `cache.purge` filter ADDED is still swept by tag —
+	// that one names a slice, not the rows the mutation wrote, and nothing else can
+	// resolve it.
+	const rowDriven = new Set(declaredScopedCacheTags.map(scopedCacheTagKey));
 
 	const sweptScopedCacheTags = options.rowFingerprints === undefined
 		? resolvedScopedCacheTags
@@ -1717,7 +1708,23 @@ export async function purgeScopedCache(
 			return rowDriven.has(scopedCacheTagKey(resolvedTag)) === false;
 		});
 
-	const tagKeys = [...new Set(sweptScopedCacheTags.map(scopedCacheTagKey))];
+	// Everything purged by pin, in the one grammar the index reads: what a hook
+	// declared, plus the tags left to sweep, each a pin of its own.
+	const purgedByPin = [
+		...(options.declaredFingerprints ?? []),
+		...sweptScopedCacheTags.map((sweptTag) => {
+			return scopedCacheFingerprintOf(sweptTag.collection, [sweptTag]);
+		}),
+	];
+
+	// What the purge reached, as tags: the mutation's own, plus the ones a hook's
+	// fingerprints compose to — the form the dev header and the telemetry speak.
+	const purgedScopedCacheTags = [
+		...resolvedScopedCacheTags,
+		...scopedCacheTagsOfFingerprints(options.declaredFingerprints ?? []),
+	];
+
+	const tagKeys = [...new Set(purgedByPin.map(renderScopedCacheFingerprint))];
 	let evicted: number | null = null;
 
 	// What a retry has to be able to run again, in the one grammar the index reads:
@@ -1736,9 +1743,7 @@ export async function purgeScopedCache(
 	const recordedFingerprints = [
 		...(options.rowFingerprints ?? []),
 		...recordedCollectionTag,
-		...sweptScopedCacheTags.map((sweptTag) => {
-			return scopedCacheFingerprintOf(sweptTag.collection, [sweptTag]);
-		}),
+		...purgedByPin,
 	].map(renderScopedCacheFingerprint);
 
 	const purged = await purgeOrRecord(
@@ -1754,10 +1759,10 @@ export async function purgeScopedCache(
 						options.indexPath ?? null,
 						options.includeCollectionTag !== false,
 					),
-				purgeScopedCacheDeclaredTags(
+				purgeScopedCacheDeclaredFingerprints(
 					cache,
 					collection,
-					sweptScopedCacheTags,
+					purgedByPin,
 					options.indexPath ?? null,
 				),
 			]);
@@ -1772,7 +1777,7 @@ export async function purgeScopedCache(
 	);
 
 	if (!purged) {
-		return resolvedScopedCacheTags;
+		return purgedScopedCacheTags;
 	}
 
 	// The tags a mutation actually resolved, in the same display form the entry
@@ -1782,7 +1787,7 @@ export async function purgeScopedCache(
 		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'slices',
-		scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
+		scopedCacheTags: purgedScopedCacheTags.map(scopedCacheTagLabel),
 		scopedCacheTagCount: tagKeys.length,
 		evicted,
 		// Awaited inside the mutation, so this time is ADDED to the write's own
@@ -1790,5 +1795,5 @@ export async function purgeScopedCache(
 		durationMs: Date.now() - startedAt,
 	});
 
-	return resolvedScopedCacheTags;
+	return purgedScopedCacheTags;
 }

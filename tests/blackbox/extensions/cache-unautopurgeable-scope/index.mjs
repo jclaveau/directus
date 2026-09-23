@@ -29,6 +29,11 @@ const COVERED_READ = 'p_unauto_covered';
 // unautopurgeable by the dependency's own auto-purge.
 const customTag = (collection) => ({ collection, field: 'ghost', value: 'g' });
 
+// The same slice as a purge names one: a fingerprint, whose pins are an AND.
+const customFingerprint = (collection) => {
+	return { collection, pinnedScope: { ghost: ['g'] } };
+};
+
 export default function registerHooks({ filter }, { services }) {
 	// No `manuallyPurged` → the read carries an unautopurgeable tag → not cacheable.
 	filter(`${CANCEL_READ}.items.read`, (records, _meta, context) => {
@@ -69,7 +74,7 @@ export default function registerHooks({ filter }, { services }) {
 	// The promised reproduction: a MANUAL_DEP update purges the same custom slice, so
 	// the manuallyPurged read is invalidated on a dependency write.
 	filter(`${MANUAL_DEP}.items.update`, (payload, _meta, context) => {
-		context.scopedCache?.purgeBy(customTag(MANUAL_DEP));
+		context.scopedCache?.purgeBy(customFingerprint(MANUAL_DEP));
 		return payload;
 	});
 

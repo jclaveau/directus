@@ -43,7 +43,7 @@ export default function registerHooks({ filter }, { services }) {
 		//     collection: 'test_items_article_author',
 		//     field: 'test_items_article_id', value: 1, type: 'integer',
 		//   }]
-		context.scopedCache?.purgeBy(result.getMeta?.()?.scopedCacheTags ?? []);
+		context.scopedCache?.purgeBy(result.getMeta?.()?.scopedCacheFingerprints ?? []);
 
 		return existing.id;
 	});
