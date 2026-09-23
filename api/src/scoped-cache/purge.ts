@@ -51,7 +51,6 @@ import {
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
 	scopedCacheRowIndexGlobs,
-	scopedCacheTagsOfFingerprints,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import {
@@ -64,12 +63,6 @@ import {
 } from './tags.js';
 
 const env = useEnv();
-
-// The slice tag keys a collection currently owns, so a collection-wide purge reads
-// them instead of walking the whole keyspace to find them again.
-function scopedCacheCollectionSlicesKey(collection: string): string {
-	return `${scopedCacheIndexPrefix()}slices:${collection}`;
-}
 
 /**
  * The collections a delete on `collection` also changes through the database's own
@@ -285,13 +278,14 @@ return members
 const SCOPED_CACHE_SWEEP_CHUNK_KEYS = 500;
 
 /**
- * Index a freshly-cached response key under every tag its data came from, so a later
- * mutation can drop just the matching entries instead of the whole namespace. Both
- * the payload key and its `__expires_at` sibling are tagged. When a cache TTL is
- * set, each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as
- * a net for members orphaned by a crash between write and purge; with no TTL
- * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
- * left unbounded to match — a normal purge still drains them.
+ * Index a freshly-cached response key under the query case it was read with, so a
+ * later mutation can drop just the entries that case answers for instead of the
+ * whole namespace. Both the payload key and its `__expires_at` sibling are indexed.
+ * When a cache TTL is set, each index set self-expires at
+ * `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as a net for members orphaned by a
+ * crash between write and purge; with no TTL (`CACHE_TTL` unset) the cached entries
+ * never expire either, so the sets are left unbounded to match — a normal purge
+ * still drains them.
  */
 export async function indexScopedCacheEntry(
 	key: string,
@@ -303,82 +297,18 @@ export async function indexScopedCacheEntry(
 		return;
 	}
 
-	// The legacy index still speaks one pin at a time, so the fingerprints are read
-	// back flat for it — the only place the AND is dropped on the way in.
-	const legacyScopedCacheTags = scopedCacheTagsOfFingerprints(fingerprints);
-
 	const redis = useScriptedRedis();
 
 	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
 		* SCOPED_CACHE_TAG_TTL_FACTOR;
 
 	const pipeline = redis.pipeline() as ScopedCacheTagPipeline;
-	const filedKeys = new Set<string>();
 
-	// One entry per collection, not per slice: a read pinned to 200 slices of the
-	// same collection files 200 tag keys into ONE index set, and sending that as 200
-	// calls costs 200 EXISTS and 200 TTL for a set whose expiry lands on the same
-	// value every time. Gathered here and sent below, after the tag sets they name.
-	const indexedTagKeys = new Map<string, string[]>();
-
-	for (const tag of legacyScopedCacheTags) {
-		const tagKey = scopedCacheTagKey(tag);
-
-		if (filedKeys.has(tagKey)) {
-			continue;
-		}
-
-		filedKeys.add(tagKey);
-
-		// `extraSiblings` = other keys written with the entry a purge must also drop
-		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
-		const members = [key, cacheExpiresAtKey(key), ...extraSiblings];
-
-		if (ttlSeconds > 0) {
-			pipeline.scopedCacheTagExpiry(tagKey, ttlSeconds, ...members);
-		}
-		else {
-			pipeline.sadd(tagKey, ...members);
-		}
-
-		// The bare tag is where a collection-wide purge starts, so filing it would
-		// only name a key that purge already holds.
-		if (tag.field === undefined) {
-			continue;
-		}
-
-		const slicesKey = scopedCacheCollectionSlicesKey(tag.collection);
-		const indexed = indexedTagKeys.get(slicesKey);
-
-		if (indexed === undefined) {
-			indexedTagKeys.set(slicesKey, [tagKey]);
-		}
-		else {
-			indexed.push(tagKey);
-		}
-	}
-
-	// Same expiry as the tag sets they name, written in the same pipeline, so the
-	// index cannot outlive — or predecease — what it points at.
-	for (const [slicesKey, tagKeys] of indexedTagKeys) {
-		for (let at = 0; at < tagKeys.length; at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS) {
-			const chunk = tagKeys.slice(at, at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS);
-
-			if (ttlSeconds > 0) {
-				pipeline.scopedCacheTagExpiry(slicesKey, ttlSeconds, ...chunk);
-			}
-			else {
-				pipeline.sadd(slicesKey, ...chunk);
-			}
-		}
-	}
-
-	// Filed in the same pipeline as the tag sets above, and holding the same
-	// members: a purge that knows the rows it wrote matches fingerprints here and
-	// drops only the entries whose whole query case the row satisfies, while one
-	// that knows nothing but a tag — a hook's own `purgeBy`, a collection-wide
-	// fallback — still sweeps the sets above. Both index the same entry, so
-	// whichever a purge reaches it by, the entry goes.
+	// One set per collection the read touched, split by its index path, holding the
+	// entry and its siblings under the whole query case the read was bound to. A
+	// purge tests that case rather than matching any one pin of it, which is what
+	// #531 is: a fingerprint is ONE tag, so a shared column cannot act as a global
+	// one.
 	for (const fingerprint of fingerprints) {
 		const fingerprintCollection = fingerprint.collection;
 		const indexPath = indexPaths.get(fingerprintCollection) ?? null;

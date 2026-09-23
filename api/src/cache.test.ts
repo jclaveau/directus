@@ -316,7 +316,7 @@ describe('scoped cache purging', () => {
 
 	describe('indexScopedCacheEntry', () => {
 		test(oneLine`
-			indexes the key + expires sibling under every collection-level tag, with a TTL
+			indexes the key + expires sibling in each collection's bare set, with a TTL
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
 				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
@@ -326,23 +326,26 @@ describe('scoped cache purging', () => {
 			// The members ride the script, which files them and moves the set's
 			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:articles',
+				'scalabus:scoped-cache-index:fingerprint:articles:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'articles:&|resp-key',
+				'articles:&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:directus_users',
+				'scalabus:scoped-cache-index:fingerprint:directus_users:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'directus_users:&|resp-key',
+				'directus_users:&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.exec).toHaveBeenCalledOnce();
 		});
 
-		test('scoped cache tags encode field=value into the tag key', async () => {
+		test(oneLine`
+			carries every value of a pin in ONE member, which is the AND a tag per value
+			could not spell
+		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
 				{
 					collection: 'slots',
@@ -352,17 +355,10 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=A',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
-			);
-
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=7',
-				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'slots:&student=,7,A,&|resp-key',
+				'slots:&student=,7,A,&|resp-key__expires_at',
 			);
 		});
 
@@ -377,41 +373,31 @@ describe('scoped cache purging', () => {
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=\x00null',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'slots:&student=,\x00null,&|resp-key',
+				'slots:&student=,\x00null,&|resp-key__expires_at',
 			);
 		});
 
 		test(oneLine`
-			a scoped value indexes its tag set once (stable column type)
+			files a read into the set its index value owns, and no other
 		`, async () => {
-			// A read pinned off a REST `_eq=7` and one off a row holding the numeric 7
-			// both canonicalize to the fingerprint token '7' upstream (fingerprint.ts)
-			// — by the time it reaches indexing there is only one string to file.
-			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'slots', pinnedScope: { student: ['7'] }, viewFields: [] },
-			]);
-
-			// One tag set, one index entry filing it, plus the one fingerprint bucket.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(3);
-
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=7',
-				600,
+			await indexScopedCacheEntry(
 				'resp-key',
-				'resp-key__expires_at',
+				[{
+					collection: 'slots',
+					pinnedScope: { student: ['7'] },
+					viewFields: [],
+				}],
+				[],
+				new Map([['slots', 'student']]),
 			);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:slices:slots',
-				600,
-				'scalabus:scoped-cache-index:tag:slots:student=7',
-			);
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledOnce();
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:student=7',
 				600,
 				'slots:&student=,7,&|resp-key',
 				'slots:&student=,7,&|resp-key__expires_at',
@@ -419,49 +405,47 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			every slice of one collection lands in a single index call, not one each
+			files a read bound to a LIST of index values under each of them: a write of
+			either value has to find it
 		`, async () => {
-			await indexScopedCacheEntry('resp-key', [
-				{
+			await indexScopedCacheEntry(
+				'resp-key',
+				[{
 					collection: 'slots',
 					pinnedScope: { student: ['A', 'B'] },
 					viewFields: [],
-				},
-			]);
+				}],
+				[],
+				new Map([['slots', 'student']]),
+			);
 
-			// The index set is the same key for both, and its expiry is the same
-			// value both times: sending it twice buys an EXISTS and a TTL for
-			// nothing. Two tag sets, the one index call that names them, plus the
-			// one fingerprint bucket (a single array entry, however many values).
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(4);
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:slices:slots',
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A',
 				600,
-				'scalabus:scoped-cache-index:tag:slots:student=A',
-				'scalabus:scoped-cache-index:tag:slots:student=B',
+				'slots:&student=,A,B,&|resp-key',
+				'slots:&student=,A,B,&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:student=B',
 				600,
 				'slots:&student=,A,B,&|resp-key',
 				'slots:&student=,A,B,&|resp-key__expires_at',
 			);
 		});
 
-		test('duplicate tags collapse to a single SADD', async () => {
+		test('a duplicated fingerprint re-sends the same members', async () => {
 			await indexScopedCacheEntry('resp-key', [
 				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
 				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
 			]);
 
-			// The legacy tag layer collapses the duplicate (one tag set, one index
-			// entry). The fingerprint-bucket layer keys off the array position, not
-			// the derived tag, so it re-sends the same bucket SADD once per
-			// duplicate — redundant but harmless, since a SADD of the same members
-			// twice leaves the set exactly as it was after the first.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(4);
+			// Keyed off the array position rather than the rendered form, so the same
+			// bucket is sent once per duplicate — redundant but harmless, since a
+			// SADD of the same members twice leaves the set exactly as it was.
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:',
@@ -486,7 +470,7 @@ describe('scoped cache purging', () => {
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 
-		test('tags the extra siblings alongside the key', async () => {
+		test('indexes the extra siblings alongside the key', async () => {
 			await indexScopedCacheEntry('resp-key', [
 				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
 			], [
@@ -494,11 +478,11 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:articles',
+				'scalabus:scoped-cache-index:fingerprint:articles:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
-				'resp-key__tags',
+				'articles:&|resp-key',
+				'articles:&|resp-key__expires_at',
+				'articles:&|resp-key__tags',
 			);
 		});
 	});

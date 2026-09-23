@@ -216,7 +216,7 @@ describe('the tag display form', () => {
 	// countScopedCacheTagMembers reads a fingerprint's token back against this
 	// string and the entry/purge tag rows join on it, so escaping it here would
 	// count zero instead.
-	it('keeps a null scope byte-identical to its Redis key', () => {
+	it('keeps a null scope byte-identical to the tag\'s identity', () => {
 		const nullSlice = {
 			collection: 'student_method_range',
 			field: 'method',
@@ -853,39 +853,7 @@ describe('createScopedCacheCollector', () => {
 	});
 });
 
-describe('collection slice index', () => {
-	it('files a slice tag key under its collection, never a bare one', async () => {
-		const indexPipeline = {
-			sadd: vi.fn().mockReturnThis(),
-			expire: vi.fn().mockReturnThis(),
-			exec: vi.fn(),
-		};
-
-		vi.mocked(useRedis).mockReturnValue({
-			defineCommand: vi.fn(),
-			pipeline: () => indexPipeline,
-		} as any);
-
-		await indexScopedCacheEntry('entry', [
-			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-			{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
-		]);
-
-		expect(indexPipeline.sadd)
-		.toHaveBeenCalledWith(
-			'ns:scoped-cache-index:slices:articles',
-			'ns:scoped-cache-index:tag:articles:author=7',
-		);
-
-		// The bare tag is where a collection-wide purge starts, so indexing it would
-		// only name a key the purge already holds.
-		expect(indexPipeline.sadd)
-		.not.toHaveBeenCalledWith(
-			'ns:scoped-cache-index:slices:articles',
-			'ns:scoped-cache-index:tag:articles',
-		);
-	});
-
+describe('a collection-wide purge', () => {
 	it('reads a collection purge off the collection\'s fingerprint sets', async () => {
 		const scan = vi.fn().mockResolvedValue(['0', []]);
 		const smembers = vi.fn();
@@ -1029,8 +997,8 @@ describe('indexScopedCacheEntry', () => {
 	});
 
 	it(oneLine`
-		only ever extends a tag set's expiry, so a later write carrying a shorter TTL
-		cannot outlive-orphan the entries an earlier one indexed
+		only ever extends an index set's expiry, so a later write carrying a shorter
+		TTL cannot outlive-orphan the entries an earlier one indexed
 	`, async () => {
 		const tagExpiry = vi.fn().mockReturnThis();
 		const expire = vi.fn().mockReturnThis();
@@ -1057,23 +1025,17 @@ describe('indexScopedCacheEntry', () => {
 			delete env['CACHE_TTL'];
 		}
 
-		// A tag set is SHARED by every entry pinned to that slice, and a bare EXPIRE
-		// overwrites: lower CACHE_TTL at runtime and one short write cuts short the
-		// set indexing an entry cached for an hour, which no purge can then reach.
+		// An index set is SHARED by every entry the collection files there, and a
+		// bare EXPIRE overwrites: lower CACHE_TTL at runtime and one short write
+		// cuts short the set indexing an entry cached for an hour, which no purge
+		// can then reach.
 		expect(expire).not.toHaveBeenCalled();
 
 		expect(tagExpiry).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:tag:articles:author=7',
+			'ns:scoped-cache-index:fingerprint:articles:',
 			3600,
-			'entry',
-			'entry__expires_at',
-		);
-
-		// The collection's slice index files under the same rule.
-		expect(tagExpiry).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:slices:articles',
-			3600,
-			'ns:scoped-cache-index:tag:articles:author=7',
+			'articles:&author=,7,&|entry',
+			'articles:&author=,7,&|entry__expires_at',
 		);
 	});
 });
