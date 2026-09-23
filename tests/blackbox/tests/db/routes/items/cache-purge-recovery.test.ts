@@ -26,6 +26,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const NOTE = 'test_items_recovery_note';
 const PENDING = 'directus_scoped_cache_pending_purges';
 
+/**
+ * The fingerprint a row of this collection is recorded under: the serialised form
+ * the index holds, with every value comma-wrapped so a partial one globs cleanly.
+ * Spelled out here rather than imported, since what is asserted is the string that
+ * reached Postgres, not the renderer that wrote it.
+ */
+function noteFingerprint(id: number | string) {
+	return `${NOTE}:&id=,${id},&`;
+}
+
 // The Redis the stack runs; the proxy below fronts it, and the boot case wants a
 // second instance connected straight to it while the proxied one stays cut off.
 const REDIS_PORT = 6108;
@@ -269,8 +279,8 @@ describe(oneLine`
 			await assertInstanceAlive();
 			expect(written.status).toBe(200);
 
-			// Recorded by its display label, so the retry can rebuild the key against
-			// whatever CACHE_NAMESPACE is set to when it runs.
+			// Recorded as a fingerprint rather than a Redis key, so the retry can rebuild
+			// the key against whatever CACHE_NAMESPACE is set to when it runs.
 			const pending = await db(PENDING).select('mode', 'scoped_cache_tag');
 
 			// Every row, not only the one asserted below: `toContainEqual` permits others,
@@ -281,7 +291,7 @@ describe(oneLine`
 
 			expect(pending).toContainEqual({
 				mode: 'slices',
-				scoped_cache_tag: `${NOTE}:id=${readNote}`,
+				scoped_cache_tag: noteFingerprint(readNote),
 			});
 
 			await proxy.open();
@@ -535,7 +545,7 @@ describe(oneLine`
 
 			for (let attempt = 0; attempt < 45 && tagged.length < 2; attempt++) {
 				tagged = await db('directus_cache_stats_scoped_purge_tags')
-					.whereIn('scoped_cache_tag', pair.map((id) => `${NOTE}:id=${id}`))
+					.whereIn('scoped_cache_tag', pair.map(noteFingerprint))
 					.select('scoped_cache_tag', 'purge_id');
 
 				if (tagged.length < 2) {
