@@ -143,10 +143,66 @@ describe.each(vendors)('%s', (vendor) => {
 		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe(status);
 	}
 
-	function givenSlots({ given, and }: StepFunctions, ids: Map<string, number>) {
-		given('a slot collection scoped by owner and method', () => undefined);
+	/**
+	 * The schema the scenarios read against, asserted rather than created here: the
+	 * instance reads `scoped_cache_fields` off the schema it boots on, so `beforeAll`
+	 * creates the collection before the spawn. The feature still states it, and a
+	 * drift between the two fails the Background instead of a purge assertion.
+	 */
+	async function expectSlotSchema(table: Record<string, string>[]) {
+		const fields = await request(getUrl(vendor, env))
+			.get(`/fields/${SLOT}`)
+			.set('Authorization', auth);
+
+		const collection = await request(getUrl(vendor, env))
+			.get(`/collections/${SLOT}`)
+			.set('Authorization', auth);
+
+		const scopedCacheFields: string[]
+			= collection.body.data.meta.scoped_cache_fields;
+
+		const declaredFields = fields.body.data
+			.filter((field: { field: string }) => field.field !== 'id')
+			.map((field: { field: string; type: string }) => {
+				return {
+					field: field.field,
+					type: field.type,
+					scoped_cache_field: scopedCacheFields.includes(field.field)
+						? 'yes'
+						: 'no',
+				};
+			});
+
+		expect(declaredFields).toEqual(expect.arrayContaining(table));
+		expect(declaredFields).toHaveLength(table.length);
+	}
+
+	function defineGivenSteps(
+		{ given, and }: StepFunctions,
+		ids: Map<string, number>,
+		readQuery: Record<string, string>,
+	) {
+		given('the slot collection:', async (table: Record<string, string>[]) => {
+			await expectSlotSchema(table);
+		});
 
 		and('the slots:', async (table: Record<string, string>[]) => {
+			await createSlots(table, ids);
+		});
+
+		// The query is the scenario's own table, so a reader sees what is cached
+		// where the scenario says it is cached, and the `Then` reads it back.
+		and('this read is cached:', async (table: Record<string, string>[]) => {
+			for (const row of table) {
+				readQuery[row['param']!] = row['value']!;
+			}
+
+			await fillCache(readQuery);
+		});
+	}
+
+	function whenSlotsCreated({ when }: StepFunctions, ids: Map<string, number>) {
+		when('the slots are created:', async (table: Record<string, string>[]) => {
 			await createSlots(table, ids);
 		});
 	}
@@ -156,30 +212,15 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write matching one pair but not the other leaves the read cached',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'alpha',
-					'filter[method][_eq]': 'spaced',
-				};
+				defineGivenSteps(steps, ids, readQuery);
 
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "alpha"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
-
-				steps.when(
-					'the slots are created:',
-					async (table: Record<string, string>[]) => {
-						await createSlots(table, ids);
-					},
-				);
+				whenSlotsCreated(steps, ids);
 
 				steps.then(
 					'the read is still cached',
-					async () => await expectCacheStatus(query, 'HIT'),
+					async () => await expectCacheStatus(readQuery, 'HIT'),
 				);
 			},
 			60_000,
@@ -189,30 +230,15 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write matching every pair purges the read',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'gamma',
-					'filter[method][_eq]': 'spaced',
-				};
+				defineGivenSteps(steps, ids, readQuery);
 
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "gamma"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
-
-				steps.when(
-					'the slots are created:',
-					async (table: Record<string, string>[]) => {
-						await createSlots(table, ids);
-					},
-				);
+				whenSlotsCreated(steps, ids);
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -222,19 +248,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write changing a field the read never named leaves it cached',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'delta',
-					'filter[method][_eq]': 'spaced',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "delta"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "d1" is updated with note "rewritten"', async () => {
 					await updateSlot(ids.get('d1')!, { note: 'rewritten' });
@@ -242,7 +258,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is still cached',
-					async () => await expectCacheStatus(query, 'HIT'),
+					async () => await expectCacheStatus(readQuery, 'HIT'),
 				);
 			},
 			60_000,
@@ -252,19 +268,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write changing a field the read sorted on purges it',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'epsilon',
-					sort: 'note',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "epsilon"\'s slots sorted by note are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "e1" is updated with note "rewritten"', async () => {
 					await updateSlot(ids.get('e1')!, { note: 'rewritten' });
@@ -272,7 +278,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -282,18 +288,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read selecting every field is purged by any column change',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: '*',
-					'filter[owner][_eq]': 'zeta',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'every field of "zeta"\'s slots is cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "z1" is updated with note "rewritten"', async () => {
 					await updateSlot(ids.get('z1')!, { note: 'rewritten' });
@@ -301,7 +298,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -311,19 +308,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read filtered on a range binds the field without pinning a value',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner,amount',
-					'filter[owner][_eq]': 'theta',
-					'filter[amount][_gt]': '5',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id, owner and amount of "theta"\'s slots above amount 5 are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "t1" is updated with note "rewritten"', async () => {
 					await updateSlot(ids.get('t1')!, { note: 'rewritten' });
@@ -331,7 +318,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is still cached',
-					async () => await expectCacheStatus(query, 'HIT'),
+					async () => await expectCacheStatus(readQuery, 'HIT'),
 				);
 			},
 			60_000,
@@ -341,19 +328,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write to the field a range was read on purges it',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner,amount',
-					'filter[owner][_eq]': 'iota',
-					'filter[amount][_gt]': '5',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id, owner and amount of "iota"\'s slots above amount 5 are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "i1" is updated with amount 30', async () => {
 					await updateSlot(ids.get('i1')!, { amount: 30 });
@@ -361,7 +338,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -371,29 +348,15 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read filtered on a list of owners is purged by a write to any of them',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_in]': 'kappa,lambda',
-				};
+				defineGivenSteps(steps, ids, readQuery);
 
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of the slots owned by "kappa" or "lambda" are cached',
-					async () => await fillCache(query),
-				);
-
-				steps.when(
-					'the slots are created:',
-					async (table: Record<string, string>[]) => {
-						await createSlots(table, ids);
-					},
-				);
+				whenSlotsCreated(steps, ids);
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -403,29 +366,15 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read filtered on a list of owners survives a write outside it',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_in]': 'mu,nu',
-				};
+				defineGivenSteps(steps, ids, readQuery);
 
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of the slots owned by "mu" or "nu" are cached',
-					async () => await fillCache(query),
-				);
-
-				steps.when(
-					'the slots are created:',
-					async (table: Record<string, string>[]) => {
-						await createSlots(table, ids);
-					},
-				);
+				whenSlotsCreated(steps, ids);
 
 				steps.then(
 					'the read is still cached',
-					async () => await expectCacheStatus(query, 'HIT'),
+					async () => await expectCacheStatus(readQuery, 'HIT'),
 				);
 			},
 			60_000,
@@ -435,19 +384,9 @@ describe.each(vendors)('%s', (vendor) => {
 			"a row moving into the read's slice purges it",
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'omicron',
-					'filter[method][_eq]': 'spaced',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "omicron"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "p1" is updated with owner "omicron"', async () => {
 					await updateSlot(ids.get('p1')!, { owner: 'omicron' });
@@ -455,7 +394,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -465,19 +404,9 @@ describe.each(vendors)('%s', (vendor) => {
 			"a row moving out of the read's slice purges it",
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'rho',
-					'filter[method][_eq]': 'spaced',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "rho"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "r1" is updated with owner "sigma"', async () => {
 					await updateSlot(ids.get('r1')!, { owner: 'sigma' });
@@ -485,7 +414,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -495,30 +424,15 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read matching two ways is purged by a write matching either',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner,method',
-					'filter[_or][0][owner][_eq]': 'tau',
-					'filter[_or][1][method][_eq]': 'spaced',
-				};
+				defineGivenSteps(steps, ids, readQuery);
 
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the slots owned by "tau" or read with the "spaced" method are cached',
-					async () => await fillCache(query),
-				);
-
-				steps.when(
-					'the slots are created:',
-					async (table: Record<string, string>[]) => {
-						await createSlots(table, ids);
-					},
-				);
+				whenSlotsCreated(steps, ids);
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -528,30 +442,15 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read matching two ways survives a write matching neither',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner,method',
-					'filter[_or][0][owner][_eq]': 'omega',
-					'filter[_or][1][method][_eq]': 'spaced',
-				};
+				defineGivenSteps(steps, ids, readQuery);
 
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the slots owned by "omega" or read with the "spaced" method are cached',
-					async () => await fillCache(query),
-				);
-
-				steps.when(
-					'the slots are created:',
-					async (table: Record<string, string>[]) => {
-						await createSlots(table, ids);
-					},
-				);
+				whenSlotsCreated(steps, ids);
 
 				steps.then(
 					'the read is still cached',
-					async () => await expectCacheStatus(query, 'HIT'),
+					async () => await expectCacheStatus(readQuery, 'HIT'),
 				);
 			},
 			60_000,
@@ -561,19 +460,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a delete of a matching row purges the read',
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'upsilon',
-					'filter[method][_eq]': 'spaced',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "upsilon"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "u1" is deleted', async () => {
 					await deleteSlot(ids.get('u1')!);
@@ -581,7 +470,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is purged',
-					async () => await expectCacheStatus(query, 'MISS'),
+					async () => await expectCacheStatus(readQuery, 'MISS'),
 				);
 			},
 			60_000,
@@ -591,19 +480,9 @@ describe.each(vendors)('%s', (vendor) => {
 			"a delete outside the read's slice leaves it cached",
 			(steps) => {
 				const ids = new Map<string, number>();
+				const readQuery: Record<string, string> = {};
 
-				const query = {
-					fields: 'id,owner',
-					'filter[owner][_eq]': 'chi',
-					'filter[method][_eq]': 'spaced',
-				};
-
-				givenSlots(steps, ids);
-
-				steps.and(
-					'the id and owner of "chi"\'s spaced slots are cached',
-					async () => await fillCache(query),
-				);
+				defineGivenSteps(steps, ids, readQuery);
 
 				steps.when('slot "c2" is deleted', async () => {
 					await deleteSlot(ids.get('c2')!);
@@ -611,7 +490,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				steps.then(
 					'the read is still cached',
-					async () => await expectCacheStatus(query, 'HIT'),
+					async () => await expectCacheStatus(readQuery, 'HIT'),
 				);
 			},
 			60_000,

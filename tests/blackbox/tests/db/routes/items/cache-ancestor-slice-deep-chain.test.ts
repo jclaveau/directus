@@ -155,22 +155,21 @@ describe(oneLine`
 			}
 		});
 
-		const bucketPath = [
-			'range', 'slots', 'part', 'course', 'unit', 'discipline', 'student', 'owner',
-		];
-
 		function readConfig() {
-			const bucketKey = `filter[${bucketPath.join('][')}][_eq]`;
-
 			return request(getUrl(vendor, env))
 				.get(`/items/${CONFIG}`)
 				.query({
 					// The unit's own name is read too: a purge drops an entry only for a
 					// write touching a field it is bound to, so a read showing no column
 					// of the ancestor would not be evicted by a rename of it.
-					fields: '*,range.slots.part.course.unit.name'
-						+ ',range.slots.part.course.unit.discipline.student.name',
-					[bucketKey]: String(ownedOwnerId),
+					fields: oneLine`
+						*,
+						range.slots.part.course.unit.name,
+						range.slots.part.course.unit.discipline.student.name
+					`,
+					[oneLine`
+						filter[range][slots][part][course][unit][discipline][student][owner][_eq]
+					`]: String(ownedOwnerId),
 				})
 				.set('Authorization', auth);
 		}

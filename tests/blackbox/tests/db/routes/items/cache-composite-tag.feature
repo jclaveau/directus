@@ -12,13 +12,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
   global one in production.
 
   Background:
-    Given a slot collection scoped by owner and method
+    Given the slot collection:
+      | field  | type    | scoped_cache_field |
+      | owner  | string  | yes                |
+      | method | string  | yes                |
+      | note   | string  | no                 |
+      | amount | integer | no                 |
 
   Scenario: a write matching one pair but not the other leaves the read cached
     Given the slots:
       | marker | owner | method | note  | amount |
       | a1     | alpha | spaced | first | 10     |
-    And the id and owner of "alpha"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | alpha    |
+      | filter[method][_eq] | spaced   |
     When the slots are created:
       | marker | owner | method | note   | amount |
       | a2     | beta  | spaced | second | 20     |
@@ -28,7 +37,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | g1     | gamma | spaced | first | 10     |
-    And the id and owner of "gamma"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | gamma    |
+      | filter[method][_eq] | spaced   |
     When the slots are created:
       | marker | owner | method | note   | amount |
       | g2     | gamma | spaced | second | 20     |
@@ -38,7 +51,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | d1     | delta | spaced | first | 10     |
-    And the id and owner of "delta"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | delta    |
+      | filter[method][_eq] | spaced   |
     When slot "d1" is updated with note "rewritten"
     Then the read is still cached
 
@@ -46,7 +63,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner   | method | note  | amount |
       | e1     | epsilon | spaced | first | 10     |
-    And the id and owner of "epsilon"'s slots sorted by note are cached
+    And this read is cached:
+      | param              | value    |
+      | fields             | id,owner |
+      | filter[owner][_eq] | epsilon  |
+      | sort               | note     |
     When slot "e1" is updated with note "rewritten"
     Then the read is purged
 
@@ -54,7 +75,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | z1     | zeta  | spaced | first | 10     |
-    And every field of "zeta"'s slots is cached
+    And this read is cached:
+      | param              | value |
+      | fields             | *     |
+      | filter[owner][_eq] | zeta  |
     When slot "z1" is updated with note "rewritten"
     Then the read is purged
 
@@ -62,7 +86,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | t1     | theta | spaced | first | 10     |
-    And the id, owner and amount of "theta"'s slots above amount 5 are cached
+    And this read is cached:
+      | param               | value           |
+      | fields              | id,owner,amount |
+      | filter[owner][_eq]  | theta           |
+      | filter[amount][_gt] | 5               |
     When slot "t1" is updated with note "rewritten"
     Then the read is still cached
 
@@ -70,7 +98,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | i1     | iota  | spaced | first | 10     |
-    And the id, owner and amount of "iota"'s slots above amount 5 are cached
+    And this read is cached:
+      | param               | value           |
+      | fields              | id,owner,amount |
+      | filter[owner][_eq]  | iota            |
+      | filter[amount][_gt] | 5               |
     When slot "i1" is updated with amount 30
     Then the read is purged
 
@@ -78,7 +110,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | k1     | kappa | spaced | first | 10     |
-    And the id and owner of the slots owned by "kappa" or "lambda" are cached
+    And this read is cached:
+      | param              | value        |
+      | fields             | id,owner     |
+      | filter[owner][_in] | kappa,lambda |
     When the slots are created:
       | marker | owner  | method | note   | amount |
       | k2     | lambda | spaced | second | 20     |
@@ -88,7 +123,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | m1     | mu    | spaced | first | 10     |
-    And the id and owner of the slots owned by "mu" or "nu" are cached
+    And this read is cached:
+      | param              | value    |
+      | fields             | id,owner |
+      | filter[owner][_in] | mu,nu    |
     When the slots are created:
       | marker | owner | method | note   | amount |
       | m2     | xi    | spaced | second | 20     |
@@ -99,7 +137,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker | owner   | method | note   | amount |
       | o1     | omicron | spaced | first  | 10     |
       | p1     | pi      | spaced | second | 20     |
-    And the id and owner of "omicron"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | omicron  |
+      | filter[method][_eq] | spaced   |
     When slot "p1" is updated with owner "omicron"
     Then the read is purged
 
@@ -107,7 +149,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | r1     | rho   | spaced | first | 10     |
-    And the id and owner of "rho"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | rho      |
+      | filter[method][_eq] | spaced   |
     When slot "r1" is updated with owner "sigma"
     Then the read is purged
 
@@ -115,7 +161,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner   | method | note  | amount |
       | v1     | tau     | slow   | first | 10     |
-    And the slots owned by "tau" or read with the "spaced" method are cached
+    And this read is cached:
+      | param                       | value           |
+      | fields                      | id,owner,method |
+      | filter[_or][0][owner][_eq]  | tau             |
+      | filter[_or][1][method][_eq] | spaced          |
     When the slots are created:
       | marker | owner | method | note   | amount |
       | v2     | phi   | spaced | second | 20     |
@@ -125,7 +175,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner | method | note  | amount |
       | w1     | omega | slow   | first | 10     |
-    And the slots owned by "omega" or read with the "spaced" method are cached
+    And this read is cached:
+      | param                       | value           |
+      | fields                      | id,owner,method |
+      | filter[_or][0][owner][_eq]  | omega           |
+      | filter[_or][1][method][_eq] | spaced          |
     When the slots are created:
       | marker | owner | method | note   | amount |
       | w2     | koppa | slow   | second | 20     |
@@ -135,7 +189,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     Given the slots:
       | marker | owner   | method | note  | amount |
       | u1     | upsilon | spaced | first | 10     |
-    And the id and owner of "upsilon"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | upsilon  |
+      | filter[method][_eq] | spaced   |
     When slot "u1" is deleted
     Then the read is purged
 
@@ -144,6 +202,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker | owner | method | note   | amount |
       | c1     | chi   | spaced | first  | 10     |
       | c2     | psi   | spaced | second | 20     |
-    And the id and owner of "chi"'s spaced slots are cached
+    And this read is cached:
+      | param               | value    |
+      | fields              | id,owner |
+      | filter[owner][_eq]  | chi      |
+      | filter[method][_eq] | spaced   |
     When slot "c2" is deleted
     Then the read is still cached
