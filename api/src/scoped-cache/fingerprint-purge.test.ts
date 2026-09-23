@@ -100,39 +100,29 @@ beforeEach(() => {
 	} as any);
 });
 
-const BARE = 'ns:scoped-cache-index:idx:slot:';
-const ALPHA = 'ns:scoped-cache-index:idx:slot:owner=alpha';
-
-// One row of `slot`, owned by alpha, whose `method` the write rewrote.
-const row = {
-	collection: 'slot',
-	pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-	viewFields: [],
-};
-
-function purge(options: Record<string, unknown>) {
-	return purgeScopedCache(cache, 'slot', [], null, {
-		rowFingerprints: [row],
-		changed: ['method'],
-		indexPath: 'owner',
-		...options,
-	});
-}
-
 describe('a purge shown the rows it wrote', () => {
 	it(oneLine`
 		drops the entries whose whole query case the row satisfies, and leaves the one
 		bound to another value of a field the row also carries
 	`, async () => {
 		members = {
-			[BARE]: ['slot:&|ns:entry-bare'],
-			[ALPHA]: [
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
 			],
 		};
 
-		await purge({});
+		// One row of `slot`, owned by alpha, whose `method` the write rewrote.
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bare');
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
@@ -140,10 +130,20 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it('reads the bare set and the one its row owns, and no other', async () => {
-		await purge({});
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
 
-		expect([...new Set(sscan.mock.calls.map(([key]) => key))])
-			.toEqual([BARE, ALPHA]);
+		expect([...new Set(sscan.mock.calls.map(([key]) => key))]).toEqual([
+			'ns:scoped-cache-index:fingerprint:slot:',
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
+		]);
 	});
 
 	it(oneLine`
@@ -151,10 +151,20 @@ describe('a purge shown the rows it wrote', () => {
 		have changed, whichever slice the row sits in
 	`, async () => {
 		members = {
-			[ALPHA]: ['slot:&owner=,alpha,&view=,title,&|ns:entry-title'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&view=,title,&|ns:entry-title',
+			],
 		};
 
-		await purge({});
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
 
 		expect(cache.delete).not.toHaveBeenCalled();
 	});
@@ -164,10 +174,20 @@ describe('a purge shown the rows it wrote', () => {
 		left the result set whichever columns it carries
 	`, async () => {
 		members = {
-			[ALPHA]: ['slot:&owner=,alpha,&view=,title,&|ns:entry-title'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&view=,title,&|ns:entry-title',
+			],
 		};
 
-		await purge({ changed: null });
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: null,
+			indexPath: 'owner',
+		});
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-title');
 	});
@@ -177,16 +197,26 @@ describe('a purge shown the rows it wrote', () => {
 		the same index value does not test a key that is already gone
 	`, async () => {
 		members = {
-			[ALPHA]: [
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
 			],
 		};
 
-		await purge({});
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
 
-		expect(srem)
-			.toHaveBeenCalledWith(ALPHA, 'slot:&owner=,alpha,&|ns:entry-alpha');
+		expect(srem).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
+			'slot:&owner=,alpha,&|ns:entry-alpha',
+		);
 
 		expect(srem).toHaveBeenCalledTimes(1);
 	});
@@ -200,10 +230,18 @@ describe('a purge shown the rows it wrote', () => {
 			return ['0', ['slot:&|ns:entry-second']];
 		});
 
-		await purge({ indexPath: null });
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: ['method'],
+			indexPath: null,
+		});
 
 		// One pass per pattern the rows can drop something under — the two bare ones
-		// plus one per pair of `row` — and the first of them takes a second page.
+		// plus one per pair of the row — and the first of them takes a second page.
 		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
 			'0',
 			'7',
@@ -222,11 +260,22 @@ describe('a purge shown the rows it wrote', () => {
 		tag warm: that entry is what the tag covers
 	`, async () => {
 		members = {
-			[BARE]: ['slot:&|ns:entry-bare'],
-			[ALPHA]: ['slot:&owner=,alpha,&|ns:entry-alpha'],
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&|ns:entry-alpha',
+			],
 		};
 
-		await purge({ includeCollectionTag: false });
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+			includeCollectionTag: false,
+		});
 
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bare');
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
@@ -236,18 +285,25 @@ describe('a purge shown the rows it wrote', () => {
 		still sweeps a tag a hook declared: it names a slice, not the rows the
 		mutation wrote, and nothing read back can resolve it
 	`, async () => {
-		const hookTag = { collection: 'other', field: 'x', value: 'y' };
-
 		await purgeScopedCache(
 			cache,
 			'slot',
-			[{ collection: 'slot', field: 'id', value: 1 }, hookTag],
+			[
+				{ collection: 'slot', field: 'id', value: 1 },
+				{ collection: 'other', field: 'x', value: 'y' },
+			],
 			null,
 			{
-				rowFingerprints: [row],
+				rowFingerprints: [{
+					collection: 'slot',
+					pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+					viewFields: [],
+				}],
 				changed: ['method'],
 				indexPath: 'owner',
-				sweepScopedCacheTags: [hookTag],
+				sweepScopedCacheTags: [
+					{ collection: 'other', field: 'x', value: 'y' },
+				],
 			},
 		);
 

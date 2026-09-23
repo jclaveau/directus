@@ -955,8 +955,8 @@ describe(oneLine`
 			try {
 				const result = await service().readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
-					{ collection: 'other', field: 'ghost', value: 'g' },
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([
+					{ collection: 'other', pinnedScope: { ghost: ['g'] }, viewFields: [] },
 				]);
 			}
 			finally {
@@ -983,7 +983,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -1010,7 +1010,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -1034,7 +1034,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -1065,7 +1065,7 @@ describe(oneLine`
 					schema: composedChainSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('student_enrollment.items.read', declare);
@@ -1095,8 +1095,12 @@ describe(oneLine`
 					schema: composedChainSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
-					{ collection: 'student_course', field: 'teaching_unit.id', value: 10 },
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([
+					{
+						collection: 'student_course',
+						pinnedScope: { 'teaching_unit.id': ['10'] },
+						viewFields: [],
+					},
 				]);
 			}
 			finally {
@@ -1206,7 +1210,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);

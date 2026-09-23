@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { ScopedCacheFingerprint, ScopedCacheTag } from '@directus/types';
+import type { ScopedCacheFingerprint } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
@@ -185,16 +185,17 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
-	// A read hook scoped this response to unautopurgeable tags (value slices on fields
-	// the target collection isn't scoped on) without `manuallyPurged`: no write can
-	// auto-purge them, so caching would serve stale. Skip caching + surface them.
-	const unautopurgeableScopeTags: ScopedCacheTag[] | undefined =
-		res.locals['scopedCacheUnautopurgeableTags']
-		?? payloadMeta?.scopedCacheUnautopurgeableTags;
+	// A read hook scoped this response to unautopurgeable fingerprints (value slices
+	// on fields the target collection isn't scoped on) without `manuallyPurged`: no
+	// write can auto-purge them, so caching would serve stale. Skip caching + surface.
+	const unautopurgeableFingerprints:
+		readonly ScopedCacheFingerprint[] | undefined =
+		res.locals['scopedCacheUnautopurgeableFingerprints']
+		?? payloadMeta?.scopedCacheUnautopurgeableFingerprints;
 
 	const unautopurgeableScope =
-		Array.isArray(unautopurgeableScopeTags) &&
-		unautopurgeableScopeTags.length > 0 &&
+		Array.isArray(unautopurgeableFingerprints) &&
+		unautopurgeableFingerprints.length > 0 &&
 		scopedCachePurgeEnabled();
 
 	// `$NOW` (in filter/deep) resolves to a Date in `sanitizeQuery` before the key is
@@ -477,12 +478,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
 		else if (unautopurgeableScope) {
-			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same tag.
+			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same pin.
 			const detail = [
 				...new Set(
-					(unautopurgeableScopeTags ?? []).map(
-						(tag) => `${tag.collection}:${tag.field}`,
-					),
+					(unautopurgeableFingerprints ?? []).flatMap((fingerprint) => {
+						return Object.keys(fingerprint.pinnedScope).map((field) => {
+							return `${fingerprint.collection}:${field}`;
+						});
+					}),
 				),
 			].join(', ');
 

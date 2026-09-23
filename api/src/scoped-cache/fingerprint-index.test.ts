@@ -46,8 +46,6 @@ schema.collections['zone']!.scopedCacheFields = ['region'];
 schema.collections['region']!.scopedCacheFields = ['owner'];
 schema.collections['note']!.scopedCacheFields = ['method', 'author'];
 
-const slotIndex = 'scalabus:scoped-cache-index:idx:slot:';
-
 describe('scopedCacheIndexPath', () => {
 	it('follows the index path to its deepest ancestor key', () => {
 		expect(scopedCacheIndexPath(schema, 'slot')).toBe('zone.region.owner');
@@ -76,7 +74,9 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 				'slot:&method=,spaced,&view=,id,&zone.region.owner=,ana,&',
 			),
 			'zone.region.owner',
-		)).toEqual([`${slotIndex}zone.region.owner=ana`]);
+		)).toEqual([
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
+		]);
 	});
 
 	it('files a read bounded to a list of values under each of them', () => {
@@ -84,8 +84,8 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,ana,bo,&'),
 			'zone.region.owner',
 		)).toEqual([
-			`${slotIndex}zone.region.owner=ana`,
-			`${slotIndex}zone.region.owner=bo`,
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=bo',
 		]);
 	});
 
@@ -93,21 +93,23 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&method=,spaced,&view=,id,&'),
 			'zone.region.owner',
-		)).toEqual([slotIndex]);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	it('files every read of a collection with no index path bare', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('loose:&view=,id,&'),
 			null,
-		)).toEqual(['scalabus:scoped-cache-index:idx:loose:']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:']);
 	});
 
 	it('escapes a value carrying a separator, so its set is its own', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,a\\,b,&'),
 			'zone.region.owner',
-		)).toEqual([`${slotIndex}zone.region.owner=a\\,b`]);
+		)).toEqual([
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=a\\,b',
+		]);
 	});
 
 	// A collection may declare a column named after an Object member, and the
@@ -116,14 +118,14 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			{ collection: 'slot', pinnedScope: {}, viewFields: [] },
 			'constructor',
-		)).toEqual([slotIndex]);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	it('files a read under an index path named after an object member', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&constructor=,ana,&'),
 			'constructor',
-		)).toEqual([`${slotIndex}constructor=ana`]);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:constructor=ana']);
 	});
 });
 
@@ -141,9 +143,9 @@ describe('scopedCacheRowIndexKeys', () => {
 			],
 			'zone.region.owner',
 		)).toEqual([
-			slotIndex,
-			`${slotIndex}zone.region.owner=ana`,
-			`${slotIndex}zone.region.owner=bo`,
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=bo',
 		]);
 	});
 
@@ -155,7 +157,10 @@ describe('scopedCacheRowIndexKeys', () => {
 				parseScopedCacheFingerprint('slot:&id=,2,&zone.region.owner=,ana,&'),
 			],
 			'zone.region.owner',
-		)).toEqual([slotIndex, `${slotIndex}zone.region.owner=ana`]);
+		)).toEqual([
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
+		]);
 	});
 
 	it('reads the bare set alone for a row whose index value never resolved', () => {
@@ -163,7 +168,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			'slot',
 			[parseScopedCacheFingerprint('slot:&id=,1,&')],
 			'zone.region.owner',
-		)).toEqual([slotIndex]);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	// A collection may declare a column named after an Object member, and the
@@ -173,7 +178,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			'slot',
 			[{ collection: 'slot', pinnedScope: {}, viewFields: [] }],
 			'constructor',
-		)).toEqual([slotIndex]);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	it('reads the set of an index path named after an object member', () => {
@@ -181,7 +186,10 @@ describe('scopedCacheRowIndexKeys', () => {
 			'slot',
 			[parseScopedCacheFingerprint('slot:&constructor=,ana,&')],
 			'constructor',
-		)).toEqual([slotIndex, `${slotIndex}constructor=ana`]);
+		)).toEqual([
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			'scalabus:scoped-cache-index:fingerprint:slot:constructor=ana',
+		]);
 	});
 
 	it('reads the bare set alone for a collection with no index path', () => {
@@ -189,12 +197,12 @@ describe('scopedCacheRowIndexKeys', () => {
 			'loose',
 			[parseScopedCacheFingerprint('loose:&id=,1,&')],
 			null,
-		)).toEqual(['scalabus:scoped-cache-index:idx:loose:']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:']);
 	});
 
 	it('names the bare set even when the write carried no row', () => {
 		expect(scopedCacheRowIndexKeys('slot', [], 'zone.region.owner'))
-			.toEqual([slotIndex]);
+			.toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 });
 

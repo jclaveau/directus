@@ -825,7 +825,7 @@ implements AbstractService<Item> {
 		// the result via `getMeta()`, not a field.
 		const {
 			fingerprints: scopedCacheFingerprints,
-			unautopurgeable: scopedCacheUnautopurgeableTags,
+			unautopurgeable: scopedCacheUnautopurgeableFingerprints,
 		} = await this.scopedCache.readFingerprints({
 				ast,
 				plan: scopedCachePlan,
@@ -868,7 +868,7 @@ implements AbstractService<Item> {
 		return withMeta(filteredRecords as Item[], scopedCacheReadMeta(
 			scopedCacheFingerprints,
 			{
-				scopedCacheUnautopurgeableTags,
+				scopedCacheUnautopurgeableFingerprints,
 				// A `scopeTo` names a collection the pre-query capture could not know
 				// about, and hands over the counter its own dependent read took.
 				scopedCacheEpochs: foldHandedOverScopedCacheEpochs(

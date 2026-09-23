@@ -255,7 +255,10 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		// #205 scoped-cache tagging fires with the request's fingerprints
+		// #205 scoped-cache tagging fires with the request's fingerprints, the legacy
+		// flat tags the old index is still written under, and the path each
+		// collection's index set is split by — `null` for a collection the schema
+		// declares no scope field on, whose fingerprints all go in the bare set.
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
@@ -499,20 +502,18 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
+		const readMetaOfPayload = scopedCacheReadMeta(
+			[
+				{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
+				{ collection: 'student', pinnedScope: {}, viewFields: [] },
+			],
+			{ scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' } },
+		);
+
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes(
-				{
-					data: withMeta(
-						{ id: 'u1' },
-						scopedCacheReadMeta([
-							{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
-							{ collection: 'student', pinnedScope: {}, viewFields: [] },
-						], {
-							scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' },
-						}),
-					),
-				},
+				{ data: withMeta({ id: 'u1' }, readMetaOfPayload) },
 				{ scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' } },
 			),
 			next,
@@ -526,27 +527,25 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		refuses to cache a payload whose meta names unautopurgeable tags, the same as
-		when a controller forwards them
+		refuses to cache a payload whose meta names unautopurgeable fingerprints, the
+		same as when a controller forwards them
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
+		const readMetaOfPayload = scopedCacheReadMeta(
+			[{ collection: 'directus_users', pinnedScope: {}, viewFields: [] }],
+			{
+				scopedCacheUnautopurgeableFingerprints: [{
+					collection: 'student',
+					pinnedScope: { level: ['3'] },
+					viewFields: [],
+				}],
+			},
+		);
+
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
-			makeRes({
-				data: withMeta(
-					{ id: 'u1' },
-					scopedCacheReadMeta([{
-						collection: 'directus_users',
-						pinnedScope: {},
-						viewFields: [],
-					}], {
-						scopedCacheUnautopurgeableTags: [
-							{ collection: 'student', field: 'level', value: 3, type: 'integer' },
-						],
-					}),
-				),
-			}),
+			makeRes({ data: withMeta({ id: 'u1' }, readMetaOfPayload) }),
 			next,
 		);
 
@@ -638,6 +637,8 @@ describe('respond middleware', () => {
 			// bound to nothing, any write to the collection moves the number.
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
+			// The index path `articles` is split by: `null`, since the schema this
+			// request carries declares no scope field on it.
 			new Map([['articles', null]]),
 		);
 	});

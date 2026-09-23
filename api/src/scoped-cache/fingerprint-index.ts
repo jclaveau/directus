@@ -30,7 +30,7 @@ function scopedCacheIndexKey(
 	collection: CollectionKey,
 	indexPin: string,
 ): string {
-	return `${scopedCacheIndexPrefix()}idx:${collection}:${indexPin}`;
+	return `${scopedCacheIndexPrefix()}fingerprint:${collection}:${indexPin}`;
 }
 
 /**

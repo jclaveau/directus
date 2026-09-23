@@ -117,8 +117,8 @@ const readHandler = asyncHandler(async (req, res, next) => {
 	const resultMeta = readMeta(result);
 	res.locals['scopedCacheFingerprints'] = resultMeta?.scopedCacheFingerprints;
 
-	res.locals['scopedCacheUnautopurgeableTags'] =
-		resultMeta?.scopedCacheUnautopurgeableTags;
+	res.locals['scopedCacheUnautopurgeableFingerprints'] =
+		resultMeta?.scopedCacheUnautopurgeableFingerprints;
 
 	res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 
@@ -155,8 +155,8 @@ router.get(
 		const resultMeta = readMeta(result);
 		res.locals['scopedCacheFingerprints'] = resultMeta?.scopedCacheFingerprints;
 
-		res.locals['scopedCacheUnautopurgeableTags'] =
-			resultMeta?.scopedCacheUnautopurgeableTags;
+		res.locals['scopedCacheUnautopurgeableFingerprints'] =
+			resultMeta?.scopedCacheUnautopurgeableFingerprints;
 
 		res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 

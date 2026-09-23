@@ -270,12 +270,13 @@ export interface ReadMeta {
 	readonly scopedCacheTags: ScopedCacheTag[];
 
 	/**
-	 * Tags a read hook scoped this response TO that are unautopurgeable — a value
-	 * slice on a field the target collection isn't scoped on, not `manuallyPurged`. No
-	 * write can auto-purge them, so respond.ts must not cache the response; it also
-	 * lists them as the `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
+	 * Fingerprints a read hook scoped this response TO that are unautopurgeable — a
+	 * value slice on a field the target collection isn't scoped on, not
+	 * `manuallyPurged`. No write can auto-purge them, so respond.ts must not cache
+	 * the response; it also names their collection and field as the
+	 * `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
 	 */
-	scopedCacheUnautopurgeableTags?: ScopedCacheTag[];
+	scopedCacheUnautopurgeableFingerprints?: ScopedCacheFingerprint[];
 
 	/**
 	 * The purge counters of the collections this read depends on, captured BEFORE its

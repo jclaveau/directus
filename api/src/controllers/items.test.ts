@@ -242,20 +242,26 @@ describe('items controller', () => {
 		// Without this the pin never reaches respond.ts, which then falls back to the
 		// bare collection tag — so the key slice a single-item read pinned would be
 		// indexed under nothing, and any write to the collection would drop the entry.
-		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
+		test(oneLine`
+			stamps the read's pins and its unautopurgeable fingerprints
+		`, async () => {
 			const fingerprint = {
 				collection: 'articles',
 				pinnedScope: { id: ['1'] },
 				viewFields: [],
 			};
 
-			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };
+			const orphan = {
+				collection: 'authors',
+				pinnedScope: { ghost: ['g'] },
+				viewFields: [],
+			};
 
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ id: 1 },
 					scopedCacheReadMeta([fingerprint], {
-						scopedCacheUnautopurgeableTags: [orphan],
+						scopedCacheUnautopurgeableFingerprints: [orphan],
 					}),
 				),
 			);
@@ -264,7 +270,8 @@ describe('items controller', () => {
 			await handler()(makeReq(), res, vi.fn());
 
 			expect(res.locals['scopedCacheFingerprints']).toEqual([fingerprint]);
-			expect(res.locals['scopedCacheUnautopurgeableTags']).toEqual([orphan]);
+			expect(res.locals['scopedCacheUnautopurgeableFingerprints'])
+				.toEqual([orphan]);
 		});
 	});
 

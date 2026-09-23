@@ -116,20 +116,6 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
-		function updateTagBody(id: number, body: string) {
-			return request(getUrl(vendor, env))
-				.patch(`/items/${TAG}/${id}`)
-				.send({ body })
-				.set('Authorization', auth);
-		}
-
-		function updateTag(id: number, item: Record<string, string>) {
-			return request(getUrl(vendor, env))
-				.patch(`/items/${TAG}/${id}`)
-				.send(item)
-				.set('Authorization', auth);
-		}
-
 		function clearCache() {
 			return request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -150,7 +136,10 @@ describe(oneLine`
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
 
-			await updateTagBody(betaTagId, 'beta touched');
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${betaTagId}`)
+				.send({ body: 'beta touched' })
+				.set('Authorization', auth);
 
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
 		});
@@ -163,12 +152,18 @@ describe(oneLine`
 
 			// The label, not the body: the read shows no tag column, so only a write
 			// moving a tag across the slice the filter named changes its response.
-			await updateTag(alphaTagId, { label: 'alpha moved' });
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ label: 'alpha moved' })
+				.set('Authorization', auth);
 
 			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
 
 			// Back in the slice the tests below read.
-			await updateTag(alphaTagId, { label: 'alpha' });
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ label: 'alpha' })
+				.set('Authorization', auth);
 		});
 
 		it('inserting a tag with the filtered label evicts the read', async () => {
@@ -238,11 +233,17 @@ describe(oneLine`
 
 			// Either scoped field the filter named bounds this read, so a write moving
 			// the tag along one of them evicts it.
-			await updateTag(alphaTagId, { kind: 'k2' });
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ kind: 'k2' })
+				.set('Authorization', auth);
 
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
 
-			await updateTag(alphaTagId, { kind: 'k1' });
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ kind: 'k1' })
+				.set('Authorization', auth);
 		});
 	});
 });

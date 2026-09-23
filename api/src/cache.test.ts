@@ -405,7 +405,7 @@ describe('scoped cache purging', () => {
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:idx:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
 				'slots:&student=,7,&|resp-key',
 				'slots:&student=,7,&|resp-key__expires_at',
@@ -437,7 +437,7 @@ describe('scoped cache purging', () => {
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:idx:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
 				'slots:&student=,A,B,&|resp-key',
 				'slots:&student=,A,B,&|resp-key__expires_at',
@@ -458,7 +458,7 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(4);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:idx:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
 				'slots:&student=,A,&|resp-key',
 				'slots:&student=,A,&|resp-key__expires_at',

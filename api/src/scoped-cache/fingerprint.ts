@@ -172,7 +172,7 @@ export function parseScopedCacheFingerprint(
  * on the SAME field are one pin listing both values, which is what an `_in`
  * filter and a set of nested parent keys both mean.
  */
-export function scopedCacheFingerprintFromTags(
+export function scopedCacheFingerprintFromLegacyTags(
 	collection: string,
 	tags: readonly ScopedCacheTag[],
 	viewFields: readonly string[] = [],
@@ -192,31 +192,6 @@ export function scopedCacheFingerprintFromTags(
 	}
 
 	return { collection, pinnedScope: taggedScope, viewFields };
-}
-
-/**
- * The fingerprint rendered back into the tag labels the dev headers carried before
- * composite tags — `collection:field=value`, one per value, `view` dropped, and
- * the bare collection when the fingerprint pins nothing.
- *
- * Kept so the behaviour this refactor preserves can be asserted by the blackbox
- * tests that already assert it, byte for byte. Moving the headers to the composite
- * form is a separate change.
- */
-export function scopedCacheFingerprintLabels(
-	fingerprint: ScopedCacheFingerprint,
-): string[] {
-	const tagLabels: string[] = [];
-
-	for (const [field, values] of Object.entries(fingerprint.pinnedScope)) {
-		for (const value of values) {
-			tagLabels.push(`${fingerprint.collection}:${field}=${value}`);
-		}
-	}
-
-	return tagLabels.length === 0
-		? [fingerprint.collection]
-		: tagLabels;
 }
 
 /**
@@ -301,7 +276,7 @@ export function scopedCacheFingerprintMatchesRow(
  * wildcard of any of its prefixes (`method_range.*`), or by `*`; a bare
  * `method_range` — the fk column alone — is not it.
  */
-export function scopedCacheFingerprintFieldsTouched(
+export function scopedCacheViewFieldsTouched(
 	viewFields: readonly string[],
 	changed: readonly string[] | null,
 ): boolean {
@@ -375,7 +350,7 @@ export function scopedCacheFingerprintsByCollection(
 			continue;
 		}
 
-		const composed = scopedCacheFingerprintFromTags(
+		const composed = scopedCacheFingerprintFromLegacyTags(
 			queryCaseCollection,
 			queryCase,
 			fieldsByCollection.get(queryCaseCollection) ?? [],
@@ -423,7 +398,7 @@ export function scopedCacheFingerprintPurgedBy(
 		? fingerprint.viewFields
 		: [...fingerprint.viewFields, ...Object.keys(fingerprint.pinnedScope)];
 
-	if (scopedCacheFingerprintFieldsTouched(queryCase, changed) === false) {
+	if (scopedCacheViewFieldsTouched(queryCase, changed) === false) {
 		return false;
 	}
 

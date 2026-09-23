@@ -3,10 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
-	scopedCacheFingerprintFieldsTouched,
-	scopedCacheFingerprintFromTags,
+	scopedCacheViewFieldsTouched,
+	scopedCacheFingerprintFromLegacyTags,
 	scopedCacheFingerprintsByCollection,
-	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintMatchesRow,
 	scopedCacheFingerprintPurgedBy,
 	scopedCacheRowIndexGlobs,
@@ -126,9 +125,9 @@ describe('parseScopedCacheFingerprint', () => {
 	});
 });
 
-describe('scopedCacheFingerprintFromTags', () => {
+describe('scopedCacheFingerprintFromLegacyTags', () => {
 	it('folds two tags on one field into one pair', () => {
-		expect(scopedCacheFingerprintFromTags(
+		expect(scopedCacheFingerprintFromLegacyTags(
 			'note',
 			[
 				{ collection: 'note', field: 'owner', value: 'a', type: 'string' },
@@ -144,7 +143,7 @@ describe('scopedCacheFingerprintFromTags', () => {
 	});
 
 	it('canonicalizes each value the way the tag key does', () => {
-		expect(scopedCacheFingerprintFromTags(
+		expect(scopedCacheFingerprintFromLegacyTags(
 			'note',
 			[
 				{ collection: 'note', field: 'id', value: '007', type: 'integer' },
@@ -158,35 +157,15 @@ describe('scopedCacheFingerprintFromTags', () => {
 	});
 
 	it('pins a field named after an object member', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprintFromTags(
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprintFromLegacyTags(
 			'note',
 			[{ collection: 'note', field: '__proto__', value: 'a', type: 'string' }],
 		))).toBe('note:&__proto__=,a,&');
 	});
 
 	it('drops a bare tag, which pins nothing', () => {
-		expect(scopedCacheFingerprintFromTags('note', [{ collection: 'note' }]))
+		expect(scopedCacheFingerprintFromLegacyTags('note', [{ collection: 'note' }]))
 			.toEqual({ collection: 'note', pinnedScope: {}, viewFields: [] });
-	});
-});
-
-describe('scopedCacheFingerprintLabels', () => {
-	it('renders one legacy label per value, without the view pair', () => {
-		expect(scopedCacheFingerprintLabels(parseScopedCacheFingerprint(
-			'entry:&account=,7,&account.org=,3,&account.org.owner=,acme,'
-			+ '&id=,913,&view=,*,&',
-		))).toEqual([
-			'entry:account=7',
-			'entry:account.org=3',
-			'entry:account.org.owner=acme',
-			'entry:id=913',
-		]);
-	});
-
-	it('renders the bare collection when the fingerprint pins nothing', () => {
-		expect(scopedCacheFingerprintLabels(
-			parseScopedCacheFingerprint('entry:&view=,*,&'),
-		)).toEqual(['entry']);
 	});
 });
 
@@ -282,41 +261,41 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 	});
 });
 
-describe('scopedCacheFingerprintFieldsTouched', () => {
+describe('scopedCacheViewFieldsTouched', () => {
 	it('is touched by an insert or a delete, whichever fields it names', () => {
-		expect(scopedCacheFingerprintFieldsTouched(['id'], null)).toBe(true);
+		expect(scopedCacheViewFieldsTouched(['id'], null)).toBe(true);
 	});
 
 	it('is touched by any column when the read selected every one', () => {
-		expect(scopedCacheFingerprintFieldsTouched(['*'], ['note'])).toBe(true);
+		expect(scopedCacheViewFieldsTouched(['*'], ['note'])).toBe(true);
 	});
 
 	it('is touched by a column it names', () => {
-		expect(scopedCacheFingerprintFieldsTouched(['id', 'day'], ['day']))
+		expect(scopedCacheViewFieldsTouched(['id', 'day'], ['day']))
 			.toBe(true);
 	});
 
 	it('is left alone by a column it never named', () => {
-		expect(scopedCacheFingerprintFieldsTouched(['id', 'day'], ['note']))
+		expect(scopedCacheViewFieldsTouched(['id', 'day'], ['note']))
 			.toBe(false);
 	});
 
 	it('is touched by a nested change under a wildcard it names', () => {
-		expect(scopedCacheFingerprintFieldsTouched(
+		expect(scopedCacheViewFieldsTouched(
 			['method_range.*'],
 			['method_range.method'],
 		)).toBe(true);
 	});
 
 	it('is left alone by a nested change under the fk column alone', () => {
-		expect(scopedCacheFingerprintFieldsTouched(
+		expect(scopedCacheViewFieldsTouched(
 			['method_range'],
 			['method_range.method'],
 		)).toBe(false);
 	});
 
 	it('is touched when a read naming no field at all meets any write', () => {
-		expect(scopedCacheFingerprintFieldsTouched([], ['note'])).toBe(true);
+		expect(scopedCacheViewFieldsTouched([], ['note'])).toBe(true);
 	});
 });
 

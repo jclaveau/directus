@@ -21,8 +21,8 @@ router.use(
 		const gqlMeta = readMeta(res.locals['payload']);
 		res.locals['scopedCacheFingerprints'] = gqlMeta?.scopedCacheFingerprints;
 
-		res.locals['scopedCacheUnautopurgeableTags'] =
-			gqlMeta?.scopedCacheUnautopurgeableTags;
+		res.locals['scopedCacheUnautopurgeableFingerprints'] =
+			gqlMeta?.scopedCacheUnautopurgeableFingerprints;
 
 		res.locals['scopedCacheEpochs'] = gqlMeta?.scopedCacheEpochs;
 
@@ -49,8 +49,8 @@ router.use(
 		const gqlMeta = readMeta(res.locals['payload']);
 		res.locals['scopedCacheFingerprints'] = gqlMeta?.scopedCacheFingerprints;
 
-		res.locals['scopedCacheUnautopurgeableTags'] =
-			gqlMeta?.scopedCacheUnautopurgeableTags;
+		res.locals['scopedCacheUnautopurgeableFingerprints'] =
+			gqlMeta?.scopedCacheUnautopurgeableFingerprints;
 
 		res.locals['scopedCacheEpochs'] = gqlMeta?.scopedCacheEpochs;
 

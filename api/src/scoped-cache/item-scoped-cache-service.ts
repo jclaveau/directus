@@ -38,7 +38,7 @@ import {
 	scopedCachePurgeEnabled,
 } from './config.js';
 import {
-	scopedCacheFingerprintFromTags,
+	scopedCacheFingerprintFromLegacyTags,
 	scopedCacheFingerprintsByCollection,
 } from './fingerprint.js';
 import { scopedCacheIndexPath } from './fingerprint-index.js';
@@ -336,7 +336,10 @@ export class ItemScopedCacheService {
 					return {
 						key: tag.value as PrimaryKey,
 						row: null,
-						fingerprint: scopedCacheFingerprintFromTags(this.collection, [tag]),
+						fingerprint: scopedCacheFingerprintFromLegacyTags(
+							this.collection,
+							[tag],
+						),
 					};
 				}),
 			};
@@ -407,7 +410,10 @@ export class ItemScopedCacheService {
 				return {
 					key: row[primaryKeyField] as PrimaryKey,
 					row,
-					fingerprint: scopedCacheFingerprintFromTags(this.collection, rowTags),
+					fingerprint: scopedCacheFingerprintFromLegacyTags(
+						this.collection,
+						rowTags,
+					),
 				};
 			}),
 		};
@@ -791,11 +797,11 @@ export class ItemScopedCacheService {
 	 * augment these (resolve M2M owners, or tag a collection an `items.read` hook
 	 * enriched from); it receives the enriched `records`. Whatever they add must be
 	 * reproducible on the `cache.purge` side or it leaks. Returns the tags plus any
-	 * unautopurgeable scopeTo tags respond.ts leaves the read uncached for.
+	 * unautopurgeable scopeTo fingerprints respond.ts leaves the read uncached for.
 	 */
 	async readFingerprints(inputs: ScopedCacheReadInputs): Promise<{
 		fingerprints: ScopedCacheFingerprint[];
-		unautopurgeable: ScopedCacheTag[];
+		unautopurgeable: ScopedCacheFingerprint[];
 	}> {
 		const {
 			ast,
@@ -806,10 +812,10 @@ export class ItemScopedCacheService {
 		} = inputs;
 
 		let tags: ScopedCacheTag[] = [];
-		let unautopurgeable: ScopedCacheTag[] = [];
+		let unautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (!scopedCachePurgeEnabled()) {
-			return { fingerprints: [], unautopurgeable };
+			return { fingerprints: [], unautopurgeable: [] };
 		}
 
 		const {
@@ -1455,7 +1461,7 @@ export class ItemScopedCacheService {
 			tags.filter(reproducedByAWrite).map((tag) => tag.collection),
 		);
 
-		unautopurgeable = [...hookAddedTags.values()].filter((tag) => {
+		unautopurgeableTags = [...hookAddedTags.values()].filter((tag) => {
 			return (
 				reproducedByAWrite(tag) === false &&
 				collectionsAWriteReaches.has(tag.collection) === false &&
@@ -1504,6 +1510,13 @@ export class ItemScopedCacheService {
 			queryCaseFields,
 		);
 
-		return { fingerprints: readFingerprints, unautopurgeable };
+		return {
+			fingerprints: readFingerprints,
+			// One pin each: a hook's tag stands alone, and what respond.ts needs off
+			// it is the collection and field it names.
+			unautopurgeable: unautopurgeableTags.map((tag) => {
+				return scopedCacheFingerprintFromLegacyTags(tag.collection, [tag]);
+			}),
+		};
 	}
 }

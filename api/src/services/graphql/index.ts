@@ -3,7 +3,6 @@ import type {
 	AbstractServiceOptions,
 	Accountability,
 	ScopedCacheFingerprint,
-	ScopedCacheTag,
 	GraphQLParams,
 	GQLScope,
 	Item,
@@ -51,11 +50,12 @@ export class GraphQLService {
 	scopedCacheFingerprints: ScopedCacheFingerprint[];
 
 	/**
-	 * Unautopurgeable scope tags across every read in this request. Non-empty → the
-	 * whole `/graphql` entry can't be safely cached, so respond.ts skips it (and names
-	 * them in the anomaly). Aggregated like the fingerprints (one entry, many reads).
+	 * Unautopurgeable scope fingerprints across every read in this request. Non-empty
+	 * → the whole `/graphql` entry can't be safely cached, so respond.ts skips it (and
+	 * names them in the anomaly). Aggregated like the fingerprints (one entry, many
+	 * reads).
 	 */
-	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
+	scopedCacheUnautopurgeableFingerprints: ScopedCacheFingerprint[];
 
 	/**
 	 * The scoped cache purge counters this request's reads captured, merged across
@@ -78,7 +78,7 @@ export class GraphQLService {
 		this.schema = options.schema;
 		this.scope = options.scope;
 		this.scopedCacheFingerprints = [];
-		this.scopedCacheUnautopurgeableTags = [];
+		this.scopedCacheUnautopurgeableFingerprints = [];
 		this.scopedCacheEpochs = {};
 	}
 
@@ -132,7 +132,8 @@ export class GraphQLService {
 		return withMeta(formattedResult, scopedCacheReadMeta(
 			this.scopedCacheFingerprints,
 			{
-				scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
+				scopedCacheUnautopurgeableFingerprints:
+					this.scopedCacheUnautopurgeableFingerprints,
 				scopedCacheEpochs: this.scopedCacheEpochs,
 			},
 		));
@@ -168,8 +169,8 @@ export class GraphQLService {
 			...(resultMeta?.scopedCacheFingerprints ?? []),
 		);
 
-		this.scopedCacheUnautopurgeableTags.push(
-			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
+		this.scopedCacheUnautopurgeableFingerprints.push(
+			...(resultMeta?.scopedCacheUnautopurgeableFingerprints ?? []),
 		);
 
 		mergeScopedCacheEpochs(
