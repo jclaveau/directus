@@ -3,8 +3,6 @@ import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 import {
-	bareScopedCacheFingerprint,
-	scopedCacheFingerprint,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 
@@ -181,7 +179,7 @@ describe('items controller', () => {
 		});
 
 		test('singleton read + stamps scopedCacheFingerprints', async () => {
-			const fingerprint = bareScopedCacheFingerprint('articles');
+			const fingerprint = { collection: 'articles', pairs: new Map(), fields: [] };
 
 			readSingleton.mockResolvedValueOnce(
 				withMeta({ id: 1 }, scopedCacheReadMeta([fingerprint])),
@@ -241,10 +239,11 @@ describe('items controller', () => {
 		// bare collection tag — so the key slice a single-item read pinned would be
 		// indexed under nothing, and any write to the collection would drop the entry.
 		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
-			const fingerprint = scopedCacheFingerprint(
-				'articles',
-				new Map([['id', ['1']]]),
-			);
+			const fingerprint = {
+				collection: 'articles',
+				pairs: new Map([['id', ['1']]]),
+				fields: [],
+			};
 
 			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };
 

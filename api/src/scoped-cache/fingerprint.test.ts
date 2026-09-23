@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
-	scopedCacheFingerprint,
 	scopedCacheFingerprintFieldsTouched,
 	scopedCacheFingerprintFromTags,
 	scopedCacheFingerprintsByCollection,
@@ -15,11 +14,11 @@ import {
 
 describe('renderScopedCacheFingerprint', () => {
 	it('sorts the pairs and wraps every value in commas', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
-			'student_time_slot',
-			new Map([['user', ['A']], ['course_part', ['4821']]]),
-			['course_part', 'day', 'id'],
-		))).toBe(
+		expect(renderScopedCacheFingerprint({
+			collection: 'student_time_slot',
+			pairs: new Map([['user', ['A']], ['course_part', ['4821']]]),
+			fields: ['course_part', 'day', 'id'],
+		})).toBe(
 			'student_time_slot:&course_part=,4821,&fields=,course_part,day,id,'
 			+ '&user=,A,&',
 		);
@@ -29,40 +28,43 @@ describe('renderScopedCacheFingerprint', () => {
 	// field cannot be named `*`, so nothing is lost, and the escape rule stays one
 	// rule rather than one rule and an exception a pattern would have to know.
 	it('lists a multi-valued pair once, sorted and deduped', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
-			'student_time_slot',
-			new Map([['course_part', ['2', '1', '2']]]),
-			['*'],
-		))).toBe('student_time_slot:&course_part=,1,2,&fields=,\\*,&');
+		expect(renderScopedCacheFingerprint({
+			collection: 'student_time_slot',
+			pairs: new Map([['course_part', ['2', '1', '2']]]),
+			fields: ['*'],
+		})).toBe('student_time_slot:&course_part=,1,2,&fields=,\\*,&');
 	});
 
 	it('leaves out the fields pair when the read names none', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
-			'student_time_slot',
-			new Map([['user', ['A']]]),
-		))).toBe('student_time_slot:&user=,A,&');
+		expect(renderScopedCacheFingerprint({
+			collection: 'student_time_slot',
+			pairs: new Map([['user', ['A']]]),
+			fields: [],
+		})).toBe('student_time_slot:&user=,A,&');
 	});
 
 	it('renders a collection bound to nothing', () => {
 		expect(renderScopedCacheFingerprint(
-			scopedCacheFingerprint('student_time_slot'),
+			{ collection: 'student_time_slot', pairs: new Map(), fields: [] },
 		)).toBe('student_time_slot:&');
 	});
 
 	it('escapes a value carrying a separator', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
-			'note',
-			new Map([['title', ['a,b&c|d\\e']]]),
-		))).toBe('note:&title=,a\\,b\\&c\\|d\\\\e,&');
+		expect(renderScopedCacheFingerprint({
+			collection: 'note',
+			pairs: new Map([['title', ['a,b&c|d\\e']]]),
+			fields: [],
+		})).toBe('note:&title=,a\\,b\\&c\\|d\\\\e,&');
 	});
 
 	// A raw one would make the pattern a purge builds around this value match
 	// slices the value never named, which is a purge of somebody else's entries.
 	it('escapes a value carrying a glob metacharacter', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprint(
-			'note',
-			new Map([['title', ['a*b?c[d]']]]),
-		))).toBe('note:&title=,a\\*b\\?c\\[d\\],&');
+		expect(renderScopedCacheFingerprint({
+			collection: 'note',
+			pairs: new Map([['title', ['a*b?c[d]']]]),
+			fields: [],
+		})).toBe('note:&title=,a\\*b\\?c\\[d\\],&');
 	});
 });
 
@@ -105,7 +107,7 @@ describe('parseScopedCacheFingerprint', () => {
 	it('reads back a value whose escapes only look like two values', () => {
 		expect([...parseScopedCacheFingerprint(
 			renderScopedCacheFingerprint(
-				scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+				{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
 			),
 		).pairs]).toEqual([['owner', ['a,b']]]);
 	});
@@ -121,11 +123,11 @@ describe('scopedCacheFingerprintFromTags', () => {
 				{ collection: 'note', field: 'id', value: 7, type: 'integer' },
 			],
 			['*'],
-		)).toEqual(scopedCacheFingerprint(
-			'note',
-			new Map([['owner', ['a', 'b']], ['id', ['7']]]),
-			['*'],
-		));
+		)).toEqual({
+			collection: 'note',
+			pairs: new Map([['owner', ['a', 'b']], ['id', ['7']]]),
+			fields: ['*'],
+		});
 	});
 
 	it('canonicalizes each value the way the tag key does', () => {
@@ -135,15 +137,16 @@ describe('scopedCacheFingerprintFromTags', () => {
 				{ collection: 'note', field: 'id', value: '007', type: 'integer' },
 				{ collection: 'note', field: 'flag', value: 't', type: 'boolean' },
 			],
-		)).toEqual(scopedCacheFingerprint(
-			'note',
-			new Map([['id', ['7']], ['flag', ['true']]]),
-		));
+		)).toEqual({
+			collection: 'note',
+			pairs: new Map([['id', ['7']], ['flag', ['true']]]),
+			fields: [],
+		});
 	});
 
 	it('drops a bare tag, which pins nothing', () => {
 		expect(scopedCacheFingerprintFromTags('note', [{ collection: 'note' }]))
-			.toEqual(scopedCacheFingerprint('note'));
+			.toEqual({ collection: 'note', pairs: new Map(), fields: [] });
 	});
 });
 
@@ -216,15 +219,15 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 
 	it('matches a value carrying a separator', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
-			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
+			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
 		)).toBe(true);
 	});
 
 	it('refuses a row whose value only looks like the pinned one', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			scopedCacheFingerprint('slot', new Map([['owner', ['a']]])),
-			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+			{ collection: 'slot', pairs: new Map([['owner', ['a']]]), fields: [] },
+			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
 		)).toBe(false);
 	});
 });
@@ -480,7 +483,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 	// matching one, so the pattern doubles what the serialiser wrote.
 	it('escapes a value carrying a glob metacharacter', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
-			scopedCacheFingerprint('slot', new Map([['owner', ['a*b']]])),
+			{ collection: 'slot', pairs: new Map([['owner', ['a*b']]]), fields: [] },
 		])).toEqual([
 			'slot:&|*',
 			'slot:&fields=,*',
@@ -490,7 +493,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 
 	it('escapes a value carrying a separator', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
-			scopedCacheFingerprint('slot', new Map([['owner', ['a,b']]])),
+			{ collection: 'slot', pairs: new Map([['owner', ['a,b']]]), fields: [] },
 		])).toEqual([
 			'slot:&|*',
 			'slot:&fields=,*',
@@ -503,7 +506,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 		instead of walking them once per slice
 	`, () => {
 		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
-			return scopedCacheFingerprint('slot', new Map([['id', [`${at}`]]]));
+			return { collection: 'slot', pairs: new Map([['id', [`${at}`]]]), fields: [] };
 		});
 
 		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);

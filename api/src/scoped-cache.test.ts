@@ -18,7 +18,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	type ScopedCacheFilterKeying,
 	assertScopedCacheRedisSupported,
-	bareScopedCacheFingerprint,
 	bumpScopedCacheEpochs,
 	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
@@ -43,7 +42,6 @@ import {
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCacheFilterKeyingByCollection,
-	scopedCacheFingerprint,
 	scopedCacheMaxPinsPerCollection,
 	scopedCacheNestedCollections,
 	scopedCacheOwnershipNestedPkPaths,
@@ -673,7 +671,11 @@ describe('createScopedCacheCollector', () => {
 			return withMeta(
 				[{ id: 1 }],
 				scopedCacheReadMeta([
-					scopedCacheFingerprint('metric', new Map([['owner', ['acme']]])),
+					{
+						collection: 'metric',
+						pairs: new Map([['owner', ['acme']]]),
+						fields: [],
+					},
 				], {
 					scopedCacheEpochs: { metric: '4' },
 				}),
@@ -683,7 +685,11 @@ describe('createScopedCacheCollector', () => {
 		const auditLookup = () => {
 			return withMeta(
 				[{ id: 2 }],
-				scopedCacheReadMeta([bareScopedCacheFingerprint('audit')], {
+				scopedCacheReadMeta([{
+					collection: 'audit',
+					pairs: new Map(),
+					fields: [],
+				}], {
 					scopedCacheEpochs: { audit: '7' },
 				}),
 			);
@@ -749,14 +755,22 @@ describe('createScopedCacheCollector', () => {
 
 			const before = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([bareScopedCacheFingerprint('metric')], {
+				scopedCacheReadMeta([{
+					collection: 'metric',
+					pairs: new Map(),
+					fields: [],
+				}], {
 					scopedCacheEpochs: { metric: '4' },
 				}),
 			);
 
 			const after = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([bareScopedCacheFingerprint('metric')], {
+				scopedCacheReadMeta([{
+					collection: 'metric',
+					pairs: new Map(),
+					fields: [],
+				}], {
 					scopedCacheEpochs: { metric: '5' },
 				}),
 			);
@@ -800,8 +814,8 @@ describe('collection slice index', () => {
 		} as any);
 
 		await indexScopedCacheEntry('entry', [
-			bareScopedCacheFingerprint('articles'),
-			scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
+			{ collection: 'articles', pairs: new Map(), fields: [] },
+			{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
 		]);
 
 		expect(indexPipeline.sadd)
@@ -981,7 +995,7 @@ describe('indexScopedCacheEntry', () => {
 		} as any);
 
 		await expect(indexScopedCacheEntry('entry', [
-			scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
+			{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
 		])).rejects.toBe(refused);
 	});
 
@@ -1007,7 +1021,7 @@ describe('indexScopedCacheEntry', () => {
 
 		try {
 			await indexScopedCacheEntry('entry', [
-				scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
+				{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
 			]);
 		}
 		finally {

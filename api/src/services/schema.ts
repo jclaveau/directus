@@ -9,7 +9,6 @@ import type {
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
 import {
-	bareScopedCacheFingerprint,
 	readScopedCacheEpochs,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
@@ -50,7 +49,9 @@ export class SchemaService {
 		const currentSnapshot = await getSnapshot({ database: this.knex });
 
 		return withMeta(currentSnapshot, scopedCacheReadMeta(
-			snapshotCollections.map(bareScopedCacheFingerprint),
+			snapshotCollections.map((collection) => {
+				return { collection, pairs: new Map(), fields: [] };
+			}),
 			{ scopedCacheEpochs },
 		));
 	}

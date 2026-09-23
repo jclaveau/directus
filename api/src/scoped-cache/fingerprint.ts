@@ -74,38 +74,6 @@ function splitUnescaped(input: string, separator: string): string[] {
 }
 
 /**
- * A query case as the rest of the api holds it: the collection, the pairs that had
- * to hold together, and the fields the read is bound to.
- *
- * Every consumer but Redis reads it open like this — a pair is a map lookup, not a
- * substring search over a rendered string — so the serialiser below runs once, at
- * the index write, and the parser once, at the index read.
- */
-export function scopedCacheFingerprint(
-	collection: string,
-	pairs: ReadonlyMap<string, readonly string[]> = new Map(),
-	fields: readonly string[] = [],
-): ScopedCacheFingerprint {
-	return {
-		collection,
-		pairs: new Map(
-			[...pairs].map(([field, values]) => [field, [...values]]),
-		),
-		fields: [...fields],
-	};
-}
-
-/**
- * The fingerprint of a read bound to nothing of a collection: no pair and no
- * field, so every write to it matches. What a tag naming only a collection said.
- */
-export function bareScopedCacheFingerprint(
-	collection: string,
-): ScopedCacheFingerprint {
-	return scopedCacheFingerprint(collection);
-}
-
-/**
  * The form Redis holds: `<collection>:&<key>=,<v1>,<v2>,&…&`.
  *
  * Pairs are sorted and every token is wrapped in commas, which is what makes a
@@ -212,7 +180,7 @@ export function scopedCacheFingerprintFromTags(
 		taggedPairs.set(tag.field, fieldValues);
 	}
 
-	return scopedCacheFingerprint(collection, taggedPairs, fields);
+	return { collection, pairs: taggedPairs, fields };
 }
 
 /**

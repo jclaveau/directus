@@ -5,7 +5,6 @@ import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
 import {
-	bareScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
 	scopedCacheReadMeta,
 } from '../../scoped-cache.js';
@@ -63,8 +62,8 @@ describe('GraphQLService scoped cache tags', () => {
 				return withMeta(
 					[{ id: 1 }],
 					scopedCacheReadMeta([
-						bareScopedCacheFingerprint('articles'),
-						bareScopedCacheFingerprint('users'),
+						{ collection: 'articles', pairs: new Map(), fields: [] },
+						{ collection: 'users', pairs: new Map(), fields: [] },
 					]),
 				);
 			},
@@ -81,7 +80,11 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta(
 					[{ id: 2 }],
-					scopedCacheReadMeta([bareScopedCacheFingerprint('directus_files')]),
+					scopedCacheReadMeta([{
+						collection: 'directus_files',
+						pairs: new Map(),
+						fields: [],
+					}]),
 				);
 			},
 		} as any);
@@ -102,7 +105,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[bareScopedCacheFingerprint('articles')],
+					[{ collection: 'articles', pairs: new Map(), fields: [] }],
 					{ scopedCacheEpochs: { articles: '7', users: '3', '*': '1' } },
 				));
 			},
@@ -116,7 +119,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[bareScopedCacheFingerprint('articles')],
+					[{ collection: 'articles', pairs: new Map(), fields: [] }],
 					{ scopedCacheEpochs: { articles: '8', files: null, '*': '2' } },
 				));
 			},
@@ -143,7 +146,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[bareScopedCacheFingerprint('articles')],
+					[{ collection: 'articles', pairs: new Map(), fields: [] }],
 					{ scopedCacheEpochs: { articles: '9', '*': '4' } },
 				));
 			},
@@ -154,7 +157,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[bareScopedCacheFingerprint('articles')],
+					[{ collection: 'articles', pairs: new Map(), fields: [] }],
 					{ scopedCacheEpochs: { articles: '2', '*': '4' } },
 				));
 			},
@@ -174,7 +177,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[bareScopedCacheFingerprint('articles')],
+					[{ collection: 'articles', pairs: new Map(), fields: [] }],
 					{ scopedCacheEpochs: { articles: '3' } },
 				));
 			},
@@ -185,7 +188,7 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[bareScopedCacheFingerprint('articles')],
+					[{ collection: 'articles', pairs: new Map(), fields: [] }],
 					{ scopedCacheEpochs: { articles: null } },
 				));
 			},
@@ -206,7 +209,11 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta(
 					[{ id: 1 }],
-					scopedCacheReadMeta([bareScopedCacheFingerprint('articles')]),
+					scopedCacheReadMeta([{
+						collection: 'articles',
+						pairs: new Map(),
+						fields: [],
+					}]),
 				);
 			},
 		} as any);
@@ -245,8 +252,8 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 
 		gql.scopedCacheFingerprints.push(
-			bareScopedCacheFingerprint('articles'),
-			bareScopedCacheFingerprint('users'),
+			{ collection: 'articles', pairs: new Map(), fields: [] },
+			{ collection: 'users', pairs: new Map(), fields: [] },
 		);
 
 		const result = await gql.execute({

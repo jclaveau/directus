@@ -1,6 +1,5 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, it } from 'vitest';
-import { scopedCacheFingerprint } from './fingerprint.js';
 import {
 	scopedCacheChangedFields,
 	scopedCacheUpdatedRows,
@@ -9,7 +8,11 @@ import {
 
 // The fingerprint plays no part in the diff — it is the row that is compared —
 // so every case below carries the same one.
-const fingerprint = scopedCacheFingerprint('slot', new Map([['id', ['1']]]));
+const fingerprint = {
+	collection: 'slot',
+	pairs: new Map([['id', ['1']]]),
+	fields: [],
+};
 
 describe('scopedCacheChangedFields', () => {
 	it('names the column the write rewrote, and no other', () => {
@@ -163,21 +166,23 @@ describe('scopedCacheWrittenRows', () => {
 
 describe('scopedCacheUpdatedRows', () => {
 	it('shows both sides of the row, and the column that moved', () => {
-		const fingerprintAlpha = scopedCacheFingerprint(
-			'slot',
-			new Map([
+		const fingerprintAlpha = {
+			collection: 'slot',
+			pairs: new Map([
 				['id', ['1']],
 				['owner', ['alpha']],
 			]),
-		);
+			fields: [],
+		};
 
-		const fingerprintBeta = scopedCacheFingerprint(
-			'slot',
-			new Map([
+		const fingerprintBeta = {
+			collection: 'slot',
+			pairs: new Map([
 				['id', ['1']],
 				['owner', ['beta']],
 			]),
-		);
+			fields: [],
+		};
 
 		expect(scopedCacheUpdatedRows(
 			{

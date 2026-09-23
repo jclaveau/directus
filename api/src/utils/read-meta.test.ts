@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest';
 import {
-	bareScopedCacheFingerprint,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 import { readMeta, withMeta } from './read-meta.js';
@@ -8,8 +7,8 @@ import { readMeta, withMeta } from './read-meta.js';
 describe('withMeta / readMeta', () => {
 	test('round-trips the metadata via getMeta()', () => {
 		const meta = scopedCacheReadMeta([
-			bareScopedCacheFingerprint('articles'),
-			bareScopedCacheFingerprint('users'),
+			{ collection: 'articles', pairs: new Map(), fields: [] },
+			{ collection: 'users', pairs: new Map(), fields: [] },
 		]);
 
 		const result = withMeta([{ id: 1 }], meta);
@@ -25,7 +24,11 @@ describe('withMeta / readMeta', () => {
 	test('getMeta is non-enumerable — invisible to JSON and spread', () => {
 		const rows = withMeta(
 			[{ id: 1 }],
-			scopedCacheReadMeta([bareScopedCacheFingerprint('articles')]),
+			scopedCacheReadMeta([{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}]),
 		);
 
 		expect(JSON.stringify(rows)).toBe('[{"id":1}]');
@@ -37,7 +40,11 @@ describe('withMeta / readMeta', () => {
 	test('works on a single object as well as an array', () => {
 		const item = withMeta(
 			{ id: 1 },
-			scopedCacheReadMeta([bareScopedCacheFingerprint('articles')]),
+			scopedCacheReadMeta([{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}]),
 		);
 
 		expect(readMeta(item)!.scopedCacheTags).toEqual([{ collection: 'articles' }]);

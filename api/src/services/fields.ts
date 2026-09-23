@@ -25,7 +25,6 @@ import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
 import {
-	bareScopedCacheFingerprint,
 	flushResponseCache,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
@@ -275,7 +274,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(result, scopedCacheReadMeta([
-			bareScopedCacheFingerprint('directus_fields'),
+			{ collection: 'directus_fields', pairs: new Map(), fields: [] },
 		]));
 	}
 
@@ -361,7 +360,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(data, scopedCacheReadMeta([
-			bareScopedCacheFingerprint('directus_fields'),
+			{ collection: 'directus_fields', pairs: new Map(), fields: [] },
 		]));
 	}
 

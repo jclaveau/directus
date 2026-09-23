@@ -15,7 +15,6 @@ import {
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
-	bareScopedCacheFingerprint,
 	indexScopedCacheEntry,
 	mergedScopedCacheEpochs,
 	scopedCacheBucketPath,
@@ -121,7 +120,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// A response with no pin at all (a hand-rolled /settings) falls back to the bare
 	// collection fingerprint so a mutation there still purges it (settings reask).
 	const collectionFallbackFingerprints: ScopedCacheFingerprint[] = req.collection
-		? [bareScopedCacheFingerprint(req.collection)]
+		? [{ collection: req.collection, pairs: new Map(), fields: [] }]
 		: [];
 
 	// `total_count` drops the query filter and counts the whole collection

@@ -50,7 +50,6 @@ import {
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
-import { scopedCacheFingerprint } from '../scoped-cache/fingerprint.js';
 import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/tags.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
@@ -196,7 +195,11 @@ describe(oneLine`
 				{
 					key: 1,
 					row: null,
-					fingerprint: scopedCacheFingerprint('articles', new Map([['id', ['1']]])),
+					fingerprint: {
+						collection: 'articles',
+						pairs: new Map([['id', ['1']]]),
+						fields: [],
+					},
 				},
 			],
 		});

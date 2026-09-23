@@ -37,6 +37,10 @@ export interface ScopedCacheFingerprint {
 	/**
 	 * Field path to the values the read is pinned to. The values of one pair are an
 	 * OR — what an `_in` means — and the pairs together are an AND.
+	 *
+	 * Empty pins nothing, so there is no pair left to fail and every write to the
+	 * collection matches — `{ collection, pairs: new Map(), fields: [] }` is what a
+	 * tag naming only a collection said.
 	 */
 	readonly pairs: ReadonlyMap<string, readonly string[]>;
 	/**

@@ -2,8 +2,6 @@ import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-	bareScopedCacheFingerprint,
-	scopedCacheFingerprint,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 
@@ -80,12 +78,10 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// Real for the same reason: composing fingerprints into a flat tag set is
 		// pure, and a stand-in would agree with the assertions rather than the
 		// grammar.
-		bareScopedCacheFingerprint: actual.bareScopedCacheFingerprint,
 		scopedCacheBucketPath: actual.scopedCacheBucketPath,
 		scopedCacheTagsOfFingerprints: actual.scopedCacheTagsOfFingerprints,
 		// Used only to build fixtures below — pure, reaches no Redis.
 		scopedCacheReadMeta: actual.scopedCacheReadMeta,
-		scopedCacheFingerprint: actual.scopedCacheFingerprint,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -225,7 +221,11 @@ describe('respond middleware', () => {
 	`, async () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')] },
+			{ scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}] },
 		);
 
 		const req = makeReq();
@@ -258,7 +258,7 @@ describe('respond middleware', () => {
 		// #205 scoped-cache tagging fires with the request's fingerprints
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[bareScopedCacheFingerprint('articles')],
+			[{ collection: 'articles', pairs: new Map(), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -274,7 +274,11 @@ describe('respond middleware', () => {
 		await respond(makeReq(), makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pairs: new Map(),
+					fields: [],
+				}],
 				httpRequestCacheKey: {
 					redisKey: 'middleware-key',
 					cacheKey: 'middleware-hash',
@@ -296,7 +300,11 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pairs: new Map(),
+					fields: [],
+				}],
 				requestStart: Date.now() - 10,
 			},
 		);
@@ -359,7 +367,11 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
-				scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pairs: new Map(),
+					fields: [],
+				}],
 				requestStart: 900,
 			},
 		);
@@ -387,7 +399,11 @@ describe('respond middleware', () => {
 		const payload = { data: [{ id: 1, blob: 'x'.repeat(200) }] };
 
 		const res = makeRes(payload, {
-			scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}],
 		});
 
 		await respond(makeReq(), res, next);
@@ -405,7 +421,11 @@ describe('respond middleware', () => {
 	test('a graphql fill captures a blank url and the graphql query', async () => {
 		const res = makeRes(
 			{ data: { me: 1 } },
-			{ scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')] },
+			{ scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}] },
 		);
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
@@ -429,7 +449,7 @@ describe('respond middleware', () => {
 		// on that collection still purges the cached response (the settings fix).
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[bareScopedCacheFingerprint('articles')],
+			[{ collection: 'articles', pairs: new Map(), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -446,8 +466,12 @@ describe('respond middleware', () => {
 				data: withMeta(
 					{ id: 'u1', student_profile: [] },
 					scopedCacheReadMeta([
-						scopedCacheFingerprint('directus_users', new Map([['id', ['u1']]])),
-						bareScopedCacheFingerprint('student'),
+						{
+							collection: 'directus_users',
+							pairs: new Map([['id', ['u1']]]),
+							fields: [],
+						},
+						{ collection: 'student', pairs: new Map(), fields: [] },
 					]),
 				),
 			}),
@@ -457,8 +481,12 @@ describe('respond middleware', () => {
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[
-				scopedCacheFingerprint('directus_users', new Map([['id', ['u1']]])),
-				bareScopedCacheFingerprint('student'),
+				{
+					collection: 'directus_users',
+					pairs: new Map([['id', ['u1']]]),
+					fields: [],
+				},
+				{ collection: 'student', pairs: new Map(), fields: [] },
 			],
 			[],
 			new Map([['directus_users', null], ['student', null]]),
@@ -478,8 +506,8 @@ describe('respond middleware', () => {
 					data: withMeta(
 						{ id: 'u1' },
 						scopedCacheReadMeta([
-							bareScopedCacheFingerprint('directus_users'),
-							bareScopedCacheFingerprint('student'),
+							{ collection: 'directus_users', pairs: new Map(), fields: [] },
+							{ collection: 'student', pairs: new Map(), fields: [] },
 						], {
 							scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' },
 						}),
@@ -508,7 +536,11 @@ describe('respond middleware', () => {
 			makeRes({
 				data: withMeta(
 					{ id: 'u1' },
-					scopedCacheReadMeta([bareScopedCacheFingerprint('directus_users')], {
+					scopedCacheReadMeta([{
+						collection: 'directus_users',
+						pairs: new Map(),
+						fields: [],
+					}], {
 						scopedCacheUnautopurgeableTags: [
 							{ collection: 'student', field: 'level', value: 3, type: 'integer' },
 						],
@@ -535,7 +567,7 @@ describe('respond middleware', () => {
 			{ meta: { total_count: 2 }, data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['id', ['1']]])),
+					{ collection: 'articles', pairs: new Map([['id', ['1']]]), fields: [] },
 				],
 			},
 		);
@@ -548,7 +580,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			// The count drops the filter, so the fingerprint drops the pin with it:
 			// bound to nothing, any write to the collection moves the number.
-			[bareScopedCacheFingerprint('articles')],
+			[{ collection: 'articles', pairs: new Map(), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -562,7 +594,7 @@ describe('respond middleware', () => {
 			{ meta: { filter_count: 1 }, data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['id', ['1']]])),
+					{ collection: 'articles', pairs: new Map([['id', ['1']]]), fields: [] },
 				],
 			},
 		);
@@ -573,7 +605,7 @@ describe('respond middleware', () => {
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[scopedCacheFingerprint('articles', new Map([['id', ['1']]]))],
+			[{ collection: 'articles', pairs: new Map([['id', ['1']]]), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -587,7 +619,7 @@ describe('respond middleware', () => {
 			{ meta: { total_count: 2, filter_count: 1 }, data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['id', ['1']]])),
+					{ collection: 'articles', pairs: new Map([['id', ['1']]]), fields: [] },
 				],
 			},
 		);
@@ -604,7 +636,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			// The count drops the filter, so the fingerprint drops the pin with it:
 			// bound to nothing, any write to the collection moves the number.
-			[bareScopedCacheFingerprint('articles')],
+			[{ collection: 'articles', pairs: new Map(), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -621,7 +653,7 @@ describe('respond middleware', () => {
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[bareScopedCacheFingerprint('articles')],
+			[{ collection: 'articles', pairs: new Map(), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -637,8 +669,12 @@ describe('respond middleware', () => {
 			{
 				cache: false,
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['owner', ['U1']]])),
-					bareScopedCacheFingerprint('authors'),
+					{
+						collection: 'articles',
+						pairs: new Map([['owner', ['U1']]]),
+						fields: [],
+					},
+					{ collection: 'authors', pairs: new Map(), fields: [] },
 				],
 			},
 		);
@@ -702,7 +738,11 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -733,7 +773,7 @@ describe('respond middleware', () => {
 
 		const res = makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
+				{ collection: 'articles', pairs: new Map([['author', ['7']]]), fields: [] },
 			],
 			scopedCacheEpochs: { articles: '7' },
 		});
@@ -762,7 +802,11 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -782,7 +826,11 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -801,7 +849,11 @@ describe('respond middleware', () => {
 		mocks.scopedCacheSweptDuringFill.mockResolvedValue(undefined);
 
 		const res = makeRes({ data: [] }, {
-			scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
 
@@ -819,8 +871,8 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				bareScopedCacheFingerprint('articles'),
-				bareScopedCacheFingerprint('authors'),
+				{ collection: 'articles', pairs: new Map(), fields: [] },
+				{ collection: 'authors', pairs: new Map(), fields: [] },
 			],
 			scopedCacheEpochs: { articles: '7', '*': '1' },
 		}), next);
@@ -842,8 +894,8 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				bareScopedCacheFingerprint('articles'),
-				bareScopedCacheFingerprint('authors'),
+				{ collection: 'articles', pairs: new Map(), fields: [] },
+				{ collection: 'authors', pairs: new Map(), fields: [] },
 			],
 			scopedCacheEpochs: { articles: '7', authors: '4', '*': '1' },
 		}), next);
@@ -878,8 +930,8 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				bareScopedCacheFingerprint('articles'),
-				bareScopedCacheFingerprint('authors'),
+				{ collection: 'articles', pairs: new Map(), fields: [] },
+				{ collection: 'authors', pairs: new Map(), fields: [] },
 			],
 			scopedCacheEpochsAtRequest: { articles: '7', '*': '1' },
 			scopedCacheEpochs: { articles: '8', authors: '4', '*': '1' },
@@ -900,7 +952,11 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
 		await respond(makeReq(), makeRes({ data: [] }, {
-			scopedCacheFingerprints: [bareScopedCacheFingerprint('authors')],
+			scopedCacheFingerprints: [{
+				collection: 'authors',
+				pairs: new Map(),
+				fields: [],
+			}],
 			scopedCacheEpochs: {},
 		}), next);
 
@@ -1022,7 +1078,11 @@ describe('respond middleware', () => {
 		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')] },
+			{ scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}] },
 		);
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
@@ -1042,7 +1102,11 @@ describe('respond middleware', () => {
 			{ data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['owner_field', ['u1']]])),
+					{
+						collection: 'articles',
+						pairs: new Map([['owner_field', ['u1']]]),
+						fields: [],
+					},
 				],
 			},
 		);
@@ -1068,7 +1132,11 @@ describe('respond middleware', () => {
 			{ data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['active', ['true']]])),
+					{
+						collection: 'articles',
+						pairs: new Map([['active', ['true']]]),
+						fields: [],
+					},
 				],
 			},
 		);
@@ -1086,7 +1154,11 @@ describe('respond middleware', () => {
 		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')] },
+			{ scopedCacheFingerprints: [{
+				collection: 'articles',
+				pairs: new Map(),
+				fields: [],
+			}] },
 		);
 
 		await respond(makeReq(), res, next);
@@ -1168,7 +1240,7 @@ describe('respond middleware', () => {
 		// falsy payload → size 0, under the limit, so caching still proceeds and 204 flushes
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[bareScopedCacheFingerprint('articles')],
+			[{ collection: 'articles', pairs: new Map(), fields: [] }],
 			[],
 			new Map([['articles', null]]),
 		);
@@ -1234,7 +1306,11 @@ describe('respond middleware', () => {
 			{ data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('articles', new Map([['owner', ['U1']]])),
+					{
+						collection: 'articles',
+						pairs: new Map([['owner', ['U1']]]),
+						fields: [],
+					},
 				],
 			},
 		);
@@ -1255,7 +1331,7 @@ describe('respond middleware', () => {
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[scopedCacheFingerprint('articles', new Map([['owner', ['U1']]]))],
+			[{ collection: 'articles', pairs: new Map([['owner', ['U1']]]), fields: [] }],
 			['cache-key__tags'],
 			new Map([['articles', null]]),
 		);
@@ -1319,7 +1395,7 @@ describe('respond middleware', () => {
 			{ data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					scopedCacheFingerprint('a', new Map([['b', ['1', '2']]])),
+					{ collection: 'a', pairs: new Map([['b', ['1', '2']]]), fields: [] },
 				],
 				scopedCachePurged: pins,
 			},
@@ -1352,7 +1428,11 @@ describe('respond middleware', () => {
 		const res = makeRes(
 			{ data: [] },
 			{
-				scopedCacheFingerprints: [bareScopedCacheFingerprint('articles')],
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pairs: new Map(),
+					fields: [],
+				}],
 				scopedCachePurged: [{ collection: 'articles' }],
 			},
 		);
