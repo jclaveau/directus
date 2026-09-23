@@ -39,33 +39,23 @@ import {
 } from './config.js';
 import {
 	useScopedCacheStore,
-	type ScopedCacheIndexEntry,
+	type ScopedCacheIndexedEntry,
+	type ScopedCacheIndexFiling,
 	type ScopedCacheUnlinkTally,
 } from './store.js';
-import {
-	parseScopedCacheIndexMember,
-	renderScopedCacheIndexMember,
-	scopedCacheCollectionIndexGlob,
-	scopedCacheFingerprintIndexKeys,
-	scopedCacheRowIndexKeys,
-} from './fingerprint-index.js';
 import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
 	scopedCacheDeclaredPins,
 	scopedCacheFingerprintHolds,
-	scopedCacheFingerprintLabels,
+	scopedCacheLegacyTags,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
-	scopedCacheRowIndexGlobs,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import {
 	bumpScopedCacheEpochs,
 } from './fill-guard.js';
-import {
-	scopedCacheIndexPrefix,
-} from './pins.js';
 
 const env = useEnv();
 
@@ -139,11 +129,11 @@ export function scopedCacheCollectionsChangedByOnDelete(
 }
 
 /**
- * How much longer an index set lives than the entries it indexes. Every write that
- * files a key into the set re-`EXPIRE`s it, so at 1 it would already outlive its
- * newest member; the doubling is slack, not arithmetic — for an entry orphaned by
+ * How much longer the index lives than the entries it indexes. Every write that
+ * files a key into it moves that expiry out, so at 1 it would already outlive its
+ * newest filing; the doubling is slack, not arithmetic — for an entry orphaned by
  * a crash between the write and its purge, and for siblings written outside this
- * pipeline. An index set holds keys, not payloads, so the slack is nearly free.
+ * pipeline. The index holds keys, not payloads, so the slack is nearly free.
  */
 const SCOPED_CACHE_INDEX_TTL_FACTOR = 2;
 
@@ -151,17 +141,17 @@ const SCOPED_CACHE_INDEX_TTL_FACTOR = 2;
  * Index a freshly-cached response key under the query case it was read with, so a
  * later mutation can drop just the entries that case answers for instead of the
  * whole namespace. Both the payload key and its `__expires_at` sibling are indexed.
- * When a cache TTL is set, each index set self-expires at
- * `SCOPED_CACHE_INDEX_TTL_FACTOR` times that TTL, as a net for members orphaned by a
+ * When a cache TTL is set, the index self-expires at
+ * `SCOPED_CACHE_INDEX_TTL_FACTOR` times that TTL, as a net for filings orphaned by a
  * crash between write and purge; with no TTL (`CACHE_TTL` unset) the cached entries
- * never expire either, so the sets are left unbounded to match — a normal purge
- * still drains them.
+ * never expire either, so the index is left unbounded to match — a normal purge
+ * still drains it.
  */
 export async function indexScopedCacheEntry(
 	key: string,
 	fingerprints: readonly ScopedCacheFingerprint[],
 	extraSiblings: string[] = [],
-	indexPaths: ReadonlyMap<string, string | null> = new Map(),
+	indexPaths: Readonly<Record<string, string | null>> = {},
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled() || fingerprints.length === 0) {
 		return;
@@ -170,103 +160,96 @@ export async function indexScopedCacheEntry(
 	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
 		* SCOPED_CACHE_INDEX_TTL_FACTOR;
 
-	const indexEntries: ScopedCacheIndexEntry[] = [];
-
-	// One set per collection the read touched, split by its index path, holding the
-	// entry and its siblings under the whole query case the read was bound to. A
-	// purge tests that case rather than matching any one pin of it, which is what
-	// #531 is: a read files ONE fingerprint per collection, so a shared column
-	// cannot act as a global pin.
-	for (const fingerprint of fingerprints) {
+	// One filing per collection the read touched, holding the entry and its
+	// siblings under the whole query case the read was bound to. A purge tests that
+	// case rather than matching any one pin of it, which is what #531 is: a read
+	// files ONE fingerprint per collection, so a shared column cannot act as a
+	// global pin.
+	const filings: ScopedCacheIndexFiling[] = fingerprints.map((fingerprint) => {
 		const fingerprintCollection = fingerprint.collection;
-		const indexPath = indexPaths.get(fingerprintCollection) ?? null;
 
-		const indexedMembers = [key, cacheExpiresAtKey(key), ...extraSiblings].map(
-			(indexedMember) => renderScopedCacheIndexMember(fingerprint, indexedMember),
-		);
-
-		for (const indexKey of scopedCacheFingerprintIndexKeys(
+		return {
 			fingerprint,
-			indexPath,
-		)) {
-			indexEntries.push({ indexKey, members: indexedMembers });
-		}
-	}
+			keys: [key, cacheExpiresAtKey(key), ...extraSiblings],
+			// What the store may split its index by. Handed over rather than read
+			// there, since only the request carries the schema it is derived from.
+			indexPath: Object.hasOwn(indexPaths, fingerprintCollection)
+				? indexPaths[fingerprintCollection] ?? null
+				: null,
+		};
+	});
 
 	// Throws when the store refuses any of it, so the caller skips the write rather
 	// than storing an entry indexed under nothing — no purge could ever reach it.
-	await useScopedCacheStore().addIndexMembers(indexEntries, ttlSeconds);
+	await useScopedCacheStore().fileIndexedEntries(filings, ttlSeconds);
 }
 
 /**
- * How many cache entries each label would purge — the blast radius the cache
- * page's drawer reports beside the labels an entry carries. Keyed by the label's
+ * How many cache entries each legacy tag would purge — the blast radius the cache
+ * page's drawer reports beside the tags an entry carries. Keyed by the tag's
  * display string (`collection` or `collection:field=value`).
  *
- * Read the way the purge that answers for that label reads: a label names a pin,
- * not a set, so the count is the entries of its collection whose fingerprint that
- * pin reaches. One pass over the collection's sets answers every label naming it,
- * since a member is parsed once and tested against each.
+ * Read the way the purge that answers for that tag reads: a tag names a pin, not a
+ * set, so the count is the entries of its collection whose fingerprint that pin
+ * reaches. One pass over the collection's sets answers every tag naming it, since
+ * a member is parsed once and tested against each.
  *
  * Counts entries rather than members: an entry is named alongside its
  * `__expires_at` and `__tags` siblings, so counting members reported the same
  * entry two or three times over — the inflation the `SCARD` this replaced carried.
  */
 export async function countScopedCacheTagMembers(
-	displayTags: readonly string[],
+	legacyTags: readonly string[],
 ): Promise<Record<string, number>> {
-	if (!scopedCachePurgeEnabled() || displayTags.length === 0) {
+	if (!scopedCachePurgeEnabled() || legacyTags.length === 0) {
 		return {};
 	}
 
 	const counts: Record<string, number> = {};
 
-	const labelledByCollection = new Map<string, {
-		displayTag: string;
+	const legacyTaggedByCollection = new Map<string, {
+		legacyTag: string;
 		declared: ScopedCacheFingerprint;
 	}[]>();
 
-	for (const displayTag of displayTags) {
-		counts[displayTag] = 0;
+	for (const legacyTag of legacyTags) {
+		counts[legacyTag] = 0;
 
-		const declared = scopedCacheFingerprintFromLabel(displayTag);
-		const labelled = labelledByCollection.get(declared.collection) ?? [];
+		const declared = scopedCacheFingerprintFromLegacyTag(legacyTag);
+		const legacyTagged = legacyTaggedByCollection.get(declared.collection) ?? [];
 
-		labelled.push({ displayTag, declared });
-		labelledByCollection.set(declared.collection, labelled);
+		legacyTagged.push({ legacyTag, declared });
+		legacyTaggedByCollection.set(declared.collection, legacyTagged);
 	}
 
 	const store = useScopedCacheStore();
 
-	for (const [collection, labelled] of labelledByCollection) {
-		// The keys each label reached, not a running total: an entry bound to a list
+	for (const [collection, legacyTagged] of legacyTaggedByCollection) {
+		// The keys each tag reached, not a running total: an entry bound to a list
 		// of index values is named by one set per value, and a blast radius counting
 		// it once per set would claim a purge frees more than it can.
 		const reachedByTag = new Map<string, Set<string>>();
 
-		for (const indexKey of await scopedCacheCollectionIndexKeys(collection)) {
-			for await (const indexedMembers of store.scanIndexMembers(indexKey, null)) {
-				for (const indexedMember of indexedMembers) {
-					const { fingerprint, key } =
-						parseScopedCacheIndexMember(indexedMember);
+		for await (
+			const indexedEntries of store.scanCollectionIndexedEntries(collection)
+		) {
+			for (const { fingerprint, key } of indexedEntries) {
+				if (key === '' || cacheSidecarOwner(key) !== null) {
+					continue;
+				}
 
-					if (key === '' || cacheSidecarOwner(key) !== null) {
-						continue;
-					}
-
-					for (const { displayTag, declared } of labelled) {
-						if (scopedCacheFingerprintReachedByPin(fingerprint, declared)) {
-							const reached = reachedByTag.get(displayTag) ?? new Set();
-							reached.add(key);
-							reachedByTag.set(displayTag, reached);
-						}
+				for (const { legacyTag, declared } of legacyTagged) {
+					if (scopedCacheFingerprintReachedByPin(fingerprint, declared)) {
+						const reached = reachedByTag.get(legacyTag) ?? new Set();
+						reached.add(key);
+						reachedByTag.set(legacyTag, reached);
 					}
 				}
 			}
 		}
 
-		for (const [displayTag, reached] of reachedByTag) {
-			counts[displayTag] = reached.size;
+		for (const [legacyTag, reached] of reachedByTag) {
+			counts[legacyTag] = reached.size;
 		}
 	}
 
@@ -274,40 +257,42 @@ export async function countScopedCacheTagMembers(
 }
 
 /**
- * The fingerprint a display label stands for. The label is namespace-free on
- * purpose, so it resolves against whatever the collection's index holds now rather
- * than against the set key it named when the label was written.
+ * The fingerprint a legacy tag stands for. The tag is namespace-free on purpose,
+ * so it resolves against whatever the collection's index holds now rather than
+ * against the set key it named when the tag was written.
  *
- * Its value is already canonical — the label is rendered from a canonical token —
- * so it is taken as written rather than canonicalised a second time.
+ * Its value is already canonical — the tag is rendered from a canonical token — so
+ * it is taken as written rather than canonicalised a second time.
  */
-function scopedCacheFingerprintFromLabel(label: string): ScopedCacheFingerprint {
+function scopedCacheFingerprintFromLegacyTag(
+	legacyTag: string,
+): ScopedCacheFingerprint {
 	const pinnedScope: Record<string, string[]> = Object.create(null);
-	const fieldAt = label.indexOf(':');
+	const fieldAt = legacyTag.indexOf(':');
 
 	if (fieldAt === -1) {
-		return { collection: label, pinnedScope, viewFields: [] };
+		return { collection: legacyTag, pinnedScope, viewFields: [] };
 	}
 
-	const pin = label.slice(fieldAt + 1);
+	const pin = legacyTag.slice(fieldAt + 1);
 	const valueAt = pin.indexOf('=');
 
 	if (valueAt === -1) {
-		return { collection: label.slice(0, fieldAt), pinnedScope, viewFields: [] };
+		return { collection: legacyTag.slice(0, fieldAt), pinnedScope, viewFields: [] };
 	}
 
 	pinnedScope[pin.slice(0, valueAt)] = [pin.slice(valueAt + 1)];
 
 	return {
-		collection: label.slice(0, fieldAt),
+		collection: legacyTag.slice(0, fieldAt),
 		pinnedScope,
 		viewFields: [],
 	};
 }
 
 /**
- * Whether a declared pin — a hook's `purgeBy`, a `cache.purge` addition, a label
- * the drawer is sizing — reaches an entry.
+ * Whether a declared pin — a hook's `purgeBy`, a `cache.purge` addition, a legacy
+ * tag the drawer is sizing — reaches an entry.
  *
  * Two arms, because a pin naming nothing and a pin naming a value are different
  * claims. The bare one is the bare collection fingerprint, and it keeps the reach
@@ -338,14 +323,14 @@ function scopedCacheFingerprintReachedByPin(
  * Drop the cache keys a swept index named, and report how many ENTRIES went — which
  * is neither how many keys were deleted nor how many the index named.
  *
- * Not the key count, because an index set holds each entry alongside its
+ * Not the key count, because the index holds each entry alongside its
  * `__expires_at` sibling and any extra sibling (`__tags`), so counting keys would
- * report every entry twice over. A sidecar is recognisable by its base key being in
- * the set beside it — the `sadd` writes them together — which stays right as
- * siblings are added.
+ * report every entry twice over. A sidecar is recognisable by its base key being
+ * filed beside it — they are filed together — which stays right as siblings are
+ * added.
  *
- * Not the membership count either, because nothing ever SREMs on the way out: a
- * member that expired by TTL stays named by the set until the set itself is dropped.
+ * Not what the index named either, because nothing prunes it on the way out: an
+ * entry that expired by TTL stays named until its filing is dropped.
  * On the workload this fork exists for — per-user keys, so high cardinality, TTLs
  * shorter than the gap between mutations — most of a set can be entries that were
  * already gone, and counting them would inflate every purge figure on the page. So
@@ -386,16 +371,13 @@ async function dropSweptScopedCacheEntries(
  * question — does one of the rows I wrote satisfy everything this entry depends on
  * — so the answer is no for every owner but alpha.
  *
- * The index sets it reads are picked by the rows: the bare set, which every write
- * to the collection reads, and the one each row's index value names. A
- * fingerprint filed under a different index value is never even looked at.
+ * How much of the index that costs is the store's own answer: it is asked for the
+ * entries these rows could reach, and how narrowly it can answer depends on how it
+ * split what it holds.
  *
- * Matched members are SREMed from the set they were found in: nothing else prunes
- * them, and a purged entry left named by the index would be re-tested by every
- * later write to that index value for as long as the set lives. A member of a
- * SECOND set — an entry bounded to a list of index values — is left behind for
- * its own set's expiry, since finding it would cost a scan of every set to save a
- * string compare.
+ * Matched entries are dropped from the index wherever it found them, since nothing
+ * else prunes it and a purged entry left named would be re-tested by every later
+ * write for as long as it lives.
  */
 async function purgeScopedCacheFingerprintIndex(
 	cache: Keyv,
@@ -416,11 +398,13 @@ async function purgeScopedCacheFingerprintIndex(
 
 	const { evicted } = await purgeScopedCacheIndexWhere(
 		cache,
-		scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
-		// The patterns the rows can drop something under, or `null` to read the sets
-		// whole. A member matching none of them cannot be purged by these rows, so
-		// letting Redis skip it saves sending it; the test still decides.
-		scopedCacheRowIndexGlobs(collection, rowFingerprints),
+		// The entries these rows could drop something in, which is the store's own
+		// question: it knows what it split its index by and what it can filter on.
+		useScopedCacheStore().scanRowIndexedEntries(
+			collection,
+			rowFingerprints,
+			indexPath,
+		),
 		(fingerprint) => {
 			// A fingerprint pinning nothing is what the bare collection fingerprint
 			// covers, so a mutation keeping that fingerprint warm keeps these
@@ -451,32 +435,32 @@ async function purgeScopedCacheFingerprintIndex(
  * holds a pin, not a row, so `scopedCacheFingerprintHolds` is the test rather than
  * `scopedCacheFingerprintPurgedBy`.
  *
- * The sets it reads are the declared pins' own when the pin IS what the index is
- * split by — the same two a write of those values would read — and every set the
- * collection owns otherwise, since a pin off the index path says nothing about
- * which split holds it. No glob narrowing either way: a declared pin matches
- * entries by what they do NOT pin as much as by what they do, and a pattern can
- * only select on what is written.
+ * How wide the store has to read for it is the store's own answer — a declared
+ * pin matches entries by what they do NOT pin as much as by what they do, so what
+ * can be narrowed on depends on how the index is split.
  */
-async function purgeScopedCacheDeclaredPins(
+function purgeScopedCacheDeclaredPins(
 	cache: Keyv,
 	collection: string,
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
 ): Promise<ScopedCachePurgeSweep> {
-	const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {
-		return fingerprint.pinnedScope[indexPath] !== undefined;
-	});
-
-	const indexKeys = pinsIndexPath
-		? scopedCacheRowIndexKeys(collection, declared, indexPath)
-		: await scopedCacheCollectionIndexKeys(collection);
-
-	return purgeScopedCacheIndexWhere(cache, indexKeys, null, (fingerprint) => {
-		return declared.some((declaredFingerprint) => {
-			return scopedCacheFingerprintReachedByPin(fingerprint, declaredFingerprint);
-		});
-	});
+	return purgeScopedCacheIndexWhere(
+		cache,
+		useScopedCacheStore().scanDeclaredIndexedEntries(
+			collection,
+			declared,
+			indexPath,
+		),
+		(fingerprint) => {
+			return declared.some((declaredFingerprint) => {
+				return scopedCacheFingerprintReachedByPin(
+					fingerprint,
+					declaredFingerprint,
+				);
+			});
+		},
+	);
 }
 
 /**
@@ -533,26 +517,6 @@ async function purgeScopedCacheDeclaredFingerprints(
 	return evicted;
 }
 
-/** Every set one collection's fingerprints are filed in, read off the keyspace. */
-async function scopedCacheCollectionIndexKeys(
-	collection: string,
-): Promise<string[]> {
-	const indexKeys: string[] = [];
-
-	for await (const batch of useScopedCacheStore().scanIndexKeys(
-		scopedCacheCollectionIndexGlob(collection),
-	)) {
-		// One at a time rather than spread: a scan is free to answer with more than
-		// one page's worth, and a spread long enough throws before the array is
-		// touched (https://github.com/jclaveau/directus/issues/397).
-		for (const indexKey of batch) {
-			indexKeys.push(indexKey);
-		}
-	}
-
-	return indexKeys;
-}
-
 /**
  * What an index purge freed, and the entries it named on the way there — which the
  * recovery drain reports as having served stale, and nothing else reads.
@@ -563,64 +527,38 @@ type ScopedCachePurgeSweep = {
 };
 
 /**
- * Read a set of index sets, keep the members whose fingerprint `purges` accepts,
- * and drop the cache entries they name.
+ * Read what the store answered with, keep the entries whose fingerprint `purges`
+ * accepts, and drop the cache entries they name.
  *
- * Matched members are SREMed from the set they were found in: nothing else prunes
- * them, and a purged entry left named by the index would be re-tested by every
- * later write to that index value for as long as the set lives. A member of a
- * SECOND set — an entry bounded to a list of index values — is left behind for
- * its own set's expiry, since finding it would cost a scan of every set to save a
- * string compare.
+ * Matched entries are dropped from the index too: nothing else prunes them, and a
+ * purged entry left in the index would be re-tested by every later write for as
+ * long as it lives.
  *
  * The counter bump is the caller's: what has to precede the reads here is one move
  * per collection, and only the caller knows which collections it is about to touch.
  */
 async function purgeScopedCacheIndexWhere(
 	cache: Keyv,
-	indexKeys: readonly string[],
-	globPatterns: readonly string[] | null,
+	indexedEntries: AsyncGenerator<ScopedCacheIndexedEntry[]>,
 	purges: (fingerprint: ScopedCacheFingerprint) => boolean,
 ): Promise<ScopedCachePurgeSweep> {
-	const store = useScopedCacheStore();
-	const matchedByIndexKey = new Map<string, Set<string>>();
+	const matched: ScopedCacheIndexedEntry[] = [];
 	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
 
-	for (const indexKey of indexKeys) {
+	for await (const indexedBatch of indexedEntries) {
+		for (const indexedEntry of indexedBatch) {
+			if (purges(indexedEntry.fingerprint) === false) {
+				continue;
+			}
 
-		// A member can match several patterns — one per pair it shares with the
-		// rows — and the passes overlap, so it is tested and SREMed once.
-		const testedMembers = new Set<string>();
+			matched.push(indexedEntry);
 
-		for (const globPattern of globPatterns ?? [null]) {
-			for await (const indexedMembers of store.scanIndexMembers(
-				indexKey,
-				globPattern,
-			)) {
-				for (const indexedMember of indexedMembers) {
-					if (testedMembers.has(indexedMember)) {
-						continue;
-					}
+			const { key } = indexedEntry;
 
-					testedMembers.add(indexedMember);
-
-					const { fingerprint, key } =
-						parseScopedCacheIndexMember(indexedMember);
-
-					if (purges(fingerprint) === false) {
-						continue;
-					}
-
-					const matchedMembers = matchedByIndexKey.get(indexKey) ?? new Set();
-					matchedMembers.add(indexedMember);
-					matchedByIndexKey.set(indexKey, matchedMembers);
-
-					if (key !== '' && seenKeys.has(key) === false) {
-						seenKeys.add(key);
-						matchedKeys.push(key);
-					}
-				}
+			if (key !== '' && seenKeys.has(key) === false) {
+				seenKeys.add(key);
+				matchedKeys.push(key);
 			}
 		}
 	}
@@ -631,7 +569,7 @@ async function purgeScopedCacheIndexWhere(
 
 	const [evicted] = await Promise.all([
 		dropSweptScopedCacheEntries(cache, matchedKeys),
-		store.removeIndexMembers(matchedByIndexKey),
+		useScopedCacheStore().removeIndexedEntries(matched),
 	]);
 
 	return { evicted, matchedKeys };
@@ -639,24 +577,21 @@ async function purgeScopedCacheIndexWhere(
 
 
 /**
- * Drop every scoped-cache index key: the fingerprint SETs
- * (`<namespace>:scoped-cache-index:fingerprint:*`) and the per-collection slice
- * indexes (`<namespace>:scoped-cache-index:slices:*`). These are
- * written direct via ioredis `sadd`, outside any Keyv namespace, so a response
- * `cache.clear()` never reaches them — they would linger as orphan pointers until
- * their `ttl*2` self-expiry, or forever when `CACHE_TTL` is unset and they are
+ * Drop the whole fingerprint index. It is written outside any Keyv namespace, so a
+ * response `cache.clear()` never reaches it — it would linger as orphan pointers
+ * until its `ttl*2` self-expiry, or forever when `CACHE_TTL` is unset and it is
  * deliberately unbounded. The `Response cache` flush calls this alongside
- * `cache.clear()` for a clean wipe. Only the SET keys are dropped; the entries
- * they pointed at are already gone with the namespace clear.
+ * `cache.clear()` for a clean wipe. Only the index goes; the entries it pointed at
+ * are already gone with the namespace clear.
  *
- * Reports how many keys Redis removed and how many commands it refused, so the
+ * Reports how much the store removed and how many commands it refused, so the
  * flush that called it can say what it cost, and say so honestly when the index is
  * still there (https://github.com/jclaveau/directus/issues/468).
  *
  * Runs AFTER `clearResponseCache`, always: that is where the wholesale counter
  * moves, and a read that snapshotted it earlier and files its fingerprints between
- * the unlink below and a move made after it would compare equal, keep its entry,
- * and leave it indexed by a set this function just deleted — reachable to no later
+ * the drop below and a move made after it would compare equal, keep its entry, and
+ * leave it indexed by something this function just deleted — reachable to no later
  * purge.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
@@ -664,11 +599,7 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 		return { dropped: 0, refused: 0 };
 	}
 
-	// The keys the pre-scoped-cache-index layout left behind are not swept here:
-	// they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
-	return useScopedCacheStore().dropIndexKeysMatching(
-		`${scopedCacheIndexPrefix()}*`,
-	);
+	return useScopedCacheStore().dropIndex();
 }
 
 /**
@@ -678,7 +609,7 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
  * after the move declines, and one that rechecked before it had written its entry
  * before the clear, which takes it. A clear that moved the counter after itself
  * left a fill rechecking in between kept — stale for its TTL, and once the index
- * drop that follows unlinked its index sets, reachable to no later purge. Moved
+ * drop that follows took its filings with it, reachable to no later purge. Moved
  * whether or not the clear finds anything, since the reads in flight are what it
  * is for.
  *
@@ -726,40 +657,38 @@ export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 }
 
 /**
- * Drop every fingerprint the collection owns, whatever it is bound to, and the sets
- * that named them.
+ * Drop every entry the collection owns, whatever it is bound to, and the index that
+ * named them.
  *
  * The fallback, so it asks no question: a purge reaching here has no rows to match
  * against — an upsert mixing inserts and updates, a write whose rows could not be
  * read back — and cannot tell a stale entry from a warm one. Every other
  * collection's entries still stand, which is the whole of what it is scoped to.
  *
- * Reports the entries it freed and the sets it dropped apart: the first is how wide
- * the purge reached, the second is how split the collection's index was, and only
- * the first is comparable to a row-driven purge's figure.
+ * Reports the entries it freed and how much index it dropped apart: the first is
+ * how wide the purge reached, the second is how split the collection's index was,
+ * and only the first is comparable to a row-driven purge's figure.
  */
 async function purgeScopedCacheCollectionIndex(
 	cache: Keyv,
 	collection: string,
 ): Promise<{ evicted: number; indexKeys: number }> {
-	const store = useScopedCacheStore();
 	const keys: string[] = [];
 	const seenKeys = new Set<string>();
 	let indexKeys = 0;
 
-	for await (const batch of store.scanIndexKeys(
-		scopedCacheCollectionIndexGlob(collection),
-	)) {
-		indexKeys += batch.length;
+	// Taken rather than read then dropped: a read filing its key in between would
+	// otherwise have its filing deleted underneath it.
+	for await (
+		const taken of useScopedCacheStore().takeCollectionIndexedKeys(collection)
+	) {
+		indexKeys += taken.indexKeys;
 
-		// Taken rather than read then dropped: a read filing its key into one of
-		// these sets in between would otherwise have its set deleted underneath it.
-		for (const indexedMember of await store.takeIndexMembers(batch)) {
-			// The fingerprint half is read past rather than parsed: this purge drops
-			// the key whichever query case filed it, so the two members an entry
-			// cached under two cases has collapse to one key here.
-			const { key } = parseScopedCacheIndexMember(indexedMember);
-
+		// One at a time rather than spread: a take is free to answer with more than
+		// one page's worth, and a spread long enough throws before the array is
+		// touched (https://github.com/jclaveau/directus/issues/397). The two entries
+		// a key cached under two query cases has collapse to one key here.
+		for (const key of taken.keys) {
 			if (seenKeys.has(key) === false) {
 				seenKeys.add(key);
 				keys.push(key);
@@ -775,7 +704,7 @@ async function purgeScopedCacheCollectionIndex(
  * its value slices — without full-flushing the namespace. The fallback when a
  * mutation's scope values are unresolvable (e.g. an upsert mixing inserts and
  * updates): which slices changed is unknown, but only reads touching THIS collection
- * can be stale, so scope the flush to its own index sets and spare every other
+ * can be stale, so scope the flush to its own index and spare every other
  * collection's entries.
  */
 export async function purgeCollectionScopedCache(
@@ -802,7 +731,7 @@ export async function purgeCollectionScopedCache(
 
 	// The expensive mode, and the one nothing else records: every slice of the
 	// collection went, because which slices actually changed was unresolvable.
-	// No label list: every slice the index happened to name is derived rather than
+	// No tag list: every slice the index happened to name is derived rather than
 	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
 		purgeId: options.scopedCachePurgeId,
@@ -855,26 +784,26 @@ async function purgeOrRecord(
 /**
  * What a recorded purge target resolves to: the fingerprints to retry it with,
  * grouped by the collection each names, plus the collections whose record is a
- * display label from before this table held fingerprints.
+ * legacy tag from before this table held fingerprints.
  *
- * A rendered fingerprint always ends on its `&` terminator and a label never
- * does, which is what tells the two apart. A label cannot be replayed against
- * the fingerprint index — it names a slice the index no longer files anything
- * under — so its collection is purged whole instead: wider than the record asked
- * for, which is the direction a recovery is allowed to miss in.
+ * A rendered fingerprint always ends on its `&` terminator and a tag never does,
+ * which is what tells the two apart. A tag cannot be replayed against the
+ * fingerprint index — it names a slice the index no longer files anything under —
+ * so its collection is purged whole instead: wider than the record asked for,
+ * which is the direction a recovery is allowed to miss in.
  */
 function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 	declaredByCollection: Map<string, ScopedCacheFingerprint[]>;
-	labelledCollections: Set<string>;
+	legacyTaggedCollections: Set<string>;
 } {
 	const declaredByCollection = new Map<string, ScopedCacheFingerprint[]>();
-	const labelledCollections = new Set<string>();
+	const legacyTaggedCollections = new Set<string>();
 
 	for (const target of recorded) {
 		if (target.endsWith('&') === false) {
 			const fieldAt = target.indexOf(':');
 
-			labelledCollections.add(
+			legacyTaggedCollections.add(
 				fieldAt === -1
 					? target
 					: target.slice(0, fieldAt),
@@ -890,7 +819,7 @@ function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 		declaredByCollection.set(fingerprint.collection, declared);
 	}
 
-	return { declaredByCollection, labelledCollections };
+	return { declaredByCollection, legacyTaggedCollections };
 }
 
 // The drain in flight, so the next trigger queues behind it rather than beside it.
@@ -946,7 +875,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	}
 
 	// The index and the entries sit behind two different clients — ioredis carries
-	// the index sets, the response cache is a Keyv over node-redis — and only the
+	// the index, the response cache is a Keyv over node-redis — and only the
 	// first one's `ready` starts this drain. The store rejects a command issued
 	// while it is offline (`disableOfflineQueue`) and `@keyv/redis` swallows that
 	// into `undefined`, so a drain in that window deletes no entry, reports every
@@ -1002,7 +931,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				});
 			}
 			else {
-				const { declaredByCollection, labelledCollections } =
+				const { declaredByCollection, legacyTaggedCollections } =
 					recordedScopedCachePurgeTargets(target.scopedCacheFingerprints);
 
 				// Every collection the record reaches, before any of them is read: a
@@ -1011,7 +940,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				// drain is about to prune.
 				await bumpScopedCacheEpochs([
 					...declaredByCollection.keys(),
-					...labelledCollections,
+					...legacyTaggedCollections,
 				]);
 
 				let evicted = 0;
@@ -1036,8 +965,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 				// Records its own collection-mode purge, as it does everywhere else:
 				// it is the one that knows how many sets its scan turned up.
-				for (const labelledCollection of labelledCollections) {
-					await purgeCollectionScopedCache(cache, labelledCollection, {
+				for (const legacyTaggedCollection of legacyTaggedCollections) {
+					await purgeCollectionScopedCache(cache, legacyTaggedCollection, {
 						scopedCachePurgeId: purgeId,
 						retried: true,
 					});
@@ -1058,15 +987,15 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					);
 				}
 
-				// Only for what the fingerprints took: a label's collection purge
+				// Only for what the fingerprints took: a legacy tag's collection purge
 				// records itself, and counting it here would show its entries evicted
 				// twice.
 				if (declaredByCollection.size > 0) {
-					// Labels, though the record holds fingerprints: the stats stream
-					// joins its label list with a comma, which a rendered fingerprint
-					// carries raw, and the entry-tags table this one is joined against
-					// is written in labels too.
-					const declaredLabels = scopedCacheFingerprintLabels(
+					// Legacy tags, though the record holds fingerprints: the stats
+					// stream joins its tag list with a comma, which a rendered
+					// fingerprint carries raw, and the entry-tags table this one is
+					// joined against is written in tags too.
+					const declaredLegacyTags = scopedCacheLegacyTags(
 						[...declaredByCollection.values()].flat(),
 					);
 
@@ -1074,8 +1003,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						purgeId,
 						collection: target.collection,
 						mode: 'slices',
-						scopedCacheTags: declaredLabels,
-						scopedCacheTagCount: declaredLabels.length,
+						scopedCacheTags: declaredLegacyTags,
+						scopedCacheTagCount: declaredLegacyTags.length,
 						evicted,
 						durationMs: null,
 					});
@@ -1265,8 +1194,8 @@ export async function purgeScopedCache(
 		// The columns an update rewrote, `null` for an insert or a delete. A read
 		// bound to none of them cannot have changed, whichever slice the row is in.
 		changed?: readonly string[] | null;
-		// The path the collection's index is split by, so the purge reads back
-		// the sets its rows own instead of every set the collection has.
+		// The path the collection's index may be split by, so the store can answer
+		// with what its rows own instead of everything the collection holds.
 		indexPath?: string | null;
 		// What a hook's `purgeBy` declared, and anything else purged by pin rather
 		// than by row. Each names a query case the mutation's own rows cannot answer
@@ -1400,9 +1329,9 @@ export async function purgeScopedCache(
 	let evicted: number | null = null;
 
 	// What a retry has to be able to run again, in the one grammar the index reads:
-	// the rows this purge was bound to, and the pins it was handed. A label would
-	// name a slice the index files nothing under, and a retry aimed at one would
-	// report success having dropped nothing.
+	// the rows this purge was bound to, and the pins it was handed. A legacy tag
+	// would name a slice the index files nothing under, and a retry aimed at one
+	// would report success having dropped nothing.
 	// The bare fingerprint rides with the rows rather than in the swept list, so a
 	// retry driven by the record alone would leave the global reads warm: a row
 	// fingerprint names a value, and a pin naming a value cannot reach an entry
@@ -1452,14 +1381,14 @@ export async function purgeScopedCache(
 		return purgedScopedCacheFingerprints;
 	}
 
-	// The labels a mutation actually resolved, in the same display form the entry
-	// sidecar stores — so "this entry carries label X, and label X was purged at T"
-	// is a join rather than a guess.
+	// The legacy tags a mutation actually resolved, in the same form the entry
+	// sidecar stores — so "this entry carries tag X, and tag X was purged at T" is
+	// a join rather than a guess.
 	queueCachePurge({
 		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'slices',
-		scopedCacheTags: scopedCacheFingerprintLabels(purgedScopedCacheFingerprints),
+		scopedCacheTags: scopedCacheLegacyTags(purgedScopedCacheFingerprints),
 		scopedCacheTagCount: renderedFingerprints.length,
 		evicted,
 		// Awaited inside the mutation, so this time is ADDED to the write's own

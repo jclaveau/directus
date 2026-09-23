@@ -521,7 +521,7 @@ function scopedCacheFilterKeyingByAlias(
 
 		// The scope is request text naming the table to join, so one naming no
 		// collection of this schema joins nothing — reporting it would put a
-		// collection that cannot exist in the response's label header.
+		// collection that cannot exist in the response's tags header.
 		if (pathScope !== undefined && schema.collections[pathScope] === undefined) {
 			parts.push(new Map([[alias, KEYING_UNKEYED]]));
 			continue;

@@ -45,7 +45,7 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 });
 
 import {
-	scopedCacheFingerprintLabels,
+	scopedCacheLegacyTags,
 	scopedCachePurgeEnabled,
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
@@ -239,7 +239,7 @@ describe('read tags at the merge', () => {
 	): Promise<string[]> => {
 		const result = await service.readByQuery(query, { emitEvents: false });
 
-		return scopedCacheFingerprintLabels(
+		return scopedCacheLegacyTags(
 			readMeta(result)?.scopedCacheFingerprints ?? [],
 		).sort();
 	};

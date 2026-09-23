@@ -178,19 +178,6 @@ export function takenOverScopedCacheKey(
 	return `${collection}:${String(key)}`;
 }
 
-// Every index key the scoped cache writes sits under one segment, so the full-flush
-// scan can ask Redis for exactly them. `<namespace>:` alone is shared with the
-// cache-stats stream, its per-entry tombstones and whatever family lands there
-// next, and a pattern wide enough to cover the index dragged all of those over the
-// wire to be filtered out here (https://github.com/jclaveau/directus/issues/468).
-// Named after the feature rather than `index`, because a flush unlinks the whole
-// segment: under a noun that broad, whatever a later feature parks there goes with
-// it. `<namespace>:stats` is the family that must not — it is the only place Redis
-// holds cache state no table can rebuild — and it stays outside.
-export function scopedCacheIndexPrefix(): string {
-	return `${env['CACHE_NAMESPACE']}:scoped-cache-index:`;
-}
-
 /**
  * What identifies a pin: its collection, its field, and the value canonicalized —
  * so `7` and `'7'`, `TRUE` and `t` key one slice. Every set that dedups pins keys
@@ -210,8 +197,14 @@ export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
 }
 
 /**
- * Build scoped cache pins from the distinct scope values present across `rows` — the
+ * One `ScopedCacheCollectionPin` per distinct scope value across `rows` — the
  * purge side.
+ *
+ * Pins, not fingerprints: each is ONE axis of the collection, and the caller
+ * composes the pins of ONE row into that row's fingerprint
+ * (`scopedCacheFingerprintOf`). Feeding a whole page of rows in therefore yields
+ * the axes those rows touch with the AND between them lost, which is what the
+ * callers wanting a per-row query case avoid by passing `[row]`.
  *
  * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*.
  * `'coarse'` returns `null` so the caller can fall back to a collection-wide purge
@@ -228,21 +221,21 @@ export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
  * `fieldTypes`: each field's schema type, so the pin value canonicalizes the same
  * way the read side's filter value does.
  */
-export function scopedCachePinsFromRows(
+export function scopedCacheCollectionPinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'skip',
 	fieldTypes?: FieldTypesByField,
 ): ScopedCacheCollectionPin[];
-export function scopedCachePinsFromRows(
+export function scopedCacheCollectionPinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse',
 	fieldTypes?: FieldTypesByField,
 ): ScopedCacheCollectionPin[] | null;
-export function scopedCachePinsFromRows(
+export function scopedCacheCollectionPinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],

@@ -21,7 +21,7 @@ import {
 	scopedCacheIndexPath,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
-	scopedCacheFingerprintLabels,
+	scopedCacheLegacyTags,
 	scopedCacheSweptDuringFill,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
@@ -68,10 +68,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		?? payloadMeta?.scopedCacheFingerprints
 		?? [];
 
-	// The same dependency spelled one pinned value at a time: what the dev headers,
-	// the audit header and the stored tag lists speak. Rendered here, at the last
-	// moment, so the AND a fingerprint holds survives everywhere that can hold it.
-	const readLabels = scopedCacheFingerprintLabels(readFingerprints);
+	// The same dependency spelled one pinned value at a time: the legacy tag form
+	// the dev headers, the audit header and the stored tag lists speak. Rendered
+	// here, at the last moment, so the AND a fingerprint holds survives everywhere
+	// that can hold it.
+	const readLegacyTags = scopedCacheLegacyTags(readFingerprints);
 
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
 	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
@@ -81,11 +82,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
 	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
 	if (env['CACHE_TAGS_HEADER']) {
-		if (readLabels.length > 0) {
+		if (readLegacyTags.length > 0) {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_TAGS_HEADER']}`,
-				readLabels,
+				readLegacyTags,
 			);
 		}
 	}
@@ -97,7 +98,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				scopedCacheFingerprintLabels(purged),
+				scopedCacheLegacyTags(purged),
 			);
 		}
 	}
@@ -148,12 +149,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		]
 		: pinnedFingerprints;
 
-	const scopedCacheLabels = scopedCacheFingerprintLabels(scopedCacheFingerprints);
+	const indexedLegacyTags = scopedCacheLegacyTags(scopedCacheFingerprints);
 
-	// The path each fingerprint's index set is split by, off the schema the request
+	// The path each collection's index may be split by, off the schema the request
 	// carries: derived from the collection, never from the read, so the fill and the
-	// write that has to find it read the same one.
-	const scopedCacheIndexPaths = new Map(
+	// write that has to find it hand the store the same one.
+	const scopedCacheIndexPaths = Object.fromEntries(
 		scopedCacheFingerprints.map((indexedFingerprint) => {
 			const fingerprintCollection = indexedFingerprint.collection;
 
@@ -173,7 +174,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	if (isCacheAuditReplay(req)) {
 		res.setHeader(
 			CACHE_AUDIT_TAGS_HEADER,
-			printableScopedCacheTags(scopedCacheLabels.join(',')),
+			printableScopedCacheTags(indexedLegacyTags.join(',')),
 		);
 	}
 
@@ -354,14 +355,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
-				if (readLabels.length > 0) {
+				if (readLegacyTags.length > 0) {
 					// An object: setCacheValue's compress expects a CacheValue. The
-					// labels as a list, so a value holding the separator reads back
-					// as the one tag it is.
+					// tags as a list, so a value holding the separator reads back as
+					// the one tag it is.
 					await setCacheValue(
 						cache,
 						cacheTagsKey(redisKey),
-						{ tags: readLabels },
+						{ tags: readLegacyTags },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}
@@ -427,7 +428,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						// The scoped cache tags the key was just indexed under, so a
 						// later purge of any of them is attributable back to this
 						// request.
-						scopedCacheTags: scopedCacheLabels,
+						scopedCacheTags: indexedLegacyTags,
 					}).catch(() => {});
 
 					// The same fill latency as a timestamped event (kind 'f') so the

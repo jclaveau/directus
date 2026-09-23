@@ -8,7 +8,6 @@ import {
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintMatchesRow,
 	scopedCacheFingerprintPurgedBy,
-	scopedCacheRowIndexGlobs,
 } from './fingerprint.js';
 
 describe('renderScopedCacheFingerprint', () => {
@@ -483,61 +482,3 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	});
 });
 
-describe('scopedCacheRowIndexGlobs', () => {
-	it('names one pattern per pair the row pins, and the two that pin none', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
-			parseScopedCacheFingerprint('slot:&id=,1,&owner=,alpha,&'),
-		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&id=*,1,*',
-			'slot:*&owner=*,alpha,*',
-		]);
-	});
-
-	it('names each value of a multi-valued pair, once across the batch', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
-			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
-			parseScopedCacheFingerprint('slot:&owner=,beta,&'),
-			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
-		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&owner=*,alpha,*',
-			'slot:*&owner=*,beta,*',
-		]);
-	});
-
-	// The value is stored escaped (`a\*b`), and a glob eats a backslash rather than
-	// matching one, so the pattern doubles what the serialiser wrote.
-	it('escapes a value carrying a glob metacharacter', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
-			{ collection: 'slot', pinnedScope: { owner: ['a*b'] }, viewFields: [] },
-		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&owner=*,a\\\\\\*b,*',
-		]);
-	});
-
-	it('escapes a value carrying a separator', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
-			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
-		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&owner=*,a\\\\,b,*',
-		]);
-	});
-
-	it(oneLine`
-		gives up on filtering past the bound, so a wide batch reads its sets whole
-		instead of walking them once per slice
-	`, () => {
-		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
-			return { collection: 'slot', pinnedScope: { id: [`${at}`] }, viewFields: [] };
-		});
-
-		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);
-	});
-});

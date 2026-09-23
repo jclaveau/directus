@@ -13,7 +13,7 @@ import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import {
 	purgeScopedCache,
-	scopedCacheFingerprintLabels,
+	scopedCacheLegacyTags,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
@@ -1607,7 +1607,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(result).toEqual([]);
 
-			const pinned = scopedCacheFingerprintLabels(
+			const pinned = scopedCacheLegacyTags(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1631,7 +1631,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owner.id', 'owner.space'],
 			});
 
-			const pinned = scopedCacheFingerprintLabels(
+			const pinned = scopedCacheLegacyTags(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1663,7 +1663,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestedSchema,
 			}).readByQuery({ fields: ['label', 'owner.space'] });
 
-			expect(scopedCacheFingerprintLabels(
+			expect(scopedCacheLegacyTags(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			)).toContain('owner:id=100');
 
@@ -1683,7 +1683,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				filter: { id: { _eq: 1 } },
 			});
 
-			const pinned = scopedCacheFingerprintLabels(
+			const pinned = scopedCacheLegacyTags(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1709,7 +1709,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owned_sub_items.id'],
 			});
 
-			const pinned = scopedCacheFingerprintLabels(
+			const pinned = scopedCacheLegacyTags(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 

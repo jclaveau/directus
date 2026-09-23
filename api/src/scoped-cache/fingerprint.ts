@@ -233,46 +233,47 @@ export function scopedCacheDeclaredPins(
 }
 
 /**
- * What a set of fingerprints is called where a fingerprint cannot be written: the
- * dev `X-Scoped-Cache-*` headers, and the label lists the telemetry stores.
+ * The tag form of a set of fingerprints — what the layer spoke before #531, kept
+ * where a fingerprint cannot be written: the dev `X-Scoped-Cache-*` headers, and
+ * the tag lists the telemetry stores.
  *
- * One label per pinned value, `viewFields` dropped, and the bare collection for a
+ * One tag per pinned value, `viewFields` dropped, and the bare collection for a
  * fingerprint pinning nothing — `collection` or `collection:field=value`. The AND
- * does not survive it, which is why nothing invalidates by a label: the stats
- * stream joins them with a comma, and a rendered fingerprint's own grammar is
- * built on commas, so this is the one form that can go there.
+ * does not survive it, which is why nothing invalidates by a tag: the stats stream
+ * joins them with a comma, and a rendered fingerprint's own grammar is built on
+ * commas, so this is the one form that can go there.
  */
-export function scopedCacheFingerprintLabels(
+export function scopedCacheLegacyTags(
 	fingerprints: readonly ScopedCacheFingerprint[],
 ): string[] {
-	const labels: string[] = [];
-	const seenLabels = new Set<string>();
+	const legacyTags: string[] = [];
+	const seenTags = new Set<string>();
 
-	const pushLabel = (pin: ScopedCacheCollectionPin): void => {
-		const label = scopedCachePinKey(pin);
+	const pushLegacyTag = (pin: ScopedCacheCollectionPin): void => {
+		const legacyTag = scopedCachePinKey(pin);
 
-		if (seenLabels.has(label)) {
+		if (seenTags.has(legacyTag)) {
 			return;
 		}
 
-		seenLabels.add(label);
-		labels.push(label);
+		seenTags.add(legacyTag);
+		legacyTags.push(legacyTag);
 	};
 
 	for (const { collection, pinnedScope } of fingerprints) {
 		if (Object.keys(pinnedScope).length === 0) {
-			pushLabel({ collection });
+			pushLegacyTag({ collection });
 			continue;
 		}
 
 		for (const [field, values] of Object.entries(pinnedScope)) {
 			for (const value of values) {
-				pushLabel({ collection, field, value });
+				pushLegacyTag({ collection, field, value });
 			}
 		}
 	}
 
-	return labels;
+	return legacyTags;
 }
 
 /**
@@ -471,63 +472,3 @@ export function scopedCacheFingerprintPurgedBy(
 	});
 }
 
-/**
- * How many patterns a purge will ask Redis to filter its index sets by before it
- * gives up and reads them whole. #531's match-side bound.
- *
- * Each pattern is one pass over the set, so a batch writing hundreds of distinct
- * slices would otherwise trade the bytes it saves for passes it cannot afford. The
- * fallback reads every member and tests it here, which is the exact same answer —
- * only wider on the wire.
- */
-export const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
-
-/**
- * The Redis glob patterns naming every indexed fingerprint the written rows can
- * drop, or `null` when there are too many to be worth filtering by.
- *
- * `SSCAN … MATCH` filters server-side, so the purge reads back the members it may
- * have to drop rather than every member of the set. The filter is a SUPERSET on
- * purpose: a glob cannot say "and no other pair", so the purge test above still
- * decides, and a pattern letting a non-match through costs one compare.
- *
- * One pattern per field the rows pin, plus the two shapes a fingerprint pinning
- * nothing renders as. A read the rows can drop pins only values the rows carry, so
- * one of its own pins names it — which is why the patterns are a union over single
- * pins and not the 2^n subsets an exact filter would need.
- */
-export function scopedCacheRowIndexGlobs(
-	collection: string,
-	rowFingerprints: readonly ScopedCacheFingerprint[],
-): string[] | null {
-	const collectionToken = escapeScopedCacheFingerprintGlob(collection);
-
-	const globPatterns = new Set<string>([
-		// Pins nothing at all, and pins nothing but its fields — the two ways a
-		// fingerprint every row matches comes out of the serialiser.
-		`${collectionToken}:&|*`,
-		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,*`,
-	]);
-
-	for (const rowFingerprint of rowFingerprints) {
-		for (const [field, values] of Object.entries(rowFingerprint.pinnedScope)) {
-			const pairKey = escapeScopedCacheFingerprintGlob(
-				escapeScopedCacheFingerprintToken(field),
-			);
-
-			for (const value of values) {
-				const valueToken = escapeScopedCacheFingerprintGlob(
-					escapeScopedCacheFingerprintToken(value),
-				);
-
-				globPatterns.add(`${collectionToken}:*&${pairKey}=*,${valueToken},*`);
-			}
-
-			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {
-				return null;
-			}
-		}
-	}
-
-	return [...globPatterns];
-}

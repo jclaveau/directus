@@ -11,7 +11,7 @@ import {
 	scopedCacheFingerprintOf,
 	scopedCacheIndexPath,
 	scopedCachePurgeEnabled,
-	scopedCachePinsFromRows,
+	scopedCacheCollectionPinsFromRows,
 } from '../../scoped-cache.js';
 
 /**
@@ -86,7 +86,7 @@ export function createScopedCacheExtensionHandle(
 			const rowFingerprints: ScopedCacheFingerprint[] = [];
 
 			for (const mutatedRow of mutatedRows) {
-				const rowTags = scopedCachePinsFromRows(
+				const rowPins = scopedCacheCollectionPinsFromRows(
 					collection,
 					pinnedFields,
 					[mutatedRow],
@@ -94,17 +94,17 @@ export function createScopedCacheExtensionHandle(
 					fieldTypes,
 				);
 
-				if (rowTags === null) {
+				if (rowPins === null) {
 					await purgeScopedCache(cache, collection, null);
 					return;
 				}
 
-				rowFingerprints.push(scopedCacheFingerprintOf(collection, rowTags));
+				rowFingerprints.push(scopedCacheFingerprintOf(collection, rowPins));
 			}
 
 			// Nothing for the rows to bind — a collection pinning no axis at all, or a
-			// write naming no row — leaves the bare collection tag, which is what the
-			// reads it can still reach were filed under.
+			// write naming no row — leaves the bare collection fingerprint, which is
+			// what the reads it can still reach were filed under.
 			if (pinnedFields.length === 0 || rowFingerprints.length === 0) {
 				await purgeScopedCache(cache, collection, []);
 				return;

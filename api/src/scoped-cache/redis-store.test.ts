@@ -1,70 +1,16 @@
-import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	parseScopedCacheIndexMember,
 	renderScopedCacheIndexMember,
 	scopedCacheFingerprintIndexKeys,
-	scopedCacheIndexPath,
+	scopedCacheRowIndexGlobs,
 	scopedCacheRowIndexKeys,
-} from './fingerprint-index.js';
+} from './redis-store.js';
 import { parseScopedCacheFingerprint } from './fingerprint.js';
 
 vi.mock('@directus/env', () => {
 	return { useEnv: () => ({ CACHE_NAMESPACE: 'scalabus' }) };
-});
-
-// `slot` owns through `zone`, which owns through `region`, so its index path is
-// two hops deep and the walk has a longest path to prefer. `note` scopes on a flat
-// column alone, so it has no ancestor to index by.
-const schema = new SchemaBuilder()
-	.collection('slot', (c) => {
-		c.field('id').id();
-		c.field('method').string();
-		c.field('zone').m2o('zone');
-	})
-	.collection('zone', (c) => {
-		c.field('id').id();
-		c.field('region').m2o('region');
-	})
-	.collection('region', (c) => {
-		c.field('id').id();
-		c.field('owner').string();
-	})
-	.collection('note', (c) => {
-		c.field('id').id();
-		c.field('method').string();
-		c.field('author').string();
-	})
-	.collection('loose', (c) => {
-		c.field('id').id();
-	})
-	.build();
-
-schema.collections['slot']!.scopedCacheFields = ['method', 'zone'];
-schema.collections['zone']!.scopedCacheFields = ['region'];
-schema.collections['region']!.scopedCacheFields = ['owner'];
-schema.collections['note']!.scopedCacheFields = ['method', 'author'];
-
-describe('scopedCacheIndexPath', () => {
-	it('follows the index path to its deepest ancestor key', () => {
-		expect(scopedCacheIndexPath(schema, 'slot')).toBe('zone.region.owner');
-	});
-
-	it('stops at the ancestor a shorter chain reaches', () => {
-		expect(scopedCacheIndexPath(schema, 'zone')).toBe('region.owner');
-	});
-
-	it(oneLine`
-		falls back to the first field a collection scoping only on its own columns
-		declares
-	`, () => {
-		expect(scopedCacheIndexPath(schema, 'note')).toBe('method');
-	});
-
-	it('has no path for a collection declaring no scope at all', () => {
-		expect(scopedCacheIndexPath(schema, 'loose')).toBe(null);
-	});
 });
 
 describe('scopedCacheFingerprintIndexKeys', () => {
@@ -233,5 +179,64 @@ describe('renderScopedCacheIndexMember', () => {
 	it('reads a member holding no key as a fingerprint alone', () => {
 		expect(parseScopedCacheIndexMember('slot:&'))
 			.toEqual({ fingerprint: parseScopedCacheFingerprint('slot:&'), key: '' });
+	});
+});
+
+describe('scopedCacheRowIndexGlobs', () => {
+	it('names one pattern per pair the row pins, and the two that pin none', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			parseScopedCacheFingerprint('slot:&id=,1,&owner=,alpha,&'),
+		])).toEqual([
+			'slot:&|*',
+			'slot:&view=,*',
+			'slot:*&id=*,1,*',
+			'slot:*&owner=*,alpha,*',
+		]);
+	});
+
+	it('names each value of a multi-valued pair, once across the batch', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
+			parseScopedCacheFingerprint('slot:&owner=,beta,&'),
+			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
+		])).toEqual([
+			'slot:&|*',
+			'slot:&view=,*',
+			'slot:*&owner=*,alpha,*',
+			'slot:*&owner=*,beta,*',
+		]);
+	});
+
+	// The value is stored escaped (`a\*b`), and a glob eats a backslash rather than
+	// matching one, so the pattern doubles what the serialiser wrote.
+	it('escapes a value carrying a glob metacharacter', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			{ collection: 'slot', pinnedScope: { owner: ['a*b'] }, viewFields: [] },
+		])).toEqual([
+			'slot:&|*',
+			'slot:&view=,*',
+			'slot:*&owner=*,a\\\\\\*b,*',
+		]);
+	});
+
+	it('escapes a value carrying a separator', () => {
+		expect(scopedCacheRowIndexGlobs('slot', [
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+		])).toEqual([
+			'slot:&|*',
+			'slot:&view=,*',
+			'slot:*&owner=*,a\\\\,b,*',
+		]);
+	});
+
+	it(oneLine`
+		gives up on filtering past the bound, so a wide batch reads its sets whole
+		instead of walking them once per slice
+	`, () => {
+		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
+			return { collection: 'slot', pinnedScope: { id: [`${at}`] }, viewFields: [] };
+		});
+
+		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);
 	});
 });

@@ -10,7 +10,7 @@ import {
 	pinnedScopedCacheQueryCasesFromFilter,
 	scopedCachePinsFromFilter,
 	scopedCacheNestedRowBindings,
-	scopedCachePinsFromRows,
+	scopedCacheCollectionPinsFromRows,
 	scopedCachePinKey,
 } from '../scoped-cache.js';
 
@@ -154,8 +154,10 @@ describe('canonicalScopedCacheValue', () => {
 
 // The field type must ride onto derived tags so key canonicalization sees it on both sides.
 describe('scope-tag type propagation', () => {
-	test('scopedCachePinsFromRows stamps each tag with its field type', () => {
-		const tags = scopedCachePinsFromRows(
+	test(oneLine`
+		scopedCacheCollectionPinsFromRows stamps each tag with its field type
+	`, () => {
+		const tags = scopedCacheCollectionPinsFromRows(
 			'slots',
 			['active'],
 			[{ active: 1 }],
@@ -186,7 +188,7 @@ describe('scope-tag type propagation', () => {
 
 // Pure scope-tag derivation behind update-payload / create tagging
 // (onUnresolvable picks coarse-fallback vs skip on a missing field).
-describe('scopedCachePinsFromRows', () => {
+describe('scopedCacheCollectionPinsFromRows', () => {
 	test('one tag per distinct value per field', () => {
 		const rows = [
 			{ student: 'A', course: 'math' },
@@ -195,7 +197,12 @@ describe('scopedCachePinsFromRows', () => {
 		];
 
 		expect(
-			scopedCachePinsFromRows('slots', ['student', 'course'], rows, 'coarse'),
+			scopedCacheCollectionPinsFromRows(
+				'slots',
+				['student', 'course'],
+				rows,
+				'coarse',
+			),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
@@ -208,7 +215,7 @@ describe('scopedCachePinsFromRows', () => {
 		const rows = [{ student: 7 }, { student: '7' }];
 
 		expect(
-			scopedCachePinsFromRows('slots', ['student'], rows, 'coarse', {
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'coarse', {
 				student: 'integer',
 			}),
 		).toEqual([
@@ -219,7 +226,9 @@ describe('scopedCachePinsFromRows', () => {
 	test('null and numeric values are kept distinct', () => {
 		const rows = [{ student: null }, { student: 0 }, { student: null }];
 
-		expect(scopedCachePinsFromRows('slots', ['student'], rows, 'coarse')).toEqual([
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'coarse'),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 			{ collection: 'slots', field: 'student', value: 0 },
 		]);
@@ -231,7 +240,9 @@ describe('scopedCachePinsFromRows', () => {
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(scopedCachePinsFromRows('slots', ['student'], rows, 'coarse')).toBeNull();
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'coarse'),
+		).toBeNull();
 	});
 
 	test(oneLine`
@@ -240,7 +251,9 @@ describe('scopedCachePinsFromRows', () => {
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(scopedCachePinsFromRows('slots', ['student'], rows, 'skip')).toEqual([
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'skip'),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
 	});
@@ -249,7 +262,12 @@ describe('scopedCachePinsFromRows', () => {
 		a field present but holding null is resolvable (distinct from being absent)
 	`, () => {
 		expect(
-			scopedCachePinsFromRows('slots', ['student'], [{ student: null }], 'coarse'),
+			scopedCacheCollectionPinsFromRows(
+				'slots',
+				['student'],
+				[{ student: null }],
+				'coarse',
+			),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 		]);
@@ -259,12 +277,14 @@ describe('scopedCachePinsFromRows', () => {
 		empty rows resolve to an empty tag list, not null (caller falls back to a
 		collection-level tag)
 	`, () => {
-		expect(scopedCachePinsFromRows('slots', ['student'], [], 'coarse')).toEqual([]);
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], [], 'coarse'),
+		).toEqual([]);
 	});
 
 	test('no configured fields yields no scoped cache tags', () => {
 		expect(
-			scopedCachePinsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
+			scopedCacheCollectionPinsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
 		).toEqual([]);
 	});
 });
@@ -713,7 +733,7 @@ describe('scopedCachePinsFromFilter — implicit primary key', () => {
 			'id',
 		);
 
-		const purged = scopedCachePinsFromRows(
+		const purged = scopedCacheCollectionPinsFromRows(
 			'notes',
 			['id'],
 			[{ id: upper.toLowerCase() }],
@@ -742,7 +762,7 @@ describe('scopedCachePinsFromFilter — implicit primary key', () => {
 			'id',
 		);
 
-		const purged = scopedCachePinsFromRows(
+		const purged = scopedCacheCollectionPinsFromRows(
 			'notes',
 			['id'],
 			[{ id: 7 }],

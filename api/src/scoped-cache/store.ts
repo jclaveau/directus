@@ -3,16 +3,17 @@
  *
  * Not the cached responses — those live in the response cache, behind `Keyv`,
  * whose store is the `CACHE_STORE` the rest of Directus configures. What is behind
- * this interface is the index a purge walks: one set per query case a read was
- * bound to, holding the keys that case answers for, and the per-collection purge
- * counters a fill rechecks before it stores.
+ * this interface is the index a purge walks: the cached entries a collection's
+ * reads were filed under, and the per-collection purge counters a fill rechecks
+ * before it stores.
  *
- * Redis is the only store that holds them today, and every command that touches
- * them goes through here, so a second one — an in-process map, a directory of
- * files — is one more implementation rather than a second set of call sites. The
- * operations are named for what the index needs, never for the command that
- * answers them: a member is added, scanned, removed or taken, a key is scanned or
- * dropped, a counter is read or bumped.
+ * The interface speaks fingerprints and cache keys, never keys of its own: how the
+ * index is laid out — one set per collection or a hundred, how a set is named, how
+ * a member is framed, which of them a scan can be narrowed to — is the store's own
+ * answer, because it is chosen to fit what that store can filter on. Redis is the
+ * only one that holds it today (`redis-store.ts`, where every command and every
+ * glob lives), so a second — an in-process map, a directory of files — is one more
+ * implementation rather than a second set of call sites.
  *
  * What an implementation owes the caller, per operation, is in each docblock — it
  * is the part a purge's correctness rests on, and the part a new store is most
@@ -20,11 +21,40 @@
  */
 
 import { redisScopedCacheStore } from './redis-store.js';
+import type { ScopedCacheFingerprint } from './fingerprint.js';
 
-/** One index set and the members a fill files into it. */
-export interface ScopedCacheIndexEntry {
-	indexKey: string;
-	members: readonly string[];
+/**
+ * One cached entry, and the query case a read filed it under.
+ *
+ * `keys` is the entry and the siblings that go with it — they are dropped
+ * together, so they are filed together. `indexPath` is the path that collection's
+ * reads are indexed by (`scopedCacheIndexPath`), or `null` when it has none: what
+ * a store MAY split its index by, never something a caller reads back.
+ */
+export interface ScopedCacheIndexFiling {
+	fingerprint: ScopedCacheFingerprint;
+	keys: readonly string[];
+	indexPath: string | null;
+}
+
+/**
+ * One entry the index answered with: the query case it was filed under, the cache
+ * key it protects, and where the store found it.
+ *
+ * `location` is the store's own. The caller hands the whole entry back to
+ * `removeIndexedEntries` rather than reading it, so nothing outside the store
+ * depends on how a member is filed.
+ */
+export interface ScopedCacheIndexedEntry {
+	fingerprint: ScopedCacheFingerprint;
+	key: string;
+	location: unknown;
+}
+
+/** One batch of a whole-collection take: what it dropped, and what it named. */
+export interface ScopedCacheIndexTake {
+	indexKeys: number;
+	keys: string[];
 }
 
 /**
@@ -47,58 +77,88 @@ export interface ScopedCacheStore {
 	assertStoreSupported(): void;
 
 	/**
-	 * File members under their index sets, and hold each set for `ttlSeconds` — an
-	 * expiry that only ever moves OUT, since a set is shared by every entry pinned
-	 * to that case and the shortest-lived of them must not cut it short. A
-	 * `ttlSeconds` of 0 leaves the sets unbounded, as the entries then are.
+	 * File these entries under the query cases they were read with, and hold the
+	 * index for `ttlSeconds` — an expiry that only ever moves OUT, since whatever
+	 * holds a filing is shared by every entry filed beside it and the shortest-lived
+	 * of them must not cut it short. A `ttlSeconds` of 0 leaves the index unbounded,
+	 * as the entries then are.
 	 *
 	 * THROWS when the store refuses any of it: the caller is about to write the
-	 * entry these members point at, and an entry indexed by nothing is reachable
-	 * to no purge for the rest of its life.
+	 * entries these filings name, and an entry indexed by nothing is reachable to no
+	 * purge for the rest of its life.
 	 */
-	addIndexMembers(
-		entries: readonly ScopedCacheIndexEntry[],
+	fileIndexedEntries(
+		filings: readonly ScopedCacheIndexFiling[],
 		ttlSeconds: number,
 	): Promise<void>;
 
 	/**
-	 * Read one index set, a page at a time. `globPattern` filters store-side when
-	 * the caller knows the shape it wants; `null` reads the whole set.
+	 * The entries a write of these rows has to test, a page at a time.
 	 *
-	 * Paged rather than whole: a collection's bare set holds every cached read
-	 * that pinned no value, and holding all of it in this process to keep the
-	 * handful a write matched is what the pages exist to avoid.
+	 * Every entry whose fingerprint COULD hold on one of `rowFingerprints` is
+	 * answered with; which of them it does hold on is the caller's test. A store is
+	 * free to skip what none of the rows can reach — that is what `indexPath` is
+	 * for — and never free to skip an entry pinning nothing, which every row
+	 * reaches.
+	 *
+	 * Paged rather than whole: a collection nothing is pinned by holds every cached
+	 * read of it, and putting all of that in this process to keep the handful a
+	 * write matched is what the pages exist to avoid.
 	 */
-	scanIndexMembers(
-		indexKey: string,
-		globPattern: string | null,
-	): AsyncGenerator<string[]>;
+	scanRowIndexedEntries(
+		collection: string,
+		rowFingerprints: readonly ScopedCacheFingerprint[],
+		indexPath: string | null,
+	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
 
 	/**
-	 * Drop the members a purge matched from the sets they were found in.
+	 * The entries a DECLARED pin could reach, a page at a time.
 	 *
-	 * Best effort, and LOGGED rather than thrown: a member left behind names a key
-	 * that is already gone, which costs the next purge a compare and can never
-	 * serve a stale hit.
+	 * Wider than the row scan by construction: a declared pin matches entries by
+	 * what they do NOT pin as much as by what they do, so a store may narrow only on
+	 * what every one of `declared` names, and has to answer with the whole
+	 * collection otherwise.
 	 */
-	removeIndexMembers(
-		byIndexKey: ReadonlyMap<string, ReadonlySet<string>>,
+	scanDeclaredIndexedEntries(
+		collection: string,
+		declared: readonly ScopedCacheFingerprint[],
+		indexPath: string | null,
+	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
+
+	/** Every entry the collection holds, a page at a time, narrowed by nothing. */
+	scanCollectionIndexedEntries(
+		collection: string,
+	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
+
+	/**
+	 * Drop the entries a purge matched from wherever the store found them.
+	 *
+	 * Best effort, and LOGGED rather than thrown: an entry left in the index names a
+	 * cache key that is already gone, which costs the next purge a compare and can
+	 * never serve a stale hit.
+	 */
+	removeIndexedEntries(
+		entries: readonly ScopedCacheIndexedEntry[],
 	): Promise<void>;
 
-	/** The index keys under `globPattern`, a page at a time. */
-	scanIndexKeys(globPattern: string): AsyncGenerator<string[]>;
-
 	/**
-	 * Read the members of these index sets and drop the sets, as ONE step.
+	 * Read the cache keys of a whole collection and drop its index, as ONE step per
+	 * batch.
 	 *
-	 * Atomicity is the point: a fill filing its key into one of these sets between
-	 * a read and a separate drop would have its set deleted underneath it, leaving
-	 * a correct entry indexed by nothing.
+	 * Atomicity is the point: a fill filing its key between a read and a separate
+	 * drop would have that filing deleted underneath it, leaving a correct entry
+	 * indexed by nothing.
+	 *
+	 * Keys rather than entries, because this purge drops them whatever query case
+	 * filed them — and `indexKeys` beside them, so the caller can report how split
+	 * the collection's index was.
 	 */
-	takeIndexMembers(indexKeys: readonly string[]): Promise<string[]>;
+	takeCollectionIndexedKeys(
+		collection: string,
+	): AsyncGenerator<ScopedCacheIndexTake>;
 
-	/** Drop every index key under `globPattern`, reporting what it cost. */
-	dropIndexKeysMatching(globPattern: string): Promise<ScopedCacheUnlinkTally>;
+	/** Drop the whole index, reporting what it cost. */
+	dropIndex(): Promise<ScopedCacheUnlinkTally>;
 
 	/**
 	 * The purge counters of these keys, in the order asked, or `null` when the

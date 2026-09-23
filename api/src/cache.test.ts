@@ -395,7 +395,7 @@ describe('scoped cache purging', () => {
 					viewFields: [],
 				}],
 				[],
-				new Map([['slots', 'student']]),
+				{ slots: 'student' },
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledOnce();
@@ -420,7 +420,7 @@ describe('scoped cache purging', () => {
 					viewFields: [],
 				}],
 				[],
-				new Map([['slots', 'student']]),
+				{ slots: 'student' },
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);

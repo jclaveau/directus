@@ -78,11 +78,11 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		scopedCacheIndexPath: actual.scopedCacheIndexPath,
 		// Used only to build fixtures below — pure, reaches no Redis.
 		scopedCacheReadMeta: actual.scopedCacheReadMeta,
-		// The real one, not a stand-in. The descriptor assertion reads the label
+		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
-		scopedCacheFingerprintLabels: actual.scopedCacheFingerprintLabels,
+		scopedCacheLegacyTags: actual.scopedCacheLegacyTags,
 		// Same reason, for the form a recorded purge is retried from.
 		renderScopedCacheFingerprint: actual.renderScopedCacheFingerprint,
 	};
@@ -261,7 +261,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
@@ -450,7 +450,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 	});
 
@@ -488,7 +488,7 @@ describe('respond middleware', () => {
 				{ collection: 'student', pinnedScope: {}, viewFields: [] },
 			],
 			[],
-			new Map([['directus_users', null], ['student', null]]),
+			{ directus_users: null, student: null },
 		);
 	});
 
@@ -581,7 +581,7 @@ describe('respond middleware', () => {
 			// bound to nothing, any write to the collection moves the number.
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 	});
 
@@ -606,7 +606,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: { id: ['1'] }, viewFields: [] }],
 			[],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 	});
 
@@ -639,7 +639,7 @@ describe('respond middleware', () => {
 			[],
 			// The index path `articles` is split by: `null`, since the schema this
 			// request carries declares no scope field on it.
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 	});
 
@@ -656,7 +656,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 	});
 
@@ -728,7 +728,7 @@ describe('respond middleware', () => {
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
 		expect(indexScopedCacheEntry)
-			.toHaveBeenCalledWith('cache-key', [], [], new Map());
+			.toHaveBeenCalledWith('cache-key', [], [], {});
 	});
 
 	test(oneLine`
@@ -1124,7 +1124,7 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// A boolean slice, because that is where a re-implementation of the label
+		// A boolean slice, because that is where a re-implementation of the tag
 		// would diverge: the driver hands back `1`, and only
 		// `canonicalScopedCacheValue` turns it into the `true` the Redis key and
 		// the purge row both use. Written `=1` here, every purge of that slice
@@ -1243,7 +1243,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
 			[],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 
 		expect(res.status).toHaveBeenCalledWith(204);
@@ -1334,7 +1334,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: { owner: ['U1'] }, viewFields: [] }],
 			['cache-key__tags'],
-			new Map([['articles', null]]),
+			{ articles: null },
 		);
 	});
 
@@ -1362,7 +1362,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	// The label keeps the raw NUL (it is the Redis key), so the escaping has to happen
+	// The tag keeps the raw NUL (it is the Redis key), so the escaping has to happen
 	// on the way out — `res.setHeader` throws ERR_INVALID_CHAR otherwise.
 	test('escapes a control byte on its way into the header', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';

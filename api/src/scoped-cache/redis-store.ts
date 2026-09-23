@@ -1,13 +1,19 @@
 /**
  * The scoped cache's index, held in Redis.
  *
- * Everything Redis-shaped about the index lives here: the Lua the two atomic steps
- * run as, the cursor loops a scan is made of, the chunk sizes a command list is cut
- * to, and the per-command error a pipeline answers with instead of rejecting. What
- * the rest of the module sees is `ScopedCacheStore` — members and counters — so the
- * purge reads the same whichever store answers it.
+ * Everything Redis-shaped about the index lives here: how a set is named and what
+ * segment it sits under, how a member is framed, the globs a scan is narrowed by,
+ * the Lua the two atomic steps run as, the cursor loops a scan is made of, the
+ * chunk sizes a command list is cut to, and the per-command error a pipeline
+ * answers with instead of rejecting. All of it is written to fit what Redis can
+ * filter on — a key is a key, a member is a string, and both are selected by glob
+ * — so none of it is a shape another store would inherit.
+ *
+ * What the rest of the module sees is `ScopedCacheStore`: fingerprints and cache
+ * keys, so the purge reads the same whichever store answers it.
  */
 
+import { useEnv } from '@directus/env';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -15,11 +21,23 @@ import {
 	useRedis,
 } from '../redis/index.js';
 import type { ChainableCommander, Redis } from 'ioredis';
+import {
+	escapeScopedCacheFingerprintGlob,
+	escapeScopedCacheFingerprintToken,
+	parseScopedCacheFingerprint,
+	renderScopedCacheFingerprint,
+	SCOPED_CACHE_FINGERPRINT_VIEW,
+	type ScopedCacheFingerprint,
+} from './fingerprint.js';
 import type {
-	ScopedCacheIndexEntry,
+	ScopedCacheIndexedEntry,
+	ScopedCacheIndexFiling,
+	ScopedCacheIndexTake,
 	ScopedCacheStore,
 	ScopedCacheUnlinkTally,
 } from './store.js';
+
+const env = useEnv();
 
 /**
  * How many members one command carries.
@@ -214,6 +232,328 @@ async function unlinkScopedCacheKeys(
 	return tally;
 }
 
+/**
+ * How many globs one scan is narrowed by before it reads the set whole.
+ *
+ * Every pattern is a pass over the set, so past a point narrowing costs more
+ * round trips than the members it saves sending. A write touching more values
+ * than this reads the sets whole and tests every member here instead.
+ */
+const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
+
+/**
+ * The pin naming nothing, whose set every write to the collection reads.
+ */
+const SCOPED_CACHE_BARE_PIN = '';
+
+/**
+ * The segment every key the scoped cache writes sits under, so the full-flush scan
+ * can ask Redis for exactly them. `<namespace>:` alone is shared with the
+ * cache-stats stream, its per-entry tombstones and whatever family lands there
+ * next, and a pattern wide enough to cover the index dragged all of those over the
+ * wire to be filtered out here (https://github.com/jclaveau/directus/issues/468).
+ * Named after the feature rather than `index`, because a flush unlinks the whole
+ * segment: under a noun that broad, whatever a later feature parks there goes with
+ * it. `<namespace>:stats` is the family that must not — it is the only place Redis
+ * holds cache state no table can rebuild — and it stays outside.
+ */
+function scopedCacheIndexPrefix(): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-index:`;
+}
+
+/**
+ * The key of the set a fingerprint is filed in, and of the set a write reads back.
+ *
+ * One set per collection would work and is what correctness asks for: every
+ * fingerprint of that collection is tested against every row written to it. It is
+ * the SIZE that does not work — a collection holding a million cached reads is a
+ * million members to walk per written row. So the set is split by the one pin a
+ * read of a scoped collection almost always carries, and a write always knows: the
+ * row's value at the index path. A write then reads its own set and the bare one,
+ * and never sees a fingerprint filed under somebody else's value.
+ *
+ * The split is an optimisation, never a bound: a fingerprint pinning nothing at
+ * that path goes bare, and the bare set is read by every write to the collection.
+ *
+ * `indexPin` is what the split is keyed by — `<path>=<value>`, or empty for the
+ * bare set. It never leaves this file: a caller asks the store for the entries it
+ * has to test, not for the sets holding them.
+ */
+function scopedCacheIndexKey(collection: string, indexPin: string): string {
+	return `${scopedCacheIndexPrefix()}fingerprint:${collection}:${indexPin}`;
+}
+
+/**
+ * The glob matching every set one collection's fingerprints are filed in — the
+ * bare one and every split the index path produced.
+ *
+ * What a collection-wide read asks for, and the reason it needs no registry of the
+ * sets a collection owns: a registry would be a second write on every fill, which
+ * is the cost the split exists to avoid.
+ *
+ * The trailing colon bounds it. The key is `fingerprint:<collection>:<indexPin>`
+ * and a collection name carries no colon, so a pattern ending at that one cannot
+ * reach a longer name this one is a prefix of.
+ */
+export function scopedCacheCollectionIndexGlob(collection: string): string {
+	const matched = escapeScopedCacheFingerprintGlob(collection);
+
+	return `${scopedCacheIndexPrefix()}fingerprint:${matched}:*`;
+}
+
+/**
+ * The keys of the sets one fingerprint is filed in: one per value it pins the
+ * index path to.
+ *
+ * A read bounded to a list of values depends on each of them and is dropped by a
+ * write to any one, so it is filed under each — the same OR an `_in` already
+ * carries, kept as the only OR the layout has left.
+ */
+export function scopedCacheFingerprintIndexKeys(
+	fingerprint: ScopedCacheFingerprint,
+	indexPath: string | null,
+): string[] {
+	const { collection } = fingerprint;
+
+	if (indexPath === null) {
+		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
+	}
+
+	const pinnedValues = Object.hasOwn(fingerprint.pinnedScope, indexPath)
+		? fingerprint.pinnedScope[indexPath]
+		: undefined;
+
+	if (pinnedValues === undefined || pinnedValues.length === 0) {
+		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
+	}
+
+	return pinnedValues.map((pinnedValue) => {
+		return scopedCacheIndexKey(
+			collection,
+			`${indexPath}=${escapeScopedCacheFingerprintToken(pinnedValue)}`,
+		);
+	});
+}
+
+/**
+ * The keys of the sets a write reads back: the bare one, and the one each of its
+ * rows' values at the index path names.
+ *
+ * The row is read as a fingerprint of its own, so the value it pins there is
+ * looked up the same way a cached read's is. A row whose index path does not
+ * resolve — the ancestor was deleted, or the write never carried it — reads the
+ * bare set alone, and the sets it cannot name are left to the collection-wide
+ * purge. The collection is the written one rather than the rows', so an empty
+ * write still names the bare set.
+ */
+export function scopedCacheRowIndexKeys(
+	collection: string,
+	rowFingerprints: readonly ScopedCacheFingerprint[],
+	indexPath: string | null,
+): string[] {
+	const indexKeys = new Set<string>([
+		scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN),
+	]);
+
+	if (indexPath === null) {
+		return [...indexKeys];
+	}
+
+	for (const rowFingerprint of rowFingerprints) {
+		const pinnedValues = Object.hasOwn(rowFingerprint.pinnedScope, indexPath)
+			? rowFingerprint.pinnedScope[indexPath] ?? []
+			: [];
+
+		for (const pinnedValue of pinnedValues) {
+			indexKeys.add(scopedCacheIndexKey(
+				collection,
+				`${indexPath}=${escapeScopedCacheFingerprintToken(pinnedValue)}`,
+			));
+		}
+	}
+
+	return [...indexKeys];
+}
+
+/**
+ * The patterns the rows can drop something under, or `null` to read the sets
+ * whole.
+ *
+ * `SSCAN … MATCH` filters server-side, so a member matching none of these never
+ * crosses the wire — and the caller's own test still decides, since a glob over a
+ * serialised fingerprint can say a pair is absent but not that the whole query
+ * case holds.
+ */
+export function scopedCacheRowIndexGlobs(
+	collection: string,
+	rowFingerprints: readonly ScopedCacheFingerprint[],
+): string[] | null {
+	const collectionToken = escapeScopedCacheFingerprintGlob(collection);
+
+	const globPatterns = new Set<string>([
+		// Pins nothing at all, and pins nothing but its fields — the two ways a
+		// fingerprint every row matches comes out of the serialiser.
+		`${collectionToken}:&|*`,
+		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,*`,
+	]);
+
+	for (const rowFingerprint of rowFingerprints) {
+		for (const [field, values] of Object.entries(rowFingerprint.pinnedScope)) {
+			const pairKey = escapeScopedCacheFingerprintGlob(
+				escapeScopedCacheFingerprintToken(field),
+			);
+
+			for (const value of values) {
+				const valueToken = escapeScopedCacheFingerprintGlob(
+					escapeScopedCacheFingerprintToken(value),
+				);
+
+				globPatterns.add(`${collectionToken}:*&${pairKey}=*,${valueToken},*`);
+			}
+
+			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {
+				return null;
+			}
+		}
+	}
+
+	return [...globPatterns];
+}
+
+/**
+ * A set member: the serialised fingerprint that has to match, and the cache key it
+ * protects.
+ *
+ * Both in one member so the match needs nothing but the set itself, and so a key
+ * cached under two different query cases is two members rather than one entry
+ * whose query cases have been merged into an OR.
+ *
+ * `|` splits them, and a fingerprint escapes every `|` it carries, so the split is
+ * on the FIRST one however the cache key is spelled. This is the one place a
+ * fingerprint leaves Node as a string; `parseScopedCacheIndexMember` is the one
+ * place it comes back.
+ */
+export function renderScopedCacheIndexMember(
+	fingerprint: ScopedCacheFingerprint,
+	key: string,
+): string {
+	return `${renderScopedCacheFingerprint(fingerprint)}|${key}`;
+}
+
+export function parseScopedCacheIndexMember(
+	member: string,
+): { fingerprint: ScopedCacheFingerprint; key: string } {
+	const splitAt = member.indexOf('|');
+
+	if (splitAt === -1) {
+		return { fingerprint: parseScopedCacheFingerprint(member), key: '' };
+	}
+
+	return {
+		fingerprint: parseScopedCacheFingerprint(member.slice(0, splitAt)),
+		key: member.slice(splitAt + 1),
+	};
+}
+
+/** Where a member was found, so a matched entry can be dropped from it. */
+interface ScopedCacheMemberLocation {
+	indexKey: string;
+	member: string;
+}
+
+/**
+ * Read a list of sets, member by member, and answer with the entries they hold.
+ *
+ * `globPatterns` is a list of passes, since `SSCAN` takes one pattern: a member
+ * matching several is yielded once, so the caller tests and drops it once.
+ */
+async function* scanScopedCacheIndexKeys(
+	indexKeys: readonly string[],
+	globPatterns: readonly string[] | null,
+): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+	const redis = useRedis();
+
+	for (const indexKey of indexKeys) {
+		const scannedMembers = new Set<string>();
+
+		for (const globPattern of globPatterns ?? [null]) {
+			let scanCursor = '0';
+
+			do {
+				const [next, members] = globPattern === null
+					? await redis.sscan(
+						indexKey,
+						scanCursor,
+						'COUNT',
+						SCOPED_CACHE_INDEX_SCAN_COUNT,
+					)
+					: await redis.sscan(
+						indexKey,
+						scanCursor,
+						'MATCH',
+						globPattern,
+						'COUNT',
+						SCOPED_CACHE_INDEX_SCAN_COUNT,
+					);
+
+				scanCursor = next;
+				const entries: ScopedCacheIndexedEntry[] = [];
+
+				for (const member of members) {
+					if (scannedMembers.has(member)) {
+						continue;
+					}
+
+					scannedMembers.add(member);
+
+					const { fingerprint, key } = parseScopedCacheIndexMember(member);
+
+					entries.push({
+						fingerprint,
+						key,
+						location: { indexKey, member } satisfies ScopedCacheMemberLocation,
+					});
+				}
+
+				yield entries;
+			}
+			while (scanCursor !== '0');
+		}
+	}
+}
+
+/**
+ * The keys under `globPattern`, a page at a time.
+ *
+ * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the whole
+ * keyspace however few keys match — but only the matches cross the wire, which is
+ * why the prefix is worth having.
+ *
+ * A single-node SCAN only covers the whole keyspace on a standalone client; a
+ * cluster would miss keys on other nodes, which `assertStoreSupported` refuses at
+ * boot.
+ */
+async function* scanScopedCacheKeys(
+	globPattern: string,
+): AsyncGenerator<string[]> {
+	const redis = useRedis();
+	let cursor = '0';
+
+	do {
+		const [next, batch] = await redis.scan(
+			cursor,
+			'MATCH',
+			globPattern,
+			'COUNT',
+			SCOPED_CACHE_SCAN_COUNT,
+		);
+
+		cursor = next;
+		yield batch;
+	}
+	while (cursor !== '0');
+}
+
 const redisStore: ScopedCacheStore = {
 	/**
 	 * Scoped purging drives SCAN + multi-key DEL over a single node, so it only
@@ -232,22 +572,31 @@ const redisStore: ScopedCacheStore = {
 		}
 	},
 
-	async addIndexMembers(
-		entries: readonly ScopedCacheIndexEntry[],
+	async fileIndexedEntries(
+		filings: readonly ScopedCacheIndexFiling[],
 		ttlSeconds: number,
 	): Promise<void> {
-		if (entries.length === 0) {
+		if (filings.length === 0) {
 			return;
 		}
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheTagPipeline;
 
-		for (const { indexKey, members } of entries) {
-			if (ttlSeconds > 0) {
-				pipeline.scopedCacheTagExpiry(indexKey, ttlSeconds, ...members);
-			}
-			else {
-				pipeline.sadd(indexKey, ...members);
+		for (const { fingerprint, keys, indexPath } of filings) {
+			const members = keys.map((key) => {
+				return renderScopedCacheIndexMember(fingerprint, key);
+			});
+
+			for (const indexKey of scopedCacheFingerprintIndexKeys(
+				fingerprint,
+				indexPath,
+			)) {
+				if (ttlSeconds > 0) {
+					pipeline.scopedCacheTagExpiry(indexKey, ttlSeconds, ...members);
+				}
+				else {
+					pipeline.sadd(indexKey, ...members);
+				}
 			}
 		}
 
@@ -265,52 +614,82 @@ const redisStore: ScopedCacheStore = {
 		}
 	},
 
-	async* scanIndexMembers(
-		indexKey: string,
-		globPattern: string | null,
-	): AsyncGenerator<string[]> {
-		const redis = useRedis();
-		let scanCursor = '0';
-
-		do {
-			const [next, indexedMembers] = globPattern === null
-				? await redis.sscan(
-					indexKey,
-					scanCursor,
-					'COUNT',
-					SCOPED_CACHE_INDEX_SCAN_COUNT,
-				)
-				: await redis.sscan(
-					indexKey,
-					scanCursor,
-					'MATCH',
-					globPattern,
-					'COUNT',
-					SCOPED_CACHE_INDEX_SCAN_COUNT,
-				);
-
-			scanCursor = next;
-			yield indexedMembers;
-		}
-		while (scanCursor !== '0');
+	scanRowIndexedEntries(
+		collection: string,
+		rowFingerprints: readonly ScopedCacheFingerprint[],
+		indexPath: string | null,
+	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+		return scanScopedCacheIndexKeys(
+			scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
+			scopedCacheRowIndexGlobs(collection, rowFingerprints),
+		);
 	},
 
-	async removeIndexMembers(
-		byIndexKey: ReadonlyMap<string, ReadonlySet<string>>,
+	async* scanDeclaredIndexedEntries(
+		collection: string,
+		declared: readonly ScopedCacheFingerprint[],
+		indexPath: string | null,
+	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+		// The declared pins' own sets when the pin IS what the index is split by —
+		// the same two a write of those values would read — and every set the
+		// collection owns otherwise, since a pin off the index path says nothing
+		// about which split holds it. No glob narrowing either way: a declared pin
+		// matches entries by what they do NOT pin as much as by what they do, and a
+		// pattern can only select on what is written.
+		const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {
+			return fingerprint.pinnedScope[indexPath] !== undefined;
+		});
+
+		if (pinsIndexPath) {
+			yield* scanScopedCacheIndexKeys(
+				scopedCacheRowIndexKeys(collection, declared, indexPath),
+				null,
+			);
+
+			return;
+		}
+
+		yield* redisStore.scanCollectionIndexedEntries(collection);
+	},
+
+	async* scanCollectionIndexedEntries(
+		collection: string,
+	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+		for await (const indexKeys of scanScopedCacheKeys(
+			scopedCacheCollectionIndexGlob(collection),
+		)) {
+			yield* scanScopedCacheIndexKeys(indexKeys, null);
+		}
+	},
+
+	async removeIndexedEntries(
+		entries: readonly ScopedCacheIndexedEntry[],
 	): Promise<void> {
+		const membersByIndexKey = new Map<string, string[]>();
+
+		for (const { location } of entries) {
+			const { indexKey, member } = location as ScopedCacheMemberLocation;
+			const members = membersByIndexKey.get(indexKey) ?? [];
+
+			members.push(member);
+			membersByIndexKey.set(indexKey, members);
+		}
+
+		if (membersByIndexKey.size === 0) {
+			return;
+		}
+
 		const redisPipeline = useRedis().pipeline();
 
-		for (const [indexKey, matchedMembers] of byIndexKey) {
-			const indexedMembers = [...matchedMembers];
-
+		for (const [indexKey, members] of membersByIndexKey) {
 			for (
 				let memberAt = 0;
-				memberAt < indexedMembers.length;
+				memberAt < members.length;
 				memberAt += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
 			) {
 				redisPipeline.srem(
 					indexKey,
-					...indexedMembers.slice(
+					...members.slice(
 						memberAt,
 						memberAt + SCOPED_CACHE_INDEX_CHUNK_MEMBERS,
 					),
@@ -333,57 +712,38 @@ const redisStore: ScopedCacheStore = {
 		}
 	},
 
-	/**
-	 * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the
-	 * whole keyspace however few keys match — but only the matches cross the wire,
-	 * which is why the prefix is worth having.
-	 *
-	 * A single-node SCAN only covers the whole keyspace on a standalone client; a
-	 * cluster would miss keys on other nodes, which `assertStoreSupported` refuses
-	 * at boot.
-	 */
-	async* scanIndexKeys(globPattern: string): AsyncGenerator<string[]> {
+	async* takeCollectionIndexedKeys(
+		collection: string,
+	): AsyncGenerator<ScopedCacheIndexTake> {
 		const redis = useRedis();
-		let cursor = '0';
 
-		do {
-			const [next, batch] = await redis.scan(
-				cursor,
-				'MATCH',
-				globPattern,
-				'COUNT',
-				SCOPED_CACHE_SCAN_COUNT,
-			);
+		for await (const indexKeys of scanScopedCacheKeys(
+			scopedCacheCollectionIndexGlob(collection),
+		)) {
+			const keys: string[] = [];
 
-			cursor = next;
-			yield batch;
-		}
-		while (cursor !== '0');
-	},
+			for (
+				let at = 0;
+				at < indexKeys.length;
+				at += SCOPED_CACHE_SWEEP_CHUNK_KEYS
+			) {
+				const chunk = indexKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
 
-	async takeIndexMembers(indexKeys: readonly string[]): Promise<string[]> {
-		const redis = useRedis();
-		const takenMembers: string[] = [];
+				const swept = await redis.eval(
+					scopedCacheSweepScript,
+					chunk.length,
+					...chunk,
+				) as string[];
 
-		for (
-			let at = 0;
-			at < indexKeys.length;
-			at += SCOPED_CACHE_SWEEP_CHUNK_KEYS
-		) {
-			const chunk = indexKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
-
-			const swept = await redis.eval(
-				scopedCacheSweepScript,
-				chunk.length,
-				...chunk,
-			) as string[];
-
-			for (const indexedMember of swept) {
-				takenMembers.push(indexedMember);
+				// The fingerprint half is read past rather than parsed: this purge
+				// drops the key whichever query case filed it.
+				for (const member of swept) {
+					keys.push(parseScopedCacheIndexMember(member).key);
+				}
 			}
-		}
 
-		return takenMembers;
+			yield { indexKeys: indexKeys.length, keys };
+		}
 	},
 
 	/**
@@ -391,13 +751,16 @@ const redisStore: ScopedCacheStore = {
 	 * collect is the one thing here that grows with the cache, and holding all of
 	 * it to delete all of it puts the whole index in this process's heap for no
 	 * gain — the deletes are per-batch round trips either way.
+	 *
+	 * The keys the pre-scoped-cache-index layout left behind are not swept here:
+	 * they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
 	 */
-	async dropIndexKeysMatching(
-		globPattern: string,
-	): Promise<ScopedCacheUnlinkTally> {
+	async dropIndex(): Promise<ScopedCacheUnlinkTally> {
 		const tally = { dropped: 0, refused: 0 };
 
-		for await (const batch of redisStore.scanIndexKeys(globPattern)) {
+		for await (const batch of scanScopedCacheKeys(
+			`${scopedCacheIndexPrefix()}*`,
+		)) {
 			const batchTally = await unlinkScopedCacheKeys(batch);
 
 			tally.dropped += batchTally.dropped;

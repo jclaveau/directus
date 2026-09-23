@@ -36,7 +36,7 @@ import {
 	scopedCacheMaxPinsPerCollection,
 	scopedCacheMaxQueryCases,
 	scopedCachePinKey,
-	scopedCachePinsFromRows,
+	scopedCacheCollectionPinsFromRows,
 } from './pins.js';
 
 /**
@@ -779,7 +779,7 @@ export function scopedCachePinsFromM2oParents(
 		// collection down to the bare fingerprint. Skipping it would pin the rows
 		// that DID carry a key and leave that one covered by nothing — stale, where
 		// the bare fingerprint only over-purges.
-		const keyPins = scopedCachePinsFromRows(
+		const keyPins = scopedCacheCollectionPinsFromRows(
 			collection,
 			[primaryKeyField],
 			rows,
@@ -810,7 +810,7 @@ export function scopedCachePinsFromM2oParents(
 			sliceFieldTypes[field] = collectionFields[field]?.type;
 		}
 
-		const slicePins = scopedCachePinsFromRows(
+		const slicePins = scopedCacheCollectionPinsFromRows(
 			collection,
 			sliceFields,
 			rows,
@@ -1069,8 +1069,8 @@ export function scopedCachePinsFromO2mChildren(
 		keying.prefixes.add(fields.slice(0, -1).join('.'));
 
 		for (const parentRow of parentRows) {
-			// Carry the parent key under the child's fk name so `scopedCachePinsFromRows`
-			// reads it as that field's value. A surfaced parent without its key leaves
+			// Carry the parent key under the child's fk name so the pins are read off
+			// it as that field's value. A surfaced parent without its key leaves
 			// part of the set unpinned; one such row takes the whole collection to the
 			// bare fingerprint (the `coarse` mode returns null on a missing field).
 			keying.rows.push(
@@ -1115,7 +1115,7 @@ export function scopedCachePinsFromO2mChildren(
 			continue;
 		}
 
-		const keyPins = scopedCachePinsFromRows(
+		const keyPins = scopedCacheCollectionPinsFromRows(
 			collection,
 			[keying.reverseFk],
 			keying.rows,
@@ -1497,8 +1497,8 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 
 /**
  * Query cases flattened: every pin any of them names, deduplicated — the axes a
- * read touched, with the AND between them dropped. What the label rendering and
- * the anomaly detail speak; the invalidation itself keeps the query cases.
+ * read touched, with the AND between them dropped. What the legacy tag rendering
+ * and the anomaly detail speak; the invalidation itself keeps the query cases.
  */
 export function scopedCachePinsOfQueryCases(
 	queryCases: readonly (readonly ScopedCacheCollectionPin[])[],

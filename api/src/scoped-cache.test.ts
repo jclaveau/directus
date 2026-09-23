@@ -49,7 +49,7 @@ import {
 	scopedCachePathReversesChain,
 	scopedCacheReadMeta,
 	scopedCacheSweptDuringFill,
-	scopedCacheFingerprintLabels,
+	scopedCacheLegacyTags,
 	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
 } from './scoped-cache.js';
@@ -165,7 +165,7 @@ afterEach(() => {
 // The one spelling of a pin that the fingerprint index, the purge attribution and
 // the dev headers all share — if these drift, a purge stops matching the entries it
 // actually dropped and the attribution silently reads zero.
-describe('the label form', () => {
+describe('the legacy tag form', () => {
 	it('renders a bare collection and a pinned slice', () => {
 		expect(scopedCachePinKey({ collection: 'articles' })).toBe('articles');
 
@@ -187,7 +187,7 @@ describe('the label form', () => {
 	});
 
 	it('joins a set for the header form', () => {
-		expect(scopedCacheFingerprintLabels([
+		expect(scopedCacheLegacyTags([
 			scopedCacheFingerprintOf('articles', []),
 			scopedCacheFingerprintOf('articles', [{ field: 'author', value: 7 }]),
 		]).join(', ')).toBe('articles, articles:author=7');
@@ -233,7 +233,7 @@ describe('the label form', () => {
 // rejects the NUL, so both exits render the tag through this one escaper.
 describe('the exit form', () => {
 	it('escapes the NULL token', () => {
-		expect(printableScopedCacheTags(scopedCacheFingerprintLabels([
+		expect(printableScopedCacheTags(scopedCacheLegacyTags([
 			scopedCacheFingerprintOf('student_method_range', [
 				{ field: 'method', value: null },
 			]),
@@ -416,8 +416,8 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 });
 
 describe('countScopedCacheTagMembers', () => {
-	// A label names a pin, not a set, so the count is read off the collection's
-	// fingerprint sets the way the purge that answers for that label reads them.
+	// A legacy tag names a pin, not a set, so the count is read off the
+	// collection's fingerprint sets the way the purge answering it reads them.
 	let countedMembers: Record<string, string[]>;
 
 	beforeEach(() => {
@@ -441,7 +441,7 @@ describe('countScopedCacheTagMembers', () => {
 	});
 
 	it(oneLine`
-		counts the entries each label reaches: the bare one the reads no value
+		counts the entries each legacy tag reaches: the bare one the reads no value
 		narrows, a pinned one the entries bound to that value
 	`, async () => {
 		countedMembers = {
@@ -488,7 +488,7 @@ describe('countScopedCacheTagMembers', () => {
 		.toEqual({ 'articles:id=5': 1 });
 	});
 
-	it('reads a null scope slice by the label\'s own byte', async () => {
+	it('reads a null scope slice by the legacy tag\'s own byte', async () => {
 		countedMembers = {
 			'ns:scoped-cache-index:fingerprint:articles:': [
 				'articles:&author=,\u0000null,&|ns:entry-unassigned',
@@ -505,7 +505,7 @@ describe('countScopedCacheTagMembers', () => {
 		.toEqual({ [nullSlice]: 1 });
 	});
 
-	it('counts a label its collection holds nothing for as zero', async () => {
+	it('counts a legacy tag its collection holds nothing for as zero', async () => {
 		expect(await countScopedCacheTagMembers(['orphan'])).toEqual({ orphan: 0 });
 	});
 
@@ -1596,7 +1596,7 @@ describe('retryPendingScopedCachePurges', () => {
 			purgeId: expect.any(String),
 			collection: 'articles',
 			mode: 'slices',
-			// The record holds fingerprints, the stats stream takes labels: it joins
+			// The record holds fingerprints, the stats stream takes tags: it joins
 			// its tag list with a comma, which a rendered fingerprint carries raw.
 			scopedCacheTags: ['articles:id=1'],
 			scopedCacheTagCount: 1,
@@ -1647,7 +1647,7 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		purges a whole collection for a record naming it by its display label — a row
+		purges a whole collection for a record naming it by its legacy tag — a row
 		written before the fingerprint index existed says which collection went stale
 		and nothing narrower, so its reach is the collection
 	`, async () => {

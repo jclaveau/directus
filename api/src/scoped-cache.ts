@@ -3,7 +3,7 @@ export * from './scoped-cache/collector.js';
 export * from './scoped-cache/pins.js';
 export * from './scoped-cache/fill-guard.js';
 export * from './scoped-cache/fingerprint.js';
-export * from './scoped-cache/fingerprint-index.js';
+export * from './scoped-cache/index-path.js';
 export * from './scoped-cache/mutated-rows.js';
 export * from './scoped-cache/ownership-injection.js';
 export * from './scoped-cache/paths.js';

@@ -42,7 +42,7 @@ import {
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintsByCollection,
 } from './fingerprint.js';
-import { scopedCacheIndexPath } from './fingerprint-index.js';
+import { scopedCacheIndexPath } from './index-path.js';
 import type {
 	ScopedCacheMutatedWrite,
 	ScopedCacheSnapshot,
@@ -60,7 +60,7 @@ import {
 import {
 	scopedCacheMaxPinsPerCollection,
 	scopedCachePinKey,
-	scopedCachePinsFromRows,
+	scopedCacheCollectionPinsFromRows,
 	type FieldTypesByField,
 } from './pins.js';
 
@@ -383,7 +383,7 @@ export class ItemScopedCacheService {
 				// and a row that somehow lost one is better pinned by the rest of
 				// itself than dropped — the fingerprint then matches MORE reads,
 				// never fewer.
-				const rowPins = scopedCachePinsFromRows(
+				const rowPins = scopedCacheCollectionPinsFromRows(
 					this.collection,
 					pinnableFields,
 					[row],
