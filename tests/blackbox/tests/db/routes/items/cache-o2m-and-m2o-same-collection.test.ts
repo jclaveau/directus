@@ -90,10 +90,13 @@ describe(oneLine`
 
 			featuredCommentId = comments[0].id;
 
+			// Asserted: read back 100 lines below, a seed PATCH that did not land
+			// surfaces as a null `featured_comment` and reads as a cache bug.
 			await request(getUrl(vendor))
 				.patch(`/items/${ARTICLE}/${readArticleId}`)
 				.send({ featured_comment: featuredCommentId })
-				.set('Authorization', auth);
+				.set('Authorization', auth)
+				.expect(200);
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
