@@ -41,7 +41,7 @@ import {
 	scopedCacheFingerprintFromTags,
 	scopedCacheFingerprintsByCollection,
 } from './fingerprint.js';
-import { scopedCacheBucketPath } from './fingerprint-index.js';
+import { scopedCacheIndexPath } from './fingerprint-index.js';
 import type {
 	ScopedCacheCapture,
 	ScopedCacheMutatedWrite,
@@ -682,7 +682,7 @@ export class ItemScopedCacheService {
 			: {
 				rowFingerprints: rows.fingerprints,
 				changed: rows.changed,
-				bucketPath: scopedCacheBucketPath(this.schema, this.collection),
+				indexPath: scopedCacheIndexPath(this.schema, this.collection),
 				sweepScopedCacheTags: hookTags,
 			};
 
@@ -988,7 +988,7 @@ export class ItemScopedCacheService {
 		// reaches the collection by, since a path that escapes the bound is a row
 		// the slice does not cover:
 		//
-		// - the path walks the chain to the slice's bucket value backwards from the
+		// - the path walks the chain to the slice's scope value backwards from the
 		//   root, whose own pin then bounds every row nested that way (`courses` off
 		//   a student read by key pins `course:student=<key>`);
 		// - the read's own filter binds the path-prefixed slice for every row the root
@@ -999,7 +999,7 @@ export class ItemScopedCacheService {
 		//
 		// A filter that keyed the collection somewhere ELSE cannot stand in: its keys
 		// name rows reached by a hop this collection never takes, which is the
-		// wrong-bucket-value stale hit `cache-ancestor-slice-wrong-value` forbids.
+		// wrong-scope-value stale hit `cache-ancestor-slice-wrong-value` forbids.
 		const sliceTagsFor = (collection: string): ScopedCacheTag[] => {
 			if (collection === this.collection) {
 				return [];

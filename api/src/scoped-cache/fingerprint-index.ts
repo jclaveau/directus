@@ -9,42 +9,46 @@ import {
 import { scopedCacheIndexPrefix } from './tags.js';
 
 /**
- * The set a fingerprint is filed in, and the set a write reads back.
+ * The key of the set a fingerprint is filed in, and of the set a write reads back.
  *
  * One set per collection would work and is what correctness asks for: every
  * fingerprint of that collection is tested against every row written to it. It is
  * the SIZE that does not work — a collection holding a million cached reads is a
- * million members to walk per written row. So the set is split by the one pair a
- * read of a scoped collection almost always pins, and a write always knows: the
- * row's bucket value. A write then reads its own bucket's set and the bare one,
- * and never sees a fingerprint filed under somebody else's bucket value.
+ * million members to walk per written row. So the set is split by the one pin a
+ * read of a scoped collection almost always carries, and a write always knows: the
+ * row's value at the index path. A write then reads its own set and the bare one,
+ * and never sees a fingerprint filed under somebody else's value.
  *
- * The split is an optimisation, never a bound: a fingerprint pinning no bucket
- * value goes bare, and the bare set is read by every write to the collection.
+ * The split is an optimisation, never a bound: a fingerprint pinning nothing at
+ * that path goes bare, and the bare set is read by every write to the collection.
+ *
+ * `indexPin` is what the split is keyed by — `<path>=<value>`, or empty for the
+ * bare set. It never leaves this file: a caller asks for the keys of the sets it
+ * has to write or read, not for the pin naming one.
  */
-export function scopedCacheFingerprintIndexKey(
+function scopedCacheIndexKey(
 	collection: CollectionKey,
-	bucket: string,
+	indexPin: string,
 ): string {
-	return `${scopedCacheIndexPrefix()}idx:${collection}:${bucket}`;
+	return `${scopedCacheIndexPrefix()}idx:${collection}:${indexPin}`;
 }
 
 /**
- * The path a collection's cached reads are bucketed by: the chain to its bucket
- * value, followed to the end.
+ * The path a collection's cached reads are indexed by: the chain to the value
+ * they belong to, followed to the end.
  *
  * A scope field naming an M2O whose target scopes too is a hop, not a bound: the
  * read pins the path THROUGH it, so `zone` leads to `zone.region` and on to
  * `zone.region.owner`, the column the row finally belongs to. The deepest such
  * path is the one that splits best — every slot of one region shares `zone`, and
- * only the terminal tells one bucket value from another.
+ * only the terminal tells one index value from another.
  *
  * The chain ends where the hops do: at a scope field naming no relation, or one
  * whose target declares no scope of its own and is pinned by its key alone. Two
  * chains of the same depth are settled by declaration order, so the field a
  * collection names first is the one it is taken to belong to.
  */
-export function scopedCacheBucketPath(
+export function scopedCacheIndexPath(
 	schema: SchemaOverview,
 	collection: CollectionKey,
 ): string | null {
@@ -99,72 +103,82 @@ export function scopedCacheBucketPath(
 }
 
 /**
- * A fingerprint pinning no bucket value, filed where every write to the
- * collection looks.
+ * The pin naming nothing, whose set every write to the collection reads.
  */
-export const SCOPED_CACHE_BARE_BUCKET = '';
+const SCOPED_CACHE_BARE_PIN = '';
 
 /**
- * The sets one fingerprint is filed in: one per value it pins the bucket path to.
+ * The keys of the sets one fingerprint is filed in: one per value it pins the
+ * index path to.
  *
- * A read bounded to a list of bucket values depends on each of them and is
- * dropped by a write to any one, so it is filed under each — the same OR an
- * `_in` already carries, kept as the only OR the layout has left.
+ * A read bounded to a list of values depends on each of them and is dropped by a
+ * write to any one, so it is filed under each — the same OR an `_in` already
+ * carries, kept as the only OR the layout has left.
  */
-export function scopedCacheFingerprintBuckets(
+export function scopedCacheFingerprintIndexKeys(
 	fingerprint: ScopedCacheFingerprint,
-	bucketPath: string | null,
+	indexPath: string | null,
 ): string[] {
-	if (bucketPath === null) {
-		return [SCOPED_CACHE_BARE_BUCKET];
+	const { collection } = fingerprint;
+
+	if (indexPath === null) {
+		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
 	}
 
-	const bucketValues = Object.hasOwn(fingerprint.pinnedScope, bucketPath)
-		? fingerprint.pinnedScope[bucketPath]
+	const pinnedValues = Object.hasOwn(fingerprint.pinnedScope, indexPath)
+		? fingerprint.pinnedScope[indexPath]
 		: undefined;
 
-	if (bucketValues === undefined || bucketValues.length === 0) {
-		return [SCOPED_CACHE_BARE_BUCKET];
+	if (pinnedValues === undefined || pinnedValues.length === 0) {
+		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
 	}
 
-	return bucketValues.map((bucketValue) => {
-		return `${bucketPath}=${escapeScopedCacheFingerprintToken(bucketValue)}`;
+	return pinnedValues.map((pinnedValue) => {
+		return scopedCacheIndexKey(
+			collection,
+			`${indexPath}=${escapeScopedCacheFingerprintToken(pinnedValue)}`,
+		);
 	});
 }
 
 /**
- * The sets a write reads back: the bare one, and the one its row's bucket value
- * names.
+ * The keys of the sets a write reads back: the bare one, and the one each of its
+ * rows' values at the index path names.
  *
- * The row is read as a fingerprint of its own, so the bucket value it pins is
- * looked up the same way a cached read's is. A row whose bucket path does not
+ * The row is read as a fingerprint of its own, so the value it pins there is
+ * looked up the same way a cached read's is. A row whose index path does not
  * resolve — the ancestor was deleted, or the write never carried it — reads the
- * bare set alone, and the other buckets it cannot name are left to the
- * collection-wide purge.
+ * bare set alone, and the sets it cannot name are left to the collection-wide
+ * purge. The collection is the written one rather than the rows', so an empty
+ * write still names the bare set.
  */
-export function scopedCacheRowBuckets(
+export function scopedCacheRowIndexKeys(
+	collection: CollectionKey,
 	rowFingerprints: readonly ScopedCacheFingerprint[],
-	bucketPath: string | null,
+	indexPath: string | null,
 ): string[] {
-	const buckets = new Set<string>([SCOPED_CACHE_BARE_BUCKET]);
+	const indexKeys = new Set<string>([
+		scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN),
+	]);
 
-	if (bucketPath === null) {
-		return [...buckets];
+	if (indexPath === null) {
+		return [...indexKeys];
 	}
 
 	for (const rowFingerprint of rowFingerprints) {
-		const bucketValues = Object.hasOwn(rowFingerprint.pinnedScope, bucketPath)
-			? rowFingerprint.pinnedScope[bucketPath] ?? []
+		const pinnedValues = Object.hasOwn(rowFingerprint.pinnedScope, indexPath)
+			? rowFingerprint.pinnedScope[indexPath] ?? []
 			: [];
 
-		for (const bucketValue of bucketValues) {
-			buckets.add(
-				`${bucketPath}=${escapeScopedCacheFingerprintToken(bucketValue)}`,
-			);
+		for (const pinnedValue of pinnedValues) {
+			indexKeys.add(scopedCacheIndexKey(
+				collection,
+				`${indexPath}=${escapeScopedCacheFingerprintToken(pinnedValue)}`,
+			));
 		}
 	}
 
-	return [...buckets];
+	return [...indexKeys];
 }
 
 /**

@@ -114,7 +114,7 @@ function purge(options: Record<string, unknown>) {
 	return purgeScopedCache(cache, 'slot', [], null, {
 		rowFingerprints: [row],
 		changed: ['method'],
-		bucketPath: 'owner',
+		indexPath: 'owner',
 		...options,
 	});
 }
@@ -174,7 +174,7 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		removes the matched member from the set it was found in, so a later write to
-		the same bucket value does not test a key that is already gone
+		the same index value does not test a key that is already gone
 	`, async () => {
 		members = {
 			[ALPHA]: [
@@ -200,7 +200,7 @@ describe('a purge shown the rows it wrote', () => {
 			return ['0', ['slot:&|ns:entry-second']];
 		});
 
-		await purge({ bucketPath: null });
+		await purge({ indexPath: null });
 
 		// One pass per pattern the rows can drop something under — the two bare ones
 		// plus one per pair of `row` — and the first of them takes a second page.
@@ -246,7 +246,7 @@ describe('a purge shown the rows it wrote', () => {
 			{
 				rowFingerprints: [row],
 				changed: ['method'],
-				bucketPath: 'owner',
+				indexPath: 'owner',
 				sweepScopedCacheTags: [hookTag],
 			},
 		);

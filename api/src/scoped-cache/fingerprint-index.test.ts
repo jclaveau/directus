@@ -4,10 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	parseScopedCacheIndexMember,
 	renderScopedCacheIndexMember,
-	scopedCacheFingerprintBuckets,
-	scopedCacheFingerprintIndexKey,
-	scopedCacheBucketPath,
-	scopedCacheRowBuckets,
+	scopedCacheFingerprintIndexKeys,
+	scopedCacheIndexPath,
+	scopedCacheRowIndexKeys,
 } from './fingerprint-index.js';
 import { parseScopedCacheFingerprint } from './fingerprint.js';
 
@@ -15,9 +14,9 @@ vi.mock('@directus/env', () => {
 	return { useEnv: () => ({ CACHE_NAMESPACE: 'scalabus' }) };
 });
 
-// `slot` owns through `zone`, which owns through `region`, so its bucket path
-// is two hops deep and the bucket has a longest path to prefer. `note` scopes on a
-// flat column alone, so it has no ancestor to bucket by.
+// `slot` owns through `zone`, which owns through `region`, so its index path is
+// two hops deep and the walk has a longest path to prefer. `note` scopes on a flat
+// column alone, so it has no ancestor to index by.
 const schema = new SchemaBuilder()
 	.collection('slot', (c) => {
 		c.field('id').id();
@@ -47,97 +46,91 @@ schema.collections['zone']!.scopedCacheFields = ['region'];
 schema.collections['region']!.scopedCacheFields = ['owner'];
 schema.collections['note']!.scopedCacheFields = ['method', 'author'];
 
-describe('scopedCacheFingerprintIndexKey', () => {
-	it('names the set by its collection and bucket, under the index prefix', () => {
-		expect(scopedCacheFingerprintIndexKey('slot', 'zone.region.owner=ana'))
-			.toBe('scalabus:scoped-cache-index:idx:slot:zone.region.owner=ana');
-	});
+const slotIndex = 'scalabus:scoped-cache-index:idx:slot:';
 
-	it('names the bare set by its collection alone', () => {
-		expect(scopedCacheFingerprintIndexKey('slot', ''))
-			.toBe('scalabus:scoped-cache-index:idx:slot:');
-	});
-});
-
-describe('scopedCacheBucketPath', () => {
-	it('follows the bucket path to its deepest ancestor key', () => {
-		expect(scopedCacheBucketPath(schema, 'slot')).toBe('zone.region.owner');
+describe('scopedCacheIndexPath', () => {
+	it('follows the index path to its deepest ancestor key', () => {
+		expect(scopedCacheIndexPath(schema, 'slot')).toBe('zone.region.owner');
 	});
 
 	it('stops at the ancestor a shorter chain reaches', () => {
-		expect(scopedCacheBucketPath(schema, 'zone')).toBe('region.owner');
+		expect(scopedCacheIndexPath(schema, 'zone')).toBe('region.owner');
 	});
 
 	it(oneLine`
 		falls back to the first field a collection scoping only on its own columns
 		declares
 	`, () => {
-		expect(scopedCacheBucketPath(schema, 'note')).toBe('method');
+		expect(scopedCacheIndexPath(schema, 'note')).toBe('method');
 	});
 
 	it('has no path for a collection declaring no scope at all', () => {
-		expect(scopedCacheBucketPath(schema, 'loose')).toBe(null);
+		expect(scopedCacheIndexPath(schema, 'loose')).toBe(null);
 	});
 });
 
-describe('scopedCacheFingerprintBuckets', () => {
-	it('files a read under the bucket value it pinned', () => {
-		expect(scopedCacheFingerprintBuckets(
+describe('scopedCacheFingerprintIndexKeys', () => {
+	it('names the set by the collection and the value the read pinned', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint(
 				'slot:&fields=,id,&method=,spaced,&zone.region.owner=,ana,&',
 			),
 			'zone.region.owner',
-		)).toEqual(['zone.region.owner=ana']);
+		)).toEqual([`${slotIndex}zone.region.owner=ana`]);
 	});
 
-	it('files a read bounded to a list of bucket values under each of them', () => {
-		expect(scopedCacheFingerprintBuckets(
+	it('files a read bounded to a list of values under each of them', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,ana,bo,&'),
 			'zone.region.owner',
-		)).toEqual(['zone.region.owner=ana', 'zone.region.owner=bo']);
+		)).toEqual([
+			`${slotIndex}zone.region.owner=ana`,
+			`${slotIndex}zone.region.owner=bo`,
+		]);
 	});
 
-	it('files a read pinning every axis but the bucket value bare', () => {
-		expect(scopedCacheFingerprintBuckets(
+	it('files a read pinning every axis but the index path bare', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&fields=,id,&method=,spaced,&'),
 			'zone.region.owner',
-		)).toEqual(['']);
+		)).toEqual([slotIndex]);
 	});
 
-	it('files every read of a collection with no bucket path bare', () => {
-		expect(scopedCacheFingerprintBuckets(
+	it('files every read of a collection with no index path bare', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('loose:&fields=,id,&'),
 			null,
-		)).toEqual(['']);
+		)).toEqual(['scalabus:scoped-cache-index:idx:loose:']);
 	});
 
-	it('escapes a bucket value carrying a separator, so its set is its own', () => {
-		expect(scopedCacheFingerprintBuckets(
+	it('escapes a value carrying a separator, so its set is its own', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,a\\,b,&'),
 			'zone.region.owner',
-		)).toEqual(['zone.region.owner=a\\,b']);
+		)).toEqual([`${slotIndex}zone.region.owner=a\\,b`]);
 	});
 
 	// A collection may declare a column named after an Object member, and the
-	// bucket path is looked up by column name.
-	it('files a read pinning nothing bare, whatever the bucket path is named', () => {
-		expect(scopedCacheFingerprintBuckets(
+	// index path is looked up by column name.
+	it('files a read pinning nothing bare, whatever the path is named', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			{ collection: 'slot', pinnedScope: {}, viewFields: [] },
 			'constructor',
-		)).toEqual(['']);
+		)).toEqual([slotIndex]);
 	});
 
-	it('files a read under a bucket path named after an object member', () => {
-		expect(scopedCacheFingerprintBuckets(
+	it('files a read under an index path named after an object member', () => {
+		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&constructor=,ana,&'),
 			'constructor',
-		)).toEqual(['constructor=ana']);
+		)).toEqual([`${slotIndex}constructor=ana`]);
 	});
 });
 
-describe('scopedCacheRowBuckets', () => {
+describe('scopedCacheRowIndexKeys', () => {
 	it('reads the bare set and the one each written row owns', () => {
-		expect(scopedCacheRowBuckets(
+		expect(scopedCacheRowIndexKeys(
+			'slot',
 			[
 				parseScopedCacheFingerprint(
 					'slot:&id=,1,&method=,spaced,&zone.region.owner=,ana,&',
@@ -147,47 +140,61 @@ describe('scopedCacheRowBuckets', () => {
 				),
 			],
 			'zone.region.owner',
-		)).toEqual(['', 'zone.region.owner=ana', 'zone.region.owner=bo']);
+		)).toEqual([
+			slotIndex,
+			`${slotIndex}zone.region.owner=ana`,
+			`${slotIndex}zone.region.owner=bo`,
+		]);
 	});
 
-	it('reads one set for two rows of the same bucket value', () => {
-		expect(scopedCacheRowBuckets(
+	it('reads one set for two rows of the same index value', () => {
+		expect(scopedCacheRowIndexKeys(
+			'slot',
 			[
 				parseScopedCacheFingerprint('slot:&id=,1,&zone.region.owner=,ana,&'),
 				parseScopedCacheFingerprint('slot:&id=,2,&zone.region.owner=,ana,&'),
 			],
 			'zone.region.owner',
-		)).toEqual(['', 'zone.region.owner=ana']);
+		)).toEqual([slotIndex, `${slotIndex}zone.region.owner=ana`]);
 	});
 
-	it('reads the bare set alone for a row whose bucket value never resolved', () => {
-		expect(scopedCacheRowBuckets(
+	it('reads the bare set alone for a row whose index value never resolved', () => {
+		expect(scopedCacheRowIndexKeys(
+			'slot',
 			[parseScopedCacheFingerprint('slot:&id=,1,&')],
 			'zone.region.owner',
-		)).toEqual(['']);
+		)).toEqual([slotIndex]);
 	});
 
 	// A collection may declare a column named after an Object member, and the
-	// bucket path is looked up by column name.
+	// index path is looked up by column name.
 	it('reads the bare set alone for a row pinning nothing, on any path', () => {
-		expect(scopedCacheRowBuckets(
+		expect(scopedCacheRowIndexKeys(
+			'slot',
 			[{ collection: 'slot', pinnedScope: {}, viewFields: [] }],
 			'constructor',
-		)).toEqual(['']);
+		)).toEqual([slotIndex]);
 	});
 
-	it('reads the bucket set of a bucket path named after an object member', () => {
-		expect(scopedCacheRowBuckets(
+	it('reads the set of an index path named after an object member', () => {
+		expect(scopedCacheRowIndexKeys(
+			'slot',
 			[parseScopedCacheFingerprint('slot:&constructor=,ana,&')],
 			'constructor',
-		)).toEqual(['', 'constructor=ana']);
+		)).toEqual([slotIndex, `${slotIndex}constructor=ana`]);
 	});
 
-	it('reads the bare set alone for a collection with no bucket path', () => {
-		expect(scopedCacheRowBuckets(
+	it('reads the bare set alone for a collection with no index path', () => {
+		expect(scopedCacheRowIndexKeys(
+			'loose',
 			[parseScopedCacheFingerprint('loose:&id=,1,&')],
 			null,
-		)).toEqual(['']);
+		)).toEqual(['scalabus:scoped-cache-index:idx:loose:']);
+	});
+
+	it('names the bare set even when the write carried no row', () => {
+		expect(scopedCacheRowIndexKeys('slot', [], 'zone.region.owner'))
+			.toEqual([slotIndex]);
 	});
 });
 

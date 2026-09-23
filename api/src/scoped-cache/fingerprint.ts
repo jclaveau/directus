@@ -448,7 +448,7 @@ export const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
  * drop, or `null` when there are too many to be worth filtering by.
  *
  * `SSCAN … MATCH` filters server-side, so the purge reads back the members it may
- * have to drop rather than every member of the bucket. The filter is a SUPERSET on
+ * have to drop rather than every member of the set. The filter is a SUPERSET on
  * purpose: a glob cannot say "and no other pair", so the purge test above still
  * decides, and a pattern letting a non-match through costs one compare.
  *

@@ -78,7 +78,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// Real for the same reason: composing fingerprints into a flat tag set is
 		// pure, and a stand-in would agree with the assertions rather than the
 		// grammar.
-		scopedCacheBucketPath: actual.scopedCacheBucketPath,
+		scopedCacheIndexPath: actual.scopedCacheIndexPath,
 		scopedCacheTagsOfFingerprints: actual.scopedCacheTagsOfFingerprints,
 		// Used only to build fixtures below — pure, reaches no Redis.
 		scopedCacheReadMeta: actual.scopedCacheReadMeta,

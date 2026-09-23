@@ -17,7 +17,7 @@ import { useLogger } from '../logger/index.js';
 import {
 	indexScopedCacheEntry,
 	mergedScopedCacheEpochs,
-	scopedCacheBucketPath,
+	scopedCacheIndexPath,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
@@ -150,10 +150,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const scopedCacheTags = scopedCacheTagsOfFingerprints(scopedCacheFingerprints);
 
-	// The bucket each fingerprint is filed in, off the schema the request carries: a
-	// path derived from the collection, never from the read, so the fill and the
+	// The path each fingerprint's index set is split by, off the schema the request
+	// carries: derived from the collection, never from the read, so the fill and the
 	// write that has to find it read the same one.
-	const scopedCacheBucketPaths = new Map(
+	const scopedCacheIndexPaths = new Map(
 		scopedCacheFingerprints.map((indexedFingerprint) => {
 			const fingerprintCollection = indexedFingerprint.collection;
 
@@ -161,7 +161,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				fingerprintCollection,
 				req.schema === undefined
 					? null
-					: scopedCacheBucketPath(req.schema, fingerprintCollection),
+					: scopedCacheIndexPath(req.schema, fingerprintCollection),
 			];
 		}),
 	);
@@ -275,7 +275,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				env['CACHE_TAGS_HEADER']
 					? [cacheTagsKey(redisKey)]
 					: [],
-				scopedCacheBucketPaths,
+				scopedCacheIndexPaths,
 			);
 
 			// Handed over together rather than awaited in turn: node-redis corks its

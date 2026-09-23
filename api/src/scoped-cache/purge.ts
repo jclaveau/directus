@@ -40,9 +40,8 @@ import {
 import {
 	parseScopedCacheIndexMember,
 	renderScopedCacheIndexMember,
-	scopedCacheFingerprintBuckets,
-	scopedCacheFingerprintIndexKey,
-	scopedCacheRowBuckets,
+	scopedCacheFingerprintIndexKeys,
+	scopedCacheRowIndexKeys,
 } from './fingerprint-index.js';
 import {
 	scopedCacheFingerprintPurgedBy,
@@ -294,7 +293,7 @@ export async function indexScopedCacheEntry(
 	key: string,
 	fingerprints: readonly ScopedCacheFingerprint[],
 	extraSiblings: string[] = [],
-	bucketPaths: ReadonlyMap<string, string | null> = new Map(),
+	indexPaths: ReadonlyMap<string, string | null> = new Map(),
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled() || fingerprints.length === 0) {
 		return;
@@ -378,23 +377,21 @@ export async function indexScopedCacheEntry(
 	// whichever a purge reaches it by, the entry goes.
 	for (const fingerprint of fingerprints) {
 		const fingerprintCollection = fingerprint.collection;
-		const bucketPath = bucketPaths.get(fingerprintCollection) ?? null;
+		const indexPath = indexPaths.get(fingerprintCollection) ?? null;
 
 		const indexedMembers = [key, cacheExpiresAtKey(key), ...extraSiblings].map(
 			(indexedMember) => renderScopedCacheIndexMember(fingerprint, indexedMember),
 		);
 
-		for (const bucket of scopedCacheFingerprintBuckets(fingerprint, bucketPath)) {
-			const bucketKey = scopedCacheFingerprintIndexKey(
-				fingerprintCollection,
-				bucket,
-			);
-
+		for (const indexKey of scopedCacheFingerprintIndexKeys(
+			fingerprint,
+			indexPath,
+		)) {
 			if (ttlSeconds > 0) {
-				pipeline.scopedCacheTagExpiry(bucketKey, ttlSeconds, ...indexedMembers);
+				pipeline.scopedCacheTagExpiry(indexKey, ttlSeconds, ...indexedMembers);
 			}
 			else {
-				pipeline.sadd(bucketKey, ...indexedMembers);
+				pipeline.sadd(indexKey, ...indexedMembers);
 			}
 		}
 	}
@@ -590,7 +587,7 @@ async function purgeScopedCacheTagKeys(
  * How many members one `SSCAN` of an index set is asked to look at per round trip.
  *
  * The set is read in pages rather than whole: a collection's bare set holds every
- * cached read that pinned no bucket value, and `SMEMBERS` on it would put the
+ * cached read that pinned no index value, and `SMEMBERS` on it would put the
  * whole thing in this process's memory — and hold Redis for the length of the
  * reply — to keep the handful the write actually matched.
  */
@@ -607,13 +604,13 @@ const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
  * — so the answer is no for every owner but alpha.
  *
  * The index sets it reads are picked by the rows: the bare set, which every write
- * to the collection reads, and the one each row's bucket value names. A
- * fingerprint filed under a different bucket value is never even looked at.
+ * to the collection reads, and the one each row's index value names. A
+ * fingerprint filed under a different index value is never even looked at.
  *
  * Matched members are SREMed from the set they were found in: nothing else prunes
  * them, and a purged entry left named by the index would be re-tested by every
- * later write to that bucket value for as long as the set lives. A member of a
- * SECOND set — an entry bounded to a list of bucket values — is left behind for
+ * later write to that index value for as long as the set lives. A member of a
+ * SECOND set — an entry bounded to a list of index values — is left behind for
  * its own set's expiry, since finding it would cost a scan of every set to save a
  * string compare.
  */
@@ -622,7 +619,7 @@ async function purgeScopedCacheFingerprintIndex(
 	collection: string,
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 	changed: readonly string[] | null,
-	bucketPath: string | null,
+	indexPath: string | null,
 	includeCollectionTag: boolean,
 ): Promise<number> {
 	if (rowFingerprints.length === 0) {
@@ -635,7 +632,7 @@ async function purgeScopedCacheFingerprintIndex(
 	await bumpScopedCacheEpochs([collection]);
 
 	const redisClient = useRedis();
-	const matchedByBucket = new Map<string, Set<string>>();
+	const matchedByIndexKey = new Map<string, Set<string>>();
 	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
 
@@ -644,8 +641,11 @@ async function purgeScopedCacheFingerprintIndex(
 	// letting Redis skip it saves sending it; the test below still decides.
 	const globPatterns = scopedCacheRowIndexGlobs(collection, rowFingerprints);
 
-	for (const bucket of scopedCacheRowBuckets(rowFingerprints, bucketPath)) {
-		const bucketKey = scopedCacheFingerprintIndexKey(collection, bucket);
+	for (const indexKey of scopedCacheRowIndexKeys(
+		collection,
+		rowFingerprints,
+		indexPath,
+	)) {
 
 		// A member can match several patterns — one per pair it shares with the
 		// rows — and the passes overlap, so it is tested and SREMed once.
@@ -657,13 +657,13 @@ async function purgeScopedCacheFingerprintIndex(
 			do {
 				const [next, indexedMembers] = globPattern === null
 					? await redisClient.sscan(
-						bucketKey,
+						indexKey,
 						scanCursor,
 						'COUNT',
 						SCOPED_CACHE_INDEX_SCAN_COUNT,
 					)
 					: await redisClient.sscan(
-						bucketKey,
+						indexKey,
 						scanCursor,
 						'MATCH',
 						globPattern,
@@ -702,9 +702,9 @@ async function purgeScopedCacheFingerprintIndex(
 						continue;
 					}
 
-					const matchedMembers = matchedByBucket.get(bucketKey) ?? new Set();
+					const matchedMembers = matchedByIndexKey.get(indexKey) ?? new Set();
 					matchedMembers.add(indexedMember);
-					matchedByBucket.set(bucketKey, matchedMembers);
+					matchedByIndexKey.set(indexKey, matchedMembers);
 
 					if (key !== '' && seenKeys.has(key) === false) {
 						seenKeys.add(key);
@@ -737,7 +737,7 @@ async function purgeScopedCacheFingerprintIndex(
 		dropCacheEntries(cache, matchedKeys.filter((key) => {
 			return entryKeys.has(key) === false;
 		})),
-		pruneScopedCacheIndex(redisClient, matchedByBucket),
+		pruneScopedCacheIndex(redisClient, matchedByIndexKey),
 	]);
 
 	return evicted;
@@ -745,11 +745,11 @@ async function purgeScopedCacheFingerprintIndex(
 
 async function pruneScopedCacheIndex(
 	redisClient: Redis,
-	matchedByBucket: ReadonlyMap<string, ReadonlySet<string>>,
+	matchedByIndexKey: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<void> {
 	const redisPipeline = redisClient.pipeline();
 
-	for (const [bucketKey, matchedMembers] of matchedByBucket) {
+	for (const [indexKey, matchedMembers] of matchedByIndexKey) {
 		const indexedMembers = [...matchedMembers];
 
 		for (
@@ -758,7 +758,7 @@ async function pruneScopedCacheIndex(
 			memberAt += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
 		) {
 			redisPipeline.srem(
-				bucketKey,
+				indexKey,
 				...indexedMembers.slice(
 					memberAt,
 					memberAt + SCOPED_CACHE_INDEX_CHUNK_MEMBERS,
@@ -1394,9 +1394,9 @@ export async function purgeScopedCache(
 		// The columns an update rewrote, `null` for an insert or a delete. A read
 		// bound to none of them cannot have changed, whichever slice the row is in.
 		changed?: readonly string[] | null;
-		// The path the collection's index is bucketed by, so the purge reads back
+		// The path the collection's index is split by, so the purge reads back
 		// the sets its rows own instead of every set the collection has.
-		bucketPath?: string | null;
+		indexPath?: string | null;
 		// The tags in the list that the rows do NOT answer for, and so keep their
 		// tag sweep: a hook's `purgeBy` names a slice, not the rows it wrote, and
 		// nothing the mutation read back can resolve it.
@@ -1517,7 +1517,7 @@ export async function purgeScopedCache(
 						collection,
 						options.rowFingerprints,
 						options.changed ?? null,
-						options.bucketPath ?? null,
+						options.indexPath ?? null,
 						options.includeCollectionTag !== false,
 					),
 				purgeScopedCacheTagKeys(cache, tagKeys),

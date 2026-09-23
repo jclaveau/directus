@@ -945,7 +945,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	// What each aliased path is the field of; the rows keep the alias.
 	fieldNames: ReadonlyMap<string, string> = new Map(),
 ): Map<CollectionKey, ScopedCacheTag[]> {
-	// One bucket per child collection: it can be nested under several paths, and
+	// One entry per child collection: it can be nested under several paths, and
 	// every parent key it is keyed by must be gathered before the cap so no path
 	// masks another. `conflicted` drops a collection reached by two reverse fks —
 	// mixing their keys under one field would pin the wrong slice.
