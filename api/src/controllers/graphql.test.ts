@@ -2,7 +2,7 @@ import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 import {
-	parseScopedCacheFingerprint,
+	bareScopedCacheFingerprint,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 
@@ -46,7 +46,7 @@ describe('graphql controller scopedCacheFingerprints', () => {
 	])(oneLine`
 		%s handler stamps scopedCacheFingerprints from the payload meta
 	`, async (_scope, getHandler) => {
-		const fingerprints = [parseScopedCacheFingerprint('articles:&')];
+		const fingerprints = [bareScopedCacheFingerprint('articles')];
 
 		execute.mockResolvedValueOnce(
 			withMeta(

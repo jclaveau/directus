@@ -3,7 +3,7 @@ import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 import {
-	parseScopedCacheFingerprint,
+	bareScopedCacheFingerprint,
 	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 
@@ -49,7 +49,7 @@ describe('PermissionsService.readByQuery override', () => {
 		// re-attach the rider so permissions reads stay scoped-invalidatable (not TTL-only).
 		const tagged = withMeta(
 			[{ id: 1 }],
-			scopedCacheReadMeta([parseScopedCacheFingerprint('directus_permissions:&')]),
+			scopedCacheReadMeta([bareScopedCacheFingerprint('directus_permissions')]),
 		);
 
 		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(tagged);

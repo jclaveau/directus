@@ -3,7 +3,7 @@ import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseScopedCacheFingerprint } from './fingerprint.js';
+import { scopedCacheFingerprint } from './fingerprint.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 
 vi.mock('./config.js', async (importOriginal) => {
@@ -84,8 +84,14 @@ describe('capture', () => {
 						parent: 9,
 						'parent.area': 'north',
 					},
-					fingerprint: parseScopedCacheFingerprint(
-						'item:&id=,1,&method=,spaced,&owner=,alpha,&parent.area=,north,&',
+					fingerprint: scopedCacheFingerprint(
+						'item',
+						new Map([
+							['id', ['1']],
+							['method', ['spaced']],
+							['owner', ['alpha']],
+							['parent.area', ['north']],
+						]),
 					),
 				},
 			],
@@ -113,8 +119,14 @@ describe('capture', () => {
 					parent: 9,
 					'parent.area': 'north',
 				},
-				fingerprint: parseScopedCacheFingerprint(
-					'item:&id=,1,&method=,spaced,&owner=,alpha,&parent.area=,north,&',
+				fingerprint: scopedCacheFingerprint(
+					'item',
+					new Map([
+						['id', ['1']],
+						['method', ['spaced']],
+						['owner', ['alpha']],
+						['parent.area', ['north']],
+					]),
 				),
 			},
 			{
@@ -126,8 +138,14 @@ describe('capture', () => {
 					parent: 8,
 					'parent.area': 'south',
 				},
-				fingerprint: parseScopedCacheFingerprint(
-					'item:&id=,2,&method=,slow,&owner=,beta,&parent.area=,south,&',
+				fingerprint: scopedCacheFingerprint(
+					'item',
+					new Map([
+						['id', ['2']],
+						['method', ['slow']],
+						['owner', ['beta']],
+						['parent.area', ['south']],
+					]),
 				),
 			},
 		]);
@@ -152,8 +170,14 @@ describe('capture', () => {
 					parent: null,
 					'parent.area': null,
 				},
-				fingerprint: parseScopedCacheFingerprint(
-					'item:&id=,3,&method=,spaced,&owner=,\x00null,&parent.area=,\x00null,&',
+				fingerprint: scopedCacheFingerprint(
+					'item',
+					new Map([
+						['id', ['3']],
+						['method', ['spaced']],
+						['owner', ['\x00null']],
+						['parent.area', ['\x00null']],
+					]),
 				),
 			},
 		]);
@@ -172,7 +196,7 @@ describe('capture', () => {
 				{
 					key: 7,
 					row: null,
-					fingerprint: parseScopedCacheFingerprint('zone:&id=,7,&'),
+					fingerprint: scopedCacheFingerprint('zone', new Map([['id', ['7']]])),
 				},
 			],
 		});

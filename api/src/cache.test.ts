@@ -126,9 +126,10 @@ const cacheHandlers = { ...busHandlers };
 
 const {
 	assertScopedCacheRedisSupported,
+	bareScopedCacheFingerprint,
 	indexScopedCacheEntry,
-	parseScopedCacheFingerprint,
 	purgeScopedCache,
+	scopedCacheFingerprint,
 	scopedCachePurgeEnabled,
 } = await import('./scoped-cache.js');
 
@@ -314,8 +315,8 @@ describe('scoped cache purging', () => {
 			indexes the key + expires sibling under every collection-level tag, with a TTL
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('articles:&'),
-				parseScopedCacheFingerprint('directus_users:&'),
+				bareScopedCacheFingerprint('articles'),
+				bareScopedCacheFingerprint('directus_users'),
 			]);
 
 			// The members ride the script, which files them and moves the set's
@@ -339,7 +340,7 @@ describe('scoped cache purging', () => {
 
 		test('scoped cache tags encode field=value into the tag key', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('slots:&student=,7,A,&'),
+				scopedCacheFingerprint('slots', new Map([['student', ['7', 'A']]])),
 			]);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
@@ -359,7 +360,7 @@ describe('scoped cache purging', () => {
 
 		test('a null scope value serializes to a sentinel, not "null"', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('slots:&student=,\x00null,&'),
+				scopedCacheFingerprint('slots', new Map([['student', ['\x00null']]])),
 			]);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
@@ -378,7 +379,7 @@ describe('scoped cache purging', () => {
 			// both canonicalize to the fingerprint token '7' upstream (fingerprint.ts)
 			// — by the time it reaches indexing there is only one string to file.
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('slots:&student=,7,&'),
+				scopedCacheFingerprint('slots', new Map([['student', ['7']]])),
 			]);
 
 			// One tag set, one index entry filing it, plus the one fingerprint bucket.
@@ -409,7 +410,7 @@ describe('scoped cache purging', () => {
 			every slice of one collection lands in a single index call, not one each
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('slots:&student=,A,B,&'),
+				scopedCacheFingerprint('slots', new Map([['student', ['A', 'B']]])),
 			]);
 
 			// The index set is the same key for both, and its expiry is the same
@@ -435,8 +436,8 @@ describe('scoped cache purging', () => {
 
 		test('duplicate tags collapse to a single SADD', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('slots:&student=,A,&'),
-				parseScopedCacheFingerprint('slots:&student=,A,&'),
+				scopedCacheFingerprint('slots', new Map([['student', ['A']]])),
+				scopedCacheFingerprint('slots', new Map([['student', ['A']]])),
 			]);
 
 			// The legacy tag layer collapses the duplicate (one tag set, one index
@@ -463,7 +464,7 @@ describe('scoped cache purging', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('articles:&'),
+				bareScopedCacheFingerprint('articles'),
 			]);
 
 			expect(redis.pipeline).not.toHaveBeenCalled();
@@ -471,7 +472,7 @@ describe('scoped cache purging', () => {
 
 		test('tags the extra siblings alongside the key', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				parseScopedCacheFingerprint('articles:&'),
+				bareScopedCacheFingerprint('articles'),
 			], [
 				'resp-key__tags',
 			]);

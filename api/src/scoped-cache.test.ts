@@ -16,42 +16,43 @@ import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	type ScopedCacheFilterKeying,
 	assertScopedCacheRedisSupported,
+	bareScopedCacheFingerprint,
 	bumpScopedCacheEpochs,
 	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
+	createScopedCacheCollector,
+	dropScopedCacheIndex,
 	earlierScopedCacheEpoch,
-	isPinnableScopeType,
-	readScopedCacheEpochs,
-	scopedCacheSweptDuringFill,
+	flushResponseCache,
 	foldHandedOverScopedCacheEpochs,
+	indexScopedCacheEntry,
+	isPinnableScopeType,
 	mergeScopedCacheEpochs,
 	mergedScopedCacheEpochs,
-	scopedCacheCollectionsWithoutGuard,
-	scopedCacheTagLabel,
-	serializeScopedCacheTags,
-	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromKeyedFilters,
-	scopedCacheOwnershipNestedPkPaths,
-	scopedCachePathReversesChain,
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromO2mChildren,
-	resolveScopedCacheM2oJoinChainFromPath,
-	scopedCacheCollectionsBeyondNestedRows,
-	scopedCacheFilterKeyingByCollection,
-	scopedCacheMaxPinsPerCollection,
-	scopedCacheNestedCollections,
-	type ScopedCacheFilterKeying,
-	dropScopedCacheIndex,
-	flushResponseCache,
-	indexScopedCacheEntry,
-	parseScopedCacheFingerprint,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
+	readScopedCacheEpochs,
+	resolveScopedCacheM2oJoinChainFromPath,
 	retryPendingScopedCachePurges,
+	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFilterKeyingByCollection,
+	scopedCacheFingerprint,
+	scopedCacheMaxPinsPerCollection,
+	scopedCacheNestedCollections,
+	scopedCacheOwnershipNestedPkPaths,
+	scopedCachePathReversesChain,
 	scopedCacheReadMeta,
+	scopedCacheSweptDuringFill,
 	scopedCacheTagKey,
+	scopedCacheTagLabel,
+	serializeScopedCacheTags,
 	startScopedCachePurgeRecovery,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
@@ -672,7 +673,7 @@ describe('createScopedCacheCollector', () => {
 			return withMeta(
 				[{ id: 1 }],
 				scopedCacheReadMeta([
-					parseScopedCacheFingerprint('metric:&owner=,acme,&'),
+					scopedCacheFingerprint('metric', new Map([['owner', ['acme']]])),
 				], {
 					scopedCacheEpochs: { metric: '4' },
 				}),
@@ -682,7 +683,7 @@ describe('createScopedCacheCollector', () => {
 		const auditLookup = () => {
 			return withMeta(
 				[{ id: 2 }],
-				scopedCacheReadMeta([parseScopedCacheFingerprint('audit:&')], {
+				scopedCacheReadMeta([bareScopedCacheFingerprint('audit')], {
 					scopedCacheEpochs: { audit: '7' },
 				}),
 			);
@@ -748,14 +749,14 @@ describe('createScopedCacheCollector', () => {
 
 			const before = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([parseScopedCacheFingerprint('metric:&')], {
+				scopedCacheReadMeta([bareScopedCacheFingerprint('metric')], {
 					scopedCacheEpochs: { metric: '4' },
 				}),
 			);
 
 			const after = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([parseScopedCacheFingerprint('metric:&')], {
+				scopedCacheReadMeta([bareScopedCacheFingerprint('metric')], {
 					scopedCacheEpochs: { metric: '5' },
 				}),
 			);
@@ -799,8 +800,8 @@ describe('collection slice index', () => {
 		} as any);
 
 		await indexScopedCacheEntry('entry', [
-			parseScopedCacheFingerprint('articles:&'),
-			parseScopedCacheFingerprint('articles:&author=,7,&'),
+			bareScopedCacheFingerprint('articles'),
+			scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
 		]);
 
 		expect(indexPipeline.sadd)
@@ -980,7 +981,7 @@ describe('indexScopedCacheEntry', () => {
 		} as any);
 
 		await expect(indexScopedCacheEntry('entry', [
-			parseScopedCacheFingerprint('articles:&author=,7,&'),
+			scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
 		])).rejects.toBe(refused);
 	});
 
@@ -1006,7 +1007,7 @@ describe('indexScopedCacheEntry', () => {
 
 		try {
 			await indexScopedCacheEntry('entry', [
-				parseScopedCacheFingerprint('articles:&author=,7,&'),
+				scopedCacheFingerprint('articles', new Map([['author', ['7']]])),
 			]);
 		}
 		finally {

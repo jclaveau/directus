@@ -1,7 +1,7 @@
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseScopedCacheFingerprint } from './fingerprint.js';
+import { scopedCacheFingerprint } from './fingerprint.js';
 import { purgeScopedCache } from './purge.js';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
@@ -105,8 +105,13 @@ const BARE = 'ns:scoped-cache-index:idx:slot:';
 const ALPHA = 'ns:scoped-cache-index:idx:slot:owner=alpha';
 
 // One row of `slot`, owned by alpha, whose `method` the write rewrote.
-const row = parseScopedCacheFingerprint(
-	'slot:&id=,1,&method=,spaced,&owner=,alpha,&',
+const row = scopedCacheFingerprint(
+	'slot',
+	new Map([
+		['id', ['1']],
+		['method', ['spaced']],
+		['owner', ['alpha']],
+	]),
 );
 
 function purge(options: Record<string, unknown>) {
