@@ -175,7 +175,7 @@ describe(oneLine`
 		});
 
 		expect(await service.scopedCache.capture([1])).toEqual({
-			tags: [],
+			legacyTags: [],
 			rows: [],
 		});
 	});
@@ -188,7 +188,7 @@ describe(oneLine`
 		});
 
 		expect(await service.scopedCache.capture([1])).toEqual({
-			tags: [
+			legacyTags: [
 				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
 			],
 			rows: [
