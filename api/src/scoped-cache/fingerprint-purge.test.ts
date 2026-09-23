@@ -17,6 +17,7 @@ const env = vi.hoisted(() => {
 		CACHE_STORE: 'redis',
 		CACHE_NAMESPACE: 'ns',
 		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+		CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	} as Record<string, any>;
 });
 

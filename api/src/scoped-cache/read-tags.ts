@@ -34,6 +34,7 @@ import {
 	canonicalScopedCacheValue,
 	isPinnableScopeType,
 	scopedCacheMaxPinsPerCollection,
+	scopedCacheMaxQueryCases,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 } from './tags.js';
@@ -1151,15 +1152,6 @@ function descendFilterSegment(
 }
 
 /**
- * How many ways to match one filter are carried apart before they are carried
- * side by side instead. A filter ANDing two `_in`s of ten values each has a
- * hundred pairings, and an entry filed under a hundred index members costs a
- * hundred SADDs to file and a hundred compares to purge — for a precision no read
- * of that shape needs.
- */
-const SCOPED_CACHE_MAX_QUERY_CASES = 16;
-
-/**
  * Scope a read's root cache tags off a filter — the read side. A read is soundly
  * scoped to a value slice only when the filter *bounds* it to that value: a future
  * insert with a new scope value must be excluded by the same filter, or the read
@@ -1279,7 +1271,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 				: left;
 		}
 
-		if (left.length * right.length > SCOPED_CACHE_MAX_QUERY_CASES) {
+		if (left.length * right.length > scopedCacheMaxQueryCases()) {
 			return [...left, ...right];
 		}
 

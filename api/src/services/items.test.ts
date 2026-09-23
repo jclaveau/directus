@@ -31,6 +31,7 @@ const env = vi.hoisted<Record<string, any>>(() => {
 		CACHE_NAMESPACE: 'scalabus',
 		// `useEnv` merges defaults.ts, so the real one always carries this.
 		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+		CACHE_SCOPED_MAX_QUERY_CASES: 16,
 		MAX_BATCH_MUTATION: 100000,
 		// The Integration Tests' nested-relation path dynamically loads notifications -> mail, which
 		// resolves this at import time.

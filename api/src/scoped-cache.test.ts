@@ -80,6 +80,7 @@ const env = vi.hoisted(() => {
 		CACHE_NAMESPACE: 'ns',
 		// `useEnv` merges defaults.ts, so the real one always carries this.
 		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+		CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	} as Record<string, any>;
 });
 

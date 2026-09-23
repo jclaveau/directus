@@ -318,3 +318,18 @@ export function scopedCacheTagsFromRows(
 export function scopedCacheMaxPinsPerCollection(): number {
 	return env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] as number;
 }
+
+/**
+ * How many ways to satisfy one filter are carried apart before they are carried
+ * side by side instead. A filter ANDing two `_in`s of ten values each has a
+ * hundred pairings, and an entry filed under a hundred index members costs a
+ * hundred writes to file and a hundred compares to purge — for a precision no
+ * read of that shape needs.
+ *
+ * Operator-tunable beside the pin ceiling above, and weighing the same two
+ * things: over it the read is pinned to each value on its own, which purges
+ * wider and never staler. Raise it for hit ratio, lower it for memory.
+ */
+export function scopedCacheMaxQueryCases(): number {
+	return env['CACHE_SCOPED_MAX_QUERY_CASES'] as number;
+}

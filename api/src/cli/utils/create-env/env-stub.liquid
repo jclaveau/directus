@@ -191,6 +191,13 @@ CACHE_ENABLED=false
 # tag — more purging, never staler. Each pin costs a Redis set and a member of the
 # collection's slice index, so raise it for hit ratio and lower it for memory. [250]
 # CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
+
+# How many ways to satisfy one filter are carried apart before they are carried
+# side by side instead. A filter ANDing two `_in`s of ten values each has a
+# hundred pairings, and an entry filed under a hundred index members costs a
+# hundred writes to file and a hundred compares to purge. Over it the read is
+# pinned to each value on its own — wider purges, never staler. [16]
+# CACHE_SCOPED_MAX_QUERY_CASES=16
 # CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
 
 # Request dimensions folded into the cache key so a header-varying response
