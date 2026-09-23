@@ -602,6 +602,15 @@ async function purgeScopedCacheDeclaredPins(
 				return Object.keys(fingerprint.pinnedScope).length === 0;
 			}
 
+			// And the converse: an entry pinning nothing holds every pin vacuously,
+			// so a declared pin would reach the global reads that no value narrows.
+			// Only the bare declared fingerprint above may, which is what a mutation
+			// keeping its collection tag sends and a declaring cancel does not — it
+			// states that one slice moved, not that the collection did (#292).
+			if (Object.keys(fingerprint.pinnedScope).length === 0) {
+				return false;
+			}
+
 			return scopedCacheFingerprintHolds(fingerprint, declaredFingerprint);
 		});
 	});
@@ -1695,8 +1704,18 @@ export async function purgeScopedCache(
 	// the rows this purge was bound to, and the pins it was handed. A label would
 	// name a slice the index files nothing under, and a retry aimed at one would
 	// report success having dropped nothing.
+	// The collection tag rides with the rows rather than in the swept list, so a
+	// retry driven by the record alone would leave the global reads warm: a row
+	// fingerprint names a value, and a pin naming a value cannot reach an entry
+	// bound to none.
+	const recordedCollectionTag =
+		options.rowFingerprints !== undefined && options.includeCollectionTag !== false
+			? [scopedCacheFingerprintOf(collection, [])]
+			: [];
+
 	const recordedFingerprints = [
 		...(options.rowFingerprints ?? []),
+		...recordedCollectionTag,
 		...sweptScopedCacheTags.map((sweptTag) => {
 			return scopedCacheFingerprintOf(sweptTag.collection, [sweptTag]);
 		}),

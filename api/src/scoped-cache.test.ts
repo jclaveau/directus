@@ -1906,9 +1906,11 @@ describe('retryPendingScopedCachePurges', () => {
 			},
 		]);
 
+		// One entry both targets reach: it is bound to the row one names and to the
+		// author the other does.
 		indexedMembers = {
 			'ns:scoped-cache-index:fingerprint:articles:': [
-				'articles:&|ns:entry-a',
+				'articles:&author=,3,&id=,1,&|ns:entry-a',
 			],
 		};
 

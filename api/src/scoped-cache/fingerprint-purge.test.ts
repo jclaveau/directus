@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { purgeScopedCache } from './purge.js';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
-import { listPendingScopedCachePurges } from '../scoped-cache-pending-purges.js';
+import {
+	listPendingScopedCachePurges,
+	recordPendingScopedCachePurge,
+} from '../scoped-cache-pending-purges.js';
 
 // hoisted: the modules under test read `const env = useEnv()` at load, before a
 // plain `const env` below would be initialised (temporal dead zone).
@@ -380,5 +383,70 @@ describe('a purge shown the rows it wrote', () => {
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bare');
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-two');
+	});
+
+	it(oneLine`
+		leaves an entry pinning nothing alone when the only pin declared names a
+		value: a cancelled write says one slice moved, not that the collection did
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&|ns:entry-alpha',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'slot',
+			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
+			null,
+			{ includeCollectionTag: false },
+		);
+
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bare');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+	});
+
+	it(oneLine`
+		records the collection tag its rows carry, so the retry that replays the
+		record by pin still reaches the reads no value narrows
+	`, async () => {
+		vi.mocked(useRedis).mockReturnValue({
+			sscan: vi.fn(async () => {
+				throw new Error('redis is down');
+			}),
+			scan,
+			eval: evalScript,
+			pipeline: () => {
+				const chain: any = {
+					incr: () => chain,
+					expire: () => chain,
+					srem: () => chain,
+					exec: async () => [],
+				};
+
+				return chain;
+			},
+		} as any);
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { owner: ['alpha'] },
+				viewFields: [],
+			}],
+			changed: null,
+			indexPath: 'owner',
+		});
+
+		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
+			{
+				mode: 'slices',
+				collection: 'slot',
+				scopedCacheFingerprints: ['slot:&owner=,alpha,&', 'slot:&'],
+			},
+			expect.any(Error),
+		);
 	});
 });
