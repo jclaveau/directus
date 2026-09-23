@@ -29,7 +29,11 @@ import {
 import {
 	getMilliseconds,
 } from '../utils/get-milliseconds.js';
-import type { EventContext, SchemaOverview, ScopedCacheTag } from '@directus/types';
+import type {
+	EventContext,
+	SchemaOverview,
+	ScopedCacheDeclaredFingerprint,
+} from '@directus/types';
 import type { Keyv } from 'keyv';
 import { dropCacheEntries } from '../cache-drop.js';
 import {
@@ -50,11 +54,12 @@ import {
 import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
+	scopedCacheDeclaredPins,
 	scopedCacheFingerprintHolds,
+	scopedCacheFingerprintLabels,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
 	scopedCacheRowIndexGlobs,
-	scopedCacheTagsOfFingerprints,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import {
@@ -62,8 +67,6 @@ import {
 } from './fill-guard.js';
 import {
 	scopedCacheIndexPrefix,
-	scopedCacheTagKey,
-	scopedCacheTagLabel,
 } from './tags.js';
 
 const env = useEnv();
@@ -1061,9 +1064,9 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					// joins its tag list with a comma, which a rendered fingerprint
 					// carries raw, and the entry-tags table this one is joined against
 					// is written in labels too.
-					const declaredLabels = scopedCacheTagsOfFingerprints(
+					const declaredLabels = scopedCacheFingerprintLabels(
 						[...declaredByCollection.values()].flat(),
-					).map(scopedCacheTagLabel);
+					);
 
 					queueCachePurge({
 						purgeId,
@@ -1217,27 +1220,29 @@ async function reportRecoveredScopedCacheEntries(
 /**
  * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
  * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
- * the bare collection tag (global reads) is always purged alongside the resolved
- * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
- * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
- * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather
- * than risk leaving a slice stale; still narrower than nuking the whole namespace.
+ * the bare collection fingerprint (global reads) is always purged alongside the
+ * resolved `scopedCacheFingerprints` (the slices the mutation touched), leaving
+ * every other slice untouched. A `null` list means "the scope couldn't be
+ * resolved" → fall back to a collection-wide purge (bare fingerprint + every
+ * slice) rather than risk leaving a slice stale; still narrower than nuking the
+ * whole namespace.
  *
  * To purge EVERY entry of a collection, pass `null` — it dispatches to
  * `purgeCollectionScopedCache`, which reads the collection's own slice index and
- * drops the bare tag plus every slice key it names. A bare `[{ collection }]` in the
- * tag list is NOT that: this function deletes exactly the keys it is handed, and a
- * read pinned to a slice (an owner, or its primary key) carries no bare tag, so it
- * survives.
+ * drops the bare fingerprint plus every slice key it names. A bare fingerprint in
+ * the list is NOT that: this function deletes exactly the keys it is handed, and a
+ * read pinned to a slice (an owner, or its primary key) is filed under that slice
+ * alone, so it survives.
  *
- * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
- * for a cancelled mutation nothing in `collection` changed, so only the hook's own
- * declared (usually foreign) slices should drop, not this collection's global reads.
+ * `includeCollectionTag: false` drops the bare fingerprint from the purge — for a
+ * cancelled mutation nothing in `collection` changed, so only the hook's own
+ * declared (usually foreign) slices should drop, not this collection's global
+ * reads.
  */
 export async function purgeScopedCache(
 	cache: Keyv,
 	collection: string,
-	scopedCacheTags: ScopedCacheTag[] | null = [],
+	scopedCacheFingerprints: ScopedCacheFingerprint[] | null = [],
 	context: EventContext | null = null,
 	options: {
 		includeCollectionTag?: boolean;
@@ -1267,10 +1272,10 @@ export async function purgeScopedCache(
 		// it is purged by what it pins, not by what was written.
 		declaredFingerprints?: readonly ScopedCacheFingerprint[];
 	} = {},
-): Promise<ScopedCacheTag[] | null> {
-	// Returns the purged tags so a caller can surface them (dev-only debug header):
-	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
-	// a collection-wide purge; otherwise the resolved slice tags.
+): Promise<ScopedCacheFingerprint[] | null> {
+	// Returns what the purge reached so a caller can surface it (dev-only debug
+	// header): `null` = whole namespace flushed (non-scoped mode); a lone bare
+	// fingerprint = a collection-wide purge; otherwise the resolved slices.
 	const startedAt = Date.now();
 
 	if (!scopedCachePurgeEnabled()) {
@@ -1306,7 +1311,7 @@ export async function purgeScopedCache(
 		return null;
 	}
 
-	if (scopedCacheTags === null) {
+	if (scopedCacheFingerprints === null) {
 		// Records its own purge — it is the one that knows how many slices the
 		// scan turned up.
 		await purgeOrRecord(
@@ -1318,14 +1323,14 @@ export async function purgeScopedCache(
 			{ mode: 'collection', collection, scopedCacheFingerprints: [] },
 		);
 
-		return [{ collection }];
+		return [scopedCacheFingerprintOf(collection, [])];
 	}
 
-	const declaredScopedCacheTags = options.includeCollectionTag === false
-		? [...scopedCacheTags]
-		: [{ collection }, ...scopedCacheTags];
+	const declaredScopedCacheFingerprints = options.includeCollectionTag === false
+		? [...scopedCacheFingerprints]
+		: [scopedCacheFingerprintOf(collection, []), ...scopedCacheFingerprints];
 
-	let resolvedScopedCacheTags = declaredScopedCacheTags;
+	let resolvedScopedCacheFingerprints = declaredScopedCacheFingerprints;
 
 	// The filter runs after the mutation committed, so an extension that throws
 	// here would answer 500 for a durable write — and, being outside
@@ -1334,47 +1339,56 @@ export async function purgeScopedCache(
 	// resolved loses whatever the extension would have added, which is the smaller
 	// harm and the visible one: its own `purgeBy` is what that tag is for.
 	try {
-		resolvedScopedCacheTags = (await emitter.emitFilter(
+		const resolved = (await emitter.emitFilter(
 			'cache.purge',
-			declaredScopedCacheTags,
+			declaredScopedCacheFingerprints,
 			{ collection },
 			context,
-		)) as ScopedCacheTag[];
+		)) as ScopedCacheDeclaredFingerprint[];
+
+		// Re-canonicalized rather than taken as given: an extension holds its values
+		// the way its own code does, and only the column's type says which slice a
+		// `7`, a `Date` or an uppercase uuid names. What the host built passes through
+		// unchanged — canonicalizing a token again returns it.
+		resolvedScopedCacheFingerprints = resolved.map((declared) => {
+			return scopedCacheFingerprintOf(
+				declared.collection,
+				scopedCacheDeclaredPins(declared, context?.schema),
+			);
+		});
 	}
 	catch (error: any) {
 		useLogger().warn(
 			error,
-			`[scoped-cache] cache.purge filter failed, purging the tags resolved `
+			`[scoped-cache] cache.purge filter failed, purging the slices resolved `
 			+ `without it: ${error}`,
 		);
 	}
 
-	// Row-driven: the fingerprints answer for every tag the mutation itself
-	// resolved, so only what the `cache.purge` filter ADDED is still swept by tag —
-	// that one names a slice, not the rows the mutation wrote, and nothing else can
-	// resolve it.
-	const rowDriven = new Set(declaredScopedCacheTags.map(scopedCacheTagKey));
+	// Row-driven: the rows answer for every slice the mutation itself resolved, so
+	// only what the `cache.purge` filter ADDED is still swept by pin — that one names
+	// a slice, not the rows the mutation wrote, and nothing else can resolve it.
+	const rowDriven = new Set(
+		declaredScopedCacheFingerprints.map(renderScopedCacheFingerprint),
+	);
 
-	const sweptScopedCacheTags = options.rowFingerprints === undefined
-		? resolvedScopedCacheTags
-		: resolvedScopedCacheTags.filter((resolvedTag) => {
-			return rowDriven.has(scopedCacheTagKey(resolvedTag)) === false;
+	const sweptScopedCacheFingerprints = options.rowFingerprints === undefined
+		? resolvedScopedCacheFingerprints
+		: resolvedScopedCacheFingerprints.filter((resolved) => {
+			return rowDriven.has(renderScopedCacheFingerprint(resolved)) === false;
 		});
 
-	// Everything purged by pin, in the one grammar the index reads: what a hook
-	// declared, plus the tags left to sweep, each a pin of its own.
+	// Everything purged by pin: what a hook declared, plus the slices left to sweep.
 	const purgedByPin = [
 		...(options.declaredFingerprints ?? []),
-		...sweptScopedCacheTags.map((sweptTag) => {
-			return scopedCacheFingerprintOf(sweptTag.collection, [sweptTag]);
-		}),
+		...sweptScopedCacheFingerprints,
 	];
 
-	// What the purge reached, as tags: the mutation's own, plus the ones a hook's
-	// fingerprints compose to — the form the dev header and the telemetry speak.
-	const purgedScopedCacheTags = [
-		...resolvedScopedCacheTags,
-		...scopedCacheTagsOfFingerprints(options.declaredFingerprints ?? []),
+	// What the purge reached: the mutation's own slices, plus the ones a hook
+	// declared.
+	const purgedScopedCacheFingerprints = [
+		...resolvedScopedCacheFingerprints,
+		...(options.declaredFingerprints ?? []),
 	];
 
 	const tagKeys = [...new Set(purgedByPin.map(renderScopedCacheFingerprint))];
@@ -1430,7 +1444,7 @@ export async function purgeScopedCache(
 	);
 
 	if (!purged) {
-		return purgedScopedCacheTags;
+		return purgedScopedCacheFingerprints;
 	}
 
 	// The tags a mutation actually resolved, in the same display form the entry
@@ -1440,7 +1454,7 @@ export async function purgeScopedCache(
 		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'slices',
-		scopedCacheTags: purgedScopedCacheTags.map(scopedCacheTagLabel),
+		scopedCacheTags: scopedCacheFingerprintLabels(purgedScopedCacheFingerprints),
 		scopedCacheTagCount: tagKeys.length,
 		evicted,
 		// Awaited inside the mutation, so this time is ADDED to the write's own
@@ -1448,5 +1462,5 @@ export async function purgeScopedCache(
 		durationMs: Date.now() - startedAt,
 	});
 
-	return purgedScopedCacheTags;
+	return purgedScopedCacheFingerprints;
 }

@@ -2,6 +2,7 @@ import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { purgeScopedCache } from './purge.js';
+import { scopedCacheFingerprintOf } from './fingerprint.js';
 import { redisConfigAvailable, useRedis } from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
 import {
@@ -306,8 +307,8 @@ describe('a purge shown the rows it wrote', () => {
 			cache,
 			'slot',
 			[
-				{ collection: 'slot', field: 'id', value: 1 },
-				{ collection: 'other', field: 'x', value: 'y' },
+				scopedCacheFingerprintOf('slot', [{ field: 'id', value: 1 }]),
+				scopedCacheFingerprintOf('other', [{ field: 'x', value: 'y' }]),
 			],
 			null,
 			{
@@ -340,7 +341,7 @@ describe('a purge shown the rows it wrote', () => {
 		await purgeScopedCache(
 			cache,
 			'slot',
-			[{ collection: 'other', field: 'x', value: 'y' }],
+			[scopedCacheFingerprintOf('other', [{ field: 'x', value: 'y' }])],
 			null,
 			{
 				rowFingerprints: [{
@@ -374,7 +375,7 @@ describe('a purge shown the rows it wrote', () => {
 		await purgeScopedCache(
 			cache,
 			'slot',
-			[{ collection: 'slot', field: 'id', value: 1 }],
+			[scopedCacheFingerprintOf('slot', [{ field: 'id', value: 1 }])],
 			null,
 		);
 
@@ -400,7 +401,7 @@ describe('a purge shown the rows it wrote', () => {
 		await purgeScopedCache(
 			cache,
 			'slot',
-			[{ collection: 'slot', field: 'owner', value: 'alpha' }],
+			[scopedCacheFingerprintOf('slot', [{ field: 'owner', value: 'alpha' }])],
 			null,
 			{ includeCollectionTag: false },
 		);

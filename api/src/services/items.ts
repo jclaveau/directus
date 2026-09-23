@@ -15,7 +15,7 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
-	ScopedCacheTag,
+	ScopedCacheFingerprint,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -28,6 +28,7 @@ import {
 	ItemScopedCacheService,
 	readScopedCacheEpochs,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheMutatedFingerprints,
 	scopedCacheReadMeta,
 	scopedCacheUpdatedRows,
 	scopedCacheWrittenRows,
@@ -100,7 +101,7 @@ implements AbstractService<Item> {
 	// the controllers as the CACHE_PURGED_TAGS_HEADER response header. Mutation
 	// methods return bare primary keys — no object for a `withMeta` rider (as reads
 	// use) — so the purged set rides the instance. `null` until a mutation purges.
-	scopedCachePurged: ScopedCacheTag[] | null = null;
+	scopedCachePurged: ScopedCacheFingerprint[] | null = null;
 
 	scopedCache: ItemScopedCacheService;
 
@@ -703,19 +704,17 @@ implements AbstractService<Item> {
 			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
 			// collection, so an undeclared take-over leaves the other rows' key slices
 			// stale even where no scope field is declared.
-			const scopedCacheCapture = takeoverUndeclared
+			const scopedCacheSnapshot = takeoverUndeclared
 				? null
-				: await this.scopedCache.capture(changedKeys);
+				: await this.scopedCache.snapshot(changedKeys);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheCapture?.legacyTags ?? null,
+				scopedCacheMutatedFingerprints(scopedCacheSnapshot),
 				scopedCacheCollector,
 				[],
 				{
 					includeCollectionTag: opts.purgeCollectionTag !== false,
-					rows: scopedCacheCapture === null
-						? undefined
-						: scopedCacheWrittenRows(scopedCacheCapture),
+					rows: scopedCacheWrittenRows(scopedCacheSnapshot),
 				},
 			);
 		}
@@ -986,7 +985,7 @@ implements AbstractService<Item> {
 				: [];
 		});
 
-		const oldScopedCacheCapture = await this.scopedCache.capture(batchKeys);
+		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(batchKeys);
 
 		// One collector shared across the forked child updates so an `items.update`
 		// hook's `purgeBy` survives to the single deferred purge below (children run
@@ -1036,26 +1035,20 @@ implements AbstractService<Item> {
 				// the transaction: invoked from a hook it shares the caller's, so the
 				// purge below lands pre-commit —
 				// https://github.com/jclaveau/directus/issues/363
-				const newScopedCacheCapture = await this.scopedCache.capture(batchKeys);
-
-				const scopedCacheTags =
-					oldScopedCacheCapture.legacyTags === null
-					|| newScopedCacheCapture.legacyTags === null
-						? null
-						: [
-							...oldScopedCacheCapture.legacyTags,
-							...newScopedCacheCapture.legacyTags,
-						];
+				const newScopedCacheSnapshot = await this.scopedCache.snapshot(batchKeys);
 
 				this.scopedCachePurged = await this.scopedCache.purge(
-					scopedCacheTags,
+					scopedCacheMutatedFingerprints(
+						oldScopedCacheSnapshot,
+						newScopedCacheSnapshot,
+					),
 					scopedCacheCollector,
 					[],
 					{
 						includeCollectionTag: opts.purgeCollectionTag !== false,
 						rows: scopedCacheUpdatedRows(
-							oldScopedCacheCapture,
-							newScopedCacheCapture,
+							oldScopedCacheSnapshot,
+							newScopedCacheSnapshot,
 						),
 					},
 				);
@@ -1094,10 +1087,10 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
-		// Capture the scope values these rows hold before the update so an update that
+		// Snapshot the scope values these rows hold before the update so an update that
 		// moves a row to a new scope value purges both slices (old ∪ new). Empty when the
 		// collection isn't scoped.
-		const oldScopedCacheCapture = await this.scopedCache.capture(keys);
+		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(keys);
 
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
@@ -1432,26 +1425,20 @@ implements AbstractService<Item> {
 			// holds only when this call owns the transaction; from a hook it shares the
 			// caller's and this purge runs pre-commit —
 			// https://github.com/jclaveau/directus/issues/363
-			const newScopedCacheCapture = await this.scopedCache.capture(keys);
-
-			const scopedCacheTags =
-				oldScopedCacheCapture.legacyTags === null
-				|| newScopedCacheCapture.legacyTags === null
-					? null
-					: [
-						...oldScopedCacheCapture.legacyTags,
-						...newScopedCacheCapture.legacyTags,
-					];
+			const newScopedCacheSnapshot = await this.scopedCache.snapshot(keys);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheTags,
+				scopedCacheMutatedFingerprints(
+					oldScopedCacheSnapshot,
+					newScopedCacheSnapshot,
+				),
 				scopedCacheCollector,
 				[],
 				{
 					includeCollectionTag: opts.purgeCollectionTag !== false,
 					rows: scopedCacheUpdatedRows(
-						oldScopedCacheCapture,
-						newScopedCacheCapture,
+						oldScopedCacheSnapshot,
+						newScopedCacheSnapshot,
 					),
 				},
 			);
@@ -1534,7 +1521,7 @@ implements AbstractService<Item> {
 				: [];
 		});
 
-		const oldScopedCacheCapture = await this.scopedCache.capture(inputKeys);
+		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(inputKeys);
 
 		// Shared collector: child upserts run with autoPurgeCache off, so a
 		// create/update hook's `purgeBy` reaches the deferred purge only via this sink.
@@ -1561,7 +1548,7 @@ implements AbstractService<Item> {
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// New scope values for every committed row (inserts + moved updates), re-read
 			// by returned key so a hook's take-over shows as whatever is now stored.
-			const newScopedCacheCapture = await this.scopedCache.capture(
+			const newScopedCacheSnapshot = await this.scopedCache.snapshot(
 				primaryKeys.filter((key): key is PrimaryKey => key !== null && key !== undefined),
 			);
 
@@ -1575,21 +1562,19 @@ implements AbstractService<Item> {
 				);
 			});
 
-			const unresolvableRows =
-				(someRowTakenOver
-					&& scopedCacheCollector.purgeFingerprints.length === 0) ||
-				oldScopedCacheCapture.legacyTags === null ||
-				newScopedCacheCapture.legacyTags === null;
+			const takeoverUndeclared =
+				someRowTakenOver
+				&& scopedCacheCollector.purgeFingerprints.length === 0;
 
-			const scopedCacheTags = unresolvableRows
+			const scopedCacheFingerprints = takeoverUndeclared
 				? null
-				: [
-					...oldScopedCacheCapture.legacyTags!,
-					...newScopedCacheCapture.legacyTags!,
-				];
+				: scopedCacheMutatedFingerprints(
+					oldScopedCacheSnapshot,
+					newScopedCacheSnapshot,
+				);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheTags,
+				scopedCacheFingerprints,
 				scopedCacheCollector,
 				[],
 				{
@@ -1597,11 +1582,11 @@ implements AbstractService<Item> {
 					// An upsert's two sides never line up — an inserted row has no old
 					// side — so the diff reads as every field, which is what an insert
 					// means anyway.
-					rows: unresolvableRows
+					rows: scopedCacheFingerprints === null
 						? undefined
 						: scopedCacheUpdatedRows(
-							oldScopedCacheCapture,
-							newScopedCacheCapture,
+							oldScopedCacheSnapshot,
+							newScopedCacheSnapshot,
 						),
 				},
 			);
@@ -1720,7 +1705,7 @@ implements AbstractService<Item> {
 			return keys.map(() => null);
 		}
 
-		// Capture the scope values of the rows about to be deleted; after the delete
+		// Snapshot the scope values of the rows about to be deleted; after the delete
 		// they're gone and can't be read, so a later purge couldn't tell which slices to
 		// drop. Off `keys`, not the filter's return: the statement below, the access
 		// check and the activity rows all target `keys`, so a hook that returned a
@@ -1733,7 +1718,7 @@ implements AbstractService<Item> {
 		const selfRelationSurvivorKeys =
 			await this.scopedCache.selfRelationSurvivorKeys(keys);
 
-		const oldScopedCacheCapture = await this.scopedCache.capture([
+		const oldScopedCacheSnapshot = await this.scopedCache.snapshot([
 			...keys,
 			...selfRelationSurvivorKeys,
 		]);
@@ -1802,20 +1787,14 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const survivorScopedCacheCapture =
-				await this.scopedCache.capture(selfRelationSurvivorKeys);
-
-			const scopedCacheTags =
-				oldScopedCacheCapture.legacyTags === null
-				|| survivorScopedCacheCapture.legacyTags === null
-					? null
-					: [
-						...oldScopedCacheCapture.legacyTags,
-						...survivorScopedCacheCapture.legacyTags,
-					];
+			const survivorScopedCacheSnapshot =
+				await this.scopedCache.snapshot(selfRelationSurvivorKeys);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheTags,
+				scopedCacheMutatedFingerprints(
+					oldScopedCacheSnapshot,
+					survivorScopedCacheSnapshot,
+				),
 				scopedCacheCollector,
 				scopedCacheCollectionsChangedByOnDelete(
 					this.schema,
@@ -1826,13 +1805,10 @@ implements AbstractService<Item> {
 					// The deleted rows as they last were, plus both sides of the rows
 					// the delete rewrote through a self-relation. No `changed`: a row
 					// leaving the result set takes every field with it.
-					rows: scopedCacheWrittenRows({
-						legacyTags: scopedCacheTags,
-						rows: [
-							...oldScopedCacheCapture.rows,
-							...survivorScopedCacheCapture.rows,
-						],
-					}),
+					rows: scopedCacheWrittenRows(
+						oldScopedCacheSnapshot,
+						survivorScopedCacheSnapshot,
+					),
 				},
 			);
 		}

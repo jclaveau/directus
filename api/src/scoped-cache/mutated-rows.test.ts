@@ -147,20 +147,23 @@ describe('scopedCacheChangedFields', () => {
 describe('scopedCacheWrittenRows', () => {
 	it('shows the rows it wrote, and every field with them', () => {
 		expect(scopedCacheWrittenRows({
-			legacyTags: [{ collection: 'slot', field: 'id', value: 1 }],
+			canResolveSlicesFromRows: true,
 			rows: [{ key: 1, row: { id: 1 }, fingerprint }],
 		})).toEqual({ fingerprints: [fingerprint], changed: null });
 	});
 
 	it('shows nothing when the rows\' scope could not be resolved', () => {
 		expect(scopedCacheWrittenRows({
-			legacyTags: null,
+			canResolveSlicesFromRows: false,
 			rows: [{ key: 1, row: { id: 1 }, fingerprint }],
 		})).toBe(undefined);
 	});
 
 	it('shows nothing when no row was read back', () => {
-		expect(scopedCacheWrittenRows({ legacyTags: [], rows: [] })).toBe(undefined);
+		expect(scopedCacheWrittenRows({
+			canResolveSlicesFromRows: true,
+			rows: [],
+		})).toBe(undefined);
 	});
 });
 
@@ -180,7 +183,7 @@ describe('scopedCacheUpdatedRows', () => {
 
 		expect(scopedCacheUpdatedRows(
 			{
-				legacyTags: [],
+				canResolveSlicesFromRows: true,
 				rows: [{
 					key: 1,
 					row: { id: 1, owner: 'alpha' },
@@ -188,7 +191,7 @@ describe('scopedCacheUpdatedRows', () => {
 				}],
 			},
 			{
-				legacyTags: [],
+				canResolveSlicesFromRows: true,
 				rows: [{
 					key: 1,
 					row: { id: 1, owner: 'beta' },
@@ -203,15 +206,18 @@ describe('scopedCacheUpdatedRows', () => {
 
 	it('shows nothing when either side could not be resolved', () => {
 		expect(scopedCacheUpdatedRows(
-			{ legacyTags: null, rows: [] },
-			{ legacyTags: [], rows: [{ key: 1, row: { id: 1 }, fingerprint }] },
+			{ canResolveSlicesFromRows: false, rows: [] },
+			{
+				canResolveSlicesFromRows: true,
+				rows: [{ key: 1, row: { id: 1 }, fingerprint }],
+			},
 		)).toBe(undefined);
 	});
 
 	it('shows nothing when neither side read a row back', () => {
 		expect(scopedCacheUpdatedRows(
-			{ legacyTags: [], rows: [] },
-			{ legacyTags: [], rows: [] },
+			{ canResolveSlicesFromRows: true, rows: [] },
+			{ canResolveSlicesFromRows: true, rows: [] },
 		)).toBe(undefined);
 	});
 });

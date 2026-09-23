@@ -7,6 +7,7 @@ import type {
 	ScopedCacheCollector,
 	ScopedCacheFingerprint,
 	ScopedCachePath,
+	ScopedCacheScopePin,
 	ScopedCacheTag,
 	SchemaOverview,
 } from '@directus/types';
@@ -43,8 +44,8 @@ import {
 } from './fingerprint.js';
 import { scopedCacheIndexPath } from './fingerprint-index.js';
 import type {
-	ScopedCacheCapture,
 	ScopedCacheMutatedWrite,
+	ScopedCacheSnapshot,
 } from './mutated-rows.js';
 import {
 	purgeScopedCache,
@@ -275,26 +276,24 @@ export class ItemScopedCacheService {
 
 	/**
 	 * What a mutation's purge is built from, read before it runs and again once it
-	 * commits: the scope tags the touched rows sit in, and the rows themselves.
+	 * commits: every row it touches, each carrying the fingerprint of the scope it
+	 * sits in.
 	 *
-	 * Both come off ONE read. The tags are the union a tag sweep still needs — one
-	 * per field per distinct value, a batch of a hundred rows of one owner emitting
-	 * that owner once — and the rows are what keeps those values attached to the row
-	 * they came from: `owner=alpha` and `method=spaced` coming from two DIFFERENT
-	 * rows must not read as one row holding both, which is exactly what a read
-	 * pinned to that pair depends on.
+	 * One fingerprint per ROW, never one per value: `owner=alpha` and
+	 * `method=spaced` coming from two DIFFERENT rows must not read as one row
+	 * holding both, which is exactly what a read pinned to that pair depends on.
 	 *
 	 * Always emits the primary-key slice of every key, on every collection, whether it
 	 * declares scope fields or not: the read side pins that axis on every collection,
 	 * and a read pinning an axis the write never emits is never purged — stale, which
 	 * is worse than any hit ratio. It costs no query, since the keys are already here.
 	 *
-	 * `legacyTags: null` is the fail-safe: the scope of these rows is unresolvable, so
-	 * their collection is purged whole.
+	 * `canResolveSlicesFromRows: false` is the fail-safe: the scope of these rows is
+	 * unresolvable, so their collection is purged whole.
 	 */
-	async capture(keys: PrimaryKey[]): Promise<ScopedCacheCapture> {
+	async snapshot(keys: PrimaryKey[]): Promise<ScopedCacheSnapshot> {
 		if (!scopedCachePurgeEnabled() || keys.length === 0) {
-			return { legacyTags: [], rows: [] };
+			return { canResolveSlicesFromRows: true, rows: [] };
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]?.primary;
@@ -304,14 +303,13 @@ export class ItemScopedCacheService {
 		// schema. Such a collection resolves no key and no scope field either, and the
 		// bare collection tag the purge always carries still drops its reads.
 		if (primaryKeyField === undefined) {
-			return { legacyTags: [], rows: [] };
+			return { canResolveSlicesFromRows: true, rows: [] };
 		}
 
 		const fieldTypes = this.fieldTypes;
 
-		const keyTags: ScopedCacheTag[] = keys.map((key) => {
+		const keyPins: ScopedCacheScopePin[] = keys.map((key) => {
 			return {
-				collection: this.collection,
 				field: primaryKeyField,
 				value: key,
 				type: fieldTypes[primaryKeyField],
@@ -331,14 +329,14 @@ export class ItemScopedCacheService {
 		// as it did before.
 		if (flatFields.length === 0 && pathFields.length === 0) {
 			return {
-				legacyTags: keyTags,
-				rows: keyTags.map((tag) => {
+				canResolveSlicesFromRows: true,
+				rows: keyPins.map((keyPin) => {
 					return {
-						key: tag.value as PrimaryKey,
+						key: keyPin.value as PrimaryKey,
 						row: null,
 						fingerprint: scopedCacheFingerprintOf(
 							this.collection,
-							[tag],
+							[keyPin],
 						),
 					};
 				}),
@@ -347,40 +345,24 @@ export class ItemScopedCacheService {
 
 		const scopedRows = await this.scopeValueRows(keys);
 
-		const flatTags = scopedCacheTagsFromRows(
-			this.collection,
-			flatFields,
-			scopedRows,
-			'coarse',
-			fieldTypes,
-		);
+		const rowsProjectEveryFlatField = scopedRows.every((scopedRow) => {
+			return flatFields.every((flatField) => flatField in scopedRow);
+		});
 
-		// A flat field is always projected, so 'coarse' only nulls on a caller
-		// feeding unprojected rows — never here; propagate it regardless.
+		// A flat field is always projected, so this only fails on a caller feeding
+		// unprojected rows — never here; propagate it regardless.
 		//
-		// Which leaves this return, and the `=== null` arms in the callers,
+		// Which leaves this return, and the unresolvable arms in the callers,
 		// unreachable today. They stay on purpose:
-		// - null is the fail-safe: scope unresolvable, so purge coarsely.
+		// - it is the fail-safe: scope unresolvable, so purge coarsely.
 		// - it is unreachable only because the select above projects exactly
-		//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
-		//   two lists together.
+		//   the fields the fingerprints below are built from, and nothing ties
+		//   those two lists together.
 		// - so a later edit to either side makes it reachable again, and
 		//   without the arms the purge would silently narrow rather than
 		//   widen: a stale cache instead of a slow one.
-		if (flatTags === null) {
-			return { legacyTags: null, rows: [] };
-		}
-
-		keyTags.push(...flatTags);
-
-		for (const field of pathFields) {
-			keyTags.push(...scopedCacheTagsFromRows(
-				this.collection,
-				[field],
-				scopedRows,
-				'skip',
-				{ [field]: fieldTypes[field] },
-			));
+		if (rowsProjectEveryFlatField === false) {
+			return { canResolveSlicesFromRows: false, rows: [] };
 		}
 
 		// The axes a read can pin itself to — a fingerprint's pinned scope.
@@ -393,13 +375,13 @@ export class ItemScopedCacheService {
 		])];
 
 		return {
-			legacyTags: keyTags,
+			canResolveSlicesFromRows: true,
 			rows: scopedRows.map((row) => {
 				// 'skip' over 'coarse': every field below is projected by the select,
 				// and a row that somehow lost one is better pinned by the rest of
 				// itself than dropped — the fingerprint then matches MORE reads,
 				// never fewer.
-				const rowTags = scopedCacheTagsFromRows(
+				const rowPins = scopedCacheTagsFromRows(
 					this.collection,
 					pinnableFields,
 					[row],
@@ -412,7 +394,7 @@ export class ItemScopedCacheService {
 					row,
 					fingerprint: scopedCacheFingerprintOf(
 						this.collection,
-						rowTags,
+						rowPins,
 					),
 				};
 			}),
@@ -632,7 +614,7 @@ export class ItemScopedCacheService {
 	}
 
 	async purge(
-		tags: ScopedCacheTag[] | null,
+		scopedCacheFingerprints: ScopedCacheFingerprint[] | null,
 		collector?: Pick<ScopedCacheCollector, 'purgeFingerprints'>,
 		changedCollections: string[] = [],
 		{
@@ -652,7 +634,7 @@ export class ItemScopedCacheService {
 			includeCollectionTag?: boolean;
 			rows?: ScopedCacheMutatedWrite | undefined;
 		} = {},
-	): Promise<ScopedCacheTag[] | null> {
+	): Promise<ScopedCacheFingerprint[] | null> {
 		// Callers reach here through `shouldClearCache`, which already rules out a
 		// null cache — but it narrows `this.cache`, and a mutable field does not
 		// carry that narrowing across the awaits below. Read it once. With no cache
@@ -668,10 +650,10 @@ export class ItemScopedCacheService {
 
 		// A rule reaching back into this collection leaves its own slices unresolvable
 		// too, so it takes the collection-wide purge — whose reach already covers the
-		// tag purge it would otherwise get alongside.
-		const ownTags = changedCollections.includes(this.collection)
+		// pinned purge it would otherwise get alongside.
+		const ownFingerprints = changedCollections.includes(this.collection)
 			? null
-			: tags;
+			: scopedCacheFingerprints;
 
 		// Outside scoped mode a purge clears the whole namespace, so one is all it
 		// takes and the fan-out would be that many more flushes to no effect.
@@ -682,7 +664,7 @@ export class ItemScopedCacheService {
 			: [];
 
 		// What the rows narrow the purge of THIS collection to. A purge that shows no
-		// rows carries none of it and sweeps its tags whole, as it did before.
+		// rows carries none of it and sweeps its pins whole, as it did before.
 		const boundToRows = rows === undefined
 			? {}
 			: {
@@ -692,11 +674,11 @@ export class ItemScopedCacheService {
 			};
 
 		// What a hook declared rides beside the mutation's own purge rather than in
-		// its tag list: it names a query case, not a row, so the rows this mutation
+		// its own list: it names a query case, not a row, so the rows this mutation
 		// wrote answer for none of it.
 		const declared = { declaredFingerprints: hookFingerprints };
 
-		if (ownTags !== null && otherCollections.length === 0) {
+		if (ownFingerprints !== null && otherCollections.length === 0) {
 			// Spelled twice rather than passing `{ includeCollectionTag }`: the option
 			// object is what a caller reads as "this purge is doing something unusual",
 			// and every assertion on the common call would have to carry a default it
@@ -705,7 +687,7 @@ export class ItemScopedCacheService {
 				return purgeScopedCache(
 					cache,
 					this.collection,
-					ownTags,
+					ownFingerprints,
 					context,
 					{ ...boundToRows, ...declared },
 				);
@@ -714,7 +696,7 @@ export class ItemScopedCacheService {
 			return purgeScopedCache(
 				cache,
 				this.collection,
-				ownTags,
+				ownFingerprints,
 				context,
 				{ ...boundToRows, ...declared, includeCollectionTag: false },
 			);
@@ -726,13 +708,13 @@ export class ItemScopedCacheService {
 		// purges for the one mutation that caused them. The single-operation case
 		// returns above precisely so it keeps minting its own, being its own purge.
 		const scopedCachePurgeId = randomUUID();
-		const purgedTagSets: (ScopedCacheTag[] | null)[] = [];
+		const purgedFingerprintSets: (ScopedCacheFingerprint[] | null)[] = [];
 
-		if (ownTags !== null) {
-			purgedTagSets.push(await purgeScopedCache(
+		if (ownFingerprints !== null) {
+			purgedFingerprintSets.push(await purgeScopedCache(
 				cache,
 				this.collection,
-				ownTags,
+				ownFingerprints,
 				context,
 				includeCollectionTag
 					? { ...boundToRows, ...declared, scopedCachePurgeId }
@@ -745,9 +727,9 @@ export class ItemScopedCacheService {
 			));
 		}
 		else {
-			// A `null` tag set means this collection's own slices are unresolvable →
+			// A `null` list means this collection's own slices are unresolvable →
 			// coarse whole-collection purge (bare tag + every slice).
-			purgedTagSets.push(await purgeScopedCache(
+			purgedFingerprintSets.push(await purgeScopedCache(
 				cache,
 				this.collection,
 				null,
@@ -760,7 +742,7 @@ export class ItemScopedCacheService {
 			// `includeCollectionTag: false`, since the coarse pass already owns this
 			// collection's bare tag (else it's purged twice and doubled in the header).
 			if (hookFingerprints.length > 0) {
-				purgedTagSets.push(await purgeScopedCache(
+				purgedFingerprintSets.push(await purgeScopedCache(
 					cache,
 					this.collection,
 					[],
@@ -774,7 +756,7 @@ export class ItemScopedCacheService {
 		// moved is unresolvable — those rows were never read — and its bare tag indexes
 		// none of them (a read bounded to one value is filed under that slice alone), so
 		// each takes the collection-wide purge rather than a tag that cannot reach it.
-		purgedTagSets.push(...await Promise.all(
+		purgedFingerprintSets.push(...await Promise.all(
 			otherCollections.map((changedCollection) => {
 				return purgeScopedCache(
 					cache,
@@ -788,9 +770,9 @@ export class ItemScopedCacheService {
 
 		// Reflect every purge in the dev debug header; a `null` from any of them means
 		// the whole namespace was flushed, which already covers what the others reached.
-		return purgedTagSets.some((tagSet) => tagSet === null)
+		return purgedFingerprintSets.some((purgedSet) => purgedSet === null)
 			? null
-			: purgedTagSets.flatMap((tagSet) => tagSet ?? []);
+			: purgedFingerprintSets.flatMap((purgedSet) => purgedSet ?? []);
 	}
 
 	/**

@@ -42,6 +42,7 @@ import {
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCacheFilterKeyingByCollection,
+	scopedCacheFingerprintOf,
 	scopedCacheMaxPinsPerCollection,
 	scopedCacheNestedCollections,
 	scopedCacheOwnershipNestedPkPaths,
@@ -1233,7 +1234,9 @@ describe('dropScopedCacheIndex', () => {
 		await purgeScopedCache(
 			{ delete: vi.fn() } as any,
 			'articles',
-			[{ collection: 'articles', field: 'author', value: 7 }],
+			[scopedCacheFingerprintOf('articles', [
+				{ field: 'author', value: 7 },
+			])],
 		);
 
 		// The bumps are their own pipeline, sent before the script — inside it they
@@ -2149,7 +2152,7 @@ describe('a purge that fails after its mutation committed', () => {
 		} as any);
 
 		const purged = await purgeScopedCache(cache as any, 'articles', [
-			{ collection: 'articles', field: 'id', value: 1 },
+			scopedCacheFingerprintOf('articles', [{ field: 'id', value: 1 }]),
 		]);
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
@@ -2161,11 +2164,12 @@ describe('a purge that fails after its mutation committed', () => {
 			closed,
 		);
 
-		// Still answered with the tags the mutation resolved — the caller's dev header
-		// names what SHOULD have gone, and the recovery is what makes that true.
+		// Still answered with the fingerprints the mutation resolved — the caller's
+		// dev header names what SHOULD have gone, and the recovery is what makes
+		// that true.
 		expect(purged).toEqual([
-			{ collection: 'articles' },
-			{ collection: 'articles', field: 'id', value: 1 },
+			scopedCacheFingerprintOf('articles', []),
+			scopedCacheFingerprintOf('articles', [{ field: 'id', value: 1 }]),
 		]);
 
 		expect(queueCachePurge).not.toHaveBeenCalled();
@@ -2211,7 +2215,7 @@ describe('a purge that fails after its mutation committed', () => {
 
 	it('records nothing, and reports the purge, when it went through', async () => {
 		await purgeScopedCache(cache as any, 'articles', [
-			{ collection: 'articles', field: 'id', value: 1 },
+			scopedCacheFingerprintOf('articles', [{ field: 'id', value: 1 }]),
 		]);
 
 		expect(recordPendingScopedCachePurge).not.toHaveBeenCalled();

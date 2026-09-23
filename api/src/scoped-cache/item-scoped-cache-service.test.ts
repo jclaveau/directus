@@ -47,9 +47,9 @@ schema.collections['item']!.scopedCacheFields = [
 	'parent.area',
 ];
 
-describe('capture', () => {
+describe('snapshot', () => {
 	it(oneLine`
-		captures one row as one fingerprint, holding every axis it sits on
+		snapshots one row as one fingerprint, holding every axis it sits on
 	`, async () => {
 		tracker.on.select('item').response([
 			{ id: 1, owner: 'alpha', method: 'spaced', parent: 9, '#path0': 'north' },
@@ -58,18 +58,8 @@ describe('capture', () => {
 		const scopedCache =
 			new ItemScopedCacheService('item', schema, db, null, null);
 
-		expect(await scopedCache.capture([1])).toEqual({
-			legacyTags: [
-				{ collection: 'item', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'item', field: 'owner', value: 'alpha', type: 'string' },
-				{ collection: 'item', field: 'method', value: 'spaced', type: 'string' },
-				{
-					collection: 'item',
-					field: 'parent.area',
-					value: 'north',
-					type: 'string',
-				},
-			],
+		expect(await scopedCache.snapshot([1])).toEqual({
+			canResolveSlicesFromRows: true,
 			rows: [
 				{
 					key: 1,
@@ -109,7 +99,7 @@ describe('capture', () => {
 		const scopedCache =
 			new ItemScopedCacheService('item', schema, db, null, null);
 
-		const { rows } = await scopedCache.capture([1, 2]);
+		const { rows } = await scopedCache.snapshot([1, 2]);
 
 		expect(rows).toEqual([
 			{
@@ -156,7 +146,7 @@ describe('capture', () => {
 	});
 
 	it(oneLine`
-		captures a null column as the sentinel a read pinning null also renders
+		snapshots a null column as the sentinel a read pinning null also renders
 	`, async () => {
 		tracker.on.select('item').response([
 			{ id: 3, owner: null, method: 'spaced', parent: null, '#path0': null },
@@ -165,7 +155,7 @@ describe('capture', () => {
 		const scopedCache =
 			new ItemScopedCacheService('item', schema, db, null, null);
 
-		const { rows } = await scopedCache.capture([3]);
+		const { rows } = await scopedCache.snapshot([3]);
 
 		expect(rows).toEqual([
 			{
@@ -195,14 +185,12 @@ describe('capture', () => {
 	// so a read of one row is purged by a write to that row and by no other. Its
 	// columns are never read — no query is issued at all — so the row rides as
 	// `null` and every update of it reads as touching every field.
-	it('captures the key axis of a collection scoping on nothing', async () => {
+	it('snapshots the key axis of a collection scoping on nothing', async () => {
 		const scopedCache =
 			new ItemScopedCacheService('zone', schema, db, null, null);
 
-		expect(await scopedCache.capture([7])).toEqual({
-			legacyTags: [
-				{ collection: 'zone', field: 'id', value: 7, type: 'integer' },
-			],
+		expect(await scopedCache.snapshot([7])).toEqual({
+			canResolveSlicesFromRows: true,
 			rows: [
 				{
 					key: 7,
@@ -218,33 +206,33 @@ describe('capture', () => {
 	});
 
 	it(oneLine`
-		captures nothing for no keys, which a collection-wide purge already covers
+		snapshots nothing for no keys, which a collection-wide purge already covers
 	`, async () => {
 		const scopedCache =
 			new ItemScopedCacheService('item', schema, db, null, null);
 
-		expect(await scopedCache.capture([]))
-			.toEqual({ legacyTags: [], rows: [] });
+		expect(await scopedCache.snapshot([]))
+			.toEqual({ canResolveSlicesFromRows: true, rows: [] });
 	});
 
 	it(oneLine`
-		captures nothing while scoped purging is off, since a full flush follows
+		snapshots nothing while scoped purging is off, since a full flush follows
 	`, async () => {
 		purgeEnabled = false;
 
 		const scopedCache =
 			new ItemScopedCacheService('item', schema, db, null, null);
 
-		expect(await scopedCache.capture([1]))
-			.toEqual({ legacyTags: [], rows: [] });
+		expect(await scopedCache.snapshot([1]))
+			.toEqual({ canResolveSlicesFromRows: true, rows: [] });
 	});
 
-	it('captures nothing for a collection absent from the schema', async () => {
+	it('snapshots nothing for a collection absent from the schema', async () => {
 		const scopedCache =
 			new ItemScopedCacheService('unknown', schema, db, null, null);
 
-		expect(await scopedCache.capture([1])).toEqual({
-			legacyTags: [],
+		expect(await scopedCache.snapshot([1])).toEqual({
+			canResolveSlicesFromRows: true,
 			rows: [],
 		});
 	});

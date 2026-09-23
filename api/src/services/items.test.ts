@@ -1742,7 +1742,9 @@ describe('Services / Items / purgeScopedCache', () => {
 
 		service.scopedCache['cache'] = null;
 
-		await service.scopedCache.purge([{ collection: 'test' }]);
+		await service.scopedCache.purge([
+			{ collection: 'test', pinnedScope: {}, viewFields: [] },
+		]);
 
 		expect(purgeScopedCache).not.toHaveBeenCalled();
 	});
@@ -1750,12 +1752,14 @@ describe('Services / Items / purgeScopedCache', () => {
 	it('purges the collection when the service has a cache', async () => {
 		const service = new ItemsService('test', { knex: db, schema });
 
-		await service.scopedCache.purge([{ collection: 'test' }]);
+		await service.scopedCache.purge([
+			{ collection: 'test', pinnedScope: {}, viewFields: [] },
+		]);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			service.cache,
 			'test',
-			[{ collection: 'test' }],
+			[{ collection: 'test', pinnedScope: {}, viewFields: [] }],
 			expect.anything(),
 			// A purge shown no rows carries none of their narrowing and sweeps its
 			// tags whole, as it did before composite tags. The declared list is the

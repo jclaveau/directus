@@ -1,9 +1,15 @@
 import type {
+	ScopedCacheDeclaredFingerprint,
 	ScopedCacheFingerprint,
 	ScopedCacheScopePin,
 	ScopedCacheTag,
+	SchemaOverview,
 } from '@directus/types';
-import { canonicalScopedCacheValue, scopedCacheTagKey } from './tags.js';
+import {
+	canonicalScopedCacheValue,
+	scopedCacheTagKey,
+	scopedCacheTagLabel,
+} from './tags.js';
 
 export type { ScopedCacheFingerprint } from '@directus/types';
 
@@ -243,6 +249,44 @@ export function scopedCacheTagsOfFingerprints(
 	}
 
 	return derivedTags;
+}
+
+/**
+ * The pins a declared fingerprint spells, typed off the schema.
+ *
+ * A declaration holds its values the way the code that wrote it does — a number,
+ * a `Date`, an uppercase uuid — and only the column's type says which slice that
+ * is. A fingerprint off `getMeta()` arrives already canonical, and canonicalizing
+ * a token again returns it unchanged.
+ */
+export function scopedCacheDeclaredPins(
+	declared: ScopedCacheDeclaredFingerprint,
+	schema: SchemaOverview | null | undefined,
+): ScopedCacheScopePin[] {
+	const fields = schema?.collections[declared.collection]?.fields;
+
+	const pinnedScope: Readonly<Record<string, readonly unknown[]>> =
+		declared.pinnedScope ?? {};
+
+	return Object.entries(pinnedScope).flatMap(([field, values]) => {
+		return values.map((value) => {
+			return { field, value, type: fields?.[field]?.type };
+		});
+	});
+}
+
+/**
+ * What a set of fingerprints is called where a fingerprint cannot be written: the
+ * dev headers, and the tag lists the telemetry stores.
+ *
+ * A label is `collection` or `collection:field=value`, and the stats stream joins
+ * a list of them with a comma — so a rendered fingerprint, whose own grammar is
+ * built on commas, cannot go there. This is the one form that can.
+ */
+export function scopedCacheFingerprintLabels(
+	fingerprints: readonly ScopedCacheFingerprint[],
+): string[] {
+	return scopedCacheTagsOfFingerprints(fingerprints).map(scopedCacheTagLabel);
 }
 
 /**

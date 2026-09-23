@@ -21,6 +21,7 @@ import {
 	scopedCacheIndexPath,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
+	scopedCacheFingerprintLabels,
 	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
 	scopedCacheTagsOfFingerprints,
@@ -98,7 +99,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				purged.map(scopedCacheTagLabel),
+				scopedCacheFingerprintLabels(purged),
 			);
 		}
 	}

@@ -6,12 +6,12 @@ import type {
 	ScopedCacheDeclaredFingerprint,
 	ScopedCacheDependency,
 	ScopedCacheFingerprint,
-	ScopedCacheScopePin,
 	ScopedCacheTag,
 	WithMeta,
 } from '@directus/types';
 import {
 	renderScopedCacheFingerprint,
+	scopedCacheDeclaredPins,
 	scopedCacheFingerprintOf,
 } from './fingerprint.js';
 import { earlierScopedCacheEpoch, scopedCacheTagKey } from './tags.js';
@@ -126,26 +126,6 @@ export function createScopedCacheCollector(
 		}
 	}
 
-	// The pins a declared fingerprint spells, typed off the schema for the reason a
-	// tag is: a hook holds the value the way its own code does — a number, a `Date`,
-	// an uppercase uuid — and only the column's type says which slice that is.
-	// A fingerprint off `getMeta()` arrives already canonical, and canonicalizing a
-	// token again returns it unchanged.
-	function declaredPins(
-		declared: ScopedCacheDeclaredFingerprint,
-	): ScopedCacheScopePin[] {
-		const fields = schema.collections[declared.collection]?.fields;
-
-		const pinnedScope: Readonly<Record<string, readonly unknown[]>> =
-			declared.pinnedScope ?? {};
-
-		return Object.entries(pinnedScope).flatMap(([field, values]) => {
-			return values.map((value) => {
-				return { field, value, type: fields?.[field]?.type };
-			});
-		});
-	}
-
 	function addPurgeFingerprint(
 		input:
 			| ScopedCacheDeclaredFingerprint
@@ -161,7 +141,7 @@ export function createScopedCacheCollector(
 			// slice through different columns would be two purges of the same thing.
 			const fingerprint = scopedCacheFingerprintOf(
 				declared.collection,
-				declaredPins(declared),
+				scopedCacheDeclaredPins(declared, schema),
 			);
 
 			// Same idempotence the tag sink has, keyed on the serialised form — the

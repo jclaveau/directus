@@ -2,7 +2,6 @@ import type {
 	Item,
 	PrimaryKey,
 	ScopedCacheFingerprint,
-	ScopedCacheTag,
 } from '@directus/types';
 
 /**
@@ -25,14 +24,17 @@ export type ScopedCacheMutatedRow = {
 };
 
 /**
- * One read of the rows a mutation touches: the rows themselves, and the flat
- * `ScopedCacheTag` slices they sit in — the legacy index this branch still
- * double-writes, kept beside the fingerprints until it retires.
- * `legacyTags: null` means their scope is unresolvable, so their collection is
- * purged whole.
+ * One read of the rows a mutation touches, taken before it runs or once it
+ * commits: the rows themselves, each carrying the fingerprint of the scope it
+ * sits in.
+ *
+ * `canResolveSlicesFromRows: false` says those fingerprints do not describe the
+ * write: a row arrived without a column the scope is built from, so which slices
+ * moved is unknown and the collection is purged whole rather than narrowed to a
+ * scope that may be missing one.
  */
-export type ScopedCacheCapture = {
-	legacyTags: ScopedCacheTag[] | null;
+export type ScopedCacheSnapshot = {
+	canResolveSlicesFromRows: boolean;
 	rows: ScopedCacheMutatedRow[];
 };
 
@@ -119,22 +121,51 @@ function sameStoredValue(before: unknown, after: unknown): boolean {
 }
 
 /**
+ * The slices a purge declares for itself: the fingerprint of every row the
+ * snapshots hold, or `null` when any of them could not resolve its scope — the
+ * collection is then purged whole.
+ *
+ * Takes the snapshots a mutation has rather than one list, since every caller but
+ * the create holds two of them (old ∪ new), and a `null` snapshot is the
+ * take-over that was never read back at all.
+ */
+export function scopedCacheMutatedFingerprints(
+	...snapshots: (ScopedCacheSnapshot | null)[]
+): ScopedCacheFingerprint[] | null {
+	const fingerprints: ScopedCacheFingerprint[] = [];
+
+	for (const snapshot of snapshots) {
+		if (snapshot === null || snapshot.canResolveSlicesFromRows === false) {
+			return null;
+		}
+
+		for (const { fingerprint } of snapshot.rows) {
+			fingerprints.push(fingerprint);
+		}
+	}
+
+	return fingerprints;
+}
+
+/**
  * What an insert or a delete shows the purge for itself: the rows it wrote, and
  * no `changed` — the row entered or left the result set whichever columns it
  * carries, so every read whose query case it satisfies is stale.
  *
- * Nothing when the capture could not resolve the rows' scope: that purge is the
+ * Nothing when a snapshot could not resolve the rows' scope: that purge is the
  * collection-wide one, which has no use for them.
  */
 export function scopedCacheWrittenRows(
-	capture: ScopedCacheCapture,
+	...snapshots: (ScopedCacheSnapshot | null)[]
 ): ScopedCacheMutatedWrite | undefined {
-	if (capture.legacyTags === null || capture.rows.length === 0) {
+	const fingerprints = scopedCacheMutatedFingerprints(...snapshots);
+
+	if (fingerprints === null || fingerprints.length === 0) {
 		return undefined;
 	}
 
 	return {
-		fingerprints: capture.rows.map(({ fingerprint }) => fingerprint),
+		fingerprints,
 		changed: null,
 	};
 }
@@ -144,10 +175,12 @@ export function scopedCacheWrittenRows(
  * that actually moved between them.
  */
 export function scopedCacheUpdatedRows(
-	before: ScopedCacheCapture,
-	after: ScopedCacheCapture,
+	before: ScopedCacheSnapshot,
+	after: ScopedCacheSnapshot,
 ): ScopedCacheMutatedWrite | undefined {
-	if (before.legacyTags === null || after.legacyTags === null) {
+	const fingerprints = scopedCacheMutatedFingerprints(before, after);
+
+	if (fingerprints === null) {
 		return undefined;
 	}
 
@@ -156,10 +189,7 @@ export function scopedCacheUpdatedRows(
 	}
 
 	return {
-		fingerprints: [
-			...before.rows.map(({ fingerprint }) => fingerprint),
-			...after.rows.map(({ fingerprint }) => fingerprint),
-		],
+		fingerprints,
 		changed: scopedCacheChangedFields(before.rows, after.rows),
 	};
 }
