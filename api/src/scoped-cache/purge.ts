@@ -1057,15 +1057,20 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				// records itself, and counting it here would show its entries evicted
 				// twice.
 				if (declaredByCollection.size > 0) {
-					const declaredFingerprints = target.scopedCacheFingerprints
-						.filter((recorded) => recorded.endsWith('&'));
+					// Labels, though the record holds fingerprints: the stats stream
+					// joins its tag list with a comma, which a rendered fingerprint
+					// carries raw, and the entry-tags table this one is joined against
+					// is written in labels too.
+					const declaredLabels = scopedCacheTagsOfFingerprints(
+						[...declaredByCollection.values()].flat(),
+					).map(scopedCacheTagLabel);
 
 					queueCachePurge({
 						purgeId,
 						collection: target.collection,
 						mode: 'slices',
-						scopedCacheTags: declaredFingerprints,
-						scopedCacheTagCount: declaredFingerprints.length,
+						scopedCacheTags: declaredLabels,
+						scopedCacheTagCount: declaredLabels.length,
 						evicted,
 						durationMs: null,
 					});

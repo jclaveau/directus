@@ -1569,7 +1569,9 @@ describe('retryPendingScopedCachePurges', () => {
 			purgeId: expect.any(String),
 			collection: 'articles',
 			mode: 'slices',
-			scopedCacheTags: ['articles:&id=,1,&'],
+			// The record holds fingerprints, the stats stream takes labels: it joins
+			// its tag list with a comma, which a rendered fingerprint carries raw.
+			scopedCacheTags: ['articles:id=1'],
 			scopedCacheTagCount: 1,
 			evicted: 1,
 			durationMs: null,
