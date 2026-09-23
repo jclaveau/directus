@@ -17,6 +17,7 @@ import { useLogger } from '../logger/index.js';
 import {
 	indexScopedCacheEntry,
 	mergedScopedCacheEpochs,
+	renderScopedCacheFingerprint,
 	scopedCacheIndexPath,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
@@ -333,7 +334,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							{
 								mode: 'slices',
 								collection: req.collection ?? null,
-								scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
+								scopedCacheFingerprints: scopedCacheFingerprints
+									.map(renderScopedCacheFingerprint),
 							},
 							error,
 						);

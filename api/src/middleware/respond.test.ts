@@ -87,6 +87,8 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
 		scopedCacheTagLabel: actual.scopedCacheTagLabel,
+		// Same reason, for the form a recorded purge is retried from.
+		renderScopedCacheFingerprint: actual.renderScopedCacheFingerprint,
 	};
 });
 
@@ -785,7 +787,7 @@ describe('respond middleware', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:author=7'],
+				scopedCacheFingerprints: ['articles:&author=,7,&'],
 			},
 			expect.any(Error),
 		);

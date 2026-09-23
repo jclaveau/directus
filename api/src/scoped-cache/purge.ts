@@ -45,6 +45,8 @@ import {
 	scopedCacheRowIndexKeys,
 } from './fingerprint-index.js';
 import {
+	parseScopedCacheFingerprint,
+	renderScopedCacheFingerprint,
 	scopedCacheFingerprintHolds,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
@@ -443,116 +445,6 @@ export async function countScopedCacheTagMembers(
 	return counts;
 }
 
-/** The collection a tag key names, bare tag or value slice alike. */
-function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
-	const tagPrefix = scopedCacheTagKeyPrefix();
-
-	if (!tagKey.startsWith(tagPrefix)) {
-		return null;
-	}
-
-	const label = tagKey.slice(tagPrefix.length);
-	const fieldAt = label.indexOf(':');
-
-	return fieldAt === -1
-		? label
-		: label.slice(0, fieldAt);
-}
-
-/**
- * The `sliceIndexKey, tagKey` pairs a batch of tag keys has to prune, flat, in the
- * shape the sweep script reads them. A collection name cannot hold a `:`, so the
- * first one after the prefix is where the field starts; a bare collection tag has
- * none and is in no slice index.
- */
-function sliceIndexPruningsOf(tagKeys: readonly string[]): string[] {
-	const tagPrefix = scopedCacheTagKeyPrefix();
-	const prunings: string[] = [];
-
-	for (const tagKey of tagKeys) {
-		const label = tagKey.startsWith(tagPrefix)
-			? tagKey.slice(tagPrefix.length)
-			: '';
-
-		const fieldAt = label.indexOf(':');
-
-		if (fieldAt === -1) {
-			continue;
-		}
-
-		prunings.push(
-			scopedCacheCollectionSlicesKey(label.slice(0, fieldAt)),
-			tagKey,
-		);
-	}
-
-	return prunings;
-}
-
-/**
- * Delete the cache entries a set of tag keys point to, then drop the tag sets.
- * Shared by the scoped purge (specific value slices) and the collection-wide
- * fallback (every slice).
- *
- * Returns how many cache entries the store freed, counted by
- * `dropSweptScopedCacheEntries`.
- */
-async function purgeScopedCacheTagKeys(
-	cache: Keyv,
-	tagKeys: string[],
-): Promise<number> {
-	// A delete with no keys throws — a `cache.purge` filter (or an empty
-	// collection scan) can leave nothing to purge.
-	if (tagKeys.length === 0) {
-		return 0;
-	}
-
-	const redis = useRedis();
-
-	// Before anything is read, and in a pipeline of its own rather than inside the
-	// script: a sweep that is refused still has to leave the counters moved, so a
-	// read in flight declines instead of caching under an index this purge was about
-	// to drop and will drop on retry.
-	await bumpScopedCacheEpochs(
-		tagKeys
-			.map(scopedCacheCollectionOfTagKey)
-			.filter((collection): collection is string => collection !== null),
-	);
-
-	const members: string[] = [];
-	const seenMembers = new Set<string>();
-
-	for (
-		let at = 0;
-		at < tagKeys.length;
-		at += SCOPED_CACHE_SWEEP_CHUNK_KEYS
-	) {
-		const batch = tagKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
-
-		// One atomic step per batch, not a pipeline: a pipeline only fixes the ORDER
-		// its own commands run in, and any other client's command may still land
-		// between two of them. Inside a script the interleaving cannot exist — a
-		// concurrent SADD either precedes the whole batch (its key is a member, and
-		// its entry is deleted below) or follows it (its set is new, and the next
-		// purge finds it).
-		const swept = await redis.eval(
-			scopedCacheSweepScript,
-			batch.length,
-			...batch,
-			...sliceIndexPruningsOf(batch),
-		) as string[];
-
-		for (const member of swept) {
-			if (seenMembers.has(member) === false) {
-				seenMembers.add(member);
-				members.push(member);
-			}
-		}
-	}
-
-	return dropSweptScopedCacheEntries(cache, members);
-}
-
 /**
  * Drop the cache keys a swept index named, and report how many ENTRIES went — which
  * is neither how many keys were deleted nor how many the index named.
@@ -642,7 +534,7 @@ async function purgeScopedCacheFingerprintIndex(
 	// about to prune.
 	await bumpScopedCacheEpochs([collection]);
 
-	return purgeScopedCacheIndexWhere(
+	const { evicted } = await purgeScopedCacheIndexWhere(
 		cache,
 		scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
 		// The patterns the rows can drop something under, or `null` to read the sets
@@ -668,6 +560,8 @@ async function purgeScopedCacheFingerprintIndex(
 			);
 		},
 	);
+
+	return evicted;
 }
 
 /**
@@ -689,7 +583,7 @@ async function purgeScopedCacheDeclaredPins(
 	collection: string,
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
-): Promise<number> {
+): Promise<ScopedCachePurgeSweep> {
 	const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {
 		return fingerprint.pinnedScope[indexPath] !== undefined;
 	});
@@ -757,12 +651,14 @@ async function purgeScopedCacheDeclaredTags(
 			? indexPath
 			: null;
 
-		evicted += await purgeScopedCacheDeclaredPins(
+		const sweep = await purgeScopedCacheDeclaredPins(
 			cache,
 			declaredCollection,
 			declared,
 			declaredIndexPath,
 		);
+
+		evicted += sweep.evicted;
 	}
 
 	return evicted;
@@ -789,6 +685,15 @@ async function scopedCacheCollectionIndexKeys(
 }
 
 /**
+ * What an index purge freed, and the entries it named on the way there — which the
+ * recovery drain reports as having served stale, and nothing else reads.
+ */
+type ScopedCachePurgeSweep = {
+	evicted: number;
+	matchedKeys: string[];
+};
+
+/**
  * Read a set of index sets, keep the members whose fingerprint `purges` accepts,
  * and drop the cache entries they name.
  *
@@ -807,7 +712,7 @@ async function purgeScopedCacheIndexWhere(
 	indexKeys: readonly string[],
 	globPatterns: readonly string[] | null,
 	purges: (fingerprint: ScopedCacheFingerprint) => boolean,
-): Promise<number> {
+): Promise<ScopedCachePurgeSweep> {
 	const redisClient = useRedis();
 	const matchedByIndexKey = new Map<string, Set<string>>();
 	const matchedKeys: string[] = [];
@@ -869,7 +774,7 @@ async function purgeScopedCacheIndexWhere(
 	}
 
 	if (matchedKeys.length === 0) {
-		return 0;
+		return { evicted: 0, matchedKeys };
 	}
 
 	const [evicted] = await Promise.all([
@@ -877,7 +782,7 @@ async function purgeScopedCacheIndexWhere(
 		pruneScopedCacheIndex(redisClient, matchedByIndexKey),
 	]);
 
-	return evicted;
+	return { evicted, matchedKeys };
 }
 
 
@@ -1268,6 +1173,47 @@ function scopedCacheTagKeyFromLabel(label: string): string {
 	return `${scopedCacheTagKeyPrefix()}${label}`;
 }
 
+/**
+ * What a recorded purge target resolves to: the fingerprints to retry it with,
+ * grouped by the collection each names, plus the collections whose record is a
+ * display label from before this table held fingerprints.
+ *
+ * A rendered fingerprint always ends on its `&` terminator and a label never
+ * does, which is what tells the two apart. A label cannot be replayed against
+ * the fingerprint index — it names a slice the index no longer files anything
+ * under — so its collection is purged whole instead: wider than the record asked
+ * for, which is the direction a recovery is allowed to miss in.
+ */
+function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
+	declaredByCollection: Map<string, ScopedCacheFingerprint[]>;
+	labelledCollections: Set<string>;
+} {
+	const declaredByCollection = new Map<string, ScopedCacheFingerprint[]>();
+	const labelledCollections = new Set<string>();
+
+	for (const target of recorded) {
+		if (target.endsWith('&') === false) {
+			const fieldAt = target.indexOf(':');
+
+			labelledCollections.add(
+				fieldAt === -1
+					? target
+					: target.slice(0, fieldAt),
+			);
+
+			continue;
+		}
+
+		const fingerprint = parseScopedCacheFingerprint(target);
+		const declared = declaredByCollection.get(fingerprint.collection) ?? [];
+
+		declared.push(fingerprint);
+		declaredByCollection.set(fingerprint.collection, declared);
+	}
+
+	return { declaredByCollection, labelledCollections };
+}
+
 // The drain in flight, so the next trigger queues behind it rather than beside it.
 let pendingScopedCachePurgeDrain: Promise<number> = Promise.resolve(0);
 
@@ -1345,23 +1291,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	const purgeId = randomUUID();
 
 	for (const target of pending) {
-		const tagKeys = target.scopedCacheTags.map(scopedCacheTagKeyFromLabel);
-
 		try {
-			// Guarded on its own: naming the stale entries is best-effort telemetry and
-			// reads Postgres, so its failure must not abort the purge — the purge is
-			// what makes the cache correct again, and a blocked one stays blocked for
-			// every later retry too.
-			try {
-				await reportRecoveredScopedCacheEntries(tagKeys, reported);
-			}
-			catch (error: any) {
-				useLogger().warn(
-					error,
-					`[scoped-cache] could not name the entries a purge left stale: ${error}`,
-				);
-			}
-
 			if (target.mode === 'namespace') {
 				await cache.clear();
 
@@ -1392,17 +1322,79 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				});
 			}
 			else {
-				const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+				const { declaredByCollection, labelledCollections } =
+					recordedScopedCachePurgeTargets(target.scopedCacheFingerprints);
 
-				queueCachePurge({
-					purgeId,
-					collection: target.collection,
-					mode: 'slices',
-					scopedCacheTags: target.scopedCacheTags,
-					scopedCacheTagCount: tagKeys.length,
-					evicted,
-					durationMs: null,
-				});
+				// Every collection the record reaches, before any of them is read: a
+				// retry owes the same guarantee the purge it finishes owed, and a read
+				// in flight has to decline rather than file itself under an index this
+				// drain is about to prune.
+				await bumpScopedCacheEpochs([
+					...declaredByCollection.keys(),
+					...labelledCollections,
+				]);
+
+				let evicted = 0;
+				const staleKeys: string[] = [];
+
+				for (const [declaredCollection, declared] of declaredByCollection) {
+					// No index path: the schema the record was written under is not this
+					// drain's to read, so every set the collection owns is scanned.
+					const sweep = await purgeScopedCacheDeclaredPins(
+						cache,
+						declaredCollection,
+						declared,
+						null,
+					);
+
+					evicted += sweep.evicted;
+
+					for (const staleKey of sweep.matchedKeys) {
+						staleKeys.push(staleKey);
+					}
+				}
+
+				// Records its own collection-mode purge, as it does everywhere else:
+				// it is the one that knows how many sets its scan turned up.
+				for (const labelledCollection of labelledCollections) {
+					await purgeCollectionScopedCache(cache, labelledCollection, {
+						scopedCachePurgeId: purgeId,
+						retried: true,
+					});
+				}
+
+				// Guarded on its own: naming the stale entries is best-effort telemetry
+				// and reads Postgres, so its failure must not abort the purge — the
+				// purge is what makes the cache correct again, and a blocked one stays
+				// blocked for every later retry too.
+				try {
+					await reportRecoveredScopedCacheEntries(staleKeys, reported);
+				}
+				catch (error: any) {
+					useLogger().warn(
+						error,
+						`[scoped-cache] could not name the entries a purge left stale: `
+						+ `${error}`,
+					);
+				}
+
+				// Only for what the fingerprints took: a label's collection purge
+				// records itself, and counting it here would show its entries evicted
+				// twice.
+				if (declaredByCollection.size > 0) {
+					const declaredFingerprints = target.scopedCacheFingerprints
+						.filter((recorded) => recorded.endsWith('&'));
+
+					queueCachePurge({
+						purgeId,
+						collection: target.collection,
+						mode: 'slices',
+						scopedCacheTags: declaredFingerprints,
+						scopedCacheTagCount: declaredFingerprints.length,
+						evicted,
+						durationMs: null,
+					});
+				}
 			}
 
 			await clearPendingScopedCachePurges(target.ids);
@@ -1494,33 +1486,35 @@ export function startScopedCachePurgeRecovery(): void {
 }
 
 /**
- * Name the entries a failed purge left stale, on the way to finally dropping
- * them. Emitted HERE rather than at failure time because the anomaly stream is
- * itself Redis-backed — reporting when the purge failed would report nothing in
- * the one case worth reporting, a Redis outage.
+ * Name the entries a failed purge left stale, once it has finally dropped them.
+ * Emitted HERE rather than at failure time because the anomaly stream is itself
+ * Redis-backed — reporting when the purge failed would report nothing in the one
+ * case worth reporting, a Redis outage.
+ *
+ * Read off what the purge matched rather than off the index: the index no longer
+ * holds a set per slice to take the members of, and the purge scanned exactly
+ * those entries on its way to deleting them.
  *
  * Best-effort: an entry with no descriptor (stats were off when it was filled)
  * is purged all the same, it just cannot be named on the admin page.
  *
- * `reported` spans the drain: an entry is a member of every tag it was filled
- * under, and a drain that retries several of them names it once, not once per
- * target.
+ * `reported` spans the drain: an entry is filed under every index value it was
+ * filled under, and a drain that retries several of them names it once, not once
+ * per target.
  */
 async function reportRecoveredScopedCacheEntries(
-	tagKeys: string[],
+	staleKeys: readonly string[],
 	reported: Set<string>,
 ): Promise<void> {
-	if (tagKeys.length === 0) {
+	if (staleKeys.length === 0) {
 		return;
 	}
 
 	const { readCacheDescriptorForRedisKey } = await import('../cache-events.js');
-	const redis = useRedis();
-	const memberLists = await Promise.all(tagKeys.map((key) => redis.smembers(key)));
 
-	// The sidecars ride the same tag set as the entry they belong to, so they are
-	// the same stale entry counted two more times.
-	const members = [...new Set(memberLists.flat())].filter((member) => {
+	// A sidecar is the same stale entry counted once more, and the purge deletes
+	// it alongside the entry it belongs to.
+	const members = [...new Set(staleKeys)].filter((member) => {
 		return cacheSidecarOwner(member) === null && !reported.has(member);
 	});
 
@@ -1601,7 +1595,7 @@ export async function purgeScopedCache(
 	if (!scopedCachePurgeEnabled()) {
 		const cleared = await purgeOrRecord(
 			() => cache.clear(),
-			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+			{ mode: 'namespace', collection: null, scopedCacheFingerprints: [] },
 		);
 
 		if (!cleared) {
@@ -1640,7 +1634,7 @@ export async function purgeScopedCache(
 					scopedCachePurgeId: options.scopedCachePurgeId,
 				});
 			},
-			{ mode: 'collection', collection, scopedCacheTags: [] },
+			{ mode: 'collection', collection, scopedCacheFingerprints: [] },
 		);
 
 		return [{ collection }];
@@ -1697,6 +1691,17 @@ export async function purgeScopedCache(
 	const tagKeys = [...new Set(sweptScopedCacheTags.map(scopedCacheTagKey))];
 	let evicted: number | null = null;
 
+	// What a retry has to be able to run again, in the one grammar the index reads:
+	// the rows this purge was bound to, and the pins it was handed. A label would
+	// name a slice the index files nothing under, and a retry aimed at one would
+	// report success having dropped nothing.
+	const recordedFingerprints = [
+		...(options.rowFingerprints ?? []),
+		...sweptScopedCacheTags.map((sweptTag) => {
+			return scopedCacheFingerprintOf(sweptTag.collection, [sweptTag]);
+		}),
+	].map(renderScopedCacheFingerprint);
+
 	const purged = await purgeOrRecord(
 		async () => {
 			const [bound, swept] = await Promise.all([
@@ -1723,7 +1728,7 @@ export async function purgeScopedCache(
 		{
 			mode: 'slices',
 			collection,
-			scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
+			scopedCacheFingerprints: recordedFingerprints,
 		},
 	);
 

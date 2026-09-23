@@ -901,32 +901,6 @@ describe('collection slice index', () => {
 		]);
 	});
 
-	it('drops a purged slice key from its collection index', async () => {
-		const sweep = redisSweepDouble(async () => []);
-
-		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockResolvedValue([]),
-			del: vi.fn(),
-			srem: vi.fn(),
-			eval: sweep.eval,
-			pipeline: () => redisPipelineDouble(),
-		} as any);
-
-		await purgeScopedCache(
-			{ delete: vi.fn() } as any,
-			'articles',
-			[{ collection: 'articles', field: 'author', value: 7 }],
-		);
-
-		// An index pruned only wholesale keeps naming keys that are gone — and pruned
-		// in the same step that drops them, or a slice re-added while the sweep ran
-		// is dropped from the index after the fact.
-		expect(sweep.pruned)
-			.toEqual([[
-				'ns:scoped-cache-index:slices:articles',
-				'ns:scoped-cache-index:tag:articles:author=7',
-			]]);
-	});
 });
 
 // The pipeline a purge still sends carries only its epoch bumps; the sweep itself is
@@ -1137,43 +1111,37 @@ describe('dropScopedCacheIndex', () => {
 	});
 
 	it(oneLine`
-		sweeps a long tag list in bounded batches — the whole list is spread into the
-		script call, and a spread long enough throws RangeError before Redis is
-		reached (#397), taking a purge that can then never complete on retry
+		sweeps a long list of index sets in bounded batches — the whole page is spread
+		into the script call, and a spread long enough throws RangeError before Redis
+		is reached (#397), taking a purge that can then never complete on retry
 	`, async () => {
 		const sweep = redisSweepDouble(async () => []);
 
+		// One set per index value, which is what a per-user-scoped collection
+		// accumulates.
+		const indexKeys = Array.from({ length: 1_201 }, (_unused, index) => {
+			return `ns:scoped-cache-index:fingerprint:articles:owner=${index}`;
+		});
+
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockResolvedValue([]),
+			scan: vi.fn().mockResolvedValue(['0', indexKeys]),
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: sweep.eval,
 			pipeline: () => redisPipelineDouble(),
 		} as any);
 
-		// One slice per key, which is what a per-user-scoped collection accumulates.
-		await purgeScopedCache(
-			{ delete: vi.fn() } as any,
-			'articles',
-			Array.from({ length: 1_201 }, (_unused, index) => {
-				return {
-					collection: 'articles',
-					field: 'author',
-					value: index,
-				};
-			}),
-		);
+		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
-		// 1201 slices + the bare collection tag the purge always prepends.
-		expect(sweep.swept.flat()).toHaveLength(1_202);
+		expect(sweep.swept.flat()).toHaveLength(1_201);
 		expect(sweep.swept).toHaveLength(3);
 
 		for (const batch of sweep.swept) {
 			expect(batch.length).toBeLessThanOrEqual(500);
 		}
 
-		// Every key still swept exactly once: batching must not drop or repeat one.
-		expect(new Set(sweep.swept.flat()).size).toBe(1_202);
+		// Every set still swept exactly once: batching must not drop or repeat one.
+		expect(new Set(sweep.swept.flat()).size).toBe(1_201);
 	});
 
 	it(oneLine`
@@ -1411,29 +1379,61 @@ describe('retryPendingScopedCachePurges', () => {
 		get: vi.fn(async (key: string) => probed.get(key)),
 	};
 
-	// `sweepMembers` is what the tag sets between them hold; the sweep script reads
-	// them inside Redis, so the double is where a case says so and where it sees
-	// which sets the sweep asked for.
-	const sweep = redisSweepDouble(() => redis.sweepMembers());
+	// What the fingerprint sets hold, keyed by the set a case expects the drain to
+	// read. A record names a pin, never the set holding it — the schema it was
+	// written under is gone by now — so the drain finds the sets by scanning the
+	// collection's own prefix, and a case declares them here.
+	let indexedMembers: Record<string, string[]>;
+
+	// The index prune rides a pipeline, so a member the drain dropped reads off this
+	// rather than off the client.
+	const srem = vi.fn();
+
+	// A collection-mode record drops whole sets through the sweep script, which does
+	// its work inside Redis and leaves no command of its own to spy on.
+	const swept: string[][] = [];
 
 	const redis = {
-		sweepMembers: vi.fn(),
-		smembers: vi.fn(),
+		sscan: vi.fn(async (indexKey: string, _cursor: string) => {
+			return ['0', indexedMembers[indexKey] ?? []];
+		}),
+		scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
+			const scanned = pattern.slice(0, -1);
+
+			return [
+				'0',
+				Object.keys(indexedMembers).filter((indexKey) => {
+					return indexKey.startsWith(scanned);
+				}),
+			];
+		}),
+		eval: vi.fn(async (_script: string, numKeys: number, ...args: string[]) => {
+			const sweptKeys = args.slice(0, numKeys);
+			swept.push(sweptKeys);
+
+			return sweptKeys.flatMap((indexKey) => indexedMembers[indexKey] ?? []);
+		}),
 		del: vi.fn(),
-		scan: vi.fn(),
-		srem: vi.fn(),
-		eval: sweep.eval,
-		pipeline: () => redisPipelineDouble(),
+		pipeline: () => {
+			const chain: any = {
+				incr: () => chain,
+				expire: () => chain,
+				srem: (...args: string[]) => {
+					srem(...args);
+					return chain;
+				},
+				exec: async () => [],
+			};
+
+			return chain;
+		},
 	};
 
 	beforeEach(() => {
 		vi.mocked(getCache).mockReturnValue({ cache } as any);
 		vi.mocked(useRedis).mockReturnValue(redis as any);
-		redis.smembers.mockResolvedValue([]);
-		redis.sweepMembers.mockResolvedValue([]);
-		sweep.swept.length = 0;
-		sweep.pruned.length = 0;
-		redis.scan.mockResolvedValue(['0', []]);
+		indexedMembers = {};
+		swept.length = 0;
 
 		// The shape a deployment with CACHE_STATS off returns for every entry, so a
 		// case has to opt IN to being able to name what it recovered.
@@ -1441,24 +1441,35 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		rebuilds a recorded label against the namespace in force AT RETRY TIME, so a
-		CACHE_NAMESPACE change between the failure and the retry cannot misaim it
+		rebuilds a recorded fingerprint against the namespace in force AT RETRY TIME, so
+		a CACHE_NAMESPACE change between the failure and the retry cannot misaim it
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
-
-		// The label was recorded under `ns`; the process now runs under `other`.
+		// The fingerprint was recorded under `ns`; the process now runs under `other`.
 		env['CACHE_NAMESPACE'] = 'other';
+
+		indexedMembers = {
+			'other:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(sweep.swept).toEqual([['other:scoped-cache-index:tag:articles:id=1']]);
+		expect(redis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'other:scoped-cache-index:fingerprint:articles:*',
+			'COUNT',
+			expect.any(Number),
+		);
+
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
@@ -1471,18 +1482,22 @@ describe('retryPendingScopedCachePurges', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [7],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=2'],
+				scopedCacheFingerprints: ['articles:&id=,2,&'],
 				ids: [8],
 			},
 		]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(2);
 
@@ -1492,7 +1507,7 @@ describe('retryPendingScopedCachePurges', () => {
 			purgeId: expect.any(String),
 			collection: 'articles',
 			mode: 'slices',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheTags: ['articles:&id=,1,&'],
 			scopedCacheTagCount: 1,
 			evicted: 1,
 			durationMs: null,
@@ -1505,30 +1520,30 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		takes every slice the index names for a collection-mode record — it named no
-		tag because which slices changed was unresolvable when it failed
+		takes every set the index names for a collection-mode record — it named no
+		fingerprint because which slices changed was unresolvable when it failed
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'collection',
 			collection: 'articles',
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
-		redis.smembers.mockImplementation(async (key: string) => {
-			return key === 'ns:scoped-cache-index:slices:articles'
-				? ['ns:scoped-cache-index:tag:articles:id=1']
-				: [];
-		});
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&|ns:entry-bare',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+				'articles:&owner=,alpha,&|ns:entry-alpha',
+			],
+		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(redis.smembers)
-			.toHaveBeenCalledWith('ns:scoped-cache-index:slices:articles');
-
-		expect(sweep.swept).toEqual([[
-			'ns:scoped-cache-index:tag:articles',
-			'ns:scoped-cache-index:tag:articles:id=1',
+		expect(swept).toEqual([[
+			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha',
 		]]);
 
 		expect(cache.clear).not.toHaveBeenCalled();
@@ -1540,18 +1555,54 @@ describe('retryPendingScopedCachePurges', () => {
 		}));
 	});
 
+	it(oneLine`
+		purges a whole collection for a record naming it by its display label — a row
+		written before the fingerprint index existed says which collection went stale
+		and nothing narrower, so its reach is the collection
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheFingerprints: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+				'articles:&owner=,alpha,&|ns:entry-alpha',
+			],
+		};
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(swept)
+			.toEqual([['ns:scoped-cache-index:fingerprint:articles:owner=alpha']]);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+
+		// Recorded by the collection purge itself, which is the one that knows how
+		// many sets its scan turned up — counting it here as well would report the
+		// same entries evicted twice.
+		expect(queueCachePurge).toHaveBeenCalledOnce();
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: 'articles',
+			mode: 'collection',
+		}));
+	});
+
 	it('flushes the whole namespace for a namespace-mode record', async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(cache.clear).toHaveBeenCalledOnce();
-		expect(sweep.swept).toEqual([]);
+		expect(swept).toEqual([]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 
 		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
@@ -1570,23 +1621,23 @@ describe('retryPendingScopedCachePurges', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [7],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=2'],
+				scopedCacheFingerprints: ['articles:&id=,2,&'],
 				ids: [8],
 			},
 		]);
 
 		const closed = new Error('Connection is closed.');
 
-		// Fails the sweep itself rather than the slice-index read: the report reads
-		// members too, and its own guard swallows a failure there, so injecting it
-		// earlier would prove nothing about the purge.
-		sweep.eval.mockRejectedValueOnce(closed);
+		// Fails the scan that finds the sets rather than a descriptor read: naming the
+		// stale entries has a guard of its own that swallows a failure, so injecting it
+		// there would prove nothing about the purge.
+		redis.scan.mockRejectedValueOnce(closed);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
@@ -1596,21 +1647,20 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		keeps the record when redis REFUSES the sweep rather than dropping the
+		keeps the record when redis REFUSES the read rather than dropping the
 		connection — the shape maxmemory with noeviction and a demoted primary both
 		take, where reads are served and the write behind them is not
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		// A script's refused command rejects the whole call, and the script is where
-		// the tag is dropped AND its slice-index entry pruned — so a refusal leaves
-		// both in place for the retry to come back for.
-		sweep.eval.mockRejectedValueOnce(new Error('OOM command not allowed'));
+		// A refused command rejects the purge before anything is dropped OR pruned, so
+		// both are left in place for the retry to come back for.
+		redis.scan.mockRejectedValueOnce(new Error('OOM command not allowed'));
 
 		expect(await retryPendingScopedCachePurges()).toBe(0);
 
@@ -1627,11 +1677,15 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockRejectedValue(new Error('relation does not exist'));
@@ -1650,7 +1704,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'collection',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
@@ -1669,7 +1723,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7, 8, 9],
 		}]);
 
@@ -1685,7 +1739,7 @@ describe('retryPendingScopedCachePurges', () => {
 		let rows = [{
 			mode: 'slices' as const,
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}];
 
@@ -1695,8 +1749,11 @@ describe('retryPendingScopedCachePurges', () => {
 			rows = [];
 		});
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
-		redis.smembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
@@ -1726,7 +1783,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
@@ -1744,11 +1801,15 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(getCache).mockReturnValue({
 			cache: { ...cache, store: { client: { isOpen: false, isReady: false } } },
@@ -1768,7 +1829,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
@@ -1792,26 +1853,23 @@ describe('retryPendingScopedCachePurges', () => {
 	// itself Redis-backed: reporting at failure time reports nothing in the one case
 	// worth reporting.
 	it(oneLine`
-		names each entry it found stale, counting the sidecars that ride the same tag as
-		the entry they belong to rather than as two more
+		names each entry it found stale, counting the sidecars filed beside it as the
+		entry they belong to rather than as two more
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		const staleMembers = [
-			'ns:entry-a',
-			'ns:entry-a__expires_at',
-			'ns:entry-a__tags',
-		];
-
-		redis.sweepMembers.mockResolvedValue(staleMembers);
-		// The recovery report reads the members again to name them; the purge's own
-		// read is the `sweepMembers` above.
-		redis.smembers.mockResolvedValue(staleMembers);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+				'articles:&id=,1,&|ns:entry-a__expires_at',
+				'articles:&id=,1,&|ns:entry-a__tags',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
@@ -1827,29 +1885,32 @@ describe('retryPendingScopedCachePurges', () => {
 		});
 	});
 
-	// An entry is a member of every tag it was filled under, and one failed
-	// mutation records one row per tag (#507): naming it per target reported the
+	// An entry is filed under every query case it was cached for, and one failed
+	// mutation records one row per target (#507): naming it per target reported the
 	// same entry as many times as the drain had targets for it.
 	it(oneLine`
-		names an entry once per drain, not once per target it is a member of
+		names an entry once per drain, not once per target it is filed under
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [7],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:author=3'],
+				scopedCacheFingerprints: ['articles:&author=,3,&'],
 				ids: [8],
 			},
 		]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
-		redis.smembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
@@ -1866,11 +1927,16 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
 		vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
@@ -1972,7 +2038,7 @@ describe('startScopedCachePurgeRecovery', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
@@ -2009,7 +2075,8 @@ describe('a purge that fails after its mutation committed', () => {
 		records the slices it could not drop, and reports no purge it did not run
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockRejectedValue(closed),
+			scan: vi.fn().mockRejectedValue(closed),
+			sscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
 			pipeline: () => redisPipelineDouble(),
 		} as any);
@@ -2022,7 +2089,7 @@ describe('a purge that fails after its mutation committed', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles', 'articles:id=1'],
+				scopedCacheFingerprints: ['articles:&', 'articles:&id=,1,&'],
 			},
 			closed,
 		);
@@ -2039,10 +2106,11 @@ describe('a purge that fails after its mutation committed', () => {
 
 	it(oneLine`
 		records the collection when the slices were unresolvable and reading the
-		collection's slice index failed too
+		collection's own index sets failed too
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockRejectedValue(closed),
+			scan: vi.fn().mockRejectedValue(closed),
+			sscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
 			pipeline: () => redisPipelineDouble(),
 		} as any);
@@ -2051,7 +2119,7 @@ describe('a purge that fails after its mutation committed', () => {
 			.toEqual([{ collection: 'articles' }]);
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
-			{ mode: 'collection', collection: 'articles', scopedCacheTags: [] },
+			{ mode: 'collection', collection: 'articles', scopedCacheFingerprints: [] },
 			closed,
 		);
 
@@ -2067,7 +2135,7 @@ describe('a purge that fails after its mutation committed', () => {
 		expect(await purgeScopedCache(cache as any, 'articles', [])).toBeNull();
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
-			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+			{ mode: 'namespace', collection: null, scopedCacheFingerprints: [] },
 			closed,
 		);
 
