@@ -4,9 +4,9 @@ import { canonicalScopedCacheValue, scopedCacheTagKey } from './tags.js';
 export type { ScopedCacheFingerprint } from '@directus/types';
 
 /** The pair naming what the read selected, sorted or filtered on. */
-export const SCOPED_CACHE_FINGERPRINT_FIELDS = 'fields';
+export const SCOPED_CACHE_FINGERPRINT_VIEW = 'view';
 
-/** The `fields` value a read of every column carries: any write touches it. */
+/** The `view` value a read of every column carries: any write touches it. */
 export const SCOPED_CACHE_ANY_FIELD = '*';
 
 // In the serialised form `&` separates pairs, `,` wraps and separates a pair's
@@ -78,10 +78,10 @@ function splitUnescaped(input: string, separator: string): string[] {
  *
  * Pairs are sorted and every token is wrapped in commas, which is what makes a
  * PARTIAL fingerprint a well-formed glob — `*&course_part=,4821,*` names every
- * entry pinned to that one value without naming `48210`. `fields` rides as a pair
+ * entry pinned to that one value without naming `48210`. `view` rides as a pair
  * of its own so the write side reads it back the way it reads a pin, and is left
  * out entirely when the read names none — a serialised ROW has pairs and no
- * fields.
+ * view.
  */
 export function renderScopedCacheFingerprint(
 	fingerprint: ScopedCacheFingerprint,
@@ -91,7 +91,7 @@ export function renderScopedCacheFingerprint(
 	);
 
 	if (fingerprint.viewFields.length > 0) {
-		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_FIELDS, fingerprint.viewFields);
+		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_VIEW, fingerprint.viewFields);
 	}
 
 	let renderedFingerprint = `${fingerprint.collection}:`;
@@ -148,7 +148,7 @@ export function parseScopedCacheFingerprint(
 			.slice(1, -1)
 			.map(unescapeScopedCacheFingerprintToken);
 
-		if (pairKey === SCOPED_CACHE_FINGERPRINT_FIELDS) {
+		if (pairKey === SCOPED_CACHE_FINGERPRINT_VIEW) {
 			parsedFields = pairValues;
 			continue;
 		}
@@ -196,7 +196,7 @@ export function scopedCacheFingerprintFromTags(
 
 /**
  * The fingerprint rendered back into the tag labels the dev headers carried before
- * composite tags — `collection:field=value`, one per value, `fields` dropped, and
+ * composite tags — `collection:field=value`, one per value, `view` dropped, and
  * the bare collection when the fingerprint pins nothing.
  *
  * Kept so the behaviour this refactor preserves can be asserted by the blackbox
@@ -220,7 +220,7 @@ export function scopedCacheFingerprintLabels(
 }
 
 /**
- * The tags a set of fingerprints composes, one per value, `fields` dropped, and
+ * The tags a set of fingerprints composes, one per value, `view` dropped, and
  * the bare collection for a fingerprint that pins nothing.
  *
  * What the round trip loses is the AND — which is the whole point of the
@@ -467,7 +467,7 @@ export function scopedCacheRowIndexGlobs(
 		// Pins nothing at all, and pins nothing but its fields — the two ways a
 		// fingerprint every row matches comes out of the serialiser.
 		`${collectionToken}:&|*`,
-		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_FIELDS}=,*`,
+		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,*`,
 	]);
 
 	for (const rowFingerprint of rowFingerprints) {

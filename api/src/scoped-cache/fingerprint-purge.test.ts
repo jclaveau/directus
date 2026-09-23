@@ -151,7 +151,7 @@ describe('a purge shown the rows it wrote', () => {
 		have changed, whichever slice the row sits in
 	`, async () => {
 		members = {
-			[ALPHA]: ['slot:&owner=,alpha,&fields=,title,&|ns:entry-title'],
+			[ALPHA]: ['slot:&owner=,alpha,&view=,title,&|ns:entry-title'],
 		};
 
 		await purge({});
@@ -164,7 +164,7 @@ describe('a purge shown the rows it wrote', () => {
 		left the result set whichever columns it carries
 	`, async () => {
 		members = {
-			[ALPHA]: ['slot:&owner=,alpha,&fields=,title,&|ns:entry-title'],
+			[ALPHA]: ['slot:&owner=,alpha,&view=,title,&|ns:entry-title'],
 		};
 
 		await purge({ changed: null });

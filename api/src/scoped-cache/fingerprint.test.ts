@@ -19,8 +19,8 @@ describe('renderScopedCacheFingerprint', () => {
 			pinnedScope: { user: ['A'], course_part: ['4821'] },
 			viewFields: ['course_part', 'day', 'id'],
 		})).toBe(
-			'student_time_slot:&course_part=,4821,&fields=,course_part,day,id,'
-			+ '&user=,A,&',
+			'student_time_slot:&course_part=,4821,&user=,A,'
+			+ '&view=,course_part,day,id,&',
 		);
 	});
 
@@ -32,10 +32,10 @@ describe('renderScopedCacheFingerprint', () => {
 			collection: 'student_time_slot',
 			pinnedScope: { course_part: ['2', '1', '2'] },
 			viewFields: ['*'],
-		})).toBe('student_time_slot:&course_part=,1,2,&fields=,\\*,&');
+		})).toBe('student_time_slot:&course_part=,1,2,&view=,\\*,&');
 	});
 
-	it('leaves out the fields pair when the read names none', () => {
+	it('leaves out the view pair when the read names none', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
 			pinnedScope: { user: ['A'] },
@@ -71,7 +71,7 @@ describe('renderScopedCacheFingerprint', () => {
 describe('parseScopedCacheFingerprint', () => {
 	it('reads the collection, the scope and the fields back', () => {
 		const parsed = parseScopedCacheFingerprint(
-			'student_time_slot:&course_part=,1,2,&fields=,day,id,&user=,A,&',
+			'student_time_slot:&course_part=,1,2,&user=,A,&view=,day,id,&',
 		);
 
 		expect(parsed.collection).toBe('student_time_slot');
@@ -171,10 +171,10 @@ describe('scopedCacheFingerprintFromTags', () => {
 });
 
 describe('scopedCacheFingerprintLabels', () => {
-	it('renders one legacy label per value, without the fields pair', () => {
+	it('renders one legacy label per value, without the view pair', () => {
 		expect(scopedCacheFingerprintLabels(parseScopedCacheFingerprint(
 			'entry:&account=,7,&account.org=,3,&account.org.owner=,acme,'
-			+ '&fields=,*,&id=,913,&',
+			+ '&id=,913,&view=,*,&',
 		))).toEqual([
 			'entry:account=7',
 			'entry:account.org=3',
@@ -185,7 +185,7 @@ describe('scopedCacheFingerprintLabels', () => {
 
 	it('renders the bare collection when the fingerprint pins nothing', () => {
 		expect(scopedCacheFingerprintLabels(
-			parseScopedCacheFingerprint('entry:&fields=,*,&'),
+			parseScopedCacheFingerprint('entry:&view=,*,&'),
 		)).toEqual(['entry']);
 	});
 });
@@ -197,14 +197,14 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 
 	it('matches a row satisfying every pair', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			parseScopedCacheFingerprint('slot:&fields=,*,&method=,spaced,&owner=,alpha,&'),
+			parseScopedCacheFingerprint('slot:&method=,spaced,&owner=,alpha,&view=,*,&'),
 			row,
 		)).toBe(true);
 	});
 
 	it('refuses a row satisfying one pair but not the other', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			parseScopedCacheFingerprint('slot:&fields=,*,&method=,spaced,&owner=,beta,&'),
+			parseScopedCacheFingerprint('slot:&method=,spaced,&owner=,beta,&view=,*,&'),
 			row,
 		)).toBe(false);
 	});
@@ -218,7 +218,7 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 
 	it('matches every row when the fingerprint pins nothing', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			parseScopedCacheFingerprint('slot:&fields=,*,&'),
+			parseScopedCacheFingerprint('slot:&view=,*,&'),
 			row,
 		)).toBe(true);
 	});
@@ -335,8 +335,8 @@ describe('scopedCacheFingerprintsByCollection', () => {
 			],
 			new Map([['slot', ['id', 'owner']], ['zone', ['area']]]),
 		).map(renderScopedCacheFingerprint)).toEqual([
-			'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&',
-			'zone:&area=,north,&fields=,area,&',
+			'slot:&method=,spaced,&owner=,alpha,&view=,id,owner,&',
+			'zone:&area=,north,&view=,area,&',
 		]);
 	});
 
@@ -351,8 +351,8 @@ describe('scopedCacheFingerprintsByCollection', () => {
 			],
 			new Map([['slot', ['id']]]),
 		).map(renderScopedCacheFingerprint)).toEqual([
-			'slot:&fields=,id,&owner=,alpha,&',
-			'slot:&dept=,rh,&fields=,id,&',
+			'slot:&owner=,alpha,&view=,id,&',
+			'slot:&dept=,rh,&view=,id,&',
 		]);
 	});
 
@@ -360,7 +360,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 		expect(scopedCacheFingerprintsByCollection(
 			[[{ collection: 'slot' }]],
 			new Map([['slot', ['id', 'note']]]),
-		).map(renderScopedCacheFingerprint)).toEqual(['slot:&fields=,id,note,&']);
+		).map(renderScopedCacheFingerprint)).toEqual(['slot:&view=,id,note,&']);
 	});
 
 	it(oneLine`
@@ -380,7 +380,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 
 describe('scopedCacheFingerprintPurgedBy', () => {
 	const read = parseScopedCacheFingerprint(
-		'slot:&fields=,id,owner,&method=,spaced,&owner=,alpha,&',
+		'slot:&method=,spaced,&owner=,alpha,&view=,id,owner,&',
 	);
 
 	it('purges when the row satisfies every pair and a bound field changed', () => {
@@ -415,7 +415,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	// survives a write that only rewrote the fk that path runs through.
 	it('purges on a pinned field the read never selected', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			parseScopedCacheFingerprint('course:&fields=,id,name,&tu.owner.user=,7,&'),
+			parseScopedCacheFingerprint('course:&tu.owner.user=,7,&view=,id,name,&'),
 			[parseScopedCacheFingerprint('course:&id=,1,&tu.owner.user=,7,&')],
 			['tu', 'tu.owner.user'],
 		)).toBe(true);
@@ -479,7 +479,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 
 	it('purges a read bounded to a list of owners by a write to either', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			parseScopedCacheFingerprint('slot:&fields=,id,owner,&owner=,kappa,lambda,&'),
+			parseScopedCacheFingerprint('slot:&owner=,kappa,lambda,&view=,id,owner,&'),
 			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,lambda,&')],
 			['owner'],
 		)).toBe(true);
@@ -489,7 +489,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		leaves a read bounded to a list of owners alone for a write outside it
 	`, () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			parseScopedCacheFingerprint('slot:&fields=,id,owner,&owner=,mu,nu,&'),
+			parseScopedCacheFingerprint('slot:&owner=,mu,nu,&view=,id,owner,&'),
 			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,xi,&')],
 			['owner'],
 		)).toBe(false);
@@ -497,7 +497,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 
 	it('purges a read of every field on a change to any column', () => {
 		expect(scopedCacheFingerprintPurgedBy(
-			parseScopedCacheFingerprint('slot:&fields=,*,&owner=,zeta,&'),
+			parseScopedCacheFingerprint('slot:&owner=,zeta,&view=,*,&'),
 			[parseScopedCacheFingerprint('slot:&id=,1,&owner=,zeta,&')],
 			['note'],
 		)).toBe(true);
@@ -510,7 +510,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 			parseScopedCacheFingerprint('slot:&id=,1,&owner=,alpha,&'),
 		])).toEqual([
 			'slot:&|*',
-			'slot:&fields=,*',
+			'slot:&view=,*',
 			'slot:*&id=*,1,*',
 			'slot:*&owner=*,alpha,*',
 		]);
@@ -523,7 +523,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
 		])).toEqual([
 			'slot:&|*',
-			'slot:&fields=,*',
+			'slot:&view=,*',
 			'slot:*&owner=*,alpha,*',
 			'slot:*&owner=*,beta,*',
 		]);
@@ -536,7 +536,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 			{ collection: 'slot', pinnedScope: { owner: ['a*b'] }, viewFields: [] },
 		])).toEqual([
 			'slot:&|*',
-			'slot:&fields=,*',
+			'slot:&view=,*',
 			'slot:*&owner=*,a\\\\\\*b,*',
 		]);
 	});
@@ -546,7 +546,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
 		])).toEqual([
 			'slot:&|*',
-			'slot:&fields=,*',
+			'slot:&view=,*',
 			'slot:*&owner=*,a\\\\,b,*',
 		]);
 	});

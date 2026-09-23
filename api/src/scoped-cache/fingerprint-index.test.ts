@@ -73,7 +73,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 	it('names the set by the collection and the value the read pinned', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint(
-				'slot:&fields=,id,&method=,spaced,&zone.region.owner=,ana,&',
+				'slot:&method=,spaced,&view=,id,&zone.region.owner=,ana,&',
 			),
 			'zone.region.owner',
 		)).toEqual([`${slotIndex}zone.region.owner=ana`]);
@@ -91,14 +91,14 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 
 	it('files a read pinning every axis but the index path bare', () => {
 		expect(scopedCacheFingerprintIndexKeys(
-			parseScopedCacheFingerprint('slot:&fields=,id,&method=,spaced,&'),
+			parseScopedCacheFingerprint('slot:&method=,spaced,&view=,id,&'),
 			'zone.region.owner',
 		)).toEqual([slotIndex]);
 	});
 
 	it('files every read of a collection with no index path bare', () => {
 		expect(scopedCacheFingerprintIndexKeys(
-			parseScopedCacheFingerprint('loose:&fields=,id,&'),
+			parseScopedCacheFingerprint('loose:&view=,id,&'),
 			null,
 		)).toEqual(['scalabus:scoped-cache-index:idx:loose:']);
 	});
