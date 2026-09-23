@@ -2,19 +2,31 @@ import type { Type } from './fields.js';
 import type { PrimaryKey } from './items.js';
 
 /**
+ * One axis a read is pinned to, before it is canonicalized into a fingerprint.
+ *
+ * `type` is the field's schema type, and it is what makes the pin resolvable: a
+ * filter value and the native DB row value spell the same value differently —
+ * `TRUE` against `t`, an ISO string against a `Date` — and only the type says they
+ * are one. A pin naming no `field` pins nothing, which is what a read that could
+ * not be narrowed depends on: the collection, whole.
+ */
+export interface ScopedCacheScopePin {
+	// Built by resolving a field off a payload, so an absent one arrives as an
+	// explicit `undefined` rather than a missing key.
+	field?: string | undefined;
+	value?: unknown;
+	type?: Type | undefined;
+}
+
+/**
  * A unit of cache scope. A collection-level tag (no `field`) covers every entry that
  * read the collection — the coarse bucket holding "global" reads that couldn't be
  * narrowed. A `field`+`value` tag pins a single slice so one owner's/partition's writes
  * drop only their own entries. `type` is the field's schema type, used to canonicalize
  * `value` so a filter value and the native DB row value resolve the same slice.
  */
-export interface ScopedCacheTag {
+export interface ScopedCacheTag extends ScopedCacheScopePin {
 	collection: string;
-	// Built by resolving a field off a payload, so an absent one arrives as an
-	// explicit `undefined` rather than a missing key.
-	field?: string | undefined;
-	value?: unknown;
-	type?: Type | undefined;
 }
 
 /**

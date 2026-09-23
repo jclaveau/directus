@@ -1,4 +1,8 @@
-import type { ScopedCacheFingerprint, ScopedCacheTag } from '@directus/types';
+import type {
+	ScopedCacheFingerprint,
+	ScopedCacheScopePin,
+	ScopedCacheTag,
+} from '@directus/types';
 import { canonicalScopedCacheValue, scopedCacheTagKey } from './tags.js';
 
 export type { ScopedCacheFingerprint } from '@directus/types';
@@ -164,31 +168,36 @@ export function parseScopedCacheFingerprint(
 }
 
 /**
- * The fingerprint a set of one collection's tags composes to.
+ * The fingerprint one collection's pins compose to.
  *
- * The pinners still derive tags — a read's query case is assembled from a dozen
- * different places, each of which knows one slice — and this is where those
- * slices stop being an OR and become the AND they always described. Several tags
- * on the SAME field are one pin listing both values, which is what an `_in`
- * filter and a set of nested parent keys both mean.
+ * The pinners still work an axis at a time — a read's query case is assembled from
+ * a dozen different places, each of which knows one slice — and this is where those
+ * slices stop being an OR and become the AND they always described. Several pins on
+ * the SAME field are one pin listing both values, which is what an `_in` filter and
+ * a set of nested parent keys both mean.
+ *
+ * This is also the one place a raw value becomes a token. A pin carries what the
+ * filter or the driver handed over, spelled its own way; everything downstream —
+ * the index key, the glob, the serialised member — reads the token and never
+ * canonicalizes again.
  */
-export function scopedCacheFingerprintFromLegacyTags(
+export function scopedCacheFingerprintOf(
 	collection: string,
-	tags: readonly ScopedCacheTag[],
+	pins: readonly ScopedCacheScopePin[],
 	viewFields: readonly string[] = [],
 ): ScopedCacheFingerprint {
-	// Null-prototyped for the reason the parser is: a tag's field is a column name,
+	// Null-prototyped for the reason the parser is: a pin's field is a column name,
 	// and `__proto__` is a legal one.
 	const pinnedScope: Record<string, string[]> = Object.create(null);
 
-	for (const tag of tags) {
-		if (tag.field === undefined) {
+	for (const pin of pins) {
+		if (pin.field === undefined) {
 			continue;
 		}
 
-		const fieldValues = pinnedScope[tag.field] ?? [];
-		fieldValues.push(canonicalScopedCacheValue(tag.value, tag.type));
-		pinnedScope[tag.field] = fieldValues;
+		const fieldValues = pinnedScope[pin.field] ?? [];
+		fieldValues.push(canonicalScopedCacheValue(pin.value, pin.type));
+		pinnedScope[pin.field] = fieldValues;
 	}
 
 	return { collection, pinnedScope, viewFields };
@@ -350,7 +359,7 @@ export function scopedCacheFingerprintsByCollection(
 			continue;
 		}
 
-		const composed = scopedCacheFingerprintFromLegacyTags(
+		const composed = scopedCacheFingerprintOf(
 			queryCaseCollection,
 			queryCase,
 			fieldsByCollection.get(queryCaseCollection) ?? [],

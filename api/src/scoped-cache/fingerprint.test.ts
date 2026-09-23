@@ -4,7 +4,7 @@ import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
 	scopedCacheViewFieldsTouched,
-	scopedCacheFingerprintFromLegacyTags,
+	scopedCacheFingerprintOf,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintMatchesRow,
 	scopedCacheFingerprintPurgedBy,
@@ -125,14 +125,14 @@ describe('parseScopedCacheFingerprint', () => {
 	});
 });
 
-describe('scopedCacheFingerprintFromLegacyTags', () => {
-	it('folds two tags on one field into one pair', () => {
-		expect(scopedCacheFingerprintFromLegacyTags(
+describe('scopedCacheFingerprintOf', () => {
+	it('folds two pins on one field into one pair', () => {
+		expect(scopedCacheFingerprintOf(
 			'note',
 			[
-				{ collection: 'note', field: 'owner', value: 'a', type: 'string' },
-				{ collection: 'note', field: 'owner', value: 'b', type: 'string' },
-				{ collection: 'note', field: 'id', value: 7, type: 'integer' },
+				{ field: 'owner', value: 'a', type: 'string' },
+				{ field: 'owner', value: 'b', type: 'string' },
+				{ field: 'id', value: 7, type: 'integer' },
 			],
 			['*'],
 		)).toEqual({
@@ -143,11 +143,11 @@ describe('scopedCacheFingerprintFromLegacyTags', () => {
 	});
 
 	it('canonicalizes each value the way the tag key does', () => {
-		expect(scopedCacheFingerprintFromLegacyTags(
+		expect(scopedCacheFingerprintOf(
 			'note',
 			[
-				{ collection: 'note', field: 'id', value: '007', type: 'integer' },
-				{ collection: 'note', field: 'flag', value: 't', type: 'boolean' },
+				{ field: 'id', value: '007', type: 'integer' },
+				{ field: 'flag', value: 't', type: 'boolean' },
 			],
 		)).toEqual({
 			collection: 'note',
@@ -157,14 +157,14 @@ describe('scopedCacheFingerprintFromLegacyTags', () => {
 	});
 
 	it('pins a field named after an object member', () => {
-		expect(renderScopedCacheFingerprint(scopedCacheFingerprintFromLegacyTags(
+		expect(renderScopedCacheFingerprint(scopedCacheFingerprintOf(
 			'note',
-			[{ collection: 'note', field: '__proto__', value: 'a', type: 'string' }],
+			[{ field: '__proto__', value: 'a', type: 'string' }],
 		))).toBe('note:&__proto__=,a,&');
 	});
 
-	it('drops a bare tag, which pins nothing', () => {
-		expect(scopedCacheFingerprintFromLegacyTags('note', [{ collection: 'note' }]))
+	it('drops a pin naming no field, which pins nothing', () => {
+		expect(scopedCacheFingerprintOf('note', [{}]))
 			.toEqual({ collection: 'note', pinnedScope: {}, viewFields: [] });
 	});
 });

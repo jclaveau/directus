@@ -38,7 +38,7 @@ import {
 	scopedCachePurgeEnabled,
 } from './config.js';
 import {
-	scopedCacheFingerprintFromLegacyTags,
+	scopedCacheFingerprintOf,
 	scopedCacheFingerprintsByCollection,
 } from './fingerprint.js';
 import { scopedCacheIndexPath } from './fingerprint-index.js';
@@ -336,7 +336,7 @@ export class ItemScopedCacheService {
 					return {
 						key: tag.value as PrimaryKey,
 						row: null,
-						fingerprint: scopedCacheFingerprintFromLegacyTags(
+						fingerprint: scopedCacheFingerprintOf(
 							this.collection,
 							[tag],
 						),
@@ -410,7 +410,7 @@ export class ItemScopedCacheService {
 				return {
 					key: row[primaryKeyField] as PrimaryKey,
 					row,
-					fingerprint: scopedCacheFingerprintFromLegacyTags(
+					fingerprint: scopedCacheFingerprintOf(
 						this.collection,
 						rowTags,
 					),
@@ -1515,7 +1515,7 @@ export class ItemScopedCacheService {
 			// One pin each: a hook's tag stands alone, and what respond.ts needs off
 			// it is the collection and field it names.
 			unautopurgeable: unautopurgeableTags.map((tag) => {
-				return scopedCacheFingerprintFromLegacyTags(tag.collection, [tag]);
+				return scopedCacheFingerprintOf(tag.collection, [tag]);
 			}),
 		};
 	}
