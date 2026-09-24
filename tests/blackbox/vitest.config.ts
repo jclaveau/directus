@@ -11,11 +11,14 @@ export default defineConfig({
 				maxWorkers: 6,
 			},
 		},
-		environment: './setup/environment.ts',
+		setupFiles: ['./setup/sequential-gate.ts'],
 		sequence: {
 			sequencer: Sequencer,
 		},
 		testTimeout: 30_000,
+		// The gate hook blocks until the files it depends on report completion,
+		// which can outlast every other file still queued behind it.
+		hookTimeout: 600_000,
 		projects: [
 			{
 				extends: true,
@@ -23,6 +26,9 @@ export default defineConfig({
 					name: 'common',
 					include: ['tests/common/**/*.test.ts', 'common/common.test.ts'],
 					globalSetup: './setup/setup.ts',
+					provide: {
+						projectName: 'common',
+					},
 				},
 			},
 			{
@@ -31,6 +37,9 @@ export default defineConfig({
 					name: 'db',
 					include: ['tests/db/**/*.test.ts', 'common/common.test.ts'],
 					globalSetup: './setup/setup.ts',
+					provide: {
+						projectName: 'db',
+					},
 				},
 			},
 		],
