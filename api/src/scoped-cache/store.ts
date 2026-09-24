@@ -162,11 +162,11 @@ export interface ScopedCacheStore {
 
 	/**
 	 * The purge counters of these keys, in the order asked, or `null` when the
-	 * store could not answer at all — which the caller reads as "no snapshot
-	 * taken", leaving the fill unguarded exactly as it is with no store.
+	 * store could not answer at all — which the caller reads as no reading taken,
+	 * leaving the fill unguarded exactly as it is with no store.
 	 */
-	readCounterValues(
-		counterKeys: readonly string[],
+	readPurgeEpochs(
+		epochKeys: readonly string[],
 	): Promise<(string | null)[] | null>;
 
 	/**
@@ -176,8 +176,8 @@ export interface ScopedCacheStore {
 	 * guard stopped guarding. It cannot stop the sweep behind it — that is what
 	 * makes the cache correct — but it must not be silent either.
 	 */
-	bumpCounterValues(
-		counterKeys: readonly string[],
+	bumpPurgeEpochs(
+		epochKeys: readonly string[],
 		ttlSeconds: number,
 	): Promise<void>;
 

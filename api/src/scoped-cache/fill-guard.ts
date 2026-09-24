@@ -67,7 +67,7 @@ export async function readScopedCacheEpochs(
 	// leaves the fill unguarded, exactly as it is with no store at all — the same
 	// trade the response cache makes everywhere else.
 	const values = await useScopedCacheStore()
-		.readCounterValues(names.map(scopedCacheEpochKey));
+		.readPurgeEpochs(names.map(scopedCacheEpochKey));
 
 	// Nothing, rather than a counter reading of `null` per collection: `*` is what
 	// says the counters were read at all, and filling it in from a read that never
@@ -111,7 +111,7 @@ export async function bumpScopedCacheEpochs(
 		// sweeps with that counter unmoved, so a fill racing it compares equal and
 		// stores rows the purge already superseded. Nothing here can stop the sweep,
 		// but a guard that silently stopped guarding must not also be silent.
-		await useScopedCacheStore().bumpCounterValues(
+		await useScopedCacheStore().bumpPurgeEpochs(
 			names.map(scopedCacheEpochKey),
 			scopedCacheEpochTtlSeconds(),
 		);

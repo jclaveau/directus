@@ -770,23 +770,23 @@ const redisStore: ScopedCacheStore = {
 		return tally;
 	},
 
-	async readCounterValues(
-		counterKeys: readonly string[],
+	async readPurgeEpochs(
+		epochKeys: readonly string[],
 	): Promise<(string | null)[] | null> {
 		return useRedis()
-			.mget([...counterKeys])
+			.mget([...epochKeys])
 			.catch((): null => null);
 	},
 
-	async bumpCounterValues(
-		counterKeys: readonly string[],
+	async bumpPurgeEpochs(
+		epochKeys: readonly string[],
 		ttlSeconds: number,
 	): Promise<void> {
 		const pipeline = useRedis().pipeline();
 
-		for (const counterKey of counterKeys) {
-			pipeline.incr(counterKey);
-			pipeline.expire(counterKey, ttlSeconds);
+		for (const epochKey of epochKeys) {
+			pipeline.incr(epochKey);
+			pipeline.expire(epochKey, ttlSeconds);
 		}
 
 		const results = await pipeline.exec();
