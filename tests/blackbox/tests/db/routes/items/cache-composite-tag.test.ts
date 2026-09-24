@@ -91,37 +91,42 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: SLOT });
 	});
 
-	async function createSlots(
-		table: Record<string, string>[],
-		ids: Map<string, number>,
-	) {
-		for (const row of parseGherkinTable<SlotRow>(table)) {
+	// A written row names itself by the marker the scenario files it under, and
+	// carries the columns the write is about: every one of them on a create, the
+	// ones it changes on an update, none at all on a delete.
+	type WrittenSlot = Partial<SlotRow> & { marker: string };
+
+	async function createSlots(rows: WrittenSlot[], ids: Map<string, number>) {
+		for (const { marker, ...columns } of rows) {
 			const response = await request(getUrl(vendor, env))
 				.post(`/items/${SLOT}`)
-				.send({
-					owner: row.owner,
-					method: row.method,
-					note: row.note,
-					amount: row.amount,
-				})
+				.send(columns)
 				.set('Authorization', auth);
 
 			expect(response.statusCode).toBe(200);
-			ids.set(row.marker, response.body.data.id);
+			ids.set(marker, response.body.data.id);
 		}
 	}
 
-	function updateSlot(id: number, item: Record<string, unknown>) {
-		return request(getUrl(vendor, env))
-			.patch(`/items/${SLOT}/${id}`)
-			.send(item)
-			.set('Authorization', auth);
+	async function updateSlots(rows: WrittenSlot[], ids: Map<string, number>) {
+		for (const { marker, ...columns } of rows) {
+			const response = await request(getUrl(vendor, env))
+				.patch(`/items/${SLOT}/${ids.get(marker)}`)
+				.send(columns)
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(200);
+		}
 	}
 
-	function deleteSlot(id: number) {
-		return request(getUrl(vendor, env))
-			.delete(`/items/${SLOT}/${id}`)
-			.set('Authorization', auth);
+	async function deleteSlots(rows: WrittenSlot[], ids: Map<string, number>) {
+		for (const { marker } of rows) {
+			const response = await request(getUrl(vendor, env))
+				.delete(`/items/${SLOT}/${ids.get(marker)}`)
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(204);
+		}
 	}
 
 	// A cell is YAML rather than JSON, which spends a line on every brace: the
@@ -257,29 +262,79 @@ describe.each(vendors)('%s', (vendor) => {
 			: { pinnedScope, viewFields };
 	}
 
-	// The fingerprints a `fingerprints` cell states, against the ones the entry
-	// filled by this request was filed under. They carry no collection: every read
-	// in this feature is of the one the Background declares.
-	async function expectFingerprints(
-		filedBefore: Set<string>,
+	// An index member joins the fingerprint it was filed under to the cache key it
+	// names, and only the fingerprint half is ever stated: a scenario says what a
+	// read is filed under, never where the entry lives.
+	const fingerprintOf = (member: string) => member.split(/(?<!\\)\|/)[0]!;
+
+	function expectStatedFingerprints(
+		members: string[],
 		expectedFingerprints: Record<string, unknown>[],
 	) {
-		const added = [...await indexedMembers()].filter(
-			(member) => !filedBefore.has(member),
-		);
-
-		const filed = [
-			...new Set(added.map((member) => member.split(/(?<!\\)\|/)[0]!)),
-		].map(decodeFingerprint);
+		const filed = [...new Set(members.map(fingerprintOf))].map(decodeFingerprint);
 
 		expect(filed).toEqual(expect.arrayContaining(expectedFingerprints));
 		expect(filed).toHaveLength(expectedFingerprints.length);
 	}
 
+	// The fingerprints a `fingerprints` cell states, against the ones the entry
+	// filled by this request was filed under. They carry no collection: every read
+	// in this feature is of the one the Background declares. The members go back to
+	// the caller, which is how a later step names that entry again.
+	async function expectFingerprints(
+		filedBefore: Set<string>,
+		expectedFingerprints: Record<string, unknown>[],
+	): Promise<string[]> {
+		const added = [...await indexedMembers()].filter(
+			(member) => !filedBefore.has(member),
+		);
+
+		expectStatedFingerprints(added, expectedFingerprints);
+
+		return added;
+	}
+
+	// What a write dropped from the index. A purge removes the members it matched
+	// and no others (`purge.ts` purgeScopedCacheIndexWhere), so the difference
+	// across the write is the set of fingerprints it reached — and an entry filed
+	// under two, one of which the row holds on, loses only that one.
+	async function expectPurgedFingerprints(
+		filedBefore: Set<string>,
+		expectedFingerprints: Record<string, unknown>[],
+	) {
+		const filedAfter = await indexedMembers();
+
+		expectStatedFingerprints(
+			[...filedBefore].filter((member) => !filedAfter.has(member)),
+			expectedFingerprints,
+		);
+	}
+
+	// The fingerprints an entry is filed under once the step's read has settled:
+	// the members recorded when the scenario cached that read, which a purge prunes
+	// and the refill puts back under the same cache key. An entry the write left
+	// alone and one it purged both end their step filed under what they state.
+	async function expectFiledFingerprints(
+		members: string[],
+		expectedFingerprints: Record<string, unknown>[],
+	) {
+		const indexed = await indexedMembers();
+
+		expect(members.filter((member) => !indexed.has(member))).toEqual([]);
+
+		expectStatedFingerprints(members, expectedFingerprints);
+	}
+
+	// What a read is filed under in `filedMembers`. The query is the one thing a
+	// step after the write still holds of the read it is about, and it is enough:
+	// two reads sending the same query are one entry.
+	const queryKey = (query: Record<string, string | string[]>) =>
+		JSON.stringify(query);
+
 	function defineGivenSteps(
 		{ given, and }: StepFunctions,
 		ids: Map<string, number>,
-		readQuery: Record<string, string | string[]>,
+		filedMembers: Map<string, string[]>,
 	) {
 		// The schema the scenarios read against, asserted rather than created here:
 		// the instance reads `scoped_cache_fields` off the schema it boots on, so
@@ -314,15 +369,14 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		and('the slots:', async (table: Record<string, string>[]) => {
-			await createSlots(table, ids);
+			await createSlots(parseGherkinTable<SlotRow>(table), ids);
 		});
 
 		// The query is the scenario's own table, so a reader sees what is cached
 		// where the scenario says it is cached, and the `Then` reads it back.
 		and('this read is cached:', async (table: Record<string, string>[]) => {
 			const { query, response, fingerprints } = table[0]!;
-
-			Object.assign(readQuery, queryParameters(query!));
+			const readQuery = queryParameters(query!);
 
 			await request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -340,7 +394,11 @@ describe.each(vendors)('%s', (vendor) => {
 				.toBe('HIT');
 
 			await expectAnswer(readQuery, ids, cellRows(response!));
-			await expectFingerprints(filedBefore, cellRows(fingerprints!));
+
+			filedMembers.set(
+				queryKey(readQuery),
+				await expectFingerprints(filedBefore, cellRows(fingerprints!)),
+			);
 		});
 
 		// Filled after the read under test, because that step clears the whole cache
@@ -359,45 +417,122 @@ describe.each(vendors)('%s', (vendor) => {
 						.toBe('HIT');
 
 					await expectAnswer(witnessQuery, ids, cellRows(response!));
-					await expectFingerprints(filedBefore, cellRows(fingerprints!));
+
+					filedMembers.set(
+						queryKey(witnessQuery),
+						await expectFingerprints(filedBefore, cellRows(fingerprints!)),
+					);
 				}
 			},
 		);
 	}
 
-	function whenSlotsCreated({ when }: StepFunctions, ids: Map<string, number>) {
-		when('the slots are created:', async (table: Record<string, string>[]) => {
-			await createSlots(table, ids);
-		});
+	// A write states the rows it writes and the fingerprints it dropped from the
+	// index, so the three mutations differ only in the verb and in what a row of the
+	// `slots` cell has to carry.
+	function defineWhenSteps({ when }: StepFunctions, ids: Map<string, number>) {
+		when.optional(
+			'the slots are created:',
+			async (table: Record<string, string>[]) => {
+				const filedBefore = await indexedMembers();
+
+				await createSlots(
+					cellRows(table[0]!['slots']!) as WrittenSlot[],
+					ids,
+				);
+
+				await expectPurgedFingerprints(
+					filedBefore,
+					cellRows(table[0]!['purged fingerprints']!),
+				);
+			},
+		);
+
+		when.optional(
+			'the slots are updated:',
+			async (table: Record<string, string>[]) => {
+				const filedBefore = await indexedMembers();
+
+				await updateSlots(
+					cellRows(table[0]!['slots']!) as WrittenSlot[],
+					ids,
+				);
+
+				await expectPurgedFingerprints(
+					filedBefore,
+					cellRows(table[0]!['purged fingerprints']!),
+				);
+			},
+		);
+
+		when.optional(
+			'the slots are deleted:',
+			async (table: Record<string, string>[]) => {
+				const filedBefore = await indexedMembers();
+
+				await deleteSlots(
+					cellRows(table[0]!['slots']!) as WrittenSlot[],
+					ids,
+				);
+
+				await expectPurgedFingerprints(
+					filedBefore,
+					cellRows(table[0]!['purged fingerprints']!),
+				);
+			},
+		);
 	}
 
 	function defineThenSteps(
 		{ then, and }: StepFunctions,
 		ids: Map<string, number>,
-		readQuery: Record<string, string | string[]>,
+		filedMembers: Map<string, string[]>,
 	) {
 		then.optional(
-			'the read is purged',
-			async () => await expectCacheStatus(readQuery, 'MISS'),
+			'the read is purged:',
+			async (table: Record<string, string>[]) => {
+				const { query, response, fingerprints } = table[0]!;
+				const readQuery = queryParameters(query!);
+
+				await expectCacheStatus(readQuery, 'MISS');
+				await expectAnswer(readQuery, ids, cellRows(response!));
+
+				await expectFiledFingerprints(
+					filedMembers.get(queryKey(readQuery))!,
+					cellRows(fingerprints!),
+				);
+			},
 		);
 
 		then.optional(
-			'the read is still cached',
-			async () => await expectCacheStatus(readQuery, 'HIT'),
-		);
+			'the read is still cached:',
+			async (table: Record<string, string>[]) => {
+				const { query, response, fingerprints } = table[0]!;
+				const readQuery = queryParameters(query!);
 
-		and.optional('it answers:', async (table: Record<string, string>[]) => {
-			await expectAnswer(readQuery, ids, cellRows(table[0]!['response']!));
-		});
+				await expectCacheStatus(readQuery, 'HIT');
+				await expectAnswer(readQuery, ids, cellRows(response!));
+
+				await expectFiledFingerprints(
+					filedMembers.get(queryKey(readQuery))!,
+					cellRows(fingerprints!),
+				);
+			},
+		);
 
 		and.optional(
 			'the witness reads are purged:',
 			async (table: Record<string, string>[]) => {
-				for (const { query, response } of table) {
+				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);
 
 					await expectCacheStatus(witnessQuery, 'MISS');
 					await expectAnswer(witnessQuery, ids, cellRows(response!));
+
+					await expectFiledFingerprints(
+						filedMembers.get(queryKey(witnessQuery))!,
+						cellRows(fingerprints!),
+					);
 				}
 			},
 		);
@@ -405,11 +540,16 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(
 			'the witness reads are still cached:',
 			async (table: Record<string, string>[]) => {
-				for (const { query, response } of table) {
+				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);
 
 					await expectCacheStatus(witnessQuery, 'HIT');
 					await expectAnswer(witnessQuery, ids, cellRows(response!));
+
+					await expectFiledFingerprints(
+						filedMembers.get(queryKey(witnessQuery))!,
+						cellRows(fingerprints!),
+					);
 				}
 			},
 		);
@@ -420,13 +560,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write matching one pin but not the other leaves the read cached',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				whenSlotsCreated(steps, ids);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -435,13 +575,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write matching every pin purges the read',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				whenSlotsCreated(steps, ids);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -450,18 +590,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write changing a field the read never named leaves it cached',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is updated with note "rewritten"',
-					async () => {
-						await updateSlot(ids.get('target_slot')!, { note: 'rewritten' });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -470,18 +605,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write changing a field the read sorted on purges it',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is updated with note "rewritten"',
-					async () => {
-						await updateSlot(ids.get('target_slot')!, { note: 'rewritten' });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -490,18 +620,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read selecting every field is purged by any column change',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is updated with note "rewritten"',
-					async () => {
-						await updateSlot(ids.get('target_slot')!, { note: 'rewritten' });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -510,18 +635,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read filtered on a range binds the field without pinning a value',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is updated with note "rewritten"',
-					async () => {
-						await updateSlot(ids.get('target_slot')!, { note: 'rewritten' });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -530,18 +650,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a write to the field a range was read on purges it',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is updated with amount 30',
-					async () => {
-						await updateSlot(ids.get('target_slot')!, { amount: 30 });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -550,13 +665,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read filtered on a list of owners is purged by a write to any of them',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				whenSlotsCreated(steps, ids);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -565,13 +680,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read filtered on a list of owners survives a write outside it',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				whenSlotsCreated(steps, ids);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -580,18 +695,13 @@ describe.each(vendors)('%s', (vendor) => {
 			"a row moving into the read's slice purges it",
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "other_owner" is updated with owner "omicron"',
-					async () => {
-						await updateSlot(ids.get('other_owner')!, { owner: 'omicron' });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -600,18 +710,13 @@ describe.each(vendors)('%s', (vendor) => {
 			"a row moving out of the read's slice purges it",
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is updated with owner "sigma"',
-					async () => {
-						await updateSlot(ids.get('target_slot')!, { owner: 'sigma' });
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -620,13 +725,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read matching two ways is purged by a write matching either',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				whenSlotsCreated(steps, ids);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -635,13 +740,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a read matching two ways survives a write matching neither',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				whenSlotsCreated(steps, ids);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -650,18 +755,13 @@ describe.each(vendors)('%s', (vendor) => {
 			'a delete of a matching row purges the read',
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "target_slot" is deleted',
-					async () => {
-						await deleteSlot(ids.get('target_slot')!);
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
@@ -670,18 +770,13 @@ describe.each(vendors)('%s', (vendor) => {
 			"a delete outside the read's slice leaves it cached",
 			(steps) => {
 				const ids = new Map<string, number>();
-				const readQuery: Record<string, string | string[]> = {};
+				const filedMembers = new Map<string, string[]>();
 
-				defineGivenSteps(steps, ids, readQuery);
+				defineGivenSteps(steps, ids, filedMembers);
 
-				steps.when(
-					'slot "other_owner" is deleted',
-					async () => {
-						await deleteSlot(ids.get('other_owner')!);
-					},
-				);
+				defineWhenSteps(steps, ids);
 
-				defineThenSteps(steps, ids, readQuery);
+				defineThenSteps(steps, ids, filedMembers);
 			},
 			60_000,
 		);
