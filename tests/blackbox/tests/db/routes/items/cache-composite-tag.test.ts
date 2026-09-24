@@ -127,13 +127,13 @@ describe.each(vendors)('%s', (vendor) => {
 		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe(status);
 	}
 
-	// A witness names its rows by the marker the scenario created them under, so a
-	// scenario reads as rows in, rows out, with no id carried across its steps, and
-	// holds only the columns that carry its point.
+	// An expected answer names its rows by the marker the scenario created them
+	// under, so a scenario reads as rows in, rows out, with no id carried across its
+	// steps, and holds only the columns that carry its point.
 	async function expectAnswer(
 		query: Record<string, string>,
 		ids: Map<string, number>,
-		witness: Record<string, string>[],
+		expectedAnswer: Record<string, string>[],
 	) {
 		const markerById = new Map<number, string>();
 
@@ -141,7 +141,7 @@ describe.each(vendors)('%s', (vendor) => {
 			markerById.set(id, marker);
 		}
 
-		const columns = Object.keys(witness[0]!);
+		const columns = Object.keys(expectedAnswer[0]!);
 
 		const answered = (await readSlots(query)).body.data.map(
 			(row: Record<string, unknown>) => {
@@ -157,8 +157,8 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
-		expect(answered).toEqual(expect.arrayContaining(witness));
-		expect(answered).toHaveLength(witness.length);
+		expect(answered).toEqual(expect.arrayContaining(expectedAnswer));
+		expect(answered).toHaveLength(expectedAnswer.length);
 	}
 
 	function defineGivenSteps(
@@ -213,9 +213,9 @@ describe.each(vendors)('%s', (vendor) => {
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			// The MISS then HIT is the witness that there is an entry to purge at
-			// all: a scenario asserting a later HIT would pass just as well against
-			// a read that was never cacheable.
+			// The MISS then HIT proves there is an entry to purge at all: a
+			// scenario asserting a later HIT would pass just as well against a read
+			// that was never cacheable.
 			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
 				.toBe('MISS');
 
@@ -228,9 +228,9 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		// Filled after the read under test, because that step clears the whole cache
-		// before it fills its own entry, and these have to outlive it.
+		// before it fills its own entry, and the witnesses have to outlive it.
 		and(
-			'the following reads are cached:',
+			'the witness reads are cached:',
 			async (table: Record<string, string>[]) => {
 				for (const query of table) {
 					expect((await readSlots(query)).headers[cacheStatusHeader])
@@ -273,7 +273,7 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		and.optional(
-			'the following reads are purged:',
+			'the witness reads are purged:',
 			async (table: Record<string, string>[]) => {
 				for (const query of table) {
 					await expectCacheStatus(query, 'MISS');
@@ -282,7 +282,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		and.optional(
-			'the following reads are still cached:',
+			'the witness reads are still cached:',
 			async (table: Record<string, string>[]) => {
 				for (const query of table) {
 					await expectCacheStatus(query, 'HIT');
