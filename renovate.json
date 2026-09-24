@@ -10,7 +10,7 @@
 	"labels": [":robot: Dependency", "Run Blackbox"],
 	"dependencyDashboard": true,
 	"forkProcessing": "enabled",
-	"baseBranches": ["v11.10.1-prepare"],
+	"baseBranches": ["v11.10.1-hhh-dev"],
 	"constraints": { "node": "22", "pnpm": ">=12 <13" },
 	"constraintsFiltering": "strict",
 	"enabledManagers": ["npm", "github-actions"],
