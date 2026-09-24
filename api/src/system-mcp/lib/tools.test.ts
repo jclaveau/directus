@@ -659,7 +659,7 @@ test('The entry read never answers with the response inside it', async () => {
 	service.readCacheEntry.mockResolvedValue({
 		exists: true,
 		value: { data: [{ id: 1, email: 'ann@corp.io' }] },
-		pins: ['collection:articles'],
+		tags: ['collection:articles'],
 		tagCounts: { 'collection:articles': 2 },
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
@@ -675,7 +675,7 @@ test('The entry read never answers with the response inside it', async () => {
 
 	expect(answer).toEqual({
 		exists: true,
-		pins: ['collection:articles'],
+		tags: ['collection:articles'],
 		tagCounts: { 'collection:articles': 2 },
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },

@@ -8,7 +8,7 @@ import {
 	runStatus,
 	scheduleDraft,
 	scheduleRule,
-	tagDrift,
+	pinDrift,
 } from './cache-audit-panel';
 
 function run(overrides: Partial<CacheAuditRun> = {}): CacheAuditRun {
@@ -49,7 +49,7 @@ function finding(overrides: Partial<CacheAuditFinding> = {}): CacheAuditFinding 
 		collection: 'articles',
 		filledAt: 1_699_999_000_000,
 		ageMs: 1_000_000,
-		tags: ['articles', 'articles:1'],
+		pins: ['articles', 'articles:1'],
 		replayPins: ['articles', 'articles:1'],
 		diff: ['/data/0/title'],
 		purgesSinceFilled: [],
@@ -136,15 +136,15 @@ describe('findingVerdict', () => {
 	});
 });
 
-describe('tagDrift', () => {
+describe('pinDrift', () => {
 	test('is unknown where the replay pinned nothing', () => {
-		expect(tagDrift(finding({ replayPins: null }))).toBeNull();
+		expect(pinDrift(finding({ replayPins: null }))).toBeNull();
 	});
 
 	test('splits a drift into what the replay added and what it dropped', () => {
-		expect(tagDrift(finding({
+		expect(pinDrift(finding({
 			verdict: 'pin_drift',
-			tags: ['articles', 'articles:1'],
+			pins: ['articles', 'articles:1'],
 			replayPins: ['articles', 'authors'],
 		}))).toEqual({ added: ['authors'], dropped: ['articles:1'] });
 	});

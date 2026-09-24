@@ -18,7 +18,7 @@ import {
 	runStatus,
 	scheduleDraft,
 	scheduleRule,
-	tagDrift,
+	pinDrift,
 } from './cache-audit-panel';
 
 const emit = defineEmits<{ audited: [] }>();
@@ -413,7 +413,7 @@ const selectedFields = computed(() => {
 });
 
 function driftOf(finding: CacheAuditFinding): string | null {
-	const drift = tagDrift(finding);
+	const drift = pinDrift(finding);
 
 	if (drift === null || (drift.added.length === 0 && drift.dropped.length === 0)) {
 		return null;

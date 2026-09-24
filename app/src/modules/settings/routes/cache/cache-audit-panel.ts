@@ -170,7 +170,7 @@ export function findingVerdict(finding: CacheAuditFinding): string {
  * The pins a replay pinned that the fill did not, and the other way round —
  * the two halves a pin drift is made of.
  */
-export function tagDrift(
+export function pinDrift(
 	finding: CacheAuditFinding,
 ): { added: string[]; dropped: string[] } | null {
 	if (finding.replayPins === null) {

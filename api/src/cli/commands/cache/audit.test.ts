@@ -329,8 +329,8 @@ describe('the rendered report', () => {
 			'stale  GET /items/articles?fields[]=id',
 			'  key rk',
 			'  user user-1  collection articles  age 90s',
-			'  tags articles:owner=acme',
-			'  replay tags articles:owner=acme',
+			'  pins articles:owner=acme',
+			'  replay pins articles:owner=acme',
 			'  diff /data/0/title',
 			'  purged since the fill and still held:',
 			'    2026-09-16T10:00:00.000Z slices articles:owner=acme',
@@ -349,7 +349,7 @@ describe('the rendered report', () => {
 		const given = report({ findings: [finding({ purgesSinceFilled: [] })] });
 
 		expect(renderReport(given)).toContain(
-			'  no purge covered it since the fill: its tags never named the write',
+			'  no purge covered it since the fill: its pins never named the write',
 		);
 	});
 
