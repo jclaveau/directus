@@ -5,7 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"bench": "vitest --watch=false startup.perf resident.perf",
-		"bench:cache": "vitest --watch=false cache.perf"
+		"bench:cache": "vitest --watch=false cache.perf",
+		"bench:devserver": "vitest --watch=false devserver.perf"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",
