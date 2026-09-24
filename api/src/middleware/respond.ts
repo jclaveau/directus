@@ -37,7 +37,7 @@ import {
 } from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
-import { setScopedCacheTagsHeader } from '../utils/scoped-cache-tags-header.js';
+import { setScopedCachePinsHeader } from '../utils/scoped-cache-pins-header.js';
 import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import {
@@ -84,7 +84,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
 	if (env['CACHE_TAGS_HEADER']) {
 		if (readPinKeys.length > 0) {
-			setScopedCacheTagsHeader(
+			setScopedCachePinsHeader(
 				res,
 				`${env['CACHE_TAGS_HEADER']}`,
 				readPinKeys,
@@ -96,7 +96,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		const purged = res.locals['scopedCachePurged'];
 
 		if (Array.isArray(purged) && purged.length) {
-			setScopedCacheTagsHeader(
+			setScopedCachePinsHeader(
 				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
 				scopedCachePinKeys(purged),

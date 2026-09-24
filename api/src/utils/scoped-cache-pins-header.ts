@@ -11,7 +11,7 @@ const SEPARATOR = ', ';
 // CACHE_TAGS_HEADER_MAX_SIZE, the rest counted in a `<name>-omitted` sibling.
 // Labels, not their joined form: a value may hold the separator, and splitting
 // on it would cut such a pin in two and count it twice.
-export function setScopedCacheTagsHeader(
+export function setScopedCachePinsHeader(
 	res: Pick<ServerResponse, 'setHeader'>,
 	name: string,
 	labels: readonly string[],
@@ -22,10 +22,10 @@ export function setScopedCacheTagsHeader(
 
 	const env = useEnv();
 	const maxSize = parseBytesConfiguration(String(env['CACHE_TAGS_HEADER_MAX_SIZE']));
-	const tags = labels.map(printableScopedCachePin);
+	const printablePins = labels.map(printableScopedCachePin);
 
 	if (!maxSize) {
-		res.setHeader(name, tags.join(SEPARATOR));
+		res.setHeader(name, printablePins.join(SEPARATOR));
 		return;
 	}
 
@@ -33,8 +33,8 @@ export function setScopedCacheTagsHeader(
 	let size = 0;
 
 	// Printable output is pure ASCII, so a length is a byte count.
-	for (const tag of tags) {
-		let next = size + tag.length;
+	for (const printablePin of printablePins) {
+		let next = size + printablePin.length;
 
 		if (kept > 0) {
 			next += SEPARATOR.length;
@@ -49,10 +49,10 @@ export function setScopedCacheTagsHeader(
 	}
 
 	if (kept > 0) {
-		res.setHeader(name, tags.slice(0, kept).join(SEPARATOR));
+		res.setHeader(name, printablePins.slice(0, kept).join(SEPARATOR));
 	}
 
-	if (kept < tags.length) {
-		res.setHeader(`${name}-omitted`, String(tags.length - kept));
+	if (kept < printablePins.length) {
+		res.setHeader(`${name}-omitted`, String(printablePins.length - kept));
 	}
 }
