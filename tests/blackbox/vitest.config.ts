@@ -7,8 +7,8 @@ export default defineConfig({
 	test: {
 		poolOptions: {
 			forks: {
-				minForks: 1,
-				maxForks: 6,
+				minWorkers: 1,
+				maxWorkers: 6,
 			},
 		},
 		environment: './setup/environment.ts',
@@ -16,5 +16,23 @@ export default defineConfig({
 			sequencer: Sequencer,
 		},
 		testTimeout: 30_000,
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: 'common',
+					include: ['tests/common/**/*.test.ts', 'common/common.test.ts'],
+					globalSetup: './setup/setup.ts',
+				},
+			},
+			{
+				extends: true,
+				test: {
+					name: 'db',
+					include: ['tests/db/**/*.test.ts', 'common/common.test.ts'],
+					globalSetup: './setup/setup.ts',
+				},
+			},
+		],
 	},
 });

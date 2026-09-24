@@ -7,14 +7,15 @@ import { sleep } from '../utils/sleep';
 
 export default <Environment>{
 	name: 'custom',
-	transformMode: 'ssr',
+	viteEnvironment: 'ssr',
 
 	async setup(global) {
 		const { totalTestsCount, afterFiles } = JSON.parse(
 			await fs.readFile('sequencer-data.json', 'utf8'),
 		);
 
-		const testFilePath = global.__vitest_worker__.ctx.files[0].split('blackbox')[1];
+		const { files, projectName } = global.__vitest_worker__.ctx;
+		const testFilePath = files[0].filepath.split('blackbox')[1];
 		const serverUrl = process.env['serverUrl'];
 
 		if (!serverUrl || isNaN(totalTestsCount)) {
@@ -23,7 +24,7 @@ export default <Environment>{
 
 		const testIndex = getReversedTestIndex(
 			testFilePath,
-			global.__vitest_worker__.ctx.config.name,
+			projectName,
 			afterFiles ?? [],
 		);
 
