@@ -492,8 +492,8 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		guards the payload's tags by the snapshot the read took, folded into the one
-		useCollection took for the route's own collection
+		guards the payload's tags by the counters the read took before its query,
+		folded into the ones useCollection took for the route's own collection
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -513,7 +513,7 @@ describe('respond middleware', () => {
 						},
 					)),
 				},
-				{ scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' } },
+				{ scopedCacheEpochsBeforeQuery: { directus_users: '3', '*': '1' } },
 			),
 			next,
 		);
@@ -867,9 +867,9 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		refuses to cache a response scoped to a collection the snapshot never covered —
-		a hook's scopeTo runs after it, so no counter can show a purge of that
-		collection landed mid-read
+		refuses to cache a response scoped to a collection the before-query reading
+		never covered — a hook's scopeTo runs after it, so no counter can show a
+		purge of that collection landed mid-read
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -909,14 +909,14 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		guards a system route's fallback tag by the snapshot useCollection took, so a
-		read handing over no snapshot of its own is still compared after the fill
+		guards a system route's fallback tag by the reading useCollection took, so a
+		read handing over no reading of its own is still compared after the fill
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 		mocks.scopedCacheSweptDuringFill.mockResolvedValueOnce('directus_users');
 
 		await respond(makeReq({ collection: 'directus_users' }), makeRes({ data: [] }, {
-			scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' },
+			scopedCacheEpochsBeforeQuery: { directus_users: '3', '*': '1' },
 		}), next);
 
 		expect(mocks.scopedCacheSweptDuringFill).toHaveBeenCalledWith(
@@ -927,8 +927,8 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		folds the request snapshot into the read's own, earlier reading first, so a
-		purge between the two is still visible at fill time
+		folds the request's before-query reading into the read's own, earlier
+		reading first, so a purge between the two is still visible at fill time
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -937,7 +937,7 @@ describe('respond middleware', () => {
 				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
 				{ collection: 'authors', pinnedScope: {}, viewFields: [] },
 			],
-			scopedCacheEpochsAtRequest: { articles: '7', '*': '1' },
+			scopedCacheEpochsBeforeQuery: { articles: '7', '*': '1' },
 			scopedCacheEpochs: { articles: '8', authors: '4', '*': '1' },
 		}), next);
 
@@ -949,9 +949,9 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		leaves a response alone when no snapshot ran at all — with no wholesale entry
-		there is no guard to be outside of, and refusing would take the whole cache
-		down wherever the counters are off
+		leaves a response alone when no reading was taken at all — with no wholesale
+		entry there is no guard to be outside of, and refusing would take the whole
+		cache down wherever the counters are off
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
