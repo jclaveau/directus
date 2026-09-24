@@ -660,15 +660,35 @@ const redisStore: ScopedCacheStore = {
 
 	async removeIndexedEntries(
 		entries: readonly ScopedCacheIndexedEntry[],
+		indexPath: string | null,
 	): Promise<void> {
 		const membersByIndexKey = new Map<string, string[]>();
 
-		for (const { location } of entries) {
-			const { indexKey, member } = location as ScopedCacheMemberLocation;
-			const members = membersByIndexKey.get(indexKey) ?? [];
+		for (const { fingerprint, location } of entries) {
+			const { indexKey: foundIn, member } = location as ScopedCacheMemberLocation;
 
-			members.push(member);
-			membersByIndexKey.set(indexKey, members);
+			// Every set `fileIndexedEntries` put this member in, not the one it was
+			// read from: a read bounded to a list of values is filed under each of
+			// them, and a write carrying one of those values reads that value's split
+			// alone. Pruning only there leaves the member in the others, naming a key
+			// this purge has just dropped, and no later write to those values can
+			// remove it — it is tested again on each of them until its set expires.
+			//
+			// The set it WAS read from stands beside them, because the two agree only
+			// while the collection's index path is what it was when the entry was
+			// filed: a path since changed, or a foreign collection purged with none
+			// known, would otherwise leave the member exactly where it was found.
+			const indexKeys = new Set([
+				foundIn,
+				...scopedCacheFingerprintIndexKeys(fingerprint, indexPath),
+			]);
+
+			for (const indexKey of indexKeys) {
+				const members = membersByIndexKey.get(indexKey) ?? [];
+
+				members.push(member);
+				membersByIndexKey.set(indexKey, members);
+			}
 		}
 
 		if (membersByIndexKey.size === 0) {

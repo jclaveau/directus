@@ -424,6 +424,7 @@ async function purgeScopedCacheFingerprintIndex(
 				changed,
 			);
 		},
+		indexPath,
 	);
 
 	return evicted;
@@ -461,6 +462,7 @@ function purgeScopedCacheDeclaredPins(
 				);
 			});
 		},
+		indexPath,
 	);
 }
 
@@ -542,6 +544,7 @@ async function purgeScopedCacheIndexWhere(
 	cache: Keyv,
 	indexedEntries: AsyncGenerator<ScopedCacheIndexedEntry[]>,
 	purges: (fingerprint: ScopedCacheFingerprint) => boolean,
+	indexPath: string | null,
 ): Promise<ScopedCachePurgeSweep> {
 	const matched: ScopedCacheIndexedEntry[] = [];
 	const matchedKeys: string[] = [];
@@ -570,7 +573,7 @@ async function purgeScopedCacheIndexWhere(
 
 	const [evicted] = await Promise.all([
 		dropSweptScopedCacheEntries(cache, matchedKeys),
-		useScopedCacheStore().removeIndexedEntries(matched),
+		useScopedCacheStore().removeIndexedEntries(matched, indexPath),
 	]);
 
 	return { evicted, matchedKeys };

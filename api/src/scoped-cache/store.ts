@@ -131,7 +131,12 @@ export interface ScopedCacheStore {
 	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
 
 	/**
-	 * Drop the entries a purge matched from wherever the store found them.
+	 * Drop the entries a purge matched from everywhere the store filed them.
+	 *
+	 * Not only where it found them: a read bounded to a list of values is filed
+	 * under each of them, and a write matching one of those values reads only that
+	 * one's split. `indexPath` is what the filing was split by, so the store can
+	 * name the other splits the same entry went into.
 	 *
 	 * Best effort, and LOGGED rather than thrown: an entry left in the index names a
 	 * cache key that is already gone, which costs the next purge a compare and can
@@ -139,6 +144,7 @@ export interface ScopedCacheStore {
 	 */
 	removeIndexedEntries(
 		entries: readonly ScopedCacheIndexedEntry[],
+		indexPath: string | null,
 	): Promise<void>;
 
 	/**

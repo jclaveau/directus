@@ -1,7 +1,8 @@
 import { oneLine } from '@directus/utils';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	parseScopedCacheIndexMember,
+	redisScopedCacheStore,
 	renderScopedCacheIndexMember,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheRowIndexGlobs,
@@ -11,6 +12,16 @@ import { parseScopedCacheFingerprint } from './fingerprint.js';
 
 vi.mock('@directus/env', () => {
 	return { useEnv: () => ({ CACHE_NAMESPACE: 'scalabus' }) };
+});
+
+const srem = vi.fn();
+
+vi.mock('../redis/index.js', () => {
+	return {
+		useRedis: () => {
+			return { pipeline: () => ({ srem, exec: async () => [] }) };
+		},
+	};
 });
 
 describe('scopedCacheFingerprintIndexKeys', () => {
@@ -238,5 +249,66 @@ describe('scopedCacheRowIndexGlobs', () => {
 		});
 
 		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);
+	});
+});
+
+
+describe('removeIndexedEntries', () => {
+	beforeEach(() => srem.mockClear());
+
+	it(oneLine`
+		prunes a read bounded to a list of values from every value's set, not only
+		the one the purge read it in
+	`, async () => {
+		const member = 'slot:&owner=,kappa,lambda,&view=,id,owner,&|cache-key';
+
+		await redisScopedCacheStore().removeIndexedEntries(
+			[{
+				fingerprint: parseScopedCacheFingerprint(member.split('|')[0]!),
+				key: 'cache-key',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=lambda',
+					member,
+				},
+			}],
+			'owner',
+		);
+
+		expect(srem.mock.calls).toEqual([
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=lambda',
+				member,
+			],
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=kappa',
+				member,
+			],
+		]);
+	});
+
+	it(oneLine`
+		prunes where it found a member the index path no longer names a set for
+	`, async () => {
+		const member = 'slot:&owner=,kappa,&view=,id,&|cache-key';
+
+		await redisScopedCacheStore().removeIndexedEntries(
+			[{
+				fingerprint: parseScopedCacheFingerprint(member.split('|')[0]!),
+				key: 'cache-key',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=kappa',
+					member,
+				},
+			}],
+			null,
+		);
+
+		expect(srem.mock.calls).toEqual([
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=kappa',
+				member,
+			],
+			['scalabus:scoped-cache-index:fingerprint:slot:', member],
+		]);
 	});
 });
