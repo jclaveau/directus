@@ -11,7 +11,6 @@ import {
 	expect,
 	it,
 	vi,
-	type MockedFunction,
 } from 'vitest';
 
 // Force auto-purge on and route shouldClearCache() to a real (truthy) cache.
@@ -147,11 +146,11 @@ cascadeChildSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
 describe(oneLine`
 	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
 `, () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
@@ -1925,11 +1924,11 @@ sharedTerminalName['left_holder']!.scopedCacheFields = ['owner'];
 sharedTerminalName['right_holder']!.scopedCacheFields = ['owner'];
 
 describe('scoped cache path snapshot (one query for every path)', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
@@ -2076,11 +2075,11 @@ unresolvablePath['note']!.scopedCacheFields = ['ghost.owner', 'holder'];
 unresolvablePath['holder']!.scopedCacheFields = ['owner'];
 
 describe('scoped cache path snapshot — rows and paths it has to survive', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 

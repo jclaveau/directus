@@ -1,6 +1,6 @@
 import { findIndex } from 'lodash-es';
 import fs from 'node:fs/promises';
-import { BaseSequencer, type WorkspaceSpec } from 'vitest/node';
+import { BaseSequencer, type TestSpecification } from 'vitest/node';
 import { filesForShard } from './shard-files';
 import { flatAfterList, sequentialTestsList } from './sequential-tests';
 
@@ -8,29 +8,27 @@ export default class CustomSequencer extends BaseSequencer {
 	// Split files across `--shard=i/n` jobs, but keep every `before` file in each
 	// shard — the ordering barrier needs them. `sort()` then orders whatever this
 	// shard runs and writes the per-shard totalTestsCount and after chain.
-	override async shard(files: WorkspaceSpec[]) {
+	override async shard(files: TestSpecification[]) {
 		const shard = this.ctx.config.shard;
 
 		if (!shard) {
 			return files;
 		}
 
-		const project = files[0]![0].config.name as 'db' | 'common';
-
 		const mine = new Set(
 			filesForShard(
-				files.map(([, path]) => path),
-				project,
+				files.map((spec) => spec.moduleId),
+				files[0]!.project.name as 'db' | 'common',
 				shard.index,
 				shard.count,
 			),
 		);
 
-		return files.filter(([, path]) => mine.has(path));
+		return files.filter((spec) => mine.has(spec.moduleId));
 	}
 
-	override async sort(files: WorkspaceSpec[]) {
-		const project = files[0]![0].config.name as 'db' | 'common';
+	override async sort(files: TestSpecification[]) {
+		const project = files[0]!.project.name as 'db' | 'common';
 
 		if (files.length > 1) {
 			const list = sequentialTestsList[project];
@@ -40,8 +38,8 @@ export default class CustomSequencer extends BaseSequencer {
 				const onlyTests = [];
 
 				for (const sequentialTest of list.only) {
-					const testIndex = findIndex(files, ([_, testFile]) => {
-						return testFile.endsWith(sequentialTest);
+					const testIndex = findIndex(files, (spec) => {
+						return spec.moduleId.endsWith(sequentialTest);
 					});
 
 					if (testIndex !== -1) {
@@ -58,8 +56,8 @@ export default class CustomSequencer extends BaseSequencer {
 				files = onlyTests;
 			} else {
 				for (const sequentialTest of list.before.slice().reverse()) {
-					const testIndex = findIndex(files, ([_, testFile]) => {
-						return testFile.endsWith(sequentialTest);
+					const testIndex = findIndex(files, (spec) => {
+						return spec.moduleId.endsWith(sequentialTest);
 					});
 
 					if (testIndex !== -1) {
@@ -77,8 +75,8 @@ export default class CustomSequencer extends BaseSequencer {
 				}
 
 				for (const sequentialTest of flatAfterList(project)) {
-					const testIndex = findIndex(files, ([_, testFile]) => {
-						return testFile.endsWith(sequentialTest);
+					const testIndex = findIndex(files, (spec) => {
+						return spec.moduleId.endsWith(sequentialTest);
 					});
 
 					if (testIndex !== -1) {
@@ -98,11 +96,11 @@ export default class CustomSequencer extends BaseSequencer {
 		}
 
 		// The after entries this shard actually runs, in the order sorted above.
-		// `setup/environment.ts` counts its barrier slots back from the end of THIS
+		// `setup/sequential-gate.ts` counts its barrier slots back from the end of THIS
 		// list — the project-wide one would wait on completions that never happen
 		// in a shard that only got part of the chain.
 		const afterFiles = flatAfterList(project).filter((entry) => {
-			return files.some(([, testFile]) => testFile.endsWith(entry));
+			return files.some((spec) => spec.moduleId.endsWith(entry));
 		});
 
 		// Expose sequencer data to setup & tests

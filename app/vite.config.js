@@ -53,10 +53,10 @@ export default defineConfig({
 		__VUE_I18N_LEGACY_API__: false,
 	},
 	resolve: {
-		alias: [{ find: '@', replacement: path.resolve(__dirname, 'src') }],
+		alias: [{ find: '@', replacement: path.resolve(import.meta.dirname, 'src') }],
 	},
 	base: process.env.NODE_ENV === 'production' ? '' : '/admin',
-	...(!process.env.HISTOIRE && {
+	...(!process.env.POVESTE && {
 		server: {
 			port: 8080,
 			proxy: {
@@ -78,7 +78,7 @@ export default defineConfig({
 		environment: 'happy-dom',
 		deps: {
 			optimizer: {
-				web: {
+				client: {
 					exclude: ['pinia', 'url'],
 				},
 			},
@@ -134,7 +134,7 @@ function directusExtensions() {
 				build: {
 					rollupOptions: {
 						input: {
-							index: path.resolve(__dirname, 'index.html'),
+							index: path.resolve(import.meta.dirname, 'index.html'),
 							...APP_SHARED_DEPS.reduce((acc, dep) => ({ ...acc, [dep.replace(/\//g, '_')]: dep }), {}),
 						},
 						output: {

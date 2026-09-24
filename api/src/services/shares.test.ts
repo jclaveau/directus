@@ -20,7 +20,7 @@ const { send } = vi.hoisted(() => {
 
 vi.mock('./mail/index.js', () => {
 	return {
-		MailService: vi.fn(() => {
+		MailService: vi.fn(function () {
 			return { send };
 		}),
 	};

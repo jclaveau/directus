@@ -7,7 +7,11 @@ import { withMeta } from '../utils/read-meta.js';
 const execute = vi.fn();
 
 vi.mock('../services/graphql/index.js', () => {
-	return { GraphQLService: vi.fn(() => ({ execute })) };
+	return {
+		GraphQLService: vi.fn(function () {
+			return { execute };
+		}),
+	};
 });
 
 vi.mock('../middleware/graphql.js', () => ({ parseGraphQL: vi.fn() }));

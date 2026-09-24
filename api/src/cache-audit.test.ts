@@ -215,7 +215,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	vi.restoreAllMocks();
+	vi.resetAllMocks();
 	userLookups.mockReset();
 });
 

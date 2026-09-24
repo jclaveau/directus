@@ -107,9 +107,18 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
 
+      # The suite's fixtures are pulled from the fork's own mirror, so a run must
+      # be able to read its GHCR packages. Harmless once a package is public.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Start services
         run:
-          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio minio-mc -d --quiet-pull --wait
+          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio -d --quiet-pull --wait
 
       - name: Run tests
         run: TEST_DB=sqlite3 pnpm run test:blackbox --project common
@@ -190,9 +199,18 @@ jobs:
             -l 30
           echo "MSSQL compatibility level set successfully"
 
+      # The suite's fixtures are pulled from the fork's own mirror, so a run must
+      # be able to read its GHCR packages. Harmless once a package is public.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Start services
         run:
-          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio minio-mc -d --quiet-pull --wait
+          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio -d --quiet-pull --wait
 
       - name: Run tests
         run: >-

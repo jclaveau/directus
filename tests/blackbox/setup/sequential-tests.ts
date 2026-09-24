@@ -25,12 +25,19 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 				'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts',
 				'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts',
 			],
-			// Every suite that spawns its own Directus runs here, serialised. Left in the
-			// parallel middle they raced each other: `cache-takeover-scope` applied a
-			// unique constraint before its own junction columns existed (postgres 42703)
-			// while two siblings were spawning servers on the same runner. They only ever
-			// passed because of how the packer happened to group them, so each repack
-			// broke a different one.
+			// The suites below spawn their own Directus and came here one at a
+			// time, each after a race it lost in the parallel middle:
+			// `cache-takeover-scope` applied a unique constraint before its own
+			// junction columns existed (postgres 42703) while two siblings were
+			// spawning servers on the same runner.
+			//
+			// They are not every spawner, and the list does not aim to be. 106 of
+			// the 160 db files boot an instance, so a file absent here is the norm
+			// rather than an oversight — and a slot here buys less than it looks:
+			// `cache-audit` and `autoscale-churn` have each failed once from inside
+			// this chain, where the only company they had was the shard's own
+			// serial order. Serialising a file costs its whole runtime, so move one
+			// here on evidence that it raced, not on the fact that it spawns.
 			'/tests/db/routes/items/cache-cancel-write.test.ts',
 			'/tests/db/routes/items/cache-delete-scope.test.ts',
 			'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts',
@@ -125,7 +132,7 @@ export function flatAfterList(project: 'db' | 'common'): string[] {
 }
 
 /**
- * Where `testFilePath` sits in the completion barrier `setup/environment.ts`
+ * Where `testFilePath` sits in the completion barrier `setup/sequential-gate.ts`
  * waits on: a `before` slot counts up from the first file, an `after` slot counts
  * back from the last, and everything else runs once the `before` chain is done.
  *

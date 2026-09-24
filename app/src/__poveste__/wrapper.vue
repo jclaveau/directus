@@ -94,7 +94,7 @@ if (isIframe && topHtmlElement) {
 	@include meta.load-css('@/styles/main');
 }
 
-.histoire-generic-render-story:not(.__histoire-render-custom-controls) .custom-wrapper {
+.__poveste-render-story:not(.__poveste-render-custom-controls) .custom-wrapper {
 	position: relative;
 	height: calc(100vh - 2 * 24px);
 	padding: 24px;

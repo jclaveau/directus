@@ -23,7 +23,7 @@ const getMetaForQuery = vi.fn();
 
 vi.mock('../services/items.js', () => {
 	return {
-		ItemsService: vi.fn(() => {
+		ItemsService: vi.fn(function () {
 			return {
 				createOne,
 				createMany,
@@ -45,7 +45,11 @@ vi.mock('../services/items.js', () => {
 });
 
 vi.mock('../services/meta.js', () => {
-	return { MetaService: vi.fn(() => ({ getMetaForQuery })) };
+	return {
+		MetaService: vi.fn(function () {
+			return { getMetaForQuery };
+		}),
+	};
 });
 
 vi.mock('../middleware/collection-exists.js', () => ({ default: vi.fn() }));

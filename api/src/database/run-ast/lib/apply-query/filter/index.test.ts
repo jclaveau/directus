@@ -57,7 +57,7 @@ describe('boolean filter operators', () => {
 	for (const { filterOperator, sqlWhereClause } of withReverseOperators) {
 		for (const filterValue of [true, '', false]) {
 			test(`${filterOperator} with value ${filterValue}`, async () => {
-				const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+				const db = knex.default({ client: Client_SQLite3 });
 				const queryBuilder = db.queryBuilder();
 
 				const rootFilter = {
@@ -87,7 +87,7 @@ test(`filter values on bigint fields are correctly passed as such to db query`, 
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	// testing with value greater than Number.MAX_SAFE_INTEGER
@@ -126,7 +126,7 @@ for (const { operator, replacement, sql } of [
 			})
 			.build();
 
-		const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 
 		applyFilter(
@@ -163,7 +163,7 @@ test(`filtering m2o relation`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -219,7 +219,7 @@ test(`filtering nested m2o with sibling relational keys`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -268,7 +268,7 @@ const o2m_schema = new SchemaBuilder()
 	.build();
 
 test(`filtering o2m relation`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -300,7 +300,7 @@ test(`filtering o2m relation`, async () => {
 
 for (const quantifier of ['_some', '_none']) {
 	test(`filtering o2m relation with ${quantifier}`, async () => {
-		const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 		aliasFn.mockReturnValueOnce('alias');
 
@@ -348,7 +348,7 @@ test(`filtering o2m relation with sibling relational keys`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -387,7 +387,7 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -424,7 +424,7 @@ test(`filtering a2o relation`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias123');
 	aliasFn.mockReturnValueOnce('alias456');
@@ -475,7 +475,7 @@ test(`filtering _between`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -507,7 +507,7 @@ test(`filtering _in`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -539,7 +539,7 @@ test(`filtering _contains`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -572,7 +572,7 @@ const operator_schema = new SchemaBuilder()
 	.build();
 
 test(`filtering _and`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -606,7 +606,7 @@ test(`filtering _and`, async () => {
 });
 
 test(`filtering _or`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(
@@ -647,7 +647,7 @@ test(`filtering $FOLLOW against reverse o2m`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -685,7 +685,7 @@ test(`filtering on count(links)`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -721,7 +721,7 @@ test(`filtering on links with existing alias map`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 	const aliasMap = {};
@@ -788,7 +788,7 @@ test(`filter with partial field permissions`, async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 	const aliasMap = {};

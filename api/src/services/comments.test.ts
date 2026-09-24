@@ -70,7 +70,7 @@ const accountability: Accountability = {
 };
 
 describe('Services / Comments', () => {
-	const db = vi.mocked(knex.default({ client: MockClient }));
+	const db = knex.default({ client: MockClient });
 
 	beforeEach(() => {
 		vi.mocked(getCache).mockReturnValue({
@@ -83,6 +83,9 @@ describe('Services / Comments', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		// Restoring only unpatches the spies since vitest 4 — the module mocks keep
+		// their calls until they are reset.
+		vi.resetAllMocks();
 	});
 
 	it('should expand a valid @mention into its user preview in the notification message (line 137)', async () => {

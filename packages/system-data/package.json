@@ -29,7 +29,6 @@
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",
-		"esbuild": "catalog:",
 		"tsdown": "catalog:",
 		"typescript": "catalog:",
 		"unplugin-yaml": "catalog:"

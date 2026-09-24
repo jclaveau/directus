@@ -54,7 +54,7 @@ const schema = new SchemaBuilder()
 	.build();
 
 describe('Integration Tests', () => {
-	const db = vi.mocked(knex.default({ client: MockClient }));
+	const db = knex.default({ client: MockClient });
 	const tracker = createTracker(db);
 
 	afterEach(() => {
