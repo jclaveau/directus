@@ -125,7 +125,7 @@ export function flatAfterList(project: 'db' | 'common'): string[] {
 }
 
 /**
- * Where `testFilePath` sits in the completion barrier `setup/environment.ts`
+ * Where `testFilePath` sits in the completion barrier `setup/sequential-gate.ts`
  * waits on: a `before` slot counts up from the first file, an `after` slot counts
  * back from the last, and everything else runs once the `before` chain is done.
  *

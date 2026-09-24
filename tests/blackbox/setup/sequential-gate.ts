@@ -13,6 +13,10 @@ declare module 'vitest' {
 
 const serverUrl = process.env['serverUrl'];
 
+// The gate blocks until the files it depends on report completion, which can
+// outlast every other file still queued behind it.
+const gateTimeout = 600_000;
+
 let testFilePath: string;
 
 beforeAll(async () => {
@@ -57,14 +61,17 @@ beforeAll(async () => {
 			}
 		}
 		catch {
-			continue;
+			// A server still booting answers with a connection error, so the poll
+			// has to keep its pace rather than spin.
 		}
 
 		await sleep(1000);
 	}
-});
+}, gateTimeout);
 
 afterAll(async () => {
+	if (!testFilePath) return;
+
 	await axios.post(`${serverUrl}/items/tests_flow_completed`, {
 		test_file_path: testFilePath,
 	}, {

@@ -96,7 +96,7 @@ export default class CustomSequencer extends BaseSequencer {
 		}
 
 		// The after entries this shard actually runs, in the order sorted above.
-		// `setup/environment.ts` counts its barrier slots back from the end of THIS
+		// `setup/sequential-gate.ts` counts its barrier slots back from the end of THIS
 		// list — the project-wide one would wait on completions that never happen
 		// in a shard that only got part of the chain.
 		const afterFiles = flatAfterList(project).filter((entry) => {
