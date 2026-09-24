@@ -141,6 +141,11 @@ describe.each(vendors)('%s', (vendor) => {
 			markerById.set(id, marker);
 		}
 
+		if (expectedAnswer.length === 0) {
+			expect((await readSlots(query)).body.data).toEqual([]);
+			return;
+		}
+
 		const columns = Object.keys(expectedAnswer[0]!);
 
 		const answered = (await readSlots(query)).body.data.map(
@@ -159,6 +164,15 @@ describe.each(vendors)('%s', (vendor) => {
 
 		expect(answered).toEqual(expect.arrayContaining(expectedAnswer));
 		expect(answered).toHaveLength(expectedAnswer.length);
+	}
+
+	// A witness read states the markers it answers, so its verdict is a body and
+	// not a header: an entry silently refilled with other rows fails here instead
+	// of reading as the entry the scenario cached.
+	function expectedMarkerRows(markers: string) {
+		return markers === 'none'
+			? []
+			: markers.split(',').map((marker) => ({ marker }));
 	}
 
 	function defineGivenSteps(
@@ -232,12 +246,14 @@ describe.each(vendors)('%s', (vendor) => {
 		and(
 			'the witness reads are cached:',
 			async (table: Record<string, string>[]) => {
-				for (const query of table) {
+				for (const { markers, ...query } of table) {
 					expect((await readSlots(query)).headers[cacheStatusHeader])
 						.toBe('MISS');
 
 					expect((await readSlots(query)).headers[cacheStatusHeader])
 						.toBe('HIT');
+
+					await expectAnswer(query, ids, expectedMarkerRows(markers!));
 				}
 			},
 		);
@@ -275,8 +291,9 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(
 			'the witness reads are purged:',
 			async (table: Record<string, string>[]) => {
-				for (const query of table) {
+				for (const { markers, ...query } of table) {
 					await expectCacheStatus(query, 'MISS');
+					await expectAnswer(query, ids, expectedMarkerRows(markers!));
 				}
 			},
 		);
@@ -284,8 +301,9 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(
 			'the witness reads are still cached:',
 			async (table: Record<string, string>[]) => {
-				for (const query of table) {
+				for (const { markers, ...query } of table) {
 					await expectCacheStatus(query, 'HIT');
+					await expectAnswer(query, ids, expectedMarkerRows(markers!));
 				}
 			},
 		);
@@ -293,7 +311,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		scenario(
-			'a write matching one pair but not the other leaves the read cached',
+			'a write matching one pin but not the other leaves the read cached',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const readQuery: Record<string, string> = {};
@@ -308,7 +326,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			'a write matching every pair purges the read',
+			'a write matching every pin purges the read',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const readQuery: Record<string, string> = {};
