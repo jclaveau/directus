@@ -26,13 +26,13 @@
 		{
 			"groupName": "all non-major dependencies",
 			"description": "exclude minors with potential breaking changes",
-			"matchPackageNames": ["typescript", "esbuild"],
+			"matchPackageNames": ["typescript"],
 			"matchUpdateTypes": ["minor"],
 			"enabled": false
 		},
 		{
 			"groupName": null,
-			"matchPackageNames": ["typescript", "esbuild"],
+			"matchPackageNames": ["typescript"],
 			"matchUpdateTypes": ["minor"],
 			"enabled": true
 		},
