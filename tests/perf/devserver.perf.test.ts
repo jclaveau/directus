@@ -52,7 +52,18 @@ const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 type Phase = 'boot' | 'optimize' | 'graph';
 
-type Rep = Record<Phase, number> & { modules: number };
+type Rep = Record<Phase, number> & {
+	modules: number;
+	optimizeMs: number;
+	graphMs: number;
+};
+
+/**
+ * What a phase cost, both ways. `ROLLDOWN_WORKER_THREADS=1` is a cap on the pool
+ * that does the transforming, so any memory it gives back is only worth taking if
+ * the wall clock says what it charged for it.
+ */
+type Measured<T> = { value: T; peakMb: number; elapsedMs: number };
 
 /**
  * Resident size of the server and everything it forked. Rolldown's workers are
@@ -113,9 +124,10 @@ async function treeRssMb(rootPid: number): Promise<number> {
 async function peakDuring<T>(
 	pid: number,
 	work: () => Promise<T>,
-): Promise<[T, number]> {
+): Promise<Measured<T>> {
 	let peak = 0;
 	let sampling = true;
+	const startedAt = Date.now();
 
 	const sampler = (async () => {
 		while (sampling) {
@@ -126,7 +138,12 @@ async function peakDuring<T>(
 
 	try {
 		const value = await work();
-		return [value, Math.max(peak, await treeRssMb(pid))];
+
+		return {
+			value,
+			peakMb: Math.max(peak, await treeRssMb(pid)),
+			elapsedMs: Date.now() - startedAt,
+		};
 	}
 	finally {
 		sampling = false;
@@ -276,17 +293,21 @@ async function measureRep(): Promise<Rep> {
 		// fetch alone measured 312 MB against the 1597 MB the same boot reached
 		// once the crawl forced the work — the wait is what puts the cold cost in
 		// this phase instead of the next one.
-		const [, optimize] = await peakDuring(server.pid, async () => {
+		const optimize = await peakDuring(server.pid, async () => {
 			await fetch(`${server.url}${entry}`);
 			await waitForOptimizedDeps();
 		});
 
-		const [modules, graph] = await peakDuring(
-			server.pid,
-			async () => await crawl(server),
-		);
+		const graph = await peakDuring(server.pid, () => crawl(server));
 
-		return { boot, optimize, graph, modules };
+		return {
+			boot,
+			optimize: optimize.peakMb,
+			graph: graph.peakMb,
+			optimizeMs: optimize.elapsedMs,
+			graphMs: graph.elapsedMs,
+			modules: graph.value,
+		};
 	}
 	finally {
 		await server.stop();
@@ -303,6 +324,13 @@ test('the admin dev server holds a bounded amount while it serves', async () => 
 	const summaries = (['boot', 'optimize', 'graph'] as Phase[]).map((phase) =>
 		summarise(phase, reps_.map((rep) => rep[phase])));
 
+	// `boot` is a single reading taken once the server is listening, so it has a
+	// size and no span; only the two phases that run work can be timed.
+	const durations = [
+		summarise('optimize', reps_.map((rep) => rep.optimizeMs)),
+		summarise('graph', reps_.map((rep) => rep.graphMs)),
+	];
+
 	const result = {
 		arm,
 		commit: process.env['PERF_HEAD_SHA'] ?? 'local',
@@ -318,6 +346,7 @@ test('the admin dev server holds a bounded amount while it serves', async () => 
 		moduleBudget,
 		modules: reps_.map((rep) => rep.modules),
 		phases: summaries,
+		durations,
 		reps: reps_,
 	};
 
@@ -333,9 +362,17 @@ test('the admin dev server holds a bounded amount while it serves', async () => 
 		[
 			`### Dev server — ${arm} (vite ${result.vite})`,
 			'',
+			'Peak resident:',
+			'',
 			`| phase | min | median | p95 | max |`,
 			`| --- | ---: | ---: | ---: | ---: |`,
 			...summaries.map((summary) => summaryRow(summary, 'MB')),
+			'',
+			'Wall clock:',
+			'',
+			`| phase | min | median | p95 | max |`,
+			`| --- | ---: | ---: | ---: | ---: |`,
+			...durations.map((summary) => summaryRow(summary, 'ms')),
 			'',
 			`Peak resident of the server and its children, ${reps} cold boots,`
 			+ ` ${result.modules[0]} modules crawled. Node ${result.node}.`,
@@ -347,7 +384,7 @@ test('the admin dev server holds a bounded amount while it serves', async () => 
 	// answering the same question.
 	expect(new Set(result.modules).size).toBe(1);
 
-	for (const summary of summaries) {
+	for (const summary of [...summaries, ...durations]) {
 		expect(summary.median).toBeGreaterThan(0);
 	}
 }, 1_800_000);

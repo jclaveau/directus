@@ -387,6 +387,12 @@ jobs:
       # still built on rollup and esbuild, so a gap between 6 and 7 is a year of
       # ordinary changes and a gap between 7 and 8 is the rolldown swap alone.
       # Without it a single 6-to-8 number cannot say which of the two moved.
+      #
+      # `vite8-rwt1-again` runs after `vite6-again` rather than beside its twin.
+      # Two adjacent arms share whatever state the runner is in, so they would
+      # agree for a reason that has nothing to do with the flag; put at the end it
+      # is separated from `vite8-rwt1` by the same span `vite6-again` is separated
+      # from `vite6`, and the two repeats are then measuring the same drift.
       - name: Measure each arm
         env:
           PERF_REPS: ${{ inputs.reps || '5' }}
@@ -418,11 +424,12 @@ jobs:
             echo "::endgroup::"
           }
 
-          arm vite6       6.4.3 6.0.1 ''
-          arm vite7       7.3.6 6.0.1 ''
-          arm vite8       8.3.0 6.0.9 ''
-          arm vite8-rwt1  8.3.0 6.0.9 1
-          arm vite6-again 6.4.3 6.0.1 ''
+          arm vite6            6.4.3 6.0.1 ''
+          arm vite7            7.3.6 6.0.1 ''
+          arm vite8            8.3.0 6.0.9 ''
+          arm vite8-rwt1       8.3.0 6.0.9 1
+          arm vite6-again      6.4.3 6.0.1 ''
+          arm vite8-rwt1-again 8.3.0 6.0.9 1
 
       - name: Write the summary
         if: always()
@@ -442,19 +449,24 @@ jobs:
           {
             echo "### Dev server — peak resident by vite major"
             echo ""
-            echo "| arm | vite | boot | cold optimize | graph |"
-            echo "| --- | --- | ---: | ---: | ---: |"
+            echo "| arm | vite | boot | cold optimize | graph | optimize time | graph time |"
+            echo "| --- | --- | ---: | ---: | ---: | ---: | ---: |"
             jq -r '"| \(.arm) | \(.vite) | "
               + ([.phases[] | select(.name != "modules")
                   | "**\(.median | floor) MB**"] | join(" | "))
+              + " | "
+              + ([.durations[]
+                  | "\((.median / 100 | floor) / 10) s"] | join(" | "))
               + " |"' $results/devserver.*.json
             echo ""
             echo "Median of $(jq -r '.reps | length' $results/devserver.vite6.json) cold boots per arm,"
             echo "$(jq -r '.modules[0]' $results/devserver.vite6.json) modules crawled each."
             echo ""
-            echo "\`vite6\` is what the fork installs today. \`vite6-again\` repeats it"
-            echo "last: the gap between the two is the runner's drift, and no difference"
-            echo "narrower than that gap is a result."
+            echo "\`vite6\` is what the fork installs today. \`vite6-again\` and"
+            echo "\`vite8-rwt1-again\` repeat an earlier arm at the end: the gap between a"
+            echo "pair is the runner's drift, and no difference narrower than that gap is a"
+            echo "result. The times are there because a capped worker pool is a cap on the"
+            echo "transforming, so memory it gives back has a price to read off beside it."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report on the commit
