@@ -249,7 +249,7 @@ describe('a purge shown the rows it wrote', () => {
 		});
 
 		// One pass per pattern the rows can drop something under — the two bare ones
-		// plus one per pair of the row — and the first of them takes a second page.
+		// plus one per pin of the row — and the first of them takes a second page.
 		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
 			'0',
 			'7',

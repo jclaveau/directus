@@ -13,15 +13,15 @@ import {
 
 export type { ScopedCacheFingerprint } from '@directus/types';
 
-/** The pair naming what the read selected, sorted or filtered on. */
+/** The pin naming what the read selected, sorted or filtered on. */
 export const SCOPED_CACHE_FINGERPRINT_VIEW = 'view';
 
 /** The `view` value a read of every column carries: any write touches it. */
 export const SCOPED_CACHE_ANY_FIELD = '*';
 
-// In the serialised form `&` separates pairs, `,` wraps and separates a pair's
+// In the serialised form `&` separates pins, `,` wraps and separates a pin's
 // values, `|` joins a fingerprint to its cache key inside an index member, and `\`
-// escapes them all. A value carrying one raw would end its pair early — or, worse,
+// escapes them all. A value carrying one raw would end its pin early — or, worse,
 // read as two values, which widens the OR and purges entries no write reached.
 //
 // `*`, `?` and `[` are escaped for the search rather than for the grammar: the
@@ -50,7 +50,7 @@ export function escapeScopedCacheFingerprintGlob(rendered: string): string {
 /**
  * Split on a separator the escapes do not cover, keeping the escapes in the parts
  * so each can be unescaped on its own. A plain `String.split` cannot: it cuts at an
- * escaped separator too, and a value carrying `&` would come back as two pairs.
+ * escaped separator too, and a value carrying `&` would come back as two pins.
  */
 function splitUnescaped(input: string, separator: string): string[] {
 	const splitParts: string[] = [];
@@ -86,31 +86,31 @@ function splitUnescaped(input: string, separator: string): string[] {
 /**
  * The form Redis holds: `<collection>:&<key>=,<v1>,<v2>,&…&`.
  *
- * Pairs are sorted and every token is wrapped in commas, which is what makes a
+ * Pins are sorted and every token is wrapped in commas, which is what makes a
  * PARTIAL fingerprint a well-formed glob — `*&course_part=,4821,*` names every
- * entry pinned to that one value without naming `48210`. `view` rides as a pair
- * of its own so the write side reads it back the way it reads a pin, and is left
- * out entirely when the read names none — a serialised ROW has pairs and no
- * view.
+ * entry pinned to that one value without naming `48210`. `view` rides as a pin
+ * of its own so the write side reads it back the way it reads any other, and
+ * is left out entirely when the read names none — a serialised ROW has pins
+ * and no view.
  */
 export function renderScopedCacheFingerprint(
 	fingerprint: ScopedCacheFingerprint,
 ): string {
-	const renderedPairs = new Map<string, readonly string[]>(
+	const renderedPins = new Map<string, readonly string[]>(
 		Object.entries(fingerprint.pinnedScope ?? {}),
 	);
 
 	const viewFields = fingerprint.viewFields ?? [];
 
 	if (viewFields.length > 0) {
-		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_VIEW, viewFields);
+		renderedPins.set(SCOPED_CACHE_FINGERPRINT_VIEW, viewFields);
 	}
 
 	let renderedFingerprint = `${fingerprint.collection}:`;
 
-	for (const key of [...renderedPairs.keys()].sort()) {
+	for (const key of [...renderedPins.keys()].sort()) {
 		const sortedValues = [
-			...new Set(renderedPairs.get(key)!.map(escapeScopedCacheFingerprintToken)),
+			...new Set(renderedPins.get(key)!.map(escapeScopedCacheFingerprintToken)),
 		].sort();
 
 		renderedFingerprint += `&${escapeScopedCacheFingerprintToken(key)}=,`
@@ -140,32 +140,34 @@ export function parseScopedCacheFingerprint(
 		? ''
 		: serialized.slice(colonAt + 1);
 
-	for (const pair of splitUnescaped(fingerprintBody, '&')) {
-		if (pair === '') {
+	for (const serialisedPin of splitUnescaped(fingerprintBody, '&')) {
+		if (serialisedPin === '') {
 			continue;
 		}
 
 		// On the FIRST `=`, for the same reason the collection splits on the first
 		// colon: a key never carries one, a value can.
-		const assignAt = pair.indexOf('=');
+		const assignAt = serialisedPin.indexOf('=');
 
 		if (assignAt === -1) {
 			continue;
 		}
 
-		const pairKey = unescapeScopedCacheFingerprintToken(pair.slice(0, assignAt));
+		const pinKey = unescapeScopedCacheFingerprintToken(
+			serialisedPin.slice(0, assignAt),
+		);
 
 		// The wrapping commas are separators, not values: `,a,b,` is two values.
-		const pairValues = splitUnescaped(pair.slice(assignAt + 1), ',')
+		const pinValues = splitUnescaped(serialisedPin.slice(assignAt + 1), ',')
 			.slice(1, -1)
 			.map(unescapeScopedCacheFingerprintToken);
 
-		if (pairKey === SCOPED_CACHE_FINGERPRINT_VIEW) {
-			parsedFields = pairValues;
+		if (pinKey === SCOPED_CACHE_FINGERPRINT_VIEW) {
+			parsedFields = pinValues;
 			continue;
 		}
 
-		parsedScope[pairKey] = pairValues;
+		parsedScope[pinKey] = pinValues;
 	}
 
 	// Only what it carries: an absent member is how every other fingerprint spells

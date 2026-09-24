@@ -183,7 +183,7 @@ describe('renderScopedCacheIndexMember', () => {
 });
 
 describe('scopedCacheRowIndexGlobs', () => {
-	it('names one pattern per pair the row pins, and the two that pin none', () => {
+	it('names one pattern per pin the row carries, and the two that pin none', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
 			parseScopedCacheFingerprint('slot:&id=,1,&owner=,alpha,&'),
 		])).toEqual([
@@ -194,7 +194,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 		]);
 	});
 
-	it('names each value of a multi-valued pair, once across the batch', () => {
+	it('names each value of a multi-valued pin, once across the batch', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
 			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
 			parseScopedCacheFingerprint('slot:&owner=,beta,&'),

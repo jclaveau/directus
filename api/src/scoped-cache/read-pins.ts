@@ -1279,10 +1279,10 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 
 		for (const one of left) {
 			for (const other of right) {
-				const bothPairs = new Map<string, Set<unknown>>();
-				unionPins(bothPairs, one);
-				unionPins(bothPairs, other);
-				mergedQueryCases.push(bothPairs);
+				const bothSidesPins = new Map<string, Set<unknown>>();
+				unionPins(bothSidesPins, one);
+				unionPins(bothSidesPins, other);
+				mergedQueryCases.push(bothSidesPins);
 			}
 		}
 

@@ -26,7 +26,7 @@ describe('renderScopedCacheFingerprint', () => {
 	// The `*` of a read bound to every field is escaped like any other token: a
 	// field cannot be named `*`, so nothing is lost, and the escape rule stays one
 	// rule rather than one rule and an exception a pattern would have to know.
-	it('lists a multi-valued pair once, sorted and deduped', () => {
+	it('lists a multi-valued pin once, sorted and deduped', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
 			pinnedScope: { course_part: ['2', '1', '2'] },
@@ -34,7 +34,7 @@ describe('renderScopedCacheFingerprint', () => {
 		})).toBe('student_time_slot:&course_part=,1,2,&view=,\\*,&');
 	});
 
-	it('leaves out the view pair when the read names none', () => {
+	it('leaves out the view pin when the read names none', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
 			pinnedScope: { user: ['A'] },
@@ -129,7 +129,7 @@ describe('parseScopedCacheFingerprint', () => {
 });
 
 describe('scopedCacheFingerprintOf', () => {
-	it('folds two pins on one field into one pair', () => {
+	it('folds two pins on one field into one', () => {
 		expect(scopedCacheFingerprintOf(
 			'note',
 			[
@@ -200,21 +200,21 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 		'slot:&id=,913,&method=,spaced,&owner=,alpha,&',
 	);
 
-	it('matches a row satisfying every pair', () => {
+	it('matches a row satisfying every pin', () => {
 		expect(scopedCacheFingerprintMatchesRow(
 			parseScopedCacheFingerprint('slot:&method=,spaced,&owner=,alpha,&view=,*,&'),
 			row,
 		)).toBe(true);
 	});
 
-	it('refuses a row satisfying one pair but not the other', () => {
+	it('refuses a row satisfying one pin but not the other', () => {
 		expect(scopedCacheFingerprintMatchesRow(
 			parseScopedCacheFingerprint('slot:&method=,spaced,&owner=,beta,&view=,*,&'),
 			row,
 		)).toBe(false);
 	});
 
-	it('matches a row on any value of a multi-valued pair', () => {
+	it('matches a row on any value of a multi-valued pin', () => {
 		expect(scopedCacheFingerprintMatchesRow(
 			parseScopedCacheFingerprint('slot:&owner=,alpha,beta,&'),
 			row,
@@ -235,7 +235,7 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 		)).toBe(false);
 	});
 
-	it('refuses a row carrying no pair of that name at all', () => {
+	it('refuses a row carrying no pin of that name at all', () => {
 		expect(scopedCacheFingerprintMatchesRow(
 			parseScopedCacheFingerprint('slot:&ner=,alpha,&'),
 			row,
@@ -346,7 +346,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 	});
 
 	// The `_or` across two fields: a row matching either changes the response, so
-	// each way is its own fingerprint. One fingerprint holding both pairs would
+	// each way is its own fingerprint. One fingerprint holding both pins would
 	// match a row carrying both and nothing else.
 	it('renders one fingerprint per way the read matches a collection', () => {
 		expect(scopedCacheFingerprintsByCollection(
@@ -388,7 +388,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 		'slot:&method=,spaced,&owner=,alpha,&view=,id,owner,&',
 	);
 
-	it('purges when the row satisfies every pair and a bound field changed', () => {
+	it('purges when the row satisfies every pin and a bound field changed', () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,
 			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&')],
@@ -397,7 +397,7 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 	});
 
 	it(oneLine`
-		leaves the read alone when the row satisfies one pair but not the other
+		leaves the read alone when the row satisfies one pin but not the other
 	`, () => {
 		expect(scopedCacheFingerprintPurgedBy(
 			read,

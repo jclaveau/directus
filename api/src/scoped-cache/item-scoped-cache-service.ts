@@ -283,7 +283,7 @@ export class ItemScopedCacheService {
 	 *
 	 * One fingerprint per ROW, never one per value: `owner=alpha` and
 	 * `method=spaced` coming from two DIFFERENT rows must not read as one row
-	 * holding both, which is exactly what a read pinned to that pair depends on.
+	 * holding both, which is exactly what a read pinned to that pin depends on.
 	 *
 	 * Always emits the primary-key slice of every key, on every collection, whether it
 	 * declares scope fields or not: the read side pins that axis on every collection,
@@ -1492,7 +1492,7 @@ export class ItemScopedCacheService {
 		// The fields each collection is bound to, folded into its fingerprint at
 		// fill time. Attached only for a collection whose pins are ALL computed: a
 		// hook's pin comes from enrichment outside the AST, so which fields that
-		// enrichment read is unknown, and a `fields` pair narrower than the truth
+		// enrichment read is unknown, and a `fields` pin narrower than the truth
 		// would keep an entry a write did change. A collection left out is bound to
 		// all of its fields, which every write touches.
 		const queryCaseFields = plan.fieldsByCollection();

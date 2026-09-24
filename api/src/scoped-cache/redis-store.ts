@@ -377,7 +377,7 @@ export function scopedCacheRowIndexKeys(
  *
  * `SSCAN … MATCH` filters server-side, so a member matching none of these never
  * crosses the wire — and the caller's own test still decides, since a glob over a
- * serialised fingerprint can say a pair is absent but not that the whole query
+ * serialised fingerprint can say a pin is absent but not that the whole query
  * case holds.
  */
 export function scopedCacheRowIndexGlobs(
@@ -395,7 +395,7 @@ export function scopedCacheRowIndexGlobs(
 
 	for (const { pinnedScope = {} } of rowFingerprints) {
 		for (const [field, values] of Object.entries(pinnedScope)) {
-			const pairKey = escapeScopedCacheFingerprintGlob(
+			const pinKey = escapeScopedCacheFingerprintGlob(
 				escapeScopedCacheFingerprintToken(field),
 			);
 
@@ -404,7 +404,7 @@ export function scopedCacheRowIndexGlobs(
 					escapeScopedCacheFingerprintToken(value),
 				);
 
-				globPatterns.add(`${collectionToken}:*&${pairKey}=*,${valueToken},*`);
+				globPatterns.add(`${collectionToken}:*&${pinKey}=*,${valueToken},*`);
 			}
 
 			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {

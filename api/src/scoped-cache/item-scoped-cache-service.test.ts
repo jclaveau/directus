@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 // `item` scopes on two flat columns, and on the owner its `parent` M2O leads to, so
-// one mutated row of it carries a pair per axis a read of it can pin itself to.
+// one mutated row of it carries a pin per axis a read of it can pin itself to.
 const schema = new SchemaBuilder()
 	.collection('item', (c) => {
 		c.field('id').id();
