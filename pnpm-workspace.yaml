@@ -310,7 +310,7 @@ overrides:
   tar-fs: 3.1.2
 
 # `directus` and `@directus/api` each list the other under dependencies. pnpm 10
-# only warned about the cycle; 11 refuses to order the two build tasks until it
+# only warned about the cycle; 12 refuses to order the two build tasks until it
 # is told an arbitrary order between them is fine.
 ignoreWorkspaceCycles: true
 

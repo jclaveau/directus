@@ -33,9 +33,9 @@
 		"typescript": "catalog:",
 		"typescript-eslint": "catalog:"
 	},
-	"packageManager": "pnpm@11.27.1",
+	"packageManager": "pnpm@12.6.0",
 	"engines": {
 		"node": "22",
-		"pnpm": ">=11 <12"
+		"pnpm": ">=12 <13"
 	}
 }
