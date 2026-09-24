@@ -7,7 +7,7 @@ node_modules/
 # Builds / Caches
 dist/
 coverage/
-.histoire/
+.poveste/
 *.tsbuildinfo
 **/.vitepress/cache/
 **/.vitepress/.temp/
