@@ -35,13 +35,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | other_owner  | beta  | spaced | third  | 30     |
       | other_method | alpha | slow   | fourth | 40     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | alpha    |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | alpha |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | alpha              | spaced              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | filter[method][_eq] | markers      |
       | id,owner | beta               | spaced              | other_owner  |
@@ -66,13 +61,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | target_slot  | gamma | spaced | first | 10     |
       | other_method | gamma | slow   | third | 30     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | gamma    |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | gamma |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | gamma              | spaced              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | filter[method][_eq] | markers      |
       | id,owner | gamma              | slow                | other_method |
@@ -93,13 +83,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | delta | spaced | first | 10     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | delta    |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | delta |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | delta              | spaced              | target_slot |
     And the witness reads are cached:
       | fields        | filter[owner][_eq] | filter[method][_eq] | markers     |
       | id,owner,note | delta              | spaced              | target_slot |
@@ -117,13 +102,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner   | method | note  | amount |
       | target_slot | epsilon | spaced | first | 10     |
     And this read is cached:
-      | param              | value    |
-      | fields             | id,owner |
-      | filter[owner][_eq] | epsilon  |
-      | sort               | note     |
-    And the cached read answers:
-      | marker      | owner   |
-      | target_slot | epsilon |
+      | fields   | filter[owner][_eq] | sort | markers     |
+      | id,owner | epsilon            | note | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | markers     |
       | id,owner | epsilon            | target_slot |
@@ -141,9 +121,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | zeta  | spaced | first | 10     |
     And this read is cached:
-      | param              | value |
-      | fields             | *     |
-      | filter[owner][_eq] | zeta  |
+      | fields | filter[owner][_eq] | markers     |
+      | *      | zeta               | target_slot |
     And the cached read answers:
       | marker      | owner | note  |
       | target_slot | zeta  | first |
@@ -164,10 +143,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | theta | spaced | first | 10     |
     And this read is cached:
-      | param               | value           |
-      | fields              | id,owner,amount |
-      | filter[owner][_eq]  | theta           |
-      | filter[amount][_gt] | 5               |
+      | fields          | filter[owner][_eq] | filter[amount][_gt] | markers     |
+      | id,owner,amount | theta              | 5                   | target_slot |
     And the cached read answers:
       | marker      | owner | amount |
       | target_slot | theta | 10     |
@@ -188,10 +165,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | iota  | spaced | first | 10     |
     And this read is cached:
-      | param               | value           |
-      | fields              | id,owner,amount |
-      | filter[owner][_eq]  | iota            |
-      | filter[amount][_gt] | 5               |
+      | fields          | filter[owner][_eq] | filter[amount][_gt] | markers     |
+      | id,owner,amount | iota               | 5                   | target_slot |
     And the cached read answers:
       | marker      | owner | amount |
       | target_slot | iota  | 10     |
@@ -212,12 +187,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | kappa | spaced | first | 10     |
     And this read is cached:
-      | param              | value        |
-      | fields             | id,owner     |
-      | filter[owner][_in] | kappa,lambda |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | kappa |
+      | fields   | filter[owner][_in] | markers     |
+      | id,owner | kappa,lambda       | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_in] | markers     |
       | id,owner | kappa              | target_slot |
@@ -238,12 +209,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | mu    | spaced | first | 10     |
     And this read is cached:
-      | param              | value    |
-      | fields             | id,owner |
-      | filter[owner][_in] | mu,nu    |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | mu    |
+      | fields   | filter[owner][_in] | markers     |
+      | id,owner | mu,nu              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_in] | markers     |
       | id,owner | mu,xi              | target_slot |
@@ -265,13 +232,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | other_owner  | pi      | spaced | second | 20     |
       | other_method | omicron | slow   | third  | 30     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | omicron  |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner   |
-      | target_slot | omicron |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | omicron            | spaced              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | filter[method][_eq] | markers      |
       | id,owner | pi                 | spaced              | other_owner  |
@@ -295,13 +257,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | target_slot  | rho   | spaced | first | 10     |
       | other_method | rho   | slow   | third | 30     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | rho      |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | rho   |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | rho                | spaced              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | filter[method][_eq] | markers      |
       | id,owner | sigma              | spaced              | none         |
@@ -321,10 +278,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | tau   | slow   | first | 10     |
     And this read is cached:
-      | param                       | value           |
-      | fields                      | id,owner,method |
-      | filter[_or][0][owner][_eq]  | tau             |
-      | filter[_or][1][method][_eq] | spaced          |
+      | fields          | filter[_or][0][owner][_eq] | filter[_or][1][method][_eq] | markers     |
+      | id,owner,method | tau                        | spaced                      | target_slot |
     And the cached read answers:
       | marker      | owner | method |
       | target_slot | tau   | slow   |
@@ -348,10 +303,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | marker      | owner | method | note  | amount |
       | target_slot | omega | slow   | first | 10     |
     And this read is cached:
-      | param                       | value           |
-      | fields                      | id,owner,method |
-      | filter[_or][0][owner][_eq]  | omega           |
-      | filter[_or][1][method][_eq] | spaced          |
+      | fields          | filter[_or][0][owner][_eq] | filter[_or][1][method][_eq] | markers     |
+      | id,owner,method | omega                      | spaced                      | target_slot |
     And the cached read answers:
       | marker      | owner | method |
       | target_slot | omega | slow   |
@@ -375,13 +328,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | target_slot  | upsilon | spaced | first | 10     |
       | other_method | upsilon | slow   | third | 30     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | upsilon  |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner   |
-      | target_slot | upsilon |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | upsilon            | spaced              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | filter[method][_eq] | markers      |
       | id,owner | upsilon            | slow                | other_method |
@@ -398,13 +346,8 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | target_slot | chi   | spaced | first  | 10     |
       | other_owner | psi   | spaced | second | 20     |
     And this read is cached:
-      | param               | value    |
-      | fields              | id,owner |
-      | filter[owner][_eq]  | chi      |
-      | filter[method][_eq] | spaced   |
-    And the cached read answers:
-      | marker      | owner |
-      | target_slot | chi   |
+      | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
+      | id,owner | chi                | spaced              | target_slot |
     And the witness reads are cached:
       | fields   | filter[owner][_eq] | filter[method][_eq] | markers     |
       | id,owner | psi                | spaced              | other_owner |

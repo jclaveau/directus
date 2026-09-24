@@ -219,9 +219,9 @@ describe.each(vendors)('%s', (vendor) => {
 		// The query is the scenario's own table, so a reader sees what is cached
 		// where the scenario says it is cached, and the `Then` reads it back.
 		and('this read is cached:', async (table: Record<string, string>[]) => {
-			for (const row of table) {
-				readQuery[row['param']!] = row['value']!;
-			}
+			const { markers, ...query } = table[0]!;
+
+			Object.assign(readQuery, query);
 
 			await request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -235,11 +235,18 @@ describe.each(vendors)('%s', (vendor) => {
 
 			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
 				.toBe('HIT');
+
+			await expectAnswer(readQuery, ids, expectedMarkerRows(markers!));
 		});
 
-		and('the cached read answers:', async (table: Record<string, string>[]) => {
-			await expectAnswer(readQuery, ids, table);
-		});
+		// Only where the read binds a column its markers do not carry: the value
+		// the scenario is about to move.
+		and.optional(
+			'the cached read answers:',
+			async (table: Record<string, string>[]) => {
+				await expectAnswer(readQuery, ids, table);
+			},
+		);
 
 		// Filled after the read under test, because that step clears the whole cache
 		// before it fills its own entry, and the witnesses have to outlive it.

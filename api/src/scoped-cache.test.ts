@@ -250,7 +250,7 @@ describe('the exit form', () => {
 	});
 });
 
-// The blackbox witness covers the rules end to end against a real database; these
+// The blackbox suite covers the rules end to end against a real database; these
 // are the shapes it cannot build — a cycle, a diamond, and a rule-less relation.
 describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	function cascadeRelation(collection: string, related: string) {
@@ -4428,8 +4428,9 @@ describe('the purge counters a fill is guarded by', () => {
 
 // The counters themselves, as opposed to the merge rules above: what a read asks
 // Redis for before its query, and what it answers when it cannot ask. Every arm
-// below is a failure or a configuration one, so none of them has a blackbox witness
-// — a read that reads nothing looks exactly like one that found nothing moved.
+// below is a failure or a configuration one, so none of them can be covered in
+// blackbox — a read that reads nothing looks exactly like one that found nothing
+// moved.
 describe('reading and bumping the purge counters', () => {
 	const mget = vi.fn();
 
