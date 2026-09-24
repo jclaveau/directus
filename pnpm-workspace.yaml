@@ -256,7 +256,7 @@ catalog:
   rate-limiter-flexible: 7.4.0
   rimraf: 6.1.3
   rolldown: 1.2.10
-  rolldown-plugin-istanbul: git+https://github.com/jclaveau/rolldown-plugin-istanbul.git
+  rolldown-plugin-istanbul: git+https://github.com/jclaveau/rolldown-plugin-istanbul.git#29c826380f1b9b87de352a8e9c85bc8e56345e0b
   rollup: 4.62.2
   rollup-plugin-node-externals: 8.1.2
   rollup-plugin-styler: 2.0.0
@@ -315,7 +315,7 @@ onlyBuiltDependencies:
   - argon2
   - isolated-vm
   - oracledb
-  - 'rolldown-plugin-istanbul@https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/7dc36ade898ed255aad00677d4e06a759f4be000'
+  - 'rolldown-plugin-istanbul@https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b'
   - sharp
   - sqlite3
   - vue-demi
