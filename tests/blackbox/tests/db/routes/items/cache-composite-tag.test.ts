@@ -15,7 +15,7 @@ import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 
 const SLOT = 'composite_tag_slot';
 const cacheStatusHeader = 'x-cache-status';
@@ -82,6 +82,27 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await awaitDirectusConnection(port);
 	}, 60_000);
+
+	// A scenario states the rows it starts from, and all fifteen read the one
+	// collection: rows a scenario left behind answer the next one's read. A filter
+	// pinning an owner no other scenario uses hides that, an `_or` branch bound to
+	// a shared `method` does not — it answered with every row the file had created
+	// so far.
+	beforeEach(async () => {
+		const existing = await request(getUrl(vendor, env))
+			.get(`/items/${SLOT}`)
+			.query({ fields: 'id', limit: '-1' })
+			.set('Authorization', auth);
+
+		const existingIds = existing.body.data.map((row: { id: number }) => row.id);
+
+		if (existingIds.length > 0) {
+			await request(getUrl(vendor, env))
+				.delete(`/items/${SLOT}`)
+				.send(existingIds)
+				.set('Authorization', auth);
+		}
+	});
 
 	afterAll(async () => {
 		instance.kill();
