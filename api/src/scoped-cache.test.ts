@@ -1950,12 +1950,11 @@ describe('startScopedCachePurgeRecovery', () => {
 
 		startScopedCachePurgeRecovery();
 
-		// The boot drain reaches `cache.js` through a lazy import, and vitest 4 serves
-		// the real module — its real Redis client — for the first one of those it sees.
-		// The reconnect drain is a real trigger and a tick later, so it gets the mock.
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
+		// Every drain queues behind the one before it, process-wide, so the boot pass
+		// this call starts can still be waiting on the drains the tests above left
+		// running. `ready` is a real second trigger and queues a pass of its own.
 		const ready = onRedisEvent.mock.calls.find(([event]) => event === 'ready');
+		expect(ready).toBeDefined();
 		ready![1]();
 
 		await vi.waitFor(() => {
