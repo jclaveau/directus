@@ -25,7 +25,7 @@ import {
 	dropScopedCacheIndex,
 	earlierScopedCacheEpoch,
 	flushResponseCache,
-	foldHandedOverScopedCacheEpochs,
+	foldScopedCacheEpochsFromHookDeclarations,
 	indexScopedCacheEntry,
 	isPinnableScopeType,
 	mergeScopedCacheEpochs,
@@ -4364,22 +4364,22 @@ describe('the purge counters a fill is guarded by', () => {
 		keeps the read's own reading over a counter a hook handed for the same
 		collection
 	`, () => {
-		expect(foldHandedOverScopedCacheEpochs(
+		expect(foldScopedCacheEpochsFromHookDeclarations(
 			{ articles: '7', '*': '1' },
 			{ articles: '9', authors: '4' },
 		)).toEqual({ articles: '7', '*': '1', authors: '4' });
 	});
 
 	it(oneLine`
-		takes a handed-over counter for a collection the before-query reading never
+		takes a declared counter for a collection the before-query reading never
 		named, since that is the only reading of it there is
 	`, () => {
-		expect(foldHandedOverScopedCacheEpochs({}, { authors: '4' }))
+		expect(foldScopedCacheEpochsFromHookDeclarations({}, { authors: '4' }))
 			.toEqual({ authors: '4' });
 	});
 
-	it('keeps a handed-over null, which is the earliest reading there is', () => {
-		expect(foldHandedOverScopedCacheEpochs({}, { authors: null }))
+	it('keeps a declared null, which is the earliest reading there is', () => {
+		expect(foldScopedCacheEpochsFromHookDeclarations({}, { authors: null }))
 			.toEqual({ authors: null });
 	});
 

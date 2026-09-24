@@ -127,8 +127,8 @@ export async function bumpScopedCacheEpochs(
 }
 
 /**
- * Fold in the counters a read hook handed over, keeping the read's OWN before-query
- * reading wherever it has one.
+ * Fold in the counters the hook declarations carry, keeping the read's OWN
+ * before-query reading wherever it has one.
  *
  * Not the rule the hook declarations use to merge two DECLARED counters, and it
  * does not need to be: the read's own value was read before its query, so it is
@@ -136,13 +136,13 @@ export async function bumpScopedCacheEpochs(
  * collection that reading never named has no such guarantee, which is why the
  * hook's value is taken there and compared where two of them meet.
  */
-export function foldHandedOverScopedCacheEpochs(
+export function foldScopedCacheEpochsFromHookDeclarations(
 	epochsBeforeQuery: ScopedCacheEpochs,
-	handedOver: ScopedCacheEpochs,
+	fromHookDeclarations: ScopedCacheEpochs,
 ): ScopedCacheEpochs {
 	const folded = { ...epochsBeforeQuery };
 
-	for (const [collection, epoch] of Object.entries(handedOver)) {
+	for (const [collection, epoch] of Object.entries(fromHookDeclarations)) {
 		if (collection in folded === false) {
 			folded[collection] = epoch;
 		}

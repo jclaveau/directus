@@ -24,7 +24,7 @@ import type { Knex } from 'knex';
 import { getCache } from '../cache.js';
 import {
 	createScopedCacheHookDeclarations,
-	foldHandedOverScopedCacheEpochs,
+	foldScopedCacheEpochsFromHookDeclarations,
 	ItemScopedCacheService,
 	readScopedCacheEpochs,
 	scopedCacheCollectionsChangedByOnDelete,
@@ -877,7 +877,7 @@ implements AbstractService<Item> {
 				scopedCacheUnautopurgeableFingerprints,
 				// A `scopeTo` names a collection the before-query reading could not know
 				// about, and hands over the counter its own dependent read took.
-				scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
+				scopedCacheEpochs: foldScopedCacheEpochsFromHookDeclarations(
 					scopedCacheEpochs,
 					scopedCacheHookDeclarations.epochs,
 				),
