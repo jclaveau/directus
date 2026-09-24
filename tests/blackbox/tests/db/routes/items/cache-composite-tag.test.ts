@@ -92,15 +92,15 @@ describe.each(vendors)('%s', (vendor) => {
 	});
 
 	// A written row names itself by the marker the scenario files it under, and
-	// carries the columns the write is about: every one of them on a create, the
-	// ones it changes on an update, none at all on a delete.
-	type WrittenSlot = Partial<SlotRow> & { marker: string };
+	// carries under `data` the body its request sends: every column on a create,
+	// the ones it changes on an update, none at all on a delete.
+	type WrittenSlot = { marker: string; data?: Partial<SlotRow> };
 
 	async function createSlots(rows: WrittenSlot[], ids: Map<string, number>) {
-		for (const { marker, ...columns } of rows) {
+		for (const { marker, data } of rows) {
 			const response = await request(getUrl(vendor, env))
 				.post(`/items/${SLOT}`)
-				.send(columns)
+				.send(data)
 				.set('Authorization', auth);
 
 			expect(response.statusCode).toBe(200);
@@ -109,10 +109,10 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	async function updateSlots(rows: WrittenSlot[], ids: Map<string, number>) {
-		for (const { marker, ...columns } of rows) {
+		for (const { marker, data } of rows) {
 			const response = await request(getUrl(vendor, env))
 				.patch(`/items/${SLOT}/${ids.get(marker)}`)
-				.send(columns)
+				.send(data)
 				.set('Authorization', auth);
 
 			expect(response.statusCode).toBe(200);
@@ -428,8 +428,8 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// A write states the rows it writes and the fingerprints it dropped from the
-	// index, so the three mutations differ only in the verb and in what a row of the
-	// `slots` cell has to carry.
+	// index, so the three mutations differ only in the verb and in the `data` a row
+	// of the `query` cell carries.
 	function defineWhenSteps({ when }: StepFunctions, ids: Map<string, number>) {
 		when.optional(
 			'the slots are created:',
@@ -437,7 +437,7 @@ describe.each(vendors)('%s', (vendor) => {
 				const filedBefore = await indexedMembers();
 
 				await createSlots(
-					cellRows(table[0]!['slots']!) as WrittenSlot[],
+					cellRows(table[0]!['query']!) as WrittenSlot[],
 					ids,
 				);
 
@@ -454,7 +454,7 @@ describe.each(vendors)('%s', (vendor) => {
 				const filedBefore = await indexedMembers();
 
 				await updateSlots(
-					cellRows(table[0]!['slots']!) as WrittenSlot[],
+					cellRows(table[0]!['query']!) as WrittenSlot[],
 					ids,
 				);
 
@@ -471,7 +471,7 @@ describe.each(vendors)('%s', (vendor) => {
 				const filedBefore = await indexedMembers();
 
 				await deleteSlots(
-					cellRows(table[0]!['slots']!) as WrittenSlot[],
+					cellRows(table[0]!['query']!) as WrittenSlot[],
 					ids,
 				);
 

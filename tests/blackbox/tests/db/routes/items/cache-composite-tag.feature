@@ -21,13 +21,15 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
   read here is of the one collection the Background declares, and the binder
   fills it in.
 
-  A write states the rows it writes and the `purged fingerprints` it dropped from
-  the index on its way through, which is the other half of the same ledger. A
-  write removes exactly the members whose pins hold on a row it wrote, reading
-  that row as it was and as it became, so a scenario says which fingerprints the
-  write reached rather than only which entries stopped answering. An entry filed
-  under two — a read matching two ways — loses only the one the row matched, and
-  states only that one here.
+  A write is stated the way a read is. The `query` cell names the row it writes
+  and, under `data`, the body its request carries: every column on a create, the
+  ones it changes on an update, none at all on a delete. Beside it stand the
+  `purged fingerprints` it dropped from the index on its way through, which is
+  the other half of the same ledger. A write removes exactly the members whose
+  pins hold on a row it wrote, reading that row as it was and as it became, so a
+  scenario says which fingerprints the write reached rather than only which
+  entries stopped answering. An entry filed under two — a read matching two ways
+  — loses only the one the row matched, and states only that one here.
 
   Every verdict step says why it fell that way: the pins the write matched on the
   row it wrote, the pin it did not match, or the field it wrote that the read
@@ -94,13 +96,13 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - method   |
       |                  |                        |     - owner    |
     When the slots are created:
-      | slots                  | purged fingerprints |
+      | query                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
-      |   owner: beta          |     method:         |
-      |   method: spaced       |       - spaced      |
-      |   note: second         |     owner:          |
-      |   amount: 20           |       - beta        |
-      |                        |   viewFields:       |
+      |   data:                |     method:         |
+      |     owner: beta        |       - spaced      |
+      |     method: spaced     |     owner:          |
+      |     note: second       |       - beta        |
+      |     amount: 20         |   viewFields:       |
       |                        |     - id            |
       |                        |     - method        |
       |                        |     - owner         |
@@ -166,13 +168,13 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                        |     - method   |
       |                |                        |     - owner    |
     When the slots are created:
-      | slots                  | purged fingerprints |
+      | query                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
-      |   owner: gamma         |     method:         |
-      |   method: spaced       |       - spaced      |
-      |   note: second         |     owner:          |
-      |   amount: 20           |       - gamma       |
-      |                        |   viewFields:       |
+      |   data:                |     method:         |
+      |     owner: gamma       |       - spaced      |
+      |     method: spaced     |     owner:          |
+      |     note: second       |       - gamma       |
+      |     amount: 20         |   viewFields:       |
       |                        |     - id            |
       |                        |     - method        |
       |                        |     - owner         |
@@ -227,10 +229,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - note     |
       |                  |                       |     - owner    |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
-      |   note: rewritten     |     method:         |
-      |                       |       - spaced      |
+      |   data:               |     method:         |
+      |     note: rewritten   |       - spaced      |
       |                       |     owner:          |
       |                       |       - delta       |
       |                       |   viewFields:       |
@@ -284,10 +286,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: epsilon |                       |     - id        |
       |                  |                       |     - owner     |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
-      |   note: rewritten     |     owner:          |
-      |                       |       - epsilon     |
+      |   data:               |     owner:          |
+      |     note: rewritten   |       - epsilon     |
       |                       |   viewFields:       |
       |                       |     - id            |
       |                       |     - note          |
@@ -334,10 +336,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: zeta |                       |     - id       |
       |               |                       |     - owner    |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
-      |   note: rewritten     |     owner:          |
-      |                       |       - zeta        |
+      |   data:               |     owner:          |
+      |     note: rewritten   |       - zeta        |
       |                       |   viewFields:       |
       |                       |     - amount        |
       |                       |     - id            |
@@ -388,10 +390,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: theta |                       |     - note     |
       |                |                       |     - owner    |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
-      |   note: rewritten     |     owner:          |
-      |                       |       - theta       |
+      |   data:               |     owner:          |
+      |     note: rewritten   |       - theta       |
       |                       |   viewFields:       |
       |                       |     - id            |
       |                       |     - note          |
@@ -439,10 +441,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: iota |                       |     - id       |
       |               |                       |     - owner    |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
-      |   amount: 30          |     owner:          |
-      |                       |       - iota        |
+      |   data:               |     owner:          |
+      |     amount: 30        |       - iota        |
       |                       |   viewFields:       |
       |                       |     - amount        |
       |                       |     - id            |
@@ -490,13 +492,13 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     _in:      |                       |     - owner    |
       |       - kappa |                       |                |
     When the slots are created:
-      | slots                  | purged fingerprints |
+      | query                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
-      |   owner: lambda        |     owner:          |
-      |   method: spaced       |       - kappa       |
-      |   note: second         |       - lambda      |
-      |   amount: 20           |   viewFields:       |
-      |                        |     - id            |
+      |   data:                |     owner:          |
+      |     owner: lambda      |       - kappa       |
+      |     method: spaced     |       - lambda      |
+      |     note: second       |   viewFields:       |
+      |     amount: 20         |     - id            |
       |                        |     - owner         |
     Then the read is purged, matching "owner: lambda":
       | query          | response               | fingerprints   |
@@ -543,13 +545,13 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |       - mu |                       |     - owner    |
       |       - xi |                       |                |
     When the slots are created:
-      | slots                  | purged fingerprints |
+      | query                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
-      |   owner: xi            |     owner:          |
-      |   method: spaced       |       - mu          |
-      |   note: second         |       - xi          |
-      |   amount: 20           |   viewFields:       |
-      |                        |     - id            |
+      |   data:                |     owner:          |
+      |     owner: xi          |       - mu          |
+      |     method: spaced     |       - xi          |
+      |     note: second       |   viewFields:       |
+      |     amount: 20         |     - id            |
       |                        |     - owner         |
     Then the read is still cached, not matching "owner: mu or nu":
       | query      | response              | fingerprints   |
@@ -610,10 +612,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - method    |
       |                  |                        |     - owner     |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: other_owner | - pinnedScope:      |+
-      |   owner: omicron      |     method:         |
-      |                       |       - spaced      |
+      |   data:               |     method:         |
+      |     owner: omicron    |       - spaced      |
       |                       |     owner:          |
       |                       |       - omicron     |
       |                       |   viewFields:       |
@@ -700,10 +702,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - method   |
       |                  |                        |     - owner    |
     When the slots are updated:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
-      |   owner: sigma        |     method:         |
-      |                       |       - spaced      |
+      |   data:               |     method:         |
+      |     owner: sigma      |       - spaced      |
       |                       |     owner:          |
       |                       |       - rho         |
       |                       |   viewFields:       |
@@ -790,13 +792,13 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                       |     - method   |
       |                      |                       |     - owner    |
     When the slots are created:
-      | slots                  | purged fingerprints |
+      | query                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
-      |   owner: phi           |     method:         |
-      |   method: spaced       |       - spaced      |
-      |   note: second         |   viewFields:       |
-      |   amount: 20           |     - id            |
-      |                        |     - method        |
+      |   data:                |     method:         |
+      |     owner: phi         |       - spaced      |
+      |     method: spaced     |   viewFields:       |
+      |     note: second       |     - id            |
+      |     amount: 20         |     - method        |
       |                        |     - owner         |
     Then the read is purged, matching "method: spaced":
       | query                | response               | fingerprints   |
@@ -868,13 +870,13 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                    |                       |     - method   |
       |                    |                       |     - owner    |
     When the slots are created:
-      | slots                  | purged fingerprints |
+      | query                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
-      |   owner: koppa         |     method:         |
-      |   method: slow         |       - slow        |
-      |   note: second         |   viewFields:       |
-      |   amount: 20           |     - id            |
-      |                        |     - method        |
+      |   data:                |     method:         |
+      |     owner: koppa       |       - slow        |
+      |     method: slow       |   viewFields:       |
+      |     note: second       |     - id            |
+      |     amount: 20         |     - method        |
       |                        |     - owner         |
     Then the read is still cached, not matching "owner: omega":
       | query                | response              | fingerprints   |
@@ -937,7 +939,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - method    |
       |                  |                        |     - owner     |
     When the slots are deleted:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |                       |     method:         |
       |                       |       - spaced      |
@@ -998,7 +1000,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
     When the slots are deleted:
-      | slots                 | purged fingerprints |
+      | query                 | purged fingerprints |
       | - marker: other_owner | - pinnedScope:      |+
       |                       |     method:         |
       |                       |       - spaced      |
