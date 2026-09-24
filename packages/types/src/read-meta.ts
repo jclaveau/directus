@@ -10,7 +10,7 @@ import type { PrimaryKey } from './items.js';
  * are one. A pin naming no `field` pins nothing, which is what a read that could
  * not be narrowed depends on: the collection, whole.
  */
-export interface ScopedCacheScopePin {
+export interface ScopedCachePin {
 	// Built by resolving a field off a payload, so an absent one arrives as an
 	// explicit `undefined` rather than a missing key.
 	field?: string | undefined;
@@ -26,7 +26,7 @@ export interface ScopedCacheScopePin {
  * A pin naming no `field` names the collection whole: the coarse bucket holding
  * the reads that could not be narrowed.
  */
-export interface ScopedCacheCollectionPin extends ScopedCacheScopePin {
+export interface ScopedCacheCollectionPin extends ScopedCachePin {
 	collection: string;
 }
 

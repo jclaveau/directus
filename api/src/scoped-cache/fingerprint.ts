@@ -2,7 +2,7 @@ import type {
 	ScopedCacheDeclaredFingerprint,
 	ScopedCacheFingerprint,
 	ScopedCacheCollectionPin,
-	ScopedCacheScopePin,
+	ScopedCachePin,
 	SchemaOverview,
 } from '@directus/types';
 import {
@@ -197,7 +197,7 @@ export function parseScopedCacheFingerprint(
  */
 export function scopedCacheFingerprintOf(
 	collection: string,
-	pins: readonly ScopedCacheScopePin[],
+	pins: readonly ScopedCachePin[],
 	viewFields: readonly string[] = [],
 ): ScopedCacheFingerprint {
 	// Null-prototyped for the reason the parser is: a pin's field is a column name,
@@ -236,7 +236,7 @@ export function scopedCacheFingerprintOf(
 export function scopedCacheDeclaredPins(
 	declared: ScopedCacheDeclaredFingerprint,
 	schema: SchemaOverview | null | undefined,
-): ScopedCacheScopePin[] {
+): ScopedCachePin[] {
 	const fields = schema?.collections[declared.collection]?.fields;
 
 	const pinnedScope: Readonly<Record<string, readonly unknown[]>> =

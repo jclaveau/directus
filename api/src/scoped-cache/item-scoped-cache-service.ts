@@ -7,7 +7,7 @@ import type {
 	ScopedCacheFingerprint,
 	ScopedCacheHookDeclarations,
 	ScopedCachePath,
-	ScopedCacheScopePin,
+	ScopedCachePin,
 	ScopedCacheCollectionPin,
 	SchemaOverview,
 } from '@directus/types';
@@ -310,7 +310,7 @@ export class ItemScopedCacheService {
 
 		const fieldTypes = this.fieldTypes;
 
-		const keyPins: ScopedCacheScopePin[] = keys.map((key) => {
+		const keyPins: ScopedCachePin[] = keys.map((key) => {
 			return {
 				field: primaryKeyField,
 				value: key,
