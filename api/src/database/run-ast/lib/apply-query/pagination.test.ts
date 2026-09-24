@@ -1,10 +1,10 @@
 import knex from 'knex';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
 import { applyLimit, applyOffset } from './pagination.js';
 
 test('limit of 0', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyLimit(db, queryBuilder, 0);
@@ -16,7 +16,7 @@ test('limit of 0', async () => {
 });
 
 test('limit of 2 and where id = 1', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyLimit(db, queryBuilder, 2);
@@ -30,7 +30,7 @@ test('limit of 2 and where id = 1', async () => {
 });
 
 test('limit of "50"', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyLimit(db, queryBuilder, '50');
@@ -42,7 +42,7 @@ test('limit of "50"', async () => {
 });
 
 test('offset of 0', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyOffset(db, queryBuilder, 0);
@@ -54,7 +54,7 @@ test('offset of 0', async () => {
 });
 
 test('offset of 1', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyOffset(db, queryBuilder, 1);
@@ -66,7 +66,7 @@ test('offset of 1', async () => {
 });
 
 test('offset of 2 and where id = 1', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyOffset(db, queryBuilder, 2);
@@ -80,7 +80,7 @@ test('offset of 2 and where id = 1', async () => {
 });
 
 test('offset of "50"', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyOffset(db, queryBuilder, '50');
@@ -92,7 +92,7 @@ test('offset of "50"', async () => {
 });
 
 test('limit and offset of 1', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyLimit(db, queryBuilder, 1);

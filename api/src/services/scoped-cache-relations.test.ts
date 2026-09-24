@@ -10,7 +10,6 @@ import {
 	expect,
 	it,
 	vi,
-	type MockedFunction,
 } from 'vitest';
 
 // A scoped-mode read must tag every collection whose DATA feeds the response, so a
@@ -165,11 +164,11 @@ const m2aThenM2o = new SchemaBuilder()
 	.build();
 
 describe('scoped cache read tagging across relation types', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 

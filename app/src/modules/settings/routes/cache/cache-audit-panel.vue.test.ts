@@ -203,7 +203,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-	vi.restoreAllMocks();
+	vi.resetAllMocks();
 	document.body.innerHTML = '';
 });
 

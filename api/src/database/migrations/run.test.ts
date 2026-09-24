@@ -11,17 +11,16 @@ import {
 	describe,
 	expect,
 	it,
-	type MockedFunction,
 	vi,
 } from 'vitest';
 import run from './run.js';
 
 describe('run', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 

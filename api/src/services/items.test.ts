@@ -8,7 +8,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { purgeScopedCache } from '../scoped-cache.js';
@@ -144,11 +144,11 @@ const schema = new SchemaBuilder()
 	.build();
 
 describe('Integration Tests', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(async () => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 
 		// PayloadService reaches for `get-service.js` lazily — a static import would be
@@ -911,11 +911,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	shapesSchema.collections['settings']!.singleton = true;
 	shapesSchema.collections['settings']!.fields['theme']!.defaultValue = 'auto';
 
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 

@@ -1927,7 +1927,8 @@ describe('startScopedCachePurgeRecovery', () => {
 	it('reports the count once there was something to finish', async () => {
 		const info = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info, warn: vi.fn() } as any);
-		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
+		const onRedisEvent = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ on: onRedisEvent } as any);
 
 		// Round-trips, because the drain now proves the store can drop an entry
 		// before it clears the records naming them.
@@ -1948,6 +1949,14 @@ describe('startScopedCachePurgeRecovery', () => {
 		}]);
 
 		startScopedCachePurgeRecovery();
+
+		// The boot drain reaches `cache.js` through a lazy import, and vitest 4 serves
+		// the real module — its real Redis client — for the first one of those it sees.
+		// The reconnect drain is a real trigger and a tick later, so it gets the mock.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		const ready = onRedisEvent.mock.calls.find(([event]) => event === 'ready');
+		ready![1]();
 
 		await vi.waitFor(() => {
 			expect(info)

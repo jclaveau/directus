@@ -139,7 +139,9 @@ vi.mock('../utils/get-date-formatted.js', () => {
 
 vi.mock('../services/import-export.js', () => {
 	return {
-		ExportService: vi.fn().mockImplementation(() => ({ transform: mocks.transform })),
+		ExportService: vi.fn(function () {
+			return { transform: mocks.transform };
+		}),
 	};
 });
 

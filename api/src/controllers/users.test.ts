@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const updateOne = vi.fn();
 
 vi.mock('../services/users.js', () => {
-	return { UsersService: vi.fn(() => ({ updateOne })) };
+	return {
+		UsersService: vi.fn(function () {
+			return { updateOne };
+		}),
+	};
 });
 
 vi.mock('../services/authentication.js', () => ({ AuthenticationService: vi.fn() }));

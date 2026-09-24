@@ -18,7 +18,7 @@ test('add join non existed relation', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -45,7 +45,7 @@ test('add join for m2o relation', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -72,7 +72,7 @@ test('add join for o2m relation', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -99,7 +99,7 @@ test('add join for a2o relation without collection scope', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	expect(() => {
@@ -122,7 +122,7 @@ test('add join for a2o relation', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -156,7 +156,7 @@ test('add join for m2m relation', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 	aliasFn.mockReturnValueOnce('alias2');
@@ -187,7 +187,7 @@ test('dont overwrite already aliased relations', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	addJoin({
