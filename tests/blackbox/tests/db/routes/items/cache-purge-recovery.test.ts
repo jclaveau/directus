@@ -271,7 +271,7 @@ describe(oneLine`
 
 			// Recorded as a fingerprint rather than a Redis key, so the retry can rebuild
 			// the key against whatever CACHE_NAMESPACE is set to when it runs.
-			const pending = await db(PENDING).select('mode', 'scoped_cache_tag');
+			const pending = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 
 			// Every row, not only the one asserted below: `toContainEqual` permits others,
 			// and a `namespace` row drains as `cache.clear()` — which would wipe the
@@ -285,7 +285,7 @@ describe(oneLine`
 				// so a partial fingerprint globs cleanly. Spelled out rather than
 				// imported: what is asserted is the string that reached Postgres, not
 				// the renderer that wrote it.
-				scoped_cache_tag: `${NOTE}:&id=,${readNote},&`,
+				scoped_cache_fingerprint: `${NOTE}:&id=,${readNote},&`,
 			});
 
 			await proxy.open();
@@ -300,7 +300,7 @@ describe(oneLine`
 			let drained: Array<Record<string, unknown>> = [];
 
 			for (let attempt = 0; attempt < 80; attempt++) {
-				drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+				drained = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 
 				if (drained.length === 0) {
 					break;
@@ -606,7 +606,7 @@ describe(oneLine`
 
 			await assertInstanceAlive();
 
-			const recorded = await db(PENDING).select('mode', 'scoped_cache_tag');
+			const recorded = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 			mark(`recorded before the boot case: ${JSON.stringify(recorded)}`);
 			expect(recorded.length).toBeGreaterThan(0);
 
@@ -638,7 +638,7 @@ describe(oneLine`
 				let drained: Array<Record<string, unknown>> = [];
 
 				for (let attempt = 0; attempt < 60; attempt++) {
-					drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+					drained = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 
 					if (drained.length === 0) {
 						break;

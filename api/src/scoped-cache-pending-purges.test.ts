@@ -99,7 +99,7 @@ describe('recordPendingScopedCachePurge', () => {
 				failed_at: expect.any(Date),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:&id=,1,&',
+				scoped_cache_fingerprint: 'articles:&id=,1,&',
 				attempts: 0,
 				last_error: 'Connection is closed.',
 			},
@@ -107,7 +107,7 @@ describe('recordPendingScopedCachePurge', () => {
 				failed_at: expect.any(Date),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:&author=,7,&',
+				scoped_cache_fingerprint: 'articles:&author=,7,&',
 				attempts: 0,
 				last_error: 'Connection is closed.',
 			},
@@ -126,7 +126,7 @@ describe('recordPendingScopedCachePurge', () => {
 			failed_at: expect.any(Date),
 			mode: 'collection',
 			collection: 'articles',
-			scoped_cache_tag: null,
+			scoped_cache_fingerprint: null,
 			attempts: 0,
 			last_error: 'Connection is closed.',
 		}]);
@@ -142,7 +142,7 @@ describe('recordPendingScopedCachePurge', () => {
 			failed_at: expect.any(Date),
 			mode: 'namespace',
 			collection: null,
-			scoped_cache_tag: null,
+			scoped_cache_fingerprint: null,
 			attempts: 0,
 			last_error: 'Connection is closed.',
 		}]);
@@ -205,25 +205,25 @@ describe('listPendingScopedCachePurges', () => {
 				id: 1,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:&id=,1,&',
+				scoped_cache_fingerprint: 'articles:&id=,1,&',
 			},
 			{
 				id: 2,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:&id=,2,&',
+				scoped_cache_fingerprint: 'articles:&id=,2,&',
 			},
 			{
 				id: 3,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:&id=,1,&',
+				scoped_cache_fingerprint: 'articles:&id=,1,&',
 			},
 			{
 				id: 4,
 				mode: 'collection',
 				collection: 'articles',
-				scoped_cache_tag: null,
+				scoped_cache_fingerprint: null,
 			},
 		];
 
@@ -254,9 +254,24 @@ describe('listPendingScopedCachePurges', () => {
 		the retry runs, so collapsing them would drop a purge
 	`, async () => {
 		selectRows = [
-			{ id: 1, mode: 'slices', collection: 'articles', scoped_cache_tag: null },
-			{ id: 2, mode: 'collection', collection: 'articles', scoped_cache_tag: null },
-			{ id: 3, mode: 'namespace', collection: null, scoped_cache_tag: null },
+			{
+				id: 1,
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_fingerprint: null,
+			},
+			{
+				id: 2,
+				mode: 'collection',
+				collection: 'articles',
+				scoped_cache_fingerprint: null,
+			},
+			{
+				id: 3,
+				mode: 'namespace',
+				collection: null,
+				scoped_cache_fingerprint: null,
+			},
 		];
 
 		expect((await listPendingScopedCachePurges()).map((row) => row.mode))

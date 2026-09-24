@@ -106,7 +106,7 @@ describe(oneLine`
 		function ownRows() {
 			return db(PENDING)
 				.where({ collection: NOTE })
-				.orWhere('scoped_cache_tag', 'like', `${NOTE}%`);
+				.orWhere('scoped_cache_fingerprint', 'like', `${NOTE}%`);
 		}
 
 		function readSlotA() {
@@ -150,7 +150,7 @@ describe(oneLine`
 			expect(write.status).toBe(200);
 
 			const recorded = await ownRows()
-				.select('mode', 'collection', 'scoped_cache_tag');
+				.select('mode', 'collection', 'scoped_cache_fingerprint');
 
 			expect(recorded.length).toBeGreaterThan(0);
 
