@@ -47,7 +47,7 @@ import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
 	scopedCacheDeclaredPins,
-	scopedCacheFingerprintHolds,
+	scopedCacheFingerprintCouldContainPin,
 	scopedCacheLegacyTags,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
@@ -300,9 +300,10 @@ function scopedCacheFingerprintFromLegacyTag(
  * a constraint holding of every entry it would be the collection purge, a
  * different operation with its own mode and its own record.
  *
- * A pin naming a value is the converse. `scopedCacheFingerprintHolds` is vacuously
- * true of an entry that pins nothing, so without this it would drop the global
- * reads too — exactly what a declaring cancel states did NOT change (#292).
+ * A pin naming a value is the converse. `scopedCacheFingerprintCouldContainPin`
+ * is vacuously true of an entry that pins nothing, so without this it would drop
+ * the global reads too — exactly what a declaring cancel states did NOT change
+ * (#292).
  */
 function scopedCacheFingerprintReachedByPin(
 	fingerprint: ScopedCacheFingerprint,
@@ -316,7 +317,7 @@ function scopedCacheFingerprintReachedByPin(
 		return false;
 	}
 
-	return scopedCacheFingerprintHolds(fingerprint, declared);
+	return scopedCacheFingerprintCouldContainPin(fingerprint, declared);
 }
 
 /**
@@ -432,8 +433,8 @@ async function purgeScopedCacheFingerprintIndex(
  * Drop every entry of a collection that a declared pin could have changed.
  *
  * What a hook's own `purgeBy` resolves to, and the one purge driven by no rows: it
- * holds a pin, not a row, so `scopedCacheFingerprintHolds` is the test rather than
- * `scopedCacheFingerprintPurgedBy`.
+ * holds a pin, not a row, so `scopedCacheFingerprintCouldContainPin` is the test
+ * rather than `scopedCacheFingerprintPurgedBy`.
  *
  * How wide the store has to read for it is the store's own answer — a declared
  * pin matches entries by what they do NOT pin as much as by what they do, so what

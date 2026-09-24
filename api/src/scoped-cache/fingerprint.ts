@@ -409,7 +409,7 @@ export function scopedCacheFingerprintsByCollection(
 }
 
 /**
- * Whether a row carrying every pin `declared` names could be inside `entry`.
+ * Whether `entry` could contain a row carrying every pin `declared` names.
  *
  * The question a purge asks when it holds a pin rather than a row — a hook's own
  * `purgeBy`, which says "anything bound to tenant=acme" and knows nothing of what
@@ -422,7 +422,7 @@ export function scopedCacheFingerprintsByCollection(
  * query case rules the row out. Pins the entry carries at OTHER fields say nothing
  * either way: the declared pin is silent about them, and silence is not exclusion.
  */
-export function scopedCacheFingerprintHolds(
+export function scopedCacheFingerprintCouldContainPin(
 	entry: ScopedCacheFingerprint,
 	declared: ScopedCacheFingerprint,
 ): boolean {
