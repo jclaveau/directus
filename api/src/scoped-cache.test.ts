@@ -4356,12 +4356,12 @@ describe('scopedCacheNestedCollections', () => {
 
 
 describe('the purge counters a fill is guarded by', () => {
-	// Two merge rules, and they are not the same rule. A read's own snapshot was
-	// taken before its query, so it is earlier than anything a hook can hand over
-	// and wins without a comparison. Two snapshots that become ONE entry have no
-	// such ordering, so the earlier reading has to be found.
+	// Two merge rules, and they are not the same rule. A read's own value was read
+	// before its query, so it is earlier than anything a hook can hand over and wins
+	// without a comparison. Two readings that become ONE entry have no such
+	// ordering, so the earlier one has to be found.
 	it(oneLine`
-		keeps the read's own snapshot over a counter a hook handed for the same
+		keeps the read's own reading over a counter a hook handed for the same
 		collection
 	`, () => {
 		expect(foldHandedOverScopedCacheEpochs(
@@ -4371,8 +4371,8 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		takes a handed-over counter for a collection the snapshot never named, since
-		that is the only reading of it there is
+		takes a handed-over counter for a collection the before-query reading never
+		named, since that is the only reading of it there is
 	`, () => {
 		expect(foldHandedOverScopedCacheEpochs({}, { authors: '4' }))
 			.toEqual({ authors: '4' });
@@ -4384,8 +4384,8 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		merges two snapshots of one entry down to the EARLIER reading, so a purge
-		between them is still visible at fill time
+		merges two readings of one entry down to the EARLIER one, so a purge between
+		them is still visible at fill time
 	`, () => {
 		const merged = { articles: '9', authors: '2' };
 		mergeScopedCacheEpochs(merged, { articles: '7', tags: '5' });
@@ -4394,8 +4394,8 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		folds the snapshots one response carries into one, or none when it carries
-		none — an empty snapshot is a guard that ran, undefined is one that did not
+		folds the readings one response carries into one, or none when it carries
+		none — an empty reading is a guard that ran, undefined is one that did not
 	`, () => {
 		expect(mergedScopedCacheEpochs(undefined, undefined)).toBeUndefined();
 		expect(mergedScopedCacheEpochs({}, undefined)).toEqual({});
@@ -4406,7 +4406,7 @@ describe('the purge counters a fill is guarded by', () => {
 		)).toEqual({ articles: '7', authors: '4', '*': '1' });
 	});
 
-	it('names the scoped collections no snapshot covered', () => {
+	it('names the scoped collections no reading covered', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{ articles: '7', '*': '1' },
 			[
@@ -4416,9 +4416,9 @@ describe('the purge counters a fill is guarded by', () => {
 		)).toEqual(['authors']);
 	});
 
-	// `*` rides every snapshot, so its absence says no snapshot ran — with nothing
-	// guarded either way, refusing here would take the whole cache down.
-	it('names nothing when no snapshot ran at all', () => {
+	// `*` rides every reading, so its absence says the counters were never read —
+	// with nothing guarded either way, refusing here would take the whole cache down.
+	it('names nothing when the counters were never read', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{},
 			[scopedCacheFingerprintOf('authors', [])],
@@ -4431,10 +4431,10 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 });
 
-// The counters themselves, as opposed to the merge rules above: what a snapshot asks
-// Redis for, and what it answers when it cannot ask. Every arm below is a failure or
-// a configuration one, so none of them has a blackbox witness — a read that
-// snapshots nothing looks exactly like one that found nothing moved.
+// The counters themselves, as opposed to the merge rules above: what a read asks
+// Redis for before its query, and what it answers when it cannot ask. Every arm
+// below is a failure or a configuration one, so none of them has a blackbox witness
+// — a read that reads nothing looks exactly like one that found nothing moved.
 describe('reading and bumping the purge counters', () => {
 	const mget = vi.fn();
 
@@ -4457,6 +4457,7 @@ describe('reading and bumping the purge counters', () => {
 
 	afterEach(() => {
 		delete env['CACHE_ENABLED'];
+		delete env['CACHE_SCOPED_EPOCH_TTL'];
 	});
 
 	it('asks for the wholesale counter alongside the named collections', async () => {
@@ -4494,7 +4495,7 @@ describe('reading and bumping the purge counters', () => {
 		['there is no Redis configured', () => {
 			vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		}],
-	])('snapshots nothing, and asks nothing, when %s', async (_case, disable) => {
+	])('reads nothing, and asks nothing, when %s', async (_case, disable) => {
 		disable();
 
 		expect(await readScopedCacheEpochs(['articles'])).toEqual({});
@@ -4503,22 +4504,22 @@ describe('reading and bumping the purge counters', () => {
 
 	// A read that cannot reach the counters still has to answer, and the fill is
 	// left unguarded exactly as it is with no Redis at all. What it must NOT do is
-	// answer with a counter reading per collection: `*` is what says a snapshot was
-	// taken, so filling it in from a read that never happened reports the guard as
-	// covering collections nothing was read for.
+	// answer with a counter reading per collection: `*` is what says the counters
+	// were read at all, so filling it in from a read that never happened reports the
+	// guard as covering collections nothing was read for.
 	it(oneLine`
-		snapshots nothing at all when the counters cannot be read, rather than a
-		reading of null per collection
+		reads nothing at all when the counters cannot be read, rather than a reading
+		of null per collection
 	`, async () => {
 		mget.mockRejectedValue(new Error('connection is closed'));
 
-		const snapshot = await readScopedCacheEpochs(['articles']);
+		const epochsBeforeQuery = await readScopedCacheEpochs(['articles']);
 
-		expect(snapshot).toEqual({});
+		expect(epochsBeforeQuery).toEqual({});
 
-		// The read names a collection the snapshot never covered, and with no `*` the
+		// The read names a collection the reading never covered, and with no `*` the
 		// guard reports itself off rather than claiming to have covered it.
-		expect(scopedCacheCollectionsWithoutGuard(snapshot, [
+		expect(scopedCacheCollectionsWithoutGuard(epochsBeforeQuery, [
 			scopedCacheFingerprintOf('articles', []),
 		])).toEqual([]);
 	});
@@ -4553,9 +4554,11 @@ describe('reading and bumping the purge counters', () => {
 	});
 
 	// An expiring counter, so a collection nothing writes to stops costing a key. A
-	// read whose counter expired between snapshot and fill reads null on both sides
+	// read whose counter expired between the two readings reads null on both sides
 	// and caches, which is right — nothing purged it in between.
-	it('bumps each collection once and gives the counter a day', async () => {
+	it(oneLine`
+		bumps each collection once and gives the counter a day by default
+	`, async () => {
 		await bumpScopedCacheEpochs(['articles', 'articles', 'authors']);
 
 		expect(counterPipeline.incr).toHaveBeenCalledTimes(2);
@@ -4570,6 +4573,26 @@ describe('reading and bumping the purge counters', () => {
 			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 24 * 60 * 60);
 
 		expect(counterPipeline.exec).toHaveBeenCalledOnce();
+	});
+
+	it('holds the counter for the configured duration', async () => {
+		env['CACHE_SCOPED_EPOCH_TTL'] = '2h';
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(counterPipeline.expire)
+			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 2 * 60 * 60);
+	});
+
+	// ms() parses neither, and expiring the counter on the command that bumps it
+	// would leave every fill racing that purge unguarded.
+	it('falls back to a day on a duration Redis could not be given', async () => {
+		env['CACHE_SCOPED_EPOCH_TTL'] = 'whenever';
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(counterPipeline.expire)
+			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 24 * 60 * 60);
 	});
 
 	it('opens no pipeline for an empty collection list', async () => {

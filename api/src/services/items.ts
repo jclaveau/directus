@@ -875,7 +875,7 @@ implements AbstractService<Item> {
 			scopedCacheFingerprints,
 			{
 				scopedCacheUnautopurgeableFingerprints,
-				// A `scopeTo` names a collection the pre-query snapshot could not know
+				// A `scopeTo` names a collection the before-query reading could not know
 				// about, and hands over the counter its own dependent read took.
 				scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
 					scopedCacheEpochs,

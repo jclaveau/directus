@@ -55,6 +55,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 'number',
 	CACHE_SCOPED_MAX_QUERY_CASES: 'number',
 	CACHE_SCOPED_PURGE_RETRY_INTERVAL: 'string',
+	CACHE_SCOPED_EPOCH_TTL: 'string',
 	CACHE_SCHEMA: 'boolean',
 	CACHE_STORE: 'string',
 	CACHE_SKIP_ALLOWED: 'boolean',

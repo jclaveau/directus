@@ -5,6 +5,7 @@ import {
 import type { ScopedCacheFingerprint } from '@directus/types';
 import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { earlierScopedCacheEpoch } from './pins.js';
 
 const env = useEnv();
@@ -15,9 +16,20 @@ const env = useEnv();
  */
 export type ScopedCacheEpochs = Record<string, string | null>;
 
-// Long enough that no read outlives its own before-query reading, short enough
-// that a collection nobody writes to stops holding a key.
-const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
+/**
+ * How long a purge counter is held. Long enough that no read outlives its own
+ * before-query reading, short enough that a collection nobody writes to stops
+ * holding a key.
+ *
+ * A value the environment cannot parse falls back to the default rather than to
+ * `0`, which would expire the counter on the command that bumps it and leave every
+ * fill racing that purge unguarded.
+ */
+function scopedCacheEpochTtlSeconds(): number {
+	return Math.ceil(
+		getMilliseconds(env['CACHE_SCOPED_EPOCH_TTL'], 24 * 60 * 60 * 1000) / 1000,
+	);
+}
 
 /**
  * A per-collection purge counter, bumped every time that collection's entries are
@@ -101,7 +113,7 @@ export async function bumpScopedCacheEpochs(
 		// but a guard that silently stopped guarding must not also be silent.
 		await useScopedCacheStore().bumpCounterValues(
 			names.map(scopedCacheEpochKey),
-			SCOPED_CACHE_EPOCH_TTL_SECONDS,
+			scopedCacheEpochTtlSeconds(),
 		);
 	}
 	catch (error: any) {
