@@ -306,16 +306,32 @@ catalog:
 
 catalogMode: strict
 
-onlyBuiltDependencies:
-  - '@fortawesome/fontawesome-common-types'
-  - '@fortawesome/fontawesome-svg-core'
-  - '@fortawesome/free-regular-svg-icons'
-  - '@fortawesome/free-solid-svg-icons'
-  - '@parcel/watcher'
-  - argon2
-  - isolated-vm
-  - oracledb
-  - 'rolldown-plugin-istanbul@https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b'
-  - sharp
-  - sqlite3
-  - vue-demi
+overrides:
+  tar-fs: 3.1.2
+
+# `directus` and `@directus/api` each list the other under dependencies. pnpm 10
+# only warned about the cycle; 12 refuses to order the two build tasks until it
+# is told an arbitrary order between them is fine.
+ignoreWorkspaceCycles: true
+
+minimumReleaseAgeExclude:
+  # pnpm 11 refuses a lockfile entry published less than a day ago. These three
+  # were resolved before that rule reached the repo, so the next dependency bump
+  # can drop the exemption.
+  - tldts-core@7.4.15
+  - tldts@7.4.15
+  - undici@8.11.2
+
+allowBuilds:
+  '@fortawesome/fontawesome-common-types': true
+  '@fortawesome/fontawesome-svg-core': true
+  '@fortawesome/free-regular-svg-icons': true
+  '@fortawesome/free-solid-svg-icons': true
+  '@parcel/watcher': true
+  argon2: true
+  isolated-vm: true
+  oracledb: true
+  'rolldown-plugin-istanbul@https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b': true
+  sharp: true
+  sqlite3: true
+  vue-demi: true

@@ -98,6 +98,10 @@ async function createBundleExtension({
 
 	const packageManager = getPackageManager();
 
+	if (packageManager === 'pnpm') {
+		await writePnpmDepBuildSettings(targetPath);
+	}
+
 	if (install) {
 		await execa(packageManager, ['install'], { cwd: targetPath });
 	}
@@ -160,6 +164,10 @@ async function createExtension({
 
 	const packageManager = getPackageManager();
 
+	if (packageManager === 'pnpm') {
+		await writePnpmDepBuildSettings(targetPath);
+	}
+
 	if (install) {
 		await execa(packageManager, ['install'], { cwd: targetPath });
 	}
@@ -167,6 +175,15 @@ async function createExtension({
 	spinner.succeed(chalk.bold('Done'));
 
 	log(getDoneMessage(type, targetDir, targetPath, packageManager, install));
+}
+
+async function writePnpmDepBuildSettings(targetPath: string) {
+	// pnpm 12 fails an install whose dependencies have unapproved build
+	// scripts, and reads that approval from pnpm-workspace.yaml only. An
+	// extension builds from its own sources, so none of them has to run.
+	const settingsPath = path.join(targetPath, 'pnpm-workspace.yaml');
+
+	await fse.writeFile(settingsPath, 'strictDepBuilds: false\n');
 }
 
 function getPackageManifest(name: string, options: ExtensionOptions, deps: Record<string, string>) {

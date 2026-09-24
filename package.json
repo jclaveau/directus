@@ -33,14 +33,9 @@
 		"typescript": "catalog:",
 		"typescript-eslint": "catalog:"
 	},
-	"pnpm": {
-		"overrides": {
-			"tar-fs": "3.1.2"
-		}
-	},
-	"packageManager": "pnpm@10.34.4",
+	"packageManager": "pnpm@12.6.0",
 	"engines": {
 		"node": "22",
-		"pnpm": ">=10 <11"
+		"pnpm": ">=12 <13"
 	}
 }
