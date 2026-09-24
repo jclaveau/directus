@@ -182,7 +182,7 @@ const FINDINGS = {
 	type: 'array',
 	description:
 		'One per entry that was not fresh: its verdict and reason, the request '
-		+ 'that filled it (method, url, query, user, collection), the tags it was '
+		+ 'that filled it (method, url, query, user, collection), the pins it was '
 		+ 'filled under against the ones the replay pinned, the JSON pointers '
 		+ 'where the stored body and the fresh one differ, and the purges that '
 		+ 'covered it since the fill. The bodies themselves are not answered.',
@@ -664,7 +664,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Read one cache entry',
 			description:
 				'The live state of a single response-cache entry: whether its value '
-				+ 'is still held, its scoped-cache tags, when it was written and when '
+				+ 'is still held, its scoped-cache pins, when it was written and when '
 				+ 'it expires, its size raw and compressed, any tombstone, when the '
 				+ 'audit last replayed it and when it was last known to answer what '
 				+ 'the database does, and the purges that covered it since it was '
@@ -690,14 +690,14 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'boolean',
 						description: 'Whether the value itself is still held.',
 					},
-					tags: {
+					pins: {
 						type: ['array', 'null'],
-						description: 'Scoped-cache tags, where that sidecar was written.',
+						description: 'Scoped-cache pins, where that sidecar was written.',
 						items: { type: 'string' },
 					},
-					tagCounts: {
+					pinCounts: {
 						type: 'object',
-						description: 'How many entries each of those tags covers.',
+						description: 'How many entries each of those pins covers.',
 					},
 					expiry: {
 						type: ['object', 'null'],
@@ -766,8 +766,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				// still hands the body to an administrator who asks for it.
 				return {
 					exists: entry.exists,
-					tags: entry.tags,
-					tagCounts: entry.tagCounts,
+					pins: entry.pins,
+					pinCounts: entry.pinCounts,
 					expiry: entry.expiry,
 					sizes: entry.sizes,
 					tombstone: entry.tombstone,
@@ -974,7 +974,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Read one cache audit run',
 			description:
 				'One audit run with a page of the findings it stored: which entries '
-				+ 'were stale or drifted, the request that filled each, its tags '
+				+ 'were stale or drifted, the request that filled each, its pins '
 				+ 'against the replay\'s, where the bodies differed, and which purges '
 				+ 'covered it since the fill. Takes the `id` from the run listing; '
 				+ '`findingsTotal` says how many there are, `offset` walks them, '

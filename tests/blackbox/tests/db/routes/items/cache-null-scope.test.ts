@@ -191,11 +191,11 @@ describe(oneLine`
 
 			const nullTag = `${COLLECTION}:owner=\u0000null`;
 
-			expect(entry.body.data.tags).toContain(nullTag);
+			expect(entry.body.data.pins).toContain(nullTag);
 
 			// Zero is exactly what a mis-spelled key returns, so this is the whole
 			// assertion — the entry and its sidecars are all filed under the slice.
-			expect(entry.body.data.tagCounts[nullTag]).toBeGreaterThan(0);
+			expect(entry.body.data.pinCounts[nullTag]).toBeGreaterThan(0);
 		}, 60_000);
 
 		// The control: a present scope value was never affected, so a regression that

@@ -631,7 +631,7 @@ describe('Services / Utils', () => {
 			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
 		});
 
-		it('readCacheEntry returns value + tags + sizes + tombstone', async () => {
+		it('readCacheEntry returns value + pins + sizes + tombstone', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
 
 			vi.mocked(getCacheValue).mockImplementation((_cache, key) => {
@@ -677,8 +677,8 @@ describe('Services / Utils', () => {
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: true,
 				value: { data: [1, 2] },
-				tags: ['articles', 'articles:id=5'],
-				tagCounts: { 'articles': 3, 'articles:id=5': 7 },
+				pins: ['articles', 'articles:id=5'],
+				pinCounts: { 'articles': 3, 'articles:id=5': 7 },
 				expiry: { exp: 5, createdAt: 1, ttlMs: 1000 },
 				// '{"data":[1,2]}' = 14 bytes raw; the mocked compress = 3.
 				sizes: { uncompressed: 14, compressed: 3 },
@@ -723,8 +723,8 @@ describe('Services / Utils', () => {
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,
@@ -763,8 +763,8 @@ describe('Services / Utils', () => {
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,

@@ -27,12 +27,12 @@ get:
                   exists:
                     type: boolean
                   value: {}
-                  tags:
+                  pins:
                     type: array
                     nullable: true
                     items:
                       type: string
-                  tagCounts:
+                  pinCounts:
                     type: object
                   expiry:
                     type: object
@@ -83,11 +83,11 @@ get:
                         collection:
                           type: string
                           nullable: true
-                        scopedCacheTag:
+                        scopedCachePin:
                           type: string
                           nullable: true
                           description: >
-                            The tag both sides matched on, or null where the
+                            The pin both sides matched on, or null where the
                             purge named none — a collection-wide purge, whose
                             collection is its reach, or a namespace clear,
                             which reached everything.

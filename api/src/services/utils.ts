@@ -446,8 +446,8 @@ export class UtilsService {
 	async readCacheEntry(redisKey: string): Promise<{
 		exists: boolean;
 		value: unknown;
-		tags: string[] | null;
-		tagCounts: Record<string, number>;
+		pins: string[] | null;
+		pinCounts: Record<string, number>;
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
@@ -482,8 +482,8 @@ export class UtilsService {
 			return {
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,
@@ -503,7 +503,7 @@ export class UtilsService {
 
 		// `__pins` lists the scoped-cache pin labels (only when the dev-only
 		// CACHE_TAGS_HEADER is on, which is what writes this sidecar).
-		const tags = storedScopedCachePinLabels(storedPins);
+		const pinLabels = storedScopedCachePinLabels(storedPins);
 
 		// Re-compress the payload to size its Redis footprint against the raw response.
 		let sizes: { uncompressed: number; compressed: number } | null = null;
@@ -522,10 +522,10 @@ export class UtilsService {
 		return {
 			exists: value !== undefined,
 			value: value ?? null,
-			tags,
+			pins: pinLabels,
 			// Blast radius: how many entries each pin would purge.
-			tagCounts: tags
-				? await countScopedCachePinMembers(tags)
+			pinCounts: pinLabels
+				? await countScopedCachePinMembers(pinLabels)
 				: {},
 			expiry,
 			sizes,
