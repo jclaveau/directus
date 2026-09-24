@@ -309,6 +309,11 @@ catalogMode: strict
 overrides:
   tar-fs: 3.1.2
 
+# `directus` and `@directus/api` each list the other under dependencies. pnpm 10
+# only warned about the cycle; 12 refuses to order the two build tasks until it
+# is told an arbitrary order between them is fine.
+ignoreWorkspaceCycles: true
+
 minimumReleaseAgeExclude:
   # pnpm 11 refuses a lockfile entry published less than a day ago. These three
   # were resolved before that rule existed and are older than it by now, so the
