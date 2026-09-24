@@ -1,4 +1,4 @@
-// A conditionally-pinning read hook: the cache audit's `tag_drift` witness. The
+// A conditionally-pinning read hook: the cache audit's `pin_drift` witness. The
 // read of DRIFT is scoped to whichever `owner` slice of DRIFT_DEP the dependency
 // row holds at read time. Move that row outside the API (raw SQL, no purge) and
 // the entry's body still matches the database, but a replay pins another slice
@@ -11,7 +11,7 @@ export default function registerHooks({ filter }, { services }) {
 	filter(`${DRIFT}.items.read`, async (records, _meta, context) => {
 		// Through the service, not raw knex: the pin below names a collection the
 		// host snapshotted no purge counter for, and only a read's own snapshot, handed
-		// over with the tag, keeps the response cacheable (`unguarded_scope`).
+		// over with the pin, keeps the response cacheable (`unguarded_scope`).
 		const dependencies = await new services.ItemsService(DRIFT_DEP, {
 			schema: context.schema,
 			knex: context.database,

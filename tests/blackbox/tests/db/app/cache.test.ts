@@ -2707,10 +2707,10 @@ describe('App Caching Tests', () => {
 			// tag of its own, so the field says so with null rather than an empty
 			// string a reader could mistake for a tag.
 			if (newest.mode === 'collection') {
-				expect(newest.scopedCacheTag).toBeNull();
+				expect(newest.scopedCachePin).toBeNull();
 			}
 			else {
-				expect(newest.scopedCacheTag).toContain(collectionFirst);
+				expect(newest.scopedCachePin).toContain(collectionFirst);
 			}
 
 			// A key nothing ever described cannot be dated, which is a different
@@ -3513,7 +3513,7 @@ describe('App Caching Tests', () => {
 						? null
 						: collectionFirst,
 					mode,
-					scoped_cache_tag_count: 2,
+					scoped_cache_pin_count: 2,
 					evicted,
 					duration_ms: durationMs,
 				};
@@ -3677,9 +3677,9 @@ describe('App Caching Tests', () => {
 
 			// A second tag of the same collection on the same entry, so the coarse
 			// join has two rows through which to reach one purge.
-			await db('directus_cache_stats_scoped_entry_tags').insert({
+			await db('directus_cache_stats_scoped_entry_pins').insert({
 				cache_key: entry.key,
-				scoped_cache_tag: `${collectionFirst}:decoy=1`,
+				scoped_cache_pin: `${collectionFirst}:decoy=1`,
 				collection: collectionFirst,
 			});
 
@@ -3688,27 +3688,27 @@ describe('App Caching Tests', () => {
 			const expired = randomUUID();
 			const now = Date.now();
 
-			await db('directus_cache_stats_scoped_purge_tags').insert([
+			await db('directus_cache_stats_scoped_purge_pins').insert([
 				// The purge that covered it: one tag-less row naming the collection,
 				// which is all a collection-wide purge knows about its own reach.
 				{
 					purge_id: covering,
 					time: new Date(now),
-					scoped_cache_tag: '',
+					scoped_cache_pin: '',
 					collection: collectionFirst,
 				},
 				// Another collection's coarse purge, which must not reach this entry.
 				{
 					purge_id: elsewhere,
 					time: new Date(now),
-					scoped_cache_tag: '',
+					scoped_cache_pin: '',
 					collection: collectionIgnored,
 				},
 				// This collection's, but older than the window asked for below.
 				{
 					purge_id: expired,
 					time: new Date(now - 600_000),
-					scoped_cache_tag: '',
+					scoped_cache_pin: '',
 					collection: collectionFirst,
 				},
 			]);
@@ -3730,14 +3730,14 @@ describe('App Caching Tests', () => {
 			expect(after).toBeDefined();
 			expect(after.purges).toBe(1);
 
-			await db('directus_cache_stats_scoped_purge_tags')
+			await db('directus_cache_stats_scoped_purge_pins')
 				.whereIn('purge_id', [covering, elsewhere, expired])
 				.delete();
 
-			await db('directus_cache_stats_scoped_entry_tags')
+			await db('directus_cache_stats_scoped_entry_pins')
 				.where({
 					cache_key: entry.key,
-					scoped_cache_tag: `${collectionFirst}:decoy=1`,
+					scoped_cache_pin: `${collectionFirst}:decoy=1`,
 				})
 				.delete();
 		}, 60000);

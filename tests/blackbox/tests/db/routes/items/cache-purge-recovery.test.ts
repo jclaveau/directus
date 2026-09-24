@@ -538,12 +538,12 @@ describe(oneLine`
 			let tagged: any[] = [];
 
 			for (let attempt = 0; attempt < 45 && tagged.length < 2; attempt++) {
-				tagged = await db('directus_cache_stats_scoped_purge_tags')
+				tagged = await db('directus_cache_stats_scoped_purge_pins')
 					// Labels here, fingerprints in the pending table above: the stats
 					// stream joins its tag list with a comma, which a rendered
 					// fingerprint carries raw.
-					.whereIn('scoped_cache_tag', pair.map((id) => `${NOTE}:id=${id}`))
-					.select('scoped_cache_tag', 'purge_id');
+					.whereIn('scoped_cache_pin', pair.map((id) => `${NOTE}:id=${id}`))
+					.select('scoped_cache_pin', 'purge_id');
 
 				if (tagged.length < 2) {
 					await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -557,14 +557,14 @@ describe(oneLine`
 
 			const purged = await db('directus_cache_stats_purges')
 				.where({ purge_id: tagged[0].purge_id })
-				.select('mode', 'scoped_cache_tag_count', 'duration_ms');
+				.select('mode', 'scoped_cache_pin_count', 'duration_ms');
 
 			mark(`recorded purges: ${JSON.stringify(purged)}`);
 
 			// The three targets recorded above: the bare tag and one per key.
 			expect(purged).toHaveLength(3);
 			expect(purged.map((row) => row.mode)).toEqual(['slices', 'slices', 'slices']);
-			expect(purged.map((row) => row.scoped_cache_tag_count)).toEqual([1, 1, 1]);
+			expect(purged.map((row) => row.scoped_cache_pin_count)).toEqual([1, 1, 1]);
 			expect(purged.map((row) => row.duration_ms)).toEqual([null, null, null]);
 		}, 60_000);
 

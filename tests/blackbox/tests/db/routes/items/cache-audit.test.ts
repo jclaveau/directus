@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // The unit tests drive the engine over a fake cache and a scripted replayer;
 // these drive the real one: entries a running node filled through Redis,
 // descriptors drained to Postgres, and replays over the node's own loopback,
-// through the hooks that pin a read's tags.
+// through the hooks that pin a read's pins.
 //
 // Every write that makes an entry stale here bypasses the API on purpose — a
 // raw UPDATE fires no purge, which is exactly the class of write the audit
@@ -41,7 +41,7 @@ const HOLD_FLAG = 'test_cache_audit_hold_flag';
 const WIDE = 'test_cache_audit_wide';
 const WIDE_PARENT = 'test_cache_audit_wide_parent';
 
-// Nested one per row and pinned one tag each, they run the replay's tags
+// Nested one per row and pinned one pin each, they run the replay's pins
 // header past node's 16KB parser default (jclaveau/directus#510).
 const WIDE_ROWS = 600;
 
@@ -395,7 +395,7 @@ describe('The cache audit replays live entries against the database', () => {
 				collection: ROWS,
 				diff: ['/data/0/amount'],
 				purgesSinceFilled: [],
-				tags: expect.arrayContaining([`${ROWS}:owner=acme`]),
+				pins: expect.arrayContaining([`${ROWS}:owner=acme`]),
 			});
 
 			expect(report.findings[0].ageMs).toBeGreaterThanOrEqual(0);
@@ -472,8 +472,8 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
-			finds a replay pinning other tags than the entry was filled under:
-			tag_drift, the body agreeing, with both tag sets and an anomaly
+			finds a replay pinning other pins than the entry was filled under:
+			pin_drift, the body agreeing, with both pin sets and an anomaly
 		`, async () => {
 			await clearCache();
 			await db(DRIFT_DEP).update({ owner: 'first' });
@@ -486,19 +486,19 @@ describe('The cache audit replays live entries against the database', () => {
 
 			const report = await auditSettled();
 
-			expect(report.counts.tag_drift).toBe(1);
+			expect(report.counts.pin_drift).toBe(1);
 
 			expect(report.findings[0]).toMatchObject({
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 				url: `/items/${DRIFT}`,
 				diff: null,
-				tags: expect.arrayContaining([`${DRIFT_DEP}:owner=first`]),
-				replayTags: expect.arrayContaining([`${DRIFT_DEP}:owner=moved`]),
+				pins: expect.arrayContaining([`${DRIFT_DEP}:owner=first`]),
+				replayPins: expect.arrayContaining([`${DRIFT_DEP}:owner=moved`]),
 			});
 
-			expect(report.findings[0].tags).not.toContain(`${DRIFT_DEP}:owner=moved`);
+			expect(report.findings[0].pins).not.toContain(`${DRIFT_DEP}:owner=moved`);
 
-			const flagged = await anomaly('tag_drift', `/items/${DRIFT}`);
+			const flagged = await anomaly('pin_drift', `/items/${DRIFT}`);
 
 			expect(flagged).toBeDefined();
 			expect(flagged.sample).toContain(`replay pinned`);
@@ -638,7 +638,7 @@ describe('The cache audit replays live entries against the database', () => {
 		});
 
 		it(oneLine`
-			replays an entry whose tags outgrow node's 16KB header cap, one pin per
+			replays an entry whose pins outgrow node's 16KB header cap, one pin per
 			nested parent, and finds it fresh rather than unreplayable
 		`, async () => {
 			await clearCache();
@@ -655,10 +655,10 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(report.counts.unreplayable).toBe(0);
 			expect(report.counts.fresh).toBe(1);
 
-			// The witness holds only past the cap: the tags the entry was filled
+			// The witness holds only past the cap: the pins the entry was filled
 			// under are what the replay hands back, in one header.
 			const pinned: string[] = await db(
-				'directus_cache_stats_scoped_entry_tags as t',
+				'directus_cache_stats_scoped_entry_pins as t',
 			)
 				.join(
 					'directus_cache_stats_descriptors as d',
@@ -666,9 +666,9 @@ describe('The cache audit replays live entries against the database', () => {
 					't.cache_key',
 				)
 				.where({ 'd.collection': WIDE, 'd.path': `/items/${WIDE}` })
-				.pluck('t.scoped_cache_tag');
+				.pluck('t.scoped_cache_pin');
 
-			expect(pinned.filter((tag) => tag.startsWith(`${WIDE_PARENT}:id=`)))
+			expect(pinned.filter((pin) => pin.startsWith(`${WIDE_PARENT}:id=`)))
 				.toHaveLength(WIDE_ROWS);
 
 			expect(Buffer.byteLength(pinned.join(','))).toBeGreaterThan(16 * 1024);
@@ -1106,7 +1106,7 @@ describe('The cache audit replays live entries against the database', () => {
 			]);
 
 			// One verdict at a time, the total counted under the same narrowing.
-			const drifted = await readRun({ verdict: 'tag_drift' });
+			const drifted = await readRun({ verdict: 'pin_drift' });
 
 			expect(drifted.body.data.findings).toEqual([]);
 			expect(drifted.body.data.findingsTotal).toBe(0);

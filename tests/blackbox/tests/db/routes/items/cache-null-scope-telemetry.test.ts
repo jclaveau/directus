@@ -14,11 +14,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // #370 escaped the NULL scope token on its way into the HTTP headers but left the
 // label raw, since the Redis key is built from it. That label is ALSO persisted,
 // and Postgres rejects 0x00 in a text column outright. The drain wraps one whole
-// tick in a single transaction, so one such tag rolls back every cache-stats event
+// tick in a single transaction, so one such pin rolls back every cache-stats event
 // batched with it — hits, misses, fills, purges — behind a warning nobody reads.
 
 const COLLECTION = 'test_items_null_scope_telemetry';
-const PURGE_TAGS = 'directus_cache_stats_scoped_purge_tags';
+const PURGE_PINS = 'directus_cache_stats_scoped_purge_pins';
 
 describe(oneLine`
 	a purge whose scope value is null persists its attribution instead of taking the
@@ -82,16 +82,16 @@ describe(oneLine`
 		}
 
 		// The drain is a ten-second cron, so rows land some ticks after the write.
-		async function awaitPurgeTag(tag: string): Promise<string[]> {
+		async function awaitPurgePin(pin: string): Promise<string[]> {
 			for (let attempt = 0; attempt < 40; attempt++) {
-				const rows = await db(PURGE_TAGS)
+				const rows = await db(PURGE_PINS)
 					.where({ collection: COLLECTION })
-					.select('scoped_cache_tag');
+					.select('scoped_cache_pin');
 
-				const tags = rows.map((row: any) => row.scoped_cache_tag);
+				const pins = rows.map((row: any) => row.scoped_cache_pin);
 
-				if (tags.includes(tag)) {
-					return tags;
+				if (pins.includes(pin)) {
+					return pins;
 				}
 
 				await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -108,8 +108,8 @@ describe(oneLine`
 			const created = await createItem({ owner: 'acme', amount: '5' });
 			expect(created.statusCode).toBe(200);
 
-			const tags = await awaitPurgeTag(`${COLLECTION}:owner=acme`);
-			expect(tags).toContain(`${COLLECTION}:owner=acme`);
+			const pins = await awaitPurgePin(`${COLLECTION}:owner=acme`);
+			expect(pins).toContain(`${COLLECTION}:owner=acme`);
 		}, 60_000);
 
 		it(oneLine`
@@ -119,8 +119,8 @@ describe(oneLine`
 			expect(created.statusCode).toBe(200);
 			expect(created.body.data.owner).toBe(null);
 
-			const tags = await awaitPurgeTag(`${COLLECTION}:owner=%00null`);
-			expect(tags).toContain(`${COLLECTION}:owner=%00null`);
+			const pins = await awaitPurgePin(`${COLLECTION}:owner=%00null`);
+			expect(pins).toContain(`${COLLECTION}:owner=%00null`);
 		}, 60_000);
 	});
 });
