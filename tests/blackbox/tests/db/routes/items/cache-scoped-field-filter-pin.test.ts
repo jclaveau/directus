@@ -108,14 +108,6 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: TAG });
 		});
 
-		// Filters the root by its tag's scoped `label` value.
-		function readRootsByTagLabel() {
-			return request(getUrl(vendor, env))
-				.get(`/items/${ROOT}`)
-				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
-				.set('Authorization', auth);
-		}
-
 		function clearCache() {
 			return request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -123,7 +115,10 @@ describe(oneLine`
 		}
 
 		it('pins the tag by its scoped label value, not by pk, never bare', async () => {
-			const tags = (await readRootsByTagLabel()).headers[cacheTagsHeader];
+			const tags = (await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheTagsHeader];
 
 			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
 			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
@@ -133,22 +128,39 @@ describe(oneLine`
 		it('a write to a tag with another label keeps the read cached', async () => {
 			await clearCache();
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
+
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 
 			await request(getUrl(vendor, env))
 				.patch(`/items/${TAG}/${betaTagId}`)
 				.send({ body: 'beta touched' })
 				.set('Authorization', auth);
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 		});
 
 		it('a tag leaving the filtered label evicts the read', async () => {
 			await clearCache();
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
+
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 
 			// The label, not the body: the read shows no tag column, so only a write
 			// moving a tag across the slice the filter named changes its response.
@@ -157,7 +169,10 @@ describe(oneLine`
 				.send({ label: 'alpha moved' })
 				.set('Authorization', auth);
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
 
 			// Back in the slice the tests below read.
 			await request(getUrl(vendor, env))
@@ -169,8 +184,15 @@ describe(oneLine`
 		it('inserting a tag with the filtered label evicts the read', async () => {
 			await clearCache();
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
+
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 
 			// A pk filter cannot be matched by an insert; a scoped-field one can, and the
 			// create emits `sf_tag:label=alpha`, so the pin must catch it.
@@ -179,7 +201,10 @@ describe(oneLine`
 				.send({ label: 'alpha', kind: 'k1', body: 'a2' })
 				.set('Authorization', auth);
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
 		});
 
 		it('slices each value of an _in filter on the scoped field', async () => {
