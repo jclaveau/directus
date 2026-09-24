@@ -33,7 +33,7 @@ Directus is a real-time API + App dashboard for SQL databases; this is a pnpm mo
 ## Requirements
 
 - Node.js 22
-- pnpm >=10 <11
+- pnpm >=11 <12
 
 ## Common Commands
 
