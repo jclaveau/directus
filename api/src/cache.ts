@@ -10,6 +10,7 @@ import {
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { redisConfigAvailable } from './redis/index.js';
+import { shareFirstDial } from './redis/lib/share-first-dial.js';
 import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
@@ -496,13 +497,15 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 
 		const keyvRedis = new KeyvRedis({ ...clientOptions, disableOfflineQueue: true });
 
-		// Dialed now rather than by the first command. `getClient()` hands the client
-		// over as soon as it is open, and node-redis is open from the moment it starts
-		// dialing — so of two commands a fresh worker sent at once, the second went
-		// out while the first was still connecting and was refused as offline (the
-		// queue above). A purge was that second command on the PR-736 preview, and
-		// was recorded for retry over a Redis that was never away. A dial that fails
+		// Dialed now rather than by the first command, and every command sent in the
+		// meantime waits for that dial. `getClient()` hands the client over as soon
+		// as it is open, and node-redis is open from the moment it starts dialing —
+		// so a command a fresh worker sent while the store was connecting was refused
+		// as offline (the queue above). A purge was that command on the PR-736
+		// preview, recorded for retry over a Redis that was never away; on production
+		// it was the very first command of every CLI process. A dial that fails
 		// reports through the `error` the adapter forwards, like any later one.
+		shareFirstDial(keyvRedis);
 		void keyvRedis.getClient().catch(() => {});
 
 		config.store = keyvRedis;

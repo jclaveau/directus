@@ -196,6 +196,42 @@ describe('`directus cache flush` clears a running node from another process', ()
 		}, 60_000);
 
 		it(oneLine`
+			sends its first command over a store that has finished dialing, rather than
+			over one node-redis already calls open
+		`, async () => {
+			// The stores dial as they are built, node-redis is open from the first
+			// byte it sends, `getClient()` hands the client over as soon as it is
+			// open, and `disableOfflineQueue` refuses a command sent before the
+			// handshake answers. The first command a fresh process sends — here the
+			// lock `set` that opens `clearSystemCache` — is the one that lands in that
+			// window. The flush is best-effort, so neither the exit code nor the
+			// "flushed" line said so: only the warn did, on every deploy.
+			const { code, output } = await runCacheFlush();
+
+			expect(code).toBe(0);
+			expect(output).not.toMatch(/The client is offline/);
+		}, 60_000);
+
+		it(oneLine`
+			gives up on a store whose dial Redis refuses, rather than waiting on a
+			reconnect that never ends
+		`, async () => {
+			// With Redis down node-redis redials forever, so the dial the stores share
+			// never settles on its own. A wait that ends only with `ready` holds the
+			// lock `set` — and the deploy step behind it — until the deadline kills
+			// the process. The first `error` is the dial's answer too.
+			const { code, output } = await runCacheFlush({
+				REDIS: `redis://localhost:${await getPort()}/${redisDb}`,
+				REDIS_RETRY_BASE_DELAY: '10',
+				REDIS_RETRY_MAX_DELAY: '50',
+				CACHE_FLUSH_TIMEOUT: '20s',
+			});
+
+			expect(output).not.toMatch(/did not finish within/);
+			expect(code).toBe(1);
+		}, 30_000);
+
+		it(oneLine`
 			serves a read the running node had cached before it as a MISS
 		`, async () => {
 			await readOwner('acme');
