@@ -42,8 +42,7 @@ const appDir = join(root, 'app');
 /** Where vite keeps the optimized dependencies; removed to force a cold boot. */
 const depCache = join(appDir, 'node_modules', '.vite');
 
-const base = '/admin';
-const entry = `${base}/src/main.ts`;
+const entry = '/admin/src/main.ts';
 
 /**
  * Built from a char code because the escape byte written literally is a control
@@ -72,7 +71,8 @@ async function treeRssMb(rootPid: number): Promise<number> {
 
 		try {
 			status = await readFile(`/proc/${pid}/status`, 'utf8');
-		} catch {
+		}
+		catch {
 			// The scanner exits as soon as it has finished; a sample that lands
 			// in that window measures the processes that are still there.
 			continue;
@@ -88,11 +88,16 @@ async function treeRssMb(rootPid: number): Promise<number> {
 
 		try {
 			children = await readFile(`/proc/${pid}/task/${pid}/children`, 'utf8');
-		} catch {
+		}
+		catch {
 			continue;
 		}
 
-		for (const child of children.trim().split(/\s+/).filter(Boolean)) {
+		const forked = children.trim()
+			.split(/\s+/)
+			.filter(Boolean);
+
+		for (const child of forked) {
 			pids.push(Number(child));
 		}
 	}
@@ -122,7 +127,8 @@ async function peakDuring<T>(
 	try {
 		const value = await work();
 		return [value, Math.max(peak, await treeRssMb(pid))];
-	} finally {
+	}
+	finally {
 		sampling = false;
 		await sampler;
 	}
@@ -131,28 +137,25 @@ async function peakDuring<T>(
 type Server = { pid: number; url: string; stop: () => Promise<void> };
 
 async function startServer(): Promise<Server> {
-	const child = spawn('pnpm', ['exec', 'vite', '--port', '0', '--strictPort=false'], {
-		cwd: appDir,
-		env: {
-			...process.env,
-			NODE_ENV: 'development',
-			// The dev server proxies everything outside /admin at an API that is
-			// not running here. Nothing this measures leaves /admin, but the
-			// proxy logs a refused connection per stray request without it.
-			API_URL: 'http://127.0.0.1:1/',
-			NO_COLOR: '1',
+	const child = spawn(
+		'pnpm',
+		['exec', 'vite', '--port', '0', '--strictPort=false'],
+		{
+			cwd: appDir,
+			env: {
+				...process.env,
+				NODE_ENV: 'development',
+				// The dev server proxies everything outside /admin at an API
+				// that is not running here. Nothing this measures leaves
+				// /admin, but the proxy logs a refused connection per stray
+				// request without it.
+				API_URL: 'http://127.0.0.1:1/',
+				NO_COLOR: '1',
+			},
 		},
-	});
+	);
 
 	let output = '';
-
-	// Every rejection below leaves a listening server behind unless the child is
-	// killed with it, and an arm that fails a rep would strand a process holding
-	// a gigabyte for the rest of the job.
-	const abandon = (error: unknown) => {
-		child.kill('SIGKILL');
-		throw error;
-	};
 
 	const url = await new Promise<string>((resolveUrl, rejectUrl) => {
 		const timer = setTimeout(
@@ -183,7 +186,13 @@ async function startServer(): Promise<Server> {
 			clearTimeout(timer);
 			rejectUrl(new Error(`The dev server exited with ${code}:\n${output}`));
 		});
-	}).catch(abandon);
+	// Every rejection above leaves a listening server behind unless the child is
+	// killed with it, and an arm that fails a rep would strand a process holding
+	// a gigabyte for the rest of the job.
+	}).catch((error: unknown) => {
+		child.kill('SIGKILL');
+		throw error;
+	});
 
 	return {
 		pid: child.pid!,
@@ -205,9 +214,7 @@ async function crawl(server: Server): Promise<number> {
 	const seen = new Set(queue);
 
 	for (let index = 0; index < queue.length && seen.size < moduleBudget; index++) {
-		const path = queue[index]!;
-
-		const response = await fetch(`${server.url}${path}`);
+		const response = await fetch(`${server.url}${queue[index]!}`);
 
 		if (response.ok === false) {
 			continue;
@@ -246,7 +253,8 @@ async function waitForOptimizedDeps(): Promise<void> {
 			if (Object.keys(written.optimized ?? {}).length > 0) {
 				return;
 			}
-		} catch {
+		}
+		catch {
 			// Not written yet, or written half way through.
 		}
 
@@ -278,9 +286,9 @@ async function measureRep(): Promise<Rep> {
 			async () => await crawl(server),
 		);
 
-
 		return { boot, optimize, graph, modules };
-	} finally {
+	}
+	finally {
 		await server.stop();
 	}
 }
@@ -292,11 +300,8 @@ test('the admin dev server holds a bounded amount while it serves', async () => 
 		reps_.push(await measureRep());
 	}
 
-	const phases: Phase[] = ['boot', 'optimize', 'graph'];
-
-	const summaries = phases.map((phase) =>
-		summarise(phase, reps_.map((rep) => rep[phase])),
-	);
+	const summaries = (['boot', 'optimize', 'graph'] as Phase[]).map((phase) =>
+		summarise(phase, reps_.map((rep) => rep[phase])));
 
 	const result = {
 		arm,
