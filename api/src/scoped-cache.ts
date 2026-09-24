@@ -7,7 +7,6 @@ export * from './scoped-cache/index-path.js';
 export * from './scoped-cache/mutated-rows.js';
 export * from './scoped-cache/ownership-injection.js';
 export * from './scoped-cache/paths.js';
-export * from './scoped-cache/read-meta.js';
 export * from './scoped-cache/read-pins.js';
 export * from './scoped-cache/read-plan.js';
 export * from './scoped-cache/purge.js';

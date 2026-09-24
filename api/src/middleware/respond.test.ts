@@ -1,9 +1,6 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-	scopedCacheReadMeta,
-} from '../scoped-cache.js';
 
 // Hoisted, because `scoped-cache.js` is now imported for real (see its mock
 // below) and reads `useEnv()` at module scope — which runs while the mock
@@ -75,8 +72,6 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
-		// Used only to build fixtures below — pure, reaches no Redis.
-		scopedCacheReadMeta: actual.scopedCacheReadMeta,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -218,11 +213,13 @@ describe('respond middleware', () => {
 	`, async () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheFingerprints: [{
-				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
-			}] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pinnedScope: {},
+					viewFields: [],
+				}],
+			},
 		);
 
 		const req = makeReq();
@@ -419,11 +416,13 @@ describe('respond middleware', () => {
 	test('a graphql fill captures a blank url and the graphql query', async () => {
 		const res = makeRes(
 			{ data: { me: 1 } },
-			{ scopedCacheFingerprints: [{
-				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
-			}] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pinnedScope: {},
+					viewFields: [],
+				}],
+			},
 		);
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
@@ -463,14 +462,16 @@ describe('respond middleware', () => {
 			makeRes({
 				data: withMeta(
 					{ id: 'u1', student_profile: [] },
-					scopedCacheReadMeta([
-						{
-							collection: 'directus_users',
-							pinnedScope: { id: ['u1'] },
-							viewFields: [],
-						},
-						{ collection: 'student', pinnedScope: {}, viewFields: [] },
-					]),
+					{
+						scopedCacheFingerprints: [
+							{
+								collection: 'directus_users',
+								pinnedScope: { id: ['u1'] },
+								viewFields: [],
+							},
+							{ collection: 'student', pinnedScope: {}, viewFields: [] },
+						],
+					},
 				),
 			}),
 			next,
@@ -501,17 +502,15 @@ describe('respond middleware', () => {
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes(
 				{
-					data: withMeta({ id: 'u1' }, scopedCacheReadMeta(
-						[
+					data: withMeta({ id: 'u1' }, {
+						scopedCacheFingerprints: [
 							{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
 							{ collection: 'student', pinnedScope: {}, viewFields: [] },
 						],
-						{
-							scopedCacheEpochs: {
-								directus_users: '4', student: '5', '*': '1',
-							},
+						scopedCacheEpochs: {
+							directus_users: '4', student: '5', '*': '1',
 						},
-					)),
+					}),
 				},
 				{ scopedCacheEpochsBeforeQuery: { directus_users: '3', '*': '1' } },
 			),
@@ -534,16 +533,16 @@ describe('respond middleware', () => {
 		await respond(
 			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
 			makeRes({
-				data: withMeta({ id: 'u1' }, scopedCacheReadMeta(
-					[{ collection: 'directus_users', pinnedScope: {}, viewFields: [] }],
-					{
-						scopedCacheUnautopurgeableFingerprints: [{
-							collection: 'student',
-							pinnedScope: { level: ['3'] },
-							viewFields: [],
-						}],
-					},
-				)),
+				data: withMeta({ id: 'u1' }, {
+					scopedCacheFingerprints: [
+						{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheUnautopurgeableFingerprints: [{
+						collection: 'student',
+						pinnedScope: { level: ['3'] },
+						viewFields: [],
+					}],
+				}),
 			}),
 			next,
 		);
@@ -1082,11 +1081,13 @@ describe('respond middleware', () => {
 		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheFingerprints: [{
-				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
-			}] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pinnedScope: {},
+					viewFields: [],
+				}],
+			},
 		);
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
@@ -1158,11 +1159,13 @@ describe('respond middleware', () => {
 		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheFingerprints: [{
-				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
-			}] },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+					pinnedScope: {},
+					viewFields: [],
+				}],
+			},
 		);
 
 		await respond(makeReq(), res, next);

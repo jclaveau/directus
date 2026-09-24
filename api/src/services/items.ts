@@ -29,7 +29,6 @@ import {
 	readScopedCacheEpochs,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheMutatedFingerprints,
-	scopedCacheReadMeta,
 	scopedCacheUpdatedRows,
 	scopedCacheWrittenRows,
 	stripScopedCacheOwnershipInjections,
@@ -871,18 +870,16 @@ implements AbstractService<Item> {
 		// its rows for revisions takes the whole update down with it. The write path
 		// validates its own filter returns (`payloadAfterHooks === null`); this one
 		// does not. Covered as it stands by read-hook-null.test.ts.
-		return withMeta(filteredRecords as Item[], scopedCacheReadMeta(
+		return withMeta(filteredRecords as Item[], {
 			scopedCacheFingerprints,
-			{
-				scopedCacheUnautopurgeableFingerprints,
-				// A `scopeTo` names a collection the before-query reading could not know
-				// about, and hands over the counter its own dependent read took.
-				scopedCacheEpochs: foldScopedCacheEpochsFromHookDeclarations(
-					scopedCacheEpochs,
-					scopedCacheHookDeclarations.epochs,
-				),
-			},
-		));
+			scopedCacheUnautopurgeableFingerprints,
+			// A `scopeTo` names a collection the before-query reading could not know
+			// about, and hands over the counter its own dependent read took.
+			scopedCacheEpochs: foldScopedCacheEpochsFromHookDeclarations(
+				scopedCacheEpochs,
+				scopedCacheHookDeclarations.epochs,
+			),
+		});
 	}
 
 	/**
@@ -911,7 +908,10 @@ implements AbstractService<Item> {
 		}
 
 		// Carry the read's metadata onto the single returned item.
-		return withMeta(results[0]!, readMeta(results) ?? scopedCacheReadMeta([]));
+		return withMeta(
+			results[0]!,
+			readMeta(results) ?? { scopedCacheFingerprints: [] },
+		);
 	}
 
 	/**
@@ -1856,7 +1856,7 @@ implements AbstractService<Item> {
 		query.limit = 1;
 
 		const records = await this.readByQuery(query, opts);
-		const singletonMeta = readMeta(records) ?? scopedCacheReadMeta([]);
+		const singletonMeta = readMeta(records) ?? { scopedCacheFingerprints: [] };
 		const record = records[0];
 
 		if (!record) {

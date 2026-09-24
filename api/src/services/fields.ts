@@ -24,10 +24,7 @@ import { addFieldFlag, getRelations, toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
-import {
-	flushResponseCache,
-	scopedCacheReadMeta,
-} from '../scoped-cache.js';
+import { flushResponseCache } from '../scoped-cache.js';
 import { ALIAS_TYPES, ALLOWED_DB_DEFAULT_FUNCTIONS } from '../constants.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import type { Helpers } from '../database/helpers/index.js';
@@ -273,9 +270,11 @@ export class FieldsService {
 		}
 
 		// TODO scope by the related collection's scoped_cache_fields
-		return withMeta(result, scopedCacheReadMeta([
-			{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
-		]));
+		return withMeta(result, {
+			scopedCacheFingerprints: [
+				{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
+			],
+		});
 	}
 
 	async readOne(collection: string, field: string): Promise<Record<string, any>> {
@@ -359,9 +358,11 @@ export class FieldsService {
 		};
 
 		// TODO scope by the related collection's scoped_cache_fields
-		return withMeta(data, scopedCacheReadMeta([
-			{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
-		]));
+		return withMeta(data, {
+			scopedCacheFingerprints: [
+				{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
+			],
+		});
 	}
 
 	async createField(

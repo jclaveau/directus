@@ -15,10 +15,7 @@ import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
-import {
-	mergeScopedCacheEpochs,
-	scopedCacheReadMeta,
-} from '../../scoped-cache.js';
+import { mergeScopedCacheEpochs } from '../../scoped-cache.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -129,14 +126,12 @@ export class GraphQLService {
 			formattedResult.extensions = result['extensions'];
 		}
 
-		return withMeta(formattedResult, scopedCacheReadMeta(
-			this.scopedCacheFingerprints,
-			{
-				scopedCacheUnautopurgeableFingerprints:
-					this.scopedCacheUnautopurgeableFingerprints,
-				scopedCacheEpochs: this.scopedCacheEpochs,
-			},
-		));
+		return withMeta(formattedResult, {
+			scopedCacheFingerprints: this.scopedCacheFingerprints,
+			scopedCacheUnautopurgeableFingerprints:
+				this.scopedCacheUnautopurgeableFingerprints,
+			scopedCacheEpochs: this.scopedCacheEpochs,
+		});
 	}
 
 	/**

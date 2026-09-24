@@ -47,7 +47,6 @@ import {
 	scopedCacheNestedCollections,
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCachePathReversesChain,
-	scopedCacheReadMeta,
 	scopedCacheSweptDuringFill,
 	scopedCacheLegacyTags,
 	scopedCachePinKey,
@@ -797,28 +796,30 @@ describe('createScopedCacheHookDeclarations', () => {
 		const metricLookup = () => {
 			return withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([
-					{
-						collection: 'metric',
-						pinnedScope: { owner: ['acme'] },
-						viewFields: [],
-					},
-				], {
+				{
+					scopedCacheFingerprints: [
+						{
+							collection: 'metric',
+							pinnedScope: { owner: ['acme'] },
+							viewFields: [],
+						},
+					],
 					scopedCacheEpochs: { metric: '4' },
-				}),
+				},
 			);
 		};
 
 		const auditLookup = () => {
 			return withMeta(
 				[{ id: 2 }],
-				scopedCacheReadMeta([{
-					collection: 'audit',
-					pinnedScope: {},
-					viewFields: [],
-				}], {
+				{
+					scopedCacheFingerprints: [{
+						collection: 'audit',
+						pinnedScope: {},
+						viewFields: [],
+					}],
 					scopedCacheEpochs: { audit: '7' },
-				}),
+				},
 			);
 		};
 
@@ -886,24 +887,26 @@ describe('createScopedCacheHookDeclarations', () => {
 
 			const before = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([{
-					collection: 'metric',
-					pinnedScope: {},
-					viewFields: [],
-				}], {
+				{
+					scopedCacheFingerprints: [{
+						collection: 'metric',
+						pinnedScope: {},
+						viewFields: [],
+					}],
 					scopedCacheEpochs: { metric: '4' },
-				}),
+				},
 			);
 
 			const after = withMeta(
 				[{ id: 1 }],
-				scopedCacheReadMeta([{
-					collection: 'metric',
-					pinnedScope: {},
-					viewFields: [],
-				}], {
+				{
+					scopedCacheFingerprints: [{
+						collection: 'metric',
+						pinnedScope: {},
+						viewFields: [],
+					}],
 					scopedCacheEpochs: { metric: '5' },
-				}),
+				},
 			);
 
 			await scope.dependOn([after, before]);

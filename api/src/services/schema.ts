@@ -8,10 +8,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
-import {
-	readScopedCacheEpochs,
-	scopedCacheReadMeta,
-} from '../scoped-cache.js';
+import { readScopedCacheEpochs } from '../scoped-cache.js';
 import { ForbiddenError } from '@directus/errors';
 import { applyDiff } from '../utils/apply-diff.js';
 import { getSnapshotDiff } from '../utils/get-snapshot-diff.js';
@@ -48,12 +45,12 @@ export class SchemaService {
 
 		const currentSnapshot = await getSnapshot({ database: this.knex });
 
-		return withMeta(currentSnapshot, scopedCacheReadMeta(
-			snapshotCollections.map((collection) => {
+		return withMeta(currentSnapshot, {
+			scopedCacheFingerprints: snapshotCollections.map((collection) => {
 				return { collection, pinnedScope: {}, viewFields: [] };
 			}),
-			{ scopedCacheEpochs },
-		));
+			scopedCacheEpochs,
+		});
 	}
 
 	async apply(payload: SnapshotDiffWithHash): Promise<void> {

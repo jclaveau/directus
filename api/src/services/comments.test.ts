@@ -4,7 +4,6 @@ import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
 import { withMeta } from '../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../scoped-cache.js';
 import { CommentsService } from './comments.js';
 import { ItemsService } from './items.js';
 import { NotificationsService } from './notifications.js';
@@ -98,18 +97,18 @@ describe('Services / Comments', () => {
 				first_name: 'Sam',
 				last_name: 'Sender',
 				email: 'sam@x.com',
-			}, scopedCacheReadMeta([])))
+			}, { scopedCacheFingerprints: [] }))
 			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
 				role: { id: null },
-			}, scopedCacheReadMeta([])));
+			}, { scopedCacheFingerprints: [] }));
 
 		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([
 			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
-		], scopedCacheReadMeta([])));
+		], { scopedCacheFingerprints: [] }));
 
 		const result = await service.createMany([
 			{

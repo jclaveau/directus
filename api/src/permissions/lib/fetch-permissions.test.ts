@@ -2,7 +2,6 @@ import type { Accountability, Permission } from '@directus/types';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { PermissionsService } from '../../services/permissions.js';
 import { withMeta } from '../../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../../scoped-cache.js';
 import type { Context } from '../types.js';
 import { fetchDynamicVariableData } from '../utils/fetch-dynamic-variable-data.js';
 import { processPermissions } from '../utils/process-permissions.js';
@@ -31,7 +30,7 @@ test('Returns permissions read through service sorted by the order of policies',
 		{ policy: 'policy-2' },
 		{ policy: 'policy-1' },
 		{ policy: 'policy-1' },
-	] as Permission[], scopedCacheReadMeta([]));
+	] as Permission[], { scopedCacheFingerprints: [] });
 
 	const policies = ['policy-1', 'policy-2'] as string[];
 	const collections = [] as string[];
@@ -53,7 +52,7 @@ test('Returns permissions read through service sorted by the order of policies',
 test('Returns all action permissions if action is undefined', async () => {
 	const permissions = withMeta(
 		[{ policy: 'policy-1' }] as Permission[],
-		scopedCacheReadMeta([]),
+		{ scopedCacheFingerprints: [] },
 	);
 
 	const policies = [] as string[];
@@ -76,7 +75,7 @@ test('Returns all action permissions if action is undefined', async () => {
 test('Fetches for all collections when collections filter is undefined', async () => {
 	const permissions = withMeta(
 		[{ policy: 'policy-1' }] as Permission[],
-		scopedCacheReadMeta([]),
+		{ scopedCacheFingerprints: [] },
 	);
 
 	const policies = [] as string[];
@@ -98,7 +97,7 @@ test('Fetches for all collections when collections filter is undefined', async (
 test('Adds minimal permissions if accountability is passed', async () => {
 	const permissions = withMeta(
 		[{ policy: 'policy-1' }] as Permission[],
-		scopedCacheReadMeta([]),
+		{ scopedCacheFingerprints: [] },
 	);
 
 	const accountability = {} as unknown as Accountability;
@@ -116,7 +115,7 @@ test('Adds minimal permissions if accountability is passed', async () => {
 test('Injects dynamic variables by calling process permissions', async () => {
 	const permissions = withMeta(
 		[{ policy: 'policy-1' }] as Permission[],
-		scopedCacheReadMeta([]),
+		{ scopedCacheFingerprints: [] },
 	);
 
 	const accountability = {} as unknown as Accountability;

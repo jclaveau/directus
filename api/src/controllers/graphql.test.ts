@@ -1,9 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
-import {
-	scopedCacheReadMeta,
-} from '../scoped-cache.js';
 
 // Stub the middleware + service the router pulls in so we can drive the bare async handlers without a
 // generated schema or a real express request lifecycle.
@@ -52,7 +49,7 @@ describe('graphql controller scopedCacheFingerprints', () => {
 		execute.mockResolvedValueOnce(
 			withMeta(
 				{ data: { ok: true } },
-				scopedCacheReadMeta(fingerprints),
+				{ scopedCacheFingerprints: fingerprints },
 			),
 		);
 
@@ -74,7 +71,7 @@ describe('graphql controller scopedCacheFingerprints', () => {
 		%s handler disables cache when the payload has errors
 	`, async (_scope, getHandler) => {
 		execute.mockResolvedValueOnce(
-			withMeta({ errors: [{ message: 'x' }] }, scopedCacheReadMeta([])),
+			withMeta({ errors: [{ message: 'x' }] }, { scopedCacheFingerprints: [] }),
 		);
 
 		const req = { accountability: null, schema: {} } as any;

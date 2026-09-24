@@ -14,7 +14,6 @@ import emitter from '../emitter.js';
 import {
 	purgeScopedCache,
 	scopedCacheLegacyTags,
-	scopedCacheReadMeta,
 } from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
@@ -191,7 +190,7 @@ describe('Integration Tests', () => {
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
 				service.readByQuery = vi.fn(async () => {
-					return withMeta([], scopedCacheReadMeta([]));
+					return withMeta([], { scopedCacheFingerprints: [] });
 				});
 
 				const error = await service.readOne(999).catch((err) => err);

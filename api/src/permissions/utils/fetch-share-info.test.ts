@@ -3,7 +3,6 @@ import knex, { type Knex } from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { withMeta } from '../../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../../scoped-cache.js';
 import { ItemsService } from '../../services/items.js';
 import { _fetchShareInfo } from './fetch-share-info.js';
 
@@ -41,7 +40,7 @@ describe('fetchShareInfo', () => {
 
 		const readOne = vi
 			.spyOn(ItemsService.prototype, 'readOne')
-			.mockResolvedValue(withMeta(share, scopedCacheReadMeta([])));
+			.mockResolvedValue(withMeta(share, { scopedCacheFingerprints: [] }));
 
 		const info = await _fetchShareInfo('share-1', { knex: db, schema });
 

@@ -4,10 +4,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
-import {
-	renderScopedCacheFingerprint,
-	scopedCacheReadMeta,
-} from '../../scoped-cache.js';
+import { renderScopedCacheFingerprint } from '../../scoped-cache.js';
 import { GraphQLExecutionError } from './errors/index.js';
 
 // Keep graphql's rule set / error classes real; stub the heavy validate + execute so we can drive
@@ -61,10 +58,12 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta(
 					[{ id: 1 }],
-					scopedCacheReadMeta([
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-						{ collection: 'users', pinnedScope: {}, viewFields: [] },
-					]),
+					{
+						scopedCacheFingerprints: [
+							{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+							{ collection: 'users', pinnedScope: {}, viewFields: [] },
+						],
+					},
 				);
 			},
 		} as any);
@@ -80,11 +79,13 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta(
 					[{ id: 2 }],
-					scopedCacheReadMeta([{
-						collection: 'directus_files',
-						pinnedScope: {},
-						viewFields: [],
-					}]),
+					{
+						scopedCacheFingerprints: [{
+							collection: 'directus_files',
+							pinnedScope: {},
+							viewFields: [],
+						}],
+					},
 				);
 			},
 		} as any);
@@ -104,10 +105,12 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
-					{ scopedCacheEpochs: { articles: '7', users: '3', '*': '1' } },
-				));
+				return withMeta([{ id: 1 }], {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheEpochs: { articles: '7', users: '3', '*': '1' },
+				});
 			},
 		} as any);
 
@@ -118,10 +121,12 @@ describe('GraphQLService scoped cache tags', () => {
 		// at fill time and cache the response the purge invalidated.
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
-					{ scopedCacheEpochs: { articles: '8', files: null, '*': '2' } },
-				));
+				return withMeta([{ id: 2 }], {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheEpochs: { articles: '8', files: null, '*': '2' },
+				});
 			},
 		} as any);
 
@@ -145,10 +150,12 @@ describe('GraphQLService scoped cache tags', () => {
 		// time and cache a response the purge between the two already invalidated.
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
-					{ scopedCacheEpochs: { articles: '9', '*': '4' } },
-				));
+				return withMeta([{ id: 1 }], {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheEpochs: { articles: '9', '*': '4' },
+				});
 			},
 		} as any);
 
@@ -156,10 +163,12 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
-					{ scopedCacheEpochs: { articles: '2', '*': '4' } },
-				));
+				return withMeta([{ id: 2 }], {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheEpochs: { articles: '2', '*': '4' },
+				});
 			},
 		} as any);
 
@@ -176,10 +185,12 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
-					{ scopedCacheEpochs: { articles: '3' } },
-				));
+				return withMeta([{ id: 1 }], {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheEpochs: { articles: '3' },
+				});
 			},
 		} as any);
 
@@ -187,10 +198,12 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], scopedCacheReadMeta(
-					[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
-					{ scopedCacheEpochs: { articles: null } },
-				));
+				return withMeta([{ id: 2 }], {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+					scopedCacheEpochs: { articles: null },
+				});
 			},
 		} as any);
 
@@ -209,11 +222,13 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta(
 					[{ id: 1 }],
-					scopedCacheReadMeta([{
-						collection: 'articles',
-						pinnedScope: {},
-						viewFields: [],
-					}]),
+					{
+						scopedCacheFingerprints: [{
+							collection: 'articles',
+							pinnedScope: {},
+							viewFields: [],
+						}],
+					},
 				);
 			},
 		} as any);

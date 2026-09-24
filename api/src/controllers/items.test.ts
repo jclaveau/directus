@@ -3,9 +3,6 @@ import { oneLine } from '@directus/utils';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
-import {
-	scopedCacheReadMeta,
-} from '../scoped-cache.js';
 
 // Per-test service method spies; the ItemsService mock returns this same object so tests drive branches.
 const createOne = vi.fn();
@@ -181,9 +178,11 @@ describe('items controller', () => {
 
 		test('singleton read + stamps scopedCacheFingerprints', async () => {
 			readSingleton.mockResolvedValueOnce(
-				withMeta({ id: 1 }, scopedCacheReadMeta([
-					{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-				])),
+				withMeta({ id: 1 }, {
+					scopedCacheFingerprints: [
+						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+					],
+				}),
 			);
 
 			getMetaForQuery.mockResolvedValueOnce({ total_count: 1 });
@@ -249,20 +248,18 @@ describe('items controller', () => {
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ id: 1 },
-					scopedCacheReadMeta(
-						[{
+					{
+						scopedCacheFingerprints: [{
 							collection: 'articles',
 							pinnedScope: { id: ['1'] },
 							viewFields: [],
 						}],
-						{
-							scopedCacheUnautopurgeableFingerprints: [{
-								collection: 'authors',
-								pinnedScope: { ghost: ['g'] },
-								viewFields: [],
-							}],
-						},
-					),
+						scopedCacheUnautopurgeableFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { ghost: ['g'] },
+							viewFields: [],
+						}],
+					},
 				),
 			);
 

@@ -7,7 +7,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Knex } from 'knex';
 import type { Tracker } from 'knex-mock-client';
 import { readMeta, withMeta } from '../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../scoped-cache.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
 
@@ -100,7 +99,7 @@ describe('Services / Fields', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], scopedCacheReadMeta([])));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 
@@ -117,7 +116,7 @@ describe('Services / Fields', () => {
 		it('reads only the field rows of the given collection', async () => {
 			const readByQuery = vi
 				.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], scopedCacheReadMeta([])));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 

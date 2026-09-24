@@ -8,7 +8,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
-import { scopedCacheReadMeta } from '../scoped-cache.js';
 import { ItemsService } from './items.js';
 import { RelationsService } from './relations.js';
 
@@ -93,7 +92,7 @@ describe('Services / Relations', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_relations', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], scopedCacheReadMeta([])));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 
@@ -117,7 +116,7 @@ describe('Services / Relations', () => {
 					many_field: 'related',
 					one_collection: 'related',
 				},
-			], scopedCacheReadMeta([])));
+			], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([
 				{
@@ -156,7 +155,7 @@ describe('Services / Relations', () => {
 
 		it('should throw ForbiddenError when no relation is found', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], scopedCacheReadMeta([])));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 

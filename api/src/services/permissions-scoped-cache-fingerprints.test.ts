@@ -2,9 +2,6 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
-import {
-	scopedCacheReadMeta,
-} from '../scoped-cache.js';
 
 // Isolate from redis/bus; force scoped mode on.
 vi.mock('../cache.js', () => ({
@@ -48,11 +45,13 @@ describe('PermissionsService.readByQuery override', () => {
 		// re-attach the rider so permissions reads stay scoped-invalidatable (not TTL-only).
 		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(withMeta(
 			[{ id: 1 }],
-			scopedCacheReadMeta([{
-				collection: 'directus_permissions',
-				pinnedScope: {},
-				viewFields: [],
-			}]),
+			{
+				scopedCacheFingerprints: [{
+					collection: 'directus_permissions',
+					pinnedScope: {},
+					viewFields: [],
+				}],
+			},
 		));
 
 		const service = new PermissionsService({ knex: db, schema: {} as any, accountability: null });
