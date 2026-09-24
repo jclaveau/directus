@@ -14,7 +14,7 @@ describe('Operations / Mail', () => {
 	beforeEach(async () => {
 		mockOperationContext = {
 			accountability: null,
-			database: vi.mocked(knex.default({ client: MockClient })),
+			database: knex.default({ client: MockClient }),
 			getSchema: vi.fn().mockResolvedValue({}),
 		};
 

@@ -1,7 +1,7 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Permission } from '@directus/types';
 import knex from 'knex';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
 import { applySearch } from './search.js';
 
@@ -28,7 +28,7 @@ const permissions = [
 
 for (const number of ['0x56071c902718e681e274DB0AaC9B4Ed2d027924d', '0b11111', '0.42e3', 'Infinity', '42.000']) {
 	test(`Prevent ${number} from being cast to number`, async () => {
-		const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 
 		applySearch(db as any, schema, queryBuilder, number, 'test', {}, permissions);
@@ -42,7 +42,7 @@ for (const number of ['0x56071c902718e681e274DB0AaC9B4Ed2d027924d', '0b11111', '
 
 for (const number of ['1234', '-128', '12.34']) {
 	test(`Casting number ${number}`, async () => {
-		const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 
 		applySearch(db as any, schema, queryBuilder, number, 'test', {}, permissions);
@@ -58,7 +58,7 @@ for (const number of ['1234', '-128', '12.34']) {
 }
 
 test(`Query is falsy if no other clause is added`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	const schema = new SchemaBuilder()
@@ -79,7 +79,7 @@ test(`Query is falsy if no other clause is added`, async () => {
 });
 
 test(`Exclude non uuid searchable field(s) when searchQuery has valid uuid value`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySearch(db as any, schema, queryBuilder, '4b9adc65-4ad8-4242-9144-fbfc58400d74', 'test', {}, [
@@ -98,7 +98,7 @@ test(`Exclude non uuid searchable field(s) when searchQuery has valid uuid value
 });
 
 test(`Remove forbidden field(s) from search`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySearch(db as any, schema, queryBuilder, 'directus', 'test', {}, [
@@ -119,7 +119,7 @@ test(`Remove forbidden field(s) from search`, async () => {
 });
 
 test(`Add all fields for * field rule`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySearch(db as any, schema, queryBuilder, '1', 'test', {}, [
@@ -141,7 +141,7 @@ test(`Add all fields for * field rule`, async () => {
 });
 
 test(`Add all fields when * is present in field rule with permission rule present`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySearch(db as any, schema, queryBuilder, '1', 'test', {}, [
@@ -165,7 +165,7 @@ test(`Add all fields when * is present in field rule with permission rule presen
 });
 
 test(`All field(s) are searched for admin`, async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySearch(db as any, schema, queryBuilder, '1', 'test', {}, []);

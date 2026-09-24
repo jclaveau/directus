@@ -9,7 +9,6 @@ import {
 	expect,
 	it,
 	vi,
-	type MockedFunction,
 } from 'vitest';
 
 const env: Record<string, any> = {
@@ -85,7 +84,7 @@ const readAll = vi.fn().mockResolvedValue([]);
 
 vi.mock('../services/relations.js', () => {
 	return {
-		RelationsService: vi.fn().mockImplementation(() => {
+		RelationsService: vi.fn().mockImplementation(function () {
 			return { readAll };
 		}),
 	};
@@ -116,11 +115,11 @@ function overviewFor(collection: string) {
 }
 
 describe('getDatabaseSchema (via getSchema bypassCache)', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
@@ -355,11 +354,11 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 });
 
 describe('getSchema cached (non-bypass) path', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 

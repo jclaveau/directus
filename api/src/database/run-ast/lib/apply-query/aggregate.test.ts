@@ -1,6 +1,6 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 import { applyAggregate } from './aggregate.js';
 import { Client_SQLite3 } from './mock.js';
 
@@ -12,7 +12,7 @@ const schema = new SchemaBuilder()
 	.build();
 
 test('aggregate empty', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(schema, queryBuilder, {}, 'articles', true);
@@ -24,7 +24,7 @@ test('aggregate empty', async () => {
 });
 
 test('aggregate counting id and title', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(
@@ -47,7 +47,7 @@ test('aggregate counting id and title', async () => {
 });
 
 test('aggregate counting *', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(
@@ -67,7 +67,7 @@ test('aggregate counting *', async () => {
 });
 
 test('aggregate countDistinct title', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(
@@ -87,7 +87,7 @@ test('aggregate countDistinct title', async () => {
 });
 
 test('aggregate countDistinct id as it is unique', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(
@@ -107,7 +107,7 @@ test('aggregate countDistinct id as it is unique', async () => {
 });
 
 test('aggregate countAll', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(
@@ -135,7 +135,7 @@ test('aggregate count o2m', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyAggregate(

@@ -18,7 +18,10 @@ const info = vi.fn();
 // the point is what happens to the promise it returns, not when it runs.
 function scheduledTick(clock: Partial<SynchronizedClock>) {
 	vi.mocked(useLogger).mockReturnValue({ warn, info } as any);
-	vi.mocked(SynchronizedClock).mockReturnValue(clock as SynchronizedClock);
+
+	vi.mocked(SynchronizedClock).mockImplementation(function () {
+		return clock;
+	} as unknown as typeof SynchronizedClock);
 
 	// clearAllMocks leaves implementations behind, so every test starts from the
 	// caught-up reading and says so itself when it wants the other one.

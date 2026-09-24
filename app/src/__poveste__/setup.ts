@@ -1,4 +1,4 @@
-import { defineSetupVue3 } from '@histoire/plugin-vue';
+import { defineSetupVue3 } from '@poveste/plugin-vue';
 import { createHead } from '@unhead/vue';
 import { createPinia } from 'pinia';
 import { createI18n } from 'vue-i18n';

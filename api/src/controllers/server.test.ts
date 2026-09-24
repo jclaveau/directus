@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const serverInfo = vi.fn();
 
 vi.mock('../services/server.js', () => {
-	return { ServerService: vi.fn(() => ({ serverInfo })) };
+	return {
+		ServerService: vi.fn(function () {
+			return { serverInfo };
+		}),
+	};
 });
 
 vi.mock('../services/specifications.js', () => {

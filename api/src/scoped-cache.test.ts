@@ -1927,7 +1927,8 @@ describe('startScopedCachePurgeRecovery', () => {
 	it('reports the count once there was something to finish', async () => {
 		const info = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info, warn: vi.fn() } as any);
-		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
+		const onRedisEvent = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ on: onRedisEvent } as any);
 
 		// Round-trips, because the drain now proves the store can drop an entry
 		// before it clears the records naming them.
@@ -1948,6 +1949,13 @@ describe('startScopedCachePurgeRecovery', () => {
 		}]);
 
 		startScopedCachePurgeRecovery();
+
+		// Every drain queues behind the one before it, process-wide, so the boot pass
+		// this call starts can still be waiting on the drains the tests above left
+		// running. `ready` is a real second trigger and queues a pass of its own.
+		const ready = onRedisEvent.mock.calls.find(([event]) => event === 'ready');
+		expect(ready).toBeDefined();
+		ready![1]();
 
 		await vi.waitFor(() => {
 			expect(info)

@@ -21,7 +21,7 @@ const schema = new SchemaBuilder()
 	.build();
 
 test('no sorting', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySort(db, schema, queryBuilder, [], null, 'articles', {});
@@ -38,7 +38,7 @@ test('no sorting', async () => {
 });
 
 test('sorting of id', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySort(db, schema, queryBuilder, ['id'], null, 'articles', {});
@@ -55,7 +55,7 @@ test('sorting of id', async () => {
 });
 
 test('sorting of id desc', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySort(db, schema, queryBuilder, ['-id'], null, 'articles', {});
@@ -72,7 +72,7 @@ test('sorting of id desc', async () => {
 });
 
 test('sorting of id and title', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySort(db, schema, queryBuilder, ['id', 'title'], null, 'articles', {});
@@ -89,7 +89,7 @@ test('sorting of id and title', async () => {
 });
 
 test('sorting of title with unused aggregation', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySort(
@@ -116,7 +116,7 @@ test('sorting of title with unused aggregation', async () => {
 });
 
 test('sorting of count(*) with aggregation', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applySort(
@@ -144,7 +144,7 @@ test('sorting of count(*) with aggregation', async () => {
 
 // TODO: count(id) would get optimized, does this take that case into account?
 test('sorting of count(links)', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 
@@ -166,7 +166,7 @@ test('sorting of count(links)', async () => {
 
 // TODO: Why is this different from the previous test?
 test('sorting of count(links) with aggregation', async () => {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
 

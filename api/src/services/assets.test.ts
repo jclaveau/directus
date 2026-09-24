@@ -33,7 +33,11 @@ const file = {
 const readOne = vi.hoisted(() => vi.fn());
 
 vi.mock('./files.js', () => {
-	return { FilesService: vi.fn(() => ({ readOne })) };
+	return {
+		FilesService: vi.fn(function () {
+			return { readOne };
+		}),
+	};
 });
 
 const location = vi.hoisted(() => {

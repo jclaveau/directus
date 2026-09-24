@@ -241,6 +241,12 @@ implements AbstractService<Item> {
 
 		const pkField = this.schema.collections[this.collection]!.fields[primaryKeyField];
 
+		const resetsAutoIncrementSequence =
+			pkField !== undefined &&
+			!opts.bypassAutoIncrementSequenceReset &&
+			['integer', 'bigInteger'].includes(pkField.type) &&
+			pkField.defaultValue === 'AUTO_INCREMENT';
+
 		// Index-aligned results: a filter hook can take over a row (returns its own PK) or cancel
 		// it (returns null), in which case that row is never inserted but still occupies its slot.
 		const results: (PrimaryKey | null)[] = new Array(data.length);
@@ -382,13 +388,7 @@ implements AbstractService<Item> {
 
 				// If a PK of type number was provided, although the PK is set the auto_increment,
 				// depending on the database, the sequence might need to be reset to protect future PK collisions.
-				if (
-					primaryKey &&
-					pkField &&
-					!opts.bypassAutoIncrementSequenceReset &&
-					['integer', 'bigInteger'].includes(pkField.type) &&
-					pkField.defaultValue === 'AUTO_INCREMENT'
-				) {
+				if (primaryKey && resetsAutoIncrementSequence) {
 					autoIncrementSequenceNeedsToBeReset = true;
 				}
 
@@ -407,6 +407,23 @@ implements AbstractService<Item> {
 					userIntegrityCheckFlagsA2O,
 					payloadService,
 				});
+			}
+
+			// The rows that leave their key to the sequence draw it in the same
+			// statement as the rows that provide one, so the sequence has to clear
+			// the provided keys before the insert runs, not only after it.
+			if (autoIncrementSequenceNeedsToBeReset) {
+				const providedPrimaryKeys = prepared
+					.map((p) => Number(p.primaryKey))
+					.filter((key) => Number.isFinite(key));
+
+				if (providedPrimaryKeys.length < prepared.length) {
+					await getHelpers(trx).sequence.raiseAutoIncrementSequence(
+						this.collection,
+						primaryKeyField,
+						Math.max(...providedPrimaryKeys),
+					);
+				}
 			}
 
 			const useBatchInsert =

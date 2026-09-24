@@ -48,7 +48,7 @@ function compile(filter: any) {
 	aliasCounter = 0;
 	aliasFn.mockImplementation(() => `a${++aliasCounter}`);
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
 	applyFilter(db, schema, queryBuilder, filter, 'owned_item', {}, [], []);

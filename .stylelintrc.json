@@ -14,7 +14,7 @@
 		}
 	],
 
-	"ignoreFiles": ["app/src/__histoire__/**"],
+	"ignoreFiles": ["app/src/__poveste__/**"],
 
 	"rules": {
 		"alpha-value-notation": "number",

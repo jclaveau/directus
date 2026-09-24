@@ -20,7 +20,7 @@ const stopAutoscaleDrill = vi.fn();
 
 vi.mock('../services/utils.js', () => {
 	return {
-		UtilsService: vi.fn(() => {
+		UtilsService: vi.fn(function () {
 			return {
 				getCacheGroupLatencies,
 				auditCache,
