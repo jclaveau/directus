@@ -430,7 +430,7 @@ describe('Integration Tests', () => {
 
 				const raiseSpy = vi
 					.spyOn(AutoIncrementHelperPostgres.prototype, 'raiseAutoIncrementSequence')
-					.mockResolvedValue();
+					.mockResolvedValue(undefined);
 
 				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
 				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
