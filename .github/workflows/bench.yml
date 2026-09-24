@@ -31,6 +31,11 @@ on:
         required: false
         default: '7'
         type: string
+      devserver:
+        description: 'Also measure the admin dev server across vite majors (slow)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -317,5 +322,183 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-cache-${{ steps.commits.outputs.head_short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  devserver:
+    name: Dev server
+    # Dispatch only, and opt-in even then. Every other job here measures the API,
+    # whose cost each trunk commit can move; this one measures which vite major
+    # the admin is installed with, which changes in one commit and then not again
+    # for a year. Running it per push would buy a flat line for four runner-hours
+    # a month.
+    if: github.event_name == 'workflow_dispatch' && inputs.devserver == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Identify the commit
+        id: commits
+        run: |
+          if [ -n "${{ inputs.ref }}" ]; then
+            git checkout --detach "${{ inputs.ref }}"
+          fi
+
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "head_short=$(git rev-parse --short=10 HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      # `build: false` — the admin dev server is the subject, and it compiles what
+      # it serves on demand. A production bundle of the platform would be ten
+      # minutes spent on an artifact nothing here opens.
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: 'false'
+
+      # The admin's vite config imports `@directus/extensions`, so vite cannot even
+      # load the config until that package has a dist — the dev server exits with
+      # `Failed to resolve entry for package` before it opens a port. Only the
+      # packages the app depends on are built, and only once: a dist lives in the
+      # package directory rather than in node_modules, so the per-arm reinstall
+      # below leaves it in place.
+      - name: Build the packages the admin imports
+        env:
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+        run: pnpm --filter '@directus/app^...' build
+
+      # Two vite majors cannot be installed beside each other, so an arm is an
+      # install rather than an environment variable, and the arms cannot be
+      # interleaved rep by rep the way a cheaper comparison would be.
+      #
+      # `vite6-again` is the guard that replaces interleaving: it repeats the
+      # first arm last, so drift on the runner shows up as a gap between two arms
+      # that ran the same code. A local A/B of the same shape drifted 118-178 MB
+      # between identical arms, which is wider than the effect being looked for,
+      # and without the repeat there would be no way to see it had happened.
+      #
+      # `vite7` earns its slot by splitting the jump in two. It is the last major
+      # still built on rollup and esbuild, so a gap between 6 and 7 is a year of
+      # ordinary changes and a gap between 7 and 8 is the rolldown swap alone.
+      # Without it a single 6-to-8 number cannot say which of the two moved.
+      #
+      # `vite8-rwt1-again` runs after `vite6-again` rather than beside its twin.
+      # Two adjacent arms share whatever state the runner is in, so they would
+      # agree for a reason that has nothing to do with the flag; put at the end it
+      # is separated from `vite8-rwt1` by the same span `vite6-again` is separated
+      # from `vite6`, and the two repeats are then measuring the same drift.
+      - name: Measure each arm
+        env:
+          PERF_REPS: ${{ inputs.reps || '5' }}
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+        run: |
+          set -euo pipefail
+
+          arm() {
+            local name=$1 vite=$2 plugin_vue=$3 threads=$4
+
+            echo "::group::arm $name (vite $vite, ROLLDOWN_WORKER_THREADS=${threads:-unset})"
+
+            # Only reinstall when the versions actually move: the two vite 8 arms
+            # differ by an environment variable alone.
+            if [ "$vite" != "$(sed -n 's/^  vite: //p' pnpm-workspace.yaml)" ]; then
+              sed -i "s/^  vite: .*/  vite: $vite/" pnpm-workspace.yaml
+              sed -i "s|^  '@vitejs/plugin-vue': .*|  '@vitejs/plugin-vue': $plugin_vue|" pnpm-workspace.yaml
+              pnpm install --no-frozen-lockfile
+            fi
+
+            if [ -n "$threads" ]; then
+              export ROLLDOWN_WORKER_THREADS="$threads"
+            else
+              unset ROLLDOWN_WORKER_THREADS
+            fi
+
+            PERF_ARM="$name" pnpm --filter tests-perf bench:devserver
+
+            echo "::endgroup::"
+          }
+
+          arm vite6            6.4.3 6.0.1 ''
+          arm vite7            7.3.6 6.0.1 ''
+          arm vite8            8.3.0 6.0.9 ''
+          arm vite8-rwt1       8.3.0 6.0.9 1
+          arm vite6-again      6.4.3 6.0.1 ''
+          arm vite8-rwt1-again 8.3.0 6.0.9 1
+
+      - name: Write the summary
+        if: always()
+        run: |
+          set -euo pipefail
+          results=tests/perf/results
+
+          if [ -z "$(ls $results/devserver.*.json 2>/dev/null)" ]; then
+            {
+              echo "### Dev server — no result"
+              echo ""
+              echo "The measurement did not finish. See the job log."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### Dev server — peak resident by vite major"
+            echo ""
+            echo "| arm | vite | boot | cold optimize | graph | optimize time | graph time |"
+            echo "| --- | --- | ---: | ---: | ---: | ---: | ---: |"
+            jq -r '"| \(.arm) | \(.vite) | "
+              + ([.phases[] | select(.name != "modules")
+                  | "**\(.median | floor) MB**"] | join(" | "))
+              + " | "
+              + ([.durations[]
+                  | "\((.median / 100 | floor) / 10) s"] | join(" | "))
+              + " |"' $results/devserver.*.json
+            echo ""
+            echo "Median of $(jq -r '.reps | length' $results/devserver.vite6.json) cold boots per arm,"
+            echo "$(jq -r '.modules[0]' $results/devserver.vite6.json) modules crawled each."
+            echo ""
+            echo "\`vite6\` is what the fork installs today. \`vite6-again\` and"
+            echo "\`vite8-rwt1-again\` repeat an earlier arm at the end: the gap between a"
+            echo "pair is the runner's drift, and no difference narrower than that gap is a"
+            echo "result. The times are there because a capped worker pool is a cap on the"
+            echo "transforming, so memory it gives back has a price to read off beside it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          results=tests/perf/results
+
+          if [ -f "$results/devserver.vite8.json" ] && [ -f "$results/devserver.vite6.json" ]; then
+            state=success
+            description=$(jq -rs '
+              (.[0].phases[] | select(.name == "graph") | .median) as $six
+              | (.[1].phases[] | select(.name == "graph") | .median) as $eight
+              | "vite6 \($six | floor) MB · vite8 \($eight | floor) MB"
+                + " · \((($eight - $six) / $six * 100) | round)%"
+            ' "$results/devserver.vite6.json" "$results/devserver.vite8.json")
+          else
+            state=failure
+            description='the measurement did not finish'
+          fi
+
+          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+            -f state="$state" \
+            -f context='Bench / devserver' \
+            -f description="$description" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-devserver-${{ steps.commits.outputs.head_short }}
           path: tests/perf/results/
           if-no-files-found: warn
