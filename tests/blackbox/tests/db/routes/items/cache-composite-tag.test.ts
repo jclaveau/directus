@@ -368,8 +368,16 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(declaredFields).toHaveLength(table.length);
 		});
 
+		// The starting rows stand in an ordinary table, one column per field, while
+		// a written row states its body under `data`: the marker names the row, and
+		// every other column is the body creating it sends.
 		and('the slots:', async (table: Record<string, string>[]) => {
-			await createSlots(parseGherkinTable<SlotRow>(table), ids);
+			await createSlots(
+				parseGherkinTable<SlotRow>(table).map(
+					({ marker, ...data }) => ({ marker, data }),
+				),
+				ids,
+			);
 		});
 
 		// The query is the scenario's own table, so a reader sees what is cached
