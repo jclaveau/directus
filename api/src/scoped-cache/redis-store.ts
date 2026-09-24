@@ -676,12 +676,16 @@ const redisStore: ScopedCacheStore = {
 			//
 			// The set it WAS read from stands beside them, because the two agree only
 			// while the collection's index path is what it was when the entry was
-			// filed: a path since changed, or a foreign collection purged with none
-			// known, would otherwise leave the member exactly where it was found.
-			const indexKeys = new Set([
-				foundIn,
-				...scopedCacheFingerprintIndexKeys(fingerprint, indexPath),
-			]);
+			// filed: a path since changed would otherwise leave the member exactly
+			// where it was found. With no path to name them by there is nothing to
+			// add — `scopedCacheFingerprintIndexKeys` answers bare for every
+			// fingerprint then, which says the caller does not know the split, not
+			// that the member is in the bare set.
+			const indexKeys = new Set(
+				indexPath === null
+					? [foundIn]
+					: [foundIn, ...scopedCacheFingerprintIndexKeys(fingerprint, indexPath)],
+			);
 
 			for (const indexKey of indexKeys) {
 				const members = membersByIndexKey.get(indexKey) ?? [];

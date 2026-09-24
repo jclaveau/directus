@@ -287,7 +287,8 @@ describe('removeIndexedEntries', () => {
 	});
 
 	it(oneLine`
-		prunes where it found a member the index path no longer names a set for
+		prunes only where it found a member, where no index path names the sets it
+		would otherwise be in
 	`, async () => {
 		const member = 'slot:&owner=,kappa,&view=,id,&|cache-key';
 
@@ -308,7 +309,6 @@ describe('removeIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:owner=kappa',
 				member,
 			],
-			['scalabus:scoped-cache-index:fingerprint:slot:', member],
 		]);
 	});
 });
