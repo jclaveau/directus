@@ -79,6 +79,9 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		scopedCacheLegacyTags: actual.scopedCacheLegacyTags,
 		// Same reason, for the form a recorded purge is retried from.
 		renderScopedCacheFingerprint: actual.renderScopedCacheFingerprint,
+		// And for the coarse flag the descriptor cases below assert: which shapes
+		// count as bare is the predicate's answer, not a second one written here.
+		scopedCacheFingerprintIsBare: actual.scopedCacheFingerprintIsBare,
 	};
 });
 
