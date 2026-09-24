@@ -107,6 +107,7 @@ describe('#constructor', () => {
 
 	test('Creates blob service client and sets containerClient', () => {
 		const mockSignedCredentials = {} as StorageSharedKeyCredential;
+
 		vi.mocked(StorageSharedKeyCredential).mockImplementationOnce(function () {
 			return mockSignedCredentials;
 		});
@@ -139,6 +140,7 @@ describe('#constructor', () => {
 	describe('Allows overriding endpoint with optional setting', () => {
 		test('Creates blob service client and sets containerClient', () => {
 			const mockSignedCredentials = {} as StorageSharedKeyCredential;
+
 			vi.mocked(StorageSharedKeyCredential).mockImplementationOnce(function () {
 				return mockSignedCredentials;
 			});

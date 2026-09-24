@@ -983,6 +983,7 @@ describe('#uploadChunk', () => {
 		};
 
 		vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response);
+
 		vi.mocked(FormData).mockImplementation(function () {
 			return mockFormData as unknown as FormData;
 		});

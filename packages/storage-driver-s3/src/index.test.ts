@@ -380,6 +380,7 @@ describe('#read', () => {
 		const mockGetObjectCommand = {} as GetObjectCommand;
 
 		vi.mocked(driver['client'].send).mockReturnValue({ Body: sample.stream } as unknown as void);
+
 		vi.mocked(GetObjectCommand).mockImplementation(function () {
 			return mockGetObjectCommand;
 		});
@@ -412,6 +413,7 @@ describe('#stat', () => {
 
 	test('Calls #send with HeadObjectCommand', async () => {
 		const mockHeadObjectCommand = {} as HeadObjectCommand;
+
 		vi.mocked(HeadObjectCommand).mockImplementation(function () {
 			return mockHeadObjectCommand;
 		});
@@ -509,6 +511,7 @@ describe('#copy', () => {
 
 	test('Executes CopyObjectCommand', async () => {
 		const mockCommand = {} as CopyObjectCommand;
+
 		vi.mocked(CopyObjectCommand).mockImplementation(function () {
 			return mockCommand;
 		});
@@ -581,6 +584,7 @@ describe('#write', () => {
 
 	test('Waits for upload to be done', async () => {
 		const mockUpload = { done: vi.fn() };
+
 		vi.mocked(Upload).mockImplementation(function () {
 			return mockUpload as unknown as Upload;
 		});
@@ -603,6 +607,7 @@ describe('#delete', () => {
 
 	test('Executes DeleteObjectCommand', async () => {
 		const mockDeleteObjectCommand = {} as DeleteObjectCommand;
+
 		vi.mocked(DeleteObjectCommand).mockImplementation(function () {
 			return mockDeleteObjectCommand;
 		});
@@ -628,9 +633,11 @@ describe('#list', () => {
 
 	test('Calls send with the command', async () => {
 		const mockListObjectsV2Command = {} as ListObjectsV2Command;
+
 		vi.mocked(ListObjectsV2Command).mockImplementation(function () {
 			return mockListObjectsV2Command;
 		});
+
 		vi.mocked(driver['client'].send).mockResolvedValue({} as unknown as void);
 
 		await driver.list(sample.path.input).next();
