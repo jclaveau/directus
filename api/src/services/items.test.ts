@@ -10,6 +10,9 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
+import {
+	AutoIncrementHelperPostgres,
+} from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
 import { purgeScopedCache } from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
@@ -417,6 +420,35 @@ describe('Integration Tests', () => {
 				expect(batchInsert.mock.calls[0]![1]).toEqual([{ name: 'a' }, { name: 'b' }]);
 				expect(result).toEqual([10, 20]);
 
+				transactionSpy.mockRestore();
+			});
+
+			it(oneLine`
+				raises the sequence past the provided keys before a mixed batch is inserted
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const raiseSpy = vi
+					.spyOn(AutoIncrementHelperPostgres.prototype, 'raiseAutoIncrementSequence')
+					.mockResolvedValue();
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				// The end-of-transaction reset runs raw SQL the spread
+				// transaction does not carry.
+				const raw = vi.fn();
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) =>
+						callback({ ...db, batchInsert, raw } as any));
+
+				await batchService().createMany([{ id: 10, name: 'a' }, { name: 'b' }]);
+
+				expect(raiseSpy).toHaveBeenCalledWith('test', 'id', 10);
+				expect(batchInsert).toHaveBeenCalledTimes(1);
+
+				raiseSpy.mockRestore();
 				transactionSpy.mockRestore();
 			});
 
