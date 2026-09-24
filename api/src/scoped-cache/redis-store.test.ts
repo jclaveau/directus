@@ -62,7 +62,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 	// index path is looked up by column name.
 	it('files a read pinning nothing bare, whatever the path is named', () => {
 		expect(scopedCacheFingerprintIndexKeys(
-			{ collection: 'slot', pinnedScope: {}, viewFields: [] },
+			{ collection: 'slot' },
 			'constructor',
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
@@ -122,7 +122,7 @@ describe('scopedCacheRowIndexKeys', () => {
 	it('reads the bare set alone for a row pinning nothing, on any path', () => {
 		expect(scopedCacheRowIndexKeys(
 			'slot',
-			[{ collection: 'slot', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'slot' }],
 			'constructor',
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
@@ -211,7 +211,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 	// matching one, so the pattern doubles what the serialiser wrote.
 	it('escapes a value carrying a glob metacharacter', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
-			{ collection: 'slot', pinnedScope: { owner: ['a*b'] }, viewFields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a*b'] } },
 		])).toEqual([
 			'slot:&|*',
 			'slot:&view=,*',
@@ -221,7 +221,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 
 	it('escapes a value carrying a separator', () => {
 		expect(scopedCacheRowIndexGlobs('slot', [
-			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
 		])).toEqual([
 			'slot:&|*',
 			'slot:&view=,*',
@@ -234,7 +234,7 @@ describe('scopedCacheRowIndexGlobs', () => {
 		instead of walking them once per slice
 	`, () => {
 		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
-			return { collection: 'slot', pinnedScope: { id: [`${at}`] }, viewFields: [] };
+			return { collection: 'slot', pinnedScope: { id: [`${at}`] } };
 		});
 
 		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);

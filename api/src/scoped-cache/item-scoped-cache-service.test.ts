@@ -80,7 +80,6 @@ describe('snapshot', () => {
 							owner: ['alpha'],
 							'parent.area': ['north'],
 						},
-						viewFields: [],
 					},
 				},
 			],
@@ -119,7 +118,6 @@ describe('snapshot', () => {
 						owner: ['alpha'],
 						'parent.area': ['north'],
 					},
-					viewFields: [],
 				},
 			},
 			{
@@ -139,7 +137,6 @@ describe('snapshot', () => {
 						owner: ['beta'],
 						'parent.area': ['south'],
 					},
-					viewFields: [],
 				},
 			},
 		]);
@@ -175,7 +172,6 @@ describe('snapshot', () => {
 						owner: ['\x00null'],
 						'parent.area': ['\x00null'],
 					},
-					viewFields: [],
 				},
 			},
 		]);
@@ -198,7 +194,6 @@ describe('snapshot', () => {
 					fingerprint: {
 						collection: 'zone',
 						pinnedScope: { id: ['7'] },
-						viewFields: [],
 					},
 				},
 			],

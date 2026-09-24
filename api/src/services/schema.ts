@@ -47,7 +47,7 @@ export class SchemaService {
 
 		return withMeta(currentSnapshot, {
 			scopedCacheFingerprints: snapshotCollections.map((collection) => {
-				return { collection, pinnedScope: {}, viewFields: [] };
+				return { collection };
 			}),
 			scopedCacheEpochs,
 		});

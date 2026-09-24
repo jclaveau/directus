@@ -109,7 +109,7 @@ describe('Services / Fields', () => {
 			const result = await service.readAll();
 
 			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
-				{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
+				{ collection: 'directus_fields' },
 			]);
 		});
 

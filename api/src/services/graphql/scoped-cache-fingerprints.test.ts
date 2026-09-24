@@ -60,8 +60,8 @@ describe('GraphQLService scoped cache tags', () => {
 					[{ id: 1 }],
 					{
 						scopedCacheFingerprints: [
-							{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-							{ collection: 'users', pinnedScope: {}, viewFields: [] },
+							{ collection: 'articles' },
+							{ collection: 'users' },
 						],
 					},
 				);
@@ -82,8 +82,6 @@ describe('GraphQLService scoped cache tags', () => {
 					{
 						scopedCacheFingerprints: [{
 							collection: 'directus_files',
-							pinnedScope: {},
-							viewFields: [],
 						}],
 					},
 				);
@@ -107,7 +105,7 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 					scopedCacheEpochs: { articles: '7', users: '3', '*': '1' },
 				});
@@ -123,7 +121,7 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 					scopedCacheEpochs: { articles: '8', files: null, '*': '2' },
 				});
@@ -152,7 +150,7 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 					scopedCacheEpochs: { articles: '9', '*': '4' },
 				});
@@ -165,7 +163,7 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 					scopedCacheEpochs: { articles: '2', '*': '4' },
 				});
@@ -187,7 +185,7 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 					scopedCacheEpochs: { articles: '3' },
 				});
@@ -200,7 +198,7 @@ describe('GraphQLService scoped cache tags', () => {
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 					scopedCacheEpochs: { articles: null },
 				});
@@ -225,8 +223,6 @@ describe('GraphQLService scoped cache tags', () => {
 					{
 						scopedCacheFingerprints: [{
 							collection: 'articles',
-							pinnedScope: {},
-							viewFields: [],
 						}],
 					},
 				);
@@ -267,8 +263,8 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 
 		gql.scopedCacheFingerprints.push(
-			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-			{ collection: 'users', pinnedScope: {}, viewFields: [] },
+			{ collection: 'articles' },
+			{ collection: 'users' },
 		);
 
 		const result = await gql.execute({

@@ -100,7 +100,7 @@ describe('Services / Relations', () => {
 			const result = await service.readAll();
 
 			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
-				{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
+				{ collection: 'directus_relations' },
 			]);
 		});
 	});
@@ -136,7 +136,7 @@ describe('Services / Relations', () => {
 			const result = await service.readOne('test', 'related');
 
 			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
-				{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
+				{ collection: 'directus_relations' },
 			]);
 		});
 

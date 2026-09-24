@@ -180,7 +180,7 @@ describe('items controller', () => {
 			readSingleton.mockResolvedValueOnce(
 				withMeta({ id: 1 }, {
 					scopedCacheFingerprints: [
-						{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+						{ collection: 'articles' },
 					],
 				}),
 			);
@@ -193,7 +193,7 @@ describe('items controller', () => {
 			expect(res.locals['payload'].data).toBeDefined();
 
 			expect(res.locals['scopedCacheFingerprints']).toEqual([
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
 			]);
 
 			expect(next).toHaveBeenCalledOnce();
@@ -252,12 +252,10 @@ describe('items controller', () => {
 						scopedCacheFingerprints: [{
 							collection: 'articles',
 							pinnedScope: { id: ['1'] },
-							viewFields: [],
 						}],
 						scopedCacheUnautopurgeableFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { ghost: ['g'] },
-							viewFields: [],
 						}],
 					},
 				),
@@ -269,13 +267,11 @@ describe('items controller', () => {
 			expect(res.locals['scopedCacheFingerprints']).toEqual([{
 				collection: 'articles',
 				pinnedScope: { id: ['1'] },
-				viewFields: [],
 			}]);
 
 			expect(res.locals['scopedCacheUnautopurgeableFingerprints']).toEqual([{
 				collection: 'authors',
 				pinnedScope: { ghost: ['g'] },
-				viewFields: [],
 			}]);
 		});
 	});

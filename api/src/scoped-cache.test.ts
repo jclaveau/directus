@@ -633,7 +633,6 @@ describe('createScopedCacheHookDeclarations', () => {
 		expect(purgeFingerprints).toEqual([{
 			collection: 'articles',
 			pinnedScope: { author: ['5'] },
-			viewFields: [],
 		}]);
 	});
 
@@ -661,8 +660,8 @@ describe('createScopedCacheHookDeclarations', () => {
 		// Two views of one slice are one thing to purge, and a fingerprint pinning
 		// nothing is the whole collection.
 		expect(purgeFingerprints).toEqual([
-			{ collection: 'articles', pinnedScope: { author: ['5'] }, viewFields: [] },
-			{ collection: 'authors', pinnedScope: {}, viewFields: [] },
+			{ collection: 'articles', pinnedScope: { author: ['5'] } },
+			{ collection: 'authors' },
 		]);
 	});
 
@@ -744,7 +743,6 @@ describe('createScopedCacheHookDeclarations', () => {
 		expect(purgeFingerprints).toEqual([{
 			collection: 'notes',
 			pinnedScope: { id: [upper.toLowerCase()] },
-			viewFields: [],
 		}]);
 	});
 
@@ -801,7 +799,6 @@ describe('createScopedCacheHookDeclarations', () => {
 						{
 							collection: 'metric',
 							pinnedScope: { owner: ['acme'] },
-							viewFields: [],
 						},
 					],
 					scopedCacheEpochs: { metric: '4' },
@@ -815,8 +812,6 @@ describe('createScopedCacheHookDeclarations', () => {
 				{
 					scopedCacheFingerprints: [{
 						collection: 'audit',
-						pinnedScope: {},
-						viewFields: [],
 					}],
 					scopedCacheEpochs: { audit: '7' },
 				},
@@ -890,8 +885,6 @@ describe('createScopedCacheHookDeclarations', () => {
 				{
 					scopedCacheFingerprints: [{
 						collection: 'metric',
-						pinnedScope: {},
-						viewFields: [],
 					}],
 					scopedCacheEpochs: { metric: '4' },
 				},
@@ -902,8 +895,6 @@ describe('createScopedCacheHookDeclarations', () => {
 				{
 					scopedCacheFingerprints: [{
 						collection: 'metric',
-						pinnedScope: {},
-						viewFields: [],
 					}],
 					scopedCacheEpochs: { metric: '5' },
 				},
@@ -1075,7 +1066,7 @@ describe('indexScopedCacheEntry', () => {
 		} as any);
 
 		await expect(indexScopedCacheEntry('entry', [
-			{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
+			{ collection: 'articles', pinnedScope: { author: ['7'] } },
 		])).rejects.toBe(refused);
 	});
 
@@ -1101,7 +1092,7 @@ describe('indexScopedCacheEntry', () => {
 
 		try {
 			await indexScopedCacheEntry('entry', [
-				{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
+				{ collection: 'articles', pinnedScope: { author: ['7'] } },
 			]);
 		}
 		finally {
@@ -2224,7 +2215,7 @@ describe('a purge that fails after its mutation committed', () => {
 		} as any);
 
 		expect(await purgeScopedCache(cache as any, 'articles', null))
-			.toEqual([{ collection: 'articles', pinnedScope: {}, viewFields: [] }]);
+			.toEqual([{ collection: 'articles' }]);
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
 			{ mode: 'collection', collection: 'articles', scopedCacheFingerprints: [] },

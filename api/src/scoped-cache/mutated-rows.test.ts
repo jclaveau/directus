@@ -11,7 +11,6 @@ import {
 const fingerprint = {
 	collection: 'slot',
 	pinnedScope: { id: ['1'] },
-	viewFields: [],
 };
 
 describe('scopedCacheChangedFields', () => {
@@ -172,13 +171,11 @@ describe('scopedCacheUpdatedRows', () => {
 		const fingerprintAlpha = {
 			collection: 'slot',
 			pinnedScope: { id: ['1'], owner: ['alpha'] },
-			viewFields: [],
 		};
 
 		const fingerprintBeta = {
 			collection: 'slot',
 			pinnedScope: { id: ['1'], owner: ['beta'] },
-			viewFields: [],
 		};
 
 		expect(scopedCacheUpdatedRows(

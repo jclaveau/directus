@@ -48,8 +48,6 @@ describe('PermissionsService.readByQuery override', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'directus_permissions',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		));
@@ -61,7 +59,7 @@ describe('PermissionsService.readByQuery override', () => {
 		expect(result).toHaveLength(2);
 
 		expect(readMeta(result)?.scopedCacheFingerprints ?? []).toEqual([
-			{ collection: 'directus_permissions', pinnedScope: {}, viewFields: [] },
+			{ collection: 'directus_permissions' },
 		]);
 	});
 });

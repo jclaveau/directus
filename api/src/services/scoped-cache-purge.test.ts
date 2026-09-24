@@ -231,12 +231,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['b'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -263,12 +261,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -298,12 +294,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -335,7 +329,6 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -399,12 +392,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -445,17 +436,14 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -492,7 +480,6 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -520,12 +507,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -558,12 +543,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -599,12 +582,10 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -656,7 +637,6 @@ describe(oneLine`
 					{
 						collection: 'test',
 						pinnedScope: { 'id': ['1'], 'student': ['b'] },
-						viewFields: [],
 					},
 				],
 				expect.anything(),
@@ -686,7 +666,6 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['default-owner'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -714,7 +693,6 @@ describe(oneLine`
 				{
 					collection: 'test',
 					pinnedScope: { 'id': ['1'], 'student': ['\x00null'] },
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -803,7 +781,6 @@ describe(oneLine`
 					{
 						collection: 'test',
 						pinnedScope: { 'id': ['1'], 'student': ['a'] },
-						viewFields: [],
 					},
 				],
 				expect.anything(),
@@ -838,12 +815,10 @@ describe(oneLine`
 					{
 						collection: 'test',
 						pinnedScope: { 'id': ['1'], 'student': ['a'] },
-						viewFields: [],
 					},
 					{
 						collection: 'test',
 						pinnedScope: { 'id': ['1'], 'student': ['c'] },
-						viewFields: [],
 					},
 				],
 				expect.anything(),
@@ -1037,7 +1012,7 @@ describe(oneLine`
 				const result = await service().readByQuery({});
 
 				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([
-					{ collection: 'other', pinnedScope: { ghost: ['g'] }, viewFields: [] },
+					{ collection: 'other', pinnedScope: { ghost: ['g'] } },
 				]);
 			}
 			finally {
@@ -1177,7 +1152,6 @@ describe(oneLine`
 					{
 						collection: 'student_course',
 						pinnedScope: { 'teaching_unit.id': ['10'] },
-						viewFields: [],
 					},
 				]);
 			}
@@ -1305,7 +1279,6 @@ describe(oneLine`
 						{
 							collection: 'test',
 							pinnedScope: { 'id': ['1'], 'student': ['a'] },
-							viewFields: [],
 						},
 					],
 					expect.anything(),
@@ -1313,7 +1286,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					}),
 				);
@@ -1352,12 +1324,10 @@ describe(oneLine`
 						{
 							collection: 'test',
 							pinnedScope: { 'id': ['1'], 'student': ['a'] },
-							viewFields: [],
 						},
 						{
 							collection: 'test',
 							pinnedScope: { 'id': ['1'], 'student': ['b'] },
-							viewFields: [],
 						},
 					],
 					expect.anything(),
@@ -1365,7 +1335,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					}),
 				);
@@ -1403,7 +1372,6 @@ describe(oneLine`
 						{
 							collection: 'test',
 							pinnedScope: { 'id': ['1'], 'student': ['a'] },
-							viewFields: [],
 						},
 					],
 					expect.anything(),
@@ -1411,7 +1379,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					}),
 				);
@@ -1452,7 +1419,6 @@ describe(oneLine`
 						{
 							collection: 'test',
 							pinnedScope: { 'id': ['99'], 'student': ['z'] },
-							viewFields: [],
 						},
 					],
 					expect.anything(),
@@ -1460,7 +1426,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					}),
 				);
@@ -1518,7 +1483,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					},
 				);
@@ -1562,7 +1526,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					},
 				);
@@ -1626,7 +1589,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 						scopedCachePurgeId: expect.any(String),
 					},
@@ -1757,12 +1719,10 @@ describe(oneLine`
 					{
 						collection: 'test',
 						pinnedScope: { 'id': ['1'] },
-						viewFields: [],
 					},
 					{
 						collection: 'test',
 						pinnedScope: { 'id': ['1'] },
-						viewFields: [],
 					},
 				],
 				expect.anything(),
@@ -1836,7 +1796,6 @@ describe(oneLine`
 						{
 							collection: 'test',
 							pinnedScope: { 'id': ['99'] },
-							viewFields: [],
 						},
 					],
 					expect.anything(),
@@ -1844,7 +1803,6 @@ describe(oneLine`
 						declaredFingerprints: [{
 							collection: 'test',
 							pinnedScope: { id: ['5'] },
-							viewFields: [],
 						}],
 					}),
 				);
@@ -2039,7 +1997,6 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 						'teaching_unit.discipline.enrollment': ['30'],
 						'teaching_unit.discipline.enrollment.student': ['a'],
 					},
-					viewFields: [],
 				},
 				{
 					collection: 'student_course',
@@ -2050,7 +2007,6 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 						'teaching_unit.discipline.enrollment': ['31'],
 						'teaching_unit.discipline.enrollment.student': ['b'],
 					},
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2088,7 +2044,6 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 						'left_ref.owner': ['left-owner'],
 						'right_ref.owner': ['right-owner'],
 					},
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2158,7 +2113,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 						'teaching_unit.discipline.enrollment': ['12'],
 						'teaching_unit.discipline.enrollment.student': ['a'],
 					},
-					viewFields: [],
 				},
 				{
 					collection: 'student_course',
@@ -2169,7 +2123,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 						'teaching_unit.discipline.enrollment': ['22'],
 						'teaching_unit.discipline.enrollment.student': ['b'],
 					},
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2207,7 +2160,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 						'teaching_unit.discipline.enrollment': ['12'],
 						'teaching_unit.discipline.enrollment.student': ['a'],
 					},
-					viewFields: [],
 				},
 				{
 					collection: 'student_course',
@@ -2218,7 +2170,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 						'teaching_unit.discipline.enrollment': ['\x00null'],
 						'teaching_unit.discipline.enrollment.student': ['\x00null'],
 					},
-					viewFields: [],
 				},
 				{
 					collection: 'student_course',
@@ -2229,7 +2180,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 						'teaching_unit.discipline.enrollment': ['\x00null'],
 						'teaching_unit.discipline.enrollment.student': ['\x00null'],
 					},
-					viewFields: [],
 				},
 			],
 			expect.anything(),
@@ -2261,7 +2211,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 						holder: ['7'],
 						'holder.owner': ['owner-a'],
 					},
-					viewFields: [],
 				},
 			],
 			expect.anything(),

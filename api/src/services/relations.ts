@@ -134,9 +134,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(allowed, {
-			scopedCacheFingerprints: [
-				{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
-			],
+			scopedCacheFingerprints: [{ collection: 'directus_relations' }],
 		});
 	}
 
@@ -198,9 +196,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(results[0]!, {
-			scopedCacheFingerprints: [
-				{ collection: 'directus_relations', pinnedScope: {}, viewFields: [] },
-			],
+			scopedCacheFingerprints: [{ collection: 'directus_relations' }],
 		});
 	}
 

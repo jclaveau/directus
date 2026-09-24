@@ -48,6 +48,7 @@ import {
 	renderScopedCacheFingerprint,
 	scopedCacheDeclaredPins,
 	scopedCacheFingerprintCouldContainPin,
+	scopedCacheFingerprintIsBare,
 	scopedCacheLegacyTags,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
@@ -267,26 +268,27 @@ export async function countScopedCacheTagMembers(
 function scopedCacheFingerprintFromLegacyTag(
 	legacyTag: string,
 ): ScopedCacheFingerprint {
-	const pinnedScope: Record<string, string[]> = Object.create(null);
 	const fieldAt = legacyTag.indexOf(':');
 
 	if (fieldAt === -1) {
-		return { collection: legacyTag, pinnedScope, viewFields: [] };
+		return { collection: legacyTag };
 	}
 
 	const pin = legacyTag.slice(fieldAt + 1);
 	const valueAt = pin.indexOf('=');
 
 	if (valueAt === -1) {
-		return { collection: legacyTag.slice(0, fieldAt), pinnedScope, viewFields: [] };
+		return { collection: legacyTag.slice(0, fieldAt) };
 	}
 
+	// Null-prototyped for the reason the parser is: the field is a column name,
+	// and `__proto__` is a legal one.
+	const pinnedScope: Record<string, string[]> = Object.create(null);
 	pinnedScope[pin.slice(0, valueAt)] = [pin.slice(valueAt + 1)];
 
 	return {
 		collection: legacyTag.slice(0, fieldAt),
 		pinnedScope,
-		viewFields: [],
 	};
 }
 
@@ -309,11 +311,11 @@ function scopedCacheFingerprintReachedByPin(
 	fingerprint: ScopedCacheFingerprint,
 	declared: ScopedCacheFingerprint,
 ): boolean {
-	if (Object.keys(declared.pinnedScope).length === 0) {
-		return Object.keys(fingerprint.pinnedScope).length === 0;
+	if (scopedCacheFingerprintIsBare(declared)) {
+		return scopedCacheFingerprintIsBare(fingerprint);
 	}
 
-	if (Object.keys(fingerprint.pinnedScope).length === 0) {
+	if (scopedCacheFingerprintIsBare(fingerprint)) {
 		return false;
 	}
 
@@ -413,7 +415,7 @@ async function purgeScopedCacheFingerprintIndex(
 			// collection fingerprint means to leave standing.
 			if (
 				includeBareFingerprint === false
-				&& Object.keys(fingerprint.pinnedScope).length === 0
+				&& scopedCacheFingerprintIsBare(fingerprint)
 			) {
 				return false;
 			}

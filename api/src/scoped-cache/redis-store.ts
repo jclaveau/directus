@@ -319,9 +319,7 @@ export function scopedCacheFingerprintIndexKeys(
 		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
 	}
 
-	const pinnedValues = Object.hasOwn(fingerprint.pinnedScope, indexPath)
-		? fingerprint.pinnedScope[indexPath]
-		: undefined;
+	const pinnedValues = fingerprint.pinnedScope?.[indexPath];
 
 	if (pinnedValues === undefined || pinnedValues.length === 0) {
 		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
@@ -360,9 +358,7 @@ export function scopedCacheRowIndexKeys(
 	}
 
 	for (const rowFingerprint of rowFingerprints) {
-		const pinnedValues = Object.hasOwn(rowFingerprint.pinnedScope, indexPath)
-			? rowFingerprint.pinnedScope[indexPath] ?? []
-			: [];
+		const pinnedValues = rowFingerprint.pinnedScope?.[indexPath] ?? [];
 
 		for (const pinnedValue of pinnedValues) {
 			indexKeys.add(scopedCacheIndexKey(
@@ -397,8 +393,8 @@ export function scopedCacheRowIndexGlobs(
 		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,*`,
 	]);
 
-	for (const rowFingerprint of rowFingerprints) {
-		for (const [field, values] of Object.entries(rowFingerprint.pinnedScope)) {
+	for (const { pinnedScope = {} } of rowFingerprints) {
+		for (const [field, values] of Object.entries(pinnedScope)) {
 			const pairKey = escapeScopedCacheFingerprintGlob(
 				escapeScopedCacheFingerprintToken(field),
 			);
@@ -637,7 +633,7 @@ const redisStore: ScopedCacheStore = {
 		// matches entries by what they do NOT pin as much as by what they do, and a
 		// pattern can only select on what is written.
 		const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {
-			return fingerprint.pinnedScope[indexPath] !== undefined;
+			return fingerprint.pinnedScope?.[indexPath] !== undefined;
 		});
 
 		if (pinsIndexPath) {

@@ -43,7 +43,7 @@ describe('graphql controller scopedCacheFingerprints', () => {
 		%s handler stamps scopedCacheFingerprints from the payload meta
 	`, async (_scope, getHandler) => {
 		const fingerprints = [
-			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			{ collection: 'articles' },
 		];
 
 		execute.mockResolvedValueOnce(

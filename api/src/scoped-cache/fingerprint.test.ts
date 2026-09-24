@@ -4,6 +4,7 @@ import {
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
 	scopedCacheViewFieldsAreTouched,
+	scopedCacheFingerprintIsBare,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintMatchesRow,
@@ -37,11 +38,16 @@ describe('renderScopedCacheFingerprint', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'student_time_slot',
 			pinnedScope: { user: ['A'] },
-			viewFields: [],
 		})).toBe('student_time_slot:&user=,A,&');
 	});
 
 	it('renders a collection bound to nothing', () => {
+		expect(renderScopedCacheFingerprint(
+			{ collection: 'student_time_slot' },
+		)).toBe('student_time_slot:&');
+	});
+
+	it('renders an empty pinned scope the way it renders an absent one', () => {
 		expect(renderScopedCacheFingerprint(
 			{ collection: 'student_time_slot', pinnedScope: {}, viewFields: [] },
 		)).toBe('student_time_slot:&');
@@ -51,7 +57,6 @@ describe('renderScopedCacheFingerprint', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'note',
 			pinnedScope: { title: ['a,b&c|d\\e'] },
-			viewFields: [],
 		})).toBe('note:&title=,a\\,b\\&c\\|d\\\\e,&');
 	});
 
@@ -61,7 +66,6 @@ describe('renderScopedCacheFingerprint', () => {
 		expect(renderScopedCacheFingerprint({
 			collection: 'note',
 			pinnedScope: { title: ['a*b?c[d]'] },
-			viewFields: [],
 		})).toBe('note:&title=,a\\*b\\?c\\[d\\],&');
 	});
 });
@@ -98,8 +102,8 @@ describe('parseScopedCacheFingerprint', () => {
 		const parsed = parseScopedCacheFingerprint('student_time_slot:&');
 
 		expect(parsed.collection).toBe('student_time_slot');
-		expect(parsed.pinnedScope).toEqual({});
-		expect(parsed.viewFields).toEqual([]);
+		expect(parsed.pinnedScope).toBeUndefined();
+		expect(parsed.viewFields).toBeUndefined();
 	});
 
 	it('reads back a field named after an object member', () => {
@@ -109,7 +113,7 @@ describe('parseScopedCacheFingerprint', () => {
 
 		// Read through `entries`, since `{ __proto__: … }` in the expectation would
 		// set the prototype rather than declare the key under test.
-		expect(Object.entries(parsed.pinnedScope)).toEqual([
+		expect(Object.entries(parsed.pinnedScope ?? {})).toEqual([
 			['__proto__', ['alpha']],
 			['constructor', ['beta']],
 		]);
@@ -118,7 +122,7 @@ describe('parseScopedCacheFingerprint', () => {
 	it('reads back a value whose escapes only look like two values', () => {
 		expect(parseScopedCacheFingerprint(
 			renderScopedCacheFingerprint(
-				{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+				{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
 			),
 		).pinnedScope).toEqual({ owner: ['a,b'] });
 	});
@@ -151,7 +155,6 @@ describe('scopedCacheFingerprintOf', () => {
 		)).toEqual({
 			collection: 'note',
 			pinnedScope: { id: ['7'], flag: ['true'] },
-			viewFields: [],
 		});
 	});
 
@@ -164,7 +167,31 @@ describe('scopedCacheFingerprintOf', () => {
 
 	it('drops a pin naming no field, which pins nothing', () => {
 		expect(scopedCacheFingerprintOf('note', [{}]))
-			.toEqual({ collection: 'note', pinnedScope: {}, viewFields: [] });
+			.toEqual({ collection: 'note' });
+	});
+});
+
+describe('scopedCacheFingerprintIsBare', () => {
+	it('reads a fingerprint naming only its collection as bare', () => {
+		expect(scopedCacheFingerprintIsBare({ collection: 'note' })).toBe(true);
+	});
+
+	it('reads an empty pinned scope as bare', () => {
+		expect(scopedCacheFingerprintIsBare(
+			{ collection: 'note', pinnedScope: {}, viewFields: [] },
+		)).toBe(true);
+	});
+
+	it('reads a fingerprint pinning a field as not bare', () => {
+		expect(scopedCacheFingerprintIsBare(
+			{ collection: 'note', pinnedScope: { user: ['A'] } },
+		)).toBe(false);
+	});
+
+	it('reads a fingerprint naming view fields and no pin as bare', () => {
+		expect(scopedCacheFingerprintIsBare(
+			{ collection: 'note', viewFields: ['title'] },
+		)).toBe(true);
 	});
 });
 
@@ -217,15 +244,15 @@ describe('scopedCacheFingerprintMatchesRow', () => {
 
 	it('matches a value carrying a separator', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
-			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
 		)).toBe(true);
 	});
 
 	it('refuses a row whose value only looks like the pinned one', () => {
 		expect(scopedCacheFingerprintMatchesRow(
-			{ collection: 'slot', pinnedScope: { owner: ['a'] }, viewFields: [] },
-			{ collection: 'slot', pinnedScope: { owner: ['a,b'] }, viewFields: [] },
+			{ collection: 'slot', pinnedScope: { owner: ['a'] } },
+			{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
 		)).toBe(false);
 	});
 

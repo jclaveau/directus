@@ -210,7 +210,6 @@ describe(oneLine`
 					fingerprint: {
 						collection: 'articles',
 						pinnedScope: { id: ['1'] },
-						viewFields: [],
 					},
 				},
 			],

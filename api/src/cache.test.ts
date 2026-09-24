@@ -324,8 +324,8 @@ describe('scoped cache purging', () => {
 			indexes the key + expires sibling in each collection's bare set, with a TTL
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-				{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
+				{ collection: 'directus_users' },
 			]);
 
 			// The members ride the script, which files them and moves the set's
@@ -355,7 +355,6 @@ describe('scoped cache purging', () => {
 				{
 					collection: 'slots',
 					pinnedScope: { student: ['7', 'A'] },
-					viewFields: [],
 				},
 			]);
 
@@ -372,7 +371,6 @@ describe('scoped cache purging', () => {
 				{
 					collection: 'slots',
 					pinnedScope: { student: ['\x00null'] },
-					viewFields: [],
 				},
 			]);
 
@@ -402,7 +400,6 @@ describe('scoped cache purging', () => {
 				[{
 					collection: 'slots',
 					pinnedScope: { student: ['7'] },
-					viewFields: [],
 				}],
 				[],
 				schema,
@@ -436,7 +433,6 @@ describe('scoped cache purging', () => {
 				[{
 					collection: 'slots',
 					pinnedScope: { student: ['A', 'B'] },
-					viewFields: [],
 				}],
 				[],
 				schema,
@@ -461,8 +457,8 @@ describe('scoped cache purging', () => {
 
 		test('a duplicated fingerprint re-sends the same members', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			// Keyed off the array position rather than the rendered form, so the same
@@ -487,7 +483,7 @@ describe('scoped cache purging', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
 			]);
 
 			expect(redis.pipeline).not.toHaveBeenCalled();
@@ -495,7 +491,7 @@ describe('scoped cache purging', () => {
 
 		test('indexes the extra siblings alongside the key', async () => {
 			await indexScopedCacheEntry('resp-key', [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
 			], [
 				'resp-key__tags',
 			]);
@@ -569,7 +565,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
@@ -605,10 +601,10 @@ describe('scoped cache purging', () => {
 			// a durable write — and, sitting outside `purgeOrRecord`, records nothing
 			// either, leaving the entries it was about to drop with nothing coming.
 			await expect(purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			])).resolves.toEqual([
-				{ collection: 'slots', pinnedScope: {}, viewFields: [] },
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
@@ -631,7 +627,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			// Two tags, and TWO entries — not the five keys deleted. An entry is
@@ -679,7 +675,7 @@ describe('scoped cache purging', () => {
 			} as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			// One, not two: the stale entry was named by the set and deleted for
@@ -722,7 +718,7 @@ describe('scoped cache purging', () => {
 			} as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			// A purge over a slice used to send one delete per key, so its cost grew
@@ -817,7 +813,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', [
-				{ collection: 'articles', pinnedScope: { author: ['1'] }, viewFields: [] },
+				{ collection: 'articles', pinnedScope: { author: ['1'] } },
 			]);
 
 			expect(cache.clear).toHaveBeenCalledOnce();
@@ -852,7 +848,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
@@ -972,7 +968,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', [
-				{ collection: 'articles', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'articles', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(cache.clear).toHaveBeenCalledTimes(1);
@@ -1018,7 +1014,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(redis.sscan).not.toHaveBeenCalled();
@@ -1055,7 +1051,7 @@ describe('scoped cache purging', () => {
 
 			expect(emitFilter).toHaveBeenCalledWith(
 				'cache.purge',
-				[{ collection: 'slots', pinnedScope: {}, viewFields: [] }],
+				[{ collection: 'slots' }],
 				{ collection: 'slots' },
 				null,
 			);
@@ -1078,7 +1074,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			expect(await purgeScopedCache(cache, 'articles', null)).toEqual([
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
 			]);
 		});
 
@@ -1086,12 +1082,12 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			const purged = await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(purged).toEqual([
-				{ collection: 'slots', pinnedScope: {}, viewFields: [] },
-				{ collection: 'slots', pinnedScope: { student: ['A'] }, viewFields: [] },
+				{ collection: 'slots' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 		});
 	});

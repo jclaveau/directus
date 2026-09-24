@@ -96,11 +96,13 @@ export function renderScopedCacheFingerprint(
 	fingerprint: ScopedCacheFingerprint,
 ): string {
 	const renderedPairs = new Map<string, readonly string[]>(
-		Object.entries(fingerprint.pinnedScope),
+		Object.entries(fingerprint.pinnedScope ?? {}),
 	);
 
-	if (fingerprint.viewFields.length > 0) {
-		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_VIEW, fingerprint.viewFields);
+	const viewFields = fingerprint.viewFields ?? [];
+
+	if (viewFields.length > 0) {
+		renderedPairs.set(SCOPED_CACHE_FINGERPRINT_VIEW, viewFields);
 	}
 
 	let renderedFingerprint = `${fingerprint.collection}:`;
@@ -165,10 +167,17 @@ export function parseScopedCacheFingerprint(
 		parsedScope[pairKey] = pairValues;
 	}
 
+	// Only what it carries: an absent member is how every other fingerprint spells
+	// pins nothing, and a decode that wrote the empty ones would be the one shape
+	// no declaration has.
 	return {
 		collection: parsedCollection,
-		pinnedScope: parsedScope,
-		viewFields: parsedFields,
+		...Object.keys(parsedScope).length > 0
+			? { pinnedScope: parsedScope }
+			: {},
+		...parsedFields.length > 0
+			? { viewFields: parsedFields }
+			: {},
 	};
 }
 
@@ -205,7 +214,15 @@ export function scopedCacheFingerprintOf(
 		pinnedScope[pin.field] = fieldValues;
 	}
 
-	return { collection, pinnedScope, viewFields };
+	return {
+		collection,
+		...Object.keys(pinnedScope).length > 0
+			? { pinnedScope }
+			: {},
+		...viewFields.length > 0
+			? { viewFields }
+			: {},
+	};
 }
 
 /**
@@ -260,7 +277,7 @@ export function scopedCacheLegacyTags(
 		legacyTags.push(legacyTag);
 	};
 
-	for (const { collection, pinnedScope } of fingerprints) {
+	for (const { collection, pinnedScope = {} } of fingerprints) {
 		if (Object.keys(pinnedScope).length === 0) {
 			pushLegacyTag({ collection });
 			continue;
@@ -277,6 +294,20 @@ export function scopedCacheLegacyTags(
 }
 
 /**
+ * Whether the fingerprint pins nothing: the bare collection, which every write to
+ * it reaches.
+ *
+ * Two shapes say it — no `pinnedScope` at all, and an empty one — because a pin
+ * has to name a field before it can rule a row out. Asking here rather than at
+ * each caller is what keeps the two from ever answering differently.
+ */
+export function scopedCacheFingerprintIsBare(
+	fingerprint: ScopedCacheFingerprint,
+): boolean {
+	return Object.keys(fingerprint.pinnedScope ?? {}).length === 0;
+}
+
+/**
  * Whether the whole pinned scope of the fingerprint holds on one row.
  *
  * The row is a fingerprint of its own — one value per field, no view fields — so
@@ -287,10 +318,8 @@ export function scopedCacheFingerprintMatchesRow(
 	fingerprint: ScopedCacheFingerprint,
 	rowFingerprint: ScopedCacheFingerprint,
 ): boolean {
-	for (const [field, values] of Object.entries(fingerprint.pinnedScope)) {
-		const rowValues = Object.hasOwn(rowFingerprint.pinnedScope, field)
-			? rowFingerprint.pinnedScope[field]
-			: undefined;
+	for (const [field, values] of Object.entries(fingerprint.pinnedScope ?? {})) {
+		const rowValues = rowFingerprint.pinnedScope?.[field];
 
 		if (rowValues === undefined) {
 			return false;
@@ -426,12 +455,13 @@ export function scopedCacheFingerprintCouldContainPin(
 	entry: ScopedCacheFingerprint,
 	declared: ScopedCacheFingerprint,
 ): boolean {
-	return Object.entries(declared.pinnedScope).every(([field, declaredTokens]) => {
-		const boundTokens = entry.pinnedScope[field];
+	return Object.entries(declared.pinnedScope ?? {})
+		.every(([field, declaredTokens]) => {
+			const boundTokens = entry.pinnedScope?.[field];
 
-		return boundTokens === undefined
-			|| boundTokens.some((token) => declaredTokens.includes(token));
-	});
+			return boundTokens === undefined
+				|| boundTokens.some((token) => declaredTokens.includes(token));
+		});
 }
 
 /**
@@ -459,9 +489,11 @@ export function scopedCacheFingerprintPurgedBy(
 	// not it also selected it: a write moving a row across one of them moves it in
 	// or out of the result set, which is a changed response by itself. Added only
 	// beside declared fields, since naming none already means every field.
-	const queryCase = fingerprint.viewFields.length === 0
-		? fingerprint.viewFields
-		: [...fingerprint.viewFields, ...Object.keys(fingerprint.pinnedScope)];
+	const viewFields = fingerprint.viewFields ?? [];
+
+	const queryCase = viewFields.length === 0
+		? viewFields
+		: [...viewFields, ...Object.keys(fingerprint.pinnedScope ?? {})];
 
 	if (scopedCacheViewFieldsAreTouched(queryCase, changed) === false) {
 		return false;

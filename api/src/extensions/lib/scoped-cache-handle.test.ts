@@ -88,17 +88,14 @@ describe('createScopedCacheExtensionHandle', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { id: ['1'], owner: ['7'] },
-						viewFields: [],
 					},
 					{
 						collection: 'articles',
 						pinnedScope: { id: ['2'], owner: ['7'] },
-						viewFields: [],
 					},
 					{
 						collection: 'articles',
 						pinnedScope: { id: ['3'], owner: ['9'] },
-						viewFields: [],
 					},
 				],
 				indexPath: 'owner',
@@ -129,7 +126,7 @@ describe('createScopedCacheExtensionHandle', () => {
 			null,
 			{
 				rowFingerprints: [
-					{ collection: 'logs', pinnedScope: { id: ['1'] }, viewFields: [] },
+					{ collection: 'logs', pinnedScope: { id: ['1'] } },
 				],
 				indexPath: null,
 			},

@@ -52,34 +52,36 @@ export interface ScopedCacheFingerprint {
 	 * Field path to the values the read is pinned to. The values of one field are an
 	 * OR — what an `_in` means — and the fields together are an AND.
 	 *
-	 * Empty pins nothing, so there is nothing left to fail and every write to the
-	 * collection matches — `{ collection, pinnedScope: {}, viewFields: [] }` is what
-	 * a tag naming only a collection said.
+	 * Absent pins nothing, so there is nothing left to fail and every write to the
+	 * collection matches — `{ collection }` is what a tag naming only a collection
+	 * said. An empty object says the same, since a pin has to name a field before
+	 * it can rule a row out: every reader takes the two alike, and the serialiser
+	 * renders them alike.
 	 */
-	readonly pinnedScope: Readonly<Record<string, readonly string[]>>;
+	readonly pinnedScope?: Readonly<Record<string, readonly string[]>>;
 	/**
 	 * The fields the read's view is built from: what it selected, sorted on,
 	 * filtered by, grouped or aggregated on, plus the reverse key of every to-many
-	 * it descended. Empty names every field: a read that cannot say which columns it
-	 * depends on depends on all of them.
+	 * it descended. Absent names every field: a read that cannot say which columns
+	 * it depends on depends on all of them.
 	 *
 	 * `limit` shapes the view too but names no field, so it is not one of them: it
 	 * already varies the cache key, so two page sizes are two entries, and a nested
 	 * node cut by a limit gets a bare fingerprint rather than a pin
 	 * (`read-plan.ts`) — the rows past the cut are named by nothing.
 	 */
-	readonly viewFields: readonly string[];
+	readonly viewFields?: readonly string[];
 }
 
 /**
  * A fingerprint as a hook spells one: the collection it names, the scope it pins
  * and, for a read's own, the fields its view is built from.
  *
- * Looser than the fingerprint the host builds, in the two ways a declaration is:
- * `pinnedScope` is optional, since naming a collection and nothing else is the
- * whole collection — what a bare tag said; and its values are whatever the hook
- * holds, since the host canonicalizes them against the schema (a `7` and a `'7'`
- * name one slice, and only the column's type says so).
+ * Looser than the fingerprint the host builds in the one way a declaration is: its
+ * values are whatever the hook holds, since the host canonicalizes them against
+ * the schema (a `7` and a `'7'` name one slice, and only the column's type says
+ * so). The members are optional on both — naming a collection and nothing else is
+ * the whole collection, wherever the fingerprint came from.
  *
  * `viewFields` is there to be ignored: they say which columns a READ depends on,
  * and no purge reads them. A fingerprint off `getMeta()` carries them, so the field

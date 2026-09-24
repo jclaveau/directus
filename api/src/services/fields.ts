@@ -271,9 +271,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(result, {
-			scopedCacheFingerprints: [
-				{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
-			],
+			scopedCacheFingerprints: [{ collection: 'directus_fields' }],
 		});
 	}
 
@@ -359,9 +357,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(data, {
-			scopedCacheFingerprints: [
-				{ collection: 'directus_fields', pinnedScope: {}, viewFields: [] },
-			],
+			scopedCacheFingerprints: [{ collection: 'directus_fields' }],
 		});
 	}
 

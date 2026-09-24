@@ -19,6 +19,7 @@ import {
 	mergedScopedCacheEpochs,
 	renderScopedCacheFingerprint,
 	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFingerprintIsBare,
 	scopedCachePurgeEnabled,
 	scopedCacheLegacyTags,
 	scopedCacheSweptDuringFill,
@@ -121,7 +122,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// A response with no pin at all (a hand-rolled /settings) falls back to the bare
 	// collection fingerprint so a mutation there still purges it (settings reask).
 	const collectionFallbackFingerprints: ScopedCacheFingerprint[] = req.collection
-		? [{ collection: req.collection, pinnedScope: {}, viewFields: [] }]
+		? [{ collection: req.collection }]
 		: [];
 
 	// `total_count` drops the query filter and counts the whole collection
@@ -380,7 +381,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						scopedFields.length > 0 &&
 						scopedCacheFingerprints.some((fingerprint) => {
 							return fingerprint.collection === req.collection
-								&& Object.keys(fingerprint.pinnedScope).length === 0;
+								&& scopedCacheFingerprintIsBare(fingerprint);
 						});
 
 					// Compute cost of this miss: request entry (cache mw) → entry written.
@@ -467,7 +468,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			const detail = [
 				...new Set(
 					(unautopurgeableFingerprints ?? []).flatMap((fingerprint) => {
-						return Object.keys(fingerprint.pinnedScope).map((field) => {
+						return Object.keys(fingerprint.pinnedScope ?? {}).map((field) => {
 							return `${fingerprint.collection}:${field}`;
 						});
 					}),

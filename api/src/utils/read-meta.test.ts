@@ -5,8 +5,8 @@ describe('withMeta / readMeta', () => {
 	test('round-trips the metadata via getMeta()', () => {
 		const meta = {
 			scopedCacheFingerprints: [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-				{ collection: 'users', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
+				{ collection: 'users' },
 			],
 		};
 
@@ -15,8 +15,8 @@ describe('withMeta / readMeta', () => {
 		expect(readMeta(result)).toBe(meta);
 
 		expect(readMeta(result)!.scopedCacheFingerprints).toEqual([
-			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-			{ collection: 'users', pinnedScope: {}, viewFields: [] },
+			{ collection: 'articles' },
+			{ collection: 'users' },
 		]);
 	});
 
@@ -26,8 +26,6 @@ describe('withMeta / readMeta', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		);
@@ -44,12 +42,10 @@ describe('withMeta / readMeta', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		))!.scopedCacheFingerprints).toEqual([
-			{ collection: 'articles', pinnedScope: {}, viewFields: [] },
+			{ collection: 'articles' },
 		]);
 	});
 

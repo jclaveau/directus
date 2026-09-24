@@ -216,8 +216,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		);
@@ -255,7 +253,7 @@ describe('respond middleware', () => {
 		// every fingerprint goes in the bare set.
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
 		);
@@ -273,8 +271,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 				httpRequestCacheKey: {
 					redisKey: 'middleware-key',
@@ -299,8 +295,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 				requestStart: Date.now() - 10,
 			},
@@ -366,8 +360,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 				requestStart: 900,
 			},
@@ -398,8 +390,6 @@ describe('respond middleware', () => {
 		await respond(makeReq(), makeRes(payload, {
 			scopedCacheFingerprints: [{
 				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
 			}],
 		}), next);
 
@@ -419,8 +409,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		);
@@ -446,7 +434,7 @@ describe('respond middleware', () => {
 		// on that collection still purges the cached response (the settings fix).
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
 		);
@@ -467,9 +455,8 @@ describe('respond middleware', () => {
 							{
 								collection: 'directus_users',
 								pinnedScope: { id: ['u1'] },
-								viewFields: [],
 							},
-							{ collection: 'student', pinnedScope: {}, viewFields: [] },
+							{ collection: 'student' },
 						],
 					},
 				),
@@ -483,9 +470,8 @@ describe('respond middleware', () => {
 				{
 					collection: 'directus_users',
 					pinnedScope: { id: ['u1'] },
-					viewFields: [],
 				},
-				{ collection: 'student', pinnedScope: {}, viewFields: [] },
+				{ collection: 'student' },
 			],
 			[],
 			{ collections: {}, relations: [] },
@@ -504,8 +490,8 @@ describe('respond middleware', () => {
 				{
 					data: withMeta({ id: 'u1' }, {
 						scopedCacheFingerprints: [
-							{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
-							{ collection: 'student', pinnedScope: {}, viewFields: [] },
+							{ collection: 'directus_users' },
+							{ collection: 'student' },
 						],
 						scopedCacheEpochs: {
 							directus_users: '4', student: '5', '*': '1',
@@ -535,12 +521,11 @@ describe('respond middleware', () => {
 			makeRes({
 				data: withMeta({ id: 'u1' }, {
 					scopedCacheFingerprints: [
-						{ collection: 'directus_users', pinnedScope: {}, viewFields: [] },
+						{ collection: 'directus_users' },
 					],
 					scopedCacheUnautopurgeableFingerprints: [{
 						collection: 'student',
 						pinnedScope: { level: ['3'] },
-						viewFields: [],
 					}],
 				}),
 			}),
@@ -564,7 +549,7 @@ describe('respond middleware', () => {
 			{ meta: { total_count: 2 }, data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					{ collection: 'articles', pinnedScope: { id: ['1'] }, viewFields: [] },
+					{ collection: 'articles', pinnedScope: { id: ['1'] } },
 				],
 			},
 		);
@@ -577,7 +562,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			// The count drops the filter, so the fingerprint drops the pin with it:
 			// bound to nothing, any write to the collection moves the number.
-			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
 		);
@@ -591,7 +576,7 @@ describe('respond middleware', () => {
 			{ meta: { filter_count: 1 }, data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					{ collection: 'articles', pinnedScope: { id: ['1'] }, viewFields: [] },
+					{ collection: 'articles', pinnedScope: { id: ['1'] } },
 				],
 			},
 		);
@@ -602,7 +587,7 @@ describe('respond middleware', () => {
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', pinnedScope: { id: ['1'] }, viewFields: [] }],
+			[{ collection: 'articles', pinnedScope: { id: ['1'] } }],
 			[],
 			{ collections: {}, relations: [] },
 		);
@@ -616,7 +601,7 @@ describe('respond middleware', () => {
 			{ meta: { total_count: 2, filter_count: 1 }, data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					{ collection: 'articles', pinnedScope: { id: ['1'] }, viewFields: [] },
+					{ collection: 'articles', pinnedScope: { id: ['1'] } },
 				],
 			},
 		);
@@ -633,7 +618,7 @@ describe('respond middleware', () => {
 			'cache-key',
 			// The count drops the filter, so the fingerprint drops the pin with it:
 			// bound to nothing, any write to the collection moves the number.
-			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'articles' }],
 			[],
 			// The schema the index path is read off: this one declares no scope
 			// field on `articles`, so it is filed in the bare set.
@@ -652,7 +637,7 @@ describe('respond middleware', () => {
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
 		);
@@ -671,9 +656,8 @@ describe('respond middleware', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { owner: ['U1'] },
-						viewFields: [],
 					},
-					{ collection: 'authors', pinnedScope: {}, viewFields: [] },
+					{ collection: 'authors' },
 				],
 			},
 		);
@@ -743,8 +727,6 @@ describe('respond middleware', () => {
 		const res = makeRes({ data: [] }, {
 			scopedCacheFingerprints: [{
 				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
 			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
@@ -776,7 +758,7 @@ describe('respond middleware', () => {
 
 		const res = makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				{ collection: 'articles', pinnedScope: { author: ['7'] }, viewFields: [] },
+				{ collection: 'articles', pinnedScope: { author: ['7'] } },
 			],
 			scopedCacheEpochs: { articles: '7' },
 		});
@@ -807,8 +789,6 @@ describe('respond middleware', () => {
 		const res = makeRes({ data: [] }, {
 			scopedCacheFingerprints: [{
 				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
 			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
@@ -831,8 +811,6 @@ describe('respond middleware', () => {
 		const res = makeRes({ data: [] }, {
 			scopedCacheFingerprints: [{
 				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
 			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
@@ -854,8 +832,6 @@ describe('respond middleware', () => {
 		const res = makeRes({ data: [] }, {
 			scopedCacheFingerprints: [{
 				collection: 'articles',
-				pinnedScope: {},
-				viewFields: [],
 			}],
 			scopedCacheEpochs: { articles: '7' },
 		});
@@ -874,8 +850,8 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-				{ collection: 'authors', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
+				{ collection: 'authors' },
 			],
 			scopedCacheEpochs: { articles: '7', '*': '1' },
 		}), next);
@@ -897,8 +873,8 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-				{ collection: 'authors', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
+				{ collection: 'authors' },
 			],
 			scopedCacheEpochs: { articles: '7', authors: '4', '*': '1' },
 		}), next);
@@ -933,8 +909,8 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [
-				{ collection: 'articles', pinnedScope: {}, viewFields: [] },
-				{ collection: 'authors', pinnedScope: {}, viewFields: [] },
+				{ collection: 'articles' },
+				{ collection: 'authors' },
 			],
 			scopedCacheEpochsBeforeQuery: { articles: '7', '*': '1' },
 			scopedCacheEpochs: { articles: '8', authors: '4', '*': '1' },
@@ -957,8 +933,6 @@ describe('respond middleware', () => {
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheFingerprints: [{
 				collection: 'authors',
-				pinnedScope: {},
-				viewFields: [],
 			}],
 			scopedCacheEpochs: {},
 		}), next);
@@ -1084,8 +1058,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		);
@@ -1110,7 +1082,6 @@ describe('respond middleware', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { owner_field: ['u1'] },
-						viewFields: [],
 					},
 				],
 			},
@@ -1140,7 +1111,6 @@ describe('respond middleware', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { active: ['true'] },
-						viewFields: [],
 					},
 				],
 			},
@@ -1162,8 +1132,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 			},
 		);
@@ -1247,7 +1215,7 @@ describe('respond middleware', () => {
 		// falsy payload → size 0, under the limit, so caching still proceeds and 204 flushes
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', pinnedScope: {}, viewFields: [] }],
+			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
 		);
@@ -1316,7 +1284,6 @@ describe('respond middleware', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { owner: ['U1'] },
-						viewFields: [],
 					},
 				],
 			},
@@ -1338,7 +1305,7 @@ describe('respond middleware', () => {
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
-			[{ collection: 'articles', pinnedScope: { owner: ['U1'] }, viewFields: [] }],
+			[{ collection: 'articles', pinnedScope: { owner: ['U1'] } }],
 			['cache-key__tags'],
 			{ collections: {}, relations: [] },
 		);
@@ -1354,7 +1321,6 @@ describe('respond middleware', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { owner: ['U2'] },
-						viewFields: [],
 					},
 				],
 			},
@@ -1380,7 +1346,6 @@ describe('respond middleware', () => {
 					{
 						collection: 'articles',
 						pinnedScope: { owner: ['\x00null'] },
-						viewFields: [],
 					},
 				],
 			},
@@ -1402,15 +1367,15 @@ describe('respond middleware', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
 
 		const purgedFingerprints = [
-			{ collection: 'a', pinnedScope: { b: ['1'] }, viewFields: [] },
-			{ collection: 'a', pinnedScope: { b: ['2'] }, viewFields: [] },
+			{ collection: 'a', pinnedScope: { b: ['1'] } },
+			{ collection: 'a', pinnedScope: { b: ['2'] } },
 		];
 
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
 				scopedCacheFingerprints: [
-					{ collection: 'a', pinnedScope: { b: ['1', '2'] }, viewFields: [] },
+					{ collection: 'a', pinnedScope: { b: ['1', '2'] } },
 				],
 				scopedCachePurged: purgedFingerprints,
 			},
@@ -1445,8 +1410,6 @@ describe('respond middleware', () => {
 			{
 				scopedCacheFingerprints: [{
 					collection: 'articles',
-					pinnedScope: {},
-					viewFields: [],
 				}],
 				scopedCachePurged: [{ collection: 'articles' }],
 			},

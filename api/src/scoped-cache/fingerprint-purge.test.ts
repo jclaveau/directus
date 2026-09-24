@@ -132,7 +132,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: ['method'],
 			indexPath: 'owner',
@@ -148,7 +147,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: ['method'],
 			indexPath: 'owner',
@@ -174,7 +172,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: ['method'],
 			indexPath: 'owner',
@@ -197,7 +194,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: null,
 			indexPath: 'owner',
@@ -221,7 +217,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: ['method'],
 			indexPath: 'owner',
@@ -248,7 +243,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: ['method'],
 			indexPath: null,
@@ -284,7 +278,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: ['method'],
 			indexPath: 'owner',
@@ -315,12 +308,11 @@ describe('a purge shown the rows it wrote', () => {
 				rowFingerprints: [{
 					collection: 'slot',
 					pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
-					viewFields: [],
 				}],
 				changed: ['method'],
 				indexPath: 'owner',
 				declaredFingerprints: [
-					{ collection: 'other', pinnedScope: { x: ['y'] }, viewFields: [] },
+					{ collection: 'other', pinnedScope: { x: ['y'] } },
 				],
 			},
 		);
@@ -347,12 +339,11 @@ describe('a purge shown the rows it wrote', () => {
 				rowFingerprints: [{
 					collection: 'slot',
 					pinnedScope: { owner: ['alpha'] },
-					viewFields: [],
 				}],
 				changed: null,
 				indexPath: 'owner',
 				declaredFingerprints: [
-					{ collection: 'other', pinnedScope: { x: ['y'] }, viewFields: [] },
+					{ collection: 'other', pinnedScope: { x: ['y'] } },
 				],
 			},
 		);
@@ -436,7 +427,6 @@ describe('a purge shown the rows it wrote', () => {
 			rowFingerprints: [{
 				collection: 'slot',
 				pinnedScope: { owner: ['alpha'] },
-				viewFields: [],
 			}],
 			changed: null,
 			indexPath: 'owner',
