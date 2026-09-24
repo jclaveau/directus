@@ -493,7 +493,7 @@ describe('scoped cache purging', () => {
 			await indexScopedCacheEntry('resp-key', [
 				{ collection: 'articles' },
 			], [
-				'resp-key__tags',
+				'resp-key__pins',
 			]);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
@@ -501,7 +501,7 @@ describe('scoped cache purging', () => {
 				600,
 				'articles:&|resp-key',
 				'articles:&|resp-key__expires_at',
-				'articles:&|resp-key__tags',
+				'articles:&|resp-key__pins',
 			);
 		});
 	});
@@ -620,7 +620,7 @@ describe('scoped cache purging', () => {
 				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 					'slots:&student=,A,&|key-a__expires_at',
-					'slots:&student=,A,&|key-a__tags',
+					'slots:&student=,A,&|key-a__pins',
 				],
 			};
 
@@ -632,7 +632,7 @@ describe('scoped cache purging', () => {
 
 			// Two pins, and TWO entries — not the five keys deleted. An entry is
 			// indexed alongside its `__expires_at` sibling and any extra sibling
-			// (`__tags`), so counting members would report every entry twice over and
+			// (`__pins`), so counting members would report every entry twice over and
 			// draw an eviction line at double the truth.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'slots',
@@ -648,7 +648,7 @@ describe('scoped cache purging', () => {
 
 			// The sidecars are still deleted — only the count excludes them.
 			expect(cache.delete).toHaveBeenCalledWith('global-key__expires_at');
-			expect(cache.delete).toHaveBeenCalledWith('key-a__tags');
+			expect(cache.delete).toHaveBeenCalledWith('key-a__pins');
 			expect(cache.delete).toHaveBeenCalledTimes(5);
 		});
 

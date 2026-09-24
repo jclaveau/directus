@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => {
 		evictCacheEntry: vi.fn(async (cache: any, redisKey: string) => {
 			await cache.delete(redisKey);
 			await cache.delete(`${redisKey}__expires_at`);
-			await cache.delete(`${redisKey}__tags`);
+			await cache.delete(`${redisKey}__pins`);
 
 			// The real one reads the key back, because a store reports an error by
 			// answering `undefined` rather than throwing.
@@ -1276,7 +1276,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		CACHE_TAGS_HEADER MISS: emits the pins header, tags the __tags sibling
+		CACHE_TAGS_HEADER MISS: emits the pins header, tags the __pins sibling
 	`, async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 
@@ -1301,15 +1301,15 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
-			'cache-key__tags',
-			{ tags: ['articles:owner=U1'] },
+			'cache-key__pins',
+			{ pins: ['articles:owner=U1'] },
 			expect.any(Number),
 		);
 
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
 			[{ collection: 'articles', pinnedScope: { owner: ['U1'] } }],
-			['cache-key__tags'],
+			['cache-key__pins'],
 			{ collections: {}, relations: [] },
 		);
 	});
@@ -1363,7 +1363,7 @@ describe('respond middleware', () => {
 	});
 
 	// A batch write pins one tag per row; past CACHE_TAGS_HEADER_MAX_SIZE the header
-	// stops and the __tags sibling still keeps every pin.
+	// stops and the __pins sibling still keeps every pin.
 	test('clamps both tag headers, the sibling keeps every pin', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
@@ -1401,8 +1401,8 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
-			'cache-key__tags',
-			{ tags: ['a:b=1', 'a:b=2'] },
+			'cache-key__pins',
+			{ pins: ['a:b=1', 'a:b=2'] },
 			expect.any(Number),
 		);
 	});

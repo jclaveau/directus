@@ -11,7 +11,7 @@ import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
-import { cacheExpiresAtKey, cacheTagsKey } from './cache-sidecars.js';
+import { cacheExpiresAtKey, cachePinsKey } from './cache-sidecars.js';
 import { cacheStoreDropsEntries } from './cache-store-probe.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
@@ -1921,7 +1921,7 @@ export async function listCacheGroupLatencies(
 }
 
 /**
- * Evict a single cached response: the value + its `__expires_at`/`__tags`
+ * Evict a single cached response: the value + its `__expires_at`/`__pins`
  * siblings. Best-effort — a no-op if it already expired. The descriptor lingers
  * until the reaper prunes it.
  */
@@ -1940,7 +1940,7 @@ export async function evictCacheEntry(
 	try {
 		await cache.delete(redisKey);
 		await cache.delete(cacheExpiresAtKey(redisKey));
-		await cache.delete(cacheTagsKey(redisKey));
+		await cache.delete(cachePinsKey(redisKey));
 
 		return await cacheStoreDropsEntries(cache);
 	}

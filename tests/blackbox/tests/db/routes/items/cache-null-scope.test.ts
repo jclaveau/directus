@@ -108,7 +108,7 @@ describe(oneLine`
 			expect(header.split(', ')).toContain(`${COLLECTION}:owner=%00null`);
 		});
 
-		// A read pinned to `_eq: null` stores the raw token in the __tags sidecar, so
+		// A read pinned to `_eq: null` stores the raw token in the __pins sidecar, so
 		// the HIT re-emits it from cache.ts — the escaping site the MISS never reaches.
 		it(oneLine`
 			escapes the null scope again when the read is served from cache

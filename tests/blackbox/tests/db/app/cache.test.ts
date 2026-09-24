@@ -886,7 +886,7 @@ describe('App Caching Tests', () => {
 			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
 			expect(miss.headers[tagsHeader]).toContain(slice);
 
-			// A HIT re-emits it from the `__tags` sibling (the read is skipped).
+			// A HIT re-emits it from the `__pins` sibling (the read is skipped).
 			const hit = await request(url).get(readA)
 				.set('Authorization', auth);
 

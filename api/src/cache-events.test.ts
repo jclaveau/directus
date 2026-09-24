@@ -2624,7 +2624,7 @@ describe('evictCacheEntry', () => {
 
 		expect(cache.delete).toHaveBeenCalledWith('k1');
 		expect(cache.delete).toHaveBeenCalledWith('k1__expires_at');
-		expect(cache.delete).toHaveBeenCalledWith('k1__tags');
+		expect(cache.delete).toHaveBeenCalledWith('k1__pins');
 	});
 
 	it(oneLine`

@@ -524,7 +524,7 @@ describe('a fresh entry', () => {
 
 	test('skips the sidecars beside it rather than replaying them', async () => {
 		fill('rk', { data: [] });
-		cache.store.set('rk__tags', { tags: 'articles' });
+		cache.store.set('rk__pins', { pins: 'articles' });
 		described(descriptor());
 		const replay = replayer(answer({ data: [] }));
 

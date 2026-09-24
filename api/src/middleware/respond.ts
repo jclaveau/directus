@@ -4,7 +4,7 @@ import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
-import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
+import { cacheExpiresAtKey, cachePinsKey } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
 	evictCacheEntry,
@@ -80,7 +80,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// smoke test can assert per-user scoping with no redis client. Never set in prod
 	// — pins carry owner ids. Raw pins are emitted, so a regression pinning nothing
 	// shows an absent header, not a masked one. A cache HIT skips this middleware —
-	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
+	// pins are also written to a __pins sibling (below), re-emitted from cache.ts.
 	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
 	if (env['CACHE_TAGS_HEADER']) {
 		if (readPinKeys.length > 0) {
@@ -260,7 +260,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				redisKey,
 				scopedCacheFingerprints,
 				env['CACHE_TAGS_HEADER']
-					? [cacheTagsKey(redisKey)]
+					? [cachePinsKey(redisKey)]
 					: [],
 				req.schema,
 			);
@@ -348,8 +348,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// the one pin it is.
 					await setCacheValue(
 						cache,
-						cacheTagsKey(redisKey),
-						{ tags: readPinKeys },
+						cachePinsKey(redisKey),
+						{ pins: readPinKeys },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}

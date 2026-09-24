@@ -473,13 +473,13 @@ describe('countScopedCachePinMembers', () => {
 	});
 
 	// The purge's own `evicted` counts entries, and a blast radius that counted
-	// each one's `__expires_at` and `__tags` siblings too would claim three.
+	// each one's `__expires_at` and `__pins` siblings too would claim three.
 	it('leaves an entry\'s sidecars out of its own blast radius', async () => {
 		countedMembers = {
 			'ns:scoped-cache-index:fingerprint:articles:': [
 				'articles:&id=,5,&|ns:entry-five',
 				'articles:&id=,5,&|ns:entry-five__expires_at',
-				'articles:&id=,5,&|ns:entry-five__tags',
+				'articles:&id=,5,&|ns:entry-five__pins',
 			],
 		};
 
@@ -1964,7 +1964,7 @@ describe('retryPendingScopedCachePurges', () => {
 			'ns:scoped-cache-index:fingerprint:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 				'articles:&id=,1,&|ns:entry-a__expires_at',
-				'articles:&id=,1,&|ns:entry-a__tags',
+				'articles:&id=,1,&|ns:entry-a__pins',
 			],
 		};
 

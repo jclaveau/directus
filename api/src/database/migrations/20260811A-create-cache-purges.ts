@@ -18,7 +18,7 @@ import { getMilliseconds } from '../../utils/get-milliseconds.js';
  *
  * The tags a purge dropped are deliberately NOT a column here — they are rows in
  * `directus_scoped_cache_purge_tags` below, one per tag, in the display form
- * `collection[:field=value]` that the `X-Scoped-Cache-*` headers and the `__tags`
+ * `collection[:field=value]` that the `X-Scoped-Cache-*` headers and the `__pins`
  * sidecar already use. That join is the point: "written at T0, a purge covering
  * tag X fired at T1, still present" is what proves a missed invalidation, where
  * a count alone only says something was purged and leaves you guessing what.
@@ -32,7 +32,7 @@ import { getMilliseconds } from '../../utils/get-milliseconds.js';
  * `scoped_cache_tag_count` is that reach as a number, for every mode.
  *
  * `evicted` counts the ENTRIES the operation deleted, excluding each entry's
- * `__expires_at`/`__tags` sidecars, and is NULL for a `namespace` clear — that
+ * `__expires_at`/`__pins` sidecars, and is NULL for a `namespace` clear — that
  * one has no member list to count, and 0 would read as "took nothing".
  *
  * No surrogate key: a hypertable refuses a unique index that does not include

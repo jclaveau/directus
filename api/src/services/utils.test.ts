@@ -643,8 +643,8 @@ describe('Services / Utils', () => {
 					return Promise.resolve({ exp: 5, createdAt: 1, ttlMs: 1000 });
 				}
 
-				if (key === 'k1__tags') {
-					return Promise.resolve({ tags: ['articles', 'articles:id=5'] });
+				if (key === 'k1__pins') {
+					return Promise.resolve({ pins: ['articles', 'articles:id=5'] });
 				}
 
 				return Promise.resolve(undefined);

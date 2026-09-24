@@ -74,7 +74,7 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 			const keys = await redis.keys(`${namespace}_response:*`);
 
 			const entries = keys.filter((key) => {
-				return !key.endsWith('__expires_at') && !key.endsWith('__tags');
+				return !key.endsWith('__expires_at') && !key.endsWith('__pins');
 			});
 
 			expect(entries).toHaveLength(1);

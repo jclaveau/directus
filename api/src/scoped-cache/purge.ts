@@ -194,7 +194,7 @@ export async function indexScopedCacheEntry(
  * a member is parsed once and tested against each.
  *
  * Counts entries rather than members: an entry is named alongside its
- * `__expires_at` and `__tags` siblings, so counting members reported the same
+ * `__expires_at` and `__pins` siblings, so counting members reported the same
  * entry two or three times over — the inflation the `SCARD` this replaced carried.
  */
 export async function countScopedCachePinMembers(
@@ -325,7 +325,7 @@ function scopedCacheFingerprintReachedByPin(
  * is neither how many keys were deleted nor how many the index named.
  *
  * Not the key count, because the index holds each entry alongside its
- * `__expires_at` sibling and any extra sibling (`__tags`), so counting keys would
+ * `__expires_at` sibling and any extra sibling (`__pins`), so counting keys would
  * report every entry twice over. A sidecar is recognisable by its base key being
  * filed beside it — they are filed together — which stays right as siblings are
  * added.

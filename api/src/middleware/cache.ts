@@ -4,8 +4,8 @@ import { getCache, getCacheValue, getCacheValues } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
 import {
 	cacheExpiresAtKey,
-	cacheTagsKey,
-	storedScopedCacheTagLabels,
+	cachePinsKey,
+	storedScopedCachePinLabels,
 } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
@@ -112,21 +112,21 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		}
 
 		if (env['CACHE_TAGS_HEADER']) {
-			// Dev-only: pins were persisted to a `${redisKey}__tags` sibling at write
+			// Dev-only: pins were persisted to a `${redisKey}__pins` sibling at write
 			// time (respond.ts); the read that builds them is skipped on a HIT.
 			try {
-				const stored = await getCacheValue(cache, cacheTagsKey(redisKey));
+				const stored = await getCacheValue(cache, cachePinsKey(redisKey));
 
 				// Same guard utils.ts puts on this sidecar: anything else flattens into
 				// a garbled header instead of being skipped.
-				const labels = storedScopedCacheTagLabels(stored);
+				const labels = storedScopedCachePinLabels(stored);
 
 				if (labels) {
 					setScopedCacheTagsHeader(res, `${env['CACHE_TAGS_HEADER']}`, labels);
 				}
 			}
 			catch (err: any) {
-				logger.warn(err, `[cache] __tags read failed: ${err.message}`);
+				logger.warn(err, `[cache] __pins read failed: ${err.message}`);
 			}
 		}
 
