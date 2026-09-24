@@ -64,7 +64,7 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { countScopedCachePinMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { SettingsService } from './settings.js';
 import { UtilsService } from './utils.js';
@@ -321,14 +321,14 @@ describe('Services / Utils', () => {
 			await adminService().getCacheAudit(7, {
 				limit: '10',
 				offset: '30',
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 				window: '7d',
 			});
 
 			expect(readCacheAuditFindings).toHaveBeenCalledWith(7, {
 				limit: 10,
 				offset: 30,
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 			});
 
 			for (const bad of [
@@ -664,12 +664,12 @@ describe('Services / Utils', () => {
 					time: 400,
 					mode: 'slices',
 					collection: 'articles',
-					scopedCacheTag: 'articles:id=5',
+					scopedCachePin: 'articles:id=5',
 					evicted: 2,
 				},
 			]);
 
-			vi.mocked(countScopedCacheTagMembers).mockResolvedValue({
+			vi.mocked(countScopedCachePinMembers).mockResolvedValue({
 				'articles': 3,
 				'articles:id=5': 7,
 			});
@@ -692,7 +692,7 @@ describe('Services / Utils', () => {
 						time: 400,
 						mode: 'slices',
 						collection: 'articles',
-						scopedCacheTag: 'articles:id=5',
+						scopedCachePin: 'articles:id=5',
 						evicted: 2,
 					},
 				],
@@ -701,7 +701,7 @@ describe('Services / Utils', () => {
 			// Measured from the entry's own fill, not from a window.
 			expect(listPurgesCoveringEntry).toHaveBeenCalledWith('h1', new Date(1));
 
-			expect(countScopedCacheTagMembers).toHaveBeenCalledWith([
+			expect(countScopedCachePinMembers).toHaveBeenCalledWith([
 				'articles',
 				'articles:id=5',
 			]);

@@ -24,7 +24,7 @@ export interface CacheEntry {
 	hits: number;
 	misses: number;
 	fills: number;
-	// Purges that covered this entry's tags in the window. Read beside `hits`:
+	// Purges that covered this entry's pins in the window. Read beside `hits`:
 	// more purges than hits means the cache is filling this response more often
 	// than it serves it.
 	purges: number;
@@ -107,7 +107,7 @@ export type CacheAnomalyReason =
 	| 'value_too_large'
 	| 'redis_error'
 	| 'stale_entry'
-	| 'tag_drift';
+	| 'pin_drift';
 
 // Normalised to its descriptor: path/method/query come from the referenced
 // directus_cache_stats_descriptors row, so it drops into the tree at the same node.
@@ -475,7 +475,7 @@ function countAnomalies(anomalies: CacheAnomaly[]): number {
 	return anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
 }
 
-// Cached entries here that over-purge — a scoped read that fell back to a bare tag.
+// Cached entries here that over-purge — a scoped read that fell back to a bare pin.
 function countCoarse(entries: CacheEntry[]): number {
 	return entries.filter((entry) => entry.coarse).length;
 }

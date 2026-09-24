@@ -72,11 +72,11 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
-		// The real one, not a stand-in. The descriptor assertion reads the tag
+		// The real one, not a stand-in. The descriptor assertion reads the pin
 		// SPELLING, and a copy here drifts off `canonicalizeScopedCachePinValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
-		scopedCacheLegacyTags: actual.scopedCacheLegacyTags,
+		scopedCachePinKeys: actual.scopedCachePinKeys,
 		// Same reason, for the form a recorded purge is retried from.
 		renderScopedCacheFingerprint: actual.renderScopedCacheFingerprint,
 		// And for the coarse flag the descriptor cases below assert: which shapes
@@ -106,7 +106,7 @@ vi.mock('../utils/get-string-byte-size.js', () => {
 
 vi.mock('../utils/cache-audit-replay.js', () => {
 	return {
-		CACHE_AUDIT_TAGS_HEADER: 'x-cache-audit-tags',
+		CACHE_AUDIT_PINS_HEADER: 'x-cache-audit-pins',
 		isCacheAuditReplay: vi.fn(() => false),
 	};
 });
@@ -251,7 +251,7 @@ describe('respond middleware', () => {
 		);
 
 		// #205 scoped-cache tagging fires with the request's fingerprints, the legacy
-		// flat tags the old index is still written under, and the schema the index
+		// flat pins the old index is still written under, and the schema the index
 		// path of each collection is read off — this one declares no scope field, so
 		// every fingerprint goes in the bare set.
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
@@ -433,7 +433,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		// A controller that set no tags → the bare `{ collection }` tag, so a mutation
+		// A controller that set no pins → the bare `{ collection }` pin, so a mutation
 		// on that collection still purges the cached response (the settings fix).
 		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
 			'cache-key',
@@ -668,8 +668,8 @@ describe('respond middleware', () => {
 		await respond(makeReq(), res, next);
 
 		expect(res.setHeader).toHaveBeenCalledWith(
-			'x-cache-audit-tags',
-			'articles:owner=U1,authors',
+			'x-cache-audit-pins',
+			'["articles:owner=U1","authors"]',
 		);
 
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
@@ -678,7 +678,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a replay of a tagless collection-less read answers an empty tags header
+		a replay of a pinless collection-less read answers an empty pins header
 	`, async () => {
 		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
 		const res = makeRes({ data: {} }, { cache: false });
@@ -686,7 +686,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(res.setHeader).toHaveBeenCalledWith('x-cache-audit-tags', '');
+		expect(res.setHeader).toHaveBeenCalledWith('x-cache-audit-pins', '[]');
 	});
 
 	test('skips caching a collection-less response in scoped mode', async () => {
@@ -696,7 +696,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		// No tags AND no collection under scoped purge → nothing could target it, so
+		// No pins AND no collection under scoped purge → nothing could target it, so
 		// it is not cached (rather than orphan a stale entry no purge can drop).
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 		expect(indexScopedCacheEntry).not.toHaveBeenCalled();
@@ -972,7 +972,7 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(warn).toHaveBeenCalled();
-		// The tag index is written first, so a failed value write leaves a tag naming
+		// The pin index is written first, so a failed value write leaves a pin naming
 		// a key that never landed — one wasted `del` on the next purge, nothing stale.
 		expect(res.json).toHaveBeenCalled();
 
@@ -1102,7 +1102,7 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// A boolean slice, because that is where a re-implementation of the tag
+		// A boolean slice, because that is where a re-implementation of the pin
 		// would diverge: the driver hands back `1`, and only
 		// `canonicalizeScopedCachePinValue` turns it into the `true` the Redis key and
 		// the purge row both use. Written `=1` here, every purge of that slice
@@ -1122,14 +1122,14 @@ describe('respond middleware', () => {
 		await respond(makeReq({ schema: scopedSchema }), res, next);
 
 		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
-			expect.objectContaining({ scopedCacheTags: ['articles:active=true'] }),
+			expect.objectContaining({ scopedCachePins: ['articles:active=true'] }),
 		);
 	});
 
 	test('a bare tag on a NON-scoped collection is not coarse', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
+		// No scoped_cache_fields → the bare pin is the only correct pin, not a fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{
@@ -1337,7 +1337,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	// The tag keeps the raw NUL (it is the Redis key), so the escaping has to happen
+	// The pin keeps the raw NUL (it is the Redis key), so the escaping has to happen
 	// on the way out — `res.setHeader` throws ERR_INVALID_CHAR otherwise.
 	test('escapes a control byte on its way into the header', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';

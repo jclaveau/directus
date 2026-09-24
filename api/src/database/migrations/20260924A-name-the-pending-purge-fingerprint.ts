@@ -10,8 +10,8 @@ const TABLE = 'directus_scoped_cache_pending_purges';
  * pin of one query case in a single token — and the drain hands it straight back
  * to the purge as `scopedCacheFingerprints`.
  *
- * The two tag tables the telemetry writes keep the name: what they store really is
- * a legacy tag, the form the `X-Scoped-Cache-Tags` header and the cache page speak.
+ * The two tables the telemetry writes hold one pin per row rather than a
+ * fingerprint, and take that word in `20260924B`.
  *
  * Metadata only on every dialect here, and the table holds rows only between a
  * failed purge and its retry.

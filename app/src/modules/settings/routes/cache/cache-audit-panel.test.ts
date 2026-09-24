@@ -22,7 +22,7 @@ function run(overrides: Partial<CacheAuditRun> = {}): CacheAuditRun {
 		counts: {
 			fresh: 10,
 			stale: 0,
-			tag_drift: 0,
+			pin_drift: 0,
 			raced: 0,
 			time_varying: 0,
 			expired: 0,
@@ -50,7 +50,7 @@ function finding(overrides: Partial<CacheAuditFinding> = {}): CacheAuditFinding 
 		filledAt: 1_699_999_000_000,
 		ageMs: 1_000_000,
 		tags: ['articles', 'articles:1'],
-		replayTags: ['articles', 'articles:1'],
+		replayPins: ['articles', 'articles:1'],
 		diff: ['/data/0/title'],
 		purgesSinceFilled: [],
 		...overrides,
@@ -71,7 +71,7 @@ describe('runStatus', () => {
 	test('a stale or drifted entry makes the run stale', () => {
 		expect(runStatus(run({ counts: { ...run().counts, stale: 1 } }))).toBe('stale');
 
-		expect(runStatus(run({ counts: { ...run().counts, tag_drift: 1 } })))
+		expect(runStatus(run({ counts: { ...run().counts, pin_drift: 1 } })))
 			.toBe('stale');
 	});
 
@@ -138,14 +138,14 @@ describe('findingVerdict', () => {
 
 describe('tagDrift', () => {
 	test('is unknown where the replay pinned nothing', () => {
-		expect(tagDrift(finding({ replayTags: null }))).toBeNull();
+		expect(tagDrift(finding({ replayPins: null }))).toBeNull();
 	});
 
 	test('splits a drift into what the replay added and what it dropped', () => {
 		expect(tagDrift(finding({
-			verdict: 'tag_drift',
+			verdict: 'pin_drift',
 			tags: ['articles', 'articles:1'],
-			replayTags: ['articles', 'authors'],
+			replayPins: ['articles', 'authors'],
 		}))).toEqual({ added: ['authors'], dropped: ['articles:1'] });
 	});
 });

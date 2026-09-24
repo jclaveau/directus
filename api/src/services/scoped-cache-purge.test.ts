@@ -64,13 +64,13 @@ const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
 
-const { createScopedCacheHookDeclarations, scopedCacheLegacyTags } =
+const { createScopedCacheHookDeclarations, scopedCachePinKeys } =
 	await import('../scoped-cache.js');
 
 // What a read ended up pinned to, as the dev headers and the telemetry spell it:
 // `collection`, or `collection:field=value` for a value slice.
 const pinnedSlices = (result: unknown): string[] => {
-	return scopedCacheLegacyTags(
+	return scopedCachePinKeys(
 		readMeta(result)?.scopedCacheFingerprints ?? [],
 	);
 };
@@ -138,10 +138,11 @@ const cascadeChildSchema = new SchemaBuilder()
 cascadeChildSchema.collections['test']!.scopedCacheFields = ['student'];
 cascadeChildSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
 
-// Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
+// Drives the purge-pin resolution at every mutation site: which ScopedCacheTags
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
-// asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
-// itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
+// asserted via toHaveBeenCalledWith(cache, collection, pins, context). The
+// pin-derivation
+// itself is unit-tested in scoped-cache-pins.test.ts; this pins the purge side
 // (snapshot-before-write, old ∪ new for update/delete/upsert).
 describe(oneLine`
 	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
@@ -176,7 +177,7 @@ describe(oneLine`
 
 		await service(selfCascadeSchema).deleteMany([1]);
 
-		// Not twice: the slice purge the tags would have driven is a subset of this.
+		// Not twice: the slice purge the pins would have driven is a subset of this.
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
@@ -223,7 +224,7 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		// Each snapshot also emits the mutated row's primary-key slice, so it appears
-		// once per snapshot (old and new) — the real purge dedups on the tag key.
+		// once per snapshot (old and new) — the real purge dedups on the pin key.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
@@ -251,8 +252,9 @@ describe(oneLine`
 
 		await service().updateMany([1], { name: 'renamed' });
 
-		// Exact, not arrayContaining: the tags are old ∪ new, so an unchanged value repeats
-		// (the real purge dedups via a Set on the tag key). Pinning the whole array also
+		// Exact, not arrayContaining: the pins are old ∪ new, so an unchanged value
+		// repeats
+		// (the real purge dedups via a Set on the pin key). Pinning the whole array also
 		// witnesses that no OTHER slice leaks in.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
@@ -302,7 +304,7 @@ describe(oneLine`
 			],
 			expect.anything(),
 			// The rows the mutation wrote ride in the same options object; what this
-			// case is about is the bare tag the purge is told to leave warm.
+			// case is about is the bare pin the purge is told to leave warm.
 			expect.objectContaining({ includeBareFingerprint: false }),
 		);
 	});
@@ -472,7 +474,8 @@ describe(oneLine`
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
-		// Pure insert → empty old snapshot, so the new slice is the whole tag set (exact).
+		// Pure insert → empty old snapshot, so the new slice is the whole pin set
+		// (exact).
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
@@ -493,7 +496,8 @@ describe(oneLine`
 	`, async () => {
 		// The payload carries the key → upsertOne takes the update path; the pre-snapshot
 		// reads the old slice (A) before the update runs. arrayContaining (not exact): upsert
-		// issues a non-fixed number of selects, so the old ∪ new tag count isn't pinnable — the
+		// issues a non-fixed number of selects, so the old ∪ new pin count isn't
+		// pinnable — the
 		// A→B exact-union witness lives in the updateMany test above.
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
@@ -613,7 +617,7 @@ describe(oneLine`
 		);
 	});
 
-	// Purge tags come from the value actually stored, not the raw input: a
+	// Purge pins come from the value actually stored, not the raw input: a
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
 	it(oneLine`
@@ -679,7 +683,8 @@ describe(oneLine`
 	`, async () => {
 		// The committed row resolves `student` to NULL (unset column, DB default null). The field
 		// key IS present, so it's a precise null-slice purge — distinct from a MISSING field key,
-		// which is the coarse (null-tags) fallback above. A read filtered `student: { _eq: null }`
+		// which is the coarse (null-pins) fallback above. A read filtered
+		// `student: { _eq: null }`
 		// pins the same slice, so the two sides meet.
 		tracker.on.insert('test').response([1]);
 		tracker.on.select('test').response([{ id: 1, student: null }]);
@@ -729,8 +734,8 @@ describe(oneLine`
 	it(oneLine`
 		a take-over the hook declares wrote nothing purges nothing at all
 	`, async () => {
-		// Nothing was written, so no entry can have gone stale — and an empty tag
-		// array is not "nothing": it still resolves to this collection's bare tag.
+		// Nothing was written, so no entry can have gone stale — and an empty pin
+		// array is not "nothing": it still resolves to this collection's bare pin.
 		const takeOver = async (_payload: any, _meta: any, ctx: any) => {
 			ctx.scopedCache.skipPurgeFor(99);
 			return 99;
@@ -858,9 +863,9 @@ describe(oneLine`
 	});
 
 	// The ancestor slice's LAST hop lands on a collection the filter names by primary
-	// key, which is classified `independent`: it needs no tag of its own, yet it holds
+	// key, which is classified `independent`: it needs no pin of its own, yet it holds
 	// the key the descendant slices by. Reading only the keyed pins loses that key, so
-	// every ownership chain ending on such a terminal fell back to the bare tag — one
+	// every ownership chain ending on such a terminal fell back to the bare pin — one
 	// write anywhere in `holder` then dropping every owner's entry.
 	it(oneLine`
 		an ancestor slice whose terminal is independent pins the slice, not the bare tag
@@ -957,7 +962,7 @@ describe(oneLine`
 
 	// `context.scopedCache` carries only the event's method: an `items.read` filter
 	// scopes the response via `scopeTo`; a create/update/delete filter purges via
-	// `purgeBy`. Additive to what the framework derived — read tags into the meta
+	// `purgeBy`. Additive to what the framework derived — read pins into the meta
 	// rider, declared fingerprints beside the mutation's own purge.
 	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
 		it(oneLine`
@@ -994,9 +999,9 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			// A FOREIGN collection, so nothing else on this response covers it: `other`
-			// is scoped on no `ghost` field, and no other tag names `other` either, so
+			// is scoped on no `ghost` field, and no other pin names `other` either, so
 			// no write reaches this entry through it. On the read's OWN collection the
-			// same tag would be harmless freight beside its computed slice.
+			// same pin would be harmless freight beside its computed slice.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'other',
@@ -1470,7 +1475,7 @@ describe(oneLine`
 					{ allowFilterCancel: true },
 				);
 
-				// Only the declared fingerprint, and the 5th arg excludes the bare tag.
+				// Only the declared fingerprint, and the 5th arg excludes the bare pin.
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(
@@ -1513,7 +1518,7 @@ describe(oneLine`
 			try {
 				await service().deleteMany([1], { allowFilterCancel: true });
 
-				// Only the declared fingerprint, and the 5th arg excludes the bare tag.
+				// Only the declared fingerprint, and the 5th arg excludes the bare pin.
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(
@@ -1541,7 +1546,7 @@ describe(oneLine`
 		`, async () => {
 			// Re-read missing `student` → snapshot null → coarse purge; the hook also
 			// declares a foreign slice, so purgeScopedCache runs twice (coarse null +
-			// hook tags) and scopedCachePurged must union both.
+			// hook pins) and scopedCachePurged must union both.
 			tracker.on.select('test').response([{ id: 1 }]);
 			tracker.on.update('test').response(1);
 
@@ -1575,9 +1580,9 @@ describe(oneLine`
 					{ scopedCachePurgeId: expect.any(String) },
 				);
 
-				// Coarse already flushed this collection's bare tag + every slice, so the
+				// Coarse already flushed this collection's bare pin + every slice, so the
 				// hook purge must NOT re-add it: includeBareFingerprint:false (else the bare
-				// tag is purged twice and doubled in the debug header).
+				// pin is purged twice and doubled in the debug header).
 				expect(purgeScopedCache).toHaveBeenNthCalledWith(
 					2,
 					expect.anything(),
@@ -1620,11 +1625,11 @@ describe(oneLine`
 			// A batch/upsert parent injects one shared collector across its children. Seed
 			// it as if an earlier child already declared a slice; a later child that takes
 			// over a row but declares nothing ITSELF must still fall back to coarse — else
-			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
+			// the pre-seeded pin reads as this row's declaration and its old slice leaks.
 			const shared = createScopedCacheHookDeclarations(schema);
 			shared.purge.purgeBy({ collection: 'siblings', pinnedScope: { id: [1] } });
 
-			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
+			// Coarse + hook-pins → purgeScopedCache runs twice and unions results; real
 			// module returns arrays, so give the spy an iterable (args are the check).
 			purgeScopedCache.mockResolvedValue([]);
 
@@ -1711,7 +1716,7 @@ describe(oneLine`
 			await unscopedService().updateMany([1], { name: 'renamed' });
 
 			// old ∪ new both resolve from the keys already in hand, so it repeats — the
-			// real purge dedups on the tag key.
+			// real purge dedups on the pin key.
 			expect(purgeScopedCache).toHaveBeenCalledWith(
 				expect.anything(),
 				'test',
@@ -1816,7 +1821,7 @@ describe(oneLine`
 
 // Composition extends each path with one more hop, so `student_course` ends up with
 // three of them off the same chain. They resolve in ONE query with the hops shared,
-// which is what these pin: the count, the shape, and that the tags did not change.
+// which is what these pin: the count, the shape, and that the pins did not change.
 const composedChainSchema = new SchemaBuilder()
 	.collection('student_course', (c) => {
 		c.field('id').id();
@@ -1846,7 +1851,7 @@ composedChain['student_enrollment']!.scopedCacheFields = ['student'];
 
 // A dotted path DECLARED on the course, with the unit it crosses declaring no scope
 // of its own: a unit write emits its key slice only, so nothing finer than the
-// bare unit tag names the rows the path reads there.
+// bare unit pin names the rows the path reads there.
 const declaredDottedSchema = new SchemaBuilder()
 	.collection('page', (c) => {
 		c.field('id').id();
@@ -1890,7 +1895,7 @@ independentTerminal['note']!.scopedCacheFields = ['holder'];
 independentTerminal['holder']!.scopedCacheFields = ['owner'];
 
 // `independent` is granted only behind an enforced fk: every way the far row can
-// disappear writes the near row too, so the near row's own tag covers it.
+// disappear writes the near row too, so the near row's own pin covers it.
 for (const relation of independentTerminalSchema.relations) {
 	relation.schema = { on_delete: 'CASCADE' } as any;
 }

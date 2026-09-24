@@ -15,21 +15,21 @@ import {
 	listPurgesCoveringEntry,
 	queueCacheAnomaly,
 	readCacheAuditQueue,
-	readScopedCacheEntryTags,
+	readScopedCacheEntryPins,
 	retireCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import { UNDER_PRESSURE_REASON } from './middleware/shed-under-pressure.js';
 import {
 	CACHE_AUDIT_REPLAY_HEADER,
-	CACHE_AUDIT_TAGS_HEADER,
+	CACHE_AUDIT_PINS_HEADER,
 	cacheAuditReplayToken,
 } from './utils/cache-audit-replay.js';
 import { decompress } from './utils/compress.js';
 import { getSecret } from './utils/get-secret.js';
 
 /**
- * Every scoped-cache guarantee is a proof by construction: a read derives tags,
+ * Every scoped-cache guarantee is a proof by construction: a read derives pins,
  * a write derives a purge set, and the suites witness that the two meet for the
  * shapes we thought of. This is the check that reasons from none of that: for
  * every entry alive in the cache, is the stored body what the database answers
@@ -56,11 +56,11 @@ import { getSecret } from './utils/get-secret.js';
  *   - fresh:         the replay answered the stored body.
  *   - stale:         a diff that held across two fresh reads. `purgesSinceFilled`
  *                    says which side lost it: a purge that covered the entry's
- *                    tags and left it alive, or no purge at all because the tags
+ *                    pins and left it alive, or no purge at all because the pins
  *                    never named what the write touched.
- *   - tag_drift:     same body, but the replay pinned other tags — the read plan
+ *   - pin_drift:     same body, but the replay pinned other pins — the read plan
  *                    is not a pure function of the request, and the entry is one
- *                    write to the uncovered tag from stale.
+ *                    write to the uncovered pin from stale.
  *   - raced:         the entry was purged or refilled while it was being
  *                    replayed. The purge doing its job, not staleness.
  *   - time_varying:  two fresh reads disagreed with each other ($NOW, a random
@@ -73,7 +73,7 @@ import { getSecret } from './utils/get-secret.js';
 export type CacheAuditVerdict =
 	| 'fresh'
 	| 'stale'
-	| 'tag_drift'
+	| 'pin_drift'
 	| 'raced'
 	| 'time_varying'
 	| 'expired'
@@ -82,7 +82,7 @@ export type CacheAuditVerdict =
 export const CACHE_AUDIT_VERDICTS: readonly CacheAuditVerdict[] = [
 	'fresh',
 	'stale',
-	'tag_drift',
+	'pin_drift',
 	'raced',
 	'time_varying',
 	'expired',
@@ -117,7 +117,7 @@ export interface CacheAuditOptions {
 	collection?: string | undefined;
 	/** JSON-pointer globs to ignore in a diff, on top of CACHE_AUDIT_IGNORE_PATHS. */
 	ignore?: string[] | undefined;
-	/** Evict the `stale` and `tag_drift` entries once reported. */
+	/** Evict the `stale` and `pin_drift` entries once reported. */
 	purge?: boolean | undefined;
 	/** Where a replay goes; the app's own listener unless told otherwise. */
 	replay?: CacheAuditReplayer | undefined;
@@ -138,10 +138,10 @@ export interface CacheAuditFinding {
 	collection: string | null;
 	filledAt: number;
 	ageMs: number;
-	/** The tags it was filled under. */
-	tags: string[];
-	/** The tags the replay pinned, where one answered. */
-	replayTags: string[] | null;
+	/** The pins it was filled under. */
+	pins: string[];
+	/** The pins the replay pinned, where one answered. */
+	replayPins: string[] | null;
 	/** JSON pointers to the first differences, stored body against fresh. */
 	diff: string[] | null;
 	purgesSinceFilled: CacheEntryPurgeRecord[] | null;
@@ -200,13 +200,13 @@ type Verdict =
 	| { verdict: 'expired' }
 	| { verdict: 'raced' }
 	| { verdict: 'unreplayable'; reason: string }
-	| { verdict: 'time_varying'; diff: string[]; replayTags: string[] }
-	| { verdict: 'tag_drift'; replayTags: string[] }
+	| { verdict: 'time_varying'; diff: string[]; replayPins: string[] }
+	| { verdict: 'pin_drift'; replayPins: string[] }
 	| {
 		verdict: 'stale';
 		reason: string | null;
 		diff: string[] | null;
-		replayTags: string[] | null;
+		replayPins: string[] | null;
 	};
 
 export async function auditCache(
@@ -262,7 +262,7 @@ export async function auditCache(
 		// whose entry is gone is retired, not examined — it describes nothing
 		// until the next fill — and a page can hold more live entries than the
 		// limit has room for; those stay unstamped for the next run. Only what
-		// will be examined has its body and tags read.
+		// will be examined has its body and pins read.
 		const askedAt = new Date();
 		const held = await askHeld(cache, due.map((row) => row.redisKey));
 		const gone: string[] = [];
@@ -282,16 +282,16 @@ export async function auditCache(
 		// has to date from the same moment as the body — read minutes apart,
 		// an entry refilled in between would carry the new sidecar beside the
 		// old body and pass for held.
-		const [stored, tags] = await Promise.all([
+		const [stored, pins] = await Promise.all([
 			cache.getMany(taken.flatMap((row) => [row.redisKey, expiryKey(row.redisKey)])),
-			readScopedCacheEntryTags(taken.map((row) => row.cacheKey)),
+			readScopedCacheEntryPins(taken.map((row) => row.cacheKey)),
 		]);
 
 		// A body gone between the two asks is re-read by the judge and found
 		// missing: raced, as any entry that moves under the audit.
 		const batch: LiveEntry[] = taken.map((row, index) => {
 			return {
-				descriptor: { ...row, scopedCacheTags: tags.get(row.cacheKey) ?? [] },
+				descriptor: { ...row, scopedCachePins: pins.get(row.cacheKey) ?? [] },
 				raw: stored[index * 2],
 				rawExpiry: stored[index * 2 + 1],
 			};
@@ -327,7 +327,7 @@ export async function auditCache(
 
 	if (options.purge === true) {
 		for (const finding of report.findings) {
-			if (finding.verdict === 'stale' || finding.verdict === 'tag_drift') {
+			if (finding.verdict === 'stale' || finding.verdict === 'pin_drift') {
 				await evictCacheEntry(cache, finding.redisKey);
 				report.evicted += 1;
 			}
@@ -443,9 +443,9 @@ class CacheAudit {
 			collection: descriptor.collection,
 			filledAt: descriptor.lastFilled.getTime(),
 			ageMs: Math.max(now - descriptor.lastFilled.getTime(), 0),
-			tags: descriptor.scopedCacheTags,
-			replayTags: 'replayTags' in verdict
-				? verdict.replayTags
+			pins: descriptor.scopedCachePins,
+			replayPins: 'replayPins' in verdict
+				? verdict.replayPins
 				: null,
 			diff: 'diff' in verdict
 				? verdict.diff
@@ -466,12 +466,12 @@ class CacheAudit {
 			);
 		}
 
-		if (verdict.verdict === 'tag_drift') {
+		if (verdict.verdict === 'pin_drift') {
 			await this.recordAnomaly(
 				descriptor,
-				'tag_drift',
-				`filled under ${descriptor.scopedCacheTags.join(',') || '(none)'}, `
-				+ `replay pinned ${verdict.replayTags.join(',') || '(none)'}`,
+				'pin_drift',
+				`filled under ${descriptor.scopedCachePins.join(',') || '(none)'}, `
+				+ `replay pinned ${verdict.replayPins.join(',') || '(none)'}`,
 			);
 		}
 
@@ -523,9 +523,9 @@ class CacheAudit {
 			const diff = this.diff(snapshot.body, fresh.body);
 
 			if (diff.length === 0) {
-				return sameTags(descriptor.scopedCacheTags, fresh.tags)
+				return samePinKeys(descriptor.scopedCachePins, fresh.pins)
 					? { verdict: 'fresh' }
-					: { verdict: 'tag_drift', replayTags: fresh.tags };
+					: { verdict: 'pin_drift', replayPins: fresh.pins };
 			}
 
 			const moved = await this.movedSince(redisKey, snapshot);
@@ -551,14 +551,14 @@ class CacheAudit {
 			}
 
 			if (this.diff(fresh.body, again.body).length > 0) {
-				return { verdict: 'time_varying', diff, replayTags: fresh.tags };
+				return { verdict: 'time_varying', diff, replayPins: fresh.pins };
 			}
 
 			return {
 				verdict: 'stale',
 				reason: null,
 				diff,
-				replayTags: fresh.tags,
+				replayPins: fresh.pins,
 			};
 		}
 
@@ -649,7 +649,7 @@ class CacheAudit {
 
 	private async replayBody(
 		request: CacheAuditReplayRequest,
-	): Promise<{ body: unknown; tags: string[] } | Verdict> {
+	): Promise<{ body: unknown; pins: string[] } | Verdict> {
 		let response: CacheAuditReplayResponse;
 
 		// A replay that never got an answer — the listener gone mid-reload, a
@@ -669,7 +669,7 @@ class CacheAudit {
 				verdict: 'stale',
 				reason: 'replay_status_403',
 				diff: null,
-				replayTags: null,
+				replayPins: null,
 			};
 		}
 
@@ -681,17 +681,20 @@ class CacheAudit {
 			return { verdict: 'unreplayable', reason: `status_${response.status}` };
 		}
 
-		const tagged = response.headers[CACHE_AUDIT_TAGS_HEADER];
+		const pinned = response.headers[CACHE_AUDIT_PINS_HEADER];
 
-		if (typeof tagged !== 'string') {
+		if (typeof pinned !== 'string') {
+			return { verdict: 'unreplayable', reason: 'replay_unrecognized' };
+		}
+
+		const pins = replayedScopedCachePins(pinned);
+
+		if (pins === null) {
 			return { verdict: 'unreplayable', reason: 'replay_unrecognized' };
 		}
 
 		try {
-			return {
-				body: JSON.parse(response.body),
-				tags: tagged.split(',').filter(Boolean),
-			};
+			return { body: JSON.parse(response.body), pins };
 		}
 		catch {
 			return { verdict: 'unreplayable', reason: 'body' };
@@ -848,11 +851,35 @@ function replayPlan(
 	return { url, request: { method: 'GET', path: url, headers } };
 }
 
-function sameTags(filled: string[], replayed: string[]): boolean {
+/**
+ * The pins a replay answered with. JSON, since a pin holds a scope value and a
+ * value can hold a comma; a node still on the build before this one answers the
+ * joined form, which a rolling deploy puts in front of this auditor while it
+ * rolls. Null where the header is neither — a drift verdict off an unparseable
+ * list would evict an entry that is fine.
+ */
+function replayedScopedCachePins(header: string): string[] | null {
+	if (!header.startsWith('[')) {
+		return header.split(',').filter(Boolean);
+	}
+
+	try {
+		const parsed: unknown = JSON.parse(header);
+
+		return Array.isArray(parsed)
+			? parsed.filter((pin): pin is string => typeof pin === 'string')
+			: null;
+	}
+	catch {
+		return null;
+	}
+}
+
+function samePinKeys(filled: string[], replayed: string[]): boolean {
 	const a = [...new Set(filled)].sort();
 	const b = [...new Set(replayed)].sort();
 
-	return a.length === b.length && a.every((tag, index) => tag === b[index]);
+	return a.length === b.length && a.every((pin, index) => pin === b[index]);
 }
 
 // A JSON round trip: what a HIT serves is the stored body serialized, and what
@@ -945,7 +972,7 @@ export interface LoopbackTarget {
 }
 
 /**
- * The replay's tags come back in one header, and a deep read pins one tag per
+ * The replay's pins come back in one header, and a deep read pins one pin per
  * related key: 370 of them ran past node's 16KB header cap and every audit of
  * that entry ended `HPE_HEADER_OVERFLOW`. Room for the fan-out #392 leaves
  * unbounded; the parser buffers only what a response actually sends.

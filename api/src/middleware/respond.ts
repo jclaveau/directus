@@ -21,7 +21,7 @@ import {
 	scopedCacheCollectionsWithoutGuard,
 	scopedCacheFingerprintIsBare,
 	scopedCachePurgeEnabled,
-	scopedCacheLegacyTags,
+	scopedCachePinKeys,
 	scopedCacheSweptDuringFill,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
@@ -32,11 +32,11 @@ import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
 import {
-	CACHE_AUDIT_TAGS_HEADER,
+	CACHE_AUDIT_PINS_HEADER,
 	isCacheAuditReplay,
 } from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
-import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
 import { setScopedCacheTagsHeader } from '../utils/scoped-cache-tags-header.js';
 import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
@@ -56,7 +56,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const { cache } = getCache();
 
-	// A read service rides its tags, its unautopurgeable ones and its before-query
+	// A read service rides its pins, its unautopurgeable ones and its before-query
 	// epoch reading on what it returns (`withMeta`). The items controller copies
 	// them into `res.locals`; a system controller hands the result over as the
 	// payload and nothing else, so they are read off the payload here. Only a
@@ -69,25 +69,25 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		?? payloadMeta?.scopedCacheFingerprints
 		?? [];
 
-	// The same dependency spelled one pinned value at a time: the legacy tag form
-	// the dev headers, the audit header and the stored tag lists speak. Rendered
+	// The same dependency spelled one pinned value at a time: the legacy pin form
+	// the dev headers, the audit header and the stored pin lists speak. Rendered
 	// here, at the last moment, so the AND a fingerprint holds survives everywhere
 	// that can hold it.
-	const readLegacyTags = scopedCacheLegacyTags(readFingerprints);
+	const readPinKeys = scopedCachePinKeys(readFingerprints);
 
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
-	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
+	// CACHE_STATUS_HEADER) exposing the scope pins a request pinned / purged, so a
 	// smoke test can assert per-user scoping with no redis client. Never set in prod
-	// — tags carry owner ids. Raw pins are emitted, so a regression pinning nothing
+	// — pins carry owner ids. Raw pins are emitted, so a regression pinning nothing
 	// shows an absent header, not a masked one. A cache HIT skips this middleware —
 	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
 	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
 	if (env['CACHE_TAGS_HEADER']) {
-		if (readLegacyTags.length > 0) {
+		if (readPinKeys.length > 0) {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_TAGS_HEADER']}`,
-				readLegacyTags,
+				readPinKeys,
 			);
 		}
 	}
@@ -99,7 +99,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				scopedCacheLegacyTags(purged),
+				scopedCachePinKeys(purged),
 			);
 		}
 	}
@@ -150,20 +150,22 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		]
 		: pinnedFingerprints;
 
-	const indexedLegacyTags = scopedCacheLegacyTags(scopedCacheFingerprints);
+	const indexedPinKeys = scopedCachePinKeys(scopedCacheFingerprints);
 
-	// The tags a fill of this request would be indexed under, in the form the
-	// entry-tags table records — what the audit diffs against the tags the entry
-	// was filled under. Always set on a replay, even empty: its presence is how
-	// the audit knows the response came through this stack at all.
+	// The pins a fill of this request would be indexed under, in the form the
+	// entry-pins table records — what the audit diffs against the pins the entry
+	// was filled under. JSON, because a pin holds a scope value and a value can
+	// hold the comma a joined list is split on. Always set on a replay, even
+	// empty: its presence is how the audit knows the response came through this
+	// stack at all.
 	if (isCacheAuditReplay(req)) {
 		res.setHeader(
-			CACHE_AUDIT_TAGS_HEADER,
-			printableScopedCacheTags(indexedLegacyTags.join(',')),
+			CACHE_AUDIT_PINS_HEADER,
+			JSON.stringify(indexedPinKeys.map(printableScopedCachePin)),
 		);
 	}
 
-	// No tags AND no collection (/server, /schema, a GraphQL query hitting nothing): a
+	// No pins AND no collection (/server, /schema, a GraphQL query hitting nothing): a
 	// scoped purge can never target it; caching would orphan a stale entry. Skip it.
 	// Full mode's cache.clear() can't orphan, so it still caches.
 	const orphansInScopedMode =
@@ -203,7 +205,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// Taken before the read's query; what it guards against, and why it is compared
 	// after the fill rather than before, is in `fill-guard.ts`. A read service hands
 	// its reading over through the controller or on the payload; a system route's
-	// also comes from `useCollection`, taken for the collection its fallback tag
+	// also comes from `useCollection`, taken for the collection its fallback pin
 	// names. Where both exist the earlier reading wins per collection.
 	const epochsBeforeQuery = mergedScopedCacheEpochs(
 		res.locals['scopedCacheEpochsBeforeQuery'] as ScopedCacheEpochs | undefined,
@@ -250,10 +252,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
 			// Index BEFORE the value exists. The two writes are not atomic, and the
-			// failure modes are not symmetric: a tag naming a key that was never
+			// failure modes are not symmetric: a pin naming a key that was never
 			// written costs one miss on the purge's `del`, while a value written
-			// under no tag is unreachable to every purge and serves stale for its
-			// whole TTL. So tag first and let a throw here skip the value entirely.
+			// under no pin is unreachable to every purge and serves stale for its
+			// whole TTL. So pin first and let a throw here skip the value entirely.
 			await indexScopedCacheEntry(
 				redisKey,
 				scopedCacheFingerprints,
@@ -340,14 +342,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
-				if (readLegacyTags.length > 0) {
+				if (readPinKeys.length > 0) {
 					// An object: setCacheValue's compress expects a CacheValue. The
-					// tags as a list, so a value holding the separator reads back as
-					// the one tag it is.
+					// pins as a list, so a value holding the separator reads back as
+					// the one pin it is.
 					await setCacheValue(
 						cache,
 						cacheTagsKey(redisKey),
-						{ tags: readLegacyTags },
+						{ tags: readPinKeys },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}
@@ -410,10 +412,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							: req.originalUrl.split('?')[1] ?? '',
 						bytes: size,
 						fillMs,
-						// The scoped cache tags the key was just indexed under, so a
+						// The scoped cache pins the key was just indexed under, so a
 						// later purge of any of them is attributable back to this
 						// request.
-						scopedCacheTags: indexedLegacyTags,
+						scopedCachePins: indexedPinKeys,
 					}).catch(() => {});
 
 					// The same fill latency as a timestamped event (kind 'f') so the

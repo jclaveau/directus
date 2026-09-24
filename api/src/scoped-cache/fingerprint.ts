@@ -252,47 +252,48 @@ export function scopedCacheDeclaredPins(
 }
 
 /**
- * The tag form of a set of fingerprints — what the layer spoke before #531, kept
- * where a fingerprint cannot be written: the dev `X-Scoped-Cache-*` headers, and
- * the tag lists the telemetry stores.
+ * The pin keys of a set of fingerprints: one `collection[:field=value]` per pinned
+ * value, `viewFields` dropped, and the bare collection for a fingerprint pinning
+ * nothing.
  *
- * One tag per pinned value, `viewFields` dropped, and the bare collection for a
- * fingerprint pinning nothing — `collection` or `collection:field=value`. The AND
- * does not survive it, which is why nothing invalidates by a tag: the stats stream
- * joins them with a comma, and a rendered fingerprint's own grammar is built on
- * commas, so this is the one form that can go there.
+ * The AND does not survive it, which is why nothing invalidates by a pin. It is
+ * the form of every surface beside the index — the dev `X-Scoped-Cache-*` headers,
+ * and the pins the telemetry stores, where the two sides could not be compared as
+ * fingerprints at all: only a read's carries the `viewFields` its response was
+ * projected on, and a write cannot know them, while their pins are the same
+ * strings.
  */
-export function scopedCacheLegacyTags(
+export function scopedCachePinKeys(
 	fingerprints: readonly ScopedCacheFingerprint[],
 ): string[] {
-	const legacyTags: string[] = [];
-	const seenTags = new Set<string>();
+	const pinKeys: string[] = [];
+	const seenPinKeys = new Set<string>();
 
-	const pushLegacyTag = (pin: ScopedCacheCollectionPin): void => {
-		const legacyTag = scopedCachePinKey(pin);
+	const pushPinKey = (pin: ScopedCacheCollectionPin): void => {
+		const pinKey = scopedCachePinKey(pin);
 
-		if (seenTags.has(legacyTag)) {
+		if (seenPinKeys.has(pinKey)) {
 			return;
 		}
 
-		seenTags.add(legacyTag);
-		legacyTags.push(legacyTag);
+		seenPinKeys.add(pinKey);
+		pinKeys.push(pinKey);
 	};
 
 	for (const { collection, pinnedScope = {} } of fingerprints) {
 		if (Object.keys(pinnedScope).length === 0) {
-			pushLegacyTag({ collection });
+			pushPinKey({ collection });
 			continue;
 		}
 
 		for (const [field, values] of Object.entries(pinnedScope)) {
 			for (const value of values) {
-				pushLegacyTag({ collection, field, value });
+				pushPinKey({ collection, field, value });
 			}
 		}
 	}
 
-	return legacyTags;
+	return pinKeys;
 }
 
 /**

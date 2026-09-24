@@ -26,7 +26,7 @@ vi.mock('./cache-audit.js', () => {
 		CACHE_AUDIT_VERDICTS: [
 			'fresh',
 			'stale',
-			'tag_drift',
+			'pin_drift',
 			'raced',
 			'time_varying',
 			'expired',
@@ -95,8 +95,8 @@ const finding: CacheAuditFinding = {
 	collection: 'articles',
 	filledAt: 1_699_999_990_000,
 	ageMs: 10_000,
-	tags: ['articles', 'articles:1'],
-	replayTags: ['articles'],
+	pins: ['articles', 'articles:1'],
+	replayPins: ['articles'],
 	diff: ['/data/0/title'],
 	purgesSinceFilled: [],
 };
@@ -106,13 +106,13 @@ const report: CacheAuditReport = {
 	counts: {
 		fresh: 1,
 		stale: 1,
-		tag_drift: 1,
+		pin_drift: 1,
 		raced: 0,
 		time_varying: 0,
 		expired: 0,
 		unreplayable: 0,
 	},
-	findings: [finding, { ...finding, verdict: 'tag_drift', diff: null }],
+	findings: [finding, { ...finding, verdict: 'pin_drift', diff: null }],
 	evicted: 2,
 	durationMs: 120,
 	timedOut: false,
@@ -128,7 +128,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
 		scanned: 3,
 		fresh: 1,
 		stale: 1,
-		tag_drift: 1,
+		pin_drift: 1,
 		raced: 0,
 		time_varying: 0,
 		expired: 0,
@@ -213,7 +213,7 @@ describe('finishCacheAuditRun', () => {
 		// Both findings in one statement, the JSON columns serialised.
 		expect(insert!.bindings).toContain(JSON.stringify(['articles', 'articles:1']));
 		expect(insert!.bindings).toContain(JSON.stringify(['/data/0/title']));
-		expect(insert!.bindings).toContain('tag_drift');
+		expect(insert!.bindings).toContain('pin_drift');
 		expect(insert!.bindings).toContainEqual(new Date(1_699_999_990_000));
 		expect(insert!.bindings.filter((b) => b === 7)).toHaveLength(2);
 
@@ -501,7 +501,7 @@ describe('listCacheAuditRuns', () => {
 				counts: {
 					fresh: 1,
 					stale: 1,
-					tag_drift: 1,
+					pin_drift: 1,
 					raced: 0,
 					time_varying: 0,
 					expired: 0,
@@ -662,7 +662,7 @@ describe('readCacheAuditFindings', () => {
 				filled_at: new Date(1_699_999_990_000),
 				age_ms: 10_000,
 				tags: JSON.stringify(['articles', 'articles:1']),
-				replay_tags: ['articles'],
+				replay_pins: ['articles'],
 				diff: JSON.stringify(['/data/0/title']),
 				purges_since_filled: '[]',
 			},
@@ -681,7 +681,7 @@ describe('readCacheAuditFindings', () => {
 				filled_at: new Date(1_699_999_990_000),
 				age_ms: 10_000,
 				tags: '[]',
-				replay_tags: null,
+				replay_pins: null,
 				diff: null,
 				purges_since_filled: null,
 			},
@@ -705,8 +705,8 @@ describe('readCacheAuditFindings', () => {
 				collection: null,
 				filledAt: 1_699_999_990_000,
 				ageMs: 10_000,
-				tags: [],
-				replayTags: null,
+				pins: [],
+				replayPins: null,
 				diff: null,
 				purgesSinceFilled: null,
 			},
@@ -728,15 +728,15 @@ describe('readCacheAuditFindings', () => {
 		const page = await readCacheAuditFindings(7, {
 			limit: 10,
 			offset: 30,
-			verdict: 'tag_drift',
+			verdict: 'pin_drift',
 		});
 
 		expect(page).toEqual({ findings: [], findingsTotal: 0 });
 
 		const [rows, count] = tracker.history.select;
 		expect(rows!.sql).toContain('"verdict" = ?');
-		expect(rows!.bindings).toEqual([7, 'tag_drift', 10, 30]);
-		expect(count!.bindings).toEqual([7, 'tag_drift', 1]);
+		expect(rows!.bindings).toEqual([7, 'pin_drift', 10, 30]);
+		expect(count!.bindings).toEqual([7, 'pin_drift', 1]);
 	});
 });
 

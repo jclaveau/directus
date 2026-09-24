@@ -551,7 +551,7 @@ function anomalyLabel(reason: CacheAnomalyReason): string {
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
 		stale_entry: t('cache_anomaly_stale_entry', 'Stale · audit replay differs'),
-		tag_drift: t('cache_anomaly_tag_drift', 'Tag drift · audit replay pinned else'),
+		pin_drift: t('cache_anomaly_pin_drift', 'Pin drift · audit replay pinned else'),
 	};
 
 	return labels[reason] ?? reason;

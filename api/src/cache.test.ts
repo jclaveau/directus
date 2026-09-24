@@ -164,9 +164,9 @@ afterEach(() => {
 // per test: chainable, and `exec` resolving because the epoch bump hangs its own
 // `.catch` off the returned promise.
 //
-// A purge reads its members with one `SUNION` over every tag key, queued on that
+// A purge reads its members with one `SUNION` over every pin key, queued on that
 // same pipeline. The double answers it as the union of the per-key `smembers` a
-// case arms, which is what the command does — so a case still says which tag sets
+// case arms, which is what the command does — so a case still says which pin sets
 // hold what, and still sees the purge ask for them.
 beforeEach(() => {
 	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
@@ -184,7 +184,7 @@ beforeEach(() => {
 		return queued.map(([keys]) => [null, keys.length]);
 	});
 
-	// The sweep is one script, so the double runs what the script runs: read each tag
+	// The sweep is one script, so the double runs what the script runs: read each pin
 	// set, drop them all, prune the slice index. It reads through `redis.smembers` and
 	// writes through `redis.unlink`/`redis.srem` so a case still arms which set holds
 	// what, and still sees the sweep ask for and drop exactly those.
@@ -630,17 +630,17 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
-			// Two tags, and TWO entries — not the five keys deleted. An entry is
+			// Two pins, and TWO entries — not the five keys deleted. An entry is
 			// indexed alongside its `__expires_at` sibling and any extra sibling
 			// (`__tags`), so counting members would report every entry twice over and
 			// draw an eviction line at double the truth.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'slots',
 				mode: 'slices',
-				// The tags themselves, in the display form the entry sidecar stores,
+				// The pins themselves, in the display form the entry sidecar stores,
 				// so a purge row joins against an entry rather than merely counting.
-				scopedCacheTags: ['slots', 'slots:student=A'],
-				scopedCacheTagCount: 2,
+				scopedCachePins: ['slots', 'slots:student=A'],
+				scopedCachePinCount: 2,
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -771,8 +771,8 @@ describe('scoped cache purging', () => {
 				mode: 'collection',
 				// Derived rather than chosen: every set the scan found, unbounded.
 				// `collection` plus the mode already state the reach exactly.
-				scopedCacheTags: null,
-				scopedCacheTagCount: 3,
+				scopedCachePins: null,
+				scopedCachePinCount: 3,
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -800,8 +800,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
-				scopedCacheTags: null,
-				scopedCacheTagCount: 3,
+				scopedCachePins: null,
+				scopedCachePinCount: 3,
 				evicted: 0,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -824,8 +824,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: null,
 				mode: 'namespace',
-				scopedCacheTags: null,
-				scopedCacheTagCount: 0,
+				scopedCachePins: null,
+				scopedCachePinCount: 0,
 				evicted: null,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -873,14 +873,14 @@ describe('scoped cache purging', () => {
 
 			expect(cache.delete).toHaveBeenCalledTimes(3);
 
-			// The bare tag reaches the reads that pinned nothing, and stops there: an
+			// The bare pin reaches the reads that pinned nothing, and stops there: an
 			// entry bound to a value is not made stale by a purge naming no value.
 			expect(cache.delete).not.toHaveBeenCalledWith('sliced-key');
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
 		test(oneLine`
-			null scopedCacheTags falls back to a collection-wide purge (every set the
+			null scopedCachePins falls back to a collection-wide purge (every set the
 			collection owns), sparing other collections
 		`, async () => {
 			indexedMembers = {
@@ -1006,7 +1006,7 @@ describe('scoped cache purging', () => {
 			a cache.purge filter that empties the tag set deletes nothing and never
 			reads an index set
 		`, async () => {
-			// A delete with no keys throws; an extension is free to drop every tag, so
+			// A delete with no keys throws; an extension is free to drop every pin, so
 			// the empty set must be a no-op rather than a crash (and must not degrade
 			// into a full flush).
 			emitFilter.mockImplementation(async () => []);
@@ -1739,7 +1739,7 @@ describe('clearCacheTargets', () => {
 // A flush, like every purge, has to move the counters BEFORE it drops anything: a
 // read that snapshotted earlier and rechecks between the clear and a bump made after
 // it compares equal, keeps the entry it just wrote, and the index drop that follows
-// unlinks the tag sets it was filed under — stale for its TTL, reachable to no
+// unlinks the pin sets it was filed under — stale for its TTL, reachable to no
 // later purge. The clear is the first drop, so the bump goes in front of it.
 describe('the wholesale counter moves before the response clear', () => {
 	function recordFlushOrder() {

@@ -13,7 +13,7 @@ import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import {
 	purgeScopedCache,
-	scopedCacheLegacyTags,
+	scopedCachePinKeys,
 } from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
@@ -1536,7 +1536,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		// SchemaBuilder can't set scoped_cache_fields, so inject them. `item` is an M2O
 		// whose target scopes `owner`, so a 2-hop `item.owner` path auto-composes; the
 		// explicit `item.owner` dedups against it; `name.foo` has a scalar head so it
-		// resolves to null and drops to the bare tag.
+		// resolves to null and drops to the bare pin.
 		pathSchema.collections['sub']!.scopedCacheFields = [
 			'item',
 			'item.owner',
@@ -1573,7 +1573,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			})
 			.build();
 
-		// The read path only builds tags — writing them is respond.ts's job — so naming
+		// The read path only builds pins — writing them is respond.ts's job — so naming
 		// a Redis config is enough to reach it, with no client involved.
 		beforeEach(() => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
@@ -1606,7 +1606,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(result).toEqual([]);
 
-			const pinned = scopedCacheLegacyTags(
+			const pinned = scopedCachePinKeys(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1630,7 +1630,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owner.id', 'owner.space'],
 			});
 
-			const pinned = scopedCacheLegacyTags(
+			const pinned = scopedCachePinKeys(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1662,7 +1662,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestedSchema,
 			}).readByQuery({ fields: ['label', 'owner.space'] });
 
-			expect(scopedCacheLegacyTags(
+			expect(scopedCachePinKeys(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			)).toContain('owner:id=100');
 
@@ -1682,7 +1682,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				filter: { id: { _eq: 1 } },
 			});
 
-			const pinned = scopedCacheLegacyTags(
+			const pinned = scopedCachePinKeys(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1708,7 +1708,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owned_sub_items.id'],
 			});
 
-			const pinned = scopedCacheLegacyTags(
+			const pinned = scopedCachePinKeys(
 				readMeta(result)?.scopedCacheFingerprints ?? [],
 			);
 
@@ -1757,7 +1757,7 @@ describe('Services / Items / purgeScopedCache', () => {
 			[{ collection: 'test' }],
 			expect.anything(),
 			// A purge shown no rows carries none of their narrowing and sweeps its
-			// tags whole, as it did before composite tags. The declared list is the
+			// pins whole, as it did before composite pins. The declared list is the
 			// hooks' channel, and this purge answers for no hook.
 			{ declaredFingerprints: [] },
 		);

@@ -93,7 +93,7 @@ describe('setScopedCacheTagsHeader', () => {
 	});
 
 	// The label is the Redis key, so a value may hold the separator: it is one
-	// tag, kept or omitted whole, never cut at the separator inside it.
+	// pin, kept or omitted whole, never cut at the separator inside it.
 	test('keeps a tag whose value holds the separator whole', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
 		const res = makeRes();

@@ -6,7 +6,8 @@ import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Isolate from the real cache module (redis/bus) and force scoped mode on, so readByQuery runs its
-// tag-accumulation branch. runAst is the only DB-touching call in the read path; stub it out.
+// pin-accumulation branch. runAst is the only DB-touching call in the read path;
+// stub it out.
 vi.mock('../cache.js', () => ({
 	getCache: () => ({ cache: null }),
 }));
@@ -45,7 +46,7 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 });
 
 import {
-	scopedCacheLegacyTags,
+	scopedCachePinKeys,
 	scopedCachePurgeEnabled,
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
@@ -68,7 +69,7 @@ const schema = new SchemaBuilder()
 
 const db = knex({ client: MockClient });
 
-describe('readByQuery scoped cache tag accumulation', () => {
+describe('readByQuery scoped cache fingerprint accumulation', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
@@ -104,7 +105,8 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const shallow = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
 		const deep = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		// Each result carries only its own query's tags — the earlier read is not polluted by the later.
+		// Each result carries only its own query's pins — the earlier read is not
+		// polluted by the later.
 		expect(
 			(readMeta(shallow)?.scopedCacheFingerprints ?? [])
 				.map((fingerprint) => fingerprint.collection)
@@ -217,9 +219,9 @@ describe(oneLine`
 	});
 });
 
-// The tags a read carries once the row-dependent pins and the AST-only plan meet.
+// The pins a read carries once the row-dependent pins and the AST-only plan meet.
 // Each case feeds the rows runAst would return — the pinners read parent keys off
-// them — and asserts the serialized tag list, so a pin, a slice and a bare tag are
+// them — and asserts the serialized pin list, so a pin, a slice and a bare pin are
 // told apart by the exact string a purge matches against.
 describe('read tags at the merge', () => {
 	// Cloned: the ownership strip collapses the fed rows in place, and a fixture
@@ -238,7 +240,7 @@ describe('read tags at the merge', () => {
 	): Promise<string[]> => {
 		const result = await service.readByQuery(query, { emitEvents: false });
 
-		return scopedCacheLegacyTags(
+		return scopedCachePinKeys(
 			readMeta(result)?.scopedCacheFingerprints ?? [],
 		).sort();
 	};
@@ -866,7 +868,7 @@ describe('read tags at the merge', () => {
 
 		// Off any request but the date's: `validateFilter` rejects the empty
 		// list, and `parseFilter` lists the value, splits the columns into `_and`
-		// and wraps the leaf in `_eq` before any tag is derived — only a filter
+		// and wraps the leaf in `_eq` before any pin is derived — only a filter
 		// handed straight to the service carries those shapes.
 		test.each([
 			['an empty list', { name: { _in: [] } }],

@@ -105,7 +105,7 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCacheTagMembers, flushResponseCache } from '../scoped-cache.js';
+import { countScopedCachePinMembers, flushResponseCache } from '../scoped-cache.js';
 import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -435,7 +435,7 @@ export class UtilsService {
 	}
 
 	// The live Redis state for a single key — the cached response plus its
-	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
+	// sidecars (scoped-cache pins, expiry metadata) — none of which the Postgres
 	// descriptor holds. All may be gone: the descriptor outlives the value.
 	/**
 	 * Takes the REDIS key — the same string `evictCacheEntry` takes, and what the
@@ -523,9 +523,9 @@ export class UtilsService {
 			exists: value !== undefined,
 			value: value ?? null,
 			tags,
-			// Blast radius: how many entries each tag would purge.
+			// Blast radius: how many entries each pin would purge.
 			tagCounts: tags
-				? await countScopedCacheTagMembers(tags)
+				? await countScopedCachePinMembers(tags)
 				: {},
 			expiry,
 			sizes,

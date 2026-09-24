@@ -313,8 +313,8 @@ function findingRow(audit: number, finding: CacheAuditFinding) {
 		collection: finding.collection,
 		filled_at: new Date(finding.filledAt),
 		age_ms: finding.ageMs,
-		tags: JSON.stringify(finding.tags),
-		replay_tags: jsonOrNull(finding.replayTags),
+		pins: JSON.stringify(finding.pins),
+		replay_pins: jsonOrNull(finding.replayPins),
 		diff: jsonOrNull(finding.diff),
 		purges_since_filled: jsonOrNull(finding.purgesSinceFilled),
 	};
@@ -488,8 +488,8 @@ function findingOf(row: Record<string, unknown>): CacheAuditFinding {
 		collection: (row['collection'] as string | null) ?? null,
 		filledAt: new Date(row['filled_at'] as string).getTime(),
 		ageMs: Number(row['age_ms']),
-		tags: (json(row['tags']) as string[] | null) ?? [],
-		replayTags: json(row['replay_tags']) as string[] | null,
+		pins: (json(row['pins']) as string[] | null) ?? [],
+		replayPins: json(row['replay_pins']) as string[] | null,
 		diff: json(row['diff']) as string[] | null,
 		purgesSinceFilled: json(
 			row['purges_since_filled'],

@@ -264,7 +264,7 @@ const headerSpecs: HeaderSpec[] = [
 	['cache_audit_trigger', 'Trigger', 'trigger', 80],
 	['cache_audit_scanned', 'Scanned', 'scanned', 90],
 	['cache_audit_stale', 'Stale', 'stale', 80],
-	['cache_audit_drifted', 'Drifted', 'tag_drift', 80],
+	['cache_audit_drifted', 'Drifted', 'pin_drift', 80],
 	['cache_audit_unreplayable', 'Unreplayable', 'unreplayable', 120],
 	['cache_audit_duration', 'Duration', 'durationMs', 90],
 	['cache_audit_options', 'Narrowed to', 'options', 200],
@@ -280,7 +280,7 @@ const rows = computed(() => {
 			...run,
 			status: runStatus(run),
 			stale: run.counts.stale,
-			tag_drift: run.counts.tag_drift,
+			pin_drift: run.counts.pin_drift,
 			unreplayable: run.counts.unreplayable,
 		};
 	});
@@ -420,8 +420,8 @@ function driftOf(finding: CacheAuditFinding): string | null {
 	}
 
 	return [
-		...drift.added.map((tag) => `+${tag}`),
-		...drift.dropped.map((tag) => `-${tag}`),
+		...drift.added.map((pin) => `+${pin}`),
+		...drift.dropped.map((pin) => `-${pin}`),
 	].join(' ');
 }
 
@@ -537,7 +537,7 @@ defineExpose({ load });
 
       <!-- Explicit, so a count of zero reads as 0 rather than as a null. -->
       <template
-        v-for="column in ['scanned', 'stale', 'tag_drift', 'unreplayable']"
+        v-for="column in ['scanned', 'stale', 'pin_drift', 'unreplayable']"
         #[`item.${column}`]="{ item }"
         :key="column"
       >
@@ -632,7 +632,7 @@ defineExpose({ load });
             v-if="driftOf(finding)"
             class="finding-line"
           >
-            {{ t('cache_audit_tag_drift', 'Tags') }}: {{ driftOf(finding) }}
+            {{ t('cache_audit_pin_drift', 'Pins') }}: {{ driftOf(finding) }}
           </div>
 
           <div
@@ -642,7 +642,7 @@ defineExpose({ load });
             {{ finding.purgesSinceFilled.length === 0
               ? t(
                 'cache_audit_never_purged',
-                'No purge covered it since the fill: its tags never named the write',
+                'No purge covered it since the fill: its pins never named the write',
               )
               : t('cache_audit_purged_held', 'Purged since the fill, still held') }}
           </div>
@@ -785,7 +785,7 @@ defineExpose({ load });
 	border-color: var(--theme--danger);
 }
 
-.finding.tag_drift {
+.finding.pin_drift {
 	border-color: var(--theme--warning);
 }
 

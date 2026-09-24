@@ -20,7 +20,7 @@ import {
 	assertScopedCacheStoreSupported,
 	bumpScopedCacheEpochs,
 	canonicalizeScopedCachePinValue,
-	countScopedCacheTagMembers,
+	countScopedCachePinMembers,
 	createScopedCacheHookDeclarations,
 	dropScopedCacheIndex,
 	earlierScopedCacheEpoch,
@@ -48,11 +48,11 @@ import {
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCachePathReversesChain,
 	scopedCacheSweptDuringFill,
-	scopedCacheLegacyTags,
+	scopedCachePinKeys,
 	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
 } from './scoped-cache.js';
-import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
+import { printableScopedCachePin } from './utils/printable-scoped-cache-pins.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import emitter from './emitter.js';
 import { getCache } from './cache.js';
@@ -120,7 +120,7 @@ const pipeline = {
 	exec: vi.fn(),
 };
 
-// A purge drops its tag keys through a pipeline of chunked UNLINKs, so every redis
+// A purge drops its pin keys through a pipeline of chunked UNLINKs, so every redis
 // stub a purge reaches has to answer `pipeline()` as well as the set commands.
 // Replies the way ioredis does — one `[error, reply]` per queued command, the reply
 // being what UNLINK removed — because the drop now counts what Redis reported
@@ -186,7 +186,7 @@ describe('the legacy tag form', () => {
 	});
 
 	it('joins a set for the header form', () => {
-		expect(scopedCacheLegacyTags([
+		expect(scopedCachePinKeys([
 			scopedCacheFingerprintOf('articles', []),
 			scopedCacheFingerprintOf('articles', [{ field: 'author', value: 7 }]),
 		]).join(', ')).toBe('articles, articles:author=7');
@@ -213,8 +213,8 @@ describe('the legacy tag form', () => {
 		expect(canonicalizeScopedCachePinValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
 	});
 
-	// countScopedCacheTagMembers reads a fingerprint's token back against this
-	// string and the entry/purge tag rows join on it, so escaping the null byte
+	// countScopedCachePinMembers reads a fingerprint's token back against this
+	// string and the entry/purge pin rows join on it, so escaping the null byte
 	// here would count zero instead.
 	it('keeps a null scope on the null-byte sentinel', () => {
 		const nullSlice = {
@@ -229,10 +229,10 @@ describe('the legacy tag form', () => {
 });
 
 // A header throws ERR_INVALID_CHAR on a control byte and a Postgres text column
-// rejects the NUL, so both exits render the tag through this one escaper.
+// rejects the NUL, so both exits render the pin through this one escaper.
 describe('the exit form', () => {
 	it('escapes the NULL token', () => {
-		expect(printableScopedCacheTags(scopedCacheLegacyTags([
+		expect(printableScopedCachePin(scopedCachePinKeys([
 			scopedCacheFingerprintOf('student_method_range', [
 				{ field: 'method', value: null },
 			]),
@@ -240,12 +240,12 @@ describe('the exit form', () => {
 	});
 
 	it('escapes any control byte a string scope value carries', () => {
-		expect(printableScopedCacheTags('articles:slug=a\u001Fb\u007F'))
+		expect(printableScopedCachePin('articles:slug=a\u001Fb\u007F'))
 		.toBe('articles:slug=a%1Fb%7F');
 	});
 
 	it('leaves a printable tag list untouched', () => {
-		expect(printableScopedCacheTags('articles, articles:author=7'))
+		expect(printableScopedCachePin('articles, articles:author=7'))
 		.toBe('articles, articles:author=7');
 	});
 });
@@ -357,7 +357,7 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	});
 
 	// The rows it takes down are its own, and the caller named only the one key, so
-	// every other slice of it would stay warm on a tag purge built from that key.
+	// every other slice of it would stay warm on a pin purge built from that key.
 	it('reports itself on a self-referencing cascade, and terminates', () => {
 		const schema = { relations: [cascadeRelation('node', 'node')] } as any;
 
@@ -414,8 +414,8 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	});
 });
 
-describe('countScopedCacheTagMembers', () => {
-	// A legacy tag names a pin, not a set, so the count is read off the
+describe('countScopedCachePinMembers', () => {
+	// A legacy pin names a pin, not a set, so the count is read off the
 	// collection's fingerprint sets the way the purge answering it reads them.
 	let countedMembers: Record<string, string[]>;
 
@@ -451,7 +451,7 @@ describe('countScopedCacheTagMembers', () => {
 			],
 		};
 
-		expect(await countScopedCacheTagMembers(['articles', 'articles:id=5']))
+		expect(await countScopedCachePinMembers(['articles', 'articles:id=5']))
 		.toEqual({ 'articles': 1, 'articles:id=5': 1 });
 	});
 
@@ -468,7 +468,7 @@ describe('countScopedCacheTagMembers', () => {
 			],
 		};
 
-		expect(await countScopedCacheTagMembers(['articles:author=1']))
+		expect(await countScopedCachePinMembers(['articles:author=1']))
 		.toEqual({ 'articles:author=1': 1 });
 	});
 
@@ -483,7 +483,7 @@ describe('countScopedCacheTagMembers', () => {
 			],
 		};
 
-		expect(await countScopedCacheTagMembers(['articles:id=5']))
+		expect(await countScopedCachePinMembers(['articles:id=5']))
 		.toEqual({ 'articles:id=5': 1 });
 	});
 
@@ -500,27 +500,27 @@ describe('countScopedCacheTagMembers', () => {
 			value: null,
 		});
 
-		expect(await countScopedCacheTagMembers([nullSlice]))
+		expect(await countScopedCachePinMembers([nullSlice]))
 		.toEqual({ [nullSlice]: 1 });
 	});
 
 	it('counts a legacy tag its collection holds nothing for as zero', async () => {
-		expect(await countScopedCacheTagMembers(['orphan'])).toEqual({ orphan: 0 });
+		expect(await countScopedCachePinMembers(['orphan'])).toEqual({ orphan: 0 });
 	});
 
 	it('returns {} when scoped purging is disabled', async () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'full';
 
-		expect(await countScopedCacheTagMembers(['articles'])).toEqual({});
+		expect(await countScopedCachePinMembers(['articles'])).toEqual({});
 	});
 
 	it('returns {} for an empty tag list', async () => {
-		expect(await countScopedCacheTagMembers([])).toEqual({});
+		expect(await countScopedCachePinMembers([])).toEqual({});
 	});
 });
 
 describe('createScopedCacheHookDeclarations', () => {
-	// The collector fills a declared tag's missing type from the schema; these cases
+	// The collector fills a declared pin's missing type from the schema; these cases
 	// name collections it does not carry, so their pins pass through as written.
 	const emptySchema = new SchemaBuilder().build();
 
@@ -1012,7 +1012,7 @@ function redisPipelineDouble() {
 }
 
 /**
- * Stand in for the sweep script: read each tag set, drop them all, prune the slice
+ * Stand in for the sweep script: read each pin set, drop them all, prune the slice
  * index. `members` is what the sets between them hold, and the recorded `swept` and
  * `pruned` are what a case asserts the sweep asked for — the script does those
  * inside Redis, so there is no command of its own to spy on.
@@ -1602,10 +1602,10 @@ describe('retryPendingScopedCachePurges', () => {
 			purgeId: expect.any(String),
 			collection: 'articles',
 			mode: 'slices',
-			// The record holds fingerprints, the stats stream takes tags: it joins
-			// its tag list with a comma, which a rendered fingerprint carries raw.
-			scopedCacheTags: ['articles:id=1'],
-			scopedCacheTagCount: 1,
+			// The record holds fingerprints, the stats stream takes pins: it joins
+			// its pin list with a comma, which a rendered fingerprint carries raw.
+			scopedCachePins: ['articles:id=1'],
+			scopedCachePinCount: 1,
 			evicted: 1,
 			durationMs: null,
 		});
@@ -2294,8 +2294,8 @@ describe('scopedCachePinsFromM2oParents', () => {
 	it(oneLine`
 		pins each nested collection by the parent keys the response carried, deduped
 	`, () => {
-		// Two sub-items under distinct items but ONE owner: the owner tag must not
-		// come out twice, and the item tags must not collapse to one.
+		// Two sub-items under distinct items but ONE owner: the owner pin must not
+		// come out twice, and the item pins must not collapse to one.
 		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
@@ -2337,7 +2337,7 @@ describe('scopedCachePinsFromM2oParents', () => {
 
 	it('keeps a collection reached across a to-many hop bare', () => {
 		// An INSERT into `owned_item` creates a row this read would have listed, and
-		// no key tag covers a key that did not exist when the entry was filled.
+		// no key pin covers a key that did not exist when the entry was filled.
 		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owner',
@@ -2557,7 +2557,7 @@ describe('scopedCachePinsFromM2oParents', () => {
 
 		it('reads only the direct columns of a dotted scope field', () => {
 			// `owner.name` names a column on another collection, which the parent row
-			// does not carry — reading it off the row would tag a wrong value.
+			// does not carry — reading it off the row would pin a wrong value.
 			const dottedSchema = new SchemaBuilder()
 				.collection('owner', (c) => {
 					c.field('id').id();
@@ -2807,7 +2807,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	it('a sorted independent collection crosses despite a covering slice', () => {
 		// An `independent` collection is skipped in readFingerprints (no slice
 		// pin), so its scope fields don't catch the reorder — the sort needs the
-		// bare tag.
+		// bare pin.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -2839,7 +2839,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 
 	it('a group crosses a scope-sliced filter-keyed collection even so', () => {
 		// A group collapses rows across slices, so the covering slice cannot stand
-		// in the way it does for a sort — it falls back to the bare tag.
+		// in the way it does for a sort — it falls back to the bare pin.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -2914,7 +2914,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 
 	it('names a collection whose nested node names no case at all', () => {
 		// `whenCase` points into a case list the parent does not carry, so
-		// nothing here says the field survives and the bare tag stays.
+		// nothing here says the field survives and the bare pin stays.
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(
 				schema,
@@ -3503,7 +3503,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 	it('reports nothing for an A2O scope naming no collection of the schema', () => {
 		// The scope is request text picking the table to join. One that names
-		// nothing joins nothing, and must not reach the response's tag header.
+		// nothing joins nothing, and must not reach the response's pin header.
 		expect([...keyingOf({
 			filter: { categories: { 'category_id:nonexistent': { id: { _eq: 7 } } } },
 		}).keys()].sort()).toEqual(['owned_item', 'owned_item_category_junction']);
@@ -3511,7 +3511,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 	it('leaves a key unkeyed when its type cannot be pinned', () => {
 		// A date-like key is not safe to slice on, so even the primary key under
-		// `_eq` reports unkeyed and the collection keeps its bare tag.
+		// `_eq` reports unkeyed and the collection keeps its bare pin.
 		const dated = new SchemaBuilder()
 			.collection('owned_item', (c) => {
 				c.field('id').id();
@@ -3656,7 +3656,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 	`, () => {
 		// `_neq 3` bounds the owner's `company` column to nothing: a write moving it
 		// to 4 emits `owner:company=3` and `owner:company=4`, neither of which a
-		// read keyed on an empty set holds. Only the bare tag reaches it.
+		// read keyed on an empty set holds. Only the bare pin reaches it.
 		const scopedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -3901,7 +3901,7 @@ describe('scopedCachePinsFromO2mChildren', () => {
 		})
 		.build();
 
-	// The pin only applies where the write side emits the matching shallow tag,
+	// The pin only applies where the write side emits the matching shallow pin,
 	// which is what declaring the fk as a flat scope field promises.
 	schema.collections['child']!.scopedCacheFields = ['parent', 'alt_parent'];
 	schema.collections['grandchild']!.scopedCacheFields = ['child'];
@@ -4004,7 +4004,7 @@ describe('scopedCachePinsFromO2mChildren', () => {
 
 	it('declines when a surfaced parent row carries no key', () => {
 		// One keyless row leaves part of the set unpinned, which takes the whole
-		// collection to the bare tag rather than a partial pin.
+		// collection to the bare pin rather than a partial pin.
 		expect(pinnedFor(
 			'parent',
 			fieldMapOf(['children', 'child']),
@@ -4807,7 +4807,7 @@ describe('the canonical scope value', () => {
 
 	// A naive column comes back as a local Date from the driver but as an ISO string
 	// from a filter, so the epoch-ms canonical can diverge across drivers and
-	// timezones. The read side never pins these — the bare collection tag instead,
+	// timezones. The read side never pins these — the bare collection pin instead,
 	// which over-purges and cannot go stale.
 	it.each(['date', 'dateTime', 'timestamp'] as const)(
 		'refuses to pin a %s',

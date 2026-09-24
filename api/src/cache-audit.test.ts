@@ -20,13 +20,13 @@ import {
 	listPurgesCoveringEntry,
 	queueCacheAnomaly,
 	readCacheAuditQueue,
-	readScopedCacheEntryTags,
+	readScopedCacheEntryPins,
 	retireCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import {
 	CACHE_AUDIT_REPLAY_HEADER,
-	CACHE_AUDIT_TAGS_HEADER,
+	CACHE_AUDIT_PINS_HEADER,
 	cacheAuditReplayToken,
 } from './utils/cache-audit-replay.js';
 import { decompress } from './utils/compress.js';
@@ -100,7 +100,7 @@ function descriptor(
 		userId: 'user-1',
 		query: 'filter[owner][_eq]=acme',
 		lastFilled: new Date('2026-09-16T10:00:00Z'),
-		scopedCacheTags: ['articles:owner=acme'],
+		scopedCachePins: ['articles:owner=acme'],
 		...overrides,
 	};
 }
@@ -123,13 +123,13 @@ function fill(
 
 function answer(
 	body: unknown,
-	overrides: Partial<CacheAuditReplayResponse> & { tags?: string } = {},
+	overrides: Partial<CacheAuditReplayResponse> & { pins?: string } = {},
 ): CacheAuditReplayResponse {
-	const { tags, ...rest } = overrides;
+	const { pins, ...rest } = overrides;
 
 	return {
 		status: 200,
-		headers: { [CACHE_AUDIT_TAGS_HEADER]: tags ?? 'articles:owner=acme' },
+		headers: { [CACHE_AUDIT_PINS_HEADER]: pins ?? '["articles:owner=acme"]' },
 		body: JSON.stringify(body),
 		...rest,
 	};
@@ -188,11 +188,11 @@ beforeEach(() => {
 			.slice(0, count);
 	});
 
-	vi.mocked(readScopedCacheEntryTags).mockImplementation(async (cacheKeys) => {
+	vi.mocked(readScopedCacheEntryPins).mockImplementation(async (cacheKeys) => {
 		return new Map(
 			queue
 				.filter((each) => cacheKeys.includes(each.cacheKey))
-				.map((each) => [each.cacheKey, each.scopedCacheTags]),
+				.map((each) => [each.cacheKey, each.scopedCachePins]),
 		);
 	});
 
@@ -295,10 +295,10 @@ describe('the queue', () => {
 		expect(askedAt.getTime()).toBeGreaterThanOrEqual(startedAt);
 		expect(askedAt.getTime()).toBeLessThanOrEqual(Date.now());
 
-		// Neither its body nor its tags were asked for: the cache said it was
+		// Neither its body nor its pins were asked for: the cache said it was
 		// gone before either.
 		expect(cache.getMany).toHaveBeenCalledWith(['rk2', 'rk2__expires_at']);
-		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck2']);
+		expect(readScopedCacheEntryPins).toHaveBeenCalledWith(['ck2']);
 	});
 
 	test(oneLine`
@@ -423,7 +423,7 @@ describe('the queue', () => {
 			'rk2__expires_at',
 		]);
 
-		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck1', 'ck2']);
+		expect(readScopedCacheEntryPins).toHaveBeenCalledWith(['ck1', 'ck2']);
 		// The third stays unstamped for the next run.
 		expect(advancedPast()).toEqual(['ck1', 'ck2']);
 	});
@@ -578,7 +578,7 @@ describe('a stale entry', () => {
 			time: 1,
 			mode: 'slices' as const,
 			collection: 'articles',
-			scopedCacheTag: 'articles:owner=acme',
+			scopedCachePin: 'articles:owner=acme',
 			evicted: 0,
 		}];
 
@@ -599,8 +599,8 @@ describe('a stale entry', () => {
 			user: 'user-1',
 			collection: 'articles',
 			filledAt: new Date('2026-09-16T10:00:00Z').getTime(),
-			tags: ['articles:owner=acme'],
-			replayTags: ['articles:owner=acme'],
+			pins: ['articles:owner=acme'],
+			replayPins: ['articles:owner=acme'],
 			diff: ['/data/0/amount'],
 			purgesSinceFilled: purges,
 		})]);
@@ -686,7 +686,7 @@ describe('a stale entry', () => {
 			verdict: 'stale',
 			reason: 'replay_status_403',
 			diff: null,
-			replayTags: null,
+			replayPins: null,
 		})]);
 
 		expect(queueCacheAnomaly).toHaveBeenCalledWith({
@@ -764,56 +764,92 @@ describe('a time-varying entry', () => {
 	});
 });
 
-describe('tag drift', () => {
-	test('is the same body pinned under other tags', async () => {
+describe('pin drift', () => {
+	test('is the same body pinned under other pins', async () => {
 		fill('rk', { data: [] });
-		described(descriptor({ scopedCacheTags: ['articles:owner=acme', 'authors'] }));
+		described(descriptor({ scopedCachePins: ['articles:owner=acme', 'authors'] }));
 
 		const report = await auditCache({
 			replay: replayer(
-				answer({ data: [] }, { tags: 'articles:owner=acme,authors:id=2' }),
+				answer({ data: [] }, { pins: '["articles:owner=acme","authors:id=2"]' }),
 			),
 		});
 
-		expect(report.counts.tag_drift).toBe(1);
+		expect(report.counts.pin_drift).toBe(1);
 
 		expect(report.findings).toEqual([expect.objectContaining({
-			verdict: 'tag_drift',
-			tags: ['articles:owner=acme', 'authors'],
-			replayTags: ['articles:owner=acme', 'authors:id=2'],
+			verdict: 'pin_drift',
+			pins: ['articles:owner=acme', 'authors'],
+			replayPins: ['articles:owner=acme', 'authors:id=2'],
 			diff: null,
 		})]);
 
 		expect(queueCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'ck',
-			reason: 'tag_drift',
+			reason: 'pin_drift',
 			detail: 'filled under articles:owner=acme,authors, '
 				+ 'replay pinned articles:owner=acme,authors:id=2',
 		});
 	});
 
-	test('does not care about tag order or repeats', async () => {
+	test('reads the joined header a node on the previous build answers', async () => {
 		fill('rk', { data: [] });
-		described(descriptor({ scopedCacheTags: ['b', 'a', 'a'] }));
+		described(descriptor({ scopedCachePins: ['articles:owner=acme'] }));
 
 		const report = await auditCache({
-			replay: replayer(answer({ data: [] }, { tags: 'a,b' })),
+			replay: replayer(answer({ data: [] }, { pins: 'articles:owner=acme' })),
+		});
+
+		expect(report.counts.fresh).toBe(1);
+	});
+
+	test('keeps a pin whose scope value holds a comma whole', async () => {
+		fill('rk', { data: [] });
+		described(descriptor({ scopedCachePins: ['articles:title=Smith, Jane'] }));
+
+		const report = await auditCache({
+			replay: replayer(
+				answer({ data: [] }, { pins: '["articles:title=Smith, Jane"]' }),
+			),
+		});
+
+		expect(report.counts.fresh).toBe(1);
+	});
+
+	test('refuses a header that is neither form', async () => {
+		fill('rk', { data: [] });
+		described(descriptor({ scopedCachePins: ['articles'] }));
+
+		const report = await auditCache({
+			replay: replayer(answer({ data: [] }, { pins: '["articles"' })),
+		});
+
+		expect(report.counts.unreplayable).toBe(1);
+		expect(report.findings[0]!.reason).toBe('replay_unrecognized');
+	});
+
+	test('does not care about pin order or repeats', async () => {
+		fill('rk', { data: [] });
+		described(descriptor({ scopedCachePins: ['b', 'a', 'a'] }));
+
+		const report = await auditCache({
+			replay: replayer(answer({ data: [] }, { pins: '["a","b"]' })),
 		});
 
 		expect(report.counts.fresh).toBe(1);
 	});
 
 	test(oneLine`
-		an entry filled under no tag at all drifts once the replay pins one
+		an entry filled under no pin at all drifts once the replay pins one
 	`, async () => {
 		fill('rk', { data: [] });
-		described(descriptor({ scopedCacheTags: [] }));
+		described(descriptor({ scopedCachePins: [] }));
 
 		const report = await auditCache({
-			replay: replayer(answer({ data: [] }, { tags: 'articles' })),
+			replay: replayer(answer({ data: [] }, { pins: '["articles"]' })),
 		});
 
-		expect(report.findings[0]!.verdict).toBe('tag_drift');
+		expect(report.findings[0]!.verdict).toBe('pin_drift');
 
 		expect(queueCacheAnomaly).toHaveBeenCalledWith(expect.objectContaining({
 			detail: 'filled under (none), replay pinned articles',
@@ -1192,7 +1228,7 @@ describe('--purge', () => {
 		// Entries replay concurrently, so answer by path rather than in order.
 		const answers: Record<string, CacheAuditReplayResponse> = {
 			'/items/a': answer({ data: [{ v: 2 }] }),
-			'/items/b': answer({ data: [] }, { tags: 'articles' }),
+			'/items/b': answer({ data: [] }, { pins: '["articles"]' }),
 			'/items/c': answer({ data: [] }),
 		};
 
@@ -1286,7 +1322,7 @@ describe('the loopback replayer', () => {
 	});
 
 	test(oneLine`
-		reads a tags header past node's 16KB default: a deep read pins one tag per
+		reads a pins header past node's 16KB default: a deep read pins one pin per
 		related key, and 370 of them ended every audit of that entry in a header
 		overflow
 	`, async () => {
@@ -1299,7 +1335,7 @@ describe('the loopback replayer', () => {
 		server.removeAllListeners('request');
 
 		server.on('request', (_req, res) => {
-			res.setHeader('x-cache-audit-tags', tags);
+			res.setHeader('x-cache-audit-pins', tags);
 			res.end('{"data":[]}');
 		});
 
@@ -1309,7 +1345,7 @@ describe('the loopback replayer', () => {
 			headers: {},
 		});
 
-		expect(response.headers['x-cache-audit-tags']).toBe(tags);
+		expect(response.headers['x-cache-audit-pins']).toBe(tags);
 	});
 
 	test('rejects when nothing listens there', async () => {

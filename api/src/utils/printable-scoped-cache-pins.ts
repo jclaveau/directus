@@ -1,6 +1,6 @@
-// The tag stays raw (it IS the Redis key), so percent-encode at the exits: a
+// The pin stays raw (it IS the Redis key), so percent-encode at the exits: a
 // bare NUL or >= U+0100 char otherwise makes res.setHeader / a text column throw.
-export function printableScopedCacheTags(serialized: string): string {
+export function printableScopedCachePin(serialized: string): string {
 	return Array.from(serialized)
 		.map((char) => {
 			const code = char.charCodeAt(0);

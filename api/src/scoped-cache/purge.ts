@@ -49,7 +49,7 @@ import {
 	scopedCacheDeclaredPins,
 	scopedCacheFingerprintCouldContainPin,
 	scopedCacheFingerprintIsBare,
-	scopedCacheLegacyTags,
+	scopedCachePinKeys,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintPurgedBy,
 	type ScopedCacheFingerprint,
@@ -184,47 +184,47 @@ export async function indexScopedCacheEntry(
 }
 
 /**
- * How many cache entries each legacy tag would purge — the blast radius the cache
- * page's drawer reports beside the tags an entry carries. Keyed by the tag's
+ * How many cache entries each legacy pin would purge — the blast radius the cache
+ * page's drawer reports beside the pins an entry carries. Keyed by the pin's
  * display string (`collection` or `collection:field=value`).
  *
- * Read the way the purge that answers for that tag reads: a tag names a pin, not a
+ * Read the way the purge that answers for that pin reads: a pin names a pin, not a
  * set, so the count is the entries of its collection whose fingerprint that pin
- * reaches. One pass over the collection's sets answers every tag naming it, since
+ * reaches. One pass over the collection's sets answers every pin naming it, since
  * a member is parsed once and tested against each.
  *
  * Counts entries rather than members: an entry is named alongside its
  * `__expires_at` and `__tags` siblings, so counting members reported the same
  * entry two or three times over — the inflation the `SCARD` this replaced carried.
  */
-export async function countScopedCacheTagMembers(
-	legacyTags: readonly string[],
+export async function countScopedCachePinMembers(
+	pinKeys: readonly string[],
 ): Promise<Record<string, number>> {
-	if (!scopedCachePurgeEnabled() || legacyTags.length === 0) {
+	if (!scopedCachePurgeEnabled() || pinKeys.length === 0) {
 		return {};
 	}
 
 	const counts: Record<string, number> = {};
 
-	const legacyTaggedByCollection = new Map<string, {
-		legacyTag: string;
+	const pinKeysByCollection = new Map<string, {
+		pinKey: string;
 		declared: ScopedCacheFingerprint;
 	}[]>();
 
-	for (const legacyTag of legacyTags) {
-		counts[legacyTag] = 0;
+	for (const pinKey of pinKeys) {
+		counts[pinKey] = 0;
 
-		const declared = scopedCacheFingerprintFromLegacyTag(legacyTag);
-		const legacyTagged = legacyTaggedByCollection.get(declared.collection) ?? [];
+		const declared = scopedCacheFingerprintFromPinKey(pinKey);
+		const pinKeyed = pinKeysByCollection.get(declared.collection) ?? [];
 
-		legacyTagged.push({ legacyTag, declared });
-		legacyTaggedByCollection.set(declared.collection, legacyTagged);
+		pinKeyed.push({ pinKey, declared });
+		pinKeysByCollection.set(declared.collection, pinKeyed);
 	}
 
 	const store = useScopedCacheStore();
 
-	for (const [collection, legacyTagged] of legacyTaggedByCollection) {
-		// The keys each tag reached, not a running total: an entry bound to a list
+	for (const [collection, pinKeyed] of pinKeysByCollection) {
+		// The keys each pin reached, not a running total: an entry bound to a list
 		// of index values is named by one set per value, and a blast radius counting
 		// it once per set would claim a purge frees more than it can.
 		const reachedByTag = new Map<string, Set<string>>();
@@ -237,18 +237,18 @@ export async function countScopedCacheTagMembers(
 					continue;
 				}
 
-				for (const { legacyTag, declared } of legacyTagged) {
+				for (const { pinKey, declared } of pinKeyed) {
 					if (scopedCacheFingerprintReachedByPin(fingerprint, declared)) {
-						const reached = reachedByTag.get(legacyTag) ?? new Set();
+						const reached = reachedByTag.get(pinKey) ?? new Set();
 						reached.add(key);
-						reachedByTag.set(legacyTag, reached);
+						reachedByTag.set(pinKey, reached);
 					}
 				}
 			}
 		}
 
-		for (const [legacyTag, reached] of reachedByTag) {
-			counts[legacyTag] = reached.size;
+		for (const [pinKey, reached] of reachedByTag) {
+			counts[pinKey] = reached.size;
 		}
 	}
 
@@ -256,27 +256,27 @@ export async function countScopedCacheTagMembers(
 }
 
 /**
- * The fingerprint a legacy tag stands for. The tag is namespace-free on purpose,
+ * The fingerprint a legacy pin stands for. The pin is namespace-free on purpose,
  * so it resolves against whatever the collection's index holds now rather than
- * against the set key it named when the tag was written.
+ * against the set key it named when the pin was written.
  *
- * Its value is already canonical — the tag is rendered from a canonical token — so
+ * Its value is already canonical — the pin is rendered from a canonical token — so
  * it is taken as written rather than canonicalised a second time.
  */
-function scopedCacheFingerprintFromLegacyTag(
-	legacyTag: string,
+function scopedCacheFingerprintFromPinKey(
+	pinKey: string,
 ): ScopedCacheFingerprint {
-	const fieldAt = legacyTag.indexOf(':');
+	const fieldAt = pinKey.indexOf(':');
 
 	if (fieldAt === -1) {
-		return { collection: legacyTag };
+		return { collection: pinKey };
 	}
 
-	const pin = legacyTag.slice(fieldAt + 1);
+	const pin = pinKey.slice(fieldAt + 1);
 	const valueAt = pin.indexOf('=');
 
 	if (valueAt === -1) {
-		return { collection: legacyTag.slice(0, fieldAt) };
+		return { collection: pinKey.slice(0, fieldAt) };
 	}
 
 	// Null-prototyped for the reason the parser is: the field is a column name,
@@ -285,14 +285,14 @@ function scopedCacheFingerprintFromLegacyTag(
 	pinnedScope[pin.slice(0, valueAt)] = [pin.slice(valueAt + 1)];
 
 	return {
-		collection: legacyTag.slice(0, fieldAt),
+		collection: pinKey.slice(0, fieldAt),
 		pinnedScope,
 	};
 }
 
 /**
  * Whether a declared pin — a hook's `purgeBy`, a `cache.purge` addition, a legacy
- * tag the drawer is sizing — reaches an entry.
+ * pin the drawer is sizing — reaches an entry.
  *
  * Two arms, because a pin naming nothing and a pin naming a value are different
  * claims. The bare one is the bare collection fingerprint, and it keeps the reach
@@ -732,14 +732,14 @@ export async function purgeCollectionScopedCache(
 
 	// The expensive mode, and the one nothing else records: every slice of the
 	// collection went, because which slices actually changed was unresolvable.
-	// No tag list: every slice the index happened to name is derived rather than
+	// No pin list: every slice the index happened to name is derived rather than
 	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
 		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'collection',
-		scopedCacheTags: null,
-		scopedCacheTagCount: indexKeys,
+		scopedCachePins: null,
+		scopedCachePinCount: indexKeys,
 		evicted,
 		durationMs: options.retried === true
 			? null
@@ -785,26 +785,26 @@ async function purgeOrRecord(
 /**
  * What a recorded purge target resolves to: the fingerprints to retry it with,
  * grouped by the collection each names, plus the collections whose record is a
- * legacy tag from before this table held fingerprints.
+ * legacy pin from before this table held fingerprints.
  *
- * A rendered fingerprint always ends on its `&` terminator and a tag never does,
- * which is what tells the two apart. A tag cannot be replayed against the
+ * A rendered fingerprint always ends on its `&` terminator and a pin never does,
+ * which is what tells the two apart. A pin cannot be replayed against the
  * fingerprint index — it names a slice the index no longer files anything under —
  * so its collection is purged whole instead: wider than the record asked for,
  * which is the direction a recovery is allowed to miss in.
  */
 function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 	declaredByCollection: Map<string, ScopedCacheFingerprint[]>;
-	legacyTaggedCollections: Set<string>;
+	pinKeyedCollections: Set<string>;
 } {
 	const declaredByCollection = new Map<string, ScopedCacheFingerprint[]>();
-	const legacyTaggedCollections = new Set<string>();
+	const pinKeyedCollections = new Set<string>();
 
 	for (const target of recorded) {
 		if (target.endsWith('&') === false) {
 			const fieldAt = target.indexOf(':');
 
-			legacyTaggedCollections.add(
+			pinKeyedCollections.add(
 				fieldAt === -1
 					? target
 					: target.slice(0, fieldAt),
@@ -820,7 +820,7 @@ function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 		declaredByCollection.set(fingerprint.collection, declared);
 	}
 
-	return { declaredByCollection, legacyTaggedCollections };
+	return { declaredByCollection, pinKeyedCollections };
 }
 
 // The drain in flight, so the next trigger queues behind it rather than beside it.
@@ -909,8 +909,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					purgeId,
 					collection: null,
 					mode: 'namespace',
-					scopedCacheTags: null,
-					scopedCacheTagCount: 0,
+					scopedCachePins: null,
+					scopedCachePinCount: 0,
 					evicted: null,
 					durationMs: null,
 				});
@@ -932,7 +932,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				});
 			}
 			else {
-				const { declaredByCollection, legacyTaggedCollections } =
+				const { declaredByCollection, pinKeyedCollections } =
 					recordedScopedCachePurgeTargets(target.scopedCacheFingerprints);
 
 				// Every collection the record reaches, before any of them is read: a
@@ -941,7 +941,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				// drain is about to prune.
 				await bumpScopedCacheEpochs([
 					...declaredByCollection.keys(),
-					...legacyTaggedCollections,
+					...pinKeyedCollections,
 				]);
 
 				let evicted = 0;
@@ -966,8 +966,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 				// Records its own collection-mode purge, as it does everywhere else:
 				// it is the one that knows how many sets its scan turned up.
-				for (const legacyTaggedCollection of legacyTaggedCollections) {
-					await purgeCollectionScopedCache(cache, legacyTaggedCollection, {
+				for (const pinKeyedCollection of pinKeyedCollections) {
+					await purgeCollectionScopedCache(cache, pinKeyedCollection, {
 						scopedCachePurgeId: purgeId,
 						retried: true,
 					});
@@ -988,15 +988,15 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					);
 				}
 
-				// Only for what the fingerprints took: a legacy tag's collection purge
+				// Only for what the fingerprints took: a legacy pin's collection purge
 				// records itself, and counting it here would show its entries evicted
 				// twice.
 				if (declaredByCollection.size > 0) {
-					// Legacy tags, though the record holds fingerprints: the stats
-					// stream joins its tag list with a comma, which a rendered
-					// fingerprint carries raw, and the entry-tags table this one is
-					// joined against is written in tags too.
-					const declaredLegacyTags = scopedCacheLegacyTags(
+					// Legacy pins, though the record holds fingerprints: the stats
+					// stream joins its pin list with a comma, which a rendered
+					// fingerprint carries raw, and the entry-pins table this one is
+					// joined against is written in pins too.
+					const declaredPinKeys = scopedCachePinKeys(
 						[...declaredByCollection.values()].flat(),
 					);
 
@@ -1004,8 +1004,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						purgeId,
 						collection: target.collection,
 						mode: 'slices',
-						scopedCacheTags: declaredLegacyTags,
-						scopedCacheTagCount: declaredLegacyTags.length,
+						scopedCachePins: declaredPinKeys,
+						scopedCachePinCount: declaredPinKeys.length,
 						evicted,
 						durationMs: null,
 					});
@@ -1227,15 +1227,15 @@ export async function purgeScopedCache(
 		// operator acting, this is a mutation invalidating everything because
 		// scoped mode is off.
 		//
-		// No tag sets and no member list to count here: the clear takes the whole
+		// No pin sets and no member list to count here: the clear takes the whole
 		// namespace, so the row records the reach and leaves the size unknown.
 		// Zero would draw the most destructive event here as one that took nothing.
 		queueCachePurge({
 			purgeId: options.scopedCachePurgeId,
 			collection: null,
 			mode: 'namespace',
-			scopedCacheTags: null,
-			scopedCacheTagCount: 0,
+			scopedCachePins: null,
+			scopedCachePinCount: 0,
 			evicted: null,
 			durationMs: Date.now() - startedAt,
 		});
@@ -1330,7 +1330,7 @@ export async function purgeScopedCache(
 	let evicted: number | null = null;
 
 	// What a retry has to be able to run again, in the one grammar the index reads:
-	// the rows this purge was bound to, and the pins it was handed. A legacy tag
+	// the rows this purge was bound to, and the pins it was handed. A legacy pin
 	// would name a slice the index files nothing under, and a retry aimed at one
 	// would report success having dropped nothing.
 	// The bare fingerprint rides with the rows rather than in the swept list, so a
@@ -1382,15 +1382,15 @@ export async function purgeScopedCache(
 		return purgedScopedCacheFingerprints;
 	}
 
-	// The legacy tags a mutation actually resolved, in the same form the entry
-	// sidecar stores — so "this entry carries tag X, and tag X was purged at T" is
+	// The legacy pins a mutation actually resolved, in the same form the entry
+	// sidecar stores — so "this entry carries pin X, and pin X was purged at T" is
 	// a join rather than a guess.
 	queueCachePurge({
 		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'slices',
-		scopedCacheTags: scopedCacheLegacyTags(purgedScopedCacheFingerprints),
-		scopedCacheTagCount: renderedFingerprints.length,
+		scopedCachePins: scopedCachePinKeys(purgedScopedCacheFingerprints),
+		scopedCachePinCount: renderedFingerprints.length,
 		evicted,
 		// Awaited inside the mutation, so this time is ADDED to the write's own
 		// latency — a slow purge slows the request that triggered it.

@@ -25,7 +25,7 @@ import {
 	readCacheAuditQueue,
 	readCacheAuditQueueState,
 	retireCacheAuditQueue,
-	readScopedCacheEntryTags,
+	readScopedCacheEntryPins,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
 	listCacheGroupLatencies,
@@ -33,9 +33,9 @@ import {
 	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
-	reapScopedCacheEntryTags,
+	reapScopedCacheEntryPins,
 	reapCachePurges,
-	reapScopedCachePurgeTags,
+	reapScopedCachePurgePins,
 	refreshCacheStatsFlag,
 	setCacheStatsEnabled,
 	subscribeCacheStatsToggle,
@@ -422,7 +422,7 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 			query: '{}',
 			bytes: 0,
 			fillMs: 0,
-			scopedCacheTags: [],
+			scopedCachePins: [],
 		});
 
 		await flushCacheEventBuffer();
@@ -552,7 +552,7 @@ describe('queueCacheDescriptor', () => {
 			query: '{"limit":5}',
 			bytes: 42,
 			fillMs: 240,
-			scopedCacheTags: [],
+			scopedCachePins: [],
 		});
 
 		await flushCacheEventBuffer();
@@ -580,7 +580,7 @@ describe('queueCacheDescriptor', () => {
 			query: '{}',
 			bytes: 0,
 			fillMs: 0,
-			scopedCacheTags: [],
+			scopedCachePins: [],
 		});
 
 		await flushCacheEventBuffer();
@@ -936,8 +936,8 @@ describe('drainCacheEvents', () => {
 				collection: 'articles',
 				mode: 'collection',
 				purgeId: 'p-1',
-				scopedCacheTags: 'articles,articles:author=2',
-				scopedCacheTagCount: '4',
+				scopedCachePins: '["articles","articles:author=2"]',
+				scopedCachePinCount: '4',
 				evicted: '11',
 				durationMs: '7',
 				ts: '6000',
@@ -950,8 +950,8 @@ describe('drainCacheEvents', () => {
 				collection: '',
 				mode: 'namespace',
 				purgeId: 'p-2',
-				scopedCacheTags: '',
-				scopedCacheTagCount: '0',
+				scopedCachePins: '[]',
+				scopedCachePinCount: '0',
 				evicted: '',
 				durationMs: '3',
 				ts: '7000',
@@ -968,7 +968,7 @@ describe('drainCacheEvents', () => {
 					purge_id: 'p-1',
 					collection: 'articles',
 					mode: 'collection',
-					scoped_cache_tag_count: 4,
+					scoped_cache_pin_count: 4,
 					evicted: 11,
 					duration_ms: 7,
 				},
@@ -977,7 +977,7 @@ describe('drainCacheEvents', () => {
 					purge_id: 'p-2',
 					collection: null,
 					mode: 'namespace',
-					scoped_cache_tag_count: 0,
+					scoped_cache_pin_count: 0,
 					evicted: null,
 					duration_ms: 3,
 				},
@@ -985,21 +985,21 @@ describe('drainCacheEvents', () => {
 			expect.any(Number),
 		);
 
-		// Each tag becomes its own row, carrying the purge's id so an entry covered
+		// Each pin becomes its own row, carrying the purge's id so an entry covered
 		// by two of them still counts the purge once.
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_purge_tags',
+			'directus_cache_stats_scoped_purge_pins',
 			[
 				{
 					purge_id: 'p-1',
 					time: new Date(6000),
-					scoped_cache_tag: 'articles',
+					scoped_cache_pin: 'articles',
 					collection: 'articles',
 				},
 				{
 					purge_id: 'p-1',
 					time: new Date(6000),
-					scoped_cache_tag: 'articles:author=2',
+					scoped_cache_pin: 'articles:author=2',
 					collection: 'articles',
 				},
 				// The purge was a `collection` one, so it also lands as a
@@ -1007,7 +1007,7 @@ describe('drainCacheEvents', () => {
 				{
 					purge_id: 'p-1',
 					time: new Date(6000),
-					scoped_cache_tag: '',
+					scoped_cache_pin: '',
 					collection: 'articles',
 				},
 			],
@@ -1022,9 +1022,9 @@ describe('drainCacheEvents', () => {
 		);
 	});
 
-	// A coarse purge drops the bare collection tag AND every slice of it, so it
-	// covers pinned entries too — and a pinned read carries only its slice tag
-	// (`articles:owner=7`), never the bare one. Recording the bare tag alone
+	// A coarse purge drops the bare collection pin AND every slice of it, so it
+	// covers pinned entries too — and a pinned read carries only its slice pin
+	// (`articles:owner=7`), never the bare one. Recording the bare pin alone
 	// would attribute the purge to global reads and miss every pinned entry,
 	// which is most of what it destroys. So it records the COLLECTION.
 	it('records a coarse purge as covering its whole collection', async () => {
@@ -1034,8 +1034,8 @@ describe('drainCacheEvents', () => {
 				purgeId: 'p-coarse',
 				collection: 'articles',
 				mode: 'collection',
-				scopedCacheTags: '',
-				scopedCacheTagCount: '9',
+				scopedCachePins: '[]',
+				scopedCachePinCount: '9',
 				evicted: '30',
 				ts: '6000',
 			}),
@@ -1047,12 +1047,12 @@ describe('drainCacheEvents', () => {
 		// collection, and enumerating derived slices is the unbounded fan-out this
 		// table exists to avoid.
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_purge_tags',
+			'directus_cache_stats_scoped_purge_pins',
 			[
 				{
 					purge_id: 'p-coarse',
 					time: new Date(6000),
-					scoped_cache_tag: '',
+					scoped_cache_pin: '',
 					collection: 'articles',
 				},
 			],
@@ -1060,31 +1060,31 @@ describe('drainCacheEvents', () => {
 		);
 	});
 
-	it('carries each entry tag\'s own collection, for the coarse join', async () => {
+	it('carries each entry pin\'s own collection, for the coarse join', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'd', cacheKey: 'k1', redisKey: 'r1', coarse: '0', method: 'GET',
 				path: '/items/a', collection: 'articles', userId: '', query: '{}',
 				url: '/items/a', bytes: '42', fillMs: '5',
-				// A read spanning two collections carries a tag from each, so the
+				// A read spanning two collections carries a pin from each, so the
 				// collection comes off the TAG rather than off the descriptor.
-				scopedCacheTags: 'articles:owner=7,directus_users', ts: '1000',
+				scopedCachePins: '["articles:owner=7","directus_users"]', ts: '1000',
 			}),
 		];
 
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_entry_tags',
+			'directus_cache_stats_scoped_entry_pins',
 			[
 				{
 					cache_key: 'k1',
-					scoped_cache_tag: 'articles:owner=7',
+					scoped_cache_pin: 'articles:owner=7',
 					collection: 'articles',
 				},
 				{
 					cache_key: 'k1',
-					scoped_cache_tag: 'directus_users',
+					scoped_cache_pin: 'directus_users',
 					collection: 'directus_users',
 				},
 			],
@@ -1092,40 +1092,85 @@ describe('drainCacheEvents', () => {
 		);
 	});
 
-	it('replaces an entry\'s tags on refill rather than merging them', async () => {
+	it('replaces an entry\'s pins on refill rather than merging them', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'd', cacheKey: 'k1', redisKey: 'r1', coarse: '0', method: 'GET',
 				path: '/items/a', collection: 'a', userId: '', query: '{}',
 				url: '/items/a', bytes: '42', fillMs: '5',
-				// The same tag twice: a read can resolve one slice through two paths.
-				scopedCacheTags: 'a,a:owner=7,a', ts: '1000',
+				// The same pin twice: a read can resolve one slice through two paths.
+				scopedCachePins: '["a","a:owner=7","a"]', ts: '1000',
 			}),
 		];
 
 		await drainCacheEvents();
 
-		// Deleted first, so a refill under a narrower scope cannot leave an old tag
+		// Deleted first, so a refill under a narrower scope cannot leave an old pin
 		// behind claiming coverage the entry no longer has.
 		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['k1']);
 		expect(builder.delete).toHaveBeenCalled();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_entry_tags',
+			'directus_cache_stats_scoped_entry_pins',
 			[
-				{ cache_key: 'k1', scoped_cache_tag: 'a', collection: 'a' },
-				{ cache_key: 'k1', scoped_cache_tag: 'a:owner=7', collection: 'a' },
+				{ cache_key: 'k1', scoped_cache_pin: 'a', collection: 'a' },
+				{ cache_key: 'k1', scoped_cache_pin: 'a:owner=7', collection: 'a' },
 			],
 			expect.any(Number),
 		);
 	});
 
-	it('records no tags for a locator, which never resolved any', async () => {
+	it('keeps a pin whose scope value holds a comma', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'k2', redisKey: 'r2', coarse: '0', method: 'GET',
+				path: '/items/a', collection: 'a', userId: '', query: '{}',
+				url: '/items/a', bytes: '42', fillMs: '5',
+				scopedCachePins: '["a:title=Smith, Jane"]', ts: '1000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_scoped_entry_pins',
+			[{
+				cache_key: 'k2',
+				scoped_cache_pin: 'a:title=Smith, Jane',
+				collection: 'a',
+			}],
+			expect.any(Number),
+		);
+	});
+
+	it('drains a pin list the build before this one left in the stream', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'k3', redisKey: 'r3', coarse: '0', method: 'GET',
+				path: '/items/a', collection: 'a', userId: '', query: '{}',
+				url: '/items/a', bytes: '42', fillMs: '5',
+				scopedCacheTags: 'a,a:owner=7', ts: '1000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_scoped_entry_pins',
+			[
+				{ cache_key: 'k3', scoped_cache_pin: 'a', collection: 'a' },
+				{ cache_key: 'k3', scoped_cache_pin: 'a:owner=7', collection: 'a' },
+			],
+			expect.any(Number),
+		);
+	});
+
+	it('records no pins for a locator, which never resolved any', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'd', cacheKey: 'k9', redisKey: 'r9', coarse: '0', method: 'GET',
 				path: '/items/a', collection: 'a', userId: '', query: '{}',
-				url: '/items/a', bytes: '0', fillMs: '0', tags: '',
+				url: '/items/a', bytes: '0', fillMs: '0', scopedCachePins: '[]',
 				ts: '', // empty ts = a locator, written at an anomaly site
 			}),
 		];
@@ -1133,7 +1178,7 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).not.toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_entry_tags',
+			'directus_cache_stats_scoped_entry_pins',
 			expect.anything(),
 			expect.anything(),
 		);
@@ -1461,7 +1506,7 @@ describe('enforceCacheStatsBudget', () => {
 			[
 				'directus_cache_stats_events',
 				'directus_cache_stats_purges',
-				'directus_cache_stats_scoped_purge_tags',
+				'directus_cache_stats_scoped_purge_pins',
 			],
 			expect.any(Date),
 		);
@@ -1563,9 +1608,9 @@ describe('enforceCacheStatsBudget', () => {
 		expect(mockSchema.getTablesSize).toHaveBeenCalledWith([
 			'directus_cache_stats_events',
 			'directus_cache_stats_purges',
-			'directus_cache_stats_scoped_purge_tags',
+			'directus_cache_stats_scoped_purge_pins',
 			'directus_cache_stats_descriptors',
-			'directus_cache_stats_scoped_entry_tags',
+			'directus_cache_stats_scoped_entry_pins',
 			'directus_cache_stats_anomalies',
 			'directus_cache_stats_config_events',
 		]);
@@ -1718,8 +1763,8 @@ describe('truncateCacheEvents', () => {
 		// Left behind, purges would count against entries whose own history was
 		// just cleared — purges without hits, on a window reporting no traffic.
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_purges');
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_purge_tags');
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_entry_tags');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_purge_pins');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_entry_pins');
 		expect(builder.truncate).toHaveBeenCalledTimes(6);
 	});
 
@@ -1801,7 +1846,7 @@ describe('capture is gated by the runtime flag', () => {
 			query: '{}',
 			bytes: 0,
 			fillMs: 0,
-			scopedCacheTags: [],
+			scopedCachePins: [],
 		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
@@ -1860,16 +1905,16 @@ describe('listCacheEntries', () => {
 
 		// k1 was covered three times; k2 has no row at all, which must read as 0
 		// rather than as missing.
-		rowsByTable['directus_cache_stats_scoped_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_scoped_entry_pins as et'] = [
 			{ cache_key: 'k1', purges: '3' },
 		];
 
 		const entries = await listCacheEntries();
 
 		expect(mockDb)
-			.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_tags as et');
+			.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_pins as et');
 
-		// COUNT(DISTINCT purge_id), so a purge covering two of an entry's tags is
+		// COUNT(DISTINCT purge_id), so a purge covering two of an entry's pins is
 		// one purge and not two.
 		expect(mockDb.raw).toHaveBeenCalledWith(
 			expect.stringContaining('COUNT(DISTINCT pt.purge_id)'),
@@ -1883,7 +1928,7 @@ describe('listCacheEntries', () => {
 	});
 
 	// The symptom this whole fix exists for: an endpoint destroyed only by
-	// collection-wide fallbacks read 0, because a coarse purge writes no tag row
+	// collection-wide fallbacks read 0, because a coarse purge writes no pin row
 	// to equi-join against. It is the expensive mode, so reading zero for it
 	// inverts the very ranking the column was added to provide.
 	it('counts a coarse purge against every entry of that collection', async () => {
@@ -1912,19 +1957,19 @@ describe('listCacheEntries', () => {
 			},
 		];
 
-		// No precise match at all — a pinned entry carries only its slice tag, and
-		// the coarse purge recorded no slice tags.
-		rowsByTable['directus_cache_stats_scoped_entry_tags as et'] = [];
+		// No precise match at all — a pinned entry carries only its slice pin, and
+		// the coarse purge recorded no slice pins.
+		rowsByTable['directus_cache_stats_scoped_entry_pins as et'] = [];
 
-		// The coarse pass, joined on collection rather than on tag.
-		rowsByTable['directus_cache_stats_scoped_purge_tags as pt'] = [
+		// The coarse pass, joined on collection rather than on pin.
+		rowsByTable['directus_cache_stats_scoped_purge_pins as pt'] = [
 			{ cache_key: 'pinned', purges: '2' },
 		];
 
 		const entries = await listCacheEntries();
 
 		expect(mockDb)
-			.toHaveBeenCalledWith('directus_cache_stats_scoped_purge_tags as pt');
+			.toHaveBeenCalledWith('directus_cache_stats_scoped_purge_pins as pt');
 
 		expect(entries[0]!.purges).toBe(2);
 	});
@@ -1955,13 +2000,13 @@ describe('listCacheEntries', () => {
 			},
 		];
 
-		// A purge is only ever tag-bearing or collection-bearing, never both, so
+		// A purge is only ever pin-bearing or collection-bearing, never both, so
 		// the two passes cannot double-count one purge and simply add.
-		rowsByTable['directus_cache_stats_scoped_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_scoped_entry_pins as et'] = [
 			{ cache_key: 'k1', purges: '3' },
 		];
 
-		rowsByTable['directus_cache_stats_scoped_purge_tags as pt'] = [
+		rowsByTable['directus_cache_stats_scoped_purge_pins as pt'] = [
 			{ cache_key: 'k1', purges: '4' },
 		];
 
@@ -1977,7 +2022,7 @@ describe('listCacheEntries', () => {
 
 		// An empty `whereIn` would scan the whole join for rows nothing can use.
 		expect(mockDb)
-			.not.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_tags as et');
+			.not.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_pins as et');
 	});
 
 	it('maps descriptor + windowed hit rows to entry records', async () => {
@@ -2037,7 +2082,7 @@ describe('listCacheEntries', () => {
 		expect(entries).toEqual([
 			{
 				key: 'k1',
-				// No purge-tag rows in this fixture, so nothing covered it.
+				// No purge-pin rows in this fixture, so nothing covered it.
 				purges: 0,
 				redisKey: '/items/a?limit=5:u1',
 				coarse: true,
@@ -2255,7 +2300,7 @@ describe('listCacheEntries', () => {
 
 		await listCacheEntries();
 
-		// The two trailing calls are the tag and collection purge passes.
+		// The two trailing calls are the pin and collection purge passes.
 		expect(builder.groupBy.mock.calls).toEqual([
 			['e.cache_key'],
 			['et.cache_key'],
@@ -2730,8 +2775,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'collection',
-			scopedCacheTags: null,
-			scopedCacheTagCount: 3,
+			scopedCachePins: null,
+			scopedCachePinCount: 3,
 			evicted: 12,
 			durationMs: 12,
 		});
@@ -2742,8 +2787,8 @@ describe('queueCachePurge', () => {
 		expect(fieldAfter(call, 'kind')).toBe('p');
 		expect(fieldAfter(call, 'collection')).toBe('articles');
 		expect(fieldAfter(call, 'mode')).toBe('collection');
-		expect(fieldAfter(call, 'scopedCacheTags')).toBe('');
-		expect(fieldAfter(call, 'scopedCacheTagCount')).toBe('3');
+		expect(fieldAfter(call, 'scopedCachePins')).toBe('[]');
+		expect(fieldAfter(call, 'scopedCachePinCount')).toBe('3');
 		expect(fieldAfter(call, 'evicted')).toBe('12');
 		expect(fieldAfter(call, 'durationMs')).toBe('12');
 	});
@@ -2757,8 +2802,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: null,
 			mode: 'namespace',
-			scopedCacheTags: null,
-			scopedCacheTagCount: 0,
+			scopedCachePins: null,
+			scopedCachePinCount: 0,
 			evicted: null,
 			durationMs: 12,
 		});
@@ -2780,8 +2825,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'slices',
-			scopedCacheTags: ['articles:id=1'],
-			scopedCacheTagCount: 1,
+			scopedCachePins: ['articles:id=1'],
+			scopedCachePinCount: 1,
 			evicted: 2,
 			durationMs: 12,
 		});
@@ -2799,8 +2844,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'slices',
-			scopedCacheTags: ['articles:id=1'],
-			scopedCacheTagCount: 1,
+			scopedCachePins: ['articles:id=1'],
+			scopedCachePinCount: 1,
 			evicted: 2,
 			durationMs: 12,
 		});
@@ -2811,27 +2856,27 @@ describe('queueCachePurge', () => {
 	});
 });
 
-describe('reapScopedCachePurgeTags', () => {
-	it('deletes tag rows past the retention window', async () => {
+describe('reapScopedCachePurgePins', () => {
+	it('deletes pin rows past the retention window', async () => {
 		deleteCount = 7;
 
-		expect(await reapScopedCachePurgeTags()).toBe(7);
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_purge_tags');
+		expect(await reapScopedCachePurgePins()).toBe(7);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_purge_pins');
 	});
 
 	it('returns 0 without touching the table when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 
-		expect(await reapScopedCachePurgeTags()).toBe(0);
+		expect(await reapScopedCachePurgePins()).toBe(0);
 
 		expect(mockDb)
-			.not.toHaveBeenCalledWith('directus_cache_stats_scoped_purge_tags');
+			.not.toHaveBeenCalledWith('directus_cache_stats_scoped_purge_pins');
 	});
 });
 
-describe('reapScopedCacheEntryTags', () => {
-	it('drops tag rows whose entry no longer has a descriptor', async () => {
-		rowsByTable['directus_cache_stats_scoped_entry_tags'] = [
+describe('reapScopedCacheEntryPins', () => {
+	it('drops pin rows whose entry no longer has a descriptor', async () => {
+		rowsByTable['directus_cache_stats_scoped_entry_pins'] = [
 			{ cache_key: 'a' },
 			{ cache_key: 'a' },
 			{ cache_key: 'b' },
@@ -2839,17 +2884,17 @@ describe('reapScopedCacheEntryTags', () => {
 
 		deleteCount = 3;
 
-		expect(await reapScopedCacheEntryTags()).toBe(3);
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_entry_tags');
+		expect(await reapScopedCacheEntryPins()).toBe(3);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_scoped_entry_pins');
 
-		// Followed out by their descriptor rather than aged out by time: the tags
+		// Followed out by their descriptor rather than aged out by time: the pins
 		// are a dimension of the entry, not a fact of their own.
 		expect(builder.whereRaw).toHaveBeenCalledWith(
 			'??.cache_key = ??.cache_key',
-			['directus_cache_stats_descriptors', 'directus_cache_stats_scoped_entry_tags'],
+			['directus_cache_stats_descriptors', 'directus_cache_stats_scoped_entry_pins'],
 		);
 
-		// One row per key per tag, so the slate names each key once however many
+		// One row per key per pin, so the slate names each key once however many
 		// rows it read for it.
 		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a', 'b']);
 	});
@@ -2857,10 +2902,10 @@ describe('reapScopedCacheEntryTags', () => {
 	it('returns 0 without touching the table when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 
-		expect(await reapScopedCacheEntryTags()).toBe(0);
+		expect(await reapScopedCacheEntryPins()).toBe(0);
 
 		expect(mockDb)
-			.not.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_tags');
+			.not.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_pins');
 	});
 });
 
@@ -3179,9 +3224,9 @@ describe('readCacheAuditQueue', () => {
 			},
 		]);
 
-		// The tags are for the entries the cache still holds, asked separately.
+		// The pins are for the entries the cache still holds, asked separately.
 		expect(mockDb).not.toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_entry_tags',
+			'directus_cache_stats_scoped_entry_pins',
 		);
 
 		// Least recently verified first: the audit, or the fill where later.
@@ -3237,15 +3282,15 @@ describe('readCacheAuditQueue', () => {
 	});
 });
 
-describe('readScopedCacheEntryTags', () => {
-	it('answers the tags of a batch of entries by key, in one query', async () => {
-		rowsByTable['directus_cache_stats_scoped_entry_tags'] = [
-			{ cache_key: 'ck1', scoped_cache_tag: 'articles:owner=acme' },
-			{ cache_key: 'ck1', scoped_cache_tag: 'authors' },
-			{ cache_key: 'ck3', scoped_cache_tag: 'authors' },
+describe('readScopedCacheEntryPins', () => {
+	it('answers the pins of a batch of entries by key, in one query', async () => {
+		rowsByTable['directus_cache_stats_scoped_entry_pins'] = [
+			{ cache_key: 'ck1', scoped_cache_pin: 'articles:owner=acme' },
+			{ cache_key: 'ck1', scoped_cache_pin: 'authors' },
+			{ cache_key: 'ck3', scoped_cache_pin: 'authors' },
 		];
 
-		const tags = await readScopedCacheEntryTags(['ck1', 'ck2', 'ck3']);
+		const tags = await readScopedCacheEntryPins(['ck1', 'ck2', 'ck3']);
 
 		expect([...tags]).toEqual([
 			['ck1', ['articles:owner=acme', 'authors']],
@@ -3257,11 +3302,11 @@ describe('readScopedCacheEntryTags', () => {
 	});
 
 	it('asks nothing for no keys, or where stats are off', async () => {
-		expect([...await readScopedCacheEntryTags([])]).toEqual([]);
+		expect([...await readScopedCacheEntryPins([])]).toEqual([]);
 
 		env['CACHE_STATS_ENABLED'] = false;
 
-		expect([...await readScopedCacheEntryTags(['ck1'])]).toEqual([]);
+		expect([...await readScopedCacheEntryPins(['ck1'])]).toEqual([]);
 		expect(mockDb).not.toHaveBeenCalled();
 	});
 });
@@ -3360,30 +3405,30 @@ describe('retireCacheAuditQueue', () => {
 });
 
 describe('listPurgesCoveringEntry', () => {
-	// The two reaches answer separately — a purge names a tag the entry was filled
+	// The two reaches answer separately — a purge names a pin the entry was filled
 	// under, or it names none and its collection is its reach — so the merge, the
 	// ordering across them and the cap are this function's own work.
 	it('merges both reaches into one list, newest first', async () => {
-		rowsByTable['directus_cache_stats_scoped_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_scoped_entry_pins as et'] = [
 			{
 				purge_id: 'p-old',
 				time: new Date(1_000).toISOString(),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=5',
+				scoped_cache_pin: 'articles:id=5',
 				evicted: 2,
 			},
 		];
 
-		rowsByTable['directus_cache_stats_scoped_purge_tags as pt'] = [
+		rowsByTable['directus_cache_stats_scoped_purge_pins as pt'] = [
 			{
 				purge_id: 'p-new',
 				time: new Date(9_000).toISOString(),
 				mode: 'collection',
 				collection: 'articles',
-				// A collection-wide purge names no tag; the empty string is how the
+				// A collection-wide purge names no pin; the empty string is how the
 				// row spells that, and null is how the answer says it outward.
-				scoped_cache_tag: '',
+				scoped_cache_pin: '',
 				evicted: null,
 			},
 		];
@@ -3395,14 +3440,14 @@ describe('listPurgesCoveringEntry', () => {
 				time: 9_000,
 				mode: 'collection',
 				collection: 'articles',
-				scopedCacheTag: null,
+				scopedCachePin: null,
 				evicted: null,
 			},
 			{
 				time: 1_000,
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTag: 'articles:id=5',
+				scopedCachePin: 'articles:id=5',
 				evicted: 2,
 			},
 		]);
@@ -3410,22 +3455,22 @@ describe('listPurgesCoveringEntry', () => {
 		// Bounded by the entry's own fill, not by a retention window.
 		expect(builder.where).toHaveBeenCalledWith('pt.time', '>', new Date(500));
 
-		// One purge covering two of the entry's tags is one row, not two.
+		// One purge covering two of the entry's pins is one row, not two.
 		expect(builder.distinct).toHaveBeenCalled();
 	});
 
-	it('counts a purge that covered several of the entry\'s tags once', async () => {
-		// A mutation touching two rows drops a tag per row, and an entry that read
+	it('counts a purge that covered several of the entry\'s pins once', async () => {
+		// A mutation touching two rows drops a pin per row, and an entry that read
 		// both carries both — so the join answers the same purge twice, differing
-		// only in which tag matched. The listing counts it once
+		// only in which pin matched. The listing counts it once
 		// (`COUNT(DISTINCT purge_id)`), and this has to agree with that.
-		rowsByTable['directus_cache_stats_scoped_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_scoped_entry_pins as et'] = [
 			{
 				purge_id: 'p-wide',
 				time: new Date(4_000).toISOString(),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=5',
+				scoped_cache_pin: 'articles:id=5',
 				evicted: 7,
 			},
 			{
@@ -3433,33 +3478,33 @@ describe('listPurgesCoveringEntry', () => {
 				time: new Date(4_000).toISOString(),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=6',
+				scoped_cache_pin: 'articles:id=6',
 				evicted: 7,
 			},
 		];
 
 		const covering = await listPurgesCoveringEntry('k1', new Date(500));
 
-		// One record, and the tag kept is the one the ordering makes first, so a
+		// One record, and the pin kept is the one the ordering makes first, so a
 		// re-read answers the same string rather than whichever row came back.
 		expect(covering).toEqual([
 			{
 				time: 4_000,
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTag: 'articles:id=5',
+				scopedCachePin: 'articles:id=5',
 				evicted: 7,
 			},
 		]);
 
-		expect(builder.orderBy).toHaveBeenCalledWith('pt.scoped_cache_tag', 'asc');
+		expect(builder.orderBy).toHaveBeenCalledWith('pt.scoped_cache_pin', 'asc');
 	});
 
-	// A namespace clear names neither a tag nor a collection, so it leaves no
+	// A namespace clear names neither a pin nor a collection, so it leaves no
 	// `purge_tags` row for either reach to join — and it took every entry, this
 	// one included. Missing it would answer "nothing purged this" about the most
 	// total invalidation there is.
-	it('names a namespace clear, which no tag or collection joins', async () => {
+	it('names a namespace clear, which no pin or collection joins', async () => {
 		rowsByTable['directus_cache_stats_purges as p'] = [
 			{
 				purge_id: 'p-clear',
@@ -3470,13 +3515,13 @@ describe('listPurgesCoveringEntry', () => {
 			},
 		];
 
-		rowsByTable['directus_cache_stats_scoped_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_scoped_entry_pins as et'] = [
 			{
 				purge_id: 'p-tagged',
 				time: new Date(2_000).toISOString(),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=5',
+				scoped_cache_pin: 'articles:id=5',
 				evicted: 1,
 			},
 		];
@@ -3489,14 +3534,14 @@ describe('listPurgesCoveringEntry', () => {
 				mode: 'namespace',
 				// It named no scope at all, which is what made it reach everything.
 				collection: null,
-				scopedCacheTag: null,
+				scopedCachePin: null,
 				evicted: null,
 			},
 			{
 				time: 2_000,
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTag: 'articles:id=5',
+				scopedCachePin: 'articles:id=5',
 				evicted: 1,
 			},
 		]);
@@ -3514,7 +3559,7 @@ describe('listPurgesCoveringEntry', () => {
 		// Not merely empty: no query was built at all.
 		expect(mockDb)
 			.not
-			.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_tags as et');
+			.toHaveBeenCalledWith('directus_cache_stats_scoped_entry_pins as et');
 	});
 });
 

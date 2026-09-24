@@ -18,7 +18,7 @@ export function cacheExpiresAtKey(redisKey: string): string {
 	return `${redisKey}${EXPIRES_AT_SUFFIX}`;
 }
 
-/** The dev-only sibling holding an entry's scoped-cache tags. */
+/** The dev-only sibling holding an entry's scoped-cache pins. */
 export function cacheTagsKey(redisKey: string): string {
 	return `${redisKey}${TAGS_SUFFIX}`;
 }
@@ -34,7 +34,7 @@ export function cacheSidecarOwner(member: string): string | null {
 }
 
 /**
- * The labels the tags sidecar holds, or null when it holds anything else — an
+ * The labels the `__tags` sidecar holds, or null when it holds anything else — an
  * entry written before the sidecar listed them, or a store answering garbage —
  * so nothing flattens into a garbled header or listing.
  */
