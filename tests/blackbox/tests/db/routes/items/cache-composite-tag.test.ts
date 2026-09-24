@@ -340,71 +340,80 @@ describe.each(vendors)('%s', (vendor) => {
 		// the instance reads `scoped_cache_fields` off the schema it boots on, so
 		// `beforeAll` creates the collection before the spawn. The feature still
 		// states it, and a drift fails the Background, not a purge assertion.
-		given('the slot collection:', async (table: Record<string, string>[]) => {
-			const fields = await request(getUrl(vendor, env))
-				.get(`/fields/${SLOT}`)
-				.set('Authorization', auth);
+		given(
+			'the slot collection and the fields a fingerprint may pin:',
+			async (table: Record<string, string>[]) => {
+				const fields = await request(getUrl(vendor, env))
+					.get(`/fields/${SLOT}`)
+					.set('Authorization', auth);
 
-			const collection = await request(getUrl(vendor, env))
-				.get(`/collections/${SLOT}`)
-				.set('Authorization', auth);
+				const collection = await request(getUrl(vendor, env))
+					.get(`/collections/${SLOT}`)
+					.set('Authorization', auth);
 
-			const scopedCacheFields: string[]
-				= collection.body.data.meta.scoped_cache_fields;
+				const scopedCacheFields: string[]
+					= collection.body.data.meta.scoped_cache_fields;
 
-			const declaredFields = fields.body.data
-				.filter((field: { field: string }) => field.field !== 'id')
-				.map((field: { field: string; type: string }) => {
-					return {
-						field: field.field,
-						type: field.type,
-						scoped_cache_field: scopedCacheFields.includes(field.field)
-							? 'yes'
-							: 'no',
-					};
-				});
+				const declaredFields = fields.body.data
+					.filter((field: { field: string }) => field.field !== 'id')
+					.map((field: { field: string; type: string }) => {
+						return {
+							field: field.field,
+							type: field.type,
+							scoped_cache_field: scopedCacheFields.includes(field.field)
+								? 'yes'
+								: 'no',
+						};
+					});
 
-			expect(declaredFields).toEqual(expect.arrayContaining(table));
-			expect(declaredFields).toHaveLength(table.length);
-		});
+				expect(declaredFields).toEqual(expect.arrayContaining(table));
+				expect(declaredFields).toHaveLength(table.length);
+			},
+		);
 
-		and('the slots:', async (table: Record<string, string>[]) => {
-			await createSlots(parseGherkinTable<SlotRow>(table), ids);
-		});
+		and(
+			'the slots the reads answer from:',
+			async (table: Record<string, string>[]) => {
+				await createSlots(parseGherkinTable<SlotRow>(table), ids);
+			},
+		);
 
 		// The query is the scenario's own table, so a reader sees what is cached
 		// where the scenario says it is cached, and the `Then` reads it back.
-		and('this read is cached:', async (table: Record<string, string>[]) => {
-			const { query, response, fingerprints } = table[0]!;
-			const readQuery = queryParameters(query!);
+		and(
+			'this read is cached, filed under its `fingerprints`:',
+			async (table: Record<string, string>[]) => {
+				const { query, response, fingerprints } = table[0]!;
+				const readQuery = queryParameters(query!);
 
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
+				await request(getUrl(vendor, env))
+					.post('/utils/cache/clear')
+					.set('Authorization', auth);
 
-			const filedBefore = await indexedMembers();
+				const filedBefore = await indexedMembers();
 
-			// The MISS then HIT proves there is an entry to purge at all: a
-			// scenario asserting a later HIT would pass just as well against a read
-			// that was never cacheable.
-			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
-				.toBe('MISS');
+				// The MISS then HIT proves there is an entry to purge at all: a
+				// scenario asserting a later HIT would pass just as well against a read
+				// that was never cacheable.
+				expect((await readSlots(readQuery)).headers[cacheStatusHeader])
+					.toBe('MISS');
 
-			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
-				.toBe('HIT');
+				expect((await readSlots(readQuery)).headers[cacheStatusHeader])
+					.toBe('HIT');
 
-			await expectAnswer(readQuery, ids, cellRows(response!));
+				await expectAnswer(readQuery, ids, cellRows(response!));
 
-			filedMembers.set(
-				queryKey(readQuery),
-				await expectFingerprints(filedBefore, cellRows(fingerprints!)),
-			);
-		});
+				filedMembers.set(
+					queryKey(readQuery),
+					await expectFingerprints(filedBefore, cellRows(fingerprints!)),
+				);
+			},
+		);
 
 		// Filled after the read under test, because that step clears the whole cache
 		// before it fills its own entry, and the witnesses have to outlive it.
 		and(
-			'the witness reads are cached:',
+			'the witness reads are cached, filed under theirs:',
 			async (table: Record<string, string>[]) => {
 				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);
@@ -432,7 +441,7 @@ describe.each(vendors)('%s', (vendor) => {
 	// `slots` cell has to carry.
 	function defineWhenSteps({ when }: StepFunctions, ids: Map<string, number>) {
 		when.optional(
-			'the slots are created:',
+			'the slots are created, purging every fingerprint they match:',
 			async (table: Record<string, string>[]) => {
 				const filedBefore = await indexedMembers();
 
@@ -449,7 +458,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
-			'the slots are updated:',
+			'the slots are updated, purging every fingerprint they match:',
 			async (table: Record<string, string>[]) => {
 				const filedBefore = await indexedMembers();
 
@@ -466,7 +475,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
-			'the slots are deleted:',
+			'the slots are deleted, purging every fingerprint they match:',
 			async (table: Record<string, string>[]) => {
 				const filedBefore = await indexedMembers();
 
@@ -489,7 +498,7 @@ describe.each(vendors)('%s', (vendor) => {
 		filedMembers: Map<string, string[]>,
 	) {
 		then.optional(
-			'the read is purged:',
+			/^the read is purged, .+:$/,
 			async (table: Record<string, string>[]) => {
 				const { query, response, fingerprints } = table[0]!;
 				const readQuery = queryParameters(query!);
@@ -505,7 +514,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		then.optional(
-			'the read is still cached:',
+			/^the read is still cached, .+:$/,
 			async (table: Record<string, string>[]) => {
 				const { query, response, fingerprints } = table[0]!;
 				const readQuery = queryParameters(query!);
@@ -521,7 +530,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		and.optional(
-			'the witness reads are purged:',
+			/^the witness reads are purged, .+:$/,
 			async (table: Record<string, string>[]) => {
 				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);
@@ -538,7 +547,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		and.optional(
-			'the witness reads are still cached:',
+			/^the witness reads are still cached, .+:$/,
 			async (table: Record<string, string>[]) => {
 				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);

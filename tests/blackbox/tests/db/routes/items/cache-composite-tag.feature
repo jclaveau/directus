@@ -29,6 +29,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
   under two — a read matching two ways — loses only the one the row matched, and
   states only that one here.
 
+  Every verdict step says why it fell that way: the pins the write matched on the
+  row it wrote, the pin it did not match, or the field it wrote that the read
+  never selected. Those are the three things the rule turns on, so a scenario
+  reads as a sentence rather than as a table the reader has to apply the rule to.
+
   The rows a write writes are stated as YAML in a multiline cell, the way
   responses and fingerprints are, so the write can carry the fingerprints it
   purged in a column beside them. The rows a scenario starts from carry nothing
@@ -44,7 +49,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
   a read the write was right to leave alone.
 
   Background:
-    Given the slot collection:
+    Given the slot collection and the fields a fingerprint may pin:
       | field  | type    | scoped_cache_field |
       | owner  | string  | yes                |
       | method | string  | yes                |
@@ -52,12 +57,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | amount | integer | no                 |
 
   Scenario: a write matching one pin but not the other leaves the read cached
-    Given the slots:
+    Given the slots the reads answer from:
       | marker       | owner | method | note   | amount |
       | target_slot  | alpha | spaced | first  | 10     |
       | other_owner  | beta  | spaced | third  | 30     |
       | other_method | alpha | slow   | fourth | 40     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |   owner: alpha        |     method:    |
@@ -68,7 +73,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response               | fingerprints   |
       | fields:          | - marker: other_owner  | - pinnedScope: |+
       |   - id           |                        |     method:    |
@@ -88,7 +93,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - id       |
       |                  |                        |     - method   |
       |                  |                        |     - owner    |
-    When the slots are created:
+    When the slots are created, purging every fingerprint they match:
       | slots                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
       |   owner: beta          |     method:         |
@@ -99,7 +104,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                        |     - id            |
       |                        |     - method        |
       |                        |     - owner         |
-    Then the read is still cached:
+    Then the read is still cached, not matching `owner: alpha`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |   owner: alpha        |     method:    |
@@ -110,7 +115,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `method: spaced, owner: beta`:
       | query            | response               | fingerprints   |
       | fields:          | - marker: other_owner  | - pinnedScope: |+
       |   - id           | - marker: created_slot |     method:    |
@@ -121,7 +126,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - id       |
       |                  |                        |     - method   |
       |                  |                        |     - owner    |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `method: slow`:
       | query          | response               | fingerprints   |
       | fields:        | - marker: other_method | - pinnedScope: |+
       |   - id         |                        |     method:    |
@@ -134,11 +139,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                        |     - owner    |
 
   Scenario: a write matching every pin purges the read
-    Given the slots:
+    Given the slots the reads answer from:
       | marker       | owner | method | note  | amount |
       | target_slot  | gamma | spaced | first | 10     |
       | other_method | gamma | slow   | third | 30     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |   owner: gamma        |     method:    |
@@ -149,7 +154,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query          | response               | fingerprints   |
       | fields:        | - marker: other_method | - pinnedScope: |+
       |   - id         |                        |     method:    |
@@ -160,7 +165,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                        |     - id       |
       |                |                        |     - method   |
       |                |                        |     - owner    |
-    When the slots are created:
+    When the slots are created, purging every fingerprint they match:
       | slots                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
       |   owner: gamma         |     method:         |
@@ -171,7 +176,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                        |     - id            |
       |                        |     - method        |
       |                        |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `method: spaced, owner: gamma`:
       | query            | response               | fingerprints   |
       | fields:          | - marker: target_slot  | - pinnedScope: |+
       |   - id           |   owner: gamma         |     method:    |
@@ -182,7 +187,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - id       |
       |                  |                        |     - method   |
       |                  |                        |     - owner    |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `method: slow`:
       | query          | response               | fingerprints   |
       | fields:        | - marker: other_method | - pinnedScope: |+
       |   - id         |                        |     method:    |
@@ -195,10 +200,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                        |     - owner    |
 
   Scenario: a write changing a field the read never named leaves it cached
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | delta | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |   owner: delta        |     method:    |
@@ -209,7 +214,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |                       |     method:    |
@@ -221,7 +226,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - method   |
       |                  |                       |     - note     |
       |                  |                       |     - owner    |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   note: rewritten     |     method:         |
@@ -233,7 +238,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - method        |
       |                       |     - note          |
       |                       |     - owner         |
-    Then the read is still cached:
+    Then the read is still cached, not reading `note`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |   owner: delta        |     method:    |
@@ -244,7 +249,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `method: spaced, owner: delta`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |                       |     method:    |
@@ -258,10 +263,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - owner    |
 
   Scenario: a write changing a field the read sorted on purges it
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner   | method | note  | amount |
       | target_slot | epsilon | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |   owner: epsilon      |     owner:      |
@@ -270,7 +275,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: epsilon |                       |     - id        |
       | sort:            |                       |     - note      |
       |   - note         |                       |     - owner     |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |                       |     owner:      |
@@ -278,7 +283,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | filter:          |                       |   viewFields:   |
       |   owner: epsilon |                       |     - id        |
       |                  |                       |     - owner     |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   note: rewritten     |     owner:          |
@@ -287,7 +292,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - id            |
       |                       |     - note          |
       |                       |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `owner: epsilon`:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |   owner: epsilon      |     owner:      |
@@ -296,7 +301,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: epsilon |                       |     - id        |
       | sort:            |                       |     - note      |
       |   - note         |                       |     - owner     |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not reading `note`:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |                       |     owner:      |
@@ -306,10 +311,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - owner     |
 
   Scenario: a read selecting every field is purged by any column change
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | zeta  | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - "*"       |   owner: zeta         |     owner:     |
@@ -320,7 +325,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |               |                       |     - method   |
       |               |                       |     - note     |
       |               |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |                       |     owner:     |
@@ -328,7 +333,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | filter:       |                       |   viewFields:  |
       |   owner: zeta |                       |     - id       |
       |               |                       |     - owner    |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   note: rewritten     |     owner:          |
@@ -339,7 +344,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - method        |
       |                       |     - note          |
       |                       |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `owner: zeta`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - "*"       |   owner: zeta         |     owner:     |
@@ -350,7 +355,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |               |                       |     - method   |
       |               |                       |     - note     |
       |               |                       |     - owner    |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not reading `note`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |                       |     owner:     |
@@ -360,10 +365,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |               |                       |     - owner    |
 
   Scenario: a read filtered on a range binds the field without pinning a value
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | theta | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |   owner: theta        |     owner:     |
@@ -373,7 +378,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: theta |                       |     - id       |
       |   amount:      |                       |     - owner    |
       |     _gt: 5     |                       |                |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |                       |     owner:     |
@@ -382,7 +387,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | filter:        |                       |     - id       |
       |   owner: theta |                       |     - note     |
       |                |                       |     - owner    |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   note: rewritten     |     owner:          |
@@ -391,7 +396,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - id            |
       |                       |     - note          |
       |                       |     - owner         |
-    Then the read is still cached:
+    Then the read is still cached, not reading `note`:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |   owner: theta        |     owner:     |
@@ -401,7 +406,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: theta |                       |     - id       |
       |   amount:      |                       |     - owner    |
       |     _gt: 5     |                       |                |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `owner: theta`:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |                       |     owner:     |
@@ -412,10 +417,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                       |     - owner    |
 
   Scenario: a write to the field a range was read on purges it
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | iota  | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |   owner: iota         |     owner:     |
@@ -425,7 +430,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: iota |                       |     - id       |
       |   amount:     |                       |     - owner    |
       |     _gt: 5    |                       |                |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |                       |     owner:     |
@@ -433,7 +438,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | filter:       |                       |   viewFields:  |
       |   owner: iota |                       |     - id       |
       |               |                       |     - owner    |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   amount: 30          |     owner:          |
@@ -442,7 +447,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - amount        |
       |                       |     - id            |
       |                       |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `owner: iota`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |   owner: iota         |     owner:     |
@@ -452,7 +457,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner: iota |                       |     - id       |
       |   amount:     |                       |     - owner    |
       |     _gt: 5    |                       |                |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not reading `amount`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |                       |     owner:     |
@@ -462,10 +467,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |               |                       |     - owner    |
 
   Scenario: a read filtered on a list of owners is purged by a write to any of them
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | kappa | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |                       |     owner:     |
@@ -475,7 +480,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     _in:       |                       |     - id       |
       |       - kappa  |                       |     - owner    |
       |       - lambda |                       |                |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |                       |     owner:     |
@@ -484,7 +489,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   owner:      |                       |     - id       |
       |     _in:      |                       |     - owner    |
       |       - kappa |                       |                |
-    When the slots are created:
+    When the slots are created, purging every fingerprint they match:
       | slots                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
       |   owner: lambda        |     owner:          |
@@ -493,7 +498,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   amount: 20           |   viewFields:       |
       |                        |     - id            |
       |                        |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `owner: lambda`:
       | query          | response               | fingerprints   |
       | fields:        | - marker: target_slot  | - pinnedScope: |+
       |   - id         |   owner: kappa         |     owner:     |
@@ -503,7 +508,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     _in:       |                        |     - id       |
       |       - kappa  |                        |     - owner    |
       |       - lambda |                        |                |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `owner: kappa`:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - id        |                       |     owner:     |
@@ -514,10 +519,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |       - kappa |                       |                |
 
   Scenario: a read filtered on a list of owners survives a write outside it
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | mu    | spaced | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query      | response              | fingerprints   |
       | fields:    | - marker: target_slot | - pinnedScope: |+
       |   - id     |                       |     owner:     |
@@ -527,7 +532,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     _in:   |                       |     - id       |
       |       - mu |                       |     - owner    |
       |       - nu |                       |                |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query      | response              | fingerprints   |
       | fields:    | - marker: target_slot | - pinnedScope: |+
       |   - id     |                       |     owner:     |
@@ -537,7 +542,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     _in:   |                       |     - id       |
       |       - mu |                       |     - owner    |
       |       - xi |                       |                |
-    When the slots are created:
+    When the slots are created, purging every fingerprint they match:
       | slots                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
       |   owner: xi            |     owner:          |
@@ -546,7 +551,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   amount: 20           |   viewFields:       |
       |                        |     - id            |
       |                        |     - owner         |
-    Then the read is still cached:
+    Then the read is still cached, not matching `owner: mu or nu`:
       | query      | response              | fingerprints   |
       | fields:    | - marker: target_slot | - pinnedScope: |+
       |   - id     |   owner: mu           |     owner:     |
@@ -556,7 +561,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     _in:   |                       |     - id       |
       |       - mu |                       |     - owner    |
       |       - nu |                       |                |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `owner: xi`:
       | query      | response               | fingerprints   |
       | fields:    | - marker: target_slot  | - pinnedScope: |+
       |   - id     | - marker: created_slot |     owner:     |
@@ -568,12 +573,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |       - xi |                        |                |
 
   Scenario: a row moving into the read's slice purges it
-    Given the slots:
+    Given the slots the reads answer from:
       | marker       | owner   | method | note   | amount |
       | target_slot  | omicron | spaced | first  | 10     |
       | other_owner  | pi      | spaced | second | 20     |
       | other_method | omicron | slow   | third  | 30     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |                       |     method:     |
@@ -584,7 +589,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id        |
       |                  |                       |     - method    |
       |                  |                       |     - owner     |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response               | fingerprints    |
       | fields:          | - marker: other_owner  | - pinnedScope:  |+
       |   - id           |                        |     method:     |
@@ -604,7 +609,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - id        |
       |                  |                        |     - method    |
       |                  |                        |     - owner     |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: other_owner | - pinnedScope:      |+
       |   owner: omicron      |     method:         |
@@ -624,7 +629,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - id            |
       |                       |     - method        |
       |                       |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `method: spaced, owner: omicron`:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |   owner: omicron      |     method:     |
@@ -635,7 +640,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id        |
       |                  |                       |     - method    |
       |                  |                       |     - owner     |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `method: spaced, owner: pi`:
       | query            | response | fingerprints   |
       | fields:          | []       | - pinnedScope: |+
       |   - id           |          |     method:    |
@@ -646,7 +651,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |          |     - id       |
       |                  |          |     - method   |
       |                  |          |     - owner    |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `method: slow`:
       | query            | response               | fingerprints    |
       | fields:          | - marker: other_method | - pinnedScope:  |+
       |   - id           |                        |     method:     |
@@ -659,11 +664,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - owner     |
 
   Scenario: a row moving out of the read's slice purges it
-    Given the slots:
+    Given the slots the reads answer from:
       | marker       | owner | method | note  | amount |
       | target_slot  | rho   | spaced | first | 10     |
       | other_method | rho   | slow   | third | 30     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |                       |     method:    |
@@ -674,7 +679,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response               | fingerprints   |
       | fields:          | []                     | - pinnedScope: |+
       |   - id           |                        |     method:    |
@@ -694,7 +699,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - id       |
       |                  |                        |     - method   |
       |                  |                        |     - owner    |
-    When the slots are updated:
+    When the slots are updated, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   owner: sigma        |     method:         |
@@ -714,7 +719,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - id            |
       |                       |     - method        |
       |                       |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `method: spaced, owner: rho`:
       | query            | response | fingerprints   |
       | fields:          | []       | - pinnedScope: |+
       |   - id           |          |     method:    |
@@ -725,7 +730,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |          |     - id       |
       |                  |          |     - method   |
       |                  |          |     - owner    |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `method: spaced, owner: sigma`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |                       |     method:    |
@@ -736,7 +741,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `method: slow`:
       | query          | response               | fingerprints   |
       | fields:        | - marker: other_method | - pinnedScope: |+
       |   - id         |                        |     method:    |
@@ -749,10 +754,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                        |     - owner    |
 
   Scenario: a read matching two ways is purged by a write matching either
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | tau   | slow   | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query                | response              | fingerprints   |
       | fields:              | - marker: target_slot | - pinnedScope: |+
       |   - id               |   owner: tau          |     owner:     |
@@ -768,7 +773,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                       |     - id       |
       |                      |                       |     - method   |
       |                      |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query                | response              | fingerprints   |
       | fields:              | - marker: target_slot | - pinnedScope: |+
       |   - id               |   owner: tau          |     owner:     |
@@ -784,7 +789,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                       |     - id       |
       |                      |                       |     - method   |
       |                      |                       |     - owner    |
-    When the slots are created:
+    When the slots are created, purging every fingerprint they match:
       | slots                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
       |   owner: phi           |     method:         |
@@ -793,7 +798,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   amount: 20           |     - id            |
       |                        |     - method        |
       |                        |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `method: spaced`:
       | query                | response               | fingerprints   |
       | fields:              | - marker: target_slot  | - pinnedScope: |+
       |   - id               |   owner: tau           |     owner:     |
@@ -809,7 +814,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                        |     - id       |
       |                      |                        |     - method   |
       |                      |                        |     - owner    |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `owner: tau`:
       | query                | response              | fingerprints   |
       | fields:              | - marker: target_slot | - pinnedScope: |+
       |   - id               |   owner: tau          |     owner:     |
@@ -827,10 +832,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                       |     - owner    |
 
   Scenario: a read matching two ways survives a write matching neither
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note  | amount |
       | target_slot | omega | slow   | first | 10     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query                | response              | fingerprints   |
       | fields:              | - marker: target_slot | - pinnedScope: |+
       |   - id               |   owner: omega        |     owner:     |
@@ -846,7 +851,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                       |     - id       |
       |                      |                       |     - method   |
       |                      |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query              | response              | fingerprints   |
       | fields:            | - marker: target_slot | - pinnedScope: |+
       |   - id             |   owner: omega        |     owner:     |
@@ -862,7 +867,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                    |                       |     - id       |
       |                    |                       |     - method   |
       |                    |                       |     - owner    |
-    When the slots are created:
+    When the slots are created, purging every fingerprint they match:
       | slots                  | purged fingerprints |
       | - marker: created_slot | - pinnedScope:      |+
       |   owner: koppa         |     method:         |
@@ -871,7 +876,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   amount: 20           |     - id            |
       |                        |     - method        |
       |                        |     - owner         |
-    Then the read is still cached:
+    Then the read is still cached, not matching `owner: omega`:
       | query                | response              | fingerprints   |
       | fields:              | - marker: target_slot | - pinnedScope: |+
       |   - id               |   owner: omega        |     owner:     |
@@ -887,7 +892,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                      |                       |     - id       |
       |                      |                       |     - method   |
       |                      |                       |     - owner    |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `method: slow`:
       | query              | response               | fingerprints   |
       | fields:            | - marker: target_slot  | - pinnedScope: |+
       |   - id             |   owner: omega         |     owner:     |
@@ -905,11 +910,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                    |                        |     - owner    |
 
   Scenario: a delete of a matching row purges the read
-    Given the slots:
+    Given the slots the reads answer from:
       | marker       | owner   | method | note  | amount |
       | target_slot  | upsilon | spaced | first | 10     |
       | other_method | upsilon | slow   | third | 30     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |                       |     method:     |
@@ -920,7 +925,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id        |
       |                  |                       |     - method    |
       |                  |                       |     - owner     |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response               | fingerprints    |
       | fields:          | - marker: other_method | - pinnedScope:  |+
       |   - id           |                        |     method:     |
@@ -931,7 +936,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - id        |
       |                  |                        |     - method    |
       |                  |                        |     - owner     |
-    When the slots are deleted:
+    When the slots are deleted, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |                       |     method:         |
@@ -942,7 +947,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - id            |
       |                       |     - method        |
       |                       |     - owner         |
-    Then the read is purged:
+    Then the read is purged, matching `method: spaced, owner: upsilon`:
       | query            | response | fingerprints    |
       | fields:          | []       | - pinnedScope:  |+
       |   - id           |          |     method:     |
@@ -953,7 +958,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |          |     - id        |
       |                  |          |     - method    |
       |                  |          |     - owner     |
-    And the witness reads are still cached:
+    And the witness reads are still cached, not matching `method: slow`:
       | query            | response               | fingerprints    |
       | fields:          | - marker: other_method | - pinnedScope:  |+
       |   - id           |                        |     method:     |
@@ -966,11 +971,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                        |     - owner     |
 
   Scenario: a delete outside the read's slice leaves it cached
-    Given the slots:
+    Given the slots the reads answer from:
       | marker      | owner | method | note   | amount |
       | target_slot | chi   | spaced | first  | 10     |
       | other_owner | psi   | spaced | second | 20     |
-    And this read is cached:
+    And this read is cached, filed under its `fingerprints`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |                       |     method:    |
@@ -981,7 +986,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are cached:
+    And the witness reads are cached, filed under theirs:
       | query            | response              | fingerprints   |
       | fields:          | - marker: other_owner | - pinnedScope: |+
       |   - id           |                       |     method:    |
@@ -992,7 +997,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    When the slots are deleted:
+    When the slots are deleted, purging every fingerprint they match:
       | slots                 | purged fingerprints |
       | - marker: other_owner | - pinnedScope:      |+
       |                       |     method:         |
@@ -1003,7 +1008,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                       |     - id            |
       |                       |     - method        |
       |                       |     - owner         |
-    Then the read is still cached:
+    Then the read is still cached, not matching `owner: chi`:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
       |   - id           |   owner: chi          |     method:    |
@@ -1014,7 +1019,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - id       |
       |                  |                       |     - method   |
       |                  |                       |     - owner    |
-    And the witness reads are purged:
+    And the witness reads are purged, matching `method: spaced, owner: psi`:
       | query            | response | fingerprints   |
       | fields:          | []       | - pinnedScope: |+
       |   - id           |          |     method:    |
