@@ -409,9 +409,9 @@ implements AbstractService<Item> {
 				});
 			}
 
-			// The rows that leave their key to the sequence draw it in the same statement as
-			// the rows that provide one, so the sequence has to clear the provided keys
-			// before the insert runs, not only after it.
+			// The rows that leave their key to the sequence draw it in the same
+			// statement as the rows that provide one, so the sequence has to clear
+			// the provided keys before the insert runs, not only after it.
 			if (autoIncrementSequenceNeedsToBeReset) {
 				const providedPrimaryKeys = prepared
 					.map((p) => Number(p.primaryKey))

@@ -17,9 +17,9 @@ export class AutoIncrementHelperPostgres extends AutoSequenceHelper {
 	}
 
 	/**
-	 * Raises the sequence to the greatest of the column's current max and the value the
-	 * caller is about to insert, so a row left to the sequence in the same statement
-	 * lands above it.
+	 * Raises the sequence to the greatest of the column's current max and
+	 * the value the caller is about to insert, so a row left to the
+	 * sequence in the same statement lands above it.
 	 */
 	override async raiseAutoIncrementSequence(
 		table: string,
@@ -27,7 +27,8 @@ export class AutoIncrementHelperPostgres extends AutoSequenceHelper {
 		providedValue: number,
 	): Promise<Knex.Raw | void> {
 		return await this.knex.raw(
-			`SELECT SETVAL(pg_get_serial_sequence(?, ?), GREATEST(?, COALESCE((SELECT MAX(??) FROM ??), 0)));`,
+			`SELECT SETVAL(pg_get_serial_sequence(?, ?),
+				GREATEST(?, COALESCE((SELECT MAX(??) FROM ??), 0)));`,
 			[`"${table}"`, column, providedValue, column, table],
 		);
 	}
