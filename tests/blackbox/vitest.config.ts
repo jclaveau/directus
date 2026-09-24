@@ -5,20 +5,12 @@ import Sequencer from './setup/sequencer';
 export default defineConfig({
 	plugins: [tsconfigPaths()],
 	test: {
-		poolOptions: {
-			forks: {
-				minWorkers: 1,
-				maxWorkers: 6,
-			},
-		},
+		maxWorkers: 6,
 		setupFiles: ['./setup/sequential-gate.ts'],
 		sequence: {
 			sequencer: Sequencer,
 		},
 		testTimeout: 30_000,
-		// The gate hook blocks until the files it depends on report completion,
-		// which can outlast every other file still queued behind it.
-		hookTimeout: 600_000,
 		projects: [
 			{
 				extends: true,
