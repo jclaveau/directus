@@ -48,11 +48,15 @@ beforeAll(async () => {
 			const completedCount = Number(response.data.data[0].count.id);
 
 			if (testIndex >= 0) {
-				if (completedCount >= testIndex) break;
-			} else if (totalTestsCount + testIndex === completedCount) {
+				if (completedCount >= testIndex) {
+					break;
+				}
+			}
+			else if (totalTestsCount + testIndex === completedCount) {
 				break;
 			}
-		} catch {
+		}
+		catch {
 			continue;
 		}
 
@@ -61,11 +65,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-	const body = {
+	await axios.post(`${serverUrl}/items/tests_flow_completed`, {
 		test_file_path: testFilePath,
-	};
-
-	await axios.post(`${serverUrl}/items/tests_flow_completed`, body, {
+	}, {
 		headers: {
 			Authorization: `Bearer ${USER.TESTS_FLOW.TOKEN}`,
 			'Content-Type': 'application/json',

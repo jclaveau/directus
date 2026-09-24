@@ -15,12 +15,10 @@ export default class CustomSequencer extends BaseSequencer {
 			return files;
 		}
 
-		const project = files[0]!.project.name as 'db' | 'common';
-
 		const mine = new Set(
 			filesForShard(
 				files.map((spec) => spec.moduleId),
-				project,
+				files[0]!.project.name as 'db' | 'common',
 				shard.index,
 				shard.count,
 			),
