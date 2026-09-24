@@ -8,7 +8,7 @@ export default defineConfig({
 	plugins: [{ ...nodeExternals(), enforce: 'pre' }, vue(), dts()],
 	build: {
 		lib: {
-			entry: resolve(__dirname, 'src/index.ts'),
+			entry: resolve(import.meta.dirname, 'src/index.ts'),
 			fileName: 'index',
 			formats: ['es'],
 		},
