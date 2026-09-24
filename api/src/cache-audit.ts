@@ -62,7 +62,8 @@ import { getSecret } from './utils/get-secret.js';
  *                    is not a pure function of the request, and the entry is one
  *                    write to the uncovered tag from stale.
  *   - raced:         the entry was purged or refilled while it was being
- *                    replayed. The purge doing its job, not staleness.
+ *                    replayed, or refilled since the drain described it. The
+ *                    purge doing its job, not staleness.
  *   - time_varying:  two fresh reads disagreed with each other ($NOW, a random
  *                    sort). Not decidable, not counted against the cache.
  *   - expired:       past its expiry and not yet evicted.
@@ -523,8 +524,12 @@ class CacheAudit {
 			const diff = this.diff(snapshot.body, fresh.body);
 
 			if (diff.length === 0) {
-				return sameTags(descriptor.scopedCacheTags, fresh.tags)
-					? { verdict: 'fresh' }
+				if (sameTags(descriptor.scopedCacheTags, fresh.tags)) {
+					return { verdict: 'fresh' };
+				}
+
+				return filledSinceDescribed(snapshot, descriptor)
+					? { verdict: 'raced' }
 					: { verdict: 'tag_drift', replayTags: fresh.tags };
 			}
 
@@ -846,6 +851,19 @@ function replayPlan(
 	const url = descriptorUrl(descriptor);
 
 	return { url, request: { method: 'GET', path: url, headers } };
+}
+
+// The descriptor's tags are the drain's, and the drain runs on a schedule
+// (`CACHE_STATS_DRAIN_SCHEDULE`): an entry refilled since it was described
+// carries the body of a fill whose tags the drain has yet to see, and the
+// replay is only ever read against those. The fill stamps the sidecar before
+// it queues the descriptor, so its own sidecar never postdates its row.
+function filledSinceDescribed(
+	snapshot: EntrySnapshot,
+	descriptor: CacheAuditDescriptor,
+): boolean {
+	return snapshot.createdAt !== null
+		&& snapshot.createdAt > descriptor.lastFilled.getTime();
 }
 
 function sameTags(filled: string[], replayed: string[]): boolean {

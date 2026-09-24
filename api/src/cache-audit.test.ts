@@ -819,6 +819,43 @@ describe('tag drift', () => {
 			detail: 'filled under (none), replay pinned articles',
 		}));
 	});
+
+	test(oneLine`
+		an entry refilled since the drain described it is raced: its tags are the
+		refill's, which the drain has yet to see
+	`, async () => {
+		fill('rk', { data: [] }, new Date('2026-09-16T10:00:05Z').getTime());
+
+		described(descriptor({
+			scopedCacheTags: ['articles:owner=acme', 'authors'],
+		}));
+
+		const report = await auditCache({
+			replay: replayer(
+				answer({ data: [] }, { tags: 'articles:owner=acme,authors:id=2' }),
+			),
+		});
+
+		expect(report.counts.raced).toBe(1);
+		expect(report.counts.tag_drift).toBe(0);
+		expect(queueCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test('a sidecar stamped when the descriptor was is the same fill', async () => {
+		fill('rk', { data: [] }, new Date('2026-09-16T10:00:00Z').getTime());
+
+		described(descriptor({
+			scopedCacheTags: ['articles:owner=acme', 'authors'],
+		}));
+
+		const report = await auditCache({
+			replay: replayer(
+				answer({ data: [] }, { tags: 'articles:owner=acme,authors:id=2' }),
+			),
+		});
+
+		expect(report.counts.tag_drift).toBe(1);
+	});
 });
 
 describe('the race guard', () => {
