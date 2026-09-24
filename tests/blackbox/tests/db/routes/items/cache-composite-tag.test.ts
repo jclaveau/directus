@@ -127,6 +127,40 @@ describe.each(vendors)('%s', (vendor) => {
 		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe(status);
 	}
 
+	// A witness names its rows by the marker the scenario created them under, so a
+	// scenario reads as rows in, rows out, with no id carried across its steps, and
+	// holds only the columns that carry its point.
+	async function expectAnswer(
+		query: Record<string, string>,
+		ids: Map<string, number>,
+		witness: Record<string, string>[],
+	) {
+		const markerById = new Map<number, string>();
+
+		for (const [marker, id] of ids) {
+			markerById.set(id, marker);
+		}
+
+		const columns = Object.keys(witness[0]!);
+
+		const answered = (await readSlots(query)).body.data.map(
+			(row: Record<string, unknown>) => {
+				const answer: Record<string, string | undefined> = {};
+
+				for (const column of columns) {
+					answer[column] = column === 'marker'
+						? markerById.get(row['id'] as number)
+						: String(row[column]);
+				}
+
+				return answer;
+			},
+		);
+
+		expect(answered).toEqual(expect.arrayContaining(witness));
+		expect(answered).toHaveLength(witness.length);
+	}
+
 	function defineGivenSteps(
 		{ given, and }: StepFunctions,
 		ids: Map<string, number>,
@@ -188,11 +222,39 @@ describe.each(vendors)('%s', (vendor) => {
 			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
 				.toBe('HIT');
 		});
+
+		and('the cached read answers:', async (table: Record<string, string>[]) => {
+			await expectAnswer(readQuery, ids, table);
+		});
 	}
 
 	function whenSlotsCreated({ when }: StepFunctions, ids: Map<string, number>) {
 		when('the slots are created:', async (table: Record<string, string>[]) => {
 			await createSlots(table, ids);
+		});
+	}
+
+	function defineThenSteps(
+		{ then, and }: StepFunctions,
+		ids: Map<string, number>,
+		readQuery: Record<string, string>,
+	) {
+		then.optional(
+			'the read is purged',
+			async () => await expectCacheStatus(readQuery, 'MISS'),
+		);
+
+		then.optional(
+			'the read is still cached',
+			async () => await expectCacheStatus(readQuery, 'HIT'),
+		);
+
+		and.optional('it answers:', async (table: Record<string, string>[]) => {
+			await expectAnswer(readQuery, ids, table);
+		});
+
+		and.optional('it answers nothing', async () => {
+			expect((await readSlots(readQuery)).body.data).toEqual([]);
 		});
 	}
 
@@ -207,10 +269,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				whenSlotsCreated(steps, ids);
 
-				steps.then(
-					'the read is still cached',
-					async () => await expectCacheStatus(readQuery, 'HIT'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -225,10 +284,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				whenSlotsCreated(steps, ids);
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -245,10 +301,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('d1')!, { note: 'rewritten' });
 				});
 
-				steps.then(
-					'the read is still cached',
-					async () => await expectCacheStatus(readQuery, 'HIT'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -265,10 +318,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('e1')!, { note: 'rewritten' });
 				});
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -285,10 +335,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('z1')!, { note: 'rewritten' });
 				});
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -305,10 +352,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('t1')!, { note: 'rewritten' });
 				});
 
-				steps.then(
-					'the read is still cached',
-					async () => await expectCacheStatus(readQuery, 'HIT'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -325,10 +369,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('i1')!, { amount: 30 });
 				});
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -343,10 +384,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				whenSlotsCreated(steps, ids);
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -361,10 +399,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				whenSlotsCreated(steps, ids);
 
-				steps.then(
-					'the read is still cached',
-					async () => await expectCacheStatus(readQuery, 'HIT'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -381,10 +416,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('p1')!, { owner: 'omicron' });
 				});
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -401,10 +433,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await updateSlot(ids.get('r1')!, { owner: 'sigma' });
 				});
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -419,10 +448,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				whenSlotsCreated(steps, ids);
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -437,10 +463,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				whenSlotsCreated(steps, ids);
 
-				steps.then(
-					'the read is still cached',
-					async () => await expectCacheStatus(readQuery, 'HIT'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -457,10 +480,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await deleteSlot(ids.get('u1')!);
 				});
 
-				steps.then(
-					'the read is purged',
-					async () => await expectCacheStatus(readQuery, 'MISS'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
@@ -477,10 +497,7 @@ describe.each(vendors)('%s', (vendor) => {
 					await deleteSlot(ids.get('c2')!);
 				});
 
-				steps.then(
-					'the read is still cached',
-					async () => await expectCacheStatus(readQuery, 'HIT'),
-				);
+				defineThenSteps(steps, ids, readQuery);
 			},
 			60_000,
 		);
