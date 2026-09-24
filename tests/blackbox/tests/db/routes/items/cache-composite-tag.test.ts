@@ -226,6 +226,21 @@ describe.each(vendors)('%s', (vendor) => {
 		and('the cached read answers:', async (table: Record<string, string>[]) => {
 			await expectAnswer(readQuery, ids, table);
 		});
+
+		// Filled after the read under test, because that step clears the whole cache
+		// before it fills its own entry, and these have to outlive it.
+		and(
+			'the following reads are cached:',
+			async (table: Record<string, string>[]) => {
+				for (const query of table) {
+					expect((await readSlots(query)).headers[cacheStatusHeader])
+						.toBe('MISS');
+
+					expect((await readSlots(query)).headers[cacheStatusHeader])
+						.toBe('HIT');
+				}
+			},
+		);
 	}
 
 	function whenSlotsCreated({ when }: StepFunctions, ids: Map<string, number>) {
@@ -256,6 +271,24 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional('it answers nothing', async () => {
 			expect((await readSlots(readQuery)).body.data).toEqual([]);
 		});
+
+		and.optional(
+			'the following reads are purged:',
+			async (table: Record<string, string>[]) => {
+				for (const query of table) {
+					await expectCacheStatus(query, 'MISS');
+				}
+			},
+		);
+
+		and.optional(
+			'the following reads are still cached:',
+			async (table: Record<string, string>[]) => {
+				for (const query of table) {
+					await expectCacheStatus(query, 'HIT');
+				}
+			},
+		);
 	}
 
 	defineFeature(feature, (scenario) => {
