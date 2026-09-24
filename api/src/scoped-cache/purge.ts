@@ -153,7 +153,7 @@ export async function indexScopedCacheEntry(
 	key: string,
 	fingerprints: readonly ScopedCacheFingerprint[],
 	extraSiblings: string[] = [],
-	schema?: SchemaOverview,
+	schema: SchemaOverview = { collections: {}, relations: [] },
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled() || fingerprints.length === 0) {
 		return;
@@ -174,9 +174,7 @@ export async function indexScopedCacheEntry(
 			// What the store may split its index by, read off the collection the
 			// fingerprint names: derived from the schema, never from the read, so a
 			// fill and the write that has to find it hand the store the same one.
-			indexPath: schema === undefined
-				? null
-				: scopedCacheIndexPath(schema, fingerprint.collection),
+			indexPath: scopedCacheIndexPath(schema, fingerprint.collection),
 		};
 	});
 
