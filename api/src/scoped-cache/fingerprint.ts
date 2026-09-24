@@ -1,12 +1,13 @@
 import type {
 	ScopedCacheDeclaredFingerprint,
+	ScopedCacheDeclaredScope,
 	ScopedCacheFingerprint,
 	ScopedCacheCollectionPin,
 	ScopedCachePin,
 	SchemaOverview,
 } from '@directus/types';
 import {
-	canonicalScopedCacheValue,
+	canonicalizeScopedCachePinValue,
 	scopedCachePinKey,
 } from './pins.js';
 
@@ -210,7 +211,7 @@ export function scopedCacheFingerprintOf(
 		}
 
 		const fieldValues = pinnedScope[pin.field] ?? [];
-		fieldValues.push(canonicalScopedCacheValue(pin.value, pin.type));
+		fieldValues.push(canonicalizeScopedCachePinValue(pin.value, pin.type));
 		pinnedScope[pin.field] = fieldValues;
 	}
 
@@ -239,8 +240,7 @@ export function scopedCacheDeclaredPins(
 ): ScopedCachePin[] {
 	const fields = schema?.collections[declared.collection]?.fields;
 
-	const pinnedScope: Readonly<Record<string, readonly unknown[]>> =
-		declared.pinnedScope ?? {};
+	const pinnedScope: ScopedCacheDeclaredScope = declared.pinnedScope ?? {};
 
 	return Object.entries(pinnedScope).flatMap(([field, values]) => {
 		return values.map((value) => {

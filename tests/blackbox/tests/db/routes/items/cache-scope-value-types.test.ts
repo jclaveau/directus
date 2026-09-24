@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // A scope value reaches the two sides of the cache in two different shapes: the
 // read gets it parsed out of a filter (`true`, `'0042'`, `'1.5'`, `'ACME'`) and
 // the write reads it back off the driver (`'t'`/`1`, `42`, `'1.50'`, `'acme'`).
-// `canonicalScopedCacheValue` is what makes those name ONE slice; when it does
+// `canonicalizeScopedCachePinValue` is what makes those name ONE slice; when it does
 // not, the read pins a key no write ever emits and the entry serves stale for its
 // whole TTL — silently, since both sides look right on their own.
 //

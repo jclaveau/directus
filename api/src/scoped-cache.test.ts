@@ -19,7 +19,7 @@ import {
 	type ScopedCacheFilterKeying,
 	assertScopedCacheStoreSupported,
 	bumpScopedCacheEpochs,
-	canonicalScopedCacheValue,
+	canonicalizeScopedCachePinValue,
 	countScopedCacheTagMembers,
 	createScopedCacheHookDeclarations,
 	dropScopedCacheIndex,
@@ -206,11 +206,11 @@ describe('the legacy tag form', () => {
 			type: 'string',
 		})).toBe('orgs:tenant=acme');
 
-		expect(canonicalScopedCacheValue('ACME', 'string'))
-		.toBe(canonicalScopedCacheValue('acme', 'string'));
+		expect(canonicalizeScopedCachePinValue('ACME', 'string'))
+		.toBe(canonicalizeScopedCachePinValue('acme', 'string'));
 
 		// `text` is the same column class one size up, and non-ASCII folds too.
-		expect(canonicalScopedCacheValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
+		expect(canonicalizeScopedCachePinValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
 	});
 
 	// countScopedCacheTagMembers reads a fingerprint's token back against this
@@ -524,8 +524,9 @@ describe('createScopedCacheHookDeclarations', () => {
 	// name collections it does not carry, so their pins pass through as written.
 	const emptySchema = new SchemaBuilder().build();
 
-	// A uuid key is where a missing type bites hardest: `canonicalScopedCacheValue`
-	// lowercases a `uuid` and leaves an untyped value alone.
+	// A uuid key is where a missing type bites hardest:
+	// `canonicalizeScopedCachePinValue` lowercases a `uuid` and leaves an untyped
+	// value alone.
 	const notesSchema = new SchemaBuilder()
 		.collection('notes', (c) => {
 			c.field('id')
@@ -4705,7 +4706,7 @@ describe('the canonical scope value', () => {
 	it('folds a uuid to one case', () => {
 		const upper = '3F2504E0-4F89-11D3-9A0C-0305E82C3301';
 
-		expect(canonicalScopedCacheValue(upper, 'uuid'))
+		expect(canonicalizeScopedCachePinValue(upper, 'uuid'))
 			.toBe(upper.toLowerCase());
 	});
 
@@ -4715,18 +4716,18 @@ describe('the canonical scope value', () => {
 	it.each([
 		true, 1, '1', 't', 'T', 'true', 'TRUE', 'True', 'y', 'YES', 'on', 'ON',
 	])('reads %s as the one true slice', (raw) => {
-		expect(canonicalScopedCacheValue(raw, 'boolean')).toBe('true');
+		expect(canonicalizeScopedCachePinValue(raw, 'boolean')).toBe('true');
 	});
 
 	it.each([
 		false, 0, '0', 'f', 'F', 'false', 'FALSE', 'n', 'NO', 'off',
 	])('reads %s as the one false slice', (raw) => {
-		expect(canonicalScopedCacheValue(raw, 'boolean')).toBe('false');
+		expect(canonicalizeScopedCachePinValue(raw, 'boolean')).toBe('false');
 	});
 
 	it('reads null and undefined as the one sentinel', () => {
-		expect(canonicalScopedCacheValue(null, 'string')).toBe('\x00null');
-		expect(canonicalScopedCacheValue(undefined, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue(null, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue(undefined, 'string')).toBe('\x00null');
 	});
 
 	// `01`, `+1`, `0001` and a driver's `1` are one key to the database, so they
@@ -4738,7 +4739,7 @@ describe('the canonical scope value', () => {
 		['-0', '0'],
 		['-0042', '-42'],
 	])('strips an integer spelling %s down to %s', (raw, canonical) => {
-		expect(canonicalScopedCacheValue(raw, 'bigInteger')).toBe(canonical);
+		expect(canonicalizeScopedCachePinValue(raw, 'bigInteger')).toBe(canonical);
 	});
 
 	// Spellings `validateKeys` still lets through, since it only asks
@@ -4748,37 +4749,37 @@ describe('the canonical scope value', () => {
 		['0x10', '16'],
 		['1.0', '1'],
 	])('normalises %s, which validateKeys accepts, to %s', (raw, canonical) => {
-		expect(canonicalScopedCacheValue(raw, 'integer')).toBe(canonical);
+		expect(canonicalizeScopedCachePinValue(raw, 'integer')).toBe(canonical);
 	});
 
 	// Past MAX_SAFE_INTEGER no token can be right, and such a key cannot have
 	// matched a row either, so a numeric pass would corrupt it for nothing.
 	it('keeps an unsafe integer spelling exactly as written', () => {
-		expect(canonicalScopedCacheValue('9007199254740993e0', 'bigInteger'))
+		expect(canonicalizeScopedCachePinValue('9007199254740993e0', 'bigInteger'))
 			.toBe('9007199254740993e0');
 	});
 
 	it('keeps a bigInteger magnitude no Number could hold', () => {
 		const beyond = '170141183460469231731687303715884105727';
 
-		expect(canonicalScopedCacheValue(`0${beyond}`, 'bigInteger')).toBe(beyond);
+		expect(canonicalizeScopedCachePinValue(`0${beyond}`, 'bigInteger')).toBe(beyond);
 	});
 
 	// Only the fixed-scale types need the numeric pass (`'1.50'` vs `1.5`).
 	it.each(['decimal', 'float'] as const)('reads a %s numerically', (type) => {
-		expect(canonicalScopedCacheValue('1.50', type)).toBe('1.5');
-		expect(canonicalScopedCacheValue(1.5, type)).toBe('1.5');
+		expect(canonicalizeScopedCachePinValue('1.50', type)).toBe('1.5');
+		expect(canonicalizeScopedCachePinValue(1.5, type)).toBe('1.5');
 	});
 
 	it('keeps a decimal that is not a number as written', () => {
-		expect(canonicalScopedCacheValue('not-a-number', 'decimal'))
+		expect(canonicalizeScopedCachePinValue('not-a-number', 'decimal'))
 			.toBe('not-a-number');
 	});
 
 	// `time` has no date component, so both sides give `HH:MM:SS` and it stays a
 	// plain string — unlike the three types below it.
 	it('leaves a time value alone', () => {
-		expect(canonicalScopedCacheValue('05:06:07', 'time')).toBe('05:06:07');
+		expect(canonicalizeScopedCachePinValue('05:06:07', 'time')).toBe('05:06:07');
 	});
 
 	it.each(['date', 'dateTime', 'timestamp'] as const)(
@@ -4786,21 +4787,21 @@ describe('the canonical scope value', () => {
 		(type) => {
 			const iso = '2024-03-04T05:06:07.000Z';
 
-			expect(canonicalScopedCacheValue(iso, type))
+			expect(canonicalizeScopedCachePinValue(iso, type))
 				.toBe(String(Date.parse(iso)));
 
-			expect(canonicalScopedCacheValue(new Date(iso), type))
+			expect(canonicalizeScopedCachePinValue(new Date(iso), type))
 				.toBe(String(Date.parse(iso)));
 		},
 	);
 
 	it('keeps a date it cannot parse as written', () => {
-		expect(canonicalScopedCacheValue('never', 'dateTime')).toBe('never');
+		expect(canonicalizeScopedCachePinValue('never', 'dateTime')).toBe('never');
 	});
 
 	it('falls through to the string form for a type it says nothing about', () => {
-		expect(canonicalScopedCacheValue(7, 'json')).toBe('7');
-		expect(canonicalScopedCacheValue(7, undefined)).toBe('7');
+		expect(canonicalizeScopedCachePinValue(7, 'json')).toBe('7');
+		expect(canonicalizeScopedCachePinValue(7, undefined)).toBe('7');
 	});
 
 	// A naive column comes back as a local Date from the driver but as an ISO string

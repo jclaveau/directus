@@ -31,7 +31,7 @@ import {
 } from './paths.js';
 import {
 	FieldTypesByField,
-	canonicalScopedCacheValue,
+	canonicalizeScopedCachePinValue,
 	isPinnableScopeType,
 	scopedCacheMaxPinsPerCollection,
 	scopedCacheMaxQueryCases,
@@ -104,7 +104,7 @@ export function scopedCachePinsFromKeyedFilters(
 		const seen = new Set<string>();
 
 		for (const value of keying.keys) {
-			const token = canonicalScopedCacheValue(value, type);
+			const token = canonicalizeScopedCachePinValue(value, type);
 
 			if (seen.has(token)) {
 				continue;

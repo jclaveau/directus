@@ -1,7 +1,9 @@
 import { useEnv } from '@directus/env';
 import type {
+	CanonicalScopedCachePinValue,
 	PrimaryKey,
 	ScopedCacheCollectionPin,
+	ScopedCachePin,
 	Type,
 } from '@directus/types';
 
@@ -43,17 +45,17 @@ export function earlierScopedCacheEpoch(
 		: right;
 }
 
-// Canonicalize a scope value to a driver-stable token so a REST/GraphQL filter value
+// Canonicalize a pin's value to a driver-stable token so a REST/GraphQL filter value
 // and the native DB row value resolve the SAME slice. `String()` alone collapses the
 // common case (number 7 vs string "7"), but diverges for non-string scalars — a
 // boolean is `true` from a parsed filter but `1`/`0` (mysql/sqlite) or `'t'` (pg)
 // from a stored row; a datetime is an ISO string from a filter but a `Date` from the
 // driver; a decimal is `1.5` vs `'1.50'`. NULL gets a null-byte sentinel rather than
 // String(null)='null', so it can't collide with a literal "null" value.
-export function canonicalScopedCacheValue(
-	value: unknown,
-	type: Type | undefined,
-): string {
+export function canonicalizeScopedCachePinValue(
+	value: ScopedCachePin['value'],
+	type: ScopedCachePin['type'],
+): CanonicalScopedCachePinValue {
 	if (value === null || value === undefined) {
 		return '\x00null';
 	}
@@ -192,7 +194,7 @@ export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
 	}
 
 	return `${pin.collection}:${pin.field}=${
-		canonicalScopedCacheValue(pin.value, pin.type)
+		canonicalizeScopedCachePinValue(pin.value, pin.type)
 	}`;
 }
 
@@ -260,7 +262,7 @@ export function scopedCacheCollectionPinsFromRows(
 			}
 
 			const value = row[field];
-			const token = canonicalScopedCacheValue(value, fieldTypes[field]);
+			const token = canonicalizeScopedCachePinValue(value, fieldTypes[field]);
 
 			if (seen.has(token)) {
 				continue;

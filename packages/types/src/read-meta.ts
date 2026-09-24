@@ -31,6 +31,35 @@ export interface ScopedCacheCollectionPin extends ScopedCachePin {
 }
 
 /**
+ * A pin's value once `canonicalizeScopedCachePinValue` has folded it against the
+ * column's type: a filter's `TRUE` and a postgres row's `t` arrive as one of
+ * these. It is the only spelling anything downstream reads — the index key, the
+ * glob, the serialised member — and canonicalizing one again returns it
+ * unchanged.
+ */
+export type CanonicalScopedCachePinValue = string;
+
+/**
+ * `ScopedCachePin[]` canonicalized and grouped by the field each one names: one
+ * entry per field, its values an OR — what an `_in` means — and the entries an
+ * AND. A pin's `type` is not carried over: it was spent canonicalizing the values.
+ */
+export type ScopedCachePinnedScope = Readonly<Record<
+	NonNullable<ScopedCachePin['field']>,
+	readonly CanonicalScopedCachePinValue[]
+>>;
+
+/**
+ * The same scope as a hook spells one, holding its values the way the code that
+ * wrote them does. The host canonicalizes them against the schema before anything
+ * matches on them, which is the whole difference between the two.
+ */
+export type ScopedCacheDeclaredScope = Readonly<Record<
+	NonNullable<ScopedCachePin['field']>,
+	readonly ScopedCachePin['value'][]
+>>;
+
+/**
  * One collection's whole dependency, in one value.
  *
  * A set of tags dies on ANY match, so every extra pin is an extra way to be
@@ -58,7 +87,7 @@ export interface ScopedCacheFingerprint {
 	 * it can rule a row out: every reader takes the two alike, and the serialiser
 	 * renders them alike.
 	 */
-	readonly pinnedScope?: Readonly<Record<string, readonly string[]>>;
+	readonly pinnedScope?: ScopedCachePinnedScope;
 	/**
 	 * The fields the read's view is built from: what it selected, sorted on,
 	 * filtered by, grouped or aggregated on, plus the reverse key of every to-many
@@ -90,7 +119,7 @@ export interface ScopedCacheFingerprint {
  */
 export interface ScopedCacheDeclaredFingerprint {
 	readonly collection: string;
-	readonly pinnedScope?: Readonly<Record<string, readonly unknown[]>>;
+	readonly pinnedScope?: ScopedCacheDeclaredScope;
 	readonly viewFields?: readonly string[];
 }
 

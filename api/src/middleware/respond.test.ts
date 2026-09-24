@@ -73,7 +73,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
-		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
+		// SPELLING, and a copy here drifts off `canonicalizeScopedCachePinValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
 		scopedCacheLegacyTags: actual.scopedCacheLegacyTags,
@@ -1104,7 +1104,7 @@ describe('respond middleware', () => {
 
 		// A boolean slice, because that is where a re-implementation of the tag
 		// would diverge: the driver hands back `1`, and only
-		// `canonicalScopedCacheValue` turns it into the `true` the Redis key and
+		// `canonicalizeScopedCachePinValue` turns it into the `true` the Redis key and
 		// the purge row both use. Written `=1` here, every purge of that slice
 		// would fail to join back to this entry and its purge count would read 0.
 		const res = makeRes(

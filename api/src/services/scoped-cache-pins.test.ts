@@ -5,7 +5,7 @@ import type {
 	FieldMap,
 } from '../permissions/modules/process-ast/types.js';
 import {
-	canonicalScopedCacheValue,
+	canonicalizeScopedCachePinValue,
 	composeScopedCachePaths,
 	pinnedScopedCacheQueryCasesFromFilter,
 	scopedCachePinsFromFilter,
@@ -17,24 +17,24 @@ import {
 // The read side derives a scope value from a (string-ish) query filter, the purge side from a
 // native DB row. Both feed the same cache key, so a filter value and its stored counterpart must
 // canonicalize identically — otherwise a write leaves the read's slice stale.
-describe('canonicalScopedCacheValue', () => {
+describe('canonicalizeScopedCachePinValue', () => {
 	test(oneLine`
 		null and undefined share the null-byte sentinel, distinct from the literal "null"
 	`, () => {
-		expect(canonicalScopedCacheValue(null, 'string')).toBe('\x00null');
-		expect(canonicalScopedCacheValue(undefined, 'string')).toBe('\x00null');
-		expect(canonicalScopedCacheValue('null', 'string')).toBe('null');
+		expect(canonicalizeScopedCachePinValue(null, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue(undefined, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue('null', 'string')).toBe('null');
 	});
 
 	test(oneLine`
 		boolean: filter \`true\`/\`false\` and driver \`1\`/\`0\`/\`t\` collapse to one token
 	`, () => {
 		for (const truthy of [true, 1, '1', 't', 'true']) {
-			expect(canonicalScopedCacheValue(truthy, 'boolean')).toBe('true');
+			expect(canonicalizeScopedCachePinValue(truthy, 'boolean')).toBe('true');
 		}
 
 		for (const falsy of [false, 0, '0', 'f', 'false']) {
-			expect(canonicalScopedCacheValue(falsy, 'boolean')).toBe('false');
+			expect(canonicalizeScopedCachePinValue(falsy, 'boolean')).toBe('false');
 		}
 	});
 
@@ -44,30 +44,31 @@ describe('canonicalScopedCacheValue', () => {
 		const iso = '2026-01-02T03:04:05.000Z';
 
 		for (const type of ['date', 'dateTime', 'timestamp'] as const) {
-			expect(canonicalScopedCacheValue(iso, type))
-				.toBe(canonicalScopedCacheValue(new Date(iso), type));
+			expect(canonicalizeScopedCachePinValue(iso, type))
+				.toBe(canonicalizeScopedCachePinValue(new Date(iso), type));
 		}
 
 		// Unparseable value falls back to its string form rather than NaN.
-		expect(canonicalScopedCacheValue('not-a-date', 'dateTime')).toBe('not-a-date');
+		expect(canonicalizeScopedCachePinValue('not-a-date', 'dateTime'))
+			.toBe('not-a-date');
 	});
 
 	test('decimal/float: fixed-scale `"1.50"` and numeric `1.5` collapse', () => {
-		expect(canonicalScopedCacheValue('1.50', 'decimal'))
-			.toBe(canonicalScopedCacheValue(1.5, 'decimal'));
+		expect(canonicalizeScopedCachePinValue('1.50', 'decimal'))
+			.toBe(canonicalizeScopedCachePinValue(1.5, 'decimal'));
 
-		expect(canonicalScopedCacheValue('2.0', 'float'))
-			.toBe(canonicalScopedCacheValue(2, 'float'));
+		expect(canonicalizeScopedCachePinValue('2.0', 'float'))
+			.toBe(canonicalizeScopedCachePinValue(2, 'float'));
 	});
 
 	test(oneLine`
 		integer/bigInteger keep \`String\` — \`7\` and \`"7"\` collapse, precision preserved
 	`, () => {
-		expect(canonicalScopedCacheValue(7, 'integer')).toBe('7');
-		expect(canonicalScopedCacheValue('7', 'integer')).toBe('7');
+		expect(canonicalizeScopedCachePinValue(7, 'integer')).toBe('7');
+		expect(canonicalizeScopedCachePinValue('7', 'integer')).toBe('7');
 
 		// Beyond Number.MAX_SAFE_INTEGER a numeric pass would corrupt; String keeps it exact.
-		expect(canonicalScopedCacheValue('9007199254740993', 'bigInteger'))
+		expect(canonicalizeScopedCachePinValue('9007199254740993', 'bigInteger'))
 			.toBe('9007199254740993');
 	});
 
@@ -77,10 +78,10 @@ describe('canonicalScopedCacheValue', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		expect(canonicalScopedCacheValue(upper, 'uuid'))
-			.toBe(canonicalScopedCacheValue(upper.toLowerCase(), 'uuid'));
+		expect(canonicalizeScopedCachePinValue(upper, 'uuid'))
+			.toBe(canonicalizeScopedCachePinValue(upper.toLowerCase(), 'uuid'));
 
-		expect(canonicalScopedCacheValue(upper, 'uuid')).toBe(upper.toLowerCase());
+		expect(canonicalizeScopedCachePinValue(upper, 'uuid')).toBe(upper.toLowerCase());
 	});
 
 	test(oneLine`
@@ -88,20 +89,20 @@ describe('canonicalScopedCacheValue', () => {
 		reads them as one key, so they cannot resolve different slices
 	`, () => {
 		for (const spelling of [1, '1', '01', '+1', '0001']) {
-			expect(canonicalScopedCacheValue(spelling, 'integer')).toBe('1');
+			expect(canonicalizeScopedCachePinValue(spelling, 'integer')).toBe('1');
 		}
 
 		// A signed zero is still zero, and a zero must not be stripped to empty.
-		expect(canonicalScopedCacheValue('-0', 'integer')).toBe('0');
-		expect(canonicalScopedCacheValue('000', 'integer')).toBe('0');
-		expect(canonicalScopedCacheValue('-007', 'integer')).toBe('-7');
+		expect(canonicalizeScopedCachePinValue('-0', 'integer')).toBe('0');
+		expect(canonicalizeScopedCachePinValue('000', 'integer')).toBe('0');
+		expect(canonicalizeScopedCachePinValue('-007', 'integer')).toBe('-7');
 	});
 
 	test(oneLine`
 		bigInteger: a leading-zero spelling collapses without a numeric pass, so
 		precision past MAX_SAFE_INTEGER survives
 	`, () => {
-		expect(canonicalScopedCacheValue('00009007199254740993', 'bigInteger'))
+		expect(canonicalizeScopedCachePinValue('00009007199254740993', 'bigInteger'))
 			.toBe('9007199254740993');
 	});
 
@@ -111,29 +112,29 @@ describe('canonicalScopedCacheValue', () => {
 		tag, and postgres trims whitespace casting text to int, so \` 1\` really is row 1
 	`, () => {
 		for (const spelling of [' 1', '1 ', '1.0']) {
-			expect(canonicalScopedCacheValue(spelling, 'integer')).toBe('1');
+			expect(canonicalizeScopedCachePinValue(spelling, 'integer')).toBe('1');
 		}
 
-		expect(canonicalScopedCacheValue('1e3', 'integer')).toBe('1000');
-		expect(canonicalScopedCacheValue('0x10', 'integer')).toBe('16');
+		expect(canonicalizeScopedCachePinValue('1e3', 'integer')).toBe('1000');
+		expect(canonicalizeScopedCachePinValue('0x10', 'integer')).toBe('16');
 	});
 
 	test(oneLine`
 		a non-numeric value on an integer field keeps its string form rather than
 		becoming an empty token
 	`, () => {
-		expect(canonicalScopedCacheValue('', 'integer')).toBe('');
-		expect(canonicalScopedCacheValue('7a', 'integer')).toBe('7a');
+		expect(canonicalizeScopedCachePinValue('', 'integer')).toBe('');
+		expect(canonicalizeScopedCachePinValue('7a', 'integer')).toBe('7a');
 
 		// Not an integer at all: no token can be right, so don't invent one.
-		expect(canonicalScopedCacheValue('1.5', 'integer')).toBe('1.5');
+		expect(canonicalizeScopedCachePinValue('1.5', 'integer')).toBe('1.5');
 	});
 
 	test(oneLine`
 		bigInteger past MAX_SAFE_INTEGER keeps its raw spelling — no numeric token can
 		round-trip it, and such a key cannot have matched a row either
 	`, () => {
-		expect(canonicalScopedCacheValue('1e30', 'bigInteger')).toBe('1e30');
+		expect(canonicalizeScopedCachePinValue('1e30', 'bigInteger')).toBe('1e30');
 	});
 
 	test(oneLine`
@@ -141,14 +142,16 @@ describe('canonicalScopedCacheValue', () => {
 		not the number 1 — but letters fold to one case, because a case-insensitive
 		collation matches both spellings to the same row
 	`, () => {
-		expect(canonicalScopedCacheValue('01', 'string')).toBe('01');
-		expect(canonicalScopedCacheValue('ABC', 'string')).toBe('abc');
-		expect(canonicalScopedCacheValue('AbC', 'text')).toBe('abc');
+		expect(canonicalizeScopedCachePinValue('01', 'string')).toBe('01');
+		expect(canonicalizeScopedCachePinValue('ABC', 'string')).toBe('abc');
+		expect(canonicalizeScopedCachePinValue('AbC', 'text')).toBe('abc');
 	});
 
 	test('unknown/undefined type falls back to `String` (owner-id path)', () => {
-		expect(canonicalScopedCacheValue(42, undefined)).toBe('42');
-		expect(canonicalScopedCacheValue('7c9e-uuid', undefined)).toBe('7c9e-uuid');
+		expect(canonicalizeScopedCachePinValue(42, undefined)).toBe('42');
+
+		expect(canonicalizeScopedCachePinValue('7c9e-uuid', undefined))
+			.toBe('7c9e-uuid');
 	});
 });
 
