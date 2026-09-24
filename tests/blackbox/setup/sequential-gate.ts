@@ -13,12 +13,10 @@ declare module 'vitest' {
 
 const serverUrl = process.env['serverUrl'];
 
-// The gate blocks until the files it depends on report completion, which can
-// outlast every other file still queued behind it.
-const gateTimeout = 600_000;
-
 let testFilePath: string;
 
+// The gate blocks until the files it depends on report completion, which can
+// outlast every other file still queued behind it, so it gets its own timeout.
 beforeAll(async () => {
 	const { totalTestsCount, afterFiles } = JSON.parse(
 		await fs.readFile('sequencer-data.json', 'utf8'),
@@ -67,10 +65,12 @@ beforeAll(async () => {
 
 		await sleep(1000);
 	}
-}, gateTimeout);
+}, 600_000);
 
 afterAll(async () => {
-	if (!testFilePath) return;
+	if (!testFilePath) {
+		return;
+	}
 
 	await axios.post(`${serverUrl}/items/tests_flow_completed`, {
 		test_file_path: testFilePath,
