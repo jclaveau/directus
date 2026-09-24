@@ -752,7 +752,7 @@ describe('the runs', () => {
 		expect(findings[0]!.textContent).toContain('GET /items/articles?fields=title');
 		expect(findings[0]!.textContent).toContain('Differs at: /data/0/title');
 		expect(findings[0]!.textContent).toContain('No purge covered it since the fill');
-		expect(findings[1]!.textContent).toContain('Tags: +authors');
+		expect(findings[1]!.textContent).toContain('Pins: +authors');
 		expect(findings[1]!.textContent).toContain('User: u-1');
 		// Every finding the run stored is on the page: nothing more to say.
 		expect(document.body.textContent).not.toContain('the rest page through');
