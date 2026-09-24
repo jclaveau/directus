@@ -138,19 +138,18 @@ export interface ScopedCacheScopeHandle {
 		options?: {
 			manuallyPurged?: boolean;
 			/**
-			 * The purge counters the read these fingerprints came from snapshotted
-			 * BEFORE its own query — `result.getMeta()?.scopedCacheEpochs` of the
-			 * dependent read.
+			 * The purge counters the read these fingerprints came from took BEFORE its
+			 * own query — `result.getMeta()?.scopedCacheEpochs` of the dependent read.
 			 *
-			 * The host snapshots the counters of the collections it can name up front,
-			 * and a hook's declaration arrives long after that, on a collection nothing
-			 * snapshotted: a purge of it landing mid-read would then pass the post-fill
-			 * comparison unnoticed and the response would be stored already stale.
-			 * There is no snapshotting it late — the check needs a value from before
+			 * The host reads the counters of the collections it can name up front, and
+			 * a hook's declaration arrives long after that, on a collection nothing
+			 * read a counter for: a purge of it landing mid-read would then pass the
+			 * post-fill comparison unnoticed and the response would be stored already
+			 * stale. There is no reading it late — the check needs a value from before
 			 * the data was read — so a scoped-to collection with no counter leaves the
 			 * response uncached (an `unguarded_scope` anomaly).
 			 *
-			 * Handing the dependent read's own snapshot over is what keeps it cacheable,
+			 * Handing the dependent read's own reading over is what keeps it cacheable,
 			 * and it is the right value by construction: that read took it before the
 			 * rows these fingerprints describe were fetched.
 			 */
@@ -334,8 +333,8 @@ export interface ReadMeta {
 	scopedCacheUnautopurgeableFingerprints?: ScopedCacheFingerprint[];
 
 	/**
-	 * The purge counters of the collections this read depends on, snapshotted BEFORE
-	 * its query ran. `respond` re-reads them at fill time: a counter that moved
+	 * The purge counters of the collections this read depends on, read BEFORE its
+	 * query ran. `respond` re-reads them at fill time: a counter that moved
 	 * means a purge landed while the read was in flight, so the rows it holds are
 	 * already superseded and the entry it would write could never be invalidated —
 	 * its fingerprints were not in the index for that purge to find.

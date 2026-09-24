@@ -589,7 +589,7 @@ async function purgeScopedCacheIndexWhere(
  * still there (https://github.com/jclaveau/directus/issues/468).
  *
  * Runs AFTER `clearResponseCache`, always: that is where the wholesale counter
- * moves, and a read that snapshotted it earlier and files its fingerprints between
+ * moves, and a read that took it earlier and files its fingerprints between
  * the drop below and a move made after it would compare equal, keep its entry, and
  * leave it indexed by something this function just deleted — reachable to no later
  * purge.
@@ -604,7 +604,7 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 
 /**
  * Drop every cached response, the way a read in flight can notice. The wholesale
- * counter — the one every read snapshots, named for no collection — moves BEFORE
+ * counter — the one every read takes, named for no collection — moves BEFORE
  * the clear, as every purge's counters move before its sweep: a fill that rechecks
  * after the move declines, and one that rechecked before it had written its entry
  * before the clear, which takes it. A clear that moved the counter after itself

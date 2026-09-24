@@ -269,10 +269,10 @@ export class ScopedCacheReadPlan {
 	}
 
 	/**
-	 * The collections whose purge counters this read has to snapshot: the ones its
+	 * The collections whose purge counters this read has to take: the ones its
 	 * fingerprints will name. Both are known before the query — the field map is
 	 * built off the AST and the keying off the filter — which is what lets the
-	 * snapshot predate any purge racing the read.
+	 * reading predate any purge racing the read.
 	 */
 	collectionsToGuard(): string[] {
 		return [
