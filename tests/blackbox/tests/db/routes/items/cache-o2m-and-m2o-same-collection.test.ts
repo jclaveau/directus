@@ -1,4 +1,4 @@
-import config, { getUrl, paths } from '@common/config';
+import config, { getNoCacheUrl, getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
 	CreateFieldM2O,
@@ -90,13 +90,16 @@ describe(oneLine`
 
 			featuredCommentId = comments[0].id;
 
-			// Asserted: read back 100 lines below, a seed PATCH that did not land
-			// surfaces as a null `featured_comment` and reads as a cache bug.
-			await request(getUrl(vendor))
+			// On the no-cache instance: the cache server can still hold a schema from
+			// before `featured_comment` existed, and an update keeps only the fields its
+			// schema knows, so it drops the value and still answers 200.
+			const featured = await request(getNoCacheUrl(vendor))
 				.patch(`/items/${ARTICLE}/${readArticleId}`)
 				.send({ featured_comment: featuredCommentId })
 				.set('Authorization', auth)
 				.expect(200);
+
+			expect(featured.body.data.featured_comment).toBe(featuredCommentId);
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -151,7 +154,10 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			expect((await readArticle()).headers[cacheStatusHeader]).toBe('MISS');
+			const before = await readArticle();
+
+			expect(before.headers[cacheStatusHeader]).toBe('MISS');
+			expect(before.body.data.featured_comment.body).toBe('featured');
 			expect((await readArticle()).headers[cacheStatusHeader]).toBe('HIT');
 
 			await updateFeaturedComment('featured, edited');
