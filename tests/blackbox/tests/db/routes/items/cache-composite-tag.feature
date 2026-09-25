@@ -52,11 +52,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
 
   Background:
     Given the slot collection:
-      | field  | type    | scoped_cache_field |
-      | owner  | string  | yes                |
-      | method | string  | yes                |
-      | note   | string  | no                 |
-      | amount | integer | no                 |
+      | field        | type    | scoped_cache_field  |
+      | owner        | string  | yes                 |
+      | method       | string  | yes                 |
+      | method_range | integer | method_range.method |
+      | note         | string  | no                  |
+      | amount       | integer | no                  |
 
   Scenario: a write matching one pin but not the other leaves the read cached
     Given the slots:
@@ -1016,3 +1017,89 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |          |     - id       |
       |                  |          |     - method   |
       |                  |          |     - owner    |
+
+  Scenario: a write by another owner leaves a read pinned through a relation cached
+    Given the method ranges:
+      | marker       | method |
+      | spaced_range | spaced |
+      | slow_range   | slow   |
+    And the slots:
+      | marker      | owner | method_range | note   |
+      | target_slot | alpha | spaced_range | first  |
+      | other_owner | beta  | spaced_range | third  |
+      | other_range | beta  | slow_range   | fourth |
+    And this read is cached:
+      | query              | response              | fingerprints             |
+      | fields:            | - marker: target_slot | - pinnedScope:           |+
+      |   - id             |   owner: alpha        |     method_range.method: |
+      |   - owner          |                       |       - spaced           |
+      | filter:            |                       |     owner:               |
+      |   owner: alpha     |                       |       - alpha            |
+      |   method_range:    |                       |   viewFields:            |
+      |     method: spaced |                       |     - id                 |
+      |                    |                       |     - method_range       |
+      |                    |                       |     - owner              |
+    And the witness reads are cached:
+      | query              | response              | fingerprints             |
+      | fields:            | - marker: other_owner | - pinnedScope:           |+
+      |   - id             |                       |     method_range.method: |
+      |   - owner          |                       |       - spaced           |
+      | filter:            |                       |     owner:               |
+      |   owner: beta      |                       |       - beta             |
+      |   method_range:    |                       |   viewFields:            |
+      |     method: spaced |                       |     - id                 |
+      |                    |                       |     - method_range       |
+      |                    |                       |     - owner              |
+      | fields:            | - marker: other_range | - pinnedScope:           |+
+      |   - id             |                       |     method_range.method: |
+      |   - owner          |                       |       - slow             |
+      | filter:            |                       |     owner:               |
+      |   owner: beta      |                       |       - beta             |
+      |   method_range:    |                       |   viewFields:            |
+      |     method: slow   |                       |     - id                 |
+      |                    |                       |     - method_range       |
+      |                    |                       |     - owner              |
+    When the slots are created:
+      | query                          | purged fingerprints      |
+      | - marker: created_slot         | - pinnedScope:           |+
+      |   data:                        |     method_range.method: |
+      |     owner: beta                |       - spaced           |
+      |     method_range: spaced_range |     owner:               |
+      |     note: second               |       - beta             |
+      |                                |   viewFields:            |
+      |                                |     - id                 |
+      |                                |     - method_range       |
+      |                                |     - owner              |
+    Then the read is still cached, not matching "owner: alpha":
+      | query              | response              | fingerprints             |
+      | fields:            | - marker: target_slot | - pinnedScope:           |+
+      |   - id             |   owner: alpha        |     method_range.method: |
+      |   - owner          |                       |       - spaced           |
+      | filter:            |                       |     owner:               |
+      |   owner: alpha     |                       |       - alpha            |
+      |   method_range:    |                       |   viewFields:            |
+      |     method: spaced |                       |     - id                 |
+      |                    |                       |     - method_range       |
+      |                    |                       |     - owner              |
+    And the witness reads are purged, matching "method_range.method: spaced, owner: beta":
+      | query              | response               | fingerprints             |
+      | fields:            | - marker: other_owner  | - pinnedScope:           |+
+      |   - id             | - marker: created_slot |     method_range.method: |
+      |   - owner          |                        |       - spaced           |
+      | filter:            |                        |     owner:               |
+      |   owner: beta      |                        |       - beta             |
+      |   method_range:    |                        |   viewFields:            |
+      |     method: spaced |                        |     - id                 |
+      |                    |                        |     - method_range       |
+      |                    |                        |     - owner              |
+    And the witness reads are still cached, not matching "method_range.method: slow":
+      | query            | response              | fingerprints             |
+      | fields:          | - marker: other_range | - pinnedScope:           |+
+      |   - id           |                       |     method_range.method: |
+      |   - owner        |                       |       - slow             |
+      | filter:          |                       |     owner:               |
+      |   owner: beta    |                       |       - beta             |
+      |   method_range:  |                       |   viewFields:            |
+      |     method: slow |                       |     - id                 |
+      |                  |                       |     - method_range       |
+      |                  |                       |     - owner              |

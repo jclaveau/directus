@@ -5,7 +5,11 @@ import {
 	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
-import { CreateCollections, DeleteCollection } from '@common/functions';
+import {
+	CreateCollections,
+	CreateFieldM2O,
+	DeleteCollection,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -18,12 +22,14 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 
 const SLOT = 'composite_tag_slot';
+const METHOD_RANGE = 'composite_tag_method_range';
 const cacheStatusHeader = 'x-cache-status';
 
 type SlotRow = {
 	marker: string;
 	owner: string;
 	method: string;
+	method_range: string;
 	note: string;
 	amount: number;
 };
@@ -61,7 +67,6 @@ describe.each(vendors)('%s', (vendor) => {
 			collections: [
 				{
 					collection: SLOT,
-					meta: { scoped_cache_fields: ['owner', 'method'] },
 					fields: [
 						{ field: 'owner', type: 'string', meta: {} },
 						{ field: 'method', type: 'string', meta: {} },
@@ -69,8 +74,29 @@ describe.each(vendors)('%s', (vendor) => {
 						{ field: 'amount', type: 'integer', meta: {} },
 					],
 				},
+				{
+					collection: METHOD_RANGE,
+					fields: [{ field: 'method', type: 'string', meta: {} }],
+				},
 			],
 		});
+
+		// A slot can scope by `method_range.method` only once the m2o exists, so the
+		// scope fields are set after the field is created.
+		await CreateFieldM2O(vendor, {
+			collection: SLOT,
+			field: 'method_range',
+			otherCollection: METHOD_RANGE,
+		});
+
+		await request(getUrl(vendor, env))
+			.patch(`/collections/${SLOT}`)
+			.send({
+				meta: {
+					scoped_cache_fields: ['owner', 'method', 'method_range.method'],
+				},
+			})
+			.set('Authorization', auth);
 
 		const port = await getPort();
 		env[vendor].PORT = String(port);
@@ -83,7 +109,7 @@ describe.each(vendors)('%s', (vendor) => {
 		await awaitDirectusConnection(port);
 	}, 60_000);
 
-	// A scenario states the rows it starts from, and all fifteen read the one
+	// A scenario states the rows it starts from, and all sixteen read the one
 	// collection: rows a scenario left behind answer the next one's read. A filter
 	// pinning an owner no other scenario uses hides that, an `_or` branch bound to
 	// a shared `method` does not — it answered with every row the file had created
@@ -110,7 +136,13 @@ describe.each(vendors)('%s', (vendor) => {
 		await redis.quit();
 
 		await DeleteCollection(vendor, { collection: SLOT });
+		await DeleteCollection(vendor, { collection: METHOD_RANGE });
 	});
+
+	// A slot names its method range by the marker the range was created under.
+	// Only one scenario creates ranges, so the markers need no scenario of their
+	// own, and the ranges it leaves behind are read by no other.
+	const methodRangeIds = new Map<string, number>();
 
 	// A written row names itself by the marker the scenario files it under, and
 	// carries under `data` the body its request sends: every column on a create,
@@ -121,7 +153,9 @@ describe.each(vendors)('%s', (vendor) => {
 		for (const { marker, data } of rows) {
 			const response = await request(getUrl(vendor, env))
 				.post(`/items/${SLOT}`)
-				.send(data)
+				.send(data?.method_range === undefined
+					? data
+					: { ...data, method_range: methodRangeIds.get(data.method_range) })
 				.set('Authorization', auth);
 
 			expect(response.statusCode).toBe(200);
@@ -376,17 +410,37 @@ describe.each(vendors)('%s', (vendor) => {
 			const declaredFields = fields.body.data
 				.filter((field: { field: string }) => field.field !== 'id')
 				.map((field: { field: string; type: string }) => {
+					// A relation scopes by the path through it, which is what the cell
+					// names: `yes` would read as a scope on the key itself.
+					const scopedCachePath = scopedCacheFields.find(
+						(scopedCacheField) => scopedCacheField.startsWith(`${field.field}.`),
+					);
+
 					return {
 						field: field.field,
 						type: field.type,
 						scoped_cache_field: scopedCacheFields.includes(field.field)
 							? 'yes'
-							: 'no',
+							: scopedCachePath ?? 'no',
 					};
 				});
 
 			expect(declaredFields).toEqual(expect.arrayContaining(table));
 			expect(declaredFields).toHaveLength(table.length);
+		});
+
+		// The ranges a slot's `method_range` names, created before the slots that
+		// point at them.
+		and.optional('the method ranges:', async (table: Record<string, string>[]) => {
+			for (const { marker, method } of table) {
+				const response = await request(getUrl(vendor, env))
+					.post(`/items/${METHOD_RANGE}`)
+					.send({ method })
+					.set('Authorization', auth);
+
+				expect(response.statusCode).toBe(200);
+				methodRangeIds.set(marker!, response.body.data.id);
+			}
 		});
 
 		// The starting rows stand in an ordinary table, one column per field, while
@@ -797,6 +851,21 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			"a delete outside the read's slice leaves it cached",
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a write by another owner leaves a read pinned through a relation cached',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const filedMembers = new Map<string, string[]>();
