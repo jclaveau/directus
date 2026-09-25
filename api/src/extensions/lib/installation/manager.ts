@@ -7,7 +7,7 @@ import { move, remove } from 'fs-extra';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import Queue from 'p-queue';
-import { join } from 'path';
+import { join } from 'node:path';
 import type { ReadableStream } from 'node:stream/web';
 import { extract } from 'tar';
 import { useLogger } from '../../../logger/index.js';
