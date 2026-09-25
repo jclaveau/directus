@@ -34,7 +34,7 @@ import {
 	stripScopedCacheOwnershipInjections,
 	takenOverScopedCacheKey,
 	withScopedCacheOwnershipInjections,
-} from '../scoped-cache.js';
+} from '../scoped-cache/index.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';

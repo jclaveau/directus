@@ -29,8 +29,9 @@ vi.mock('../../cache.js', () => {
 // Keep scopedCacheCollectionPinsFromRows + composeScopedCachePaths real so tag
 // derivation and relational-scope detection run; only spy the purge sink and pin
 // scoped mode.
-vi.mock('../../scoped-cache.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../../scoped-cache.js')>();
+vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../scoped-cache/index.js')>();
 
 	return {
 		...actual,

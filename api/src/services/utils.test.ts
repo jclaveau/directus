@@ -64,7 +64,7 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCachePinMembers } from '../scoped-cache.js';
+import { countScopedCachePinMembers } from '../scoped-cache/index.js';
 import { compress } from '../utils/compress.js';
 import { SettingsService } from './settings.js';
 import { UtilsService } from './utils.js';
@@ -80,7 +80,7 @@ vi.mock('../cache.js');
 vi.mock('../cache-audit-runs.js');
 vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
-vi.mock('../scoped-cache.js');
+vi.mock('../scoped-cache/index.js');
 vi.mock('../utils/compress.js');
 vi.mock('../processes/autoscale/lib/drill.js');
 vi.mock('../processes/autoscale/lib/reload.js');

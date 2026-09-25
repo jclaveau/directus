@@ -24,7 +24,7 @@ import {
 	scopedCachePinKeys,
 	scopedCacheSweptDuringFill,
 	type ScopedCacheEpochs,
-} from '../scoped-cache.js';
+} from '../scoped-cache/index.js';
 import {
 	recordPendingScopedCachePurge,
 } from '../scoped-cache-pending-purges.js';

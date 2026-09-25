@@ -48,7 +48,7 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 import {
 	scopedCachePinKeys,
 	scopedCachePurgeEnabled,
-} from '../scoped-cache.js';
+} from '../scoped-cache/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/pins.js';

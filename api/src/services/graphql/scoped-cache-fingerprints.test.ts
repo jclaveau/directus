@@ -4,7 +4,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
-import { renderScopedCacheFingerprint } from '../../scoped-cache.js';
+import { renderScopedCacheFingerprint } from '../../scoped-cache/index.js';
 import { GraphQLExecutionError } from './errors/index.js';
 
 // Keep graphql's rule set / error classes real; stub the heavy validate + execute so we can drive

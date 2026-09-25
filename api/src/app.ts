@@ -91,7 +91,7 @@ import tusSchedule from './schedules/tus.js';
 import {
 	assertScopedCacheStoreSupported,
 	startScopedCachePurgeRecovery,
-} from './scoped-cache.js';
+} from './scoped-cache/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';

@@ -12,7 +12,7 @@ import {
 	scopedCacheNestedRowBindings,
 	scopedCacheCollectionPinsFromRows,
 	scopedCachePinKey,
-} from '../scoped-cache.js';
+} from '../scoped-cache/index.js';
 
 // The read side derives a scope value from a (string-ish) query filter, the purge side from a
 // native DB row. Both feed the same cache key, so a filter value and its stored counterpart must

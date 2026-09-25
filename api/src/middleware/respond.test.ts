@@ -61,8 +61,8 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../scoped-cache.js')>();
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../scoped-cache/index.js')>();
 
 	return {
 		indexScopedCacheEntry: mocks.indexScopedCacheEntry,

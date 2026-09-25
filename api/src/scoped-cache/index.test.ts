@@ -6,12 +6,12 @@ import type {
 	FunctionFieldNode,
 	M2ONode,
 	O2MNode,
-} from './types/ast.js';
+} from '../types/ast.js';
 import type {
 	CollectionKey,
 	FieldMap,
 	QueryPath,
-} from './permissions/modules/process-ast/types.js';
+} from '../permissions/modules/process-ast/types.js';
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,24 +51,24 @@ import {
 	scopedCachePinKeys,
 	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
-} from './scoped-cache.js';
-import { printableScopedCachePin } from './utils/printable-scoped-cache-pins.js';
-import { redisConfigAvailable, useRedis } from './redis/index.js';
-import emitter from './emitter.js';
-import { getCache } from './cache.js';
-import { useLogger } from './logger/index.js';
-import { withMeta } from './utils/read-meta.js';
+} from './index.js';
+import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
+import { redisConfigAvailable, useRedis } from '../redis/index.js';
+import emitter from '../emitter.js';
+import { getCache } from '../cache.js';
+import { useLogger } from '../logger/index.js';
+import { withMeta } from '../utils/read-meta.js';
 import {
 	queueCacheAnomaly,
 	queueCachePurge,
 	readCacheDescriptorForRedisKey,
-} from './cache-events.js';
+} from '../cache-events.js';
 import {
 	clearPendingScopedCachePurges,
 	countFailedScopedCachePurgeRetry,
 	listPendingScopedCachePurges,
 	recordPendingScopedCachePurge,
-} from './scoped-cache-pending-purges.js';
+} from '../scoped-cache-pending-purges.js';
 
 // hoisted: scoped-cache.ts reads `const env = useEnv()` at module load, before a
 // plain `const env` below would be initialised (temporal dead zone).
@@ -84,9 +84,9 @@ const env = vi.hoisted(() => {
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
-vi.mock('./redis/index.js');
+vi.mock('../redis/index.js');
 
-vi.mock('./emitter.js', () => {
+vi.mock('../emitter.js', () => {
 	return {
 		default: {
 			emitAction: vi.fn(),
@@ -95,10 +95,10 @@ vi.mock('./emitter.js', () => {
 	};
 });
 
-vi.mock('./logger/index.js', () => ({ useLogger: vi.fn() }));
-vi.mock('./cache.js', () => ({ getCache: vi.fn() }));
+vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
+vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
 
-vi.mock('./cache-events.js', () => {
+vi.mock('../cache-events.js', () => {
 	return {
 		queueCacheAnomaly: vi.fn(),
 		queueCachePurge: vi.fn(),
@@ -106,7 +106,7 @@ vi.mock('./cache-events.js', () => {
 	};
 });
 
-vi.mock('./scoped-cache-pending-purges.js', () => {
+vi.mock('../scoped-cache-pending-purges.js', () => {
 	return {
 		clearPendingScopedCachePurges: vi.fn(),
 		countFailedScopedCachePurgeRetry: vi.fn(),

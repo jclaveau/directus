@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => {
 	return { readScopedCacheEpochs: vi.fn() };
 });
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { readScopedCacheEpochs: mocks.readScopedCacheEpochs };
 });
 

@@ -12,7 +12,7 @@ import {
 	scopedCacheIndexPath,
 	scopedCachePurgeEnabled,
 	scopedCacheCollectionPinsFromRows,
-} from '../../scoped-cache.js';
+} from '../../scoped-cache/index.js';
 
 /**
  * Build the `context.scopedCache` handle for a register-type extension's

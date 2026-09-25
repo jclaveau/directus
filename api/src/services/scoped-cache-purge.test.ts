@@ -64,7 +64,7 @@ const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
 
 const { createScopedCacheHookDeclarations, scopedCachePinKeys } =
-	await import('../scoped-cache.js');
+	await import('../scoped-cache/index.js');
 
 // What a read ended up pinned to, as the dev headers and the telemetry spell it:
 // `collection`, or `collection:field=value` for a value slice.

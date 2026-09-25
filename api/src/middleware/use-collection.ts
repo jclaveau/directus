@@ -3,7 +3,7 @@
  * system collections
  */
 import type { RequestHandler } from 'express';
-import { readScopedCacheEpochs } from '../scoped-cache.js';
+import { readScopedCacheEpochs } from '../scoped-cache/index.js';
 import asyncHandler from '../utils/async-handler.js';
 
 const useCollection = (collection: string): RequestHandler => {

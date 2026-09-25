@@ -140,7 +140,7 @@ const {
 	purgeScopedCache,
 	scopedCacheFingerprintOf,
 	scopedCachePurgeEnabled,
-} = await import('./scoped-cache.js');
+} = await import('./scoped-cache/index.js');
 
 function setEnv(values: Record<string, unknown>) {
 	for (const key of Object.keys(mockEnv.current)) {

@@ -14,7 +14,7 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache.js';
+import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache/index.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';

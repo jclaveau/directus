@@ -22,7 +22,7 @@ vi.mock('../middleware/rate-limiter-registration.js', () => {
 
 const scopedCachePurgeEnabled = vi.fn();
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 

@@ -105,7 +105,10 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCachePinMembers, flushResponseCache } from '../scoped-cache.js';
+import {
+	countScopedCachePinMembers,
+	flushResponseCache,
+} from '../scoped-cache/index.js';
 import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';

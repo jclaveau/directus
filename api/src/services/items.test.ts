@@ -17,7 +17,7 @@ import emitter from '../emitter.js';
 import {
 	purgeScopedCache,
 	scopedCachePinKeys,
-} from '../scoped-cache.js';
+} from '../scoped-cache/index.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';

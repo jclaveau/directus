@@ -8,7 +8,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
-import { readScopedCacheEpochs } from '../scoped-cache.js';
+import { readScopedCacheEpochs } from '../scoped-cache/index.js';
 import { ForbiddenError } from '@directus/errors';
 import { applyDiff } from '../utils/apply-diff.js';
 import { getSnapshotDiff } from '../utils/get-snapshot-diff.js';
