@@ -2513,7 +2513,7 @@ onUnmounted(() => {
 					</div>
 
 					<div class="value-head pins-head">
-						{{ t('scoped_cache_tags', 'Scoped cache pins') }}
+						{{ t('scoped_cache_pins', 'Scoped cache pins') }}
 					</div>
 					<div v-if="cachedPins && cachedPins.length" class="pins">
 						<span v-for="pin in cachedPins" :key="pin" class="pin">
@@ -2524,7 +2524,7 @@ onUnmounted(() => {
 						</span>
 					</div>
 					<div v-else class="value-note">
-						{{ t('no_scoped_cache_tags', 'None (needs CACHE_TAGS_HEADER)') }}
+						{{ t('no_scoped_cache_pins', 'None (needs CACHE_TAGS_HEADER)') }}
 					</div>
 				</div>
 
