@@ -10,7 +10,7 @@ import type { AbstractServiceOptions, Accountability, LoginResult, SchemaOvervie
 import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { getAuthProvider } from '../auth.js';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
 import getDatabase from '../database/index.js';

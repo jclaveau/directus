@@ -1,9 +1,8 @@
 import { useEnv } from '@directus/env';
 import { resolvePackage } from '@directus/utils/node';
 import { readdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import path, { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import path from 'path';
 import { useLogger } from '../../logger/index.js';
 import { escapeRegExp } from '../../utils/lodash-es-used.js';
 import { Url } from '../../utils/url.js';

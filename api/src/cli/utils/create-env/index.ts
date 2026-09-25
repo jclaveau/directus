@@ -1,9 +1,8 @@
-import fs from 'fs';
+import fs from 'node:fs';
 import { Liquid } from 'liquidjs';
-import { dirname } from 'node:path';
+import path, { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import path from 'path';
-import { promisify } from 'util';
+import { promisify } from 'node:util';
 import type { Driver } from '@directus/types';
 import type { Credentials } from '../create-db-connection.js';
 

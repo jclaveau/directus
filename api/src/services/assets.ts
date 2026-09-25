@@ -20,7 +20,7 @@ import type { Knex } from 'knex';
 import { contentType } from 'mime-types';
 import type { Readable } from 'node:stream';
 import hash from 'object-hash';
-import path from 'path';
+import path from 'node:path';
 import { SUPPORTED_IMAGE_TRANSFORM_FORMATS } from '../constants.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';

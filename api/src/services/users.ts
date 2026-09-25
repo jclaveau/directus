@@ -14,7 +14,7 @@ import { FailedValidationError, joiValidationErrorItemToErrorExtensions } from '
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { clearSystemCache } from '../cache.js';
 import { flushResponseCache } from '../scoped-cache.js';
 import getDatabase from '../database/index.js';
