@@ -337,7 +337,7 @@ export function scopedCacheFingerprintMatchesRow(
 }
 
 /**
- * Whether the write touched a field the read is bound to.
+ * Whether the write touched a field the read's view names.
  *
  * `changed === null` is an insert or a delete: the row entered or left the result
  * set, whichever columns it carries. An update only reaches a read that selected,
@@ -351,20 +351,20 @@ export function scopedCacheViewFieldsAreTouched(
 	viewFields: readonly string[],
 	changed: readonly string[] | null,
 ): boolean {
-	// A read naming no field is bound to all of them: the fail-safe direction is
-	// the over-purge, never the stale hit.
+	// A read naming no field means its view is every field: the fail-safe
+	// direction is the over-purge, never the stale hit.
 	if (changed === null || viewFields.length === 0) {
 		return true;
 	}
 
-	const boundFields = new Set(viewFields);
+	const viewedFields = new Set(viewFields);
 
-	if (boundFields.has(SCOPED_CACHE_ANY_FIELD)) {
+	if (viewedFields.has(SCOPED_CACHE_ANY_FIELD)) {
 		return true;
 	}
 
 	for (const field of changed) {
-		if (boundFields.has(field)) {
+		if (viewedFields.has(field)) {
 			return true;
 		}
 
@@ -375,7 +375,7 @@ export function scopedCacheViewFieldsAreTouched(
 			segmentDepth > 0;
 			segmentDepth--
 		) {
-			if (boundFields.has(`${fieldSegments.slice(0, segmentDepth).join('.')}.*`)) {
+			if (viewedFields.has(`${fieldSegments.slice(0, segmentDepth).join('.')}.*`)) {
 				return true;
 			}
 		}
@@ -444,12 +444,12 @@ export function scopedCacheFingerprintsByCollection(
  * Whether `entry` could contain a row carrying every pin `declared` names.
  *
  * The question a purge asks when it holds a pin rather than a row — a hook's own
- * `purgeBy`, which says "anything bound to tenant=acme" and knows nothing of what
+ * `purgeBy`, which says "anything pinned to tenant=acme" and knows nothing of what
  * was written. It is the row test read the other way round: there, the row has to
  * answer every pin the entry carries; here, the entry only has to leave room for
  * the row.
  *
- * So an entry bound to other values at that field stands — no row of this pin is
+ * So an entry pinned to other values at that field stands — no row of this pin is
  * in it — while an entry that never pinned the field goes, since nothing about its
  * query case rules the row out. Pins the entry carries at OTHER fields say nothing
  * either way: the declared pin is silent about them, and silence is not exclusion.
@@ -460,10 +460,10 @@ export function scopedCacheFingerprintCouldContainPin(
 ): boolean {
 	return Object.entries(declared.pinnedScope ?? {})
 		.every(([field, declaredTokens]) => {
-			const boundTokens = entry.pinnedScope?.[field];
+			const pinnedTokens = entry.pinnedScope?.[field];
 
-			return boundTokens === undefined
-				|| boundTokens.some((token) => declaredTokens.includes(token));
+			return pinnedTokens === undefined
+				|| pinnedTokens.some((token) => declaredTokens.includes(token));
 		});
 }
 
@@ -472,7 +472,7 @@ export function scopedCacheFingerprintCouldContainPin(
  *
  * Two tests, both of which have to hold.
  *
- * The write touched a field the read is bound to — an insert or a delete always
+ * The write touched a field the read's view names — an insert or a delete always
  * does, since the row entered or left the result set whichever columns it
  * carries, and an update only when it rewrote a column the read selected, sorted
  * or filtered on.
@@ -488,7 +488,7 @@ export function scopedCacheFingerprintPurgedBy(
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 	changed: readonly string[] | null,
 ): boolean {
-	// Every field the read pinned to a value is a field it is bound to, whether or
+	// Every field the read pinned to a value is a field its view names, whether or
 	// not it also selected it: a write moving a row across one of them moves it in
 	// or out of the result set, which is a changed response by itself. Added only
 	// beside declared fields, since naming none already means every field.

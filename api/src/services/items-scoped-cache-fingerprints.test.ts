@@ -99,7 +99,7 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles']);
 	});
 
-	test('files no view for a read bound to every field', async () => {
+	test('files no view for a read whose view is every field', async () => {
 		const service = new ItemsService('articles', {
 			knex: db,
 			schema,

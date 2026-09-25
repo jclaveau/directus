@@ -369,7 +369,7 @@ export class ItemScopedCacheService {
 
 		// The axes a read can pin itself to — a fingerprint's pinned scope.
 		// Every OTHER column the row carries stays out of them and rides the row
-		// instead: it can only ever be a field the read is bound to, never a slice.
+		// instead: it can only ever be a field the read's view names, never a slice.
 		const pinnableFields = [...new Set([
 			primaryKeyField,
 			...flatFields,
@@ -1489,30 +1489,30 @@ export class ItemScopedCacheService {
 			);
 		});
 
-		// The fields each collection is bound to, folded into its fingerprint at
-		// fill time. Attached only for a collection whose pins are ALL computed: a
-		// hook's pin comes from enrichment outside the AST, so which fields that
-		// enrichment read is unknown, and a `fields` pin narrower than the truth
-		// would keep an entry a write did change. A collection left out is bound to
-		// all of its fields, which every write touches.
+		// The view of each collection, folded into its fingerprint at fill time.
+		// Attached only for a collection whose pins are ALL computed: a hook's pin
+		// comes from enrichment outside the AST, so which fields that enrichment
+		// read is unknown, and a `fields` pin narrower than the truth would keep an
+		// entry a write did change. A collection left out defaults to a view of
+		// every field, which every write touches.
 		const queryCaseFields = plan.fieldsByCollection();
 
 		for (const pin of hookAddedPins.values()) {
 			queryCaseFields.delete(pin.collection);
 		}
 
-		// Bound to every field the collection has is bound to all of them, which a
-		// fingerprint naming no view already says. The list would otherwise ride in
-		// every member the fingerprint is filed under: once per row of a read that
-		// pins per row, 30 bytes each on a four-column collection.
-		for (const [collection, boundFields] of queryCaseFields) {
+		// A view naming every field the collection has says what a fingerprint
+		// with no view already says. The list would otherwise ride in every member
+		// the fingerprint is filed under — once per row of a read that pins per
+		// row, 30 bytes each on a four-column collection.
+		for (const [collection, viewFields] of queryCaseFields) {
 			const schemaFields = Object.keys(
 				this.schema.collections[collection]?.fields ?? {},
 			);
 
 			if (
 				schemaFields.length > 0 &&
-				schemaFields.every((schemaField) => boundFields.includes(schemaField))
+				schemaFields.every((schemaField) => viewFields.includes(schemaField))
 			) {
 				queryCaseFields.delete(collection);
 			}
