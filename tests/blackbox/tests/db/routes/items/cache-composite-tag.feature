@@ -1328,10 +1328,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - alpha                      |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - alpha_part                 |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - spaced                     |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - spaced_range               |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
     And the witness reads are cached:
@@ -1352,10 +1364,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - beta                       |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - beta_part                  |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - spaced                     |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - spaced_range               |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
       | fields:                 | - marker: other_range | - collection: composite_path_slot  |+
@@ -1374,10 +1398,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - beta                       |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - beta_part                  |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - slow                       |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - slow_range                 |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
     When the slots are created:
@@ -1410,10 +1446,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - alpha                      |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - alpha_part                 |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - spaced                     |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - spaced_range               |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
     And the witness reads are purged, matching "course_part.owner: beta, method_range.method: spaced":
@@ -1434,10 +1482,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                        |       - beta                       |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - owner                        |
+      |                         |                        | - collection: composite_path_part  |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - beta_part                  |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - owner                        |
       |                         |                        | - collection: composite_path_range |
       |                         |                        |   pinnedScope:                     |
       |                         |                        |     method:                        |
       |                         |                        |       - spaced                     |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - method                       |
+      |                         |                        | - collection: composite_path_range |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - spaced_range               |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - method                       |
     And the witness reads are still cached, not matching "method_range.method: slow":
@@ -1458,10 +1518,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - beta                       |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - beta_part                  |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - slow                       |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - slow_range                 |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
 
@@ -1692,10 +1764,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - alpha                      |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - alpha_part                 |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - spaced                     |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - spaced_range               |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
     And the witness reads are cached:
@@ -1716,10 +1800,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                        |       - beta                       |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - owner                        |
+      |                         |                        | - collection: composite_path_part  |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - beta_part                  |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - owner                        |
       |                         |                        | - collection: composite_path_range |
       |                         |                        |   pinnedScope:                     |
       |                         |                        |     method:                        |
       |                         |                        |       - slow                       |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - method                       |
+      |                         |                        | - collection: composite_path_range |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - slow_range                 |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - method                       |
       | fields:                 | - marker: other_method | - collection: composite_path_slot  |+
@@ -1738,10 +1834,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                        |       - alpha                      |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - owner                        |
+      |                         |                        | - collection: composite_path_part  |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - alpha_part                 |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - owner                        |
       |                         |                        | - collection: composite_path_range |
       |                         |                        |   pinnedScope:                     |
       |                         |                        |     method:                        |
       |                         |                        |       - massed                     |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - method                       |
+      |                         |                        | - collection: composite_path_range |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - massed_range               |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - method                       |
     When the method ranges are updated:
@@ -1756,6 +1864,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                        |   pinnedScope:                     |
       |                        |     method:                        |
       |                        |       - slow                       |
+      |                        |   viewFields:                      |
+      |                        |     - method                       |
+      |                        | - collection: composite_path_range |
+      |                        |   pinnedScope:                     |
+      |                        |     id:                            |
+      |                        |       - spaced_range               |
       |                        |   viewFields:                      |
       |                        |     - method                       |
     Then the read is purged, matching "method: spaced":
@@ -1800,10 +1914,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |       - beta                       |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - owner                        |
+      |                         |                       | - collection: composite_path_part  |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - beta_part                  |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - owner                        |
       |                         |                       | - collection: composite_path_range |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     method:                        |
       |                         |                       |       - slow                       |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - slow_range                 |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
     And the witness reads are still cached, not matching "method: massed":
@@ -1824,9 +1950,21 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                        |       - alpha                      |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - owner                        |
+      |                         |                        | - collection: composite_path_part  |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - alpha_part                 |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - owner                        |
       |                         |                        | - collection: composite_path_range |
       |                         |                        |   pinnedScope:                     |
       |                         |                        |     method:                        |
       |                         |                        |       - massed                     |
+      |                         |                        |   viewFields:                      |
+      |                         |                        |     - method                       |
+      |                         |                        | - collection: composite_path_range |
+      |                         |                        |   pinnedScope:                     |
+      |                         |                        |     id:                            |
+      |                         |                        |       - massed_range               |
       |                         |                        |   viewFields:                      |
       |                         |                        |     - method                       |

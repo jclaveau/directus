@@ -402,6 +402,23 @@ describe.each(vendors)('%s', (vendor) => {
 	// a renderer here would agree with a renderer's own bug. A fingerprint of the
 	// Background's collection carries no `collection`, the way the feature states
 	// it; any other names the one it was filed for.
+	// A read showing a parent's columns is also filed under that parent's primary
+	// key, which the database picked; a scenario names the row by its marker.
+	const parentIds = new Map([
+		[PATH_PART, pathPartIds],
+		[PATH_RANGE, pathRangeIds],
+	]);
+
+	function parentMarker(collection: string, id: string) {
+		for (const [marker, parentId] of parentIds.get(collection)!) {
+			if (String(parentId) === id) {
+				return marker;
+			}
+		}
+
+		return id;
+	}
+
 	function decodeFingerprint(rendered: string) {
 		const unescaped = (token: string) => token.replace(/\\(.)/g, '$1');
 		const [filedFor, ...pins] = rendered.match(/(?:\\.|[^&])+/g) ?? [];
@@ -415,6 +432,9 @@ describe.each(vendors)('%s', (vendor) => {
 
 			if (unescaped(field!) === 'view') {
 				viewFields = tokens;
+			}
+			else if (unescaped(field!) === 'id' && parentIds.has(collection)) {
+				pinnedScope['id'] = tokens.map((id) => parentMarker(collection, id));
 			}
 			else {
 				pinnedScope[unescaped(field!)] = tokens;
@@ -434,6 +454,7 @@ describe.each(vendors)('%s', (vendor) => {
 	// names, and only the fingerprint half is ever stated: a scenario says what a
 	// read is filed under, never where the entry lives.
 	const fingerprintOf = (member: string) => member.split(/(?<!\\)\|/)[0]!;
+	const cacheKeyOf = (member: string) => member.split(/(?<!\\)\|/)[1]!;
 
 	function expectStatedFingerprints(
 		members: string[],
@@ -479,18 +500,23 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// The fingerprints an entry is filed under once the step's read has settled:
-	// the members recorded when the scenario cached that read, which a purge prunes
-	// and the refill puts back under the same cache key. An entry the write left
-	// alone and one it purged both end their step filed under what they state.
+	// every member under the cache key recorded when the scenario cached that read,
+	// which a purge prunes and the refill files again. The refill is what the rows
+	// now make of the read, so a parent row it no longer shows is no longer pinned.
+	// An entry the write left alone and one it purged both end their step filed
+	// under what they state.
 	async function expectFiledFingerprints(
 		members: string[],
 		expectedFingerprints: Record<string, unknown>[],
 	) {
-		const indexed = await indexedMembers();
+		const cacheKeys = new Set(members.map(cacheKeyOf));
 
-		expect(members.filter((member) => !indexed.has(member))).toEqual([]);
-
-		expectStatedFingerprints(members, expectedFingerprints);
+		expectStatedFingerprints(
+			[...await indexedMembers()].filter(
+				(member) => cacheKeys.has(cacheKeyOf(member)),
+			),
+			expectedFingerprints,
+		);
 	}
 
 	// What a read is filed under in `filedMembers`. The query is the one thing a
