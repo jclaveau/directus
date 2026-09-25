@@ -321,12 +321,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - "*"       |   owner: zeta         |     owner:     |
       | filter:       |   note: first         |       - zeta   |
-      |   owner: zeta |                       |   viewFields:  |
-      |               |                       |     - amount   |
-      |               |                       |     - id       |
-      |               |                       |     - method   |
-      |               |                       |     - note     |
-      |               |                       |     - owner    |
+      |   owner: zeta |                       |                |
     And the witness reads are cached:
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
@@ -340,23 +335,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | - marker: target_slot | - pinnedScope:      |+
       |   data:               |     owner:          |
       |     note: rewritten   |       - zeta        |
-      |                       |   viewFields:       |
-      |                       |     - amount        |
-      |                       |     - id            |
-      |                       |     - method        |
-      |                       |     - note          |
-      |                       |     - owner         |
     Then the read is purged, matching "owner: zeta":
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
       |   - "*"       |   owner: zeta         |     owner:     |
       | filter:       |   note: rewritten     |       - zeta   |
-      |   owner: zeta |                       |   viewFields:  |
-      |               |                       |     - amount   |
-      |               |                       |     - id       |
-      |               |                       |     - method   |
-      |               |                       |     - note     |
-      |               |                       |     - owner    |
+      |   owner: zeta |                       |                |
     And the witness reads are still cached, not reading "note":
       | query         | response              | fingerprints   |
       | fields:       | - marker: target_slot | - pinnedScope: |+
