@@ -505,38 +505,45 @@ describe.each(vendors)('%s', (vendor) => {
 		// `beforeAll` creates the collection before the spawn. The feature still
 		// states it, and a drift fails the Background, not a purge assertion.
 		given('the slot collection:', async (table: Record<string, string>[]) => {
-			const fields = await request(getUrl(vendor, env))
-				.get(`/fields/${SLOT}`)
-				.set('Authorization', auth);
-
-			const collection = await request(getUrl(vendor, env))
-				.get(`/collections/${SLOT}`)
-				.set('Authorization', auth);
-
-			const scopedCacheFields: string[]
-				= collection.body.data.meta.scoped_cache_fields;
-
-			const declaredFields = fields.body.data
-				.filter((field: { field: string }) => field.field !== 'id')
-				.map((field: { field: string; type: string }) => {
-					// A relation scopes by the path through it, which is what the cell
-					// names: `yes` would read as a scope on the key itself.
-					const scopedCachePath = scopedCacheFields.find(
-						(scopedCacheField) => scopedCacheField.startsWith(`${field.field}.`),
-					);
-
-					return {
-						field: field.field,
-						type: field.type,
-						scoped_cache_field: scopedCacheFields.includes(field.field)
-							? 'yes'
-							: scopedCachePath ?? 'no',
-					};
-				});
-
-			expect(declaredFields).toEqual(expect.arrayContaining(table));
-			expect(declaredFields).toHaveLength(table.length);
+			await expectDeclaredFields(SLOT, table);
 		});
+	}
+
+	async function expectDeclaredFields(
+		collectionName: string,
+		table: Record<string, string>[],
+	) {
+		const fields = await request(getUrl(vendor, env))
+			.get(`/fields/${collectionName}`)
+			.set('Authorization', auth);
+
+		const collection = await request(getUrl(vendor, env))
+			.get(`/collections/${collectionName}`)
+			.set('Authorization', auth);
+
+		const scopedCacheFields: string[]
+			= collection.body.data.meta.scoped_cache_fields;
+
+		const declaredFields = fields.body.data
+			.filter((field: { field: string }) => field.field !== 'id')
+			.map((field: { field: string; type: string }) => {
+				// A relation declared by the path through it names that path; declared
+				// by its key alone it reads `yes`, and composes off the parent's scope.
+				const scopedCachePath = scopedCacheFields.find(
+					(scopedCacheField) => scopedCacheField.startsWith(`${field.field}.`),
+				);
+
+				return {
+					field: field.field,
+					type: field.type,
+					scoped_cache_field: scopedCacheFields.includes(field.field)
+						? 'yes'
+						: scopedCachePath ?? 'no',
+				};
+			});
+
+		expect(declaredFields).toEqual(expect.arrayContaining(table));
+		expect(declaredFields).toHaveLength(table.length);
 	}
 
 	function defineGivenSteps(
@@ -656,18 +663,28 @@ describe.each(vendors)('%s', (vendor) => {
 	) {
 		defineBackgroundSteps(given);
 
-		and('the path collections:', async (table: Record<string, string>[]) => {
-			for (const row of table) {
-				const collection = await request(getUrl(vendor, env))
-					.get(`/collections/${row['collection']}`)
-					.set('Authorization', auth);
+		and(
+			'the course part collection:',
+			async (table: Record<string, string>[]) => {
+				await expectDeclaredFields(PATH_PART, table);
+			},
+		);
 
-				expect(collection.body.data.meta.scoped_cache_fields)
-					.toEqual(loadYaml(row['scoped_cache_fields']!));
-			}
-		});
+		and(
+			'the method range collection:',
+			async (table: Record<string, string>[]) => {
+				await expectDeclaredFields(PATH_RANGE, table);
+			},
+		);
 
-		and('the path parts:', async (table: Record<string, string>[]) => {
+		and(
+			'the composed slot collection:',
+			async (table: Record<string, string>[]) => {
+				await expectDeclaredFields(PATH_SLOT, table);
+			},
+		);
+
+		and('the course parts:', async (table: Record<string, string>[]) => {
 			for (const { marker, owner } of table) {
 				const response = await request(getUrl(vendor, env))
 					.post(`/items/${PATH_PART}`)
@@ -679,7 +696,7 @@ describe.each(vendors)('%s', (vendor) => {
 			}
 		});
 
-		and('the path ranges:', async (table: Record<string, string>[]) => {
+		and('the method ranges:', async (table: Record<string, string>[]) => {
 			for (const { marker, method } of table) {
 				const response = await request(getUrl(vendor, env))
 					.post(`/items/${PATH_RANGE}`)
@@ -691,7 +708,7 @@ describe.each(vendors)('%s', (vendor) => {
 			}
 		});
 
-		and('the path slots:', async (table: Record<string, string>[]) => {
+		and('the slots:', async (table: Record<string, string>[]) => {
 			await createPathSlots(
 				parseGherkinTable<PathSlotRow & { marker: string }>(table).map(
 					({ marker, ...data }) => ({ marker, data }),
@@ -710,7 +727,7 @@ describe.each(vendors)('%s', (vendor) => {
 		ids: Map<string, number>,
 	) {
 		when.optional(
-			'the path slots are created:',
+			'the slots are created:',
 			async (table: Record<string, string>[]) => {
 				const filedBefore = await indexedMembers();
 
@@ -727,7 +744,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
-			'the path ranges are updated:',
+			'the method ranges are updated:',
 			async (table: Record<string, string>[]) => {
 				const filedBefore = await indexedMembers();
 

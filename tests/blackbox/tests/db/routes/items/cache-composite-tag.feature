@@ -1106,20 +1106,26 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - owner              |
 
   Scenario: a write by another owner leaves a composed-path read cached
-    Given the path collections:
-      | collection           | scoped_cache_fields         |
-      | composite_path_part  | [owner]                     |
-      | composite_path_range | [method]                    |
-      | composite_path_slot  | [course_part, method_range] |
-    And the path parts:
+    Given the course part collection:
+      | field | type   | scoped_cache_field |
+      | owner | string | yes                |
+    And the method range collection:
+      | field  | type   | scoped_cache_field |
+      | method | string | yes                |
+    And the composed slot collection:
+      | field        | type    | scoped_cache_field |
+      | course_part  | integer | yes                |
+      | method_range | integer | yes                |
+      | note         | string  | no                 |
+    And the course parts:
       | marker     | owner |
       | alpha_part | alpha |
       | beta_part  | beta  |
-    And the path ranges:
+    And the method ranges:
       | marker       | method |
       | spaced_range | spaced |
       | slow_range   | slow   |
-    And the path slots:
+    And the slots:
       | marker      | course_part | method_range | note   |
       | target_slot | alpha_part  | spaced_range | first  |
       | other_owner | beta_part   | spaced_range | third  |
@@ -1194,7 +1200,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                    |                       |       - slow                       |
       |                    |                       |   viewFields:                      |
       |                    |                       |     - method                       |
-    When the path slots are created:
+    When the slots are created:
       | query                          | purged fingerprints               |
       | - marker: created_slot         | - collection: composite_path_slot |+
       |   data:                        |   pinnedScope:                    |
@@ -1280,21 +1286,27 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |     - method                       |
 
   Scenario: a write to a parent purges the reads its old and new value match
-    Given the path collections:
-      | collection           | scoped_cache_fields         |
-      | composite_path_part  | [owner]                     |
-      | composite_path_range | [method]                    |
-      | composite_path_slot  | [course_part, method_range] |
-    And the path parts:
+    Given the course part collection:
+      | field | type   | scoped_cache_field |
+      | owner | string | yes                |
+    And the method range collection:
+      | field  | type   | scoped_cache_field |
+      | method | string | yes                |
+    And the composed slot collection:
+      | field        | type    | scoped_cache_field |
+      | course_part  | integer | yes                |
+      | method_range | integer | yes                |
+      | note         | string  | no                 |
+    And the course parts:
       | marker     | owner |
       | alpha_part | alpha |
       | beta_part  | beta  |
-    And the path ranges:
+    And the method ranges:
       | marker       | method |
       | spaced_range | spaced |
       | slow_range   | slow   |
       | massed_range | massed |
-    And the path slots:
+    And the slots:
       | marker       | course_part | method_range | note   |
       | target_slot  | alpha_part  | spaced_range | first  |
       | other_range  | beta_part   | slow_range   | second |
@@ -1369,7 +1381,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                    |                        |       - massed                     |
       |                    |                        |   viewFields:                      |
       |                    |                        |     - method                       |
-    When the path ranges are updated:
+    When the method ranges are updated:
       | query                  | purged fingerprints                |
       | - marker: spaced_range | - collection: composite_path_range |+
       |   data:                |   pinnedScope:                     |
@@ -1383,7 +1395,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                        |       - slow                       |
       |                        |   viewFields:                      |
       |                        |     - method                       |
-    Then the read is purged, matching "method: spaced" on the range as it was:
+    Then the read is purged, matching "method: spaced":
       | query              | response | fingerprints                       |
       | fields:            | []       | - collection: composite_path_slot  |+
       |   - id             |          |   pinnedScope:                     |
@@ -1407,7 +1419,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                    |          |       - spaced                     |
       |                    |          |   viewFields:                      |
       |                    |          |     - method                       |
-    And the witness reads are purged, matching "method: slow" on the range as it became:
+    And the witness reads are purged, matching "method: slow":
       | query            | response              | fingerprints                       |
       | fields:          | - marker: other_range | - collection: composite_path_slot  |+
       |   - id           |                       |   pinnedScope:                     |
@@ -1431,7 +1443,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                  |                       |       - slow                       |
       |                  |                       |   viewFields:                      |
       |                  |                       |     - method                       |
-    And the witness reads are still cached, matching neither "method: spaced" nor "method: slow":
+    And the witness reads are still cached, not matching "method: massed":
       | query              | response               | fingerprints                       |
       | fields:            | - marker: other_method | - collection: composite_path_slot  |+
       |   - id             |                        |   pinnedScope:                     |
