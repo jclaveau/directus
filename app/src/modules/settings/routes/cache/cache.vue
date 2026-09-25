@@ -2068,7 +2068,7 @@ onUnmounted(() => {
 				<div ref="latencyChartEl" class="chart" />
 			</div>
 
-			<div style="display: flex; justify-content:space-between;">
+			<div class="summary-row">
 				<div class="summary">
 					<div class="metric">
 						<span class="value">{{ abbreviateNumber(groups.length) }}</span>
@@ -2080,14 +2080,13 @@ onUnmounted(() => {
 					</div>
 				</div>
 
-				<div style="display: flex; align-items: center; gap: 16px 32px;">
+				<div class="cache-toolbar">
 					<v-input
 						v-model="ttlDraft"
 						class="ttl-input"
 						small
 						inline
 						:placeholder="ttlPlaceholder"
-						style="width: 100px;"
 						@keydown.enter="saveTtl"
 					>
 						<template #append>
@@ -2559,13 +2558,15 @@ onUnmounted(() => {
 	margin-block-end: 24px;
 }
 
-/* A dedicated row under the metrics, left-aligned — body content pushed to the far
-   right hides behind the auto-refresh sidebar, so keep these on the left. */
+.summary-row {
+	display: flex;
+	justify-content: space-between;
+}
+
 .cache-toolbar {
 	display: flex;
 	align-items: center;
-	gap: 20px;
-	margin-block-end: 24px;
+	gap: 16px 32px;
 }
 
 /* The flush select + button read as one control, set apart from the TTL field. */
@@ -3166,7 +3167,7 @@ table.entries .entry-row {
 /* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
    (which, with the 20px inner input, otherwise collapses to the icons' width). */
 .cache-toolbar .ttl-input {
-	inline-size: 240px;
+	inline-size: 100px;
 }
 
 .flush-select {
