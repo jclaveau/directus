@@ -1158,7 +1158,39 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
+			'a write by another owner leaves a read selecting through composed paths'
+				+ ' cached',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				definePathGivenSteps(steps, ids, filedMembers);
+
+				definePathWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers, PATH_SLOT);
+			},
+			60_000,
+		);
+
+		scenario(
 			'a write to a parent purges the reads its old and new value match',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				definePathGivenSteps(steps, ids, filedMembers);
+
+				definePathWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers, PATH_SLOT);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a write to a parent purges the reads selecting through it'
+				+ ' that its old and new value match',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const filedMembers = new Map<string, string[]>();
