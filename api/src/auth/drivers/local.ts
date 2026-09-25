@@ -4,7 +4,7 @@ import type { Accountability } from '@directus/types';
 import argon2 from 'argon2';
 import { Router } from 'express';
 import Joi from 'joi';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.js';
 import { respond } from '../../middleware/respond.js';
 import { createDefaultAccountability } from '../../permissions/utils/create-default-accountability.js';

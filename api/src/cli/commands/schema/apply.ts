@@ -1,6 +1,6 @@
 import type { Snapshot } from '@directus/types';
 import inquirer from 'inquirer';
-import path from 'path';
+import path from 'node:path';
 import getDatabase, { isInstalled, validateDatabaseConnection } from '../../../database/index.js';
 import { useLogger } from '../../../logger/index.js';
 import { applySnapshot } from '../../../utils/apply-snapshot.js';

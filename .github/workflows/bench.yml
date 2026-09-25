@@ -136,6 +136,11 @@ jobs:
         run: |
           pnpm --filter directus deploy --legacy --prod dist
           mv dist dist-head
+          # The --prod deploy rewrites node_modules/.pnpm-workspace-state-v1.json
+          # with dev: false, so pnpm 12 re-syncs the workspace to that state on the
+          # next `pnpm --filter` command and prunes every devDependency, vitest
+          # included. A plain install puts the lockfile state back.
+          pnpm install
 
       - name: Build the baseline bundle
         run: |
@@ -261,7 +266,13 @@ jobs:
         run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
 
       - name: Build the bundle
-        run: pnpm --filter directus deploy --legacy --prod dist
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          # The --prod deploy rewrites node_modules/.pnpm-workspace-state-v1.json
+          # with dev: false, so pnpm 12 re-syncs the workspace to that state on the
+          # next `pnpm --filter` command and prunes every devDependency, vitest
+          # included. A plain install puts the lockfile state back.
+          pnpm install
 
       # An empty extensions directory rather than none: a missing one makes every
       # boot log a resolution failure, and four instances pay for it.

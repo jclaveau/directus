@@ -22,17 +22,16 @@ import type {
 } from '@directus/types';
 import { isTypeIn, toBoolean } from '@directus/utils';
 import { pathToRelativeUrl, processId } from '@directus/utils/node';
-import aliasDefault from '@rollup/plugin-alias';
-import nodeResolveDefault from '@rollup/plugin-node-resolve';
-import virtualDefault from '@rollup/plugin-virtual';
+import alias from '@rollup/plugin-alias';
+import nodeResolve from '@rollup/plugin-node-resolve';
+import virtual from '@rollup/plugin-virtual';
 import chokidar, { FSWatcher } from 'chokidar';
 import express, { Router } from 'express';
 import { readFile, readdir } from 'node:fs/promises';
 import os from 'node:os';
-import { dirname, join } from 'node:path';
+import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ReadStream } from 'node:fs';
-import path from 'path';
 import { rolldown } from 'rolldown';
 import { rollup } from 'rollup';
 import { useBus } from '../bus/index.js';
@@ -61,12 +60,6 @@ import { createScopedCacheExtensionHandle } from './lib/scoped-cache-handle.js';
 import { syncExtensions } from './lib/sync-extensions.js';
 import { wrapEmbeds } from './lib/wrap-embeds.js';
 import DriverLocal from '@directus/storage-driver-local';
-
-// Workaround for https://github.com/rollup/plugins/issues/1329
-const virtual = virtualDefault as unknown as typeof virtualDefault.default;
-// @rollup/plugin-alias v6 is pure ESM with a callable default export, no .default interop
-const alias = aliasDefault;
-const nodeResolve = nodeResolveDefault as unknown as typeof nodeResolveDefault.default;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

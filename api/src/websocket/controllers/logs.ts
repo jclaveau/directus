@@ -1,6 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { WebSocketMessage } from '@directus/types';
-import type { Server as httpServer } from 'http';
+import type { Server as httpServer } from 'node:http';
 import type WebSocket from 'ws';
 import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';

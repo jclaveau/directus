@@ -4,7 +4,7 @@ import { toArray, toBoolean } from '@directus/utils';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
 import { Readable } from 'node:stream';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { getCache } from '../cache.js';
 import { RESUMABLE_UPLOADS } from '../constants.js';
 import getDatabase, { hasDatabaseConnection } from '../database/index.js';
