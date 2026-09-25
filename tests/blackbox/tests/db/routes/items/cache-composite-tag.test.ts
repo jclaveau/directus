@@ -23,6 +23,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 
 const SLOT = 'composite_tag_slot';
 const METHOD_RANGE = 'composite_tag_method_range';
+
+// The production layout, where the slot declares only its foreign keys and the
+// path to each value composes off the scope its parent declares.
+const PATH_PART = 'composite_path_part';
+const PATH_RANGE = 'composite_path_range';
+const PATH_SLOT = 'composite_path_slot';
+
 const cacheStatusHeader = 'x-cache-status';
 
 type SlotRow = {
@@ -98,6 +105,42 @@ describe.each(vendors)('%s', (vendor) => {
 			})
 			.set('Authorization', auth);
 
+		await CreateCollections(vendor, {
+			collections: [
+				{
+					collection: PATH_PART,
+					meta: { scoped_cache_fields: ['owner'] },
+					fields: [{ field: 'owner', type: 'string', meta: {} }],
+				},
+				{
+					collection: PATH_RANGE,
+					meta: { scoped_cache_fields: ['method'] },
+					fields: [{ field: 'method', type: 'string', meta: {} }],
+				},
+				{
+					collection: PATH_SLOT,
+					fields: [{ field: 'note', type: 'string', meta: {} }],
+				},
+			],
+		});
+
+		await CreateFieldM2O(vendor, {
+			collection: PATH_SLOT,
+			field: 'course_part',
+			otherCollection: PATH_PART,
+		});
+
+		await CreateFieldM2O(vendor, {
+			collection: PATH_SLOT,
+			field: 'method_range',
+			otherCollection: PATH_RANGE,
+		});
+
+		await request(getUrl(vendor, env))
+			.patch(`/collections/${PATH_SLOT}`)
+			.send({ meta: { scoped_cache_fields: ['course_part', 'method_range'] } })
+			.set('Authorization', auth);
+
 		const port = await getPort();
 		env[vendor].PORT = String(port);
 
@@ -113,20 +156,24 @@ describe.each(vendors)('%s', (vendor) => {
 	// collection: rows a scenario left behind answer the next one's read. A filter
 	// pinning an owner no other scenario uses hides that, an `_or` branch bound to
 	// a shared `method` does not — it answered with every row the file had created
-	// so far.
+	// so far. The path slots go before the parts and ranges they point at.
 	beforeEach(async () => {
-		const existing = await request(getUrl(vendor, env))
-			.get(`/items/${SLOT}`)
-			.query({ fields: 'id', limit: '-1' })
-			.set('Authorization', auth);
-
-		const existingIds = existing.body.data.map((row: { id: number }) => row.id);
-
-		if (existingIds.length > 0) {
-			await request(getUrl(vendor, env))
-				.delete(`/items/${SLOT}`)
-				.send(existingIds)
+		for (const collection of [SLOT, PATH_SLOT, PATH_PART, PATH_RANGE]) {
+			const existing = await request(getUrl(vendor, env))
+				.get(`/items/${collection}`)
+				.query({ fields: 'id', limit: '-1' })
 				.set('Authorization', auth);
+
+			const existingIds = existing.body.data.map(
+				(row: { id: number }) => row.id,
+			);
+
+			if (existingIds.length > 0) {
+				await request(getUrl(vendor, env))
+					.delete(`/items/${collection}`)
+					.send(existingIds)
+					.set('Authorization', auth);
+			}
 		}
 	});
 
@@ -137,12 +184,20 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await DeleteCollection(vendor, { collection: SLOT });
 		await DeleteCollection(vendor, { collection: METHOD_RANGE });
+		await DeleteCollection(vendor, { collection: PATH_SLOT });
+		await DeleteCollection(vendor, { collection: PATH_PART });
+		await DeleteCollection(vendor, { collection: PATH_RANGE });
 	});
 
 	// A slot names its method range by the marker the range was created under.
 	// Only one scenario creates ranges, so the markers need no scenario of their
 	// own, and the ranges it leaves behind are read by no other.
 	const methodRangeIds = new Map<string, number>();
+
+	// The same for the parents a path slot points at. Every scenario creates its
+	// own, and `beforeEach` drops what the previous one left.
+	const pathPartIds = new Map<string, number>();
+	const pathRangeIds = new Map<string, number>();
 
 	// A written row names itself by the marker the scenario files it under, and
 	// carries under `data` the body its request sends: every column on a create,
@@ -184,6 +239,46 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 	}
 
+	type PathSlotRow = {
+		course_part: string;
+		method_range: string;
+		note: string;
+	};
+
+	type WrittenPathSlot = { marker: string; data: PathSlotRow };
+
+	async function createPathSlots(
+		rows: WrittenPathSlot[],
+		ids: Map<string, number>,
+	) {
+		for (const { marker, data } of rows) {
+			const response = await request(getUrl(vendor, env))
+				.post(`/items/${PATH_SLOT}`)
+				.send({
+					...data,
+					course_part: pathPartIds.get(data.course_part),
+					method_range: pathRangeIds.get(data.method_range),
+				})
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(200);
+			ids.set(marker, response.body.data.id);
+		}
+	}
+
+	type WrittenPathRange = { marker: string; data: { method: string } };
+
+	async function updatePathRanges(rows: WrittenPathRange[]) {
+		for (const { marker, data } of rows) {
+			const response = await request(getUrl(vendor, env))
+				.patch(`/items/${PATH_RANGE}/${pathRangeIds.get(marker)}`)
+				.send(data)
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(200);
+		}
+	}
+
 	// A cell is YAML rather than JSON, which spends a line on every brace: the
 	// fork's multiline notation dedents a cell as a block, so the indentation the
 	// reader sees is the one the parser reads.
@@ -214,9 +309,13 @@ describe.each(vendors)('%s', (vendor) => {
 		return parameters;
 	}
 
-	function readSlots(query: Record<string, string | string[]>) {
+	// The Background's collection unless a path scenario names its own.
+	function readSlots(
+		query: Record<string, string | string[]>,
+		collection: string = SLOT,
+	) {
 		return request(getUrl(vendor, env))
-			.get(`/items/${SLOT}`)
+			.get(`/items/${collection}`)
 			.query(query)
 			.set('Authorization', auth);
 	}
@@ -224,8 +323,10 @@ describe.each(vendors)('%s', (vendor) => {
 	async function expectCacheStatus(
 		query: Record<string, string | string[]>,
 		status: 'HIT' | 'MISS',
+		collection: string,
 	) {
-		expect((await readSlots(query)).headers[cacheStatusHeader]).toBe(status);
+		expect((await readSlots(query, collection)).headers[cacheStatusHeader])
+			.toBe(status);
 	}
 
 	// An expected answer names its rows by the marker the scenario created them
@@ -235,6 +336,7 @@ describe.each(vendors)('%s', (vendor) => {
 		query: Record<string, string | string[]>,
 		ids: Map<string, number>,
 		expectedAnswer: Record<string, unknown>[],
+		collection: string,
 	) {
 		const markerById = new Map<number, string>();
 
@@ -243,13 +345,13 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 
 		if (expectedAnswer.length === 0) {
-			expect((await readSlots(query)).body.data).toEqual([]);
+			expect((await readSlots(query, collection)).body.data).toEqual([]);
 			return;
 		}
 
 		const columns = Object.keys(expectedAnswer[0]!);
 
-		const answered = (await readSlots(query)).body.data.map(
+		const answered = (await readSlots(query, collection)).body.data.map(
 			(row: Record<string, unknown>) => {
 				const answer: Record<string, unknown> = {};
 
@@ -267,22 +369,26 @@ describe.each(vendors)('%s', (vendor) => {
 		expect(answered).toHaveLength(expectedAnswer.length);
 	}
 
-	// Every member the scoped-cache index holds for this collection, as
-	// `<rendered fingerprint>|<cache key>` (`redis-store.ts`). Filling one entry
-	// adds its own members and no others, so what a read is filed under is the
-	// difference across the request that filled it -- which needs no cache key,
-	// and so no readable one.
+	// Every member the scoped-cache index holds for the collections a scenario
+	// states fingerprints of, as `<rendered fingerprint>|<cache key>`
+	// (`redis-store.ts`). Filling one entry adds its own members and no others, so
+	// what a read is filed under is the difference across the request that filled
+	// it -- which needs no cache key, and so no readable one. A path read touches
+	// three collections and a write to either parent purges through its own index,
+	// so theirs are read too; nothing but a path scenario reads them.
 	async function indexedMembers(): Promise<Set<string>> {
-		const indexKeys = await redis.keys(
-			`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint:`
-			+ `${SLOT}:*`,
-		);
-
 		const members = new Set<string>();
 
-		for (const indexKey of indexKeys) {
-			for (const member of await redis.smembers(indexKey)) {
-				members.add(member);
+		for (const collection of [SLOT, PATH_SLOT, PATH_PART, PATH_RANGE]) {
+			const indexKeys = await redis.keys(
+				`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint:`
+				+ `${collection}:*`,
+			);
+
+			for (const indexKey of indexKeys) {
+				for (const member of await redis.smembers(indexKey)) {
+					members.add(member);
+				}
 			}
 		}
 
@@ -293,10 +399,13 @@ describe.each(vendors)('%s', (vendor) => {
 	// <value>,&...&`, every reserved character backslash-escaped, with the view
 	// riding as a pin named `view`. The scenario states the struct and this decodes
 	// what was filed, rather than rendering the struct the way production does --
-	// a renderer here would agree with a renderer's own bug.
+	// a renderer here would agree with a renderer's own bug. A fingerprint of the
+	// Background's collection carries no `collection`, the way the feature states
+	// it; any other names the one it was filed for.
 	function decodeFingerprint(rendered: string) {
 		const unescaped = (token: string) => token.replace(/\\(.)/g, '$1');
-		const [, ...pins] = rendered.match(/(?:\\.|[^&])+/g) ?? [];
+		const [filedFor, ...pins] = rendered.match(/(?:\\.|[^&])+/g) ?? [];
+		const collection = unescaped(filedFor!).replace(/:$/, '');
 		const pinnedScope: Record<string, string[]> = {};
 		let viewFields: string[] | undefined;
 
@@ -312,9 +421,13 @@ describe.each(vendors)('%s', (vendor) => {
 			}
 		}
 
-		return viewFields === undefined
+		const fingerprint = viewFields === undefined
 			? { pinnedScope }
 			: { pinnedScope, viewFields };
+
+		return collection === SLOT
+			? fingerprint
+			: { collection, ...fingerprint };
 	}
 
 	// An index member joins the fingerprint it was filed under to the cache key it
@@ -386,11 +499,7 @@ describe.each(vendors)('%s', (vendor) => {
 	const queryKey = (query: Record<string, string | string[]>) =>
 		JSON.stringify(query);
 
-	function defineGivenSteps(
-		{ given, and }: StepFunctions,
-		ids: Map<string, number>,
-		filedMembers: Map<string, string[]>,
-	) {
+	function defineBackgroundSteps(given: StepFunctions['given']) {
 		// The schema the scenarios read against, asserted rather than created here:
 		// the instance reads `scoped_cache_fields` off the schema it boots on, so
 		// `beforeAll` creates the collection before the spawn. The feature still
@@ -428,6 +537,14 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(declaredFields).toEqual(expect.arrayContaining(table));
 			expect(declaredFields).toHaveLength(table.length);
 		});
+	}
+
+	function defineGivenSteps(
+		{ given, and }: StepFunctions,
+		ids: Map<string, number>,
+		filedMembers: Map<string, string[]>,
+	) {
+		defineBackgroundSteps(given);
 
 		// The ranges a slot's `method_range` names, created before the slots that
 		// point at them.
@@ -455,6 +572,16 @@ describe.each(vendors)('%s', (vendor) => {
 			);
 		});
 
+		defineCachedReadSteps(and, ids, filedMembers, SLOT);
+	}
+
+	// The read under test and its witnesses, of the collection a scenario reads.
+	function defineCachedReadSteps(
+		and: StepFunctions['and'],
+		ids: Map<string, number>,
+		filedMembers: Map<string, string[]>,
+		collection: string,
+	) {
 		// The query is the scenario's own table, so a reader sees what is cached
 		// where the scenario says it is cached, and the `Then` reads it back.
 		and('this read is cached:', async (table: Record<string, string>[]) => {
@@ -470,13 +597,15 @@ describe.each(vendors)('%s', (vendor) => {
 			// The MISS then HIT proves there is an entry to purge at all: a
 			// scenario asserting a later HIT would pass just as well against a read
 			// that was never cacheable.
-			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
-				.toBe('MISS');
+			expect(
+				(await readSlots(readQuery, collection)).headers[cacheStatusHeader],
+			).toBe('MISS');
 
-			expect((await readSlots(readQuery)).headers[cacheStatusHeader])
-				.toBe('HIT');
+			expect(
+				(await readSlots(readQuery, collection)).headers[cacheStatusHeader],
+			).toBe('HIT');
 
-			await expectAnswer(readQuery, ids, cellRows(response!));
+			await expectAnswer(readQuery, ids, cellRows(response!), collection);
 
 			filedMembers.set(
 				queryKey(readQuery),
@@ -493,19 +622,123 @@ describe.each(vendors)('%s', (vendor) => {
 					const witnessQuery = queryParameters(query!);
 					const filedBefore = await indexedMembers();
 
-					expect((await readSlots(witnessQuery)).headers[cacheStatusHeader])
-						.toBe('MISS');
+					expect(
+						(await readSlots(witnessQuery, collection)).headers[cacheStatusHeader],
+					).toBe('MISS');
 
-					expect((await readSlots(witnessQuery)).headers[cacheStatusHeader])
-						.toBe('HIT');
+					expect(
+						(await readSlots(witnessQuery, collection)).headers[cacheStatusHeader],
+					).toBe('HIT');
 
-					await expectAnswer(witnessQuery, ids, cellRows(response!));
+					await expectAnswer(
+						witnessQuery,
+						ids,
+						cellRows(response!),
+						collection,
+					);
 
 					filedMembers.set(
 						queryKey(witnessQuery),
 						await expectFingerprints(filedBefore, cellRows(fingerprints!)),
 					);
 				}
+			},
+		);
+	}
+
+	// The production layout: the slot declares its two foreign keys and nothing
+	// past them, each parent declares its own column, and the paths
+	// `course_part.owner` and `method_range.method` compose off the two.
+	function definePathGivenSteps(
+		{ given, and }: StepFunctions,
+		ids: Map<string, number>,
+		filedMembers: Map<string, string[]>,
+	) {
+		defineBackgroundSteps(given);
+
+		and('the path collections:', async (table: Record<string, string>[]) => {
+			for (const row of table) {
+				const collection = await request(getUrl(vendor, env))
+					.get(`/collections/${row['collection']}`)
+					.set('Authorization', auth);
+
+				expect(collection.body.data.meta.scoped_cache_fields)
+					.toEqual(loadYaml(row['scoped_cache_fields']!));
+			}
+		});
+
+		and('the path parts:', async (table: Record<string, string>[]) => {
+			for (const { marker, owner } of table) {
+				const response = await request(getUrl(vendor, env))
+					.post(`/items/${PATH_PART}`)
+					.send({ owner })
+					.set('Authorization', auth);
+
+				expect(response.statusCode).toBe(200);
+				pathPartIds.set(marker!, response.body.data.id);
+			}
+		});
+
+		and('the path ranges:', async (table: Record<string, string>[]) => {
+			for (const { marker, method } of table) {
+				const response = await request(getUrl(vendor, env))
+					.post(`/items/${PATH_RANGE}`)
+					.send({ method })
+					.set('Authorization', auth);
+
+				expect(response.statusCode).toBe(200);
+				pathRangeIds.set(marker!, response.body.data.id);
+			}
+		});
+
+		and('the path slots:', async (table: Record<string, string>[]) => {
+			await createPathSlots(
+				parseGherkinTable<PathSlotRow & { marker: string }>(table).map(
+					({ marker, ...data }) => ({ marker, data }),
+				),
+				ids,
+			);
+		});
+
+		defineCachedReadSteps(and, ids, filedMembers, PATH_SLOT);
+	}
+
+	// A write to a parent purges through the parent's own index, which is where
+	// its `purged fingerprints` are read from like any other.
+	function definePathWhenSteps(
+		{ when }: StepFunctions,
+		ids: Map<string, number>,
+	) {
+		when.optional(
+			'the path slots are created:',
+			async (table: Record<string, string>[]) => {
+				const filedBefore = await indexedMembers();
+
+				await createPathSlots(
+					cellRows(table[0]!['query']!) as WrittenPathSlot[],
+					ids,
+				);
+
+				await expectPurgedFingerprints(
+					filedBefore,
+					cellRows(table[0]!['purged fingerprints']!),
+				);
+			},
+		);
+
+		when.optional(
+			'the path ranges are updated:',
+			async (table: Record<string, string>[]) => {
+				const filedBefore = await indexedMembers();
+
+				await updatePathRanges(
+					cellRows(table[0]!['query']!) as WrittenPathRange[],
+				);
+
+				await expectPurgedFingerprints(
+					filedBefore,
+					cellRows(table[0]!['purged fingerprints']!),
+				);
 			},
 		);
 	}
@@ -570,6 +803,7 @@ describe.each(vendors)('%s', (vendor) => {
 		{ then, and }: StepFunctions,
 		ids: Map<string, number>,
 		filedMembers: Map<string, string[]>,
+		collection: string = SLOT,
 	) {
 		then.optional(
 			/^the read is purged, .+:$/,
@@ -577,8 +811,8 @@ describe.each(vendors)('%s', (vendor) => {
 				const { query, response, fingerprints } = table[0]!;
 				const readQuery = queryParameters(query!);
 
-				await expectCacheStatus(readQuery, 'MISS');
-				await expectAnswer(readQuery, ids, cellRows(response!));
+				await expectCacheStatus(readQuery, 'MISS', collection);
+				await expectAnswer(readQuery, ids, cellRows(response!), collection);
 
 				await expectFiledFingerprints(
 					filedMembers.get(queryKey(readQuery))!,
@@ -593,8 +827,8 @@ describe.each(vendors)('%s', (vendor) => {
 				const { query, response, fingerprints } = table[0]!;
 				const readQuery = queryParameters(query!);
 
-				await expectCacheStatus(readQuery, 'HIT');
-				await expectAnswer(readQuery, ids, cellRows(response!));
+				await expectCacheStatus(readQuery, 'HIT', collection);
+				await expectAnswer(readQuery, ids, cellRows(response!), collection);
 
 				await expectFiledFingerprints(
 					filedMembers.get(queryKey(readQuery))!,
@@ -609,8 +843,14 @@ describe.each(vendors)('%s', (vendor) => {
 				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);
 
-					await expectCacheStatus(witnessQuery, 'MISS');
-					await expectAnswer(witnessQuery, ids, cellRows(response!));
+					await expectCacheStatus(witnessQuery, 'MISS', collection);
+
+					await expectAnswer(
+						witnessQuery,
+						ids,
+						cellRows(response!),
+						collection,
+					);
 
 					await expectFiledFingerprints(
 						filedMembers.get(queryKey(witnessQuery))!,
@@ -626,8 +866,14 @@ describe.each(vendors)('%s', (vendor) => {
 				for (const { query, response, fingerprints } of table) {
 					const witnessQuery = queryParameters(query!);
 
-					await expectCacheStatus(witnessQuery, 'HIT');
-					await expectAnswer(witnessQuery, ids, cellRows(response!));
+					await expectCacheStatus(witnessQuery, 'HIT', collection);
+
+					await expectAnswer(
+						witnessQuery,
+						ids,
+						cellRows(response!),
+						collection,
+					);
 
 					await expectFiledFingerprints(
 						filedMembers.get(queryKey(witnessQuery))!,
@@ -875,6 +1121,36 @@ describe.each(vendors)('%s', (vendor) => {
 				defineWhenSteps(steps, ids);
 
 				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a write by another owner leaves a composed-path read cached',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				definePathGivenSteps(steps, ids, filedMembers);
+
+				definePathWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers, PATH_SLOT);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a write to a parent purges the reads its old and new value match',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				definePathGivenSteps(steps, ids, filedMembers);
+
+				definePathWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers, PATH_SLOT);
 			},
 			60_000,
 		);

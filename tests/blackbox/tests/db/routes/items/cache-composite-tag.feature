@@ -17,9 +17,10 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
   back after the write. The query is the `Query` the service receives rather than
   a URL encoding of it, and the fingerprints are the entry's own tags read back
   out of the index, so a scenario says which pins a read resolved instead of
-  inferring them from what survived a purge. They carry no `collection`: every
-  read here is of the one collection the Background declares, and the binder
-  fills it in.
+  inferring them from what survived a purge. A fingerprint of the collection the
+  Background declares carries no `collection`, and the binder fills it in; the
+  last two scenarios read collections of their own, whose `scoped_cache_fields`
+  compose into paths, so every fingerprint there names its `collection`.
 
   A write is stated the way a read is. The `query` cell names the row it writes
   and, under `data`, the body its request carries: every column on a create, the
@@ -1103,3 +1104,354 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     method: slow |                       |     - id                 |
       |                  |                       |     - method_range       |
       |                  |                       |     - owner              |
+
+  Scenario: a write by another owner leaves a composed-path read cached
+    Given the path collections:
+      | collection           | scoped_cache_fields         |
+      | composite_path_part  | [owner]                     |
+      | composite_path_range | [method]                    |
+      | composite_path_slot  | [course_part, method_range] |
+    And the path parts:
+      | marker     | owner |
+      | alpha_part | alpha |
+      | beta_part  | beta  |
+    And the path ranges:
+      | marker       | method |
+      | spaced_range | spaced |
+      | slow_range   | slow   |
+    And the path slots:
+      | marker      | course_part | method_range | note   |
+      | target_slot | alpha_part  | spaced_range | first  |
+      | other_owner | beta_part   | spaced_range | third  |
+      | other_range | beta_part   | slow_range   | fourth |
+    And this read is cached:
+      | query              | response              | fingerprints                       |
+      | fields:            | - marker: target_slot | - collection: composite_path_slot  |+
+      |   - id             |                       |   pinnedScope:                     |
+      | filter:            |                       |     course_part.owner:             |
+      |   course_part:     |                       |       - alpha                      |
+      |     owner: alpha   |                       |     method_range.method:           |
+      |   method_range:    |                       |       - spaced                     |
+      |     method: spaced |                       |   viewFields:                      |
+      |                    |                       |     - course_part                  |
+      |                    |                       |     - id                           |
+      |                    |                       |     - method_range                 |
+      |                    |                       | - collection: composite_path_part  |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     owner:                         |
+      |                    |                       |       - alpha                      |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - owner                        |
+      |                    |                       | - collection: composite_path_range |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     method:                        |
+      |                    |                       |       - spaced                     |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - method                       |
+    And the witness reads are cached:
+      | query              | response              | fingerprints                       |
+      | fields:            | - marker: other_owner | - collection: composite_path_slot  |+
+      |   - id             |                       |   pinnedScope:                     |
+      | filter:            |                       |     course_part.owner:             |
+      |   course_part:     |                       |       - beta                       |
+      |     owner: beta    |                       |     method_range.method:           |
+      |   method_range:    |                       |       - spaced                     |
+      |     method: spaced |                       |   viewFields:                      |
+      |                    |                       |     - course_part                  |
+      |                    |                       |     - id                           |
+      |                    |                       |     - method_range                 |
+      |                    |                       | - collection: composite_path_part  |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     owner:                         |
+      |                    |                       |       - beta                       |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - owner                        |
+      |                    |                       | - collection: composite_path_range |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     method:                        |
+      |                    |                       |       - spaced                     |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - method                       |
+      | fields:            | - marker: other_range | - collection: composite_path_slot  |+
+      |   - id             |                       |   pinnedScope:                     |
+      | filter:            |                       |     course_part.owner:             |
+      |   course_part:     |                       |       - beta                       |
+      |     owner: beta    |                       |     method_range.method:           |
+      |   method_range:    |                       |       - slow                       |
+      |     method: slow   |                       |   viewFields:                      |
+      |                    |                       |     - course_part                  |
+      |                    |                       |     - id                           |
+      |                    |                       |     - method_range                 |
+      |                    |                       | - collection: composite_path_part  |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     owner:                         |
+      |                    |                       |       - beta                       |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - owner                        |
+      |                    |                       | - collection: composite_path_range |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     method:                        |
+      |                    |                       |       - slow                       |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - method                       |
+    When the path slots are created:
+      | query                          | purged fingerprints               |
+      | - marker: created_slot         | - collection: composite_path_slot |+
+      |   data:                        |   pinnedScope:                    |
+      |     course_part: beta_part     |     course_part.owner:            |
+      |     method_range: spaced_range |       - beta                      |
+      |     note: second               |     method_range.method:          |
+      |                                |       - spaced                    |
+      |                                |   viewFields:                     |
+      |                                |     - course_part                 |
+      |                                |     - id                          |
+      |                                |     - method_range                |
+    Then the read is still cached, not matching "course_part.owner: alpha":
+      | query              | response              | fingerprints                       |
+      | fields:            | - marker: target_slot | - collection: composite_path_slot  |+
+      |   - id             |                       |   pinnedScope:                     |
+      | filter:            |                       |     course_part.owner:             |
+      |   course_part:     |                       |       - alpha                      |
+      |     owner: alpha   |                       |     method_range.method:           |
+      |   method_range:    |                       |       - spaced                     |
+      |     method: spaced |                       |   viewFields:                      |
+      |                    |                       |     - course_part                  |
+      |                    |                       |     - id                           |
+      |                    |                       |     - method_range                 |
+      |                    |                       | - collection: composite_path_part  |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     owner:                         |
+      |                    |                       |       - alpha                      |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - owner                        |
+      |                    |                       | - collection: composite_path_range |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     method:                        |
+      |                    |                       |       - spaced                     |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - method                       |
+    And the witness reads are purged, matching "course_part.owner: beta, method_range.method: spaced":
+      | query              | response               | fingerprints                       |
+      | fields:            | - marker: other_owner  | - collection: composite_path_slot  |+
+      |   - id             | - marker: created_slot |   pinnedScope:                     |
+      | filter:            |                        |     course_part.owner:             |
+      |   course_part:     |                        |       - beta                       |
+      |     owner: beta    |                        |     method_range.method:           |
+      |   method_range:    |                        |       - spaced                     |
+      |     method: spaced |                        |   viewFields:                      |
+      |                    |                        |     - course_part                  |
+      |                    |                        |     - id                           |
+      |                    |                        |     - method_range                 |
+      |                    |                        | - collection: composite_path_part  |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     owner:                         |
+      |                    |                        |       - beta                       |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - owner                        |
+      |                    |                        | - collection: composite_path_range |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     method:                        |
+      |                    |                        |       - spaced                     |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - method                       |
+    And the witness reads are still cached, not matching "method_range.method: slow":
+      | query            | response              | fingerprints                       |
+      | fields:          | - marker: other_range | - collection: composite_path_slot  |+
+      |   - id           |                       |   pinnedScope:                     |
+      | filter:          |                       |     course_part.owner:             |
+      |   course_part:   |                       |       - beta                       |
+      |     owner: beta  |                       |     method_range.method:           |
+      |   method_range:  |                       |       - slow                       |
+      |     method: slow |                       |   viewFields:                      |
+      |                  |                       |     - course_part                  |
+      |                  |                       |     - id                           |
+      |                  |                       |     - method_range                 |
+      |                  |                       | - collection: composite_path_part  |
+      |                  |                       |   pinnedScope:                     |
+      |                  |                       |     owner:                         |
+      |                  |                       |       - beta                       |
+      |                  |                       |   viewFields:                      |
+      |                  |                       |     - owner                        |
+      |                  |                       | - collection: composite_path_range |
+      |                  |                       |   pinnedScope:                     |
+      |                  |                       |     method:                        |
+      |                  |                       |       - slow                       |
+      |                  |                       |   viewFields:                      |
+      |                  |                       |     - method                       |
+
+  Scenario: a write to a parent purges the reads its old and new value match
+    Given the path collections:
+      | collection           | scoped_cache_fields         |
+      | composite_path_part  | [owner]                     |
+      | composite_path_range | [method]                    |
+      | composite_path_slot  | [course_part, method_range] |
+    And the path parts:
+      | marker     | owner |
+      | alpha_part | alpha |
+      | beta_part  | beta  |
+    And the path ranges:
+      | marker       | method |
+      | spaced_range | spaced |
+      | slow_range   | slow   |
+      | massed_range | massed |
+    And the path slots:
+      | marker       | course_part | method_range | note   |
+      | target_slot  | alpha_part  | spaced_range | first  |
+      | other_range  | beta_part   | slow_range   | second |
+      | other_method | alpha_part  | massed_range | third  |
+    And this read is cached:
+      | query              | response              | fingerprints                       |
+      | fields:            | - marker: target_slot | - collection: composite_path_slot  |+
+      |   - id             |                       |   pinnedScope:                     |
+      | filter:            |                       |     course_part.owner:             |
+      |   course_part:     |                       |       - alpha                      |
+      |     owner: alpha   |                       |     method_range.method:           |
+      |   method_range:    |                       |       - spaced                     |
+      |     method: spaced |                       |   viewFields:                      |
+      |                    |                       |     - course_part                  |
+      |                    |                       |     - id                           |
+      |                    |                       |     - method_range                 |
+      |                    |                       | - collection: composite_path_part  |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     owner:                         |
+      |                    |                       |       - alpha                      |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - owner                        |
+      |                    |                       | - collection: composite_path_range |
+      |                    |                       |   pinnedScope:                     |
+      |                    |                       |     method:                        |
+      |                    |                       |       - spaced                     |
+      |                    |                       |   viewFields:                      |
+      |                    |                       |     - method                       |
+    And the witness reads are cached:
+      | query              | response               | fingerprints                       |
+      | fields:            | - marker: other_range  | - collection: composite_path_slot  |+
+      |   - id             |                        |   pinnedScope:                     |
+      | filter:            |                        |     course_part.owner:             |
+      |   course_part:     |                        |       - beta                       |
+      |     owner: beta    |                        |     method_range.method:           |
+      |   method_range:    |                        |       - slow                       |
+      |     method: slow   |                        |   viewFields:                      |
+      |                    |                        |     - course_part                  |
+      |                    |                        |     - id                           |
+      |                    |                        |     - method_range                 |
+      |                    |                        | - collection: composite_path_part  |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     owner:                         |
+      |                    |                        |       - beta                       |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - owner                        |
+      |                    |                        | - collection: composite_path_range |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     method:                        |
+      |                    |                        |       - slow                       |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - method                       |
+      | fields:            | - marker: other_method | - collection: composite_path_slot  |+
+      |   - id             |                        |   pinnedScope:                     |
+      | filter:            |                        |     course_part.owner:             |
+      |   course_part:     |                        |       - alpha                      |
+      |     owner: alpha   |                        |     method_range.method:           |
+      |   method_range:    |                        |       - massed                     |
+      |     method: massed |                        |   viewFields:                      |
+      |                    |                        |     - course_part                  |
+      |                    |                        |     - id                           |
+      |                    |                        |     - method_range                 |
+      |                    |                        | - collection: composite_path_part  |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     owner:                         |
+      |                    |                        |       - alpha                      |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - owner                        |
+      |                    |                        | - collection: composite_path_range |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     method:                        |
+      |                    |                        |       - massed                     |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - method                       |
+    When the path ranges are updated:
+      | query                  | purged fingerprints                |
+      | - marker: spaced_range | - collection: composite_path_range |+
+      |   data:                |   pinnedScope:                     |
+      |     method: slow       |     method:                        |
+      |                        |       - spaced                     |
+      |                        |   viewFields:                      |
+      |                        |     - method                       |
+      |                        | - collection: composite_path_range |
+      |                        |   pinnedScope:                     |
+      |                        |     method:                        |
+      |                        |       - slow                       |
+      |                        |   viewFields:                      |
+      |                        |     - method                       |
+    Then the read is purged, matching "method: spaced" on the range as it was:
+      | query              | response | fingerprints                       |
+      | fields:            | []       | - collection: composite_path_slot  |+
+      |   - id             |          |   pinnedScope:                     |
+      | filter:            |          |     course_part.owner:             |
+      |   course_part:     |          |       - alpha                      |
+      |     owner: alpha   |          |     method_range.method:           |
+      |   method_range:    |          |       - spaced                     |
+      |     method: spaced |          |   viewFields:                      |
+      |                    |          |     - course_part                  |
+      |                    |          |     - id                           |
+      |                    |          |     - method_range                 |
+      |                    |          | - collection: composite_path_part  |
+      |                    |          |   pinnedScope:                     |
+      |                    |          |     owner:                         |
+      |                    |          |       - alpha                      |
+      |                    |          |   viewFields:                      |
+      |                    |          |     - owner                        |
+      |                    |          | - collection: composite_path_range |
+      |                    |          |   pinnedScope:                     |
+      |                    |          |     method:                        |
+      |                    |          |       - spaced                     |
+      |                    |          |   viewFields:                      |
+      |                    |          |     - method                       |
+    And the witness reads are purged, matching "method: slow" on the range as it became:
+      | query            | response              | fingerprints                       |
+      | fields:          | - marker: other_range | - collection: composite_path_slot  |+
+      |   - id           |                       |   pinnedScope:                     |
+      | filter:          |                       |     course_part.owner:             |
+      |   course_part:   |                       |       - beta                       |
+      |     owner: beta  |                       |     method_range.method:           |
+      |   method_range:  |                       |       - slow                       |
+      |     method: slow |                       |   viewFields:                      |
+      |                  |                       |     - course_part                  |
+      |                  |                       |     - id                           |
+      |                  |                       |     - method_range                 |
+      |                  |                       | - collection: composite_path_part  |
+      |                  |                       |   pinnedScope:                     |
+      |                  |                       |     owner:                         |
+      |                  |                       |       - beta                       |
+      |                  |                       |   viewFields:                      |
+      |                  |                       |     - owner                        |
+      |                  |                       | - collection: composite_path_range |
+      |                  |                       |   pinnedScope:                     |
+      |                  |                       |     method:                        |
+      |                  |                       |       - slow                       |
+      |                  |                       |   viewFields:                      |
+      |                  |                       |     - method                       |
+    And the witness reads are still cached, matching neither "method: spaced" nor "method: slow":
+      | query              | response               | fingerprints                       |
+      | fields:            | - marker: other_method | - collection: composite_path_slot  |+
+      |   - id             |                        |   pinnedScope:                     |
+      | filter:            |                        |     course_part.owner:             |
+      |   course_part:     |                        |       - alpha                      |
+      |     owner: alpha   |                        |     method_range.method:           |
+      |   method_range:    |                        |       - massed                     |
+      |     method: massed |                        |   viewFields:                      |
+      |                    |                        |     - course_part                  |
+      |                    |                        |     - id                           |
+      |                    |                        |     - method_range                 |
+      |                    |                        | - collection: composite_path_part  |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     owner:                         |
+      |                    |                        |       - alpha                      |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - owner                        |
+      |                    |                        | - collection: composite_path_range |
+      |                    |                        |   pinnedScope:                     |
+      |                    |                        |     method:                        |
+      |                    |                        |       - massed                     |
+      |                    |                        |   viewFields:                      |
+      |                    |                        |     - method                       |
