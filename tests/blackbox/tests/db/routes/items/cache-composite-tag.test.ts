@@ -501,8 +501,10 @@ describe.each(vendors)('%s', (vendor) => {
 
 	// The fingerprints an entry is filed under once the step's read has settled:
 	// every member under the cache key recorded when the scenario cached that read,
-	// which a purge prunes and the refill files again. The refill is what the rows
-	// now make of the read, so a parent row it no longer shows is no longer pinned.
+	// which a purge prunes where it matched and the refill files again. A member the
+	// purge did not match outlives the entry it named, so a parent row the refill no
+	// longer shows can still be pinned
+	// (https://github.com/jclaveau/directus/issues/547).
 	// An entry the write left alone and one it purged both end their step filed
 	// under what they state.
 	async function expectFiledFingerprints(

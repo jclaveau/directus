@@ -1872,6 +1872,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                        |       - spaced_range               |
       |                        |   viewFields:                      |
       |                        |     - method                       |
+    # The part's primary key is left over from the first fill, not filed by the
+    # refill, whose answer shows no part: a purge removes only the members it
+    # matched, and this write matched none of the part's. Harmless (a wider
+    # purge, never a stale read); it goes once a purge drops every member of the
+    # entries it drops, https://github.com/jclaveau/directus/issues/547.
     Then the read is purged, matching "method: spaced":
       | query                   | response | fingerprints                       |
       | fields:                 | []       | - collection: composite_path_slot  |+
@@ -1888,6 +1893,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |          |   pinnedScope:                     |
       |                         |          |     owner:                         |
       |                         |          |       - alpha                      |
+      |                         |          |   viewFields:                      |
+      |                         |          |     - owner                        |
+      |                         |          | - collection: composite_path_part  |
+      |                         |          |   pinnedScope:                     |
+      |                         |          |     id:                            |
+      |                         |          |       - alpha_part                 |
       |                         |          |   viewFields:                      |
       |                         |          |     - owner                        |
       |                         |          | - collection: composite_path_range |
