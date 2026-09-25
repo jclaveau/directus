@@ -99,6 +99,30 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles']);
 	});
 
+	test('files no view for a read bound to every field', async () => {
+		const service = new ItemsService('articles', {
+			knex: db,
+			schema,
+			accountability: null,
+		});
+
+		const everyField = await service.readByQuery(
+			{ fields: ['*'] },
+			{ emitEvents: false },
+		);
+
+		const someFields = await service.readByQuery(
+			{ fields: ['id', 'title'] },
+			{ emitEvents: false },
+		);
+
+		expect(readMeta(everyField)?.scopedCacheFingerprints)
+			.toEqual([{ collection: 'articles' }]);
+
+		expect(readMeta(someFields)?.scopedCacheFingerprints)
+			.toEqual([{ collection: 'articles', viewFields: ['id', 'title'] }]);
+	});
+
 	test('tags are bounded per read — they do not accumulate across reads on one instance', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 

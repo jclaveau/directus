@@ -1501,6 +1501,23 @@ export class ItemScopedCacheService {
 			queryCaseFields.delete(pin.collection);
 		}
 
+		// Bound to every field the collection has is bound to all of them, which a
+		// fingerprint naming no view already says. The list would otherwise ride in
+		// every member the fingerprint is filed under: once per row of a read that
+		// pins per row, 30 bytes each on a four-column collection.
+		for (const [collection, boundFields] of queryCaseFields) {
+			const schemaFields = Object.keys(
+				this.schema.collections[collection]?.fields ?? {},
+			);
+
+			if (
+				schemaFields.length > 0 &&
+				schemaFields.every((schemaField) => boundFields.includes(schemaField))
+			) {
+				queryCaseFields.delete(collection);
+			}
+		}
+
 		// The root's own filter is the one place several pins of a collection have
 		// to hold together — everywhere else a pin stands alone, the way the sweep
 		// reads it, so each is a query case of its own. Reading those as a
