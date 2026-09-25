@@ -8,7 +8,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import Queue from 'p-queue';
 import { join } from 'path';
-import type { ReadableStream } from 'stream/web';
+import type { ReadableStream } from 'node:stream/web';
 import { extract } from 'tar';
 import { useLogger } from '../../../logger/index.js';
 import { getStorage } from '../../../storage/index.js';
