@@ -1060,6 +1060,50 @@ describe('drainCacheEvents', () => {
 		);
 	});
 
+	// A lone surrogate made encodeURIComponent throw outside the try, so the
+	// batch was never acked; a pin past 255 failed the varchar insert and lost
+	// every event beside it.
+	it('stores a lone-surrogate or over-long pin and acks the batch', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'p',
+				purgeId: 'p-odd',
+				collection: 'articles',
+				mode: 'slices',
+				scopedCachePins: JSON.stringify([
+					'articles:id=\ud800',
+					`articles:slug=${'x'.repeat(300)}`,
+				]),
+				scopedCachePinCount: '2',
+				evicted: '0',
+				ts: '6000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_scoped_purge_pins',
+			[
+				{
+					purge_id: 'p-odd',
+					time: new Date(6000),
+					scoped_cache_pin: 'articles:id=%EF%BF%BD',
+					collection: 'articles',
+				},
+				{
+					purge_id: 'p-odd',
+					time: new Date(6000),
+					scoped_cache_pin: `articles:slug=${'x'.repeat(241)}`,
+					collection: 'articles',
+				},
+			],
+			expect.any(Number),
+		);
+
+		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '1-0');
+	});
+
 	it('carries each entry pin\'s own collection, for the coarse join', async () => {
 		streamBatch = [
 			streamEntry('1-0', {

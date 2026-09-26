@@ -36,7 +36,7 @@ import {
 	isCacheAuditReplay,
 } from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
-import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
+import { storedScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
 import { setScopedCachePinsHeader } from '../utils/scoped-cache-pins-header.js';
 import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
@@ -161,7 +161,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	if (isCacheAuditReplay(req)) {
 		res.setHeader(
 			CACHE_AUDIT_PINS_HEADER,
-			JSON.stringify(indexedPinKeys.map(printableScopedCachePin)),
+			JSON.stringify(indexedPinKeys.map(storedScopedCachePin)),
 		);
 	}
 

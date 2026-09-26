@@ -18,7 +18,7 @@ import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { CACHE_ENTRY_VERIFIED_AT } from './utils/cache-entry-verified-at.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
-import { printableScopedCachePin } from './utils/printable-scoped-cache-pins.js';
+import { storedScopedCachePin } from './utils/printable-scoped-cache-pins.js';
 
 // The timeseries wire types live in @directus/types so the app chart shares them.
 // Re-exported for consumers; the import above is what binds them in this file.
@@ -1013,7 +1013,7 @@ async function persistStreamBatch(
 					time: at,
 					// Escaped on the way into the column, not at the producer, so any
 					// caller queueing a purge is covered — a raw NUL fails the whole tick.
-					scoped_cache_pin: printableScopedCachePin(scopedCachePin),
+					scoped_cache_pin: storedScopedCachePin(scopedCachePin),
 					collection: collectionOfScopedCachePin(scopedCachePin),
 				});
 			}
@@ -1085,7 +1085,7 @@ async function persistStreamBatch(
 					filledUnder.map((scopedCachePin) => {
 						return {
 							// Same escaping as the purge side, or the two stop joining.
-							scoped_cache_pin: printableScopedCachePin(scopedCachePin),
+							scoped_cache_pin: storedScopedCachePin(scopedCachePin),
 							collection: collectionOfScopedCachePin(scopedCachePin),
 						};
 					}),
