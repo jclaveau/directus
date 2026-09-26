@@ -792,7 +792,7 @@ describe('pin drift', () => {
 		});
 	});
 
-	test('reads the joined header a node on the previous build answers', async () => {
+	test('refuses a joined list, which no build sends in this header', async () => {
 		fill('rk', { data: [] });
 		described(descriptor({ scopedCachePins: ['articles:owner=acme'] }));
 
@@ -800,7 +800,8 @@ describe('pin drift', () => {
 			replay: replayer(answer({ data: [] }, { pins: 'articles:owner=acme' })),
 		});
 
-		expect(report.counts.fresh).toBe(1);
+		expect(report.counts.unreplayable).toBe(1);
+		expect(report.findings[0]!.reason).toBe('replay_unrecognized');
 	});
 
 	test('keeps a pin whose scope value holds a comma whole', async () => {
@@ -816,7 +817,7 @@ describe('pin drift', () => {
 		expect(report.counts.fresh).toBe(1);
 	});
 
-	test('refuses a header that is neither form', async () => {
+	test('refuses a header that does not parse', async () => {
 		fill('rk', { data: [] });
 		described(descriptor({ scopedCachePins: ['articles'] }));
 

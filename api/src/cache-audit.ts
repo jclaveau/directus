@@ -853,16 +853,10 @@ function replayPlan(
 
 /**
  * The pins a replay answered with. JSON, since a pin holds a scope value and a
- * value can hold a comma; a node still on the build before this one answers the
- * joined form, which a rolling deploy puts in front of this auditor while it
- * rolls. Null where the header is neither — a drift verdict off an unparseable
- * list would evict an entry that is fine.
+ * value can hold a comma. Null where it does not parse — a drift verdict off an
+ * unparseable list would evict an entry that is fine.
  */
 function replayedScopedCachePins(header: string): string[] | null {
-	if (!header.startsWith('[')) {
-		return header.split(',').filter(Boolean);
-	}
-
 	try {
 		const parsed: unknown = JSON.parse(header);
 
