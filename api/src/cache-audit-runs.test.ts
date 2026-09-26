@@ -721,6 +721,66 @@ describe('readCacheAuditFindings', () => {
 		expect(count!.bindings).toEqual([7, 1]);
 	});
 
+	it('reads a pre-20260924B purge record\'s scopedCacheTag as its pin', async () => {
+		tracker.on.select('count("id") as "total"').response([{ total: 1 }]);
+
+		tracker.on.select('directus_cache_audit_findings').response([
+			{
+				id: 1,
+				audit: 7,
+				verdict: 'stale',
+				reason: null,
+				redis_key: 'abc',
+				cache_key: 'abc',
+				method: 'GET',
+				url: '/items/articles',
+				query: '',
+				user_id: null,
+				collection: 'articles',
+				filled_at: new Date(1_699_999_990_000),
+				age_ms: 10_000,
+				pins: '[]',
+				replay_pins: null,
+				diff: null,
+				purges_since_filled: JSON.stringify([
+					{
+						time: 5,
+						mode: 'slices',
+						collection: 'articles',
+						scopedCacheTag: 'articles:id=7',
+						evicted: 1,
+					},
+					{
+						time: 6,
+						mode: 'slices',
+						collection: 'articles',
+						scopedCachePin: 'articles:id=8',
+						evicted: 2,
+					},
+				]),
+			},
+		]);
+
+		const page = await readCacheAuditFindings(7, { limit: 100, offset: 0 });
+
+		expect(page.findings[0]!.purgesSinceFilled).toEqual([
+			{
+				time: 5,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCachePin: 'articles:id=7',
+				evicted: 1,
+			},
+			{
+				time: 6,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCachePin: 'articles:id=8',
+				evicted: 2,
+			},
+		]);
+	});
+
 	it('walks the findings by offset, keeping to one verdict when asked', async () => {
 		tracker.on.select('count("id") as "total"').response([{ total: 0 }]);
 		tracker.on.select('directus_cache_audit_findings').response([]);

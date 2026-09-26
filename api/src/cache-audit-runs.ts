@@ -491,10 +491,26 @@ function findingOf(row: Record<string, unknown>): CacheAuditFinding {
 		pins: (json(row['pins']) as string[] | null) ?? [],
 		replayPins: json(row['replay_pins']) as string[] | null,
 		diff: json(row['diff']) as string[] | null,
-		purgesSinceFilled: json(
-			row['purges_since_filled'],
-		) as CacheEntryPurgeRecord[] | null,
+		purgesSinceFilled: purgeRecordsOf(json(row['purges_since_filled'])),
 	};
+}
+
+// 20260924B renamed the columns, not the key inside a finding stored before it,
+// which still names its pin `scopedCacheTag`.
+function purgeRecordsOf(stored: unknown): CacheEntryPurgeRecord[] | null {
+	if (!Array.isArray(stored)) {
+		return null;
+	}
+
+	return stored.map((record: Record<string, unknown>) => {
+		if (!('scopedCacheTag' in record)) {
+			return record as unknown as CacheEntryPurgeRecord;
+		}
+
+		const { scopedCacheTag, ...rest } = record;
+
+		return { ...rest, scopedCachePin: scopedCacheTag } as CacheEntryPurgeRecord;
+	});
 }
 
 function nullableNumber(value: unknown): number | null {
