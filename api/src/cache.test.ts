@@ -25,7 +25,6 @@ const redis = vi.hoisted(() => {
 		eval: vi.fn(),
 		srem: vi.fn(),
 		scopedCacheTagExpiry: vi.fn(),
-		incr: vi.fn(),
 		sunion: vi.fn(),
 		unlink: vi.fn(),
 		exec: vi.fn(),
@@ -34,6 +33,7 @@ const redis = vi.hoisted(() => {
 	return {
 		isCluster: false,
 		defineCommand: vi.fn(),
+		scopedCacheEpochBump: vi.fn(),
 		smembers: vi.fn(),
 		sscan: vi.fn(
 			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
@@ -174,8 +174,7 @@ beforeEach(() => {
 	redis._pipeline.expire.mockReturnValue(redis._pipeline);
 
 	// Answers a flush's unlinks with what was queued since the last exec — a real
-	// `pipeline()` hands back a fresh queue every call, and the epoch bump execs its
-	// own before the unlinks are queued — and an epoch bump alone with nothing.
+	// `pipeline()` hands back a fresh queue every call.
 	let executed = 0;
 
 	redis._pipeline.exec.mockImplementation(async () => {
@@ -1778,9 +1777,11 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		onTestFinished(() => clear.mockRestore());
 
-		redis._pipeline.incr.mockImplementation((key: string) => {
-			calls.push(`incr ${key}`);
-		});
+		redis.scopedCacheEpochBump.mockImplementation(
+			(_epochKeyCount: number, epochKey: string) => {
+				calls.push(`bump ${epochKey}`);
+			},
+		);
 
 		redis.scan.mockImplementation(async () => {
 			calls.push('scan');
@@ -1796,10 +1797,10 @@ describe('the wholesale counter moves before the response clear', () => {
 		await flushCaches(true);
 
 		expect(calls).toEqual([
-			'incr scalabus:scoped-cache-epoch:*',
+			'bump scalabus:scoped-cache-epoch:*',
 			'clear',
 			'scan',
-			'incr scalabus:scoped-cache-epoch:*',
+			'bump scalabus:scoped-cache-epoch:*',
 		]);
 	});
 
@@ -1809,10 +1810,10 @@ describe('the wholesale counter moves before the response clear', () => {
 		await clearCacheTargets(['response']);
 
 		expect(calls).toEqual([
-			'incr scalabus:scoped-cache-epoch:*',
+			'bump scalabus:scoped-cache-epoch:*',
 			'clear',
 			'scan',
-			'incr scalabus:scoped-cache-epoch:*',
+			'bump scalabus:scoped-cache-epoch:*',
 		]);
 	});
 });

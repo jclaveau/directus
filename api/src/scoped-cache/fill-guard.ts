@@ -93,9 +93,9 @@ export async function readScopedCacheEpochs(
 
 /**
  * Bump the counters of the collections a purge just dropped entries for. Expiring,
- * so a collection nothing writes to stops costing a key; a read whose counter
- * expired between the two readings reads `null` on both sides and caches, which is
- * right — nothing purged it in between.
+ * so a collection nothing writes to stops costing a key. A counter that expired
+ * between a read's two readings comes back only through a purge, and the store
+ * recreates it at a value it never held, so the read compares unequal and evicts.
  */
 export async function bumpScopedCacheEpochs(
 	collections: Iterable<string>,

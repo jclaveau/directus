@@ -3,7 +3,7 @@
  *
  * Everything Redis-shaped about the index lives here: how a set is named and what
  * segment it sits under, how a member is framed, the globs a scan is narrowed by,
- * the Lua the two atomic steps run as, the cursor loops a scan is made of, the
+ * the Lua the atomic steps run as, the cursor loops a scan is made of, the
  * chunk sizes a command list is cut to, and the per-command error a pipeline
  * answers with instead of rejecting. All of it is written to fit what Redis can
  * filter on — a key is a key, a member is a string, and both are selected by glob
@@ -103,6 +103,36 @@ end
 return 0
 `;
 
+/**
+ * Bump purge counters, creating a missing one at the server's clock in
+ * microseconds rather than at `0`.
+ *
+ * A counter recreated at `1` repeats the value it may have held before it expired
+ * or was evicted: a read that took `1` before its query, then a purge recreating
+ * the counter at `1`, compares equal after the fill and keeps rows that purge
+ * superseded. A seed from `TIME` never repeats a value read before: matching one
+ * would take a bump per microsecond for the counter's whole life. Redis's own
+ * clock, so a skewed API node cannot seed one in the past, and one script, so the
+ * counter cannot expire between the seed and its `INCR`.
+ *
+ * Sixteen digits, under 2^53, so `earlierScopedCacheEpoch` still compares them as
+ * numbers exactly.
+ *
+ * KEYS are the counters, ARGV[1] how many seconds each is held.
+ */
+export const scopedCacheEpochBumpScript = `
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+for i = 1, #KEYS do
+	redis.call('SET', KEYS[i], seed, 'NX')
+	redis.call('INCR', KEYS[i])
+	redis.call('EXPIRE', KEYS[i], ARGV[1])
+end
+
+return #KEYS
+`;
+
 type ScopedCacheTagExpiryCommand = {
 	scopedCacheTagExpiry(
 		tagKey: string,
@@ -113,20 +143,33 @@ type ScopedCacheTagExpiryCommand = {
 
 type ScopedCacheTagPipeline = ChainableCommander & ScopedCacheTagExpiryCommand;
 
+type ScopedCacheEpochBumpCommand = {
+	scopedCacheEpochBump(
+		epochKeyCount: number,
+		...epochKeysThenTtl: Array<string | number>
+	): Promise<number>;
+};
+
+type ScopedCacheScriptedRedis = Redis
+	& ScopedCacheTagExpiryCommand
+	& ScopedCacheEpochBumpCommand;
+
 const clientsCarryingScripts = new WeakSet<Redis>();
 
 /**
- * The shared client, with the tag-expiry script registered as a command on it.
+ * The shared client, with the tag-expiry and counter-bump scripts registered as
+ * commands on it.
  *
  * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
- * `NOSCRIPT` — so the 316-byte script crosses the wire once per server rather than
- * once per index set. A read filed under 200 index sets sends 402 in one pipeline,
- * and as `EVAL` that is 124 KB of Lua per fill against 193 KB sent in total.
+ * `NOSCRIPT` — so the 316-byte tag-expiry script crosses the wire once per server
+ * rather than once per index set. A read filed under 200 index sets sends 402 in
+ * one pipeline, and as `EVAL` that is 124 KB of Lua per fill against 193 KB sent
+ * in total.
  *
  * Registration is per client and idempotent, but `defineCommand` rebuilds the
  * command each time, so the set keeps it to the first call per connection.
  */
-function useScriptedRedis(): Redis & ScopedCacheTagExpiryCommand {
+function useScriptedRedis(): ScopedCacheScriptedRedis {
 	const redis = useRedis();
 
 	if (! clientsCarryingScripts.has(redis)) {
@@ -135,10 +178,14 @@ function useScriptedRedis(): Redis & ScopedCacheTagExpiryCommand {
 			lua: scopedCacheTagExpiryScript,
 		});
 
+		redis.defineCommand('scopedCacheEpochBump', {
+			lua: scopedCacheEpochBumpScript,
+		});
+
 		clientsCarryingScripts.add(redis);
 	}
 
-	return redis as Redis & ScopedCacheTagExpiryCommand;
+	return redis as ScopedCacheScriptedRedis;
 }
 
 /**
@@ -151,9 +198,9 @@ function useScriptedRedis(): Redis & ScopedCacheTagExpiryCommand {
  * `SUNION`: the union has to be built before the sets are dropped anyway, and
  * `unpack`ing a key list into one call overflows Lua's stack.
  *
- * KEYS are the index sets. The counter bumps are NOT in here — they are one
- * pipeline of their own, sent first, so they still land when the sweep behind them
- * is refused.
+ * KEYS are the index sets. The counter bumps are NOT in here — they are a script
+ * of their own, sent first, so they still land when the sweep behind them is
+ * refused.
  */
 export const scopedCacheSweepScript = `
 local seen = {}
@@ -807,23 +854,13 @@ const redisStore: ScopedCacheStore = {
 		epochKeys: readonly string[],
 		ttlSeconds: number,
 	): Promise<void> {
-		const pipeline = useRedis().pipeline();
-
-		for (const epochKey of epochKeys) {
-			pipeline.incr(epochKey);
-			pipeline.expire(epochKey, ttlSeconds);
-		}
-
-		const results = await pipeline.exec();
-
-		// `exec` rejects only on a connection-level failure, so an `INCR` refused on
-		// its own — maxmemory with noeviction, a WRONGTYPE — resolves as an entry
-		// error. The caller decides what that costs; it must not pass unseen.
-		const refused = results?.find(([error]) => error !== null)?.[0];
-
-		if (refused) {
-			throw refused;
-		}
+		// Rejects on a counter the script could not move — maxmemory with
+		// noeviction, a WRONGTYPE — which the caller must not let pass unseen.
+		await useScriptedRedis().scopedCacheEpochBump(
+			epochKeys.length,
+			...epochKeys,
+			ttlSeconds,
+		);
 	},
 
 	onStoreReady(listener: () => void): void {

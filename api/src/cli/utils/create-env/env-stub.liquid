@@ -206,10 +206,11 @@ CACHE_ENABLED=false
 # CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
 
 # How long a collection's purge counter is held. A read takes it before its query
-# and again after the fill, and a counter that expired between the two reads the
-# same on both sides — so this only has to outlive the slowest read, and shorter
-# means a collection nobody writes to stops costing a key sooner. 0 or less is
-# read as the default: a counter expired as it is bumped guards nothing. [24h]
+# and again after the fill, and a purge recreating an expired counter starts it
+# at Redis's clock, never at a value it held — so this only has to outlive the
+# slowest read, and shorter means a collection nobody writes to stops costing a
+# key sooner. 0 or less is read as the default: a counter expired as it is
+# bumped guards nothing. [24h]
 # CACHE_SCOPED_EPOCH_TTL=24h
 
 # Request dimensions folded into the cache key so a header-varying response

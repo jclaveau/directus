@@ -4,6 +4,7 @@ import {
 	parseScopedCacheIndexMember,
 	redisScopedCacheStore,
 	renderScopedCacheIndexMember,
+	scopedCacheEpochBumpScript,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheRowIndexGlobs,
 	scopedCacheRowIndexKeys,
@@ -15,11 +16,17 @@ vi.mock('@directus/env', () => {
 });
 
 const srem = vi.fn();
+const defineCommand = vi.fn();
+const scopedCacheEpochBump = vi.fn();
 
 vi.mock('../redis/index.js', () => {
 	return {
 		useRedis: () => {
-			return { pipeline: () => ({ srem, exec: async () => [] }) };
+			return {
+				defineCommand,
+				scopedCacheEpochBump,
+				pipeline: () => ({ srem, exec: async () => [] }),
+			};
 		},
 	};
 });
@@ -344,5 +351,55 @@ describe('removeIndexedEntries', () => {
 				member,
 			],
 		]);
+	});
+});
+
+describe('bumpPurgeEpochs', () => {
+	beforeEach(() => {
+		defineCommand.mockReset();
+		scopedCacheEpochBump.mockReset();
+	});
+
+	it(oneLine`
+		bumps every counter in one script call, holding each for the ttl
+	`, async () => {
+		await redisScopedCacheStore().bumpPurgeEpochs(
+			['ns:scoped-cache-epoch:slot', 'ns:scoped-cache-epoch:*'],
+			86400,
+		);
+
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheEpochBump',
+			{ lua: scopedCacheEpochBumpScript },
+		);
+
+		expect(scopedCacheEpochBump.mock.calls).toEqual([
+			[2, 'ns:scoped-cache-epoch:slot', 'ns:scoped-cache-epoch:*', 86400],
+		]);
+	});
+
+	// A counter recreated at `1` after it expired repeats the `1` a read may have
+	// taken before its query, and that read then keeps rows the purge superseded.
+	it('seeds a missing counter from the server clock before bumping it', () => {
+		expect(scopedCacheEpochBumpScript).toContain(
+			"local now = redis.call('TIME')\n"
+			+ "local seed = now[1] .. "
+			+ "string.format('%06d', tonumber(now[2]))",
+		);
+
+		expect(scopedCacheEpochBumpScript).toContain(
+			"\tredis.call('SET', KEYS[i], seed, 'NX')\n"
+			+ "\tredis.call('INCR', KEYS[i])",
+		);
+	});
+
+	it('throws a bump the server refused, so the caller can say so', async () => {
+		scopedCacheEpochBump
+			.mockRejectedValue(new Error('OOM command not allowed'));
+
+		await expect(redisScopedCacheStore().bumpPurgeEpochs(
+			['ns:scoped-cache-epoch:slot'],
+			86400,
+		)).rejects.toThrow('OOM command not allowed');
 	});
 });

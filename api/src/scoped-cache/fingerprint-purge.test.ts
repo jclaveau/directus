@@ -98,10 +98,10 @@ beforeEach(() => {
 		sscan,
 		scan,
 		eval: evalScript,
+		defineCommand: vi.fn(),
+		scopedCacheEpochBump: vi.fn(),
 		pipeline: () => {
 			const chain: any = {
-				incr: () => chain,
-				expire: () => chain,
 				srem: (...args: string[]) => {
 					srem(...args);
 					return chain;
@@ -456,10 +456,10 @@ describe('a purge shown the rows it wrote', () => {
 			}),
 			scan,
 			eval: evalScript,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 			pipeline: () => {
 				const chain: any = {
-					incr: () => chain,
-					expire: () => chain,
 					srem: () => chain,
 					exec: async () => [],
 				};

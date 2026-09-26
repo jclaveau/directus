@@ -176,7 +176,9 @@ export interface ScopedCacheStore {
 	): Promise<(string | null)[] | null>;
 
 	/**
-	 * Bump these purge counters and hold each for `ttlSeconds`.
+	 * Bump these purge counters and hold each for `ttlSeconds`. A counter that is
+	 * missing — expired, evicted, flushed — must come back at a value it never held
+	 * before, or a read that took the old value compares equal after its fill.
 	 *
 	 * THROWS when the store refuses any of it, so the caller can say that the
 	 * guard stopped guarding. It cannot stop the sweep behind it — that is what
