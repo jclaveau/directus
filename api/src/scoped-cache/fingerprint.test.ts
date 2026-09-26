@@ -176,6 +176,36 @@ describe('scopedCacheFingerprintOf', () => {
 		});
 	});
 
+	it('pins a null beside another value with the null sentinel', () => {
+		expect(scopedCacheFingerprintOf(
+			'slot',
+			[
+				{ field: 'owner', value: null, type: 'string' },
+				{ field: 'method', value: 'spaced', type: 'string' },
+			],
+		)).toEqual({
+			collection: 'slot',
+			pinnedScope: { owner: ['\x00null'], method: ['spaced'] },
+		});
+	});
+
+	it('renders a null beside another value and reads it back', () => {
+		expect(parseScopedCacheFingerprint(renderScopedCacheFingerprint(
+			scopedCacheFingerprintOf(
+				'slot',
+				[
+					{ field: 'owner', value: null, type: 'string' },
+					{ field: 'method', value: 'spaced', type: 'string' },
+				],
+				['id'],
+			),
+		))).toEqual({
+			collection: 'slot',
+			pinnedScope: { method: ['spaced'], owner: ['\x00null'] },
+			viewFields: ['id'],
+		});
+	});
+
 	it('pins a field named after an object member', () => {
 		expect(renderScopedCacheFingerprint(scopedCacheFingerprintOf(
 			'note',
@@ -541,5 +571,56 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 			['note'],
 		)).toBe(true);
 	});
-});
 
+	it('purges a read pinning a null beside another value by a null row', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint(
+				'slot:&method=,spaced,&owner=,\x00null,&view=,id,&',
+			),
+			[parseScopedCacheFingerprint(
+				'slot:&id=,1,&method=,spaced,&owner=,\x00null,&',
+			)],
+			null,
+		)).toBe(true);
+	});
+
+	it('leaves a read pinning a null alone for a row holding the string null', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint(
+				'slot:&method=,spaced,&owner=,\x00null,&view=,id,&',
+			),
+			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,null,&')],
+			null,
+		)).toBe(false);
+	});
+
+	it(oneLine`
+		leaves a read pinning a null alone for a null row outside its other pin
+	`, () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint(
+				'slot:&method=,spaced,&owner=,\x00null,&view=,id,&',
+			),
+			[parseScopedCacheFingerprint(
+				'slot:&id=,1,&method=,slow,&owner=,\x00null,&',
+			)],
+			null,
+		)).toBe(false);
+	});
+
+	it('purges a read pinned on its parent id alone by a write to that parent', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint('range:&id=,7,&view=,method,&'),
+			[parseScopedCacheFingerprint('range:&id=,7,&method=,slow,&')],
+			['method'],
+		)).toBe(true);
+	});
+
+	it('leaves a read pinned on its parent id alone for a write to another', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint('range:&id=,7,&view=,method,&'),
+			[parseScopedCacheFingerprint('range:&id=,8,&method=,slow,&')],
+			['method'],
+		)).toBe(false);
+	});
+});
