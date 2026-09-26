@@ -248,8 +248,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 		try {
 			const now = Date.now();
-			const ttlMs = getMilliseconds(resolvedCacheTtl());
-			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
+			const cacheTtl = resolvedCacheTtl();
+			const ttlMs = getMilliseconds(cacheTtl);
+			const expiresAt = now + getMilliseconds(cacheTtl, 0);
 
 			// Index BEFORE the value exists. The two writes are not atomic, and the
 			// failure modes are not symmetric: a pin naming a key that was never
@@ -263,6 +264,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					? [cachePinsKey(redisKey)]
 					: [],
 				req.schema,
+				cacheTtl,
 			);
 
 			// Handed over together rather than awaited in turn: node-redis corks its
@@ -350,7 +352,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						cache,
 						cachePinsKey(redisKey),
 						{ pins: readPinKeys },
-						getMilliseconds(resolvedCacheTtl()),
+						ttlMs,
 					);
 				}
 			}

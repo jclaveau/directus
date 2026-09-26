@@ -145,21 +145,24 @@ const SCOPED_CACHE_INDEX_TTL_FACTOR = 2;
  * whole namespace. Both the payload key and its `__expires_at` sibling are indexed.
  * When a cache TTL is set, the index self-expires at
  * `SCOPED_CACHE_INDEX_TTL_FACTOR` times that TTL, as a net for filings orphaned by a
- * crash between write and purge; with no TTL (`CACHE_TTL` unset) the cached entries
- * never expire either, so the index is left unbounded to match — a normal purge
- * still drains it.
+ * crash between write and purge; with no TTL the cached entries never expire
+ * either, so the index is left unbounded to match — a normal purge still drains it.
+ *
+ * `cacheTtl` is the TTL the caller wrote the entry with, read once for both: the
+ * settings override can change between two reads of it.
  */
 export async function indexScopedCacheEntry(
 	key: string,
 	fingerprints: readonly ScopedCacheFingerprint[],
 	extraSiblings: string[] = [],
 	schema: SchemaOverview = { collections: {}, relations: [] },
+	cacheTtl: unknown = resolvedCacheTtl(),
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled() || fingerprints.length === 0) {
 		return;
 	}
 
-	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
+	const ttlSeconds = Math.ceil(getMilliseconds(cacheTtl, 0) / 1000)
 		* SCOPED_CACHE_INDEX_TTL_FACTOR;
 
 	// One filing per collection the read touched, holding the entry and its

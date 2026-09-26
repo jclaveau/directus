@@ -20,6 +20,7 @@ const env = mockEnv.current;
 const redis = vi.hoisted(() => {
 	const pipeline = {
 		sadd: vi.fn(),
+		persist: vi.fn(),
 		expire: vi.fn(),
 		eval: vi.fn(),
 		srem: vi.fn(),

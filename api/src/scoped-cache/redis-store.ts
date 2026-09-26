@@ -595,6 +595,11 @@ const redisStore: ScopedCacheStore = {
 				}
 				else {
 					pipeline.sadd(indexKey, ...members);
+
+					// The entries it names never expire now, so neither may the set: one
+					// filed while a TTL was in force keeps that expiry otherwise, and
+					// drops out from under them.
+					pipeline.persist(indexKey);
 				}
 			}
 		}

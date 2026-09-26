@@ -81,7 +81,7 @@ export interface ScopedCacheStore {
 	 * index for `ttlSeconds` — an expiry that only ever moves OUT, since whatever
 	 * holds a filing is shared by every entry filed beside it and the shortest-lived
 	 * of them must not cut it short. A `ttlSeconds` of 0 leaves the index unbounded,
-	 * as the entries then are.
+	 * as the entries then are — clearing an expiry an earlier filing gave it.
 	 *
 	 * THROWS when the store refuses any of it: the caller is about to write the
 	 * entries these filings name, and an entry indexed by nothing is reachable to no

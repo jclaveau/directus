@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => {
 		recordPendingScopedCachePurge: vi.fn().mockResolvedValue(undefined),
 		queueMissLatency: vi.fn(),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
+		resolvedCacheTtl: vi.fn((): unknown => env['CACHE_TTL']),
 	};
 });
 
@@ -116,6 +117,10 @@ vi.mock('../utils/report-cache-anomaly.js', () => {
 });
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
+
+vi.mock('../cache-config.js', () => {
+	return { resolvedCacheTtl: mocks.resolvedCacheTtl };
+});
 
 vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
 
@@ -205,6 +210,7 @@ beforeEach(() => {
 	permissionsCachable.mockResolvedValue(true);
 	mocks.queryCachable.mockReturnValue(true);
 	mocks.scopedCachePurgeEnabled.mockReturnValue(false);
+	mocks.resolvedCacheTtl.mockImplementation(() => env['CACHE_TTL']);
 });
 
 afterEach(() => {
@@ -261,6 +267,7 @@ describe('respond middleware', () => {
 			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
@@ -442,6 +449,36 @@ describe('respond middleware', () => {
 			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
+		);
+	});
+
+	test(oneLine`
+		files the index under the TTL the entry was written with, even when the
+		override changes during the fill
+	`, async () => {
+		mocks.resolvedCacheTtl
+			.mockReturnValueOnce('5m')
+			.mockReturnValue(undefined);
+
+		await respond(makeReq(), makeRes({ data: [] }), next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
+			mockCache,
+			'cache-key',
+			{ data: [] },
+			300000,
+		);
+
+		// A second read answering no TTL (the override cleared, CACHE_TTL unset) would
+		// file the index and the entry under different lifetimes: an entry outliving
+		// its index serves stale.
+		expect(indexScopedCacheEntry).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles' }],
+			[],
+			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -480,6 +517,7 @@ describe('respond middleware', () => {
 			],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -570,6 +608,7 @@ describe('respond middleware', () => {
 			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -595,6 +634,7 @@ describe('respond middleware', () => {
 			[{ collection: 'articles', pinnedScope: { id: ['1'] } }],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -628,6 +668,7 @@ describe('respond middleware', () => {
 			// The schema the index path is read off: this one declares no scope
 			// field on `articles`, so it is filed in the bare set.
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -645,6 +686,7 @@ describe('respond middleware', () => {
 			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -719,6 +761,7 @@ describe('respond middleware', () => {
 			[],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 
@@ -1223,6 +1266,7 @@ describe('respond middleware', () => {
 			[{ collection: 'articles' }],
 			[],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 
 		expect(res.status).toHaveBeenCalledWith(204);
@@ -1313,6 +1357,7 @@ describe('respond middleware', () => {
 			[{ collection: 'articles', pinnedScope: { owner: ['U1'] } }],
 			['cache-key__pins'],
 			{ collections: {}, relations: [] },
+			'5m',
 		);
 	});
 

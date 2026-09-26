@@ -1114,6 +1114,46 @@ describe('indexScopedCacheEntry', () => {
 			'articles:&author=,7,&|entry__expires_at',
 		);
 	});
+
+	it(oneLine`
+		clears an index set's expiry under a TTL of 0, since the entries it names
+		then never expire
+	`, async () => {
+		const sadd = vi.fn().mockReturnThis();
+		const persist = vi.fn().mockReturnThis();
+
+		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
+			pipeline: () => {
+				return {
+					sadd,
+					persist,
+					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
+					exec: vi.fn().mockResolvedValue([]),
+				};
+			},
+		} as any);
+
+		await indexScopedCacheEntry(
+			'entry',
+			[{ collection: 'articles', pinnedScope: { author: ['7'] } }],
+			[],
+			{ collections: {}, relations: [] },
+			'0',
+		);
+
+		// A set filed while a TTL was in force keeps that expiry through a plain
+		// SADD, and expires under entries that no purge can reach any more.
+		expect(sadd).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:articles:',
+			'articles:&author=,7,&|entry',
+			'articles:&author=,7,&|entry__expires_at',
+		);
+
+		expect(persist).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:articles:',
+		);
+	});
 });
 
 describe('dropScopedCacheIndex', () => {
