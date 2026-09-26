@@ -23,6 +23,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // adds, the columns a `search=` matches, the column an A2O reads its collection
 // from. Each case writes one column outside the view and one inside it, so the
 // HIT proves the view is narrow and the MISS proves it holds that column.
+//
+// Each written collection scopes on a `scope_key` no read touches: a collection
+// scoping on nothing never reads its rows back, so every write to it reads as
+// touching every column and no view could stay narrow.
 const ARTICLE = 'composite_view_article';
 const NOTE = 'composite_view_note';
 const PAGE = 'composite_view_page';
@@ -49,6 +53,7 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['CACHE_NAMESPACE'] = `directus-composite-view-${vendor}`;
 
 	let instance: ChildProcess;
+	let userId: string;
 	const userToken = `composite-view-${vendor}-00000000000000000`;
 	const admin = `Bearer ${USER.ADMIN.TOKEN}`;
 	const asUser = `Bearer ${userToken}`;
@@ -97,7 +102,9 @@ describe.each(vendors)('%s', (vendor) => {
 			collections: [
 				{
 					collection: ARTICLE,
+					meta: { scoped_cache_fields: ['scope_key'] },
 					fields: [
+						{ field: 'scope_key', type: 'string', meta: {} },
 						{ field: 'title', type: 'string', meta: {} },
 						{ field: 'status', type: 'string', meta: {} },
 						{ field: 'body', type: 'string', meta: {} },
@@ -105,7 +112,9 @@ describe.each(vendors)('%s', (vendor) => {
 				},
 				{
 					collection: NOTE,
+					meta: { scoped_cache_fields: ['scope_key'] },
 					fields: [
+						{ field: 'scope_key', type: 'string', meta: {} },
 						{ field: 'title', type: 'string', meta: {} },
 						{ field: 'flag', type: 'boolean', meta: {} },
 					],
@@ -116,7 +125,9 @@ describe.each(vendors)('%s', (vendor) => {
 				},
 				{
 					collection: TEXT,
+					meta: { scoped_cache_fields: ['scope_key'] },
 					fields: [
+						{ field: 'scope_key', type: 'string', meta: {} },
 						{ field: 'body', type: 'string', meta: {} },
 						{ field: 'note', type: 'string', meta: {} },
 					],
@@ -131,7 +142,9 @@ describe.each(vendors)('%s', (vendor) => {
 				},
 				{
 					collection: LABEL,
+					meta: { scoped_cache_fields: ['scope_key'] },
 					fields: [
+						{ field: 'scope_key', type: 'string', meta: {} },
 						{ field: 'name', type: 'string', meta: {} },
 						{ field: 'color', type: 'string', meta: {} },
 					],
@@ -159,6 +172,19 @@ describe.each(vendors)('%s', (vendor) => {
 			field: 'position',
 			type: 'integer',
 		});
+
+		await CreateField(vendor, {
+			collection: BLOCK,
+			field: 'scope_key',
+			type: 'string',
+		});
+
+		const scopedBlock = await request(getUrl(vendor, env))
+			.patch(`/collections/${BLOCK}`)
+			.send({ meta: { scoped_cache_fields: ['scope_key'] } })
+			.set('Authorization', admin);
+
+		expect(scopedBlock.statusCode).toBe(200);
 
 		await CreateFieldM2M(vendor, {
 			collection: SHELF,
@@ -206,6 +232,8 @@ describe.each(vendors)('%s', (vendor) => {
 			});
 
 		expect(userResponse.statusCode).toBe(200);
+
+		userId = userResponse.body.data.id;
 
 		articleId = (await CreateItem(vendor, {
 			collection: ARTICLE,
@@ -325,6 +353,15 @@ describe.each(vendors)('%s', (vendor) => {
 
 	afterAll(async () => {
 		instance.kill();
+
+		await request(getUrl(vendor, env))
+			.delete(`/users/${userId}`)
+			.set('Authorization', admin);
+
+		await request(getUrl(vendor, env))
+			.delete('/policies')
+			.send({ query: { filter: { name: { _eq: 'composite view policy' } } } })
+			.set('Authorization', admin);
 
 		for (const collection of [
 			BLOCK,
@@ -450,6 +487,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.toBe('HIT');
 
 		await updateItem(TEXT, firstTextId, { note: 'edited note' });
+		await updateItem(TEXT, switchTextId, { body: 'on another page' });
 
 		const afterNote = await readItems(PAGE, query);
 
