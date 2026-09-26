@@ -188,8 +188,9 @@ CACHE_ENABLED=false
 
 # How many keys one collection may be pinned by on a single scoped read. Over it
 # the read falls back to that collection's declared scope slices, then to its bare
-# tag — more purging, never staler. Each pin costs a Redis set and a member of the
-# collection's slice index, so raise it for hit ratio and lower it for memory. [250]
+# pin — more purging, never staler. Each pin costs a Redis set and a member of the
+# collection's fingerprint index, so raise it for hit ratio and lower it for
+# memory. [250]
 # CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
 
 # How many ways to satisfy one filter are carried apart before they are carried
@@ -198,6 +199,10 @@ CACHE_ENABLED=false
 # hundred writes to file and a hundred compares to purge. Over it the read is
 # pinned to each value on its own — wider purges, never staler. [16]
 # CACHE_SCOPED_MAX_QUERY_CASES=16
+
+# How often a purge that failed with Redis still reachable (OOM under noeviction,
+# a LOADING replica) is retried from its recorded row; a reconnect retries it
+# too. 0 leaves the reconnect as the only retry. [1m]
 # CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
 
 # How long a collection's purge counter is held. A read takes it before its query
