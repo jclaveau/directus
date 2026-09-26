@@ -168,7 +168,8 @@ function scenarioDeclares(
  *
  * A cell that is not valid JSON is kept as the string it was written as, so
  * `| spaced_repetition |` stays a string while `| 12 |` and `| ["a","b"] |` come
- * back as the number and the array the scenario meant.
+ * back as the number and the array the scenario meant. A quoted cell is a JSON
+ * string, so `| "7" |` and `| "null" |` stay the strings `'7'` and `'null'`.
  */
 export function parseGherkinTable<Row extends Record<string, unknown>>(
 	rows: Record<string, string>[],
