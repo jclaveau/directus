@@ -115,9 +115,9 @@ vi.mock('./lib/in-flight.js', () => {
 	return { inFlightOf, watchInFlightReports };
 });
 
-const answerPoolHealthQueries = vi.fn(async () => undefined);
+const answerPoolHealthQueries = vi.fn<() => Promise<void>>(async () => undefined);
 const reportPoolHealth = vi.fn();
-const withdrawPoolHealth = vi.fn(async () => undefined);
+const withdrawPoolHealth = vi.fn<() => Promise<void>>(async () => undefined);
 
 vi.mock('../lib/pool-health.js', () => {
 	return { answerPoolHealthQueries, reportPoolHealth, withdrawPoolHealth };
