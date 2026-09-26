@@ -1230,7 +1230,8 @@ describe('dropScopedCacheIndex', () => {
 	});
 
 	it(oneLine`
-		moves no counter of its own — \`clearResponseCache\` has, before it
+		moves the wholesale counter again once the index is gone — a fill that filed
+		before the drop and wrote its entry after it is indexed by nothing
 	`, async () => {
 		const { scan } = mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
 		const { incr } = vi.mocked(useRedis)().pipeline();
@@ -1238,7 +1239,7 @@ describe('dropScopedCacheIndex', () => {
 		await dropScopedCacheIndex();
 
 		expect(scan).toHaveBeenCalledOnce();
-		expect(incr).not.toHaveBeenCalled();
+		expect(incr).toHaveBeenCalledExactlyOnceWith('ns:scoped-cache-epoch:*');
 	});
 
 	it(oneLine`
@@ -1423,9 +1424,9 @@ describe('flushResponseCache', () => {
 	}
 
 	it(oneLine`
-		moves the wholesale counter BEFORE the clear, then drops the index — a read
-		rechecking between a clear and a move made after it keeps an entry the
-		index drop then orphans
+		moves the wholesale counter BEFORE the clear, drops the index, then moves it
+		again — a read rechecking between a clear and a move made after it keeps an
+		entry the index drop then orphans
 	`, async () => {
 		const { calls, cache } = recordFlush();
 
@@ -1437,6 +1438,8 @@ describe('flushResponseCache', () => {
 			'clear',
 			'scan',
 			'unlink',
+			'exec',
+			'incr ns:scoped-cache-epoch:*',
 			'exec',
 		]);
 	});
@@ -1454,6 +1457,8 @@ describe('flushResponseCache', () => {
 			'exec',
 			'scan',
 			'unlink',
+			'exec',
+			'incr ns:scoped-cache-epoch:*',
 			'exec',
 		]);
 	});
@@ -1486,7 +1491,13 @@ describe('flushResponseCache', () => {
 
 		await expect(flushResponseCache(cache)).resolves.toBeUndefined();
 
-		expect(calls).toEqual(['incr ns:scoped-cache-epoch:*', 'exec', 'clear']);
+		expect(calls).toEqual([
+			'incr ns:scoped-cache-epoch:*',
+			'exec',
+			'clear',
+			'incr ns:scoped-cache-epoch:*',
+			'exec',
+		]);
 
 		expect(warn).toHaveBeenCalledWith(
 			expect.any(Error),

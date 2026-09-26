@@ -1741,7 +1741,8 @@ describe('clearCacheTargets', () => {
 // read that snapshotted earlier and rechecks between the clear and a bump made after
 // it compares equal, keeps the entry it just wrote, and the index drop that follows
 // unlinks the pin sets it was filed under — stale for its TTL, reachable to no
-// later purge. The clear is the first drop, so the bump goes in front of it.
+// later purge. The clear is the first drop, so the bump goes in front of it; a
+// second follows the index drop, for a fill that filed before it and wrote after.
 describe('the wholesale counter moves before the response clear', () => {
 	function recordFlushOrder() {
 		setEnv({
@@ -1778,7 +1779,12 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		await flushCaches(true);
 
-		expect(calls).toEqual(['incr scalabus:scoped-cache-epoch:*', 'clear', 'scan']);
+		expect(calls).toEqual([
+			'incr scalabus:scoped-cache-epoch:*',
+			'clear',
+			'scan',
+			'incr scalabus:scoped-cache-epoch:*',
+		]);
 	});
 
 	test('in clearCacheTargets', async () => {
@@ -1786,7 +1792,12 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		await clearCacheTargets(['response']);
 
-		expect(calls).toEqual(['incr scalabus:scoped-cache-epoch:*', 'clear', 'scan']);
+		expect(calls).toEqual([
+			'incr scalabus:scoped-cache-epoch:*',
+			'clear',
+			'scan',
+			'incr scalabus:scoped-cache-epoch:*',
+		]);
 	});
 });
 

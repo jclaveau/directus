@@ -595,18 +595,27 @@ async function purgeScopedCacheIndexWhere(
  * flush that called it can say what it cost, and say so honestly when the index is
  * still there (https://github.com/jclaveau/directus/issues/468).
  *
- * Runs AFTER `clearResponseCache`, always: that is where the wholesale counter
- * moves, and a read that took it earlier and files its fingerprints between
- * the drop below and a move made after it would compare equal, keep its entry, and
- * leave it indexed by something this function just deleted — reachable to no later
- * purge.
+ * Runs AFTER `clearResponseCache`, always, and moves the wholesale counter again
+ * once the index is gone. The move before the clear cannot catch a fill that took
+ * the counter after it, filed its fingerprints before the drop below and wrote its
+ * entry after it: that entry compares equal and is indexed by nothing, reachable
+ * to no later purge. The move here makes that fill's recheck evict it. A fill that
+ * also rechecked before this move still keeps its entry
+ * (https://github.com/jclaveau/directus/issues/547).
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!scopedCacheIndexStoreAvailable()) {
 		return { dropped: 0, refused: 0 };
 	}
 
-	return useScopedCacheStore().dropIndex();
+	try {
+		return await useScopedCacheStore().dropIndex();
+	}
+	finally {
+		// On a failed drop too: whatever part of the index did go took the filings
+		// of the fills in flight with it.
+		await bumpScopedCacheEpochs(['*']);
+	}
 }
 
 /**
