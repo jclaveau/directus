@@ -1082,6 +1082,7 @@ describe('indexScopedCacheEntry', () => {
 					sadd: vi.fn().mockReturnThis(),
 					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
 					expire: vi.fn().mockReturnThis(),
+					persist: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
 					// REJECTS on a connection-level failure, so an ignored reply
 					// reads as success.
