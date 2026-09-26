@@ -203,6 +203,67 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                |                        |     - method   |
       |                |                        |     - owner    |
 
+  Scenario: a pinned value carrying a separator purges only its own read
+    Given the slots:
+      | marker      | owner   | method | note  | amount |
+      | target_slot | a\|b,c  | spaced | first | 10     |
+      | other_owner | a\|b    | spaced | third | 30     |
+    And this read is cached:
+      | query              | response              | fingerprints   |
+      | fields:            | - marker: target_slot | - pinnedScope: |+
+      |   - id             |   owner: 'a\|b,c'     |     method:    |
+      |   - owner          |                       |       - spaced |
+      | filter:            |                       |     owner:     |
+      |   owner: 'a\|b,c'  |                       |       - 'a\|b,c' |
+      |   method: spaced   |                       |   viewFields:  |
+      |                    |                       |     - id       |
+      |                    |                       |     - method   |
+      |                    |                       |     - owner    |
+    And the witness reads are cached:
+      | query            | response              | fingerprints   |
+      | fields:          | - marker: other_owner | - pinnedScope: |+
+      |   - id           |   owner: 'a\|b'       |     method:    |
+      |   - owner        |                       |       - spaced |
+      | filter:          |                       |     owner:     |
+      |   owner: 'a\|b'  |                       |       - 'a\|b' |
+      |   method: spaced |                       |   viewFields:  |
+      |                  |                       |     - id       |
+      |                  |                       |     - method   |
+      |                  |                       |     - owner    |
+    When the slots are created:
+      | query                  | purged fingerprints |
+      | - marker: created_slot | - pinnedScope:      |+
+      |   data:                |     method:         |
+      |     owner: 'a\|b,c'    |       - spaced      |
+      |     method: spaced     |     owner:          |
+      |     note: second       |       - 'a\|b,c'    |
+      |     amount: 20         |   viewFields:       |
+      |                        |     - id            |
+      |                        |     - method        |
+      |                        |     - owner         |
+    Then the read is purged, matching the owner "a|b,c":
+      | query              | response               | fingerprints   |
+      | fields:            | - marker: target_slot  | - pinnedScope: |+
+      |   - id             |   owner: 'a\|b,c'      |     method:    |
+      |   - owner          | - marker: created_slot |       - spaced |
+      | filter:            |   owner: 'a\|b,c'      |     owner:     |
+      |   owner: 'a\|b,c'  |                        |       - 'a\|b,c' |
+      |   method: spaced   |                        |   viewFields:  |
+      |                    |                        |     - id       |
+      |                    |                        |     - method   |
+      |                    |                        |     - owner    |
+    And the witness reads are still cached, not matching the owner "a|b":
+      | query            | response              | fingerprints   |
+      | fields:          | - marker: other_owner | - pinnedScope: |+
+      |   - id           |   owner: 'a\|b'       |     method:    |
+      |   - owner        |                       |       - spaced |
+      | filter:          |                       |     owner:     |
+      |   owner: 'a\|b'  |                       |       - 'a\|b' |
+      |   method: spaced |                       |   viewFields:  |
+      |                  |                       |     - id       |
+      |                  |                       |     - method   |
+      |                  |                       |     - owner    |
+
   Scenario: a write changing a field the read never named leaves it cached
     Given the slots:
       | marker      | owner | method | note  | amount |
@@ -454,6 +515,58 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | filter:       |                       |   viewFields:  |
       |   owner: iota |                       |     - id       |
       |               |                       |     - owner    |
+
+  Scenario: a row moving out of the range a read was filtered on purges it
+    Given the slots:
+      | marker      | owner | method | note  | amount |
+      | target_slot | eta   | spaced | first | 10     |
+    And this read is cached:
+      | query        | response              | fingerprints   |
+      | fields:      | - marker: target_slot | - pinnedScope: |+
+      |   - id       |   owner: eta          |     owner:     |
+      |   - owner    |   amount: 10          |       - eta    |
+      |   - amount   |                       |   viewFields:  |
+      | filter:      |                       |     - amount   |
+      |   owner: eta |                       |     - id       |
+      |   amount:    |                       |     - owner    |
+      |     _gte: 5  |                       |                |
+      |     _lt: 20  |                       |                |
+    And the witness reads are cached:
+      | query        | response              | fingerprints   |
+      | fields:      | - marker: target_slot | - pinnedScope: |+
+      |   - id       |                       |     owner:     |
+      |   - owner    |                       |       - eta    |
+      | filter:      |                       |   viewFields:  |
+      |   owner: eta |                       |     - id       |
+      |              |                       |     - owner    |
+    When the slots are updated:
+      | query                 | purged fingerprints |
+      | - marker: target_slot | - pinnedScope:      |+
+      |   data:               |     owner:          |
+      |     amount: 30        |       - eta         |
+      |                       |   viewFields:       |
+      |                       |     - amount        |
+      |                       |     - id            |
+      |                       |     - owner         |
+    Then the read is purged, matching "owner: eta":
+      | query        | response | fingerprints   |
+      | fields:      | []       | - pinnedScope: |+
+      |   - id       |          |     owner:     |
+      |   - owner    |          |       - eta    |
+      |   - amount   |          |   viewFields:  |
+      | filter:      |          |     - amount   |
+      |   owner: eta |          |     - id       |
+      |   amount:    |          |     - owner    |
+      |     _gte: 5  |          |                |
+      |     _lt: 20  |          |                |
+    And the witness reads are still cached, not reading "amount":
+      | query        | response              | fingerprints   |
+      | fields:      | - marker: target_slot | - pinnedScope: |+
+      |   - id       |                       |     owner:     |
+      |   - owner    |                       |       - eta    |
+      | filter:      |                       |   viewFields:  |
+      |   owner: eta |                       |     - id       |
+      |              |                       |     - owner    |
 
   Scenario: a read filtered on a list of owners is purged by a write to any of them
     Given the slots:

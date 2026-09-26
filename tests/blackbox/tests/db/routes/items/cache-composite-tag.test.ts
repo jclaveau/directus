@@ -949,6 +949,21 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
+			'a pinned value carrying a separator purges only its own read',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
 			'a write changing a field the read never named leaves it cached',
 			(steps) => {
 				const ids = new Map<string, number>();
@@ -1010,6 +1025,21 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			'a write to the field a range was read on purges it',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a row moving out of the range a read was filtered on purges it',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const filedMembers = new Map<string, string[]>();
