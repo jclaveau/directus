@@ -61,14 +61,36 @@ describe('bumpScopedCacheEpochs', () => {
 		);
 	});
 
-	it('rounds a sub-second duration up to one second', async () => {
+	it('raises a sub-second duration to five minutes', async () => {
 		env['CACHE_SCOPED_EPOCH_TTL'] = '10ms';
 
 		await bumpScopedCacheEpochs(['articles']);
 
 		expect(bumpPurgeEpochs).toHaveBeenCalledWith(
 			['ns:scoped-cache-epoch:articles'],
-			1,
+			300,
+		);
+	});
+
+	it('raises a one-minute duration to five minutes', async () => {
+		env['CACHE_SCOPED_EPOCH_TTL'] = '1m';
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(bumpPurgeEpochs).toHaveBeenCalledWith(
+			['ns:scoped-cache-epoch:articles'],
+			300,
+		);
+	});
+
+	it('keeps a duration above five minutes as given', async () => {
+		env['CACHE_SCOPED_EPOCH_TTL'] = '6m';
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(bumpPurgeEpochs).toHaveBeenCalledWith(
+			['ns:scoped-cache-epoch:articles'],
+			360,
 		);
 	});
 });

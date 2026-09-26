@@ -24,6 +24,11 @@ export type ScopedCacheEpochs = Record<string, string | null>;
  * A value that is not a positive duration falls back to the default: `EXPIRE`
  * with `0` or less deletes the counter on the command that bumps it, and every
  * fill racing that purge would read no counter on both sides and be kept.
+ *
+ * A positive duration below five minutes is raised to five minutes: a counter
+ * that expires while a read is between its two readings is recreated only by a
+ * purge, so a shorter hold would drop the counter under a slow read and keep a
+ * fill that raced a purge before the expiry.
  */
 function scopedCacheEpochTtlSeconds(): number {
 	const defaultTtlMilliseconds = 24 * 60 * 60 * 1000;
@@ -37,7 +42,7 @@ function scopedCacheEpochTtlSeconds(): number {
 		return defaultTtlMilliseconds / 1000;
 	}
 
-	return Math.ceil(ttlMilliseconds / 1000);
+	return Math.max(Math.ceil(ttlMilliseconds / 1000), 5 * 60);
 }
 
 /**

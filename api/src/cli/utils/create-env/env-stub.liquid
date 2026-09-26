@@ -210,7 +210,8 @@ CACHE_ENABLED=false
 # at Redis's clock, never at a value it held — so this only has to outlive the
 # slowest read, and shorter means a collection nobody writes to stops costing a
 # key sooner. 0 or less is read as the default: a counter expired as it is
-# bumped guards nothing. [24h]
+# bumped guards nothing. Anything below 5m is raised to 5m, so a counter never
+# expires under a read still between its two readings. [24h]
 # CACHE_SCOPED_EPOCH_TTL=24h
 
 # Request dimensions folded into the cache key so a header-varying response
