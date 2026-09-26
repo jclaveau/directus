@@ -135,12 +135,12 @@ async function publishPoolHealth(health: PoolHealth | null): Promise<boolean> {
  * `answerPoolHealthQueries`.
  */
 export function reportPoolHealth(health: PoolHealth): void {
-	const unchanged = reported !== null
+	if (
+		reported !== null
 		&& reported.failedWorkers === health.failedWorkers
 		&& reported.onlineWorkers === health.onlineWorkers
-		&& reported.targetWorkers === health.targetWorkers;
-
-	if (unchanged) {
+		&& reported.targetWorkers === health.targetWorkers
+	) {
 		return;
 	}
 

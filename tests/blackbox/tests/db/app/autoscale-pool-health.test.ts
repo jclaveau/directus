@@ -44,8 +44,11 @@ describe('A pool the supervisor cannot keep whole reaches /server/health', () =>
 		done: (body: Record<string, any>) => boolean,
 	) {
 		const deadline = Date.now() + 120_000;
+
 		const askHealth = () => {
-			return request(url).get('/server/health').set('Authorization', auth);
+			return request(url)
+				.get('/server/health')
+				.set('Authorization', auth);
 		};
 
 		let response = await askHealth();

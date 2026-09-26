@@ -211,12 +211,10 @@ export async function runAutoscaler(): Promise<void> {
 
 		// Bounded, since a publish over a Redis that is down waits with no
 		// deadline (jclaveau/directus#463) and a stop must still stop.
-		const withdrawn = Promise.race([
+		void Promise.race([
 			withdrawPoolHealth(),
 			new Promise((resolve) => setTimeout(resolve, WITHDRAW_TIMEOUT_MS)),
-		]);
-
-		void withdrawn.finally(() => process.exit(0));
+		]).finally(() => process.exit(0));
 	};
 
 	process.on('SIGINT', stop);
