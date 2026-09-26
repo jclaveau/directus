@@ -5,6 +5,14 @@ import { MockClient } from 'knex-mock-client';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../../../utils/read-meta.js';
 
+// graphql-compose requires graphql's CommonJS build while vite hands the source
+// the ESM one, so its instanceof checks refuse every type system.ts builds.
+vi.mock('graphql', async () => {
+	const { createRequire } = await import('node:module');
+
+	return createRequire(import.meta.url)('graphql');
+});
+
 vi.mock('../../../database/index.js', () => ({ default: vi.fn() }));
 vi.mock('../../../utils/get-service.js', () => ({ getService: vi.fn() }));
 vi.mock('../schema/index.js', () => ({ generateSchema: vi.fn() }));

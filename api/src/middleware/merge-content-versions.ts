@@ -25,7 +25,7 @@ export const mergeContentVersions: RequestHandler = asyncHandler(async (req, res
 		// directus_versions (a delete, a key rename, a save) would leave the merged
 		// response cached. The bare fingerprint makes any such write purge it; it
 		// goes before the lookup because a missing version is an answer too.
-		const itemFingerprints: ScopedCacheFingerprint[] | undefined =
+		const itemFingerprints: readonly ScopedCacheFingerprint[] | undefined =
 			res.locals['scopedCacheFingerprints'];
 
 		res.locals['scopedCacheFingerprints'] = [
