@@ -4983,4 +4983,49 @@ describe('ScopedCacheReadPlan.fieldsByCollection', () => {
 			['comment', ['article', 'body', 'id']],
 		]));
 	});
+
+	it('names the collection column of an A2O the read nests through', () => {
+		const schema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('subject').a2o(['owner']);
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('note', schema, {
+			type: 'root',
+			name: 'note',
+			query: {},
+			cases: [],
+			children: [
+				{
+					type: 'a2o',
+					names: ['owner'],
+					fieldKey: 'subject',
+					children: {
+						owner: [
+							{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+						],
+					},
+					query: { owner: {} },
+					cases: { owner: [] },
+					whenCase: [],
+					relation: {
+						collection: 'note',
+						field: 'subject',
+						related_collection: null,
+						meta: { one_collection_field: 'collection' },
+					},
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['note', ['collection', 'subject']],
+			['owner', ['id']],
+		]));
+	});
 });
