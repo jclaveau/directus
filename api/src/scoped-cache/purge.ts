@@ -474,15 +474,16 @@ function purgeScopedCacheDeclaredPins(
  * `purgeBy`, and whatever the `cache.purge` filter added to what it declared.
  *
  * Grouped by the collection each fingerprint names, because a hook is free to
- * declare one on another collection entirely and the index is per collection. Only
- * the mutation's own collection has a known index path; a foreign one is read
- * whole, which is what not knowing how it is split costs.
+ * declare one on another collection entirely and the index is per collection. A
+ * foreign one's index path is read off the schema, as its fills were filed, and
+ * only without a schema is it read whole.
  */
 async function purgeScopedCacheDeclaredFingerprints(
 	cache: Keyv,
 	collection: string,
 	declaredFingerprints: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
+	schema: SchemaOverview | null,
 ): Promise<number> {
 	if (declaredFingerprints.length === 0) {
 		return 0;
@@ -506,9 +507,13 @@ async function purgeScopedCacheDeclaredFingerprints(
 	let evicted = 0;
 
 	for (const [declaredCollection, declared] of declaredByCollection) {
-		const declaredIndexPath = declaredCollection === collection
-			? indexPath
-			: null;
+		let declaredIndexPath = indexPath;
+
+		if (declaredCollection !== collection) {
+			declaredIndexPath = schema === null
+				? null
+				: scopedCacheIndexPath(schema, declaredCollection);
+		}
 
 		const sweep = await purgeScopedCacheDeclaredPins(
 			cache,
@@ -1381,6 +1386,7 @@ export async function purgeScopedCache(
 					collection,
 					purgedByPin,
 					options.indexPath ?? null,
+					context?.schema ?? null,
 				),
 			]);
 

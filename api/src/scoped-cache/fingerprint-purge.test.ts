@@ -321,6 +321,51 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
+		reads a hook's pin on another collection off that collection's own index
+		bucket, rather than scanning every set it owns
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:other:x=y': [
+				'other:&x=,y,&|ns:entry-x',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'slot',
+			[],
+			{
+				schema: {
+					collections: { other: { scopedCacheFields: ['x'] } },
+					relations: [],
+				},
+			} as any,
+			{
+				rowFingerprints: [{
+					collection: 'slot',
+					pinnedScope: { owner: ['alpha'] },
+				}],
+				changed: null,
+				indexPath: 'owner',
+				declaredFingerprints: [
+					{ collection: 'other', pinnedScope: { x: ['y'] } },
+				],
+			},
+		);
+
+		expect(scan).not.toHaveBeenCalled();
+
+		expect(sscan).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:other:x=y',
+			'0',
+			'COUNT',
+			1000,
+		);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-x');
+	});
+
+	it(oneLine`
 		leaves an entry bound to another value of the field a hook declared: no row
 		carrying that pin is in it
 	`, async () => {
