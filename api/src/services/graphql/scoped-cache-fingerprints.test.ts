@@ -235,6 +235,46 @@ describe('GraphQLService scoped cache tags', () => {
 	});
 
 	test(oneLine`
+		execute() files nothing once a root read carried no meta — the other roots'
+		fingerprints alone would let a write to what that root read miss the entry
+	`, async () => {
+		const gql = makeService({
+			collections: {
+				articles: { singleton: false },
+				files: { singleton: false },
+			},
+		});
+
+		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
+					scopedCacheFingerprints: [{ collection: 'articles' }],
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => [{ id: 2 }],
+		} as any);
+
+		await gql.read('files', {});
+
+		const result = await gql.execute({
+			query: '',
+			document: {} as any,
+			variables: {},
+			operationName: null,
+			contextValue: {},
+		});
+
+		expect(readMeta(result)?.scopedCacheFingerprints).toEqual([]);
+	});
+
+	test(oneLine`
 		execute() stamps the merged counters onto its result, so respond can compare
 		them after the fill — without them a /graphql entry is filled unguarded
 	`, async () => {

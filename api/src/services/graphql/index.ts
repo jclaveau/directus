@@ -69,6 +69,14 @@ export class GraphQLService {
 	 */
 	scopedCacheEpochs: Record<string, string | null>;
 
+	/**
+	 * A root read returned no read meta: nothing records what it depends on, so no
+	 * write can purge the response by it. Filing the entry under the other roots'
+	 * fingerprints alone would outlive such a write, so it is filed under none —
+	 * which `respond` refuses in scoped mode, as it does a query hitting nothing.
+	 */
+	unpinnedRootRead: boolean;
+
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
@@ -77,6 +85,7 @@ export class GraphQLService {
 		this.scopedCacheFingerprints = [];
 		this.scopedCacheUnautopurgeableFingerprints = [];
 		this.scopedCacheEpochs = {};
+		this.unpinnedRootRead = false;
 	}
 
 	/**
@@ -127,7 +136,9 @@ export class GraphQLService {
 		}
 
 		return withMeta(formattedResult, {
-			scopedCacheFingerprints: this.scopedCacheFingerprints,
+			scopedCacheFingerprints: this.unpinnedRootRead
+				? []
+				: this.scopedCacheFingerprints,
 			scopedCacheUnautopurgeableFingerprints:
 				this.scopedCacheUnautopurgeableFingerprints,
 			scopedCacheEpochs: this.scopedCacheEpochs,
@@ -158,22 +169,36 @@ export class GraphQLService {
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
 
-		const resultMeta = readMeta(result);
+		this.foldReadMeta(result);
+
+		return result;
+	}
+
+	/**
+	 * Fold one root read's meta into this request's aggregate. The item roots go
+	 * through `read()`; the system roots (`users_me`, `fields`, …) call their
+	 * services directly and hand their result over here.
+	 */
+	foldReadMeta(readResult: unknown): void {
+		const resultMeta = readMeta(readResult);
+
+		if (resultMeta === undefined) {
+			this.unpinnedRootRead = true;
+			return;
+		}
 
 		this.scopedCacheFingerprints.push(
-			...(resultMeta?.scopedCacheFingerprints ?? []),
+			...resultMeta.scopedCacheFingerprints,
 		);
 
 		this.scopedCacheUnautopurgeableFingerprints.push(
-			...(resultMeta?.scopedCacheUnautopurgeableFingerprints ?? []),
+			...(resultMeta.scopedCacheUnautopurgeableFingerprints ?? []),
 		);
 
 		mergeScopedCacheEpochs(
 			this.scopedCacheEpochs,
-			resultMeta?.scopedCacheEpochs ?? {},
+			resultMeta.scopedCacheEpochs ?? {},
 		);
-
-		return result;
 	}
 
 	/**
