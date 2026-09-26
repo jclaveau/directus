@@ -157,28 +157,38 @@ describe(oneLine`
 				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
 				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
 
-			expect((await request(getUrl(vendor, env))
+			const cachedRead = await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
-				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
+				.set('Authorization', auth);
+
+			expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+			expect(cachedRead.body.data).toMatchObject([{ name: 'r-alpha' }]);
 
 			// The label, not the body: the read shows no tag column, so only a write
 			// moving a tag across the slice the filter named changes its response.
-			await request(getUrl(vendor, env))
+			const moved = await request(getUrl(vendor, env))
 				.patch(`/items/${TAG}/${alphaTagId}`)
 				.send({ label: 'alpha moved' })
 				.set('Authorization', auth);
 
-			expect((await request(getUrl(vendor, env))
+			expect(moved.statusCode).toBe(200);
+
+			const purgedRead = await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
-				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
+				.set('Authorization', auth);
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toEqual([]);
 
 			// Back in the slice the tests below read.
-			await request(getUrl(vendor, env))
+			const restored = await request(getUrl(vendor, env))
 				.patch(`/items/${TAG}/${alphaTagId}`)
 				.send({ label: 'alpha' })
 				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
 		});
 
 		it('inserting a tag with the filtered label evicts the read', async () => {
@@ -196,15 +206,22 @@ describe(oneLine`
 
 			// A pk filter cannot be matched by an insert; a scoped-field one can, and the
 			// create emits `sf_tag:label=alpha`, so the pin must catch it.
-			await request(getUrl(vendor, env))
+			const created = await request(getUrl(vendor, env))
 				.post(`/items/${TAG}`)
 				.send({ label: 'alpha', kind: 'k1', body: 'a2' })
 				.set('Authorization', auth);
 
-			expect((await request(getUrl(vendor, env))
+			expect(created.statusCode).toBe(200);
+
+			// No root row names the new tag, so the answer the refill reads is the
+			// cached one: only the status can tell the purge.
+			const purgedRead = await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
-				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
+				.set('Authorization', auth);
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toMatchObject([{ name: 'r-alpha' }]);
 		});
 
 		it('slices each value of an _in filter on the scoped field', async () => {
@@ -254,21 +271,32 @@ describe(oneLine`
 
 			await clearCache();
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('HIT');
+
+			const cachedRead = await readByTwoFields();
+
+			expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+			expect(cachedRead.body.data).toMatchObject([{ name: 'r-alpha' }]);
 
 			// Either scoped field the filter named bounds this read, so a write moving
 			// the tag along one of them evicts it.
-			await request(getUrl(vendor, env))
+			const moved = await request(getUrl(vendor, env))
 				.patch(`/items/${TAG}/${alphaTagId}`)
 				.send({ kind: 'k2' })
 				.set('Authorization', auth);
 
-			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
+			expect(moved.statusCode).toBe(200);
 
-			await request(getUrl(vendor, env))
+			const purgedRead = await readByTwoFields();
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toEqual([]);
+
+			const restored = await request(getUrl(vendor, env))
 				.patch(`/items/${TAG}/${alphaTagId}`)
 				.send({ kind: 'k1' })
 				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
 		});
 	});
 });

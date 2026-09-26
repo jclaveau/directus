@@ -296,10 +296,12 @@ describe(oneLine`
 				.headers[cacheStatusHeader]).toBe('MISS');
 
 			// Back where the tests below expect it.
-			await request(getUrl(vendor, env))
+			const restored = await request(getUrl(vendor, env))
 				.patch(`/items/${PROFILE}/${boundProfileId}`)
 				.send({ account: boundAccountId })
 				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
 		});
 
 		it(oneLine`
