@@ -161,8 +161,11 @@ export function renderScopedCacheFingerprint(
 export function parseScopedCacheFingerprint(
 	serialized: string,
 ): ScopedCacheFingerprint {
-	// On the FIRST colon: a collection name carries none, and a value may.
-	const colonAt = serialized.indexOf(':');
+	// Where the collection ends is the `:&` every body opens with, not the first
+	// colon: a collection name may carry one, and it is written raw.
+	const colonAt = serialized.includes(':&')
+		? serialized.indexOf(':&')
+		: serialized.indexOf(':');
 
 	const parsedCollection = colonAt === -1
 		? serialized
@@ -183,11 +186,12 @@ export function parseScopedCacheFingerprint(
 			continue;
 		}
 
-		// On the FIRST `=`, for the same reason the collection splits on the first
-		// colon: a key never carries one, a value can.
-		const assignAt = serialisedPin.indexOf('=');
+		// On the `=` right before the first unescaped comma, not the first `=`: a
+		// field name may carry one and it is written raw, while every `,` of a key is
+		// escaped and the value list always opens with one.
+		const assignAt = indexOfUnescaped(serialisedPin, ',') - 1;
 
-		if (assignAt === -1) {
+		if (assignAt < 0 || serialisedPin[assignAt] !== '=') {
 			continue;
 		}
 

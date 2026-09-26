@@ -138,6 +138,24 @@ describe('parseScopedCacheFingerprint', () => {
 		});
 	});
 
+	// A raw `=` in a field name read as the separator would file the pin under
+	// another field, and a write to the real one would never match it.
+	it('reads a field name carrying `=` back whole', () => {
+		expect(parseScopedCacheFingerprint(
+			renderScopedCacheFingerprint(
+				{ collection: 'slot', pinnedScope: { 'a=b': ['7'] } },
+			),
+		)).toEqual({ collection: 'slot', pinnedScope: { 'a=b': ['7'] } });
+	});
+
+	it('reads a collection name carrying a colon back whole', () => {
+		expect(parseScopedCacheFingerprint(
+			renderScopedCacheFingerprint(
+				{ collection: 'ns:slot', pinnedScope: { owner: ['alpha'] } },
+			),
+		)).toEqual({ collection: 'ns:slot', pinnedScope: { owner: ['alpha'] } });
+	});
+
 	it('reads back a value whose escapes only look like two values', () => {
 		expect(parseScopedCacheFingerprint(
 			renderScopedCacheFingerprint(
