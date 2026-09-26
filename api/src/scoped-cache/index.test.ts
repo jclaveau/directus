@@ -4911,4 +4911,76 @@ describe('ScopedCacheReadPlan.fieldsByCollection', () => {
 			['team', ['active']],
 		]));
 	});
+
+	it('names every column the root\'s search can match', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('body').text();
+				c.field('views').integer();
+				c.field('featured').boolean();
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: { search: 'news' },
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['body', 'id', 'title', 'views']],
+		]));
+	});
+
+	it('names every column a nested node\'s deep search can match', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('body').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'o2m',
+					name: 'comment',
+					fieldKey: 'comments',
+					query: { search: 'news' },
+					cases: [],
+					whenCase: [],
+					relation: {
+						collection: 'comment',
+						field: 'article',
+						related_collection: 'article',
+						meta: { one_field: 'comments' },
+					},
+					children: [
+						{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+					],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['comments', 'id']],
+			['comment', ['article', 'body', 'id']],
+		]));
+	});
 });

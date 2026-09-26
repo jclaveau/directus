@@ -1,3 +1,4 @@
+import { NUMERIC_TYPES } from '@directus/constants';
 import {
 	joinFilterWithCases,
 } from '../database/run-ast/lib/apply-query/join-filter-with-cases.js';
@@ -12,6 +13,9 @@ import type {
 import {
 	formatA2oKey,
 } from '../permissions/modules/process-ast/utils/format-a2o-key.js';
+import {
+	getInfoForPath,
+} from '../permissions/modules/process-ast/utils/get-info-for-path.js';
 import type { AST } from '../types/ast.js';
 import {
 	getRelationInfo,
@@ -341,6 +345,13 @@ export function scopedCacheNestedRowBindings(
 	return boundFieldsByCollection;
 }
 
+const SEARCHABLE_TYPES: readonly Type[] = [
+	'string',
+	'text',
+	'uuid',
+	...NUMERIC_TYPES,
+];
+
 /**
  * The fields a read depends on that `fieldMapFromAst` leaves out, filed the way
  * the field map files its own: per path, under the collection at that path.
@@ -348,6 +359,10 @@ export function scopedCacheNestedRowBindings(
  * The permission cases of every node: they decide which rows come back as much
  * as the query's own filter does, so a write moving a row across one of them
  * changes the response on a column the read may never have selected.
+ *
+ * The columns a node's `search` can match, by the types `applySearch` searches.
+ * It narrows them further by the search value and the permitted fields; naming
+ * them all over-purges at worst.
  */
 export function scopedCacheViewFieldsBeyondFieldMap(
 	schema: SchemaOverview,
@@ -357,9 +372,29 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 
 	const addNodeFields = (
 		collection: CollectionKey,
+		query: Query,
 		cases: Filter[],
 		path: QueryPath,
 	): void => {
+		if (query.search) {
+			const searchedFields = getInfoForPath(
+				viewFieldMap,
+				'read',
+				path,
+				collection,
+			).fields;
+
+			const collectionFields = schema.collections[collection]?.fields ?? {};
+
+			for (const [fieldName, { type: fieldType }] of Object.entries(
+				collectionFields,
+			)) {
+				if (SEARCHABLE_TYPES.includes(fieldType)) {
+					searchedFields.add(fieldName);
+				}
+			}
+		}
+
 		const casesFilter = joinFilterWithCases(null, cases);
 
 		if (casesFilter) {
@@ -382,27 +417,42 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 			const childPath = [...path, child.fieldKey];
 
 			if (child.type === 'functionField') {
-				addNodeFields(child.relatedCollection, child.cases, childPath);
+				addNodeFields(
+					child.relatedCollection,
+					child.query,
+					child.cases,
+					childPath,
+				);
+
 				continue;
 			}
 
 			if (child.type === 'a2o') {
-				for (const name of child.names) {
-					const namedPath = [...path, formatA2oKey(child.fieldKey, name)];
+				for (const relatedCollection of child.names) {
+					const namedPath = [
+						...path,
+						formatA2oKey(child.fieldKey, relatedCollection),
+					];
 
-					addNodeFields(name, child.cases[name] ?? [], namedPath);
-					addFieldsOf(child.children[name] ?? [], namedPath);
+					addNodeFields(
+						relatedCollection,
+						child.query[relatedCollection] ?? {},
+						child.cases[relatedCollection] ?? [],
+						namedPath,
+					);
+
+					addFieldsOf(child.children[relatedCollection] ?? [], namedPath);
 				}
 
 				continue;
 			}
 
-			addNodeFields(child.name, child.cases, childPath);
+			addNodeFields(child.name, child.query, child.cases, childPath);
 			addFieldsOf(child.children, childPath);
 		}
 	};
 
-	addNodeFields(ast.name, ast.cases, []);
+	addNodeFields(ast.name, ast.query, ast.cases, []);
 	addFieldsOf(ast.children, []);
 
 	return viewFieldMap;
