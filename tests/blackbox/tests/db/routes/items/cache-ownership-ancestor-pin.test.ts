@@ -41,6 +41,7 @@ describe(oneLine`
 
 		let instance: ChildProcess;
 		let ownerId: number;
+		let ownedRootId: number;
 		let ownedGrandownerId: number;
 		let siblingGrandownerId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -92,6 +93,8 @@ describe(oneLine`
 				collection: ROOT,
 				item: [{ name: 'root-owned' }, { name: 'root-sibling' }],
 			});
+
+			ownedRootId = roots[0].id;
 
 			const grandowners = await CreateItem(vendor, {
 				collection: GRANDOWNER,
@@ -212,6 +215,46 @@ describe(oneLine`
 			await updateGrandowner(ownedGrandownerId, 'grandowner-owned-touched');
 
 			expect((await readNotes()).headers[cacheStatusHeader]).toBe('HIT');
+		});
+
+		it(oneLine`
+			a delete of the owned ancestor purges the read: its view is the key alone,
+			which only a delete touches (#531)
+		`, async () => {
+			await clearCache();
+
+			expect((await readNotes()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readNotes()).headers[cacheStatusHeader]).toBe('HIT');
+
+			const deleted = await request(getUrl(vendor, env))
+				.delete(`/items/${GRANDOWNER}/${ownedGrandownerId}`)
+				.set('Authorization', auth);
+
+			expect(deleted.statusCode).toBe(204);
+
+			const purgedRead = await readNotes();
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(purgedRead.body.data).toMatchObject([
+				{ body: 'a note', owner: ownerId },
+			]);
+
+			const recreated = await request(getUrl(vendor, env))
+				.post(`/items/${GRANDOWNER}`)
+				.send({ name: 'grandowner-owned', root: ownedRootId })
+				.set('Authorization', auth);
+
+			expect(recreated.statusCode).toBe(200);
+
+			ownedGrandownerId = recreated.body.data.id;
+
+			const repointed = await request(getUrl(vendor, env))
+				.patch(`/items/${OWNER}/${ownerId}`)
+				.send({ grandowner: ownedGrandownerId })
+				.set('Authorization', auth);
+
+			expect(repointed.statusCode).toBe(200);
 		});
 	});
 });
