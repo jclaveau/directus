@@ -115,6 +115,14 @@ vi.mock('./lib/in-flight.js', () => {
 	return { inFlightOf, watchInFlightReports };
 });
 
+const answerPoolHealthQueries = vi.fn(async () => undefined);
+const reportPoolHealth = vi.fn();
+const withdrawPoolHealth = vi.fn(async () => undefined);
+
+vi.mock('../lib/pool-health.js', () => {
+	return { answerPoolHealthQueries, reportPoolHealth, withdrawPoolHealth };
+});
+
 // Compiling the graph behind these modules is seconds of work, and a case that
 // pays it is a case timing its own toolchain.
 beforeAll(async () => {
@@ -608,6 +616,71 @@ describe('runAutoscaler', () => {
 		);
 
 		expect(recordAutoscaleTick).toHaveBeenCalledOnce();
+	});
+
+	// A query nobody answers costs a new worker its reading, not the pool its
+	// scaling, so the loop runs on without it.
+	test('scales on when pool health queries cannot be answered', async () => {
+		answerPoolHealthQueries.mockRejectedValueOnce(new Error('redis is down'));
+
+		await ticks(2);
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ message: 'redis is down' }),
+			'[autoscale] could not answer pool health queries',
+		);
+
+		expect(recordAutoscaleTick).toHaveBeenCalledTimes(2);
+	});
+
+	test('takes the reading back before it exits on a stop', async () => {
+		const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+			return undefined as never;
+		});
+
+		let withdraw = (): void => undefined;
+
+		withdrawPoolHealth.mockImplementationOnce(() => {
+			return new Promise<void>((resolve) => {
+				withdraw = resolve;
+			});
+		});
+
+		await ticks(1);
+		process.emit('SIGTERM');
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(disconnectFromSupervisor).toHaveBeenCalledOnce();
+		expect(withdrawPoolHealth).toHaveBeenCalledOnce();
+		expect(exit).not.toHaveBeenCalled();
+
+		withdraw();
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(exit).toHaveBeenCalledWith(0);
+
+		exit.mockRestore();
+	});
+
+	// A publish over a Redis that is down waits with no deadline.
+	test('exits a second after a stop the bus never answers', async () => {
+		const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+			return undefined as never;
+		});
+
+		withdrawPoolHealth.mockImplementationOnce(() => new Promise(() => {}));
+
+		await ticks(1);
+		process.emit('SIGINT');
+		await vi.advanceTimersByTimeAsync(999);
+
+		expect(exit).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1);
+
+		expect(exit).toHaveBeenCalledWith(0);
+
+		exit.mockRestore();
 	});
 });
 
