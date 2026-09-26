@@ -303,10 +303,10 @@ function scopedCacheFingerprintFromPinKey(
  * a constraint holding of every entry it would be the collection purge, a
  * different operation with its own mode and its own record.
  *
- * A pin naming a value is the converse. `scopedCacheFingerprintCouldContainPin`
- * is vacuously true of an entry that pins nothing, so without this it would drop
- * the global reads too — exactly what a declaring cancel states did NOT change
- * (#292).
+ * A pin naming a value reaches every entry that could hold a row of that slice,
+ * which `scopedCacheFingerprintCouldContainPin` answers — the reads that pin
+ * nothing among them: a global read, or a range read indexed bare, holds the
+ * slice's rows as much as the entry pinned to it does.
  */
 function scopedCacheFingerprintReachedByPin(
 	fingerprint: ScopedCacheFingerprint,
@@ -314,10 +314,6 @@ function scopedCacheFingerprintReachedByPin(
 ): boolean {
 	if (scopedCacheFingerprintIsBare(declared)) {
 		return scopedCacheFingerprintIsBare(fingerprint);
-	}
-
-	if (scopedCacheFingerprintIsBare(fingerprint)) {
-		return false;
 	}
 
 	return scopedCacheFingerprintCouldContainPin(fingerprint, declared);
@@ -1196,9 +1192,9 @@ async function reportRecoveredScopedCacheEntries(
  * alone, so it survives.
  *
  * `includeBareFingerprint: false` drops the bare fingerprint from the purge — for
- * a cancelled mutation nothing in `collection` changed, so only the hook's own
- * declared (usually foreign) slices should drop, not this collection's global
- * reads.
+ * a cancelled mutation nothing in `collection` changed, so only what the hook
+ * declared should drop: its (usually foreign) slices, and the global reads of
+ * the collections those slices name.
  */
 export async function purgeScopedCache(
 	cache: Keyv,

@@ -424,8 +424,8 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
-		leaves an entry pinning nothing alone when the only pin declared names a
-		value: a cancelled write says one slice moved, not that the collection did
+		drops an entry pinning nothing when the only pin declared names a value:
+		a read no value narrows holds that slice's rows too
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
@@ -442,7 +442,7 @@ describe('a purge shown the rows it wrote', () => {
 			{ includeBareFingerprint: false },
 		);
 
-		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bare');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bare');
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
 	});
 

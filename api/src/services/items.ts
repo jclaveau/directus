@@ -1167,7 +1167,8 @@ implements AbstractService<Item> {
 			// (parity with create's cancel); a plain validation cancel is a no-op (the
 			// guard keeps empty declarations from reaching the purge). The cancel purges
 			// only the declared fingerprints — `includeBareFingerprint: false` leaves
-			// this collection's own bare one (its global reads) warm, nothing changed.
+			// this collection's own bare one warm, nothing changed; a declared value
+			// pin still reaches the global reads of the collection it names.
 			if (
 				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
@@ -1714,7 +1715,8 @@ implements AbstractService<Item> {
 			// (parity with create's cancel); a plain validation cancel is a no-op (the
 			// guard keeps empty declarations from reaching the purge). The cancel purges
 			// only the declared fingerprints — `includeBareFingerprint: false` leaves
-			// this collection's own bare one (its global reads) warm, nothing changed.
+			// this collection's own bare one warm, nothing changed; a declared value
+			// pin still reaches the global reads of the collection it names.
 			if (
 				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)

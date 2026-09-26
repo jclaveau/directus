@@ -447,7 +447,7 @@ describe('countScopedCachePinMembers', () => {
 
 	it(oneLine`
 		counts the entries each legacy tag reaches: the bare one the reads no value
-		narrows, a pinned one the entries bound to that value
+		narrows, a pinned one those reads and the entries bound to that value
 	`, async () => {
 		countedMembers = {
 			'ns:scoped-cache-index:fingerprint:articles:': [
@@ -458,7 +458,7 @@ describe('countScopedCachePinMembers', () => {
 		};
 
 		expect(await countScopedCachePinMembers(['articles', 'articles:id=5']))
-		.toEqual({ 'articles': 1, 'articles:id=5': 1 });
+		.toEqual({ 'articles': 1, 'articles:id=5': 2 });
 	});
 
 	it(oneLine`
