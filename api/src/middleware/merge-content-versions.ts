@@ -1,3 +1,4 @@
+import type { ScopedCacheFingerprint } from '@directus/types';
 import { isObject } from '@directus/utils';
 import type { RequestHandler } from 'express';
 import { VersionsService } from '../services/versions.js';
@@ -15,6 +16,20 @@ export const mergeContentVersions: RequestHandler = asyncHandler(async (req, res
 
 		// only act on single item requests
 		if (!isObject(originalData)) return next();
+
+		// The version saves are read below and never pinned, so a later write to
+		// directus_versions (a delete, a key rename, a save) would leave the merged
+		// response cached. The bare fingerprint makes any such write purge it; it
+		// goes before the lookup because a missing version is an answer too.
+		const itemFingerprints: ScopedCacheFingerprint[] | undefined =
+			res.locals['scopedCacheFingerprints'];
+
+		res.locals['scopedCacheFingerprints'] = [
+			...itemFingerprints?.length
+				? itemFingerprints
+				: [{ collection: req.collection }],
+			{ collection: 'directus_versions' },
+		];
 
 		const versionsService = new VersionsService({ accountability: req.accountability ?? null, schema: req.schema });
 
