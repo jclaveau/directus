@@ -407,25 +407,71 @@ describe.each(vendors)('%s', (vendor) => {
 		return id;
 	}
 
+	// Keeps each escape as written, so a part's length is where its separator sat.
+	function splitUnescaped(serialized: string, separator: string) {
+		const splitParts = [''];
+
+		for (let charAt = 0; charAt < serialized.length; charAt++) {
+			if (serialized[charAt] === separator) {
+				splitParts.push('');
+				continue;
+			}
+
+			const escapedLength = serialized[charAt] === '\\'
+				? 2
+				: 1;
+
+			splitParts[splitParts.length - 1] += serialized
+				.slice(charAt, charAt + escapedLength);
+
+			charAt += escapedLength - 1;
+		}
+
+		return splitParts;
+	}
+
+	// Mirrors `parseScopedCacheFingerprint`, which this suite cannot import: the
+	// collection ends at `:&`, a key at the `=` before its first unescaped comma,
+	// and `,,` is one empty value.
 	function decodeFingerprint(rendered: string) {
 		const unescaped = (token: string) => token.replace(/\\(.)/g, '$1');
-		const [filedFor, ...pins] = rendered.match(/(?:\\.|[^&])+/g) ?? [];
-		const collection = unescaped(filedFor!).replace(/:$/, '');
+
+		const colonAt = rendered.includes(':&')
+			? rendered.indexOf(':&')
+			: rendered.indexOf(':');
+
+		const collection = colonAt === -1
+			? rendered
+			: rendered.slice(0, colonAt);
+
+		const fingerprintBody = colonAt === -1
+			? ''
+			: rendered.slice(colonAt + 1);
+
 		const pinnedScope: Record<string, string[]> = {};
 		let viewFields: string[] | undefined;
 
-		for (const pin of pins) {
-			const [field, values] = pin.split(/(?<!\\)=/);
-			const tokens = (values?.match(/(?:\\.|[^,])+/g) ?? []).map(unescaped);
+		for (const pin of splitUnescaped(fingerprintBody, '&')) {
+			const assignAt = splitUnescaped(pin, ',')[0]!.length - 1;
+
+			if (assignAt < 0 || pin[assignAt] !== '=') {
+				continue;
+			}
+
+			const field = pin.slice(0, assignAt);
+
+			const tokens = splitUnescaped(pin.slice(assignAt + 1), ',')
+				.slice(1, -1)
+				.map(unescaped);
 
 			if (field === 'view') {
 				viewFields = tokens;
 			}
-			else if (unescaped(field!) === 'id' && parentIds.has(collection)) {
+			else if (unescaped(field) === 'id' && parentIds.has(collection)) {
 				pinnedScope['id'] = tokens.map((id) => parentMarker(collection, id));
 			}
 			else {
-				pinnedScope[unescaped(field!)] = tokens;
+				pinnedScope[unescaped(field)] = tokens;
 			}
 		}
 
@@ -441,8 +487,11 @@ describe.each(vendors)('%s', (vendor) => {
 	// An index member joins the fingerprint it was filed under to the cache key it
 	// names, and only the fingerprint half is ever stated: a scenario says what a
 	// read is filed under, never where the entry lives.
-	const fingerprintOf = (member: string) => member.split(/(?<!\\)\|/)[0]!;
-	const cacheKeyOf = (member: string) => member.split(/(?<!\\)\|/)[1]!;
+	const fingerprintOf = (member: string) => splitUnescaped(member, '|')[0]!;
+
+	const cacheKeyOf = (member: string) => {
+		return member.slice(fingerprintOf(member).length + 1);
+	};
 
 	function expectStatedFingerprints(
 		members: string[],
