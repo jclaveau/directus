@@ -20,6 +20,8 @@ export class BusRedis implements Bus {
 	private compression: boolean;
 	private compressionMinSize: number;
 	private handlers: Record<string, Set<MessageHandler<any>>>;
+	private resubscribeCallbacks = new Set<() => void>();
+	private readyBefore = false;
 
 	constructor(config: Omit<BusConfigRedis, 'type'>) {
 		this.namespace = config.namespace;
@@ -47,13 +49,26 @@ export class BusRedis implements Bus {
 		// Redis answers with the same count.
 		this.sub.on('ready', () => {
 			const channels = Object.keys(this.handlers);
+			const reconnected = this.readyBefore;
+
+			this.readyBefore = true;
 
 			if (channels.length > 0) {
-				this.sub.subscribe(...channels).catch((error) => {
-					this.pub.emit('error', error);
-				});
+				this.sub.subscribe(...channels)
+					.then(() => {
+						if (reconnected) {
+							this.resubscribeCallbacks.forEach((callback) => callback());
+						}
+					})
+					.catch((error) => {
+						this.pub.emit('error', error);
+					});
 			}
 		});
+	}
+
+	onResubscribe(callback: () => void) {
+		this.resubscribeCallbacks.add(callback);
 	}
 
 	async publish<T = unknown>(channel: string, message: T) {

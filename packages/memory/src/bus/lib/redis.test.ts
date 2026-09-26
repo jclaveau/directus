@@ -286,6 +286,56 @@ describe('on every ready of the subscriber', () => {
 	});
 });
 
+describe('onResubscribe', () => {
+	test('Calls back once the channels are subscribed again', async () => {
+		const resubscribed = vi.fn();
+
+		bus.onResubscribe(resubscribed);
+		await bus.subscribe(mockChannel, mockHandler);
+		vi.mocked(mockSubRedis.subscribe).mockResolvedValue(1);
+
+		listenerFor('ready')();
+		listenerFor('ready')();
+
+		await vi.waitFor(() => expect(resubscribed).toHaveBeenCalledTimes(1));
+	});
+
+	test('Does not call back on the first connection', async () => {
+		const resubscribed = vi.fn();
+
+		bus.onResubscribe(resubscribed);
+		await bus.subscribe(mockChannel, mockHandler);
+		vi.mocked(mockSubRedis.subscribe).mockResolvedValue(1);
+
+		listenerFor('ready')();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(resubscribed).not.toHaveBeenCalled();
+	});
+
+	test('Does not call back when the resubscribe is refused', async () => {
+		const resubscribed = vi.fn();
+		const error = new Error('Connection is closed.');
+
+		bus.onResubscribe(resubscribed);
+		await bus.subscribe(mockChannel, mockHandler);
+
+		vi.mocked(mockSubRedis.subscribe)
+			.mockResolvedValueOnce(1)
+			.mockRejectedValueOnce(error);
+
+		listenerFor('ready')();
+		listenerFor('ready')();
+
+		await vi.waitFor(() => {
+			expect(mockRedis.emit).toHaveBeenCalledWith('error', error);
+		});
+
+		expect(resubscribed).not.toHaveBeenCalled();
+	});
+});
+
 describe('unsubscribe', () => {
 	test('Returns early when no handlers exist for channel', async () => {
 		await bus.unsubscribe(mockNamespacedChannel, mockHandler);
