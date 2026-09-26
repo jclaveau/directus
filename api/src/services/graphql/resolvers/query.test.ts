@@ -22,6 +22,13 @@ vi.mock('../utils/replace-fragments.js', () => {
 	return { replaceFragmentsInSelections: vi.fn(() => [{}]) };
 });
 
+vi.mock('../../../scoped-cache/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../../../scoped-cache/index.js')>(),
+		readScopedCacheEpochs: vi.fn(async () => ({ '*': '1', directus_versions: '7' })),
+	};
+});
+
 import type { GraphQLService } from '../index.js';
 import { resolveQuery } from './query.js';
 
@@ -42,6 +49,7 @@ describe('resolveQuery scoped cache fingerprints', () => {
 			accountability: null,
 			read: vi.fn(async () => [{ id: '1' }]),
 			scopedCacheFingerprints: [],
+			scopedCacheEpochs: {},
 		} as unknown as GraphQLService;
 
 		await resolveQuery(gql, {
@@ -54,5 +62,34 @@ describe('resolveQuery scoped cache fingerprints', () => {
 		expect(gql.scopedCacheFingerprints).toEqual([
 			{ collection: 'directus_versions' },
 		]);
+	});
+
+	test(oneLine`
+		a version read takes the directus_versions counter, so the fill guard does
+		not refuse the /graphql response as unguarded
+	`, async () => {
+		const gql = {
+			scope: 'items',
+			schema: {
+				collections: { articles: { primary: 'id', singleton: false } },
+			},
+			accountability: null,
+			read: vi.fn(async () => [{ id: '1' }]),
+			scopedCacheFingerprints: [],
+			scopedCacheEpochs: { '*': '1', articles: '2' },
+		} as unknown as GraphQLService;
+
+		await resolveQuery(gql, {
+			fieldName: 'articles_by_version',
+			fieldNodes: [{ arguments: [] }],
+			fragments: {},
+			variableValues: {},
+		} as any);
+
+		expect(gql.scopedCacheEpochs).toEqual({
+			'*': '1',
+			articles: '2',
+			directus_versions: '7',
+		});
 	});
 });

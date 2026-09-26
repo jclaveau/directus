@@ -1,6 +1,10 @@
 import type { ScopedCacheFingerprint } from '@directus/types';
 import { isObject } from '@directus/utils';
 import type { RequestHandler } from 'express';
+import {
+	mergedScopedCacheEpochs,
+	readScopedCacheEpochs,
+} from '../scoped-cache/index.js';
 import { VersionsService } from '../services/versions.js';
 import asyncHandler from '../utils/async-handler.js';
 import { mergeVersionsRaw, mergeVersionsRecursive } from '../utils/merge-version-data.js';
@@ -30,6 +34,13 @@ export const mergeContentVersions: RequestHandler = asyncHandler(async (req, res
 				: [{ collection: req.collection }],
 			{ collection: 'directus_versions' },
 		];
+
+		// The fill guard refuses a fingerprint whose collection it never read a
+		// counter for, so the reading is taken here, before the lookup it guards.
+		res.locals['scopedCacheEpochs'] = mergedScopedCacheEpochs(
+			res.locals['scopedCacheEpochs'],
+			await readScopedCacheEpochs(['directus_versions']),
+		);
 
 		const versionsService = new VersionsService({ accountability: req.accountability ?? null, schema: req.schema });
 
