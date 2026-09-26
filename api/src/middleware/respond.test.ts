@@ -1361,6 +1361,35 @@ describe('respond middleware', () => {
 		);
 	});
 
+	test(oneLine`
+		CACHE_TAGS_HEADER MISS swept by a purge during the fill: writes no __pins
+		sibling after the eviction dropped it
+	`, async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValueOnce('articles');
+
+		await respond(makeReq(), makeRes({ data: [{ id: 1 }] }, {
+			scopedCacheFingerprints: [
+				{
+					collection: 'articles',
+					pinnedScope: { owner: ['U1'] },
+				},
+			],
+			scopedCacheEpochs: { articles: '7' },
+		}), next);
+
+		expect(mocks.evictCacheEntry).toHaveBeenCalledWith(mockCache, 'cache-key');
+
+		// Written after the eviction, it would outlive the entry it describes.
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalledWith(
+			mockCache,
+			'cache-key__pins',
+			{ pins: ['articles:owner=U1'] },
+			expect.any(Number),
+		);
+	});
+
 	test('CACHE_PURGED_TAGS_HEADER emits purged tags on a mutation', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 

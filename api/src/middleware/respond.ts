@@ -292,9 +292,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// serialization before it is most of it.
 			const filledAt = Date.now();
 
+			let sweptDuringFill: string | undefined;
+
 			if (epochsBeforeQuery) {
-				const sweptDuringFill =
-					await scopedCacheSweptDuringFill(epochsBeforeQuery);
+				sweptDuringFill = await scopedCacheSweptDuringFill(epochsBeforeQuery);
 
 				if (sweptDuringFill !== undefined) {
 					// This is the one purge that knows precisely which key is stale, and
@@ -342,8 +343,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
 
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
-			// the read that builds them) can still emit them, via cache.ts.
-			if (env['CACHE_TAGS_HEADER']) {
+			// the read that builds them) can still emit them, via cache.ts. Not for
+			// an entry a purge swept during the fill: the eviction above already
+			// dropped its sidecar, and one written now outlives the entry.
+			if (env['CACHE_TAGS_HEADER'] && sweptDuringFill === undefined) {
 				if (readPinKeys.length > 0) {
 					// An object: setCacheValue's compress expects a CacheValue. The
 					// pins as a list, so a value holding the separator reads back as
