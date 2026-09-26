@@ -1089,7 +1089,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			'a row moving out of the range a read was filtered on purges it',
+			'a row moving out of the range and owner a read was filtered on purges it',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const filedMembers = new Map<string, string[]>();
