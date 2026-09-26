@@ -257,10 +257,6 @@ describe.each(vendors)('%s', (vendor) => {
 	});
 
 	afterAll(async () => {
-		instance.kill();
-
-		await redis.quit();
-
 		await request(getUrl(vendor, env))
 			.delete(`/users/${userId}`)
 			.set('Authorization', admin);
@@ -269,6 +265,10 @@ describe.each(vendors)('%s', (vendor) => {
 			.delete('/policies')
 			.send({ query: { filter: { name: { _eq: policyName } } } })
 			.set('Authorization', admin);
+
+		instance.kill();
+
+		await redis.quit();
 
 		for (const collection of COLLECTIONS) {
 			await DeleteCollection(vendor, { collection });

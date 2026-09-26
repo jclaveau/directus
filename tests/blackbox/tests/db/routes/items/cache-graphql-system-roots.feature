@@ -29,26 +29,26 @@ Feature: A /graphql/system read is filed under every root it resolved
       | reader  | Ada        |
       | witness | Grace      |
     And this read is cached:
-      | user   | query                       | response          |+
-      | reader | >-                          | users_me:         |
+      | user   | query                       | response          |
+      | reader | >-                          | users_me:         |+
       |        |   { users_me { first_name } |   first_name: Ada |
       |        |   roles { id } }            |                   |
     And the witness reads are cached:
-      | user    | query                       | response            |+
-      | witness | >-                          | users_me:           |
+      | user    | query                       | response            |
+      | witness | >-                          | users_me:           |+
       |         |   { users_me { first_name } |   first_name: Grace |
       |         |   roles { id } }            |                     |
     When the users rename themselves:
       | marker | first_name |
       | reader | Augusta    |
     Then the read is purged, since the rename wrote the row users_me read:
-      | user   | query                       | response              |+
-      | reader | >-                          | users_me:             |
+      | user   | query                       | response              |
+      | reader | >-                          | users_me:             |+
       |        |   { users_me { first_name } |   first_name: Augusta |
       |        |   roles { id } }            |                       |
     And the witness reads are still cached, since the rename wrote another row:
-      | user    | query                       | response            |+
-      | witness | >-                          | users_me:           |
+      | user    | query                       | response            |
+      | witness | >-                          | users_me:           |+
       |         |   { users_me { first_name } |   first_name: Grace |
       |         |   roles { id } }            |                     |
 
@@ -59,27 +59,27 @@ Feature: A /graphql/system read is filed under every root it resolved
       | control | Grace      |
     And the project descriptor is "before"
     And this read is refused:
-      | user   | query                      | response                       |+
-      | reader | >-                         | server_info:                   |
+      | user   | query                      | response                       |
+      | reader | >-                         | server_info:                   |+
       |        |   { server_info { project  |   project:                     |
       |        |   { project_descriptor } } |     project_descriptor: before |
       |        |   roles { id } }           |                                |
     And the witness reads are cached:
-      | user    | query                       | response             |+
-      | control | >-                          | roles:               |
+      | user    | query                       | response             |
+      | control | >-                          | roles:               |+
       |         |   { roles(filter: { name: { |   - name: Admin Role |
       |         |   _eq: "Admin Role" } })    |                      |
       |         |   { name } }                |                      |
     When the project descriptor is changed to "after"
     Then the read is refused, since server_info pins nothing a write purges by:
-      | user   | query                      | response                      |+
-      | reader | >-                         | server_info:                  |
+      | user   | query                      | response                      |
+      | reader | >-                         | server_info:                  |+
       |        |   { server_info { project  |   project:                    |
       |        |   { project_descriptor } } |     project_descriptor: after |
       |        |   roles { id } }           |                               |
     And the witness reads are still cached, since the write was to the settings:
-      | user    | query                       | response             |+
-      | control | >-                          | roles:               |
+      | user    | query                       | response             |
+      | control | >-                          | roles:               |+
       |         |   { roles(filter: { name: { |   - name: Admin Role |
       |         |   _eq: "Admin Role" } })    |                      |
       |         |   { name } }                |                      |

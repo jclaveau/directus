@@ -36,24 +36,24 @@ Feature: A read merged with a content version is purged by a write to its versio
       | marker | note   | key   | delta                  |
       | draft  | target | draft | { "title": "drafted" } |
     And this read is cached:
-      | read             | response       |+
-      | note: target     | title: drafted |
+      | read             | response       |
+      | note: target     | title: drafted |+
       | query:           |                |
       |   version: draft |                |
     And the witness reads are cached:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
     When the versions are deleted:
       | marker |
       | draft  |
     Then the read is purged, since the version it merged is gone:
-      | read             | response    |+
-      | note: target     | title: main |
+      | read             | response    |
+      | note: target     | title: main |+
       | query:           |             |
       |   version: draft |             |
     And the witness reads are still cached, since no note was written:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
 
   Scenario: renaming the version's key purges a read merged with it
     Given the notes:
@@ -63,24 +63,24 @@ Feature: A read merged with a content version is purged by a write to its versio
       | marker | note   | key   | delta                  |
       | draft  | target | draft | { "title": "drafted" } |
     And this read is cached:
-      | read             | response       |+
-      | note: target     | title: drafted |
+      | read             | response       |
+      | note: target     | title: drafted |+
       | query:           |                |
       |   version: draft |                |
     And the witness reads are cached:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
     When the versions are renamed:
       | marker | key      |
       | draft  | archived |
     Then the read is purged, since no version holds the asked key any more:
-      | read             | response    |+
-      | note: target     | title: main |
+      | read             | response    |
+      | note: target     | title: main |+
       | query:           |             |
       |   version: draft |             |
     And the witness reads are still cached, since no note was written:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
 
   Scenario: renaming another version into the asked key purges the read
     Given the notes:
@@ -90,24 +90,24 @@ Feature: A read merged with a content version is purged by a write to its versio
       | marker | note   | key   | delta                  |
       | other  | target | other | { "title": "drafted" } |
     And this read is cached:
-      | read             | response    |+
-      | note: target     | title: main |
+      | read             | response    |
+      | note: target     | title: main |+
       | query:           |             |
       |   version: draft |             |
     And the witness reads are cached:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
     When the versions are renamed:
       | marker | key   |
       | other  | draft |
     Then the read is purged, since a version now holds the asked key:
-      | read             | response       |+
-      | note: target     | title: drafted |
+      | read             | response       |
+      | note: target     | title: drafted |+
       | query:           |                |
       |   version: draft |                |
     And the witness reads are still cached, since no note was written:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
 
   Scenario: deleting the version purges a GraphQL read merged with it
     Given the notes:
@@ -117,23 +117,23 @@ Feature: A read merged with a content version is purged by a write to its versio
       | marker | note   | key   | delta                  |
       | draft  | target | draft | { "title": "drafted" } |
     And this read is cached:
-      | read                                      | response                  |+
-      | note: target                              | cache_version_note_by_id: |
+      | read                                      | response                  |
+      | note: target                              | cache_version_note_by_id: |+
       | graphql: >-                               |   title: drafted          |
       |   { cache_version_note_by_id(id: "$note", |                           |
       |   version: "draft") { title } }           |                           |
     And the witness reads are cached:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
     When the versions are deleted:
       | marker |
       | draft  |
     Then the read is purged, since the version it merged is gone:
-      | read                                      | response                  |+
-      | note: target                              | cache_version_note_by_id: |
+      | read                                      | response                  |
+      | note: target                              | cache_version_note_by_id: |+
       | graphql: >-                               |   title: main             |
       |   { cache_version_note_by_id(id: "$note", |                           |
       |   version: "draft") { title } }           |                           |
     And the witness reads are still cached, since no note was written:
-      | read         | response    |+
-      | note: target | title: main |
+      | read         | response    |
+      | note: target | title: main |+
