@@ -145,12 +145,7 @@ function unlinkPipeline() {
 		return queued.map(([keys]) => [null, keys.length]);
 	});
 
-	return {
-		incr: vi.fn().mockReturnThis(),
-		expire: vi.fn().mockReturnThis(),
-		unlink,
-		exec,
-	};
+	return { unlink, exec };
 }
 
 beforeEach(() => {
@@ -970,7 +965,8 @@ describe('a collection-wide purge', () => {
 			scan,
 			srem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
@@ -993,18 +989,6 @@ describe('a collection-wide purge', () => {
 	`, async () => {
 		const calls: string[] = [];
 
-		const pipeline = {
-			incr: (key: string) => {
-				calls.push(`incr ${key}`);
-				return pipeline;
-			},
-			expire: () => pipeline,
-			exec: async () => {
-				calls.push('exec');
-				return [];
-			},
-		};
-
 		vi.mocked(useRedis).mockReturnValue({
 			scan: async (_cursor: string, _match: string, pattern: string) => {
 				calls.push(`scan ${pattern}`);
@@ -1016,32 +1000,22 @@ describe('a collection-wide purge', () => {
 				calls.push('eval');
 				return [];
 			},
-			pipeline: () => pipeline,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
+				calls.push(`bump ${epochKey}`);
+			},
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:articles',
-			'exec',
+			'bump ns:scoped-cache-epoch:articles',
 			'scan ns:scoped-cache-index:fingerprint:articles:*',
 			'eval',
 		]);
 	});
 
 });
-
-// The pipeline a purge still sends carries only its epoch bumps; the sweep itself is
-// one script, doubled by `redisSweepDouble` below.
-function redisPipelineDouble() {
-	const chain = {
-		incr: () => chain,
-		expire: () => chain,
-		exec: async () => [],
-	};
-
-	return chain;
-}
 
 /**
  * Stand in for the sweep script: read each index set and drop them all. `members` is
@@ -1189,12 +1163,18 @@ describe('dropScopedCacheIndex', () => {
 		}
 
 		const pipeline = unlinkPipeline();
+		const scopedCacheEpochBump = vi.fn();
 
-		const redis = { scan, pipeline: () => pipeline };
+		const redis = {
+			scan,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump,
+			pipeline: () => pipeline,
+		};
 
 		vi.mocked(useRedis).mockReturnValue(redis as any);
 
-		return { scan, unlink: pipeline.unlink };
+		return { scan, unlink: pipeline.unlink, scopedCacheEpochBump };
 	}
 
 	it(oneLine`
@@ -1257,13 +1237,19 @@ describe('dropScopedCacheIndex', () => {
 		moves the wholesale counter again once the index is gone — a fill that filed
 		before the drop and wrote its entry after it is indexed by nothing
 	`, async () => {
-		const { scan } = mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
-		const { incr } = vi.mocked(useRedis)().pipeline();
+		const { scan, scopedCacheEpochBump } = mockScan(
+			['0', ['ns:scoped-cache-index:fingerprint:articles']],
+		);
 
 		await dropScopedCacheIndex();
 
 		expect(scan).toHaveBeenCalledOnce();
-		expect(incr).toHaveBeenCalledExactlyOnceWith('ns:scoped-cache-epoch:*');
+
+		expect(scopedCacheEpochBump).toHaveBeenCalledExactlyOnceWith(
+			1,
+			'ns:scoped-cache-epoch:*',
+			86400,
+		);
 	});
 
 	it(oneLine`
@@ -1284,7 +1270,8 @@ describe('dropScopedCacheIndex', () => {
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: sweep.eval,
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
@@ -1304,23 +1291,15 @@ describe('dropScopedCacheIndex', () => {
 		moves the counters even when the sweep behind them is refused, so a read in
 		flight declines rather than caching under an index the retry will drop
 	`, async () => {
-		const bumped: string[] = [];
-
-		const pipeline = {
-			incr: (key: string) => {
-				bumped.push(key);
-				return pipeline;
-			},
-			expire: () => pipeline,
-			exec: async () => [],
-		};
+		const scopedCacheEpochBump = vi.fn();
 
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: vi.fn().mockRejectedValue(new Error('Connection is closed.')),
-			pipeline: () => pipeline,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump,
 		} as any);
 
 		await purgeScopedCache(
@@ -1331,9 +1310,13 @@ describe('dropScopedCacheIndex', () => {
 			])],
 		);
 
-		// The bumps are their own pipeline, sent before the script — inside it they
+		// The bumps are their own script call, sent before the sweep — inside it they
 		// would have gone down with the refusal.
-		expect(bumped).toEqual(['ns:scoped-cache-epoch:articles']);
+		expect(scopedCacheEpochBump).toHaveBeenCalledExactlyOnceWith(
+			1,
+			'ns:scoped-cache-epoch:articles',
+			86400,
+		);
 	});
 
 	it('counts what Redis removed, not what it was handed', async () => {
@@ -1415,11 +1398,6 @@ describe('flushResponseCache', () => {
 		const calls: string[] = [];
 
 		const pipeline = {
-			incr: (key: string) => {
-				calls.push(`incr ${key}`);
-				return pipeline;
-			},
-			expire: () => pipeline,
 			unlink: () => {
 				calls.push('unlink');
 				return pipeline;
@@ -1434,6 +1412,10 @@ describe('flushResponseCache', () => {
 			scan: async () => {
 				calls.push('scan');
 				return ['0', ['ns:scoped-cache-index:fingerprint:articles']];
+			},
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
+				calls.push(`bump ${epochKey}`);
 			},
 			pipeline: () => pipeline,
 		} as any);
@@ -1457,14 +1439,12 @@ describe('flushResponseCache', () => {
 		await flushResponseCache(cache);
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 			'clear',
 			'scan',
 			'unlink',
 			'exec',
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 		]);
 	});
 
@@ -1477,13 +1457,11 @@ describe('flushResponseCache', () => {
 		await flushResponseCache(null);
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 			'scan',
 			'unlink',
 			'exec',
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 		]);
 	});
 
@@ -1516,11 +1494,9 @@ describe('flushResponseCache', () => {
 		await expect(flushResponseCache(cache)).resolves.toBeUndefined();
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 			'clear',
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 		]);
 
 		expect(warn).toHaveBeenCalledWith(
@@ -1585,10 +1561,10 @@ describe('retryPendingScopedCachePurges', () => {
 			return sweptKeys.flatMap((indexKey) => indexedMembers[indexKey] ?? []);
 		}),
 		del: vi.fn(),
+		defineCommand: vi.fn(),
+		scopedCacheEpochBump: vi.fn(),
 		pipeline: () => {
 			const chain: any = {
-				incr: () => chain,
-				expire: () => chain,
 				srem: (...args: string[]) => {
 					srem(...args);
 					return chain;
@@ -2274,7 +2250,8 @@ describe('a purge that fails after its mutation committed', () => {
 			scan: vi.fn().mockResolvedValue(['0', []]),
 			srem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, tags) => tags);
@@ -2288,7 +2265,8 @@ describe('a purge that fails after its mutation committed', () => {
 			scan: vi.fn().mockRejectedValue(closed),
 			sscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		const purged = await purgeScopedCache(cache as any, 'articles', [
@@ -2323,7 +2301,8 @@ describe('a purge that fails after its mutation committed', () => {
 			scan: vi.fn().mockRejectedValue(closed),
 			sscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		expect(await purgeScopedCache(cache as any, 'articles', null))
@@ -4544,21 +4523,17 @@ describe('the purge counters a fill is guarded by', () => {
 // moved.
 describe('reading and bumping the purge counters', () => {
 	const mget = vi.fn();
-
-	const counterPipeline = {
-		incr: vi.fn().mockReturnThis(),
-		expire: vi.fn().mockReturnThis(),
-		exec: vi.fn(),
-	};
+	const scopedCacheEpochBump = vi.fn();
 
 	beforeEach(() => {
 		env['CACHE_ENABLED'] = true;
 		mget.mockResolvedValue([]);
-		counterPipeline.exec.mockResolvedValue([]);
+		scopedCacheEpochBump.mockResolvedValue(1);
 
 		vi.mocked(useRedis).mockReturnValue({
 			mget,
-			pipeline: () => counterPipeline,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump,
 		} as any);
 	});
 
@@ -4631,18 +4606,15 @@ describe('reading and bumping the purge counters', () => {
 		])).toEqual([]);
 	});
 
-	// `exec` rejects only on a connection-level failure, so an INCR refused on its
-	// own resolves as an entry error. Nothing here can stop the sweep behind it —
-	// that is what makes the cache correct — but a guard that silently stopped
-	// guarding must not also be silent: the fills racing this purge are unguarded.
+	// Nothing here can stop the sweep behind a refused bump — that is what makes the
+	// cache correct — but a guard that silently stopped guarding must not also be
+	// silent: the fills racing this purge are unguarded.
 	it('warns when a counter bump was refused rather than dropped', async () => {
 		const warn = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
 
-		counterPipeline.exec.mockResolvedValue([
-			[null, 1],
-			[new Error('OOM command not allowed'), null],
-		]);
+		scopedCacheEpochBump
+			.mockRejectedValue(new Error('OOM command not allowed'));
 
 		await bumpScopedCacheEpochs(['articles']);
 
@@ -4653,33 +4625,23 @@ describe('reading and bumping the purge counters', () => {
 		const warn = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
 
-		counterPipeline.exec.mockResolvedValue([[null, 1], [null, 1]]);
-
 		await bumpScopedCacheEpochs(['articles']);
 
 		expect(warn).not.toHaveBeenCalled();
 	});
 
-	// An expiring counter, so a collection nothing writes to stops costing a key. A
-	// read whose counter expired between the two readings reads null on both sides
-	// and caches, which is right — nothing purged it in between.
+	// An expiring counter, so a collection nothing writes to stops costing a key.
 	it(oneLine`
 		bumps each collection once and gives the counter a day by default
 	`, async () => {
 		await bumpScopedCacheEpochs(['articles', 'articles', 'authors']);
 
-		expect(counterPipeline.incr).toHaveBeenCalledTimes(2);
-
-		expect(counterPipeline.incr)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles');
-
-		expect(counterPipeline.incr)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:authors');
-
-		expect(counterPipeline.expire)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 24 * 60 * 60);
-
-		expect(counterPipeline.exec).toHaveBeenCalledOnce();
+		expect(scopedCacheEpochBump.mock.calls).toEqual([[
+			2,
+			'ns:scoped-cache-epoch:articles',
+			'ns:scoped-cache-epoch:authors',
+			86400,
+		]]);
 	});
 
 	it('holds the counter for the configured duration', async () => {
@@ -4687,8 +4649,8 @@ describe('reading and bumping the purge counters', () => {
 
 		await bumpScopedCacheEpochs(['articles']);
 
-		expect(counterPipeline.expire)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 2 * 60 * 60);
+		expect(scopedCacheEpochBump)
+			.toHaveBeenCalledWith(1, 'ns:scoped-cache-epoch:articles', 7200);
 	});
 
 	// ms() parses neither, and expiring the counter on the command that bumps it
@@ -4698,14 +4660,14 @@ describe('reading and bumping the purge counters', () => {
 
 		await bumpScopedCacheEpochs(['articles']);
 
-		expect(counterPipeline.expire)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 24 * 60 * 60);
+		expect(scopedCacheEpochBump)
+			.toHaveBeenCalledWith(1, 'ns:scoped-cache-epoch:articles', 86400);
 	});
 
-	it('opens no pipeline for an empty collection list', async () => {
+	it('sends no bump for an empty collection list', async () => {
 		await bumpScopedCacheEpochs([]);
 
-		expect(counterPipeline.exec).not.toHaveBeenCalled();
+		expect(scopedCacheEpochBump).not.toHaveBeenCalled();
 	});
 
 	// Best effort, and the whole of it: this runs BEFORE the sweep, so letting a
@@ -4715,7 +4677,7 @@ describe('reading and bumping the purge counters', () => {
 	it(oneLine`
 		swallows a bump the client refuses, so the sweep behind it still runs
 	`, async () => {
-		counterPipeline.exec.mockRejectedValue(new Error('closed'));
+		scopedCacheEpochBump.mockRejectedValue(new Error('closed'));
 
 		await expect(bumpScopedCacheEpochs(['articles'])).resolves.toBeUndefined();
 	});
