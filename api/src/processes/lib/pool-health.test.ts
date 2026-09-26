@@ -14,11 +14,14 @@ vi.mock('../../logger/index.js', () => {
 	return { useLogger: () => ({ warn }) };
 });
 
-type Publish = (channel: string, message: PoolHealth) => Promise<void>;
+type Publish = (
+	channel: string,
+	message: PoolHealth | null | object,
+) => Promise<void>;
 
 type Subscribe = (
 	channel: string,
-	handler: (health: PoolHealth) => void,
+	handler: (health: PoolHealth | null) => void,
 ) => Promise<void>;
 
 const publish = vi.fn<Publish>(async () => {});
@@ -73,7 +76,7 @@ test('carries the reading the bus delivers', async () => {
 	});
 });
 
-test('drops a reading nothing has refreshed', async () => {
+test('keeps a reading however long nothing changes it', async () => {
 	vi.useFakeTimers();
 
 	const { initPoolHealthMirror, poolHealthReading } = await freshMirror();
@@ -86,14 +89,38 @@ test('drops a reading nothing has refreshed', async () => {
 		targetWorkers: 5,
 	});
 
-	vi.advanceTimersByTime(140_000);
-	expect(poolHealthReading()).not.toBeNull();
+	vi.advanceTimersByTime(3_600_000);
 
-	// The reporter stops with the process that holds the supervisor
-	// connection, and a pool that recovered while it was down would otherwise
-	// leave every worker answering for the failure that was true back then.
-	vi.advanceTimersByTime(20_000);
+	expect(poolHealthReading()).toEqual({
+		failedWorkers: 2,
+		onlineWorkers: 3,
+		targetWorkers: 5,
+	});
+});
+
+test('forgets a reading its reporter took back', async () => {
+	const { initPoolHealthMirror, poolHealthReading } = await freshMirror();
+
+	initPoolHealthMirror();
+	const deliver = subscribe.mock.calls[0]![1];
+
+	deliver({ failedWorkers: 2, onlineWorkers: 3, targetWorkers: 5 });
+
+	// A pool that recovered while the reporter was down would otherwise leave
+	// every worker answering for the failure that was true when it stopped.
+	deliver(null);
+
 	expect(poolHealthReading()).toBeNull();
+});
+
+test('asks for the reading once subscribed', async () => {
+	const { initPoolHealthMirror } = await freshMirror();
+
+	initPoolHealthMirror();
+
+	await vi.waitFor(() => {
+		expect(publish).toHaveBeenCalledWith('poolHealth:query', {});
+	});
 });
 
 test('reports a pool, and reads its own report', async () => {
@@ -115,19 +142,79 @@ test('reports a pool, and reads its own report', async () => {
 	});
 });
 
-test('repeats a reading on a floor rather than on the tick', async () => {
+test('sends an unchanged reading once, however long it holds', async () => {
 	vi.useFakeTimers();
 
 	const { reportPoolHealth } = await freshMirror();
 
 	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
-	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
-	expect(publish).toHaveBeenCalledTimes(1);
 
-	// Repeated while it is still true, so a worker that booted after it was
-	// first sent is answered, and so it never expires under a live reporter.
-	vi.advanceTimersByTime(11_000);
+	// A pool holding still puts nothing on the bus, so a platform that stops an
+	// idle service after ten minutes without traffic can stop this one.
+	vi.advanceTimersByTime(3_600_000);
 	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+
+	expect(publish).toHaveBeenCalledTimes(1);
+});
+
+test('answers a query with the last reading', async () => {
+	const { answerPoolHealthQueries, reportPoolHealth } = await freshMirror();
+
+	await answerPoolHealthQueries();
+	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+
+	const [channel, answer] = subscribe.mock.calls[0]!;
+	expect(channel).toBe('poolHealth:query');
+
+	answer(null);
+
+	expect(publish).toHaveBeenNthCalledWith(
+		2,
+		'poolHealth',
+		{ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 },
+	);
+});
+
+test('answers no query before the pool was measured', async () => {
+	const { answerPoolHealthQueries } = await freshMirror();
+
+	await answerPoolHealthQueries();
+	subscribe.mock.calls[0]![1](null);
+
+	expect(publish).not.toHaveBeenCalled();
+});
+
+test('takes the reading back, and sends it again on the next tick', async () => {
+	const {
+		answerPoolHealthQueries,
+		reportPoolHealth,
+		withdrawPoolHealth,
+	} = await freshMirror();
+
+	await answerPoolHealthQueries();
+	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+	await withdrawPoolHealth();
+
+	expect(publish).toHaveBeenLastCalledWith('poolHealth', null);
+
+	// Taken back, nothing is left to answer a query with.
+	subscribe.mock.calls[0]![1](null);
+	expect(publish).toHaveBeenCalledTimes(2);
+
+	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+	expect(publish).toHaveBeenCalledTimes(3);
+});
+
+test('sends a reading the bus refused again on the next tick', async () => {
+	const { reportPoolHealth } = await freshMirror();
+
+	publish.mockRejectedValueOnce(new Error('no redis'));
+
+	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+	await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+
+	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+
 	expect(publish).toHaveBeenCalledTimes(2);
 });
 
@@ -193,7 +280,6 @@ test('holds a prewarm the supervisor cannot complete', async () => {
 });
 
 test('lets a deployment through once its pool is up, for good', async () => {
-	vi.useFakeTimers();
 	env = { PM2_AUTOSCALE_PREWARM: 3 };
 
 	const { initPoolHealthMirror, poolHasComeUp } = await freshMirror();
@@ -210,8 +296,8 @@ test('lets a deployment through once its pool is up, for good', async () => {
 	deliver({ failedWorkers: 1, onlineWorkers: 2, targetWorkers: 3 });
 	expect(poolHasComeUp()).toBe(true);
 
-	// Including once the reading it came up on has expired.
-	vi.advanceTimersByTime(200_000);
+	// Including once the reading it came up on was taken back.
+	deliver(null);
 	expect(poolHasComeUp()).toBe(true);
 });
 

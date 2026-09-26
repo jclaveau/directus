@@ -30,28 +30,18 @@ export interface PoolHealth {
 }
 
 /**
- * How long a reading stands before it is read as nothing said.
+ * The channel a process that has just subscribed asks for the reading on.
  *
- * The reporter stops with the process that holds the supervisor connection, and
- * a deployment that runs no such process never had one. Without an expiry, a
- * pool that recovered while the reporter was down would leave every worker
- * reporting the failure that was true when the bus last worked — and the state
- * this is here to make visible would be the one state it could get stuck in.
+ * The reading is sent when it changes and at no other time, so a worker the
+ * pool gained after the last change would otherwise have nothing to answer
+ * for until the next one. Asked once, on boot: a deployment whose pool holds
+ * still puts nothing on the bus, and a platform that stops an idle service
+ * after a stretch without traffic can stop it.
  */
-const READING_STANDS_MS = 150_000;
+const POOL_QUERY_CHANNEL = 'poolHealth:query';
 
-/**
- * How often the same reading is repeated, so it stands while it is true.
- *
- * Short because a worker holds health down until it has heard the pool is up,
- * and every worker answers the probe in turn: the floor is what bounds both how
- * long a deployment waits on its last worker to hear, and how long a worker the
- * pool gained later answers for a pool it has not been told about yet.
- */
-const REFRESH_MS = 10_000;
-
-let reading: (PoolHealth & { at: number }) | null = null;
-let reported: (PoolHealth & { at: number }) | null = null;
+let reading: PoolHealth | null = null;
+let reported: PoolHealth | null = null;
 let cameUp = false;
 
 /**
@@ -80,8 +70,12 @@ function awaitsPrewarm(): boolean {
 		&& Number(env['PM2_AUTOSCALE_PREWARM'] ?? 0) > 0;
 }
 
-function record(health: PoolHealth, at: number): void {
-	reading = { ...health, at };
+function record(health: PoolHealth | null): void {
+	reading = health;
+
+	if (health === null) {
+		return;
+	}
 
 	if (health.failedWorkers === 0 && health.onlineWorkers >= health.targetWorkers) {
 		cameUp = true;
@@ -105,9 +99,9 @@ export function poolHasComeUp(): boolean {
 	return cameUp || awaitsPrewarm() === false;
 }
 
-/** What the supervisor last said about the pool, while that still stands. */
+/** What the supervisor last said about the pool, unless its reporter stopped. */
 export function poolHealthReading(): PoolHealth | null {
-	if (reading === null || Date.now() - reading.at > READING_STANDS_MS) {
+	if (reading === null) {
 		return null;
 	}
 
@@ -118,38 +112,82 @@ export function poolHealthReading(): PoolHealth | null {
 	};
 }
 
+/** Resolves whether the bus took the reading, and never rejects. */
+async function publishPoolHealth(health: PoolHealth | null): Promise<boolean> {
+	try {
+		await useBus().publish<PoolHealth | null>(POOL_CHANNEL, health);
+
+		return true;
+	}
+	catch (error: unknown) {
+		useLogger().warn(error, '[pool-health] could not report the pool');
+
+		return false;
+	}
+}
+
 /**
  * Tell the deployment what the supervisor says about its pool.
  *
- * Repeated on a floor rather than sent per tick: the reading has to keep
- * standing while it is true, and a worker that booted after it was first sent
- * has nothing to ask. Unchanged and recent, it is left alone — pub/sub reaches
- * every node of the deployment, and a tick is not a rate anybody needs this at.
+ * Sent when it changes and at no other time: pub/sub reaches every node of the
+ * deployment, and a pool that holds still has nothing new to say. A worker
+ * that boots after the last change asks for it instead, see
+ * `answerPoolHealthQueries`.
  */
 export function reportPoolHealth(health: PoolHealth): void {
-	const now = Date.now();
-
-	const same = reported !== null
+	const unchanged = reported !== null
 		&& reported.failedWorkers === health.failedWorkers
 		&& reported.onlineWorkers === health.onlineWorkers
 		&& reported.targetWorkers === health.targetWorkers;
 
-	if (same && now - reported!.at < REFRESH_MS) {
+	if (unchanged) {
 		return;
 	}
 
-	reported = { ...health, at: now };
+	reported = { ...health };
 
 	// Kept locally as well as sent: the process that reports is a process of the
 	// deployment like any other, and an unreachable bus should not leave it
 	// knowing less about the pool than it just measured.
-	record(health, now);
+	record(reported);
 
-	const published = useBus().publish<PoolHealth>(POOL_CHANNEL, health);
+	const sent = reported;
 
-	published.catch((error: unknown) => {
-		useLogger().warn(error, '[pool-health] could not report the pool');
+	// Forgotten when the bus refused it, so the next tick sends it again: an
+	// unchanged reading is not sent twice, and this one never arrived.
+	void publishPoolHealth(sent).then((delivered) => {
+		if (delivered === false && reported === sent) {
+			reported = null;
+		}
 	});
+}
+
+/**
+ * Send the last reading again to whichever process asks for it.
+ *
+ * Run by the process that reports, so a worker that booted after the last
+ * change hears the pool it serves in without waiting for the next one.
+ */
+export async function answerPoolHealthQueries(): Promise<void> {
+	await useBus().subscribe(POOL_QUERY_CHANNEL, () => {
+		if (reported !== null) {
+			void publishPoolHealth(reported);
+		}
+	});
+}
+
+/**
+ * Take the reading back, on the reporter's way out.
+ *
+ * Nothing repeats a reading any more, so nothing would expire it either: a pool
+ * that recovered while the reporter was down would leave every worker
+ * answering for the failure that was true when it stopped. A reporter that
+ * crashes is restarted by its supervisor, and its first tick sends a reading
+ * again.
+ */
+export async function withdrawPoolHealth(): Promise<void> {
+	reported = null;
+	await publishPoolHealth(null);
 }
 
 /**
@@ -161,11 +199,16 @@ export function reportPoolHealth(health: PoolHealth): void {
  */
 export function initPoolHealthMirror(): void {
 	const subscribed = useBus()
-		.subscribe<PoolHealth>(POOL_CHANNEL, (health) => {
-			record(health, Date.now());
+		.subscribe<PoolHealth | null>(POOL_CHANNEL, (health) => {
+			record(health);
 		});
 
-	subscribed.catch((error: unknown) => {
+	// Asked once subscribed, so the answer is not sent before anything listens.
+	const asked = subscribed.then(async () => {
+		await useBus().publish(POOL_QUERY_CHANNEL, {});
+	});
+
+	asked.catch((error: unknown) => {
 		useLogger().warn(
 			error,
 			'[pool-health] no readings will be heard; '
