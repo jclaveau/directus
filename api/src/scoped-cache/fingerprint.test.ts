@@ -9,6 +9,7 @@ import {
 	scopedCacheFingerprintsByCollection,
 	scopedCacheFingerprintMatchesRow,
 	scopedCacheFingerprintPurgedBy,
+	scopedCacheDeclaredPins,
 } from './fingerprint.js';
 
 describe('renderScopedCacheFingerprint', () => {
@@ -143,6 +144,27 @@ describe('parseScopedCacheFingerprint', () => {
 				{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
 			),
 		).pinnedScope).toEqual({ owner: ['a,b'] });
+	});
+});
+
+describe('scopedCacheDeclaredPins', () => {
+	// The read types a dotted scope path off its terminal column, so an uppercase
+	// value declared on it has to fold the way the read's did.
+	it('types a dotted pin off the column the path ends on', () => {
+		expect(scopedCacheDeclaredPins(
+			{ collection: 'slot', pinnedScope: { 'zone.region.owner': ['Acme'] } },
+			{
+				collections: {
+					slot: { fields: { zone: { type: 'integer' } } },
+					zone: { primary: 'id', fields: { region: { type: 'integer' } } },
+					region: { primary: 'id', fields: { owner: { type: 'string' } } },
+				},
+				relations: [
+					{ collection: 'slot', field: 'zone', related_collection: 'zone' },
+					{ collection: 'zone', field: 'region', related_collection: 'region' },
+				],
+			} as any,
+		)).toEqual([{ field: 'zone.region.owner', value: 'Acme', type: 'string' }]);
 	});
 });
 

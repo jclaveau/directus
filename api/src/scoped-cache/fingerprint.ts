@@ -5,7 +5,11 @@ import type {
 	ScopedCacheCollectionPin,
 	ScopedCachePin,
 	SchemaOverview,
+	Type,
 } from '@directus/types';
+import {
+	resolveScopedCacheM2oJoinChainFromPath,
+} from './paths.js';
 import {
 	canonicalizeScopedCachePinValue,
 	scopedCachePinKey,
@@ -273,14 +277,14 @@ export function scopedCacheDeclaredPins(
 	declared: ScopedCacheDeclaredFingerprint,
 	schema: SchemaOverview | null | undefined,
 ): ScopedCachePin[] {
-	const fields = schema?.collections[declared.collection]?.fields;
-
 	const pinnedScope: ScopedCacheDeclaredScope = declared.pinnedScope ?? {};
 
 	const declaredPins: ScopedCachePin[] = Object.entries(pinnedScope)
 		.flatMap(([field, values]) => {
+			const type = declaredPinType(schema, declared.collection, field);
+
 			return values.map((value) => {
-				return { field, value, type: fields?.[field]?.type };
+				return { field, value, type };
 			});
 		});
 
@@ -297,8 +301,45 @@ export function scopedCacheDeclaredPins(
 	return [...declaredPins, {
 		field: legacyTag.field,
 		value: legacyTag.value,
-		type: fields?.[legacyTag.field]?.type ?? legacyTag.type,
+		type: declaredPinType(schema, declared.collection, legacyTag.field)
+			?? legacyTag.type,
 	}];
+}
+
+/**
+ * The type of the column a declared pin's field names. A dotted scope path
+ * (`zone.region.owner`) is no column of the collection itself: its value is the
+ * terminal column's, and the read types it off that column, so a declaration
+ * typed any other way spells the value as a token the entry never carries.
+ */
+function declaredPinType(
+	schema: SchemaOverview | null | undefined,
+	collection: string,
+	field: string,
+): Type | undefined {
+	const ownType = schema?.collections[collection]?.fields[field]?.type;
+
+	if (ownType !== undefined || !schema || !field.includes('.')) {
+		return ownType;
+	}
+
+	const pathSegments = field.split('.');
+
+	const joins = resolveScopedCacheM2oJoinChainFromPath(
+		schema,
+		collection,
+		pathSegments.slice(0, -1),
+	);
+
+	const terminalCollection = joins?.at(-1)?.relatedCollection;
+
+	if (terminalCollection === undefined) {
+		return undefined;
+	}
+
+	return schema.collections[terminalCollection]
+		?.fields[pathSegments.at(-1)!]
+		?.type;
 }
 
 /**
