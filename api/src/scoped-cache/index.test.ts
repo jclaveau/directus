@@ -1764,6 +1764,33 @@ describe('retryPendingScopedCachePurges', () => {
 		}));
 	});
 
+	it(oneLine`
+		purges a whole collection for a legacy tag whose value ends in an ampersand —
+		it is no fingerprint, and read as one it pins nothing the index files
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheFingerprints: ['articles:title=Q&'],
+			ids: [7],
+		}]);
+
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+				'articles:&title=,q,&|ns:entry-alpha',
+			],
+		};
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: 'articles',
+			mode: 'collection',
+		}));
+	});
+
 	it('flushes the whole namespace for a namespace-mode record', async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',

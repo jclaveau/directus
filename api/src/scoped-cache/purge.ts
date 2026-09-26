@@ -807,11 +807,12 @@ async function purgeOrRecord(
  * grouped by the collection each names, plus the collections whose record is a
  * legacy pin from before this table held fingerprints.
  *
- * A rendered fingerprint always ends on its `&` terminator and a pin never does,
- * which is what tells the two apart. A pin cannot be replayed against the
- * fingerprint index — it names a slice the index no longer files anything under —
- * so its collection is purged whole instead: wider than the record asked for,
- * which is the direction a recovery is allowed to miss in.
+ * A rendered fingerprint opens its body with `:&` right after the collection and
+ * ends on its `&` terminator, which is what tells it from a pin — a pin whose
+ * value ends in `&` passes the second test alone. A pin cannot be replayed
+ * against the fingerprint index — it names a slice the index no longer files
+ * anything under — so its collection is purged whole instead: wider than the
+ * record asked for, which is the direction a recovery is allowed to miss in.
  */
 function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 	declaredByCollection: Map<string, ScopedCacheFingerprint[]>;
@@ -821,15 +822,23 @@ function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 	const pinKeyedCollections = new Set<string>();
 
 	for (const target of recorded) {
-		if (target.endsWith('&') === false) {
-			const fieldAt = target.indexOf(':');
+		const fieldAt = target.indexOf(':');
 
+		const rendersFingerprint = target.includes(':&')
+			&& target.endsWith('&');
+
+		// A pin never opens its field with `&`. A colon inside the collection, or a
+		// pin value carrying `:&`, leaves both readings open, and then both run: a
+		// missed slice is stale, a wider purge is not.
+		if (rendersFingerprint === false || target[fieldAt + 1] !== '&') {
 			pinKeyedCollections.add(
 				fieldAt === -1
 					? target
 					: target.slice(0, fieldAt),
 			);
+		}
 
+		if (rendersFingerprint === false) {
 			continue;
 		}
 
