@@ -202,10 +202,10 @@ describe('The cache audit replays through the pressure limiter', () => {
 					return response;
 				});
 
-			const pingStatuses: number[] = [];
+			const pingAnswers: request.Response[] = [];
 
 			while (!runFinished) {
-				pingStatuses.push((await ping()).statusCode);
+				pingAnswers.push(await ping());
 			}
 
 			const run = await running;
@@ -221,7 +221,16 @@ describe('The cache audit replays through the pressure limiter', () => {
 			expect(Date.now() - startedAt).toBeGreaterThanOrEqual(ENTRIES * STALL_MS);
 
 			// And the limiter shed everyone else while the replays went through.
-			expect(pingStatuses).toContain(503);
+			expect(pingAnswers).toContainEqual(expect.objectContaining({
+				statusCode: 503,
+				body: {
+					errors: [
+						expect.objectContaining({
+							extensions: expect.objectContaining({ reason: 'Under pressure' }),
+						}),
+					],
+				},
+			}));
 		}, 60_000);
 	});
 });
