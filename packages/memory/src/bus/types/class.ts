@@ -24,4 +24,14 @@ export interface Bus {
 	 * @param callback Callback to remove from the stack
 	 */
 	unsubscribe<T = unknown>(channel: string, callback: MessageHandler<T>): Promise<void>;
+
+	/**
+	 * Call back once the channels are subscribed again after a lost connection
+	 *
+	 * Pub/sub keeps nothing for a subscriber that is away, so whatever was
+	 * published in between is gone: this is the moment to ask for it again.
+	 *
+	 * @param callback Called after every resubscribe, never on the first connection
+	 */
+	onResubscribe(callback: () => void): void;
 }
