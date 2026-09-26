@@ -1343,10 +1343,6 @@ export async function purgeScopedCache(
 		...(options.declaredFingerprints ?? []),
 	];
 
-	const renderedFingerprints = [
-		...new Set(purgedByPin.map(renderScopedCacheFingerprint)),
-	];
-
 	let evicted: number | null = null;
 
 	// What a retry has to be able to run again, in the one grammar the index reads:
@@ -1406,12 +1402,14 @@ export async function purgeScopedCache(
 	// The legacy pins a mutation actually resolved, in the same form the entry
 	// sidecar stores — so "this entry carries pin X, and pin X was purged at T" is
 	// a join rather than a guess.
+	const purgedPinKeys = scopedCachePinKeys(purgedScopedCacheFingerprints);
+
 	queueCachePurge({
 		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'slices',
-		scopedCachePins: scopedCachePinKeys(purgedScopedCacheFingerprints),
-		scopedCachePinCount: renderedFingerprints.length,
+		scopedCachePins: purgedPinKeys,
+		scopedCachePinCount: purgedPinKeys.length,
 		evicted,
 		// Awaited inside the mutation, so this time is ADDED to the write's own
 		// latency — a slow purge slows the request that triggered it.

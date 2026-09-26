@@ -648,6 +648,27 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledTimes(5);
 		});
 
+		test(oneLine`
+			counts the pins it records, not the fingerprints they came in
+		`, async () => {
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			// Two fingerprints, the bare one and one holding both pairs, and three
+			// pins: the count is what the purge-pins rows hold, one per pin.
+			await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', pinnedScope: { student: ['A'], teacher: ['T'] } },
+			]);
+
+			expect(queueCachePurge).toHaveBeenCalledWith({
+				collection: 'slots',
+				mode: 'slices',
+				scopedCachePins: ['slots', 'slots:student=A', 'slots:teacher=T'],
+				scopedCachePinCount: 3,
+				evicted: 0,
+				durationMs: expect.any(Number),
+			});
+		});
+
 		test('counts only the entries that were still there to delete', async () => {
 			// Nothing SREMs a member until a purge matches it, so a key that expired
 			// by TTL is still named by its set. Counting memberships would report it
