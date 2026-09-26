@@ -17,6 +17,7 @@ import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	type ScopedCacheFilterKeying,
+	ScopedCacheReadPlan,
 	assertScopedCacheStoreSupported,
 	bumpScopedCacheEpochs,
 	canonicalizeScopedCachePinValue,
@@ -4830,4 +4831,84 @@ describe('the canonical scope value', () => {
 			expect(isPinnableScopeType(type)).toBe(true);
 		},
 	);
+});
+
+// The view a fingerprint narrows to: a write rewriting none of these fields is
+// taken not to change the response, so each one the read depends on has to be
+// here.
+describe('ScopedCacheReadPlan.fieldsByCollection', () => {
+	it('names the fields a permission case filters the root by', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('status').string();
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [{ status: { _eq: 'published' } }],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{ type: 'field', name: 'title', fieldKey: 'title', whenCase: [] },
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['id', 'status', 'title']],
+		]));
+	});
+
+	it('names the fields a nested node\'s case filters through a relation', () => {
+		const schema = new SchemaBuilder()
+			.collection('author', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('team').m2o('team');
+			})
+			.collection('team', (c) => {
+				c.field('id').id();
+				c.field('active').boolean();
+			})
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('author').m2o('author');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'm2o',
+					name: 'author',
+					fieldKey: 'author',
+					query: {},
+					cases: [{ team: { active: { _eq: true } } }],
+					whenCase: [],
+					relation: {
+						collection: 'article',
+						field: 'author',
+						related_collection: 'author',
+					},
+					children: [
+						{ type: 'field', name: 'name', fieldKey: 'name', whenCase: [] },
+					],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['author', 'id']],
+			['author', ['name', 'team']],
+			['team', ['active']],
+		]));
+	});
 });
