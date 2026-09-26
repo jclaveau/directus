@@ -352,8 +352,6 @@ describe.each(vendors)('%s', (vendor) => {
 	});
 
 	afterAll(async () => {
-		instance.kill();
-
 		await request(getUrl(vendor, env))
 			.delete(`/users/${userId}`)
 			.set('Authorization', admin);
@@ -362,6 +360,8 @@ describe.each(vendors)('%s', (vendor) => {
 			.delete('/policies')
 			.send({ query: { filter: { name: { _eq: 'composite view policy' } } } })
 			.set('Authorization', admin);
+
+		instance.kill();
 
 		for (const collection of [
 			BLOCK,
@@ -487,7 +487,6 @@ describe.each(vendors)('%s', (vendor) => {
 			.toBe('HIT');
 
 		await updateItem(TEXT, firstTextId, { note: 'edited note' });
-		await updateItem(TEXT, switchTextId, { body: 'on another page' });
 
 		const afterNote = await readItems(PAGE, query);
 
