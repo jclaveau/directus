@@ -144,7 +144,10 @@ export function renderScopedCacheFingerprint(
 		renderedPins.set(SCOPED_CACHE_FINGERPRINT_VIEW, viewFields);
 	}
 
-	let renderedFingerprint = `${fingerprint.collection}:`;
+	// Escaped like any token: a collection name is only required to be non-empty,
+	// and a raw `|` in one would cut the index member short of its cache key.
+	let renderedFingerprint
+		= `${escapeScopedCacheFingerprintToken(fingerprint.collection)}:`;
 
 	for (const key of [...renderedPins.keys()].sort()) {
 		const sortedValues = [
@@ -162,14 +165,14 @@ export function parseScopedCacheFingerprint(
 	serialized: string,
 ): ScopedCacheFingerprint {
 	// Where the collection ends is the `:&` every body opens with, not the first
-	// colon: a collection name may carry one, and it is written raw.
+	// colon: a collection name may carry one, which is not escaped — its `&` is.
 	const colonAt = serialized.includes(':&')
 		? serialized.indexOf(':&')
 		: serialized.indexOf(':');
 
-	const parsedCollection = colonAt === -1
+	const parsedCollection = unescapeScopedCacheFingerprintToken(colonAt === -1
 		? serialized
-		: serialized.slice(0, colonAt);
+		: serialized.slice(0, colonAt));
 
 	// Null-prototyped: the keys come off the wire, and a collection may declare a
 	// field named `__proto__` — an own key here, the object's prototype anywhere

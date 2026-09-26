@@ -218,6 +218,22 @@ describe('renderScopedCacheIndexMember', () => {
 		});
 	});
 
+	it(oneLine`
+		round-trips a collection whose name carries a pipe, so the member still
+		splits at the key it protects
+	`, () => {
+		expect(parseScopedCacheIndexMember(renderScopedCacheIndexMember(
+			{ collection: 'a|b:&c', pinnedScope: { owner: ['alpha'] } },
+			'ns:abc',
+		))).toEqual({
+			fingerprint: {
+				collection: 'a|b:&c',
+				pinnedScope: { owner: ['alpha'] },
+			},
+			key: 'ns:abc',
+		});
+	});
+
 	it('reads a member holding no key as a fingerprint alone', () => {
 		expect(parseScopedCacheIndexMember('slot:&'))
 			.toEqual({ fingerprint: parseScopedCacheFingerprint('slot:&'), key: '' });
@@ -279,6 +295,15 @@ describe('scopedCacheRowIndexGlobs', () => {
 			'slot:&view=,*',
 			'slot:*&owner=*,a\\\\,b,*',
 		]);
+	});
+
+	it(oneLine`
+		reads the sets whole for a collection its escapes respell, so a member
+		filed under the raw name is still tested
+	`, () => {
+		expect(scopedCacheRowIndexGlobs('a*b', [
+			{ collection: 'a*b', pinnedScope: { owner: ['alpha'] } },
+		])).toBe(null);
 	});
 
 	it(oneLine`
