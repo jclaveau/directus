@@ -67,6 +67,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
+	// A slot names its method range by the marker the range was created under,
+	// and a path slot its parents the same way; `beforeEach` drops them all.
+	const methodRangeIds = new Map<string, number>();
+	const pathPartIds = new Map<string, number>();
+	const pathRangeIds = new Map<string, number>();
+
 	beforeAll(async () => {
 		// The scoped instance reads `scoped_cache_fields` off the schema it boots on,
 		// so the collection precedes the spawn.
@@ -152,27 +158,42 @@ describe.each(vendors)('%s', (vendor) => {
 		await awaitDirectusConnection(port);
 	}, 60_000);
 
-	// A scenario states the rows it starts from, and all sixteen read the one
+	// A scenario states the rows it starts from, and seventeen read the one
 	// collection: rows a scenario left behind answer the next one's read. A filter
 	// pinning an owner no other scenario uses hides that, an `_or` branch bound to
 	// a shared `method` does not — it answered with every row the file had created
-	// so far. The path slots go before the parts and ranges they point at.
+	// so far. The slots go before the ranges and parts they point at, and so do
+	// the markers naming them.
 	beforeEach(async () => {
-		for (const collection of [SLOT, PATH_SLOT, PATH_PART, PATH_RANGE]) {
+		methodRangeIds.clear();
+		pathPartIds.clear();
+		pathRangeIds.clear();
+
+		for (const collection of [
+			SLOT,
+			METHOD_RANGE,
+			PATH_SLOT,
+			PATH_PART,
+			PATH_RANGE,
+		]) {
 			const existing = await request(getUrl(vendor, env))
 				.get(`/items/${collection}`)
 				.query({ fields: 'id', limit: '-1' })
 				.set('Authorization', auth);
+
+			expect(existing.statusCode).toBe(200);
 
 			const existingIds = existing.body.data.map(
 				(row: { id: number }) => row.id,
 			);
 
 			if (existingIds.length > 0) {
-				await request(getUrl(vendor, env))
+				const deleted = await request(getUrl(vendor, env))
 					.delete(`/items/${collection}`)
 					.send(existingIds)
 					.set('Authorization', auth);
+
+				expect(deleted.statusCode).toBe(204);
 			}
 		}
 	});
@@ -188,16 +209,6 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: PATH_PART });
 		await DeleteCollection(vendor, { collection: PATH_RANGE });
 	});
-
-	// A slot names its method range by the marker the range was created under.
-	// Only one scenario creates ranges, so the markers need no scenario of their
-	// own, and the ranges it leaves behind are read by no other.
-	const methodRangeIds = new Map<string, number>();
-
-	// The same for the parents a path slot points at. Every scenario creates its
-	// own, and `beforeEach` drops what the previous one left.
-	const pathPartIds = new Map<string, number>();
-	const pathRangeIds = new Map<string, number>();
 
 	// A written row names itself by the marker the scenario files it under, and
 	// carries under `data` the body its request sends: every column on a create,
@@ -331,42 +342,19 @@ describe.each(vendors)('%s', (vendor) => {
 
 	// An expected answer names its rows by the marker the scenario created them
 	// under, so a scenario reads as rows in, rows out, with no id carried across its
-	// steps, and holds only the columns that carry its point.
+	// steps, and holds only the columns that carry its point, in the order the
+	// read answers them.
 	async function expectAnswer(
 		query: Record<string, string | string[]>,
 		ids: Map<string, number>,
 		expectedAnswer: Record<string, unknown>[],
 		collection: string,
 	) {
-		const markerById = new Map<number, string>();
-
-		for (const [marker, id] of ids) {
-			markerById.set(id, marker);
-		}
-
-		if (expectedAnswer.length === 0) {
-			expect((await readSlots(query, collection)).body.data).toEqual([]);
-			return;
-		}
-
-		const columns = Object.keys(expectedAnswer[0]!);
-
-		const answered = (await readSlots(query, collection)).body.data.map(
-			(row: Record<string, unknown>) => {
-				const answer: Record<string, unknown> = {};
-
-				for (const column of columns) {
-					answer[column] = column === 'marker'
-						? markerById.get(row['id'] as number)
-						: row[column];
-				}
-
-				return answer;
-			},
+		expect((await readSlots(query, collection)).body.data).toMatchObject(
+			expectedAnswer.map(({ marker, ...columns }) => {
+				return { id: ids.get(marker as string), ...columns };
+			}),
 		);
-
-		expect(answered).toEqual(expect.arrayContaining(expectedAnswer));
-		expect(answered).toHaveLength(expectedAnswer.length);
 	}
 
 	// Every member the scoped-cache index holds for the collections a scenario
@@ -1097,6 +1085,21 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			'a read matching two ways is purged by a write matching either',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a read matching two ways is purged by a write matching only its first',
 			(steps) => {
 				const ids = new Map<string, number>();
 				const filedMembers = new Map<string, string[]>();

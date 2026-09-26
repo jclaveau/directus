@@ -221,7 +221,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     And the witness reads are cached:
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
-      |   - id           |                       |     method:    |
+      |   - id           |   note: first         |     method:    |
       |   - owner        |                       |       - spaced |
       |   - note         |                       |     owner:     |
       | filter:          |                       |       - delta  |
@@ -256,7 +256,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     And the witness reads are purged, matching "method: spaced, owner: delta":
       | query            | response              | fingerprints   |
       | fields:          | - marker: target_slot | - pinnedScope: |+
-      |   - id           |                       |     method:    |
+      |   - id           |   note: rewritten     |     method:    |
       |   - owner        |                       |       - spaced |
       |   - note         |                       |     owner:     |
       | filter:          |                       |       - delta  |
@@ -268,21 +268,22 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
 
   Scenario: a write changing a field the read sorted on purges it
     Given the slots:
-      | marker      | owner   | method | note  | amount |
-      | target_slot | epsilon | spaced | first | 10     |
+      | marker      | owner   | method | note   | amount |
+      | target_slot | epsilon | spaced | first  | 10     |
+      | other_slot  | epsilon | spaced | second | 20     |
     And this read is cached:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
       |   - id           |   owner: epsilon      |     owner:      |
-      |   - owner        |                       |       - epsilon |
-      | filter:          |                       |   viewFields:   |
+      |   - owner        | - marker: other_slot  |       - epsilon |
+      | filter:          |   owner: epsilon      |   viewFields:   |
       |   owner: epsilon |                       |     - id        |
       | sort:            |                       |     - note      |
       |   - note         |                       |     - owner     |
     And the witness reads are cached:
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
-      |   - id           |                       |     owner:      |
+      |   - id           | - marker: other_slot  |     owner:      |
       |   - owner        |                       |       - epsilon |
       | filter:          |                       |   viewFields:   |
       |   owner: epsilon |                       |     - id        |
@@ -291,24 +292,24 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | query                 | purged fingerprints |
       | - marker: target_slot | - pinnedScope:      |+
       |   data:               |     owner:          |
-      |     note: rewritten   |       - epsilon     |
+      |     note: third       |       - epsilon     |
       |                       |   viewFields:       |
       |                       |     - id            |
       |                       |     - note          |
       |                       |     - owner         |
     Then the read is purged, matching "owner: epsilon":
       | query            | response              | fingerprints    |
-      | fields:          | - marker: target_slot | - pinnedScope:  |+
+      | fields:          | - marker: other_slot  | - pinnedScope:  |+
       |   - id           |   owner: epsilon      |     owner:      |
-      |   - owner        |                       |       - epsilon |
-      | filter:          |                       |   viewFields:   |
+      |   - owner        | - marker: target_slot |       - epsilon |
+      | filter:          |   owner: epsilon      |   viewFields:   |
       |   owner: epsilon |                       |     - id        |
       | sort:            |                       |     - note      |
       |   - note         |                       |     - owner     |
     And the witness reads are still cached, not reading "note":
       | query            | response              | fingerprints    |
       | fields:          | - marker: target_slot | - pinnedScope:  |+
-      |   - id           |                       |     owner:      |
+      |   - id           | - marker: other_slot  |     owner:      |
       |   - owner        |                       |       - epsilon |
       | filter:          |                       |   viewFields:   |
       |   owner: epsilon |                       |     - id        |
@@ -814,6 +815,85 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |     - method: rushed |                       | - pinnedScope: |
       |                      |                       |     method:    |
       |                      |                       |       - rushed |
+      |                      |                       |   viewFields:  |
+      |                      |                       |     - id       |
+      |                      |                       |     - method   |
+      |                      |                       |     - owner    |
+
+  Scenario: a read matching two ways is purged by a write matching only its first
+    Given the slots:
+      | marker      | owner | method | note   | amount |
+      | target_slot | sampi | slow   | first  | 10     |
+      | other_owner | san   | slow   | second | 20     |
+    And this read is cached:
+      | query                | response              | fingerprints   |
+      | fields:              | - marker: target_slot | - pinnedScope: |+
+      |   - id               |   owner: sampi        |     owner:     |
+      |   - owner            |   method: slow        |       - sampi  |
+      |   - method           |                       |   viewFields:  |
+      | filter:              |                       |     - id       |
+      |   _or:               |                       |     - method   |
+      |     - owner: sampi   |                       |     - owner    |
+      |     - method: spaced |                       | - pinnedScope: |
+      |                      |                       |     method:    |
+      |                      |                       |       - spaced |
+      |                      |                       |   viewFields:  |
+      |                      |                       |     - id       |
+      |                      |                       |     - method   |
+      |                      |                       |     - owner    |
+    And the witness reads are cached:
+      | query                | response              | fingerprints   |
+      | fields:              | - marker: other_owner | - pinnedScope: |+
+      |   - id               |   owner: san          |     owner:     |
+      |   - owner            |   method: slow        |       - san    |
+      |   - method           |                       |   viewFields:  |
+      | filter:              |                       |     - id       |
+      |   _or:               |                       |     - method   |
+      |     - owner: san     |                       |     - owner    |
+      |     - method: spaced |                       | - pinnedScope: |
+      |                      |                       |     method:    |
+      |                      |                       |       - spaced |
+      |                      |                       |   viewFields:  |
+      |                      |                       |     - id       |
+      |                      |                       |     - method   |
+      |                      |                       |     - owner    |
+    When the slots are created:
+      | query                  | purged fingerprints |
+      | - marker: created_slot | - pinnedScope:      |+
+      |   data:                |     owner:          |
+      |     owner: sampi       |       - sampi       |
+      |     method: massed     |   viewFields:       |
+      |     note: third        |     - id            |
+      |     amount: 30         |     - method        |
+      |                        |     - owner         |
+    Then the read is purged, matching "owner: sampi":
+      | query                | response               | fingerprints   |
+      | fields:              | - marker: target_slot  | - pinnedScope: |+
+      |   - id               |   owner: sampi         |     owner:     |
+      |   - owner            |   method: slow         |       - sampi  |
+      |   - method           | - marker: created_slot |   viewFields:  |
+      | filter:              |   owner: sampi         |     - id       |
+      |   _or:               |   method: massed       |     - method   |
+      |     - owner: sampi   |                        |     - owner    |
+      |     - method: spaced |                        | - pinnedScope: |
+      |                      |                        |     method:    |
+      |                      |                        |       - spaced |
+      |                      |                        |   viewFields:  |
+      |                      |                        |     - id       |
+      |                      |                        |     - method   |
+      |                      |                        |     - owner    |
+    And the witness reads are still cached, not matching "owner: san":
+      | query                | response              | fingerprints   |
+      | fields:              | - marker: other_owner | - pinnedScope: |+
+      |   - id               |   owner: san          |     owner:     |
+      |   - owner            |   method: slow        |       - san    |
+      |   - method           |                       |   viewFields:  |
+      | filter:              |                       |     - id       |
+      |   _or:               |                       |     - method   |
+      |     - owner: san     |                       |     - owner    |
+      |     - method: spaced |                       | - pinnedScope: |
+      |                      |                       |     method:    |
+      |                      |                       |       - spaced |
       |                      |                       |   viewFields:  |
       |                      |                       |     - id       |
       |                      |                       |     - method   |
@@ -1563,6 +1643,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | target_slot  | alpha_part  | spaced_range | first  |
       | other_range  | beta_part   | slow_range   | second |
       | other_method | alpha_part  | massed_range | third  |
+      | other_owner  | beta_part   | spaced_range | fourth |
     And this read is cached:
       | query              | response              | fingerprints                       |
       | fields:            | - marker: target_slot | - collection: composite_path_slot  |+
@@ -1674,7 +1755,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
     And the witness reads are purged, matching "method: slow":
       | query            | response              | fingerprints                       |
       | fields:          | - marker: other_range | - collection: composite_path_slot  |+
-      |   - id           |                       |   pinnedScope:                     |
+      |   - id           | - marker: other_owner |   pinnedScope:                     |
       | filter:          |                       |     course_part.owner:             |
       |   course_part:   |                       |       - beta                       |
       |     owner: beta  |                       |     method_range.method:           |
@@ -1746,6 +1827,7 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       | target_slot  | alpha_part  | spaced_range | first  |
       | other_range  | beta_part   | slow_range   | second |
       | other_method | alpha_part  | massed_range | third  |
+      | other_owner  | beta_part   | spaced_range | fourth |
     And this read is cached:
       | query                   | response              | fingerprints                       |
       | fields:                 | - marker: target_slot | - collection: composite_path_slot  |+
@@ -1914,11 +1996,11 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |   - course_part.owner   |     owner: beta       |     course_part.owner:             |
       |   - method_range.method |   method_range:       |       - beta                       |
       | filter:                 |     method: slow      |     method_range.method:           |
-      |   course_part:          |                       |       - slow                       |
-      |     owner: beta         |                       |   viewFields:                      |
-      |   method_range:         |                       |     - course_part                  |
-      |     method: slow        |                       |     - id                           |
-      |                         |                       |     - method_range                 |
+      |   course_part:          | - marker: other_owner |       - slow                       |
+      |     owner: beta         |   course_part:        |   viewFields:                      |
+      |   method_range:         |     owner: beta       |     - course_part                  |
+      |     method: slow        |   method_range:       |     - id                           |
+      |                         |     method: slow      |     - method_range                 |
       |                         |                       | - collection: composite_path_part  |
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     owner:                         |
@@ -1941,6 +2023,12 @@ Feature: A cached read is purged only by a write matching its whole fingerprint
       |                         |                       |   pinnedScope:                     |
       |                         |                       |     id:                            |
       |                         |                       |       - slow_range                 |
+      |                         |                       |   viewFields:                      |
+      |                         |                       |     - method                       |
+      |                         |                       | - collection: composite_path_range |
+      |                         |                       |   pinnedScope:                     |
+      |                         |                       |     id:                            |
+      |                         |                       |       - spaced_range               |
       |                         |                       |   viewFields:                      |
       |                         |                       |     - method                       |
     And the witness reads are still cached, not matching "method: massed":
