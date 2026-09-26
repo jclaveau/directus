@@ -2777,6 +2777,36 @@ describe('listCacheAnomalies', () => {
 		]);
 	});
 
+	// An old-build node, mid-rollout past 20260924B, queues the old name.
+	it('reads a legacy tag_drift reason as pin_drift', async () => {
+		queryRows = [
+			{
+				cache_key: 'k9',
+				reason: 'tag_drift',
+				path: '/items/a',
+				method: 'GET',
+				query: '',
+				count: '1',
+				sample: null,
+				last_seen: new Date(2000).toISOString(),
+			},
+		];
+
+		expect(await listCacheAnomalies()).toEqual([
+			{
+				cacheKey: 'k9',
+				reason: 'pin_drift',
+				path: '/items/a',
+				method: 'GET',
+				query: '',
+				url: '/items/a',
+				count: 1,
+				sample: null,
+				lastSeen: 2000,
+			},
+		]);
+	});
+
 	it('returns an empty list when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		expect(await listCacheAnomalies()).toEqual([]);

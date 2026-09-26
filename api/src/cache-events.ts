@@ -2224,7 +2224,11 @@ export async function listCacheAnomalies(
 	return rows.map((row: Record<string, unknown>) => {
 		return {
 			cacheKey: row['cache_key'] as string,
-			reason: row['reason'] as CacheAnomalyReason,
+			// A node still on the build before 20260924B queues its drift under
+			// the old name, and the drain stores the reason as it came.
+			reason: (row['reason'] === 'tag_drift'
+				? 'pin_drift'
+				: row['reason']) as CacheAnomalyReason,
 			path: row['path'] as string,
 			method: row['method'] as string,
 			query: (row['query'] as string) ?? '',
