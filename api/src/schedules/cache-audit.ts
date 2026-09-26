@@ -13,7 +13,7 @@ import {
 /**
  * A recurring cache audit over real traffic — dev and preview only, since a run
  * costs one uncached read per live entry. Each run lands in the audit history
- * and its `stale_entry`/`tag_drift` findings on the cache dashboard as
+ * and its `stale_entry`/`pin_drift` findings on the cache dashboard as
  * anomalies, so a missed invalidation shows up without anyone reading a log.
  *
  * The rule is `directus_settings.cache_audit_schedule` when set, else
@@ -111,10 +111,10 @@ async function runOnce(): Promise<void> {
 		const report = await runCacheAudit('cron');
 
 		const summary = `${report.scanned} entries in ${report.durationMs}ms: `
-			+ `${report.counts.stale} stale, ${report.counts.tag_drift} drifted, `
+			+ `${report.counts.stale} stale, ${report.counts.pin_drift} drifted, `
 			+ `${report.counts.unreplayable} unreplayable`;
 
-		if (report.counts.stale > 0 || report.counts.tag_drift > 0) {
+		if (report.counts.stale > 0 || report.counts.pin_drift > 0) {
 			logger.warn(`[cache-audit] ${summary}`);
 		}
 		else {

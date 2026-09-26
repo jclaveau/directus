@@ -284,13 +284,24 @@ describe(oneLine`
 			expect((await readMembershipsOfBoundAccount())
 				.headers[cacheStatusHeader]).toBe('HIT');
 
+			// The account, not the label: the read shows no profile column, so only a
+			// write moving a profile across the slice the filter named can change its
+			// response — a label rewritten under the same account cannot.
 			await request(getUrl(vendor, env))
 				.patch(`/items/${PROFILE}/${boundProfileId}`)
-				.send({ label: 'p2' })
+				.send({ account: otherAccountId })
 				.set('Authorization', auth);
 
 			expect((await readMembershipsOfBoundAccount())
 				.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Back where the tests below expect it.
+			const restored = await request(getUrl(vendor, env))
+				.patch(`/items/${PROFILE}/${boundProfileId}`)
+				.send({ account: boundAccountId })
+				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
 		});
 
 		it(oneLine`

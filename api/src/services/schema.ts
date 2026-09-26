@@ -8,7 +8,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
-import { readScopedCacheEpochs } from '../scoped-cache.js';
+import { readScopedCacheEpochs } from '../scoped-cache/index.js';
 import { ForbiddenError } from '@directus/errors';
 import { applyDiff } from '../utils/apply-diff.js';
 import { getSnapshotDiff } from '../utils/get-snapshot-diff.js';
@@ -33,21 +33,24 @@ export class SchemaService {
 
 		// A snapshot is the whole SCHEMA. Tag by the system collections it derives from,
 		// so a schema mutation purges the response, not a business-row write. Their
-		// purge counters are captured first, so a schema change landing mid-read
-		// refuses the fill (`fill-guard.ts`).
-		const scopedCacheTags = [
-			{ collection: 'directus_collections' },
-			{ collection: 'directus_fields' },
-			{ collection: 'directus_relations' },
+		// purge counters are read first, so a schema change landing mid-read refuses
+		// the fill (`fill-guard.ts`).
+		const snapshotCollections = [
+			'directus_collections',
+			'directus_fields',
+			'directus_relations',
 		];
 
-		const scopedCacheEpochs = await readScopedCacheEpochs(
-			scopedCacheTags.map(({ collection }) => collection),
-		);
+		const scopedCacheEpochs = await readScopedCacheEpochs(snapshotCollections);
 
 		const currentSnapshot = await getSnapshot({ database: this.knex });
 
-		return withMeta(currentSnapshot, { scopedCacheTags, scopedCacheEpochs });
+		return withMeta(currentSnapshot, {
+			scopedCacheFingerprints: snapshotCollections.map((collection) => {
+				return { collection };
+			}),
+			scopedCacheEpochs,
+		});
 	}
 
 	async apply(payload: SnapshotDiffWithHash): Promise<void> {

@@ -137,18 +137,15 @@ describe(oneLine`
 			expect(response.statusCode).toBe(200);
 
 			// Both composed terminals come off the SAME joined query, so a column read
-			// against the wrong path surfaces as a wrong value, not a missing tag. Each
-			// slice lands twice because an update purges the snapshot taken before the
-			// write and the one taken after, and the bare collection tag rides along.
+			// against the wrong path surfaces as a wrong value, not a missing label.
+			// The update purges the snapshot taken before the write and the one taken
+			// after: here they resolve to the same slices, and the header names each
+			// one once — the bare collection tag rides along.
 			expect(response.headers[purgedTagsHeader].split(', ').sort()).toEqual([
 				ENTRY,
 				`${ENTRY}:account.org.owner=acme`,
-				`${ENTRY}:account.org.owner=acme`,
-				`${ENTRY}:account.org=${orgId}`,
 				`${ENTRY}:account.org=${orgId}`,
 				`${ENTRY}:account=${accountId}`,
-				`${ENTRY}:account=${accountId}`,
-				`${ENTRY}:id=${entryId}`,
 				`${ENTRY}:id=${entryId}`,
 			].sort());
 		});

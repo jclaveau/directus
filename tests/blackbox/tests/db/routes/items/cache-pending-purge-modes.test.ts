@@ -156,13 +156,13 @@ describe(oneLine`
 		function record(row: {
 			mode: string;
 			collection: string | null;
-			scoped_cache_tag?: string | null;
+			scoped_cache_fingerprint?: string | null;
 		}) {
 			return db(PENDING).insert({
 				failed_at: new Date(),
 				mode: row.mode,
 				collection: row.collection,
-				scoped_cache_tag: row.scoped_cache_tag ?? null,
+				scoped_cache_fingerprint: row.scoped_cache_fingerprint ?? null,
 				attempts: 0,
 				last_error: 'seeded by the pending-purge modes spec',
 			});

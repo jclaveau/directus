@@ -209,8 +209,8 @@ const emptyState = computed(() => {
 const selectedEntry = ref<CacheEntry | null>(null);
 const cachedValue = ref<unknown>(null);
 const cachedValueExists = ref(false);
-const cachedTags = ref<string[] | null>(null);
-const cachedTagCounts = ref<Record<string, number>>({});
+const cachedPins = ref<string[] | null>(null);
+const cachedPinCounts = ref<Record<string, number>>({});
 const cachedTombstone = ref<number | null>(null);
 
 const cachedExpiry = ref<
@@ -551,7 +551,7 @@ function anomalyLabel(reason: CacheAnomalyReason): string {
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
 		stale_entry: t('cache_anomaly_stale_entry', 'Stale · audit replay differs'),
-		tag_drift: t('cache_anomaly_tag_drift', 'Tag drift · audit replay pinned else'),
+		pin_drift: t('cache_anomaly_pin_drift', 'Pin drift · audit replay pinned else'),
 	};
 
 	return labels[reason] ?? reason;
@@ -1821,8 +1821,8 @@ async function openEntry(entry: CacheEntry) {
 	now.value = Date.now(); // fresh clock so absentReason's expired-vs-evicted verdict is current
 	cachedValue.value = null;
 	cachedValueExists.value = false;
-	cachedTags.value = null;
-	cachedTagCounts.value = {};
+	cachedPins.value = null;
+	cachedPinCounts.value = {};
 	cachedExpiry.value = null;
 	cachedSizes.value = null;
 	cachedTombstone.value = null;
@@ -1842,8 +1842,8 @@ async function openEntry(entry: CacheEntry) {
 		const data = response.data.data;
 		cachedValueExists.value = data.exists;
 		cachedValue.value = data.value;
-		cachedTags.value = data.tags;
-		cachedTagCounts.value = data.tagCounts ?? {};
+		cachedPins.value = data.pins;
+		cachedPinCounts.value = data.pinCounts ?? {};
 		cachedExpiry.value = data.expiry;
 		cachedSizes.value = data.sizes;
 		cachedTombstone.value = data.tombstone;
@@ -2511,19 +2511,19 @@ onUnmounted(() => {
 						</div>
 					</div>
 
-					<div class="value-head tags-head">
-						{{ t('scoped_cache_tags', 'Scoped cache tags') }}
+					<div class="value-head pins-head">
+						{{ t('scoped_cache_pins', 'Scoped cache pins') }}
 					</div>
-					<div v-if="cachedTags && cachedTags.length" class="tags">
-						<span v-for="tag in cachedTags" :key="tag" class="tag">
-							{{ tag }}
-							<template v-if="cachedTagCounts[tag]">
-								({{ cachedTagCounts[tag] }})
+					<div v-if="cachedPins && cachedPins.length" class="pins">
+						<span v-for="pin in cachedPins" :key="pin" class="pin">
+							{{ pin }}
+							<template v-if="cachedPinCounts[pin]">
+								({{ cachedPinCounts[pin] }})
 							</template>
 						</span>
 					</div>
 					<div v-else class="value-note">
-						{{ t('no_scoped_cache_tags', 'None (needs CACHE_TAGS_HEADER)') }}
+						{{ t('no_scoped_cache_pins', 'None (needs CACHE_TAGS_HEADER)') }}
 					</div>
 				</div>
 
@@ -3036,13 +3036,13 @@ table.entries .entry-row {
 	margin-block-end: 24px;
 }
 
-.tags {
+.pins {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 }
 
-.tag {
+.pin {
 	padding: 2px 8px;
 	background-color: var(--theme--background-subdued);
 	border-radius: var(--theme--border-radius);
@@ -3050,7 +3050,7 @@ table.entries .entry-row {
 	font-size: 12px;
 }
 
-.tags-head {
+.pins-head {
 	margin-block-start: 16px;
 }
 

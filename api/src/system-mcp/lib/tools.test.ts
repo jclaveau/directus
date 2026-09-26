@@ -659,8 +659,8 @@ test('The entry read never answers with the response inside it', async () => {
 	service.readCacheEntry.mockResolvedValue({
 		exists: true,
 		value: { data: [{ id: 1, email: 'ann@corp.io' }] },
-		tags: ['collection:articles'],
-		tagCounts: { 'collection:articles': 2 },
+		pins: ['collection:articles'],
+		pinCounts: { 'collection:articles': 2 },
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
@@ -675,8 +675,8 @@ test('The entry read never answers with the response inside it', async () => {
 
 	expect(answer).toEqual({
 		exists: true,
-		tags: ['collection:articles'],
-		tagCounts: { 'collection:articles': 2 },
+		pins: ['collection:articles'],
+		pinCounts: { 'collection:articles': 2 },
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
@@ -909,8 +909,8 @@ const auditFinding: CacheAuditFinding = {
 	collection: 'articles',
 	filledAt: 1_700_000_000_000,
 	ageMs: 1000,
-	tags: ['articles'],
-	replayTags: ['articles'],
+	pins: ['articles'],
+	replayPins: ['articles'],
 	diff: ['/data/0/title'],
 	purgesSinceFilled: [],
 };
@@ -925,7 +925,7 @@ const auditRun: CacheAuditRun = {
 	counts: {
 		fresh: 1,
 		stale: 1,
-		tag_drift: 0,
+		pin_drift: 0,
 		raced: 0,
 		time_varying: 0,
 		expired: 0,
@@ -1181,8 +1181,8 @@ test('Every declared output property is one the tool actually answers', () => {
 		],
 		read_cache_entry: {
 			exists: true,
-			tags: ['collection:articles'],
-			tagCounts: { 'collection:articles': 2 },
+			pins: ['collection:articles'],
+			pinCounts: { 'collection:articles': 2 },
 			expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 			sizes: { uncompressed: 100, compressed: 40 },
 			tombstone: null,
@@ -1194,7 +1194,7 @@ test('Every declared output property is one the tool actually answers', () => {
 					time: 4,
 					mode: 'slices',
 					collection: 'articles',
-					scopedCacheTag: 'articles:id=5',
+					scopedCachePin: 'articles:id=5',
 					evicted: 2,
 				},
 			],

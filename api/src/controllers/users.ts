@@ -12,7 +12,7 @@ import checkRateLimit from '../middleware/rate-limiter-registration.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { validateBatch } from '../middleware/validate-batch.js';
-import { scopedCachePurgeEnabled } from '../scoped-cache.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import { AuthenticationService } from '../services/authentication.js';
 import { MetaService } from '../services/meta.js';
 import { TFAService } from '../services/tfa.js';
@@ -183,7 +183,7 @@ router.patch(
 		await service.updateOne(
 			req.accountability.user,
 			{ last_page: req.body.last_page },
-			{ autoPurgeCache: scopedCachePurgeEnabled(), purgeCollectionTag: false },
+			{ autoPurgeCache: scopedCachePurgeEnabled(), purgeBareFingerprint: false },
 		);
 
 		return next();

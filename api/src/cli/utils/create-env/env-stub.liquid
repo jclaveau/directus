@@ -188,10 +188,31 @@ CACHE_ENABLED=false
 
 # How many keys one collection may be pinned by on a single scoped read. Over it
 # the read falls back to that collection's declared scope slices, then to its bare
-# tag — more purging, never staler. Each pin costs a Redis set and a member of the
-# collection's slice index, so raise it for hit ratio and lower it for memory. [250]
+# pin — more purging, never staler. Each pin costs a Redis set and a member of the
+# collection's fingerprint index, so raise it for hit ratio and lower it for
+# memory. [250]
 # CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
+
+# How many ways to satisfy one filter are carried apart before they are carried
+# side by side instead. A filter ANDing two `_in`s of ten values each has a
+# hundred pairings, and an entry filed under a hundred index members costs a
+# hundred writes to file and a hundred compares to purge. Over it the read is
+# pinned to each value on its own — wider purges, never staler. [16]
+# CACHE_SCOPED_MAX_QUERY_CASES=16
+
+# How often a purge that failed with Redis still reachable (OOM under noeviction,
+# a LOADING replica) is retried from its recorded row; a reconnect retries it
+# too. 0 leaves the reconnect as the only retry. [1m]
 # CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
+
+# How long a collection's purge counter is held. A read takes it before its query
+# and again after the fill, and a purge recreating an expired counter starts it
+# at Redis's clock, never at a value it held — so this only has to outlive the
+# slowest read, and shorter means a collection nobody writes to stops costing a
+# key sooner. 0 or less is read as the default: a counter expired as it is
+# bumped guards nothing. Anything below 5m is raised to 5m, so a counter never
+# expires under a read still between its two readings. [24h]
+# CACHE_SCOPED_EPOCH_TTL=24h
 
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,

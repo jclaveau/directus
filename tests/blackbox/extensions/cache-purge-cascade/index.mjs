@@ -3,11 +3,12 @@
 // aggregates charges. The framework purges the charge's own slice, but nothing
 // reaches the invoice. This delete hook resolves the owner of the charge being
 // deleted (read before the delete commits), looks up that owner's invoice slice, and
-// passes the lookup's returned scopedCacheTags to `context.scopedCache.purgeBy`.
+// passes that lookup's own `scopedCacheFingerprints` to
+// `context.scopedCache.purgeBy`.
 //
 // Resolving the owner from the deleted keys (not a hardcoded value) keeps the purge
 // precise: deleting one owner's charge leaves another's invoice warm. Reuses the
-// lookup's tags rather than build one, so the declared purge can't drift.
+// lookup's fingerprints rather than build one, so the declared purge can't drift.
 
 const CHARGE = 'test_items_charge';
 const INVOICE = 'test_items_invoice';
@@ -41,7 +42,9 @@ export default function registerHooks({ filter }, { services }) {
 			{ emitEvents: false },
 		);
 
-		context.scopedCache?.purgeBy(affected.getMeta?.()?.scopedCacheTags ?? []);
+		context.scopedCache?.purgeBy(
+			affected.getMeta?.()?.scopedCacheFingerprints ?? [],
+		);
 
 		return keys;
 	});

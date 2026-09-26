@@ -6,7 +6,8 @@ import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Isolate from the real cache module (redis/bus) and force scoped mode on, so readByQuery runs its
-// tag-accumulation branch. runAst is the only DB-touching call in the read path; stub it out.
+// pin-accumulation branch. runAst is the only DB-touching call in the read path;
+// stub it out.
 vi.mock('../cache.js', () => ({
 	getCache: () => ({ cache: null }),
 }));
@@ -29,9 +30,9 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 
 vi.mock('../database/run-ast/run-ast.js', () => ({ runAst: vi.fn(async () => []) }));
 
-vi.mock('../scoped-cache/tags.js', async (importOriginal) => {
+vi.mock('../scoped-cache/pins.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache/tags.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/pins.js')>()),
 		scopedCacheMaxPinsPerCollection: vi.fn(() => 250),
 	};
 });
@@ -45,12 +46,12 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 });
 
 import {
+	scopedCachePinKeys,
 	scopedCachePurgeEnabled,
-	serializeScopedCacheTags,
-} from '../scoped-cache.js';
+} from '../scoped-cache/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
-import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/tags.js';
+import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/pins.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 
@@ -68,7 +69,7 @@ const schema = new SchemaBuilder()
 
 const db = knex({ client: MockClient });
 
-describe('readByQuery scoped cache tag accumulation', () => {
+describe('readByQuery scoped cache fingerprint accumulation', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
@@ -80,7 +81,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(result)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -90,8 +93,34 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const result = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(result)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles']);
+	});
+
+	test('files no view for a read whose view is every field', async () => {
+		const service = new ItemsService('articles', {
+			knex: db,
+			schema,
+			accountability: null,
+		});
+
+		const everyField = await service.readByQuery(
+			{ fields: ['*'] },
+			{ emitEvents: false },
+		);
+
+		const someFields = await service.readByQuery(
+			{ fields: ['id', 'title'] },
+			{ emitEvents: false },
+		);
+
+		expect(readMeta(everyField)?.scopedCacheFingerprints)
+			.toEqual([{ collection: 'articles' }]);
+
+		expect(readMeta(someFields)?.scopedCacheFingerprints)
+			.toEqual([{ collection: 'articles', viewFields: ['id', 'title'] }]);
 	});
 
 	test('tags are bounded per read — they do not accumulate across reads on one instance', async () => {
@@ -100,13 +129,18 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const shallow = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
 		const deep = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		// Each result carries only its own query's tags — the earlier read is not polluted by the later.
+		// Each result carries only its own query's pins — the earlier read is not
+		// polluted by the later.
 		expect(
-			(readMeta(shallow)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(shallow)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles']);
 
 		expect(
-			(readMeta(deep)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(deep)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -117,7 +151,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const one = await service.readOne(1, { fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(one)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(one)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -128,7 +164,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const record = await service.readSingleton({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(record)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(record)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 
@@ -139,7 +177,9 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const defaults = await service.readSingleton({ fields: ['*'] }, { emitEvents: false });
 
 		expect(
-			(readMeta(defaults)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(defaults)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles']);
 	});
 
@@ -149,7 +189,7 @@ describe('readByQuery scoped cache tag accumulation', () => {
 
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(readMeta(result)?.scopedCacheTags.length).toBe(0);
+		expect(readMeta(result)?.scopedCacheFingerprints.length).toBe(0);
 	});
 });
 
@@ -174,7 +214,10 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await service.scopedCache.snapshot([1])).toEqual([]);
+		expect(await service.scopedCache.snapshot([1])).toEqual({
+			canResolveSlicesFromRows: true,
+			rows: [],
+		});
 	});
 
 	test('resolves the key slice on a collection it does know', async () => {
@@ -184,15 +227,25 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await service.scopedCache.snapshot([1])).toEqual([
-			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
-		]);
+		expect(await service.scopedCache.snapshot([1])).toEqual({
+			canResolveSlicesFromRows: true,
+			rows: [
+				{
+					key: 1,
+					row: null,
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['1'] },
+					},
+				},
+			],
+		});
 	});
 });
 
-// The tags a read carries once the row-dependent pins and the AST-only plan meet.
+// The pins a read carries once the row-dependent pins and the AST-only plan meet.
 // Each case feeds the rows runAst would return — the pinners read parent keys off
-// them — and asserts the serialized tag list, so a pin, a slice and a bare tag are
+// them — and asserts the serialized pin list, so a pin, a slice and a bare pin are
 // told apart by the exact string a purge matches against.
 describe('read tags at the merge', () => {
 	// Cloned: the ownership strip collapses the fed rows in place, and a fixture
@@ -211,9 +264,9 @@ describe('read tags at the merge', () => {
 	): Promise<string[]> => {
 		const result = await service.readByQuery(query, { emitEvents: false });
 
-		return serializeScopedCacheTags(readMeta(result)?.scopedCacheTags ?? [])
-			.split(', ')
-			.sort();
+		return scopedCachePinKeys(
+			readMeta(result)?.scopedCacheFingerprints ?? [],
+		).sort();
 	};
 
 	beforeEach(() => {
@@ -839,7 +892,7 @@ describe('read tags at the merge', () => {
 
 		// Off any request but the date's: `validateFilter` rejects the empty
 		// list, and `parseFilter` lists the value, splits the columns into `_and`
-		// and wraps the leaf in `_eq` before any tag is derived — only a filter
+		// and wraps the leaf in `_eq` before any pin is derived — only a filter
 		// handed straight to the service carries those shapes.
 		test.each([
 			['an empty list', { name: { _in: [] } }],

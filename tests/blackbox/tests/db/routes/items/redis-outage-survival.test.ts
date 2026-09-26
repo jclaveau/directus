@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // the story honest. A node-redis client rethrows what nobody listens to and Node
 // turns an unhandled rejection into an uncaught exception, so those two really did
 // end the process — and a dead server answers ECONNRESET, which names nothing, so
-// the instance's own log is captured and reported here instead. An ioredis client
+// the instance's own log is snapshotted and reported here instead. An ioredis client
 // does not: it `console.error`s every failed reconnect to stderr, which is why what
 // is asserted below is the shape of the log and not only that something is alive.
 //

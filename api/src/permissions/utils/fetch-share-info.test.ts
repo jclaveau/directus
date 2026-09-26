@@ -40,7 +40,7 @@ describe('fetchShareInfo', () => {
 
 		const readOne = vi
 			.spyOn(ItemsService.prototype, 'readOne')
-			.mockResolvedValue(withMeta(share, { scopedCacheTags: [] }));
+			.mockResolvedValue(withMeta(share, { scopedCacheFingerprints: [] }));
 
 		const info = await _fetchShareInfo('share-1', { knex: db, schema });
 

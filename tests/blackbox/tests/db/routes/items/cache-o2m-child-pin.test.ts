@@ -365,12 +365,48 @@ describe(oneLine`
 			expect(warm.headers[cacheTagsHeader])
 				.not.toMatch(new RegExp(`(^|, )${CHILD}:parent=`));
 
-			// Bare means a child of ANY parent evicts it, including the sibling's.
+			// Bare means a child of ANY parent evicts it, including the sibling's —
+			// through the fk it hangs off, which is what decides whether the read
+			// holds that row at all. Its body is a column the read never shows.
 			expect((await readMainless()).headers[cacheStatusHeader]).toBe('HIT');
 
-			await updateChild(siblingChildId, 'sibling touched for mainless root');
+			await request(getUrl(vendor, env))
+				.patch(`/items/${CHILD}/${siblingChildId}`)
+				.send({ parent: ownedParentId })
+				.set('Authorization', auth);
 
 			expect((await readMainless()).headers[cacheStatusHeader]).toBe('MISS');
+
+			const restored = await request(getUrl(vendor, env))
+				.patch(`/items/${CHILD}/${siblingChildId}`)
+				.send({ parent: siblingParentId })
+				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
+
+			// The move above named the owned parent too; a child created under the
+			// sibling alone names no parent a pinned read could hold, so only a bare
+			// read is purged by it. The answer cannot move: no row reaches a parent.
+			expect((await readMainless()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readMainless()).headers[cacheStatusHeader]).toBe('HIT');
+
+			const created = await request(getUrl(vendor, env))
+				.post(`/items/${CHILD}`)
+				.send({ body: 'another sibling child', parent: siblingParentId })
+				.set('Authorization', auth);
+
+			expect(created.statusCode).toBe(200);
+
+			const purgedRead = await readMainless();
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toEqual([{ id: mainlessRootId, main: null }]);
+
+			const deleted = await request(getUrl(vendor, env))
+				.delete(`/items/${CHILD}/${created.body.data.id}`)
+				.set('Authorization', auth);
+
+			expect(deleted.statusCode).toBe(204);
 		});
 
 		it(oneLine`
@@ -404,14 +440,49 @@ describe(oneLine`
 
 			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('HIT');
 
-			// Bare: this child is under only ONE of the two aliases, and a write to it
-			// evicts all the same.
+			// Bare: this child is under only ONE of the two aliases, and a write to the
+			// fk of the OTHER evicts all the same.
 			await request(getUrl(vendor, env))
 				.patch(`/items/${CONFLICT_CHILD}/${conflictChildId}`)
-				.send({ body: 'touched under one alias' })
+				.send({ alt_parent: conflictParentId })
 				.set('Authorization', auth);
 
 			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('MISS');
+
+			const restored = await request(getUrl(vendor, env))
+				.patch(`/items/${CONFLICT_CHILD}/${conflictChildId}`)
+				.send({ alt_parent: null })
+				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
+
+			// The move above named the read's parent; a child created under no
+			// parent names none, so only a bare read is purged by it.
+			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('HIT');
+
+			const created = await request(getUrl(vendor, env))
+				.post(`/items/${CONFLICT_CHILD}`)
+				.send({ body: 'reached by neither alias' })
+				.set('Authorization', auth);
+
+			expect(created.statusCode).toBe(200);
+
+			const purgedRead = await readBothAliases();
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(purgedRead.body.data).toEqual([{
+				id: conflictParentId,
+				children: [{ id: conflictChildId }],
+				alt_children: [],
+			}]);
+
+			const deleted = await request(getUrl(vendor, env))
+				.delete(`/items/${CONFLICT_CHILD}/${created.body.data.id}`)
+				.set('Authorization', auth);
+
+			expect(deleted.statusCode).toBe(204);
 		});
 	});
 });

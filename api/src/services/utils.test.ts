@@ -64,7 +64,7 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { countScopedCachePinMembers } from '../scoped-cache/index.js';
 import { compress } from '../utils/compress.js';
 import { SettingsService } from './settings.js';
 import { UtilsService } from './utils.js';
@@ -80,7 +80,7 @@ vi.mock('../cache.js');
 vi.mock('../cache-audit-runs.js');
 vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
-vi.mock('../scoped-cache.js');
+vi.mock('../scoped-cache/index.js');
 vi.mock('../utils/compress.js');
 vi.mock('../processes/autoscale/lib/drill.js');
 vi.mock('../processes/autoscale/lib/reload.js');
@@ -321,14 +321,14 @@ describe('Services / Utils', () => {
 			await adminService().getCacheAudit(7, {
 				limit: '10',
 				offset: '30',
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 				window: '7d',
 			});
 
 			expect(readCacheAuditFindings).toHaveBeenCalledWith(7, {
 				limit: 10,
 				offset: 30,
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 			});
 
 			for (const bad of [
@@ -631,7 +631,7 @@ describe('Services / Utils', () => {
 			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
 		});
 
-		it('readCacheEntry returns value + tags + sizes + tombstone', async () => {
+		it('readCacheEntry returns value + pins + sizes + tombstone', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
 
 			vi.mocked(getCacheValue).mockImplementation((_cache, key) => {
@@ -643,8 +643,8 @@ describe('Services / Utils', () => {
 					return Promise.resolve({ exp: 5, createdAt: 1, ttlMs: 1000 });
 				}
 
-				if (key === 'k1__tags') {
-					return Promise.resolve({ tags: ['articles', 'articles:id=5'] });
+				if (key === 'k1__pins') {
+					return Promise.resolve({ pins: ['articles', 'articles:id=5'] });
 				}
 
 				return Promise.resolve(undefined);
@@ -664,12 +664,12 @@ describe('Services / Utils', () => {
 					time: 400,
 					mode: 'slices',
 					collection: 'articles',
-					scopedCacheTag: 'articles:id=5',
+					scopedCachePin: 'articles:id=5',
 					evicted: 2,
 				},
 			]);
 
-			vi.mocked(countScopedCacheTagMembers).mockResolvedValue({
+			vi.mocked(countScopedCachePinMembers).mockResolvedValue({
 				'articles': 3,
 				'articles:id=5': 7,
 			});
@@ -677,8 +677,8 @@ describe('Services / Utils', () => {
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: true,
 				value: { data: [1, 2] },
-				tags: ['articles', 'articles:id=5'],
-				tagCounts: { 'articles': 3, 'articles:id=5': 7 },
+				pins: ['articles', 'articles:id=5'],
+				pinCounts: { 'articles': 3, 'articles:id=5': 7 },
 				expiry: { exp: 5, createdAt: 1, ttlMs: 1000 },
 				// '{"data":[1,2]}' = 14 bytes raw; the mocked compress = 3.
 				sizes: { uncompressed: 14, compressed: 3 },
@@ -692,7 +692,7 @@ describe('Services / Utils', () => {
 						time: 400,
 						mode: 'slices',
 						collection: 'articles',
-						scopedCacheTag: 'articles:id=5',
+						scopedCachePin: 'articles:id=5',
 						evicted: 2,
 					},
 				],
@@ -701,7 +701,7 @@ describe('Services / Utils', () => {
 			// Measured from the entry's own fill, not from a window.
 			expect(listPurgesCoveringEntry).toHaveBeenCalledWith('h1', new Date(1));
 
-			expect(countScopedCacheTagMembers).toHaveBeenCalledWith([
+			expect(countScopedCachePinMembers).toHaveBeenCalledWith([
 				'articles',
 				'articles:id=5',
 			]);
@@ -723,8 +723,8 @@ describe('Services / Utils', () => {
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,
@@ -763,8 +763,8 @@ describe('Services / Utils', () => {
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,

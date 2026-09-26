@@ -1,7 +1,7 @@
 export type CacheAuditVerdict =
 	| 'fresh'
 	| 'stale'
-	| 'tag_drift'
+	| 'pin_drift'
 	| 'raced'
 	| 'time_varying'
 	| 'expired'
@@ -51,8 +51,8 @@ export interface CacheAuditFinding {
 	collection: string | null;
 	filledAt: number;
 	ageMs: number;
-	tags: string[];
-	replayTags: string[] | null;
+	pins: string[];
+	replayPins: string[] | null;
 	diff: string[] | null;
 	purgesSinceFilled: CacheAuditPurge[] | null;
 }
@@ -96,7 +96,7 @@ export function runStatus(run: CacheAuditRun): CacheAuditRunStatus {
 		return 'failed';
 	}
 
-	return run.counts.stale > 0 || run.counts.tag_drift > 0
+	return run.counts.stale > 0 || run.counts.pin_drift > 0
 		? 'stale'
 		: 'clean';
 }
@@ -104,7 +104,7 @@ export function runStatus(run: CacheAuditRun): CacheAuditRunStatus {
 /** The verdicts a run row reports beside its status, non-fresh only. */
 export const REPORTED_VERDICTS: Exclude<CacheAuditVerdict, 'fresh'>[] = [
 	'stale',
-	'tag_drift',
+	'pin_drift',
 	'raced',
 	'time_varying',
 	'expired',
@@ -167,21 +167,21 @@ export function findingVerdict(finding: CacheAuditFinding): string {
 }
 
 /**
- * The tags a replay pinned that the fill did not, and the other way round —
- * the two halves a tag drift is made of.
+ * The pins a replay pinned that the fill did not, and the other way round —
+ * the two halves a pin drift is made of.
  */
-export function tagDrift(
+export function pinDrift(
 	finding: CacheAuditFinding,
 ): { added: string[]; dropped: string[] } | null {
-	if (finding.replayTags === null) {
+	if (finding.replayPins === null) {
 		return null;
 	}
 
-	const filled = new Set(finding.tags);
-	const replayed = new Set(finding.replayTags);
+	const filled = new Set(finding.pins);
+	const replayed = new Set(finding.replayPins);
 
 	return {
-		added: finding.replayTags.filter((tag) => !filled.has(tag)),
-		dropped: finding.tags.filter((tag) => !replayed.has(tag)),
+		added: finding.replayPins.filter((pin) => !filled.has(pin)),
+		dropped: finding.pins.filter((pin) => !replayed.has(pin)),
 	};
 }

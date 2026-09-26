@@ -17,11 +17,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //   - a pure veto (declares nothing) purges NOTHING and leaves the row unchanged /
 //     undeleted — a cancel changed nothing, so the slice stays warm.
 //   - a veto that declares its slice via `purgeBy` purges precisely — pinning the
-//     parity fix that drains the collector on the update/delete cancel path (before
-//     the fix these early-returned and dropped the declaration).
+//     parity fix that drains the declarations on the update/delete cancel path
+//     (before the fix these early-returned and dropped the declaration).
+//     The declared slice reaches the collection's bare entries too, so the global
+//     read goes with it; a sibling slice stays warm.
 //   - a pure veto's GLOBAL (unscoped) read stays warm too: the cancel changed
 //     nothing, so not even the bare collection tag is purged (a pure cancel must
-//     not drain the collector, else every rejected write flushes all global reads).
+//     not drain the declarations, else every rejected write flushes all global
+//     reads).
 
 const EDITABLE = 'test_items_editable';
 const REMOVABLE = 'test_items_removable';
@@ -73,7 +76,7 @@ describe(oneLine`
 				],
 			});
 
-			// Independent seeds → one round-trip. Capture the PKs the hooks act on.
+			// Independent seeds → one round-trip. Snapshot the PKs the hooks act on.
 			const [editables, removables] = await Promise.all([
 				CreateItem(vendor, {
 					collection: EDITABLE,
@@ -163,7 +166,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an update veto that declares its slice via purgeBy purges precisely — the
-			declared space MISSes, a sibling AND the global read stay warm, still no write
+			declared space and the global read MISS, a sibling stays warm, still no write
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -191,9 +194,9 @@ describe(oneLine`
 
 			expect(a.headers[cacheStatusHeader]).toBe('MISS');
 			expect(b.headers[cacheStatusHeader]).toBe('HIT');
-			// Declaring cancel drops ONLY space 'a' — the bare tag (global read) stays
-			// warm, since the collection itself didn't change (#4).
-			expect(all.headers[cacheStatusHeader]).toBe('HIT');
+			// A declared value pin reaches the bare entries too: the global read holds
+			// space 'a' as much as the pinned read does.
+			expect(all.headers[cacheStatusHeader]).toBe('MISS');
 			expect(a.body.data[0].note).toBe('orig');
 		});
 
@@ -227,7 +230,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a delete veto that declares its slice via purgeBy purges precisely — the
-			declared space MISSes, a sibling AND the global read stay warm, row survives
+			declared space and the global read MISS, a sibling stays warm, row survives
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -254,9 +257,9 @@ describe(oneLine`
 
 			expect(p.headers[cacheStatusHeader]).toBe('HIT');
 			expect(q.headers[cacheStatusHeader]).toBe('MISS');
-			// Declaring cancel drops ONLY space 'q' — the bare tag (global read) stays
-			// warm, since the collection itself didn't change (#4).
-			expect(all.headers[cacheStatusHeader]).toBe('HIT');
+			// A declared value pin reaches the bare entries too: the global read holds
+			// space 'q' as much as the pinned read does.
+			expect(all.headers[cacheStatusHeader]).toBe('MISS');
 			expect(q.body.data).toHaveLength(1);
 		});
 

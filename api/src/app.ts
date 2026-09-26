@@ -89,9 +89,9 @@ import retentionSchedule from './schedules/retention.js';
 import telemetrySchedule from './schedules/telemetry.js';
 import tusSchedule from './schedules/tus.js';
 import {
-	assertScopedCacheRedisSupported,
+	assertScopedCacheStoreSupported,
 	startScopedCachePurgeRecovery,
-} from './scoped-cache.js';
+} from './scoped-cache/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
@@ -137,7 +137,7 @@ export default async function createApp(): Promise<express.Application> {
 	await validateDatabaseExtensions();
 	await validateStorage();
 
-	assertScopedCacheRedisSupported();
+	assertScopedCacheStoreSupported();
 
 	await registerAuthProviders();
 

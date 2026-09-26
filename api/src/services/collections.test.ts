@@ -132,7 +132,7 @@ describe('Services / Collections', () => {
 		it('merges the system collections into the meta rows', async () => {
 			const readByQuery = vi
 				.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			const service = new CollectionsService({ knex: db, schema });
 			const collections = await service.readByQuery();

@@ -4,6 +4,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
+import { renderScopedCacheFingerprint } from '../../scoped-cache/index.js';
 import { GraphQLExecutionError } from './errors/index.js';
 
 // Keep graphql's rule set / error classes real; stub the heavy validate + execute so we can drive
@@ -55,35 +56,43 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }],
-				});
+				return withMeta(
+					[{ id: 1 }],
+					{
+						scopedCacheFingerprints: [
+							{ collection: 'articles' },
+							{ collection: 'users' },
+						],
+					},
+				);
 			},
 		} as any);
 
 		await gql.read('articles', {});
 
-		expect(gql.scopedCacheTags.map((tag) => tag.collection).sort()).toEqual([
-			'articles',
-			'users',
-		]);
+		expect(
+			gql.scopedCacheFingerprints.map(renderScopedCacheFingerprint).sort(),
+		).toEqual(['articles:&', 'users:&']);
 
 		// a second read on another collection adds to the same per-request union
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'directus_files' }],
-				});
+				return withMeta(
+					[{ id: 2 }],
+					{
+						scopedCacheFingerprints: [{
+							collection: 'directus_files',
+						}],
+					},
+				);
 			},
 		} as any);
 
 		await gql.read('files', {});
 
-		expect(gql.scopedCacheTags.map((tag) => tag.collection).sort()).toEqual([
-			'articles',
-			'directus_files',
-			'users',
-		]);
+		expect(
+			gql.scopedCacheFingerprints.map(renderScopedCacheFingerprint).sort(),
+		).toEqual(['articles:&', 'directus_files:&', 'users:&']);
 	});
 
 	test(oneLine`
@@ -95,7 +104,9 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
 					scopedCacheEpochs: { articles: '7', users: '3', '*': '1' },
 				});
 			},
@@ -109,7 +120,9 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
 					scopedCacheEpochs: { articles: '8', files: null, '*': '2' },
 				});
 			},
@@ -127,16 +140,18 @@ describe('GraphQLService scoped cache tags', () => {
 
 	test(oneLine`
 		keeps the earliest counter even when it ARRIVES second — graphql-js resolves
-		root fields in parallel, so the first result back is not the first capture
+		root fields in parallel, so the first result back is not the first snapshot
 	`, async () => {
 		const gql = makeService({ collections: { articles: { singleton: false } } });
 
-		// The later capture resolves first. Keeping it would compare equal at fill
+		// The later snapshot resolves first. Keeping it would compare equal at fill
 		// time and cache a response the purge between the two already invalidated.
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
 					scopedCacheEpochs: { articles: '9', '*': '4' },
 				});
 			},
@@ -147,7 +162,9 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
 					scopedCacheEpochs: { articles: '2', '*': '4' },
 				});
 			},
@@ -167,7 +184,9 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
 					scopedCacheEpochs: { articles: '3' },
 				});
 			},
@@ -178,7 +197,9 @@ describe('GraphQLService scoped cache tags', () => {
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
 				return withMeta([{ id: 2 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
 					scopedCacheEpochs: { articles: null },
 				});
 			},
@@ -197,15 +218,60 @@ describe('GraphQLService scoped cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () => {
-				return withMeta([{ id: 1 }], {
-					scopedCacheTags: [{ collection: 'articles' }],
-				});
+				return withMeta(
+					[{ id: 1 }],
+					{
+						scopedCacheFingerprints: [{
+							collection: 'articles',
+						}],
+					},
+				);
 			},
 		} as any);
 
 		await gql.read('articles', {});
 
 		expect(gql.scopedCacheEpochs).toEqual({});
+	});
+
+	test(oneLine`
+		execute() files nothing once a root read carried no meta — the other roots'
+		fingerprints alone would let a write to what that root read miss the entry
+	`, async () => {
+		const gql = makeService({
+			collections: {
+				articles: { singleton: false },
+				files: { singleton: false },
+			},
+		});
+
+		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
+					scopedCacheFingerprints: [{ collection: 'articles' }],
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => [{ id: 2 }],
+		} as any);
+
+		await gql.read('files', {});
+
+		const result = await gql.execute({
+			query: '',
+			document: {} as any,
+			variables: {},
+			operationName: null,
+			contextValue: {},
+		});
+
+		expect(readMeta(result)?.scopedCacheFingerprints).toEqual([]);
 	});
 
 	test(oneLine`
@@ -236,7 +302,10 @@ describe('GraphQLService scoped cache tags', () => {
 		const gql = makeService({});
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 
-		gql.scopedCacheTags.push({ collection: 'articles' }, { collection: 'users' });
+		gql.scopedCacheFingerprints.push(
+			{ collection: 'articles' },
+			{ collection: 'users' },
+		);
 
 		const result = await gql.execute({
 			query: '',
@@ -249,7 +318,9 @@ describe('GraphQLService scoped cache tags', () => {
 		expect(result.data).toEqual({ ok: true });
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+			(readMeta(result)?.scopedCacheFingerprints ?? [])
+				.map((fingerprint) => fingerprint.collection)
+				.sort(),
 		).toEqual(['articles', 'users']);
 	});
 

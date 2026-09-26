@@ -108,21 +108,6 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: TAG });
 		});
 
-		// Filters the root by its tag's scoped `label` value.
-		function readRootsByTagLabel() {
-			return request(getUrl(vendor, env))
-				.get(`/items/${ROOT}`)
-				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
-				.set('Authorization', auth);
-		}
-
-		function updateTagBody(id: number, body: string) {
-			return request(getUrl(vendor, env))
-				.patch(`/items/${TAG}/${id}`)
-				.send({ body })
-				.set('Authorization', auth);
-		}
-
 		function clearCache() {
 			return request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -130,7 +115,10 @@ describe(oneLine`
 		}
 
 		it('pins the tag by its scoped label value, not by pk, never bare', async () => {
-			const tags = (await readRootsByTagLabel()).headers[cacheTagsHeader];
+			const tags = (await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheTagsHeader];
 
 			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
 			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
@@ -140,39 +128,100 @@ describe(oneLine`
 		it('a write to a tag with another label keeps the read cached', async () => {
 			await clearCache();
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
 
-			await updateTagBody(betaTagId, 'beta touched');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${betaTagId}`)
+				.send({ body: 'beta touched' })
+				.set('Authorization', auth);
+
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 		});
 
-		it('a write to a tag with the filtered label evicts the read', async () => {
+		it('a tag leaving the filtered label evicts the read', async () => {
 			await clearCache();
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
 
-			await updateTagBody(alphaTagId, 'alpha touched');
+			const cachedRead = await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth);
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
+			expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+			expect(cachedRead.body.data).toMatchObject([{ name: 'r-alpha' }]);
+
+			// The label, not the body: the read shows no tag column, so only a write
+			// moving a tag across the slice the filter named changes its response.
+			const moved = await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ label: 'alpha moved' })
+				.set('Authorization', auth);
+
+			expect(moved.statusCode).toBe(200);
+
+			const purgedRead = await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth);
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toEqual([]);
+
+			// Back in the slice the tests below read.
+			const restored = await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ label: 'alpha' })
+				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
 		});
 
 		it('inserting a tag with the filtered label evicts the read', async () => {
 			await clearCache();
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('MISS');
+
+			expect((await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth)).headers[cacheStatusHeader]).toBe('HIT');
 
 			// A pk filter cannot be matched by an insert; a scoped-field one can, and the
 			// create emits `sf_tag:label=alpha`, so the pin must catch it.
-			await request(getUrl(vendor, env))
+			const created = await request(getUrl(vendor, env))
 				.post(`/items/${TAG}`)
 				.send({ label: 'alpha', kind: 'k1', body: 'a2' })
 				.set('Authorization', auth);
 
-			expect((await readRootsByTagLabel()).headers[cacheStatusHeader]).toBe('MISS');
+			expect(created.statusCode).toBe(200);
+
+			// No root row names the new tag, so the answer the refill reads is the
+			// cached one: only the status can tell the purge.
+			const purgedRead = await request(getUrl(vendor, env))
+				.get(`/items/${ROOT}`)
+				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
+				.set('Authorization', auth);
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toMatchObject([{ name: 'r-alpha' }]);
 		});
 
 		it('slices each value of an _in filter on the scoped field', async () => {
@@ -222,11 +271,32 @@ describe(oneLine`
 
 			await clearCache();
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
-			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('HIT');
 
-			await updateTagBody(alphaTagId, 'alpha conflict touched');
+			const cachedRead = await readByTwoFields();
 
-			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');
+			expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+			expect(cachedRead.body.data).toMatchObject([{ name: 'r-alpha' }]);
+
+			// Either scoped field the filter named bounds this read, so a write moving
+			// the tag along one of them evicts it.
+			const moved = await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ kind: 'k2' })
+				.set('Authorization', auth);
+
+			expect(moved.statusCode).toBe(200);
+
+			const purgedRead = await readByTwoFields();
+
+			expect(purgedRead.headers[cacheStatusHeader]).toBe('MISS');
+			expect(purgedRead.body.data).toEqual([]);
+
+			const restored = await request(getUrl(vendor, env))
+				.patch(`/items/${TAG}/${alphaTagId}`)
+				.send({ kind: 'k1' })
+				.set('Authorization', auth);
+
+			expect(restored.statusCode).toBe(200);
 		});
 	});
 });

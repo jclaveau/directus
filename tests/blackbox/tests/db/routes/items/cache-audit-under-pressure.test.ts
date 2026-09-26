@@ -20,7 +20,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // starts, and every replay of STALL stalls the loop again — the
 // `cache-audit-stall` hook blocks it for 300ms per read once its flag is
 // armed, three times the limiter's ceiling — and the run has to come back
-// fresh all the same, while the limiter sheds anyone else throughout.
+// fresh all the same, while the limiter sheds anyone else throughout: a
+// ping polled while the run is in flight is shed at least once.
 //
 // The limiter is put under pressure with the marker itself: a page of marked
 // reads of STALL, each a stall the limiter cannot shed, and none a fill (a
@@ -30,7 +31,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // a whole window inside the block, whatever the sampling clock.
 //
 // Every count is read off the run's own answer: the history is a plain request
-// too, and after the run the limiter sheds it with everyone else.
+// too, shed with everyone else. After the run nothing is asserted of the
+// limiter: its flag is the mean of the last window, and the run's tail of idle
+// I/O turns it off or not depending on where the sampling clock falls.
 
 const STALL = 'test_cache_audit_stall';
 const STALL_FLAG = 'test_cache_audit_stall_flag';
@@ -190,7 +193,22 @@ describe('The cache audit replays through the pressure limiter', () => {
 			// The trigger is a plain request too, shed like any other: it goes
 			// in marked, as the audit's own.
 			const startedAt = Date.now();
-			const run = await audit().set(replayHeader, marker);
+			let runFinished = false;
+
+			const running = audit()
+				.set(replayHeader, marker)
+				.then((response) => {
+					runFinished = true;
+					return response;
+				});
+
+			const pingAnswers: request.Response[] = [];
+
+			while (!runFinished) {
+				pingAnswers.push(await ping());
+			}
+
+			const run = await running;
 
 			expect(run.statusCode).toBe(200);
 
@@ -202,12 +220,17 @@ describe('The cache audit replays through the pressure limiter', () => {
 			// The stalls happened: the run took at least all of them, end to end.
 			expect(Date.now() - startedAt).toBeGreaterThanOrEqual(ENTRIES * STALL_MS);
 
-			// And the limiter is still shedding: the run's own stalls kept every
-			// window it sampled inside a block.
-			const after = await ping();
-
-			expect(after.statusCode).toBe(503);
-			expect(after.body.errors[0].extensions.reason).toBe('Under pressure');
+			// And the limiter shed everyone else while the replays went through.
+			expect(pingAnswers).toContainEqual(expect.objectContaining({
+				statusCode: 503,
+				body: {
+					errors: [
+						expect.objectContaining({
+							extensions: expect.objectContaining({ reason: 'Under pressure' }),
+						}),
+					],
+				},
+			}));
 		}, 60_000);
 	});
 });

@@ -99,7 +99,7 @@ describe('Services / Fields', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 
@@ -108,7 +108,7 @@ describe('Services / Fields', () => {
 			const service = new FieldsService({ knex: db, schema });
 			const result = await service.readAll();
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
 				{ collection: 'directus_fields' },
 			]);
 		});
@@ -116,7 +116,7 @@ describe('Services / Fields', () => {
 		it('reads only the field rows of the given collection', async () => {
 			const readByQuery = vi
 				.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 

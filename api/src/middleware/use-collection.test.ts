@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => {
 	return { readScopedCacheEpochs: vi.fn() };
 });
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { readScopedCacheEpochs: mocks.readScopedCacheEpochs };
 });
 
@@ -28,23 +28,23 @@ beforeEach(() => {
 
 describe('useCollection', () => {
 	test(oneLine`
-		sets the collection and, on a GET, captures its purge counter first
+		sets the collection and, on a GET, reads its purge counter first
 	`, async () => {
 		const { req, res, next } = await run('GET');
 
 		expect(req.collection).toBe('directus_users');
 		expect(mocks.readScopedCacheEpochs).toHaveBeenCalledWith(['directus_users']);
 
-		expect(res.locals['scopedCacheEpochsAtRequest'])
+		expect(res.locals['scopedCacheEpochsBeforeQuery'])
 			.toEqual({ directus_users: '3', '*': '1' });
 
 		expect(next).toHaveBeenCalled();
 	});
 
-	test('captures nothing on a mutation, which fills no cache', async () => {
+	test('reads nothing on a mutation, which fills no cache', async () => {
 		const { res } = await run('PATCH');
 
 		expect(mocks.readScopedCacheEpochs).not.toHaveBeenCalled();
-		expect(res.locals['scopedCacheEpochsAtRequest']).toBeUndefined();
+		expect(res.locals['scopedCacheEpochsBeforeQuery']).toBeUndefined();
 	});
 });

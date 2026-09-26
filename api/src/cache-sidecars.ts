@@ -11,21 +11,21 @@
  */
 
 const EXPIRES_AT_SUFFIX = '__expires_at';
-const TAGS_SUFFIX = '__tags';
+const PINS_SUFFIX = '__pins';
 
 /** Where a HIT reads an entry's age, TTL and expiry from. */
 export function cacheExpiresAtKey(redisKey: string): string {
 	return `${redisKey}${EXPIRES_AT_SUFFIX}`;
 }
 
-/** The dev-only sibling holding an entry's scoped-cache tags. */
-export function cacheTagsKey(redisKey: string): string {
-	return `${redisKey}${TAGS_SUFFIX}`;
+/** The dev-only sibling holding an entry's scoped-cache pins. */
+export function cachePinsKey(redisKey: string): string {
+	return `${redisKey}${PINS_SUFFIX}`;
 }
 
 /** The entry a sidecar belongs to, or null when the key is not one. */
 export function cacheSidecarOwner(member: string): string | null {
-	const suffix = [EXPIRES_AT_SUFFIX, TAGS_SUFFIX]
+	const suffix = [EXPIRES_AT_SUFFIX, PINS_SUFFIX]
 		.find((candidate) => member.endsWith(candidate));
 
 	return suffix === undefined
@@ -34,18 +34,18 @@ export function cacheSidecarOwner(member: string): string | null {
 }
 
 /**
- * The labels the tags sidecar holds, or null when it holds anything else — an
+ * The labels the `__pins` sidecar holds, or null when it holds anything else — an
  * entry written before the sidecar listed them, or a store answering garbage —
  * so nothing flattens into a garbled header or listing.
  */
-export function storedScopedCacheTagLabels(stored: unknown): string[] | null {
-	const tags = (stored as { tags?: unknown } | undefined)?.tags;
+export function storedScopedCachePinLabels(stored: unknown): string[] | null {
+	const pins = (stored as { pins?: unknown } | undefined)?.pins;
 
-	if (!Array.isArray(tags) || tags.length === 0) {
+	if (!Array.isArray(pins) || pins.length === 0) {
 		return null;
 	}
 
-	return tags.every((tag) => typeof tag === 'string')
-		? tags
+	return pins.every((pin) => typeof pin === 'string')
+		? pins
 		: null;
 }

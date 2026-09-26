@@ -1,74 +1,80 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Filter, Item, Query } from '@directus/types';
+import type {
+	Filter,
+	Item,
+	Query,
+	ScopedCacheDeclaredFingerprint,
+} from '@directus/types';
 import type {
 	A2MNode,
 	AST,
 	FunctionFieldNode,
 	M2ONode,
 	O2MNode,
-} from './types/ast.js';
+} from '../types/ast.js';
 import type {
 	CollectionKey,
 	FieldMap,
 	QueryPath,
-} from './permissions/modules/process-ast/types.js';
+} from '../permissions/modules/process-ast/types.js';
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	assertScopedCacheRedisSupported,
+	type ScopedCacheFilterKeying,
+	ScopedCacheReadPlan,
+	assertScopedCacheStoreSupported,
 	bumpScopedCacheEpochs,
-	canonicalScopedCacheValue,
-	countScopedCacheTagMembers,
+	canonicalizeScopedCachePinValue,
+	countScopedCachePinMembers,
+	createScopedCacheHookDeclarations,
+	dropScopedCacheIndex,
 	earlierScopedCacheEpoch,
+	flushResponseCache,
+	foldScopedCacheEpochsFromHookDeclarations,
+	indexScopedCacheEntry,
 	isPinnableScopeType,
-	readScopedCacheEpochs,
-	scopedCacheSweptDuringFill,
-	foldHandedOverScopedCacheEpochs,
 	mergeScopedCacheEpochs,
 	mergedScopedCacheEpochs,
-	scopedCacheCollectionsWithoutGuard,
-	scopedCacheTagLabel,
-	serializeScopedCacheTags,
-	createScopedCacheCollector,
-	pinnedScopedCacheTagsFromKeyedFilters,
-	scopedCacheOwnershipNestedPkPaths,
-	scopedCachePathReversesChain,
-	pinnedScopedCacheTagsFromM2oParents,
-	pinnedScopedCacheTagsFromO2mChildren,
-	resolveScopedCacheM2oJoinChainFromPath,
-	scopedCacheCollectionsBeyondNestedRows,
-	scopedCacheFilterKeyingByCollection,
-	scopedCacheMaxPinsPerCollection,
-	scopedCacheNestedCollections,
-	type ScopedCacheFilterKeying,
-	dropScopedCacheIndex,
-	flushResponseCache,
+	scopedCachePinsFromKeyedFilters,
+	scopedCachePinsFromM2oParents,
+	scopedCachePinsFromO2mChildren,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
+	readScopedCacheEpochs,
+	resolveScopedCacheM2oJoinChainFromPath,
 	retryPendingScopedCachePurges,
+	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
-	scopedCacheTagKey,
+	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFilterKeyingByCollection,
+	scopedCacheFingerprintOf,
+	scopedCacheMaxPinsPerCollection,
+	scopedCacheNestedCollections,
+	scopedCacheOwnershipNestedPkPaths,
+	scopedCachePathReversesChain,
+	scopedCacheSweptDuringFill,
+	scopedCachePinKeys,
+	scopedCachePinKey,
 	startScopedCachePurgeRecovery,
-	tagScopedCacheKeys,
-} from './scoped-cache.js';
-import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
-import { redisConfigAvailable, useRedis } from './redis/index.js';
-import emitter from './emitter.js';
-import { getCache } from './cache.js';
-import { useLogger } from './logger/index.js';
-import { withMeta } from './utils/read-meta.js';
+} from './index.js';
+import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
+import { redisConfigAvailable, useRedis } from '../redis/index.js';
+import emitter from '../emitter.js';
+import { getCache } from '../cache.js';
+import { useLogger } from '../logger/index.js';
+import { withMeta } from '../utils/read-meta.js';
 import {
 	queueCacheAnomaly,
 	queueCachePurge,
 	readCacheDescriptorForRedisKey,
-} from './cache-events.js';
+} from '../cache-events.js';
 import {
 	clearPendingScopedCachePurges,
 	countFailedScopedCachePurgeRetry,
 	listPendingScopedCachePurges,
 	recordPendingScopedCachePurge,
-} from './scoped-cache-pending-purges.js';
+} from '../scoped-cache-pending-purges.js';
 
 // hoisted: scoped-cache.ts reads `const env = useEnv()` at module load, before a
 // plain `const env` below would be initialised (temporal dead zone).
@@ -79,13 +85,14 @@ const env = vi.hoisted(() => {
 		CACHE_NAMESPACE: 'ns',
 		// `useEnv` merges defaults.ts, so the real one always carries this.
 		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+		CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	} as Record<string, any>;
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
-vi.mock('./redis/index.js');
+vi.mock('../redis/index.js');
 
-vi.mock('./emitter.js', () => {
+vi.mock('../emitter.js', () => {
 	return {
 		default: {
 			emitAction: vi.fn(),
@@ -94,10 +101,10 @@ vi.mock('./emitter.js', () => {
 	};
 });
 
-vi.mock('./logger/index.js', () => ({ useLogger: vi.fn() }));
-vi.mock('./cache.js', () => ({ getCache: vi.fn() }));
+vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
+vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
 
-vi.mock('./cache-events.js', () => {
+vi.mock('../cache-events.js', () => {
 	return {
 		queueCacheAnomaly: vi.fn(),
 		queueCachePurge: vi.fn(),
@@ -105,7 +112,7 @@ vi.mock('./cache-events.js', () => {
 	};
 });
 
-vi.mock('./scoped-cache-pending-purges.js', () => {
+vi.mock('../scoped-cache-pending-purges.js', () => {
 	return {
 		clearPendingScopedCachePurges: vi.fn(),
 		countFailedScopedCachePurgeRetry: vi.fn(),
@@ -119,7 +126,7 @@ const pipeline = {
 	exec: vi.fn(),
 };
 
-// A purge drops its tag keys through a pipeline of chunked UNLINKs, so every redis
+// A purge drops its pin keys through a pipeline of chunked UNLINKs, so every redis
 // stub a purge reaches has to answer `pipeline()` as well as the set commands.
 // Replies the way ioredis does — one `[error, reply]` per queued command, the reply
 // being what UNLINK removed — because the drop now counts what Redis reported
@@ -138,12 +145,7 @@ function unlinkPipeline() {
 		return queued.map(([keys]) => [null, keys.length]);
 	});
 
-	return {
-		incr: vi.fn().mockReturnThis(),
-		expire: vi.fn().mockReturnThis(),
-		unlink,
-		exec,
-	};
+	return { unlink, exec };
 }
 
 beforeEach(() => {
@@ -160,14 +162,14 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-// The one spelling of a tag that the entry index, the purge index and the dev
-// headers all share — if these two drift, a purge stops matching the entries it
+// The one spelling of a pin that the fingerprint index, the purge attribution and
+// the dev headers all share — if these drift, a purge stops matching the entries it
 // actually dropped and the attribution silently reads zero.
-describe('the tag display form', () => {
+describe('the legacy tag form', () => {
 	it('renders a bare collection and a pinned slice', () => {
-		expect(scopedCacheTagLabel({ collection: 'articles' })).toBe('articles');
+		expect(scopedCachePinKey({ collection: 'articles' })).toBe('articles');
 
-		expect(scopedCacheTagLabel({
+		expect(scopedCachePinKey({
 			collection: 'articles',
 			field: 'author',
 			value: 7,
@@ -176,7 +178,7 @@ describe('the tag display form', () => {
 
 	it('canonicalises the value the same way the Redis key does', () => {
 		// A filter's `true` and a driver's `1` must resolve one slice, not two.
-		expect(scopedCacheTagLabel({
+		expect(scopedCachePinKey({
 			collection: 'slots',
 			field: 'active',
 			value: 1,
@@ -185,10 +187,10 @@ describe('the tag display form', () => {
 	});
 
 	it('joins a set for the header form', () => {
-		expect(serializeScopedCacheTags([
-			{ collection: 'articles' },
-			{ collection: 'articles', field: 'author', value: 7 },
-		])).toBe('articles, articles:author=7');
+		expect(scopedCachePinKeys([
+			scopedCacheFingerprintOf('articles', []),
+			scopedCacheFingerprintOf('articles', [{ field: 'author', value: 7 }]),
+		]).join(', ')).toBe('articles, articles:author=7');
 	});
 
 	// MySQL/MariaDB (`utf8mb4_*_ci`) and MSSQL (`*_CI_AS`) compare strings
@@ -198,55 +200,58 @@ describe('the tag display form', () => {
 	// `uuid` branch already folds away. On a case-sensitive vendor the folding merges
 	// two slices into one instead: an over-purge, never a stale hit.
 	it('folds a string slice to one case, as a case-insensitive vendor does', () => {
-		expect(scopedCacheTagLabel({
+		expect(scopedCachePinKey({
 			collection: 'orgs',
 			field: 'tenant',
 			value: 'Acme',
 			type: 'string',
 		})).toBe('orgs:tenant=acme');
 
-		expect(canonicalScopedCacheValue('ACME', 'string'))
-		.toBe(canonicalScopedCacheValue('acme', 'string'));
+		expect(canonicalizeScopedCachePinValue('ACME', 'string'))
+		.toBe(canonicalizeScopedCachePinValue('acme', 'string'));
 
 		// `text` is the same column class one size up, and non-ASCII folds too.
-		expect(canonicalScopedCacheValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
+		expect(canonicalizeScopedCachePinValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
 	});
 
-	// countScopedCacheTagMembers rebuilds the Redis key from this string and the
-	// entry/purge tag rows join on it, so escaping it here would read zero instead.
-	it('keeps a null scope byte-identical to its Redis key', () => {
+	// countScopedCachePinMembers reads a fingerprint's token back against this
+	// string and the entry/purge pin rows join on it, so escaping the null byte
+	// here would count zero instead.
+	it('keeps a null scope on the null-byte sentinel', () => {
 		const nullSlice = {
 			collection: 'student_method_range',
 			field: 'method',
 			value: null,
 		};
 
-		expect(scopedCacheTagKey(nullSlice))
-		.toBe(`ns:scoped-cache-index:tag:${scopedCacheTagLabel(nullSlice)}`);
+		expect(scopedCachePinKey(nullSlice))
+		.toBe('student_method_range:method=\x00null');
 	});
 });
 
 // A header throws ERR_INVALID_CHAR on a control byte and a Postgres text column
-// rejects the NUL, so both exits render the tag through this one escaper.
+// rejects the NUL, so both exits render the pin through this one escaper.
 describe('the exit form', () => {
 	it('escapes the NULL token', () => {
-		expect(printableScopedCacheTags(serializeScopedCacheTags([
-			{ collection: 'student_method_range', field: 'method', value: null },
-		]))).toBe('student_method_range:method=%00null');
+		expect(printableScopedCachePin(scopedCachePinKeys([
+			scopedCacheFingerprintOf('student_method_range', [
+				{ field: 'method', value: null },
+			]),
+		]).join(', '))).toBe('student_method_range:method=%00null');
 	});
 
 	it('escapes any control byte a string scope value carries', () => {
-		expect(printableScopedCacheTags('articles:slug=a\u001Fb\u007F'))
+		expect(printableScopedCachePin('articles:slug=a\u001Fb\u007F'))
 		.toBe('articles:slug=a%1Fb%7F');
 	});
 
 	it('leaves a printable tag list untouched', () => {
-		expect(printableScopedCacheTags('articles, articles:author=7'))
+		expect(printableScopedCachePin('articles, articles:author=7'))
 		.toBe('articles, articles:author=7');
 	});
 });
 
-// The blackbox witness covers the rules end to end against a real database; these
+// The blackbox suite covers the rules end to end against a real database; these
 // are the shapes it cannot build — a cycle, a diamond, and a rule-less relation.
 describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	function cascadeRelation(collection: string, related: string) {
@@ -353,7 +358,7 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	});
 
 	// The rows it takes down are its own, and the caller named only the one key, so
-	// every other slice of it would stay warm on a tag purge built from that key.
+	// every other slice of it would stay warm on a pin purge built from that key.
 	it('reports itself on a self-referencing cascade, and terminates', () => {
 		const schema = { relations: [cascadeRelation('node', 'node')] } as any;
 
@@ -410,66 +415,119 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	});
 });
 
-describe('countScopedCacheTagMembers', () => {
-	it('scards each tag set and maps the reply to per-tag counts', async () => {
-		pipeline.exec.mockResolvedValue([
-			[null, 3],
-			[null, 7],
-		]);
+describe('countScopedCachePinMembers', () => {
+	// A legacy pin names a pin, not a set, so the count is read off the
+	// collection's fingerprint sets the way the purge answering it reads them.
+	let countedMembers: Record<string, string[]>;
 
-		const counts = await countScopedCacheTagMembers([
-			'articles',
-			'articles:id=5',
-		]);
+	beforeEach(() => {
+		countedMembers = {};
 
-		expect(pipeline.scard)
-			.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles');
+		vi.mocked(useRedis).mockReturnValue({
+			sscan: vi.fn(async (indexKey: string) => {
+				return ['0', countedMembers[indexKey] ?? []];
+			}),
+			scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
+				const scanned = pattern.slice(0, -1);
 
-		expect(pipeline.scard)
-			.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles:id=5');
-
-		expect(counts).toEqual({ 'articles': 3, 'articles:id=5': 7 });
+				return [
+					'0',
+					Object.keys(countedMembers).filter((indexKey) => {
+						return indexKey.startsWith(scanned);
+					}),
+				];
+			}),
+		} as any);
 	});
 
-	it('scards the raw key of a null scope slice', async () => {
-		pipeline.exec.mockResolvedValue([[null, 2]]);
+	it(oneLine`
+		counts the entries each legacy tag reaches: the bare one the reads no value
+		narrows, a pinned one those reads and the entries bound to that value
+	`, async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&|ns:entry-bare',
+				'articles:&id=,5,&|ns:entry-five',
+				'articles:&id=,9,&|ns:entry-nine',
+			],
+		};
 
-		await countScopedCacheTagMembers([scopedCacheTagLabel({
+		expect(await countScopedCachePinMembers(['articles', 'articles:id=5']))
+		.toEqual({ 'articles': 1, 'articles:id=5': 2 });
+	});
+
+	it(oneLine`
+		counts an entry named by two sets once: a purge frees it once, whatever the
+		index files it under
+	`, async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:author=1': [
+				'articles:&author=,1,2,&|ns:entry-both',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:author=2': [
+				'articles:&author=,1,2,&|ns:entry-both',
+			],
+		};
+
+		expect(await countScopedCachePinMembers(['articles:author=1']))
+		.toEqual({ 'articles:author=1': 1 });
+	});
+
+	// The purge's own `evicted` counts entries, and a blast radius that counted
+	// each one's `__expires_at` and `__pins` siblings too would claim three.
+	it('leaves an entry\'s sidecars out of its own blast radius', async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,5,&|ns:entry-five',
+				'articles:&id=,5,&|ns:entry-five__expires_at',
+				'articles:&id=,5,&|ns:entry-five__pins',
+			],
+		};
+
+		expect(await countScopedCachePinMembers(['articles:id=5']))
+		.toEqual({ 'articles:id=5': 1 });
+	});
+
+	it('reads a null scope slice by the legacy tag\'s own byte', async () => {
+		countedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&author=,\u0000null,&|ns:entry-unassigned',
+			],
+		};
+
+		const nullSlice = scopedCachePinKey({
 			collection: 'articles',
 			field: 'author',
 			value: null,
-		})]);
+		});
 
-		expect(pipeline.scard)
-		.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles:author=\u0000null');
+		expect(await countScopedCachePinMembers([nullSlice]))
+		.toEqual({ [nullSlice]: 1 });
 	});
 
-	it('treats a missing pipeline reply as a zero count', async () => {
-		pipeline.exec.mockResolvedValue([undefined]);
-
-		expect(await countScopedCacheTagMembers(['orphan'])).toEqual({ orphan: 0 });
+	it('counts a legacy tag its collection holds nothing for as zero', async () => {
+		expect(await countScopedCachePinMembers(['orphan'])).toEqual({ orphan: 0 });
 	});
 
 	it('returns {} when scoped purging is disabled', async () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'full';
 
-		expect(await countScopedCacheTagMembers(['articles'])).toEqual({});
-		expect(pipeline.scard).not.toHaveBeenCalled();
+		expect(await countScopedCachePinMembers(['articles'])).toEqual({});
 	});
 
 	it('returns {} for an empty tag list', async () => {
-		expect(await countScopedCacheTagMembers([])).toEqual({});
-		expect(pipeline.scard).not.toHaveBeenCalled();
+		expect(await countScopedCachePinMembers([])).toEqual({});
 	});
 });
 
-describe('createScopedCacheCollector', () => {
-	// The collector fills a declared tag's missing type from the schema; these cases
-	// name collections it does not carry, so their tags pass through as written.
+describe('createScopedCacheHookDeclarations', () => {
+	// The collector fills a declared pin's missing type from the schema; these cases
+	// name collections it does not carry, so their pins pass through as written.
 	const emptySchema = new SchemaBuilder().build();
 
-	// A uuid key is where a missing type bites hardest: `canonicalScopedCacheValue`
-	// lowercases a `uuid` and leaves an untyped value alone.
+	// A uuid key is where a missing type bites hardest:
+	// `canonicalizeScopedCachePinValue` lowercases a `uuid` and leaves an untyped
+	// value alone.
 	const notesSchema = new SchemaBuilder()
 		.collection('notes', (c) => {
 			c.field('id')
@@ -478,24 +536,24 @@ describe('createScopedCacheCollector', () => {
 		})
 		.build();
 
-	it('records a key whose purge a hook skipped, without adding a tag', () => {
-		const { purge, tags, purgeSkippedKeys } =
-			createScopedCacheCollector(emptySchema);
+	it('records a key whose purge a hook skipped, without adding a pin', () => {
+		const { purge, scopeQueryCases, purgeSkippedKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		purge.skipPurgeFor(7);
 
 		expect([...purgeSkippedKeys]).toEqual(['7']);
 
 		// Declaring nothing to purge must not read as declaring a purge: the
-		// takeover check keys on the tag count.
-		expect(tags).toEqual([]);
+		// takeover check keys on the declaration count.
+		expect(scopeQueryCases).toEqual([]);
 	});
 
 	it(oneLine`
 		keeps the EARLIEST counter a scopeTo handed over per collection — a second
 		dependent read straddling a purge must not overwrite the value that shows it
 	`, () => {
-		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo(
 			{ collection: 'authors' },
@@ -517,7 +575,7 @@ describe('createScopedCacheCollector', () => {
 		its lookups out with allSettled hands them over in completion order, which is
 		not the order they were taken in
 	`, () => {
-		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '9' } });
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '2' } });
@@ -529,7 +587,7 @@ describe('createScopedCacheCollector', () => {
 		an absent counter beats any count — that lookup found the collection with no
 		counter at all, so a number beside it proves a purge created one in between
 	`, () => {
-		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '4' } });
 		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: null } });
@@ -541,16 +599,18 @@ describe('createScopedCacheCollector', () => {
 		leaves the counters empty for a scopeTo that handed none over, so respond can
 		tell a declared collection apart from a guarded one
 	`, () => {
-		const { scope, epochs, tags } = createScopedCacheCollector(emptySchema);
+		const { scope, epochs, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'authors' });
 
 		expect(epochs).toEqual({});
-		expect(tags).toEqual([{ collection: 'authors' }]);
+		expect(scopeQueryCases).toEqual([[{ collection: 'authors' }]]);
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, purgeSkippedKeys } = createScopedCacheCollector(emptySchema);
+		const { purge, purgeSkippedKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
 
 		purge.skipPurgeFor(7);
 		purge.skipPurgeFor('7');
@@ -558,37 +618,130 @@ describe('createScopedCacheCollector', () => {
 		expect([...purgeSkippedKeys]).toEqual(['7']);
 	});
 
-	it('scopeTo and purgeBy feed one idempotent tag set', () => {
-		const { scope, purge, tags } = createScopedCacheCollector(emptySchema);
-		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
+	it('scopeTo and purgeBy fill sinks of their own', () => {
+		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+			createScopedCacheHookDeclarations(emptySchema);
 
-		scope.scopeTo(authorSlice);
-		purge.purgeBy({ ...authorSlice }); // same slice via the other handle → deduped
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
+		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
-		expect(tags).toEqual([authorSlice]);
+		// The same slice through both handles, and it lands twice: the read side is
+		// composed with the read's own query cases before it becomes a fingerprint,
+		// so folding one into the other would purge by a scope nothing declared.
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'articles', field: 'author', value: 5 }],
+		]);
+
+		expect(purgeFingerprints).toEqual([{
+			collection: 'articles',
+			pinnedScope: { author: ['5'] },
+		}]);
 	});
 
-	it('accepts a batch, deduping within it and against prior tags', () => {
-		const { scope, tags } = createScopedCacheCollector(emptySchema);
-		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
-		const authorsTable = { collection: 'authors' };
+	it(oneLine`
+		takes a fingerprint batch, dropping the viewFields a read's own carries: they
+		say which columns a read depends on, and no purge reads them
+	`, () => {
+		const { purge, purgeFingerprints } =
+			createScopedCacheHookDeclarations(emptySchema);
 
-		scope.scopeTo(authorSlice);
-		scope.scopeTo([{ ...authorSlice }, authorsTable, authorsTable]);
+		purge.purgeBy([
+			{
+				collection: 'articles',
+				pinnedScope: { author: [5] },
+				viewFields: ['title'],
+			},
+			{
+				collection: 'articles',
+				pinnedScope: { author: ['5'] },
+				viewFields: ['body'],
+			},
+			{ collection: 'authors' },
+		]);
 
-		// authorSlice repeats the prior tag, authorsTable appears twice → each once.
-		expect(tags).toEqual([authorSlice, authorsTable]);
+		// Two views of one slice are one thing to purge, and a fingerprint pinning
+		// nothing is the whole collection.
+		expect(purgeFingerprints).toEqual([
+			{ collection: 'articles', pinnedScope: { author: ['5'] } },
+			{ collection: 'authors' },
+		]);
 	});
 
-	it('dedups on the canonical tag key — field order and value type collapse', () => {
-		const { scope, purge, tags } = createScopedCacheCollector(emptySchema);
+	it(oneLine`
+		reads a pre-fingerprint tag as the slice it names, not as the bare
+		collection — which would purge only the reads pinning nothing
+	`, () => {
+		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+			createScopedCacheHookDeclarations(emptySchema);
 
-		scope.scopeTo({ collection: 'articles', field: 'author', value: 7 });
-		// Same slice: keys in a different order AND the value as a string. A raw JSON
-		// compare would keep both; the canonical key collapses them to one.
-		purge.purgeBy({ field: 'author', value: '7', collection: 'articles' });
+		const legacyTag = {
+			collection: 'articles',
+			field: 'author',
+			value: 5,
+		} as ScopedCacheDeclaredFingerprint;
 
-		expect(tags).toHaveLength(1);
+		scope.scopeTo(legacyTag);
+		purge.purgeBy(legacyTag);
+
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'articles', field: 'author', value: 5 }],
+		]);
+
+		expect(purgeFingerprints).toEqual([{
+			collection: 'articles',
+			pinnedScope: { author: ['5'] },
+		}]);
+	});
+
+	it('accepts a batch, deduping within it and against prior declarations', () => {
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
+
+		scope.scopeTo([
+			{ collection: 'articles', pinnedScope: { author: [5] } },
+			{ collection: 'authors' },
+			{ collection: 'authors' },
+		]);
+
+		// The articles slice repeats the prior one, authors appears twice → each once.
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'articles', field: 'author', value: 5 }],
+			[{ collection: 'authors' }],
+		]);
+	});
+
+	it(oneLine`
+		keeps the axes of one declared fingerprint together, so the read dies only on
+		a write reproducing the whole of it
+	`, () => {
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		scope.scopeTo({
+			collection: 'articles',
+			pinnedScope: { author: [5], status: ['published'] },
+		});
+
+		expect(scopeQueryCases).toEqual([[
+			{ collection: 'articles', field: 'author', value: 5 },
+			{ collection: 'articles', field: 'status', value: 'published' },
+		]]);
+	});
+
+	it(oneLine`
+		dedups on the canonical axis keys — field order and value type collapse
+	`, () => {
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [7] } });
+		// Same slice, the value as a string. A raw JSON compare would keep both; the
+		// canonical key collapses them to one.
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: ['7'] } });
+
+		expect(scopeQueryCases).toHaveLength(1);
 	});
 
 	it(oneLine`
@@ -597,105 +750,120 @@ describe('createScopedCacheCollector', () => {
 		different key from the lowercase one the purge side emits for the same row
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
-		const { scope, purge, tags } = createScopedCacheCollector(notesSchema);
 
-		scope.scopeTo({ collection: 'notes', field: 'id', value: upper });
+		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+			createScopedCacheHookDeclarations(notesSchema);
+
+		scope.scopeTo({ collection: 'notes', pinnedScope: { id: [upper] } });
 		// The spelling the driver hands the purge side for the very same row.
-		purge.purgeBy({ collection: 'notes', field: 'id', value: upper.toLowerCase() });
+		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
-		expect(tags).toEqual([
-			{ collection: 'notes', field: 'id', value: upper, type: 'uuid' },
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'notes', field: 'id', value: upper, type: 'uuid' }],
 		]);
 
-		expect(scopedCacheTagKey(tags[0]!)).toBe(
-			`ns:scoped-cache-index:tag:notes:id=${upper.toLowerCase()}`,
+		expect(scopedCachePinKey(scopeQueryCases[0]![0]!)).toBe(
+			`notes:id=${upper.toLowerCase()}`,
 		);
+
+		// A fingerprint's tokens are canonicalized the same way, so the pin and the
+		// purge name one slice.
+		expect(purgeFingerprints).toEqual([{
+			collection: 'notes',
+			pinnedScope: { id: [upper.toLowerCase()] },
+		}]);
 	});
 
 	it(oneLine`
-		leaves a tag whose type the hook DID declare alone, and a bare collection tag
-		has no field to look up
+		leaves a declaration naming a collection or field the schema doesn't know
+		untyped rather than inventing one, and a bare one has no field to look up
 	`, () => {
-		const { scope, tags } = createScopedCacheCollector(notesSchema);
+		const { scope, scopeQueryCases } =
+			createScopedCacheHookDeclarations(notesSchema);
 
-		scope.scopeTo({ collection: 'notes', field: 'id', value: 7, type: 'integer' });
+		scope.scopeTo({ collection: 'ghosts', pinnedScope: { id: ['A'] } });
+		scope.scopeTo({ collection: 'notes', pinnedScope: { ghost: ['A'] } });
 		scope.scopeTo({ collection: 'notes' });
 
-		expect(tags).toEqual([
-			{ collection: 'notes', field: 'id', value: 7, type: 'integer' },
-			{ collection: 'notes' },
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'ghosts', field: 'id', value: 'A' }],
+			[{ collection: 'notes', field: 'ghost', value: 'A' }],
+			[{ collection: 'notes' }],
 		]);
 	});
 
-	it(oneLine`
-		leaves a tag naming a collection or field the schema doesn't know untyped
-		rather than inventing one
-	`, () => {
-		const { scope, tags } = createScopedCacheCollector(notesSchema);
+	it('records the axis keys of a manuallyPurged scopeTo (anomaly-exempt)', () => {
+		const { scope, manuallyPurgedKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
 
-		scope.scopeTo({ collection: 'ghosts', field: 'id', value: 'A' });
-		scope.scopeTo({ collection: 'notes', field: 'ghost', value: 'A' });
+		scope.scopeTo(
+			{ collection: 'articles', pinnedScope: { author: [5] } },
+			{ manuallyPurged: true },
+		);
 
-		expect(tags).toEqual([
-			{ collection: 'ghosts', field: 'id', value: 'A' },
-			{ collection: 'notes', field: 'ghost', value: 'A' },
-		]);
-	});
-
-	it('records a manuallyPurged scopeTo tag key (anomaly-exempt)', () => {
-		const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
-		const slice = { collection: 'articles', field: 'author', value: 5 };
-
-		scope.scopeTo(slice, { manuallyPurged: true });
-
-		expect(manuallyPurgedKeys.has(scopedCacheTagKey(slice))).toBe(true);
+		expect([...manuallyPurgedKeys]).toEqual(['articles:author=5']);
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
 		const { scope, purge, manuallyPurgedKeys } =
-			createScopedCacheCollector(emptySchema);
+			createScopedCacheHookDeclarations(emptySchema);
 
-		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
+		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
 		purge.purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
 	});
 
 	describe('dependOn', () => {
-		// A lookup as `readByQuery` returns it: rows carrying the tags they resolved
-		// and the counters the lookup took before its query.
-		const acmeMetrics = { collection: 'metric', field: 'owner', value: 'acme' };
+		// A lookup as `readByQuery` returns it: rows carrying the fingerprints they
+		// resolved and the counters the lookup took before its query.
+		const acmeMetrics = [{ collection: 'metric', field: 'owner', value: 'acme' }];
 
 		const metricLookup = () => {
-			return withMeta([{ id: 1 }], {
-				scopedCacheTags: [acmeMetrics],
-				scopedCacheEpochs: { metric: '4' },
-			});
+			return withMeta(
+				[{ id: 1 }],
+				{
+					scopedCacheFingerprints: [
+						{
+							collection: 'metric',
+							pinnedScope: { owner: ['acme'] },
+						},
+					],
+					scopedCacheEpochs: { metric: '4' },
+				},
+			);
 		};
 
 		const auditLookup = () => {
-			return withMeta([{ id: 2 }], {
-				scopedCacheTags: [{ collection: 'audit' }],
-				scopedCacheEpochs: { audit: '7' },
-			});
+			return withMeta(
+				[{ id: 2 }],
+				{
+					scopedCacheFingerprints: [{
+						collection: 'audit',
+					}],
+					scopedCacheEpochs: { audit: '7' },
+				},
+			);
 		};
 
 		it('folds a pending lookup and hands its rows back', async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const rows = await scope.dependOn(Promise.resolve(metricLookup()));
 
 			expect(rows).toEqual([{ id: 1 }]);
-			expect(tags).toEqual([acmeMetrics]);
+			expect(scopeQueryCases).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
 		it('takes an already-resolved lookup the same way', async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			await scope.dependOn(metricLookup());
 
-			expect(tags).toEqual([acmeMetrics]);
+			expect(scopeQueryCases).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
@@ -703,14 +871,15 @@ describe('createScopedCacheCollector', () => {
 			walks a Promise.all batch — a result is itself an array, so the meta rider is
 			what tells one lookup from the batch holding it
 		`, async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const batch = await scope.dependOn(
 				Promise.all([metricLookup(), auditLookup()]),
 			);
 
 			expect(batch).toHaveLength(2);
-			expect(tags).toEqual([acmeMetrics, { collection: 'audit' }]);
+			expect(scopeQueryCases).toEqual([acmeMetrics, [{ collection: 'audit' }]]);
 
 			expect(epochs).toEqual({ metric: '4', audit: '7' });
 		});
@@ -719,7 +888,8 @@ describe('createScopedCacheCollector', () => {
 			folds the fulfilled verdicts of a Promise.allSettled batch and passes the
 			rejected one through for the caller to judge
 		`, async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const verdicts = await scope.dependOn(
 				Promise.allSettled([metricLookup(), Promise.reject(new Error('gone'))]),
@@ -728,7 +898,7 @@ describe('createScopedCacheCollector', () => {
 			expect(verdicts.map((verdict) => verdict.status))
 				.toEqual(['fulfilled', 'rejected']);
 
-			expect(tags).toEqual([acmeMetrics]);
+			expect(scopeQueryCases).toEqual([acmeMetrics]);
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
@@ -736,25 +906,36 @@ describe('createScopedCacheCollector', () => {
 			folds each lookup on its own, so two lookups of one collection straddling a
 			purge are judged on the earlier counter
 		`, async () => {
-			const { scope, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, epochs } = createScopedCacheHookDeclarations(emptySchema);
 
-			const before = withMeta([{ id: 1 }], {
-				scopedCacheTags: [{ collection: 'metric' }],
-				scopedCacheEpochs: { metric: '4' },
-			});
+			const before = withMeta(
+				[{ id: 1 }],
+				{
+					scopedCacheFingerprints: [{
+						collection: 'metric',
+					}],
+					scopedCacheEpochs: { metric: '4' },
+				},
+			);
 
-			const after = withMeta([{ id: 1 }], {
-				scopedCacheTags: [{ collection: 'metric' }],
-				scopedCacheEpochs: { metric: '5' },
-			});
+			const after = withMeta(
+				[{ id: 1 }],
+				{
+					scopedCacheFingerprints: [{
+						collection: 'metric',
+					}],
+					scopedCacheEpochs: { metric: '5' },
+				},
+			);
 
 			await scope.dependOn([after, before]);
 
 			expect(epochs).toEqual({ metric: '4' });
 		});
 
-		it('never marks a folded tag manuallyPurged', async () => {
-			const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
+		it('never marks a folded declaration manuallyPurged', async () => {
+			const { scope, manuallyPurgedKeys } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			await scope.dependOn(metricLookup());
 
@@ -762,94 +943,56 @@ describe('createScopedCacheCollector', () => {
 		});
 
 		it('adds nothing for a value carrying no meta rider', async () => {
-			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+			const { scope, scopeQueryCases, epochs } =
+				createScopedCacheHookDeclarations(emptySchema);
 
 			const rows = await scope.dependOn([{ id: 1 }]);
 
 			expect(rows).toEqual([{ id: 1 }]);
-			expect(tags).toEqual([]);
+			expect(scopeQueryCases).toEqual([]);
 			expect(epochs).toEqual({});
 		});
 	});
 });
 
-describe('collection slice index', () => {
-	it('files a slice tag key under its collection, never a bare one', async () => {
-		const indexPipeline = {
-			sadd: vi.fn().mockReturnThis(),
-			expire: vi.fn().mockReturnThis(),
-			exec: vi.fn(),
-		};
-
-		vi.mocked(useRedis).mockReturnValue({
-			defineCommand: vi.fn(),
-			pipeline: () => indexPipeline,
-		} as any);
-
-		await tagScopedCacheKeys('entry', [
-			{ collection: 'articles' },
-			{ collection: 'articles', field: 'author', value: 7 },
-		]);
-
-		expect(indexPipeline.sadd)
-		.toHaveBeenCalledWith(
-			'ns:scoped-cache-index:slices:articles',
-			'ns:scoped-cache-index:tag:articles:author=7',
-		);
-
-		// The bare tag is where a collection-wide purge starts, so indexing it would
-		// only name a key the purge already holds.
-		expect(indexPipeline.sadd)
-		.not.toHaveBeenCalledWith(
-			'ns:scoped-cache-index:slices:articles',
-			'ns:scoped-cache-index:tag:articles',
-		);
-	});
-
-	it('reads a collection purge off the index, not a keyspace scan', async () => {
-		const smembers = vi.fn()
-			.mockResolvedValueOnce(['ns:scoped-cache-index:tag:articles:author=7'])
-			.mockResolvedValue([]);
-
-		const scan = vi.fn();
+describe('a collection-wide purge', () => {
+	it('reads a collection purge off the collection\'s fingerprint sets', async () => {
+		const scan = vi.fn().mockResolvedValue(['0', []]);
+		const smembers = vi.fn();
 
 		vi.mocked(useRedis).mockReturnValue({
 			smembers,
 			scan,
 			srem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
-		expect(smembers).toHaveBeenCalledWith('ns:scoped-cache-index:slices:articles');
-		expect(scan).not.toHaveBeenCalled();
+		expect(scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'ns:scoped-cache-index:fingerprint:articles:*',
+			'COUNT',
+			1000,
+		);
+
+		expect(smembers).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
-		bumps the counter BEFORE reading the slice index — a read filing a new slice
-		between that read and the sweep is missed by this purge, and the bump is what
-		makes it decline instead of surviving under a slice nothing swept
+		bumps the counter BEFORE scanning the collection's sets — a read filing a new
+		fingerprint between that scan and the sweep is missed by this purge, and the
+		bump is what makes it decline instead of surviving under a set nothing swept
 	`, async () => {
 		const calls: string[] = [];
 
-		const pipeline = {
-			incr: (key: string) => {
-				calls.push(`incr ${key}`);
-				return pipeline;
-			},
-			expire: () => pipeline,
-			exec: async () => {
-				calls.push('exec');
-				return [];
-			},
-		};
-
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: async (key: string) => {
-				calls.push(`smembers ${key}`);
-				return [];
+			scan: async (_cursor: string, _match: string, pattern: string) => {
+				calls.push(`scan ${pattern}`);
+				return ['0', ['ns:scoped-cache-index:fingerprint:articles:']];
 			},
 			del: vi.fn(),
 			srem: vi.fn(),
@@ -857,74 +1000,34 @@ describe('collection slice index', () => {
 				calls.push('eval');
 				return [];
 			},
-			pipeline: () => pipeline,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
+				calls.push(`bump ${epochKey}`);
+			},
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:articles',
-			'exec',
-			'smembers ns:scoped-cache-index:slices:articles',
-			'incr ns:scoped-cache-epoch:articles',
-			'exec',
+			'bump ns:scoped-cache-epoch:articles',
+			'scan ns:scoped-cache-index:fingerprint:articles:*',
 			'eval',
 		]);
 	});
 
-	it('drops a purged slice key from its collection index', async () => {
-		const sweep = redisSweepDouble(async () => []);
-
-		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockResolvedValue([]),
-			del: vi.fn(),
-			srem: vi.fn(),
-			eval: sweep.eval,
-			pipeline: () => redisPipelineDouble(),
-		} as any);
-
-		await purgeScopedCache(
-			{ delete: vi.fn() } as any,
-			'articles',
-			[{ collection: 'articles', field: 'author', value: 7 }],
-		);
-
-		// An index pruned only wholesale keeps naming keys that are gone — and pruned
-		// in the same step that drops them, or a slice re-added while the sweep ran
-		// is dropped from the index after the fact.
-		expect(sweep.pruned)
-			.toEqual([[
-				'ns:scoped-cache-index:slices:articles',
-				'ns:scoped-cache-index:tag:articles:author=7',
-			]]);
-	});
 });
 
-// The pipeline a purge still sends carries only its epoch bumps; the sweep itself is
-// one script, doubled by `redisSweepDouble` below.
-function redisPipelineDouble() {
-	const chain = {
-		incr: () => chain,
-		expire: () => chain,
-		exec: async () => [],
-	};
-
-	return chain;
-}
-
 /**
- * Stand in for the sweep script: read each tag set, drop them all, prune the slice
- * index. `members` is what the sets between them hold, and the recorded `swept` and
- * `pruned` are what a case asserts the sweep asked for — the script does those
- * inside Redis, so there is no command of its own to spy on.
+ * Stand in for the sweep script: read each index set and drop them all. `members` is
+ * what the sets between them hold, and the recorded `swept` is what a case asserts
+ * the sweep asked for — the script does it inside Redis, so there is no command of
+ * its own to spy on.
  */
 function redisSweepDouble(members: () => Promise<string[]>) {
 	const swept: string[][] = [];
-	const pruned: [string, string][] = [];
 
 	return {
 		swept,
-		pruned,
 		eval: vi.fn(async (
 			_script: string,
 			numKeys: number,
@@ -932,18 +1035,12 @@ function redisSweepDouble(members: () => Promise<string[]>) {
 		) => {
 			swept.push(args.slice(0, numKeys));
 
-			const prunings = args.slice(numKeys);
-
-			for (let at = 0; at < prunings.length; at += 2) {
-				pruned.push([prunings[at]!, prunings[at + 1]!]);
-			}
-
 			return members();
 		}),
 	};
 }
 
-describe('tagScopedCacheKeys', () => {
+describe('indexScopedCacheEntry', () => {
 	it(oneLine`
 		throws the command error a pipeline REPLIED with, so its caller can skip
 		writing an entry that would be indexed under nothing
@@ -959,6 +1056,7 @@ describe('tagScopedCacheKeys', () => {
 					sadd: vi.fn().mockReturnThis(),
 					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
 					expire: vi.fn().mockReturnThis(),
+					persist: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
 					// REJECTS on a connection-level failure, so an ignored reply
 					// reads as success.
@@ -967,14 +1065,14 @@ describe('tagScopedCacheKeys', () => {
 			},
 		} as any);
 
-		await expect(tagScopedCacheKeys('entry', [
-			{ collection: 'articles', field: 'author', value: 7 },
+		await expect(indexScopedCacheEntry('entry', [
+			{ collection: 'articles', pinnedScope: { author: ['7'] } },
 		])).rejects.toBe(refused);
 	});
 
 	it(oneLine`
-		only ever extends a tag set's expiry, so a later write carrying a shorter TTL
-		cannot outlive-orphan the entries an earlier one indexed
+		only ever extends an index set's expiry, so a later write carrying a shorter
+		TTL cannot outlive-orphan the entries an earlier one indexed
 	`, async () => {
 		const tagExpiry = vi.fn().mockReturnThis();
 		const expire = vi.fn().mockReturnThis();
@@ -993,31 +1091,65 @@ describe('tagScopedCacheKeys', () => {
 		} as any);
 
 		try {
-			await tagScopedCacheKeys('entry', [
-				{ collection: 'articles', field: 'author', value: 7 },
+			await indexScopedCacheEntry('entry', [
+				{ collection: 'articles', pinnedScope: { author: ['7'] } },
 			]);
 		}
 		finally {
 			delete env['CACHE_TTL'];
 		}
 
-		// A tag set is SHARED by every entry pinned to that slice, and a bare EXPIRE
-		// overwrites: lower CACHE_TTL at runtime and one short write cuts short the
-		// set indexing an entry cached for an hour, which no purge can then reach.
+		// An index set is SHARED by every entry the collection files there, and a
+		// bare EXPIRE overwrites: lower CACHE_TTL at runtime and one short write
+		// cuts short the set indexing an entry cached for an hour, which no purge
+		// can then reach.
 		expect(expire).not.toHaveBeenCalled();
 
 		expect(tagExpiry).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:tag:articles:author=7',
+			'ns:scoped-cache-index:fingerprint:articles:',
 			3600,
+			'articles:&author=,7,&|entry',
+			'articles:&author=,7,&|entry__expires_at',
+		);
+	});
+
+	it(oneLine`
+		clears an index set's expiry under a TTL of 0, since the entries it names
+		then never expire
+	`, async () => {
+		const sadd = vi.fn().mockReturnThis();
+		const persist = vi.fn().mockReturnThis();
+
+		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
+			pipeline: () => {
+				return {
+					sadd,
+					persist,
+					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
+					exec: vi.fn().mockResolvedValue([]),
+				};
+			},
+		} as any);
+
+		await indexScopedCacheEntry(
 			'entry',
-			'entry__expires_at',
+			[{ collection: 'articles', pinnedScope: { author: ['7'] } }],
+			[],
+			{ collections: {}, relations: [] },
+			'0',
 		);
 
-		// The collection's slice index files under the same rule.
-		expect(tagExpiry).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:slices:articles',
-			3600,
-			'ns:scoped-cache-index:tag:articles:author=7',
+		// A set filed while a TTL was in force keeps that expiry through a plain
+		// SADD, and expires under entries that no purge can reach any more.
+		expect(sadd).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:articles:',
+			'articles:&author=,7,&|entry',
+			'articles:&author=,7,&|entry__expires_at',
+		);
+
+		expect(persist).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:articles:',
 		);
 	});
 });
@@ -1031,12 +1163,18 @@ describe('dropScopedCacheIndex', () => {
 		}
 
 		const pipeline = unlinkPipeline();
+		const scopedCacheEpochBump = vi.fn();
 
-		const redis = { scan, pipeline: () => pipeline };
+		const redis = {
+			scan,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump,
+			pipeline: () => pipeline,
+		};
 
 		vi.mocked(useRedis).mockReturnValue(redis as any);
 
-		return { scan, unlink: pipeline.unlink };
+		return { scan, unlink: pipeline.unlink, scopedCacheEpochBump };
 	}
 
 	it(oneLine`
@@ -1044,12 +1182,12 @@ describe('dropScopedCacheIndex', () => {
 	`, async () => {
 		const { scan, unlink } = mockScan(
 			['4', [
-				'ns:scoped-cache-index:tag:articles',
+				'ns:scoped-cache-index:fingerprint:articles',
 				'ns:scoped-cache-index:slices:articles',
 			]],
 			['0', [
-				'ns:scoped-cache-index:tag:articles:id=1',
-				'ns:scoped-cache-index:tag:authors',
+				'ns:scoped-cache-index:fingerprint:articles:id=1',
+				'ns:scoped-cache-index:fingerprint:authors',
 			]],
 		);
 
@@ -1083,107 +1221,110 @@ describe('dropScopedCacheIndex', () => {
 		// One call per scan page, not one for the lot: collecting first would put
 		// the whole index in this process's heap to delete it from Redis.
 		expect(unlink).toHaveBeenNthCalledWith(1, [
-			'ns:scoped-cache-index:tag:articles',
+			'ns:scoped-cache-index:fingerprint:articles',
 			'ns:scoped-cache-index:slices:articles',
 		]);
 
 		expect(unlink).toHaveBeenNthCalledWith(2, [
-			'ns:scoped-cache-index:tag:articles:id=1',
-			'ns:scoped-cache-index:tag:authors',
+			'ns:scoped-cache-index:fingerprint:articles:id=1',
+			'ns:scoped-cache-index:fingerprint:authors',
 		]);
 
 		expect(dropped).toEqual({ dropped: 4, refused: 0 });
 	});
 
 	it(oneLine`
-		moves no counter of its own — \`clearResponseCache\` has, before it
+		moves the wholesale counter again once the index is gone — a fill that filed
+		before the drop and wrote its entry after it is indexed by nothing
 	`, async () => {
-		const { scan } = mockScan(['0', ['ns:scoped-cache-index:tag:articles']]);
-		const { incr } = vi.mocked(useRedis)().pipeline();
+		const { scan, scopedCacheEpochBump } = mockScan(
+			['0', ['ns:scoped-cache-index:fingerprint:articles']],
+		);
 
 		await dropScopedCacheIndex();
 
 		expect(scan).toHaveBeenCalledOnce();
-		expect(incr).not.toHaveBeenCalled();
+
+		expect(scopedCacheEpochBump).toHaveBeenCalledExactlyOnceWith(
+			1,
+			'ns:scoped-cache-epoch:*',
+			86400,
+		);
 	});
 
 	it(oneLine`
-		sweeps a long tag list in bounded batches — the whole list is spread into the
-		script call, and a spread long enough throws RangeError before Redis is
-		reached (#397), taking a purge that can then never complete on retry
+		sweeps a long list of index sets in bounded batches — the whole page is spread
+		into the script call, and a spread long enough throws RangeError before Redis
+		is reached (#397), taking a purge that can then never complete on retry
 	`, async () => {
 		const sweep = redisSweepDouble(async () => []);
 
+		// One set per index value, which is what a per-user-scoped collection
+		// accumulates.
+		const indexKeys = Array.from({ length: 1_201 }, (_unused, index) => {
+			return `ns:scoped-cache-index:fingerprint:articles:owner=${index}`;
+		});
+
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockResolvedValue([]),
+			scan: vi.fn().mockResolvedValue(['0', indexKeys]),
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: sweep.eval,
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
-		// One slice per key, which is what a per-user-scoped collection accumulates.
-		await purgeScopedCache(
-			{ delete: vi.fn() } as any,
-			'articles',
-			Array.from({ length: 1_201 }, (_unused, index) => {
-				return {
-					collection: 'articles',
-					field: 'author',
-					value: index,
-				};
-			}),
-		);
+		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
-		// 1201 slices + the bare collection tag the purge always prepends.
-		expect(sweep.swept.flat()).toHaveLength(1_202);
+		expect(sweep.swept.flat()).toHaveLength(1_201);
 		expect(sweep.swept).toHaveLength(3);
 
 		for (const batch of sweep.swept) {
 			expect(batch.length).toBeLessThanOrEqual(500);
 		}
 
-		// Every key still swept exactly once: batching must not drop or repeat one.
-		expect(new Set(sweep.swept.flat()).size).toBe(1_202);
+		// Every set still swept exactly once: batching must not drop or repeat one.
+		expect(new Set(sweep.swept.flat()).size).toBe(1_201);
 	});
 
 	it(oneLine`
 		moves the counters even when the sweep behind them is refused, so a read in
 		flight declines rather than caching under an index the retry will drop
 	`, async () => {
-		const bumped: string[] = [];
-
-		const pipeline = {
-			incr: (key: string) => {
-				bumped.push(key);
-				return pipeline;
-			},
-			expire: () => pipeline,
-			exec: async () => [],
-		};
+		const scopedCacheEpochBump = vi.fn();
 
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: vi.fn().mockRejectedValue(new Error('Connection is closed.')),
-			pipeline: () => pipeline,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump,
 		} as any);
 
 		await purgeScopedCache(
 			{ delete: vi.fn() } as any,
 			'articles',
-			[{ collection: 'articles', field: 'author', value: 7 }],
+			[scopedCacheFingerprintOf('articles', [
+				{ field: 'author', value: 7 },
+			])],
 		);
 
-		// The bumps are their own pipeline, sent before the script — inside it they
+		// The bumps are their own script call, sent before the sweep — inside it they
 		// would have gone down with the refusal.
-		expect(bumped).toEqual(['ns:scoped-cache-epoch:articles']);
+		expect(scopedCacheEpochBump).toHaveBeenCalledExactlyOnceWith(
+			1,
+			'ns:scoped-cache-epoch:articles',
+			86400,
+		);
 	});
 
 	it('counts what Redis removed, not what it was handed', async () => {
 		const { unlink } = mockScan(
-			['0', ['ns:scoped-cache-index:tag:a', 'ns:scoped-cache-index:tag:b']],
+			['0', [
+				'ns:scoped-cache-index:fingerprint:a',
+				'ns:scoped-cache-index:fingerprint:b',
+			]],
 		);
 
 		// A pipeline reports per command, so a chunk that failed is a chunk still
@@ -1204,7 +1345,7 @@ describe('dropScopedCacheIndex', () => {
 	it('splits the drop into chunked commands', async () => {
 		const keys = Array.from(
 			{ length: 2500 },
-			(_, at) => `ns:scoped-cache-index:tag:c:id=${at}`,
+			(_, at) => `ns:scoped-cache-index:fingerprint:c:id=${at}`,
 		);
 
 		const { unlink } = mockScan(['0', keys]);
@@ -1241,7 +1382,7 @@ describe('dropScopedCacheIndex', () => {
 	// The keys the pre-scoped-cache-index layout wrote go once, in
 	// `20260911A-drop-the-pre-scoped-cache-index-layout`, not on every flush.
 	it('walks the index prefix and nothing else', async () => {
-		const { scan } = mockScan(['0', ['ns:scoped-cache-index:tag:articles']]);
+		const { scan } = mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
 
 		await dropScopedCacheIndex();
 
@@ -1257,11 +1398,6 @@ describe('flushResponseCache', () => {
 		const calls: string[] = [];
 
 		const pipeline = {
-			incr: (key: string) => {
-				calls.push(`incr ${key}`);
-				return pipeline;
-			},
-			expire: () => pipeline,
 			unlink: () => {
 				calls.push('unlink');
 				return pipeline;
@@ -1275,7 +1411,11 @@ describe('flushResponseCache', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: async () => {
 				calls.push('scan');
-				return ['0', ['ns:scoped-cache-index:tag:articles']];
+				return ['0', ['ns:scoped-cache-index:fingerprint:articles']];
+			},
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
+				calls.push(`bump ${epochKey}`);
 			},
 			pipeline: () => pipeline,
 		} as any);
@@ -1290,44 +1430,44 @@ describe('flushResponseCache', () => {
 	}
 
 	it(oneLine`
-		moves the wholesale counter BEFORE the clear, then drops the index — a read
-		rechecking between a clear and a move made after it keeps an entry the
-		index drop then orphans
+		moves the wholesale counter BEFORE the clear, drops the index, then moves it
+		again — a read rechecking between a clear and a move made after it keeps an
+		entry the index drop then orphans
 	`, async () => {
 		const { calls, cache } = recordFlush();
 
 		await flushResponseCache(cache);
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 			'clear',
 			'scan',
 			'unlink',
 			'exec',
+			'bump ns:scoped-cache-epoch:*',
 		]);
 	});
 
 	it(oneLine`
 		moves the counter with no cache to clear — the reads in flight are what the
-		move is for, and they captured it whether or not anything was stored
+		move is for, and they snapshot it whether or not anything was stored
 	`, async () => {
 		const { calls } = recordFlush();
 
 		await flushResponseCache(null);
 
 		expect(calls).toEqual([
-			'incr ns:scoped-cache-epoch:*',
-			'exec',
+			'bump ns:scoped-cache-epoch:*',
 			'scan',
 			'unlink',
 			'exec',
+			'bump ns:scoped-cache-epoch:*',
 		]);
 	});
 
 	it(oneLine`
 		clears and nothing more with scoped purging off — there is no counter a read
-		captured and no index to drop, and the scan would still walk the whole
+		snapshot and no index to drop, and the scan would still walk the whole
 		keyspace on every permission, field or collection change
 	`, async () => {
 		const { calls, cache } = recordFlush();
@@ -1353,7 +1493,11 @@ describe('flushResponseCache', () => {
 
 		await expect(flushResponseCache(cache)).resolves.toBeUndefined();
 
-		expect(calls).toEqual(['incr ns:scoped-cache-epoch:*', 'exec', 'clear']);
+		expect(calls).toEqual([
+			'bump ns:scoped-cache-epoch:*',
+			'clear',
+			'bump ns:scoped-cache-epoch:*',
+		]);
 
 		expect(warn).toHaveBeenCalledWith(
 			expect.any(Error),
@@ -1382,29 +1526,61 @@ describe('retryPendingScopedCachePurges', () => {
 		get: vi.fn(async (key: string) => probed.get(key)),
 	};
 
-	// `sweepMembers` is what the tag sets between them hold; the sweep script reads
-	// them inside Redis, so the double is where a case says so and where it sees
-	// which sets the sweep asked for.
-	const sweep = redisSweepDouble(() => redis.sweepMembers());
+	// What the fingerprint sets hold, keyed by the set a case expects the drain to
+	// read. A record names a pin, never the set holding it — the schema it was
+	// written under is gone by now — so the drain finds the sets by scanning the
+	// collection's own prefix, and a case declares them here.
+	let indexedMembers: Record<string, string[]>;
+
+	// The index prune rides a pipeline, so a member the drain dropped reads off this
+	// rather than off the client.
+	const srem = vi.fn();
+
+	// A collection-mode record drops whole sets through the sweep script, which does
+	// its work inside Redis and leaves no command of its own to spy on.
+	const swept: string[][] = [];
 
 	const redis = {
-		sweepMembers: vi.fn(),
-		smembers: vi.fn(),
+		sscan: vi.fn(async (indexKey: string, _cursor: string) => {
+			return ['0', indexedMembers[indexKey] ?? []];
+		}),
+		scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
+			const scanned = pattern.slice(0, -1);
+
+			return [
+				'0',
+				Object.keys(indexedMembers).filter((indexKey) => {
+					return indexKey.startsWith(scanned);
+				}),
+			];
+		}),
+		eval: vi.fn(async (_script: string, numKeys: number, ...args: string[]) => {
+			const sweptKeys = args.slice(0, numKeys);
+			swept.push(sweptKeys);
+
+			return sweptKeys.flatMap((indexKey) => indexedMembers[indexKey] ?? []);
+		}),
 		del: vi.fn(),
-		scan: vi.fn(),
-		srem: vi.fn(),
-		eval: sweep.eval,
-		pipeline: () => redisPipelineDouble(),
+		defineCommand: vi.fn(),
+		scopedCacheEpochBump: vi.fn(),
+		pipeline: () => {
+			const chain: any = {
+				srem: (...args: string[]) => {
+					srem(...args);
+					return chain;
+				},
+				exec: async () => [],
+			};
+
+			return chain;
+		},
 	};
 
 	beforeEach(() => {
 		vi.mocked(getCache).mockReturnValue({ cache } as any);
 		vi.mocked(useRedis).mockReturnValue(redis as any);
-		redis.smembers.mockResolvedValue([]);
-		redis.sweepMembers.mockResolvedValue([]);
-		sweep.swept.length = 0;
-		sweep.pruned.length = 0;
-		redis.scan.mockResolvedValue(['0', []]);
+		indexedMembers = {};
+		swept.length = 0;
 
 		// The shape a deployment with CACHE_STATS off returns for every entry, so a
 		// case has to opt IN to being able to name what it recovered.
@@ -1412,24 +1588,35 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		rebuilds a recorded label against the namespace in force AT RETRY TIME, so a
-		CACHE_NAMESPACE change between the failure and the retry cannot misaim it
+		rebuilds a recorded fingerprint against the namespace in force AT RETRY TIME, so
+		a CACHE_NAMESPACE change between the failure and the retry cannot misaim it
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
-
-		// The label was recorded under `ns`; the process now runs under `other`.
+		// The fingerprint was recorded under `ns`; the process now runs under `other`.
 		env['CACHE_NAMESPACE'] = 'other';
+
+		indexedMembers = {
+			'other:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(sweep.swept).toEqual([['other:scoped-cache-index:tag:articles:id=1']]);
+		expect(redis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'other:scoped-cache-index:fingerprint:articles:*',
+			'COUNT',
+			expect.any(Number),
+		);
+
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
@@ -1442,18 +1629,22 @@ describe('retryPendingScopedCachePurges', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [7],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=2'],
+				scopedCacheFingerprints: ['articles:&id=,2,&'],
 				ids: [8],
 			},
 		]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(2);
 
@@ -1463,8 +1654,10 @@ describe('retryPendingScopedCachePurges', () => {
 			purgeId: expect.any(String),
 			collection: 'articles',
 			mode: 'slices',
-			scopedCacheTags: ['articles:id=1'],
-			scopedCacheTagCount: 1,
+			// The record holds fingerprints, the stats stream takes pins: it joins
+			// its pin list with a comma, which a rendered fingerprint carries raw.
+			scopedCachePins: ['articles:id=1'],
+			scopedCachePinCount: 1,
 			evicted: 1,
 			durationMs: null,
 		});
@@ -1476,30 +1669,30 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		takes every slice the index names for a collection-mode record — it named no
-		tag because which slices changed was unresolvable when it failed
+		takes every set the index names for a collection-mode record — it named no
+		fingerprint because which slices changed was unresolvable when it failed
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'collection',
 			collection: 'articles',
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
-		redis.smembers.mockImplementation(async (key: string) => {
-			return key === 'ns:scoped-cache-index:slices:articles'
-				? ['ns:scoped-cache-index:tag:articles:id=1']
-				: [];
-		});
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&|ns:entry-bare',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+				'articles:&owner=,alpha,&|ns:entry-alpha',
+			],
+		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(redis.smembers)
-			.toHaveBeenCalledWith('ns:scoped-cache-index:slices:articles');
-
-		expect(sweep.swept).toEqual([[
-			'ns:scoped-cache-index:tag:articles',
-			'ns:scoped-cache-index:tag:articles:id=1',
+		expect(swept).toEqual([[
+			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha',
 		]]);
 
 		expect(cache.clear).not.toHaveBeenCalled();
@@ -1511,18 +1704,81 @@ describe('retryPendingScopedCachePurges', () => {
 		}));
 	});
 
+	it(oneLine`
+		purges a whole collection for a record naming it by its legacy tag — a row
+		written before the fingerprint index existed says which collection went stale
+		and nothing narrower, so its reach is the collection
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheFingerprints: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+				'articles:&owner=,alpha,&|ns:entry-alpha',
+			],
+		};
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(swept)
+			.toEqual([['ns:scoped-cache-index:fingerprint:articles:owner=alpha']]);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+
+		// Recorded by the collection purge itself, which is the one that knows how
+		// many sets its scan turned up — counting it here as well would report the
+		// same entries evicted twice.
+		expect(queueCachePurge).toHaveBeenCalledOnce();
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: 'articles',
+			mode: 'collection',
+		}));
+	});
+
+	it(oneLine`
+		purges a whole collection for a legacy tag whose value ends in an ampersand —
+		it is no fingerprint, and read as one it pins nothing the index files
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheFingerprints: ['articles:title=Q&'],
+			ids: [7],
+		}]);
+
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+				'articles:&title=,q,&|ns:entry-alpha',
+			],
+		};
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: 'articles',
+			mode: 'collection',
+		}));
+	});
+
 	it('flushes the whole namespace for a namespace-mode record', async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(cache.clear).toHaveBeenCalledOnce();
-		expect(sweep.swept).toEqual([]);
+		expect(swept).toEqual([]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 
 		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
@@ -1541,23 +1797,23 @@ describe('retryPendingScopedCachePurges', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [7],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=2'],
+				scopedCacheFingerprints: ['articles:&id=,2,&'],
 				ids: [8],
 			},
 		]);
 
 		const closed = new Error('Connection is closed.');
 
-		// Fails the sweep itself rather than the slice-index read: the report reads
-		// members too, and its own guard swallows a failure there, so injecting it
-		// earlier would prove nothing about the purge.
-		sweep.eval.mockRejectedValueOnce(closed);
+		// Fails the scan that finds the sets rather than a descriptor read: naming the
+		// stale entries has a guard of its own that swallows a failure, so injecting it
+		// there would prove nothing about the purge.
+		redis.scan.mockRejectedValueOnce(closed);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
@@ -1567,21 +1823,20 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		keeps the record when redis REFUSES the sweep rather than dropping the
+		keeps the record when redis REFUSES the read rather than dropping the
 		connection — the shape maxmemory with noeviction and a demoted primary both
 		take, where reads are served and the write behind them is not
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		// A script's refused command rejects the whole call, and the script is where
-		// the tag is dropped AND its slice-index entry pruned — so a refusal leaves
-		// both in place for the retry to come back for.
-		sweep.eval.mockRejectedValueOnce(new Error('OOM command not allowed'));
+		// A refused command rejects the purge before anything is dropped OR pruned, so
+		// both are left in place for the retry to come back for.
+		redis.scan.mockRejectedValueOnce(new Error('OOM command not allowed'));
 
 		expect(await retryPendingScopedCachePurges()).toBe(0);
 
@@ -1598,11 +1853,15 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockRejectedValue(new Error('relation does not exist'));
@@ -1621,7 +1880,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'collection',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
@@ -1640,7 +1899,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7, 8, 9],
 		}]);
 
@@ -1656,7 +1915,7 @@ describe('retryPendingScopedCachePurges', () => {
 		let rows = [{
 			mode: 'slices' as const,
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}];
 
@@ -1666,8 +1925,11 @@ describe('retryPendingScopedCachePurges', () => {
 			rows = [];
 		});
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
-		redis.smembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
@@ -1697,7 +1959,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
@@ -1715,11 +1977,15 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(getCache).mockReturnValue({
 			cache: { ...cache, store: { client: { isOpen: false, isReady: false } } },
@@ -1739,7 +2005,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
@@ -1763,26 +2029,23 @@ describe('retryPendingScopedCachePurges', () => {
 	// itself Redis-backed: reporting at failure time reports nothing in the one case
 	// worth reporting.
 	it(oneLine`
-		names each entry it found stale, counting the sidecars that ride the same tag as
-		the entry they belong to rather than as two more
+		names each entry it found stale, counting the sidecars filed beside it as the
+		entry they belong to rather than as two more
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		const staleMembers = [
-			'ns:entry-a',
-			'ns:entry-a__expires_at',
-			'ns:entry-a__tags',
-		];
-
-		redis.sweepMembers.mockResolvedValue(staleMembers);
-		// The recovery report reads the members again to name them; the purge's own
-		// read is the `sweepMembers` above.
-		redis.smembers.mockResolvedValue(staleMembers);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+				'articles:&id=,1,&|ns:entry-a__expires_at',
+				'articles:&id=,1,&|ns:entry-a__pins',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
@@ -1798,29 +2061,34 @@ describe('retryPendingScopedCachePurges', () => {
 		});
 	});
 
-	// An entry is a member of every tag it was filled under, and one failed
-	// mutation records one row per tag (#507): naming it per target reported the
+	// An entry is filed under every query case it was cached for, and one failed
+	// mutation records one row per target (#507): naming it per target reported the
 	// same entry as many times as the drain had targets for it.
 	it(oneLine`
-		names an entry once per drain, not once per target it is a member of
+		names an entry once per drain, not once per target it is filed under
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [7],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:author=3'],
+				scopedCacheFingerprints: ['articles:&author=,3,&'],
 				ids: [8],
 			},
 		]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
-		redis.smembers.mockResolvedValue(['ns:entry-a']);
+		// One entry both targets reach: it is bound to the row one names and to the
+		// author the other does.
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&author=,3,&id=,1,&|ns:entry-a',
+			],
+		};
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
@@ -1837,11 +2105,16 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheTags: ['articles:id=1'],
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
 			ids: [7],
 		}]);
 
-		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
 		vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
@@ -1944,7 +2217,7 @@ describe('startScopedCachePurgeRecovery', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',
 			collection: null,
-			scopedCacheTags: [],
+			scopedCacheFingerprints: [],
 			ids: [7],
 		}]);
 
@@ -1977,7 +2250,8 @@ describe('a purge that fails after its mutation committed', () => {
 			scan: vi.fn().mockResolvedValue(['0', []]),
 			srem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, tags) => tags);
@@ -1988,29 +2262,32 @@ describe('a purge that fails after its mutation committed', () => {
 		records the slices it could not drop, and reports no purge it did not run
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockRejectedValue(closed),
+			scan: vi.fn().mockRejectedValue(closed),
+			sscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		const purged = await purgeScopedCache(cache as any, 'articles', [
-			{ collection: 'articles', field: 'id', value: 1 },
+			scopedCacheFingerprintOf('articles', [{ field: 'id', value: 1 }]),
 		]);
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles', 'articles:id=1'],
+				scopedCacheFingerprints: ['articles:&', 'articles:&id=,1,&'],
 			},
 			closed,
 		);
 
-		// Still answered with the tags the mutation resolved — the caller's dev header
-		// names what SHOULD have gone, and the recovery is what makes that true.
+		// Still answered with the fingerprints the mutation resolved — the caller's
+		// dev header names what SHOULD have gone, and the recovery is what makes
+		// that true.
 		expect(purged).toEqual([
-			{ collection: 'articles' },
-			{ collection: 'articles', field: 'id', value: 1 },
+			scopedCacheFingerprintOf('articles', []),
+			scopedCacheFingerprintOf('articles', [{ field: 'id', value: 1 }]),
 		]);
 
 		expect(queueCachePurge).not.toHaveBeenCalled();
@@ -2018,19 +2295,21 @@ describe('a purge that fails after its mutation committed', () => {
 
 	it(oneLine`
 		records the collection when the slices were unresolvable and reading the
-		collection's slice index failed too
+		collection's own index sets failed too
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
-			smembers: vi.fn().mockRejectedValue(closed),
+			scan: vi.fn().mockRejectedValue(closed),
+			sscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
-			pipeline: () => redisPipelineDouble(),
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
 		expect(await purgeScopedCache(cache as any, 'articles', null))
 			.toEqual([{ collection: 'articles' }]);
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
-			{ mode: 'collection', collection: 'articles', scopedCacheTags: [] },
+			{ mode: 'collection', collection: 'articles', scopedCacheFingerprints: [] },
 			closed,
 		);
 
@@ -2046,7 +2325,7 @@ describe('a purge that fails after its mutation committed', () => {
 		expect(await purgeScopedCache(cache as any, 'articles', [])).toBeNull();
 
 		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
-			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+			{ mode: 'namespace', collection: null, scopedCacheFingerprints: [] },
 			closed,
 		);
 
@@ -2055,7 +2334,7 @@ describe('a purge that fails after its mutation committed', () => {
 
 	it('records nothing, and reports the purge, when it went through', async () => {
 		await purgeScopedCache(cache as any, 'articles', [
-			{ collection: 'articles', field: 'id', value: 1 },
+			scopedCacheFingerprintOf('articles', [{ field: 'id', value: 1 }]),
 		]);
 
 		expect(recordPendingScopedCachePurge).not.toHaveBeenCalled();
@@ -2063,7 +2342,7 @@ describe('a purge that fails after its mutation committed', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromM2oParents', () => {
+describe('scopedCachePinsFromM2oParents', () => {
 	// owner <- owned_item <- owned_sub_item, each child naming its parent, so a read
 	// rooted at the sub-item reaches both ancestors through M2O hops only.
 	const schema = new SchemaBuilder()
@@ -2105,9 +2384,9 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	it(oneLine`
 		pins each nested collection by the parent keys the response carried, deduped
 	`, () => {
-		// Two sub-items under distinct items but ONE owner: the owner tag must not
-		// come out twice, and the item tags must not collapse to one.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		// Two sub-items under distinct items but ONE owner: the owner pin must not
+		// come out twice, and the item pins must not collapse to one.
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -2136,7 +2415,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	});
 
 	it('leaves the root collection to its own filter', () => {
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -2148,8 +2427,8 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 	it('keeps a collection reached across a to-many hop bare', () => {
 		// An INSERT into `owned_item` creates a row this read would have listed, and
-		// no key tag covers a key that did not exist when the entry was filled.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		// no key pin covers a key that did not exist when the entry was filled.
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owner',
 			fieldMapOf(['', 'owner'], ['owned_items', 'owned_item']),
@@ -2164,7 +2443,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	`, () => {
 		// Reached twice: directly by M2O, and back down the owner's to-many. The
 		// weakest path decides, or the read goes stale on an insert.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			fieldMapOf(
@@ -2186,7 +2465,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	});
 
 	it('skips a row whose parent link is empty, pinning its siblings', () => {
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -2210,7 +2489,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		// never the payload. Pinning nothing there would list the collection by
 		// nothing at all, and no write to it would ever drop the read.
 		expect(
-			pinnedScopedCacheTagsFromM2oParents(
+			scopedCachePinsFromM2oParents(
 				schema,
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
@@ -2221,7 +2500,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 	it('falls back to bare when a parent row carries no key', () => {
 		// Half a key set pins half the rows and silently serves the rest stale.
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			fieldMapOf(['owned_item', 'owned_item']),
@@ -2245,7 +2524,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			})
 			.build();
 
-		const pinned = pinnedScopedCacheTagsFromM2oParents(
+		const pinned = scopedCachePinsFromM2oParents(
 			a2oSchema,
 			'note',
 			fieldMapOf(['subject:owner', 'owner']),
@@ -2268,7 +2547,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			.build();
 
 		expect(
-			pinnedScopedCacheTagsFromM2oParents(
+			scopedCachePinsFromM2oParents(
 				selfSchema,
 				'owned_item',
 				fieldMapOf(['parent', 'owned_item']),
@@ -2281,7 +2560,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		// Nothing merged a parent in, so the response cannot answer the path and the
 		// walk refuses to read a key off a number.
 		expect(
-			pinnedScopedCacheTagsFromM2oParents(
+			scopedCachePinsFromM2oParents(
 				schema,
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
@@ -2326,7 +2605,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
 
-			const pinned = pinnedScopedCacheTagsFromM2oParents(
+			const pinned = scopedCachePinsFromM2oParents(
 				slicedSchema,
 				'owned_item',
 				ownerFieldMap,
@@ -2355,7 +2634,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
 
 			expect(
-				pinnedScopedCacheTagsFromM2oParents(
+				scopedCachePinsFromM2oParents(
 					slicedSchema,
 					'owned_item',
 					ownerFieldMap,
@@ -2368,7 +2647,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 		it('reads only the direct columns of a dotted scope field', () => {
 			// `owner.name` names a column on another collection, which the parent row
-			// does not carry — reading it off the row would tag a wrong value.
+			// does not carry — reading it off the row would pin a wrong value.
 			const dottedSchema = new SchemaBuilder()
 				.collection('owner', (c) => {
 					c.field('id').id();
@@ -2386,7 +2665,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			];
 
 			expect(
-				pinnedScopedCacheTagsFromM2oParents(
+				scopedCachePinsFromM2oParents(
 					dottedSchema,
 					'owned_item',
 					ownerFieldMap,
@@ -2403,7 +2682,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		});
 
 		it('goes bare when the collection declares no slice to fall back on', () => {
-			const pinned = pinnedScopedCacheTagsFromM2oParents(
+			const pinned = scopedCachePinsFromM2oParents(
 				schema,
 				'owned_item',
 				ownerFieldMap,
@@ -2416,7 +2695,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		it('still pins the same set exactly at the ceiling', () => {
 			// Non-vacuity: the two cases above degrade because of the COUNT, not
 			// because this shape was never pinnable.
-			const pinned = pinnedScopedCacheTagsFromM2oParents(
+			const pinned = scopedCachePinsFromM2oParents(
 				schema,
 				'owned_item',
 				ownerFieldMap,
@@ -2557,7 +2836,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 
 	it('spares a collection the root filter names by key', () => {
 		// The rows it reaches are exactly that key, which
-		// `pinnedScopedCacheTagsFromKeyedFilters` pins; nothing forces bare.
+		// `scopedCachePinsFromKeyedFilters` pins; nothing forces bare.
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(
 				schema,
@@ -2616,8 +2895,9 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	});
 
 	it('a sorted independent collection crosses despite a covering slice', () => {
-		// An `independent` collection is skipped in readTags (no slice pin), so its
-		// scope fields don't catch the reorder — the sort needs the bare tag.
+		// An `independent` collection is skipped in readFingerprints (no slice
+		// pin), so its scope fields don't catch the reorder — the sort needs the
+		// bare pin.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -2649,7 +2929,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 
 	it('a group crosses a scope-sliced filter-keyed collection even so', () => {
 		// A group collapses rows across slices, so the covering slice cannot stand
-		// in the way it does for a sort — it falls back to the bare tag.
+		// in the way it does for a sort — it falls back to the bare pin.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -2724,7 +3004,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 
 	it('names a collection whose nested node names no case at all', () => {
 		// `whenCase` points into a case list the parent does not carry, so
-		// nothing here says the field survives and the bare tag stays.
+		// nothing here says the field survives and the bare pin stays.
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(
 				schema,
@@ -3024,7 +3304,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 			spares itself when its own columns decide and its parent's key pins it
 		`, () => {
 			// Every write to a course of the student emits `course:student=<id>`,
-			// the pin `pinnedScopedCacheTagsFromO2mChildren` puts on this read.
+			// the pin `scopedCachePinsFromO2mChildren` puts on this read.
 			expect([...scopedCacheCollectionsBeyondNestedRows(
 				toManySchema(),
 				studentReading({
@@ -3313,7 +3593,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 	it('reports nothing for an A2O scope naming no collection of the schema', () => {
 		// The scope is request text picking the table to join. One that names
-		// nothing joins nothing, and must not reach the response's tag header.
+		// nothing joins nothing, and must not reach the response's pin header.
 		expect([...keyingOf({
 			filter: { categories: { 'category_id:nonexistent': { id: { _eq: 7 } } } },
 		}).keys()].sort()).toEqual(['owned_item', 'owned_item_category_junction']);
@@ -3321,7 +3601,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 	it('leaves a key unkeyed when its type cannot be pinned', () => {
 		// A date-like key is not safe to slice on, so even the primary key under
-		// `_eq` reports unkeyed and the collection keeps its bare tag.
+		// `_eq` reports unkeyed and the collection keeps its bare pin.
 		const dated = new SchemaBuilder()
 			.collection('owned_item', (c) => {
 				c.field('id').id();
@@ -3466,7 +3746,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 	`, () => {
 		// `_neq 3` bounds the owner's `company` column to nothing: a write moving it
 		// to 4 emits `owner:company=3` and `owner:company=4`, neither of which a
-		// read keyed on an empty set holds. Only the bare tag reaches it.
+		// read keyed on an empty set holds. Only the bare pin reaches it.
 		const scopedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -3680,7 +3960,7 @@ describe('scopedCacheOwnershipNestedPkPaths', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromO2mChildren', () => {
+describe('scopedCachePinsFromO2mChildren', () => {
 	// `child` hangs off `parent` twice, over two different fks, so one read can
 	// reach it by two names. `grandchild` sits a second to-many hop down, and
 	// `root` reaches the parent through an M2O so a prefix has something to walk.
@@ -3711,7 +3991,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		})
 		.build();
 
-	// The pin only applies where the write side emits the matching shallow tag,
+	// The pin only applies where the write side emits the matching shallow pin,
 	// which is what declaring the fk as a flat scope field promises.
 	schema.collections['child']!.scopedCacheFields = ['parent', 'alt_parent'];
 	schema.collections['grandchild']!.scopedCacheFields = ['child'];
@@ -3732,7 +4012,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		fieldMap: FieldMap,
 		records: Item[],
 	) {
-		return pinnedScopedCacheTagsFromO2mChildren(
+		return scopedCachePinsFromO2mChildren(
 			schema,
 			rootCollection,
 			fieldMap,
@@ -3814,7 +4094,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 
 	it('declines when a surfaced parent row carries no key', () => {
 		// One keyless row leaves part of the set unpinned, which takes the whole
-		// collection to the bare tag rather than a partial pin.
+		// collection to the bare pin rather than a partial pin.
 		expect(pinnedFor(
 			'parent',
 			fieldMapOf(['children', 'child']),
@@ -3827,7 +4107,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		// ownership slice covers rows reached by two disagreeing reverse fks.
 		const conflicted = new Set<CollectionKey>();
 
-		pinnedScopedCacheTagsFromO2mChildren(
+		scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child'], ['alt_children', 'child']),
@@ -3844,7 +4124,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	`, () => {
 		const conflicted = new Set<CollectionKey>();
 
-		const pinned = pinnedScopedCacheTagsFromO2mChildren(
+		const pinned = scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child'], ['favorite', 'child']),
@@ -3862,7 +4142,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	`, () => {
 		const conflicted = new Set<CollectionKey>();
 
-		const pinned = pinnedScopedCacheTagsFromO2mChildren(
+		const pinned = scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child'], ['drafts', 'child']),
@@ -3877,7 +4157,7 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	it('leaves conflictedOut empty for a child keyed on one fk', () => {
 		const conflicted = new Set<CollectionKey>();
 
-		pinnedScopedCacheTagsFromO2mChildren(
+		scopedCachePinsFromO2mChildren(
 			schema,
 			'parent',
 			fieldMapOf(['children', 'child']),
@@ -3995,7 +4275,7 @@ describe('scopedCachePathReversesChain', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
+describe('scopedCachePinsFromKeyedFilters', () => {
 	const schema = new SchemaBuilder()
 		.collection('owner', (c) => {
 			c.field('id').id();
@@ -4010,7 +4290,7 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 	function pinsFor(
 		keying: Map<CollectionKey, ScopedCacheFilterKeying>,
 	) {
-		return pinnedScopedCacheTagsFromKeyedFilters(schema, 'owned_item', keying);
+		return scopedCachePinsFromKeyedFilters(schema, 'owned_item', keying);
 	}
 
 	it('pins one primary-key tag per key the filter named', () => {
@@ -4161,36 +4441,36 @@ describe('scopedCacheNestedCollections', () => {
 
 
 describe('the purge counters a fill is guarded by', () => {
-	// Two merge rules, and they are not the same rule. A read's own capture was
-	// taken before its query, so it is earlier than anything a hook can hand over
-	// and wins without a comparison. Two captures that become ONE entry have no
-	// such ordering, so the earlier reading has to be found.
+	// Two merge rules, and they are not the same rule. A read's own value was read
+	// before its query, so it is earlier than anything a hook can hand over and wins
+	// without a comparison. Two readings that become ONE entry have no such
+	// ordering, so the earlier one has to be found.
 	it(oneLine`
-		keeps the read's own capture over a counter a hook handed for the same
+		keeps the read's own reading over a counter a hook handed for the same
 		collection
 	`, () => {
-		expect(foldHandedOverScopedCacheEpochs(
+		expect(foldScopedCacheEpochsFromHookDeclarations(
 			{ articles: '7', '*': '1' },
 			{ articles: '9', authors: '4' },
 		)).toEqual({ articles: '7', '*': '1', authors: '4' });
 	});
 
 	it(oneLine`
-		takes a handed-over counter for a collection the capture never named, since
-		that is the only reading of it there is
+		takes a declared counter for a collection the before-query reading never
+		named, since that is the only reading of it there is
 	`, () => {
-		expect(foldHandedOverScopedCacheEpochs({}, { authors: '4' }))
+		expect(foldScopedCacheEpochsFromHookDeclarations({}, { authors: '4' }))
 			.toEqual({ authors: '4' });
 	});
 
-	it('keeps a handed-over null, which is the earliest reading there is', () => {
-		expect(foldHandedOverScopedCacheEpochs({}, { authors: null }))
+	it('keeps a declared null, which is the earliest reading there is', () => {
+		expect(foldScopedCacheEpochsFromHookDeclarations({}, { authors: null }))
 			.toEqual({ authors: null });
 	});
 
 	it(oneLine`
-		merges two captures of one entry down to the EARLIER reading, so a purge
-		between them is still visible at fill time
+		merges two readings of one entry down to the EARLIER one, so a purge between
+		them is still visible at fill time
 	`, () => {
 		const merged = { articles: '9', authors: '2' };
 		mergeScopedCacheEpochs(merged, { articles: '7', tags: '5' });
@@ -4199,8 +4479,8 @@ describe('the purge counters a fill is guarded by', () => {
 	});
 
 	it(oneLine`
-		folds the captures one response carries into one, or none when it carries
-		none — an empty capture is a guard that ran, undefined is one that did not
+		folds the readings one response carries into one, or none when it carries
+		none — an empty reading is a guard that ran, undefined is one that did not
 	`, () => {
 		expect(mergedScopedCacheEpochs(undefined, undefined)).toBeUndefined();
 		expect(mergedScopedCacheEpochs({}, undefined)).toEqual({});
@@ -4211,54 +4491,55 @@ describe('the purge counters a fill is guarded by', () => {
 		)).toEqual({ articles: '7', authors: '4', '*': '1' });
 	});
 
-	it('names the tagged collections no capture covered', () => {
+	it('names the scoped collections no reading covered', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{ articles: '7', '*': '1' },
-			[{ collection: 'articles' }, { collection: 'authors' }],
+			[
+				scopedCacheFingerprintOf('articles', []),
+				scopedCacheFingerprintOf('authors', []),
+			],
 		)).toEqual(['authors']);
 	});
 
-	// `*` rides every capture, so its absence says no capture ran — with nothing
-	// guarded either way, refusing here would take the whole cache down.
-	it('names nothing when no capture ran at all', () => {
+	// `*` rides every reading, so its absence says the counters were never read —
+	// with nothing guarded either way, refusing here would take the whole cache down.
+	it('names nothing when the counters were never read', () => {
 		expect(scopedCacheCollectionsWithoutGuard(
 			{},
-			[{ collection: 'authors' }],
+			[scopedCacheFingerprintOf('authors', [])],
 		)).toEqual([]);
 
 		expect(scopedCacheCollectionsWithoutGuard(
 			undefined,
-			[{ collection: 'authors' }],
+			[scopedCacheFingerprintOf('authors', [])],
 		)).toEqual([]);
 	});
 });
 
-// The counters themselves, as opposed to the merge rules above: what a capture asks
-// Redis for, and what it answers when it cannot ask. Every arm below is a failure or
-// a configuration one, so none of them has a blackbox witness — a read that captures
-// nothing looks exactly like a read that captured and found nothing moved.
+// The counters themselves, as opposed to the merge rules above: what a read asks
+// Redis for before its query, and what it answers when it cannot ask. Every arm
+// below is a failure or a configuration one, so none of them can be covered in
+// blackbox — a read that reads nothing looks exactly like one that found nothing
+// moved.
 describe('reading and bumping the purge counters', () => {
 	const mget = vi.fn();
-
-	const counterPipeline = {
-		incr: vi.fn().mockReturnThis(),
-		expire: vi.fn().mockReturnThis(),
-		exec: vi.fn(),
-	};
+	const scopedCacheEpochBump = vi.fn();
 
 	beforeEach(() => {
 		env['CACHE_ENABLED'] = true;
 		mget.mockResolvedValue([]);
-		counterPipeline.exec.mockResolvedValue([]);
+		scopedCacheEpochBump.mockResolvedValue(1);
 
 		vi.mocked(useRedis).mockReturnValue({
 			mget,
-			pipeline: () => counterPipeline,
+			defineCommand: vi.fn(),
+			scopedCacheEpochBump,
 		} as any);
 	});
 
 	afterEach(() => {
 		delete env['CACHE_ENABLED'];
+		delete env['CACHE_SCOPED_EPOCH_TTL'];
 	});
 
 	it('asks for the wholesale counter alongside the named collections', async () => {
@@ -4296,7 +4577,7 @@ describe('reading and bumping the purge counters', () => {
 		['there is no Redis configured', () => {
 			vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		}],
-	])('captures nothing, and asks nothing, when %s', async (_case, disable) => {
+	])('reads nothing, and asks nothing, when %s', async (_case, disable) => {
 		disable();
 
 		expect(await readScopedCacheEpochs(['articles'])).toEqual({});
@@ -4305,38 +4586,35 @@ describe('reading and bumping the purge counters', () => {
 
 	// A read that cannot reach the counters still has to answer, and the fill is
 	// left unguarded exactly as it is with no Redis at all. What it must NOT do is
-	// answer with a counter reading per collection: `*` is what says a capture was
-	// taken, so filling it in from a read that never happened reports the guard as
-	// covering collections nothing was read for.
+	// answer with a counter reading per collection: `*` is what says the counters
+	// were read at all, so filling it in from a read that never happened reports the
+	// guard as covering collections nothing was read for.
 	it(oneLine`
-		captures nothing at all when the counters cannot be read, rather than a
-		reading of null per collection
+		reads nothing at all when the counters cannot be read, rather than a reading
+		of null per collection
 	`, async () => {
 		mget.mockRejectedValue(new Error('connection is closed'));
 
-		const captured = await readScopedCacheEpochs(['articles']);
+		const epochsBeforeQuery = await readScopedCacheEpochs(['articles']);
 
-		expect(captured).toEqual({});
+		expect(epochsBeforeQuery).toEqual({});
 
-		// The tags name a collection the capture never covered, and with no `*` the
+		// The read names a collection the reading never covered, and with no `*` the
 		// guard reports itself off rather than claiming to have covered it.
-		expect(scopedCacheCollectionsWithoutGuard(captured, [
-			{ collection: 'articles' },
+		expect(scopedCacheCollectionsWithoutGuard(epochsBeforeQuery, [
+			scopedCacheFingerprintOf('articles', []),
 		])).toEqual([]);
 	});
 
-	// `exec` rejects only on a connection-level failure, so an INCR refused on its
-	// own resolves as an entry error. Nothing here can stop the sweep behind it —
-	// that is what makes the cache correct — but a guard that silently stopped
-	// guarding must not also be silent: the fills racing this purge are unguarded.
+	// Nothing here can stop the sweep behind a refused bump — that is what makes the
+	// cache correct — but a guard that silently stopped guarding must not also be
+	// silent: the fills racing this purge are unguarded.
 	it('warns when a counter bump was refused rather than dropped', async () => {
 		const warn = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
 
-		counterPipeline.exec.mockResolvedValue([
-			[null, 1],
-			[new Error('OOM command not allowed'), null],
-		]);
+		scopedCacheEpochBump
+			.mockRejectedValue(new Error('OOM command not allowed'));
 
 		await bumpScopedCacheEpochs(['articles']);
 
@@ -4347,37 +4625,49 @@ describe('reading and bumping the purge counters', () => {
 		const warn = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
 
-		counterPipeline.exec.mockResolvedValue([[null, 1], [null, 1]]);
-
 		await bumpScopedCacheEpochs(['articles']);
 
 		expect(warn).not.toHaveBeenCalled();
 	});
 
-	// An expiring counter, so a collection nothing writes to stops costing a key. A
-	// read whose counter expired between capture and fill reads null on both sides
-	// and caches, which is right — nothing purged it in between.
-	it('bumps each collection once and gives the counter a day', async () => {
+	// An expiring counter, so a collection nothing writes to stops costing a key.
+	it(oneLine`
+		bumps each collection once and gives the counter a day by default
+	`, async () => {
 		await bumpScopedCacheEpochs(['articles', 'articles', 'authors']);
 
-		expect(counterPipeline.incr).toHaveBeenCalledTimes(2);
-
-		expect(counterPipeline.incr)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles');
-
-		expect(counterPipeline.incr)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:authors');
-
-		expect(counterPipeline.expire)
-			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 24 * 60 * 60);
-
-		expect(counterPipeline.exec).toHaveBeenCalledOnce();
+		expect(scopedCacheEpochBump.mock.calls).toEqual([[
+			2,
+			'ns:scoped-cache-epoch:articles',
+			'ns:scoped-cache-epoch:authors',
+			86400,
+		]]);
 	});
 
-	it('opens no pipeline for an empty collection list', async () => {
+	it('holds the counter for the configured duration', async () => {
+		env['CACHE_SCOPED_EPOCH_TTL'] = '2h';
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(scopedCacheEpochBump)
+			.toHaveBeenCalledWith(1, 'ns:scoped-cache-epoch:articles', 7200);
+	});
+
+	// ms() parses neither, and expiring the counter on the command that bumps it
+	// would leave every fill racing that purge unguarded.
+	it('falls back to a day on a duration Redis could not be given', async () => {
+		env['CACHE_SCOPED_EPOCH_TTL'] = 'whenever';
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(scopedCacheEpochBump)
+			.toHaveBeenCalledWith(1, 'ns:scoped-cache-epoch:articles', 86400);
+	});
+
+	it('sends no bump for an empty collection list', async () => {
 		await bumpScopedCacheEpochs([]);
 
-		expect(counterPipeline.exec).not.toHaveBeenCalled();
+		expect(scopedCacheEpochBump).not.toHaveBeenCalled();
 	});
 
 	// Best effort, and the whole of it: this runs BEFORE the sweep, so letting a
@@ -4387,7 +4677,7 @@ describe('reading and bumping the purge counters', () => {
 	it(oneLine`
 		swallows a bump the client refuses, so the sweep behind it still runs
 	`, async () => {
-		counterPipeline.exec.mockRejectedValue(new Error('closed'));
+		scopedCacheEpochBump.mockRejectedValue(new Error('closed'));
 
 		await expect(bumpScopedCacheEpochs(['articles'])).resolves.toBeUndefined();
 	});
@@ -4461,14 +4751,14 @@ describe('the Redis client scoped purging requires', () => {
 	it('refuses a cluster client while scoped purging is on', () => {
 		vi.mocked(useRedis).mockReturnValue({ isCluster: true } as any);
 
-		expect(() => assertScopedCacheRedisSupported())
+		expect(() => assertScopedCacheStoreSupported())
 			.toThrow(/not implemented for Redis cluster/);
 	});
 
 	it('accepts a standalone client', () => {
 		vi.mocked(useRedis).mockReturnValue({ isCluster: false } as any);
 
-		expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+		expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 	});
 
 	// Outside scoped mode the purge is a full flush, which a cluster takes.
@@ -4476,7 +4766,7 @@ describe('the Redis client scoped purging requires', () => {
 		env['CACHE_AUTO_PURGE_MODE'] = 'full';
 		vi.mocked(useRedis).mockReturnValue({ isCluster: true } as any);
 
-		expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+		expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 	});
 });
 
@@ -4490,7 +4780,7 @@ describe('the canonical scope value', () => {
 	it('folds a uuid to one case', () => {
 		const upper = '3F2504E0-4F89-11D3-9A0C-0305E82C3301';
 
-		expect(canonicalScopedCacheValue(upper, 'uuid'))
+		expect(canonicalizeScopedCachePinValue(upper, 'uuid'))
 			.toBe(upper.toLowerCase());
 	});
 
@@ -4500,18 +4790,18 @@ describe('the canonical scope value', () => {
 	it.each([
 		true, 1, '1', 't', 'T', 'true', 'TRUE', 'True', 'y', 'YES', 'on', 'ON',
 	])('reads %s as the one true slice', (raw) => {
-		expect(canonicalScopedCacheValue(raw, 'boolean')).toBe('true');
+		expect(canonicalizeScopedCachePinValue(raw, 'boolean')).toBe('true');
 	});
 
 	it.each([
 		false, 0, '0', 'f', 'F', 'false', 'FALSE', 'n', 'NO', 'off',
 	])('reads %s as the one false slice', (raw) => {
-		expect(canonicalScopedCacheValue(raw, 'boolean')).toBe('false');
+		expect(canonicalizeScopedCachePinValue(raw, 'boolean')).toBe('false');
 	});
 
 	it('reads null and undefined as the one sentinel', () => {
-		expect(canonicalScopedCacheValue(null, 'string')).toBe('\x00null');
-		expect(canonicalScopedCacheValue(undefined, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue(null, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue(undefined, 'string')).toBe('\x00null');
 	});
 
 	// `01`, `+1`, `0001` and a driver's `1` are one key to the database, so they
@@ -4523,7 +4813,7 @@ describe('the canonical scope value', () => {
 		['-0', '0'],
 		['-0042', '-42'],
 	])('strips an integer spelling %s down to %s', (raw, canonical) => {
-		expect(canonicalScopedCacheValue(raw, 'bigInteger')).toBe(canonical);
+		expect(canonicalizeScopedCachePinValue(raw, 'bigInteger')).toBe(canonical);
 	});
 
 	// Spellings `validateKeys` still lets through, since it only asks
@@ -4533,37 +4823,37 @@ describe('the canonical scope value', () => {
 		['0x10', '16'],
 		['1.0', '1'],
 	])('normalises %s, which validateKeys accepts, to %s', (raw, canonical) => {
-		expect(canonicalScopedCacheValue(raw, 'integer')).toBe(canonical);
+		expect(canonicalizeScopedCachePinValue(raw, 'integer')).toBe(canonical);
 	});
 
 	// Past MAX_SAFE_INTEGER no token can be right, and such a key cannot have
 	// matched a row either, so a numeric pass would corrupt it for nothing.
 	it('keeps an unsafe integer spelling exactly as written', () => {
-		expect(canonicalScopedCacheValue('9007199254740993e0', 'bigInteger'))
+		expect(canonicalizeScopedCachePinValue('9007199254740993e0', 'bigInteger'))
 			.toBe('9007199254740993e0');
 	});
 
 	it('keeps a bigInteger magnitude no Number could hold', () => {
 		const beyond = '170141183460469231731687303715884105727';
 
-		expect(canonicalScopedCacheValue(`0${beyond}`, 'bigInteger')).toBe(beyond);
+		expect(canonicalizeScopedCachePinValue(`0${beyond}`, 'bigInteger')).toBe(beyond);
 	});
 
 	// Only the fixed-scale types need the numeric pass (`'1.50'` vs `1.5`).
 	it.each(['decimal', 'float'] as const)('reads a %s numerically', (type) => {
-		expect(canonicalScopedCacheValue('1.50', type)).toBe('1.5');
-		expect(canonicalScopedCacheValue(1.5, type)).toBe('1.5');
+		expect(canonicalizeScopedCachePinValue('1.50', type)).toBe('1.5');
+		expect(canonicalizeScopedCachePinValue(1.5, type)).toBe('1.5');
 	});
 
 	it('keeps a decimal that is not a number as written', () => {
-		expect(canonicalScopedCacheValue('not-a-number', 'decimal'))
+		expect(canonicalizeScopedCachePinValue('not-a-number', 'decimal'))
 			.toBe('not-a-number');
 	});
 
 	// `time` has no date component, so both sides give `HH:MM:SS` and it stays a
 	// plain string — unlike the three types below it.
 	it('leaves a time value alone', () => {
-		expect(canonicalScopedCacheValue('05:06:07', 'time')).toBe('05:06:07');
+		expect(canonicalizeScopedCachePinValue('05:06:07', 'time')).toBe('05:06:07');
 	});
 
 	it.each(['date', 'dateTime', 'timestamp'] as const)(
@@ -4571,26 +4861,26 @@ describe('the canonical scope value', () => {
 		(type) => {
 			const iso = '2024-03-04T05:06:07.000Z';
 
-			expect(canonicalScopedCacheValue(iso, type))
+			expect(canonicalizeScopedCachePinValue(iso, type))
 				.toBe(String(Date.parse(iso)));
 
-			expect(canonicalScopedCacheValue(new Date(iso), type))
+			expect(canonicalizeScopedCachePinValue(new Date(iso), type))
 				.toBe(String(Date.parse(iso)));
 		},
 	);
 
 	it('keeps a date it cannot parse as written', () => {
-		expect(canonicalScopedCacheValue('never', 'dateTime')).toBe('never');
+		expect(canonicalizeScopedCachePinValue('never', 'dateTime')).toBe('never');
 	});
 
 	it('falls through to the string form for a type it says nothing about', () => {
-		expect(canonicalScopedCacheValue(7, 'json')).toBe('7');
-		expect(canonicalScopedCacheValue(7, undefined)).toBe('7');
+		expect(canonicalizeScopedCachePinValue(7, 'json')).toBe('7');
+		expect(canonicalizeScopedCachePinValue(7, undefined)).toBe('7');
 	});
 
 	// A naive column comes back as a local Date from the driver but as an ISO string
 	// from a filter, so the epoch-ms canonical can diverge across drivers and
-	// timezones. The read side never pins these — the bare collection tag instead,
+	// timezones. The read side never pins these — the bare collection pin instead,
 	// which over-purges and cannot go stale.
 	it.each(['date', 'dateTime', 'timestamp'] as const)(
 		'refuses to pin a %s',
@@ -4605,4 +4895,276 @@ describe('the canonical scope value', () => {
 			expect(isPinnableScopeType(type)).toBe(true);
 		},
 	);
+});
+
+// The view a fingerprint narrows to: a write rewriting none of these fields is
+// taken not to change the response, so each one the read depends on has to be
+// here.
+describe('ScopedCacheReadPlan.fieldsByCollection', () => {
+	it('names the fields a permission case filters the root by', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('status').string();
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [{ status: { _eq: 'published' } }],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{ type: 'field', name: 'title', fieldKey: 'title', whenCase: [] },
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['id', 'status', 'title']],
+		]));
+	});
+
+	it('names the fields a nested node\'s case filters through a relation', () => {
+		const schema = new SchemaBuilder()
+			.collection('author', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('team').m2o('team');
+			})
+			.collection('team', (c) => {
+				c.field('id').id();
+				c.field('active').boolean();
+			})
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('author').m2o('author');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'm2o',
+					name: 'author',
+					fieldKey: 'author',
+					query: {},
+					cases: [{ team: { active: { _eq: true } } }],
+					whenCase: [],
+					relation: {
+						collection: 'article',
+						field: 'author',
+						related_collection: 'author',
+					},
+					children: [
+						{ type: 'field', name: 'name', fieldKey: 'name', whenCase: [] },
+					],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['author', 'id']],
+			['author', ['name', 'team']],
+			['team', ['active']],
+		]));
+	});
+
+	it('names every column the root\'s search can match', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('body').text();
+				c.field('views').integer();
+				c.field('featured').boolean();
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: { search: 'news' },
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['body', 'id', 'title', 'views']],
+		]));
+	});
+
+	it('names every column a nested node\'s deep search can match', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('body').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'o2m',
+					name: 'comment',
+					fieldKey: 'comments',
+					query: { search: 'news' },
+					cases: [],
+					whenCase: [],
+					relation: {
+						collection: 'comment',
+						field: 'article',
+						related_collection: 'article',
+						meta: { one_field: 'comments' },
+					},
+					children: [
+						{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+					],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['comments', 'id']],
+			['comment', ['article', 'body', 'id']],
+		]));
+	});
+
+	it('names the collection column of an A2O the read nests through', () => {
+		const schema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('subject').a2o(['owner']);
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('note', schema, {
+			type: 'root',
+			name: 'note',
+			query: {},
+			cases: [],
+			children: [
+				{
+					type: 'a2o',
+					names: ['owner'],
+					fieldKey: 'subject',
+					children: {
+						owner: [
+							{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+						],
+					},
+					query: { owner: {} },
+					cases: { owner: [] },
+					whenCase: [],
+					relation: {
+						collection: 'note',
+						field: 'subject',
+						related_collection: null,
+						meta: { one_collection_field: 'collection' },
+					},
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['note', ['collection', 'subject']],
+			['owner', ['id']],
+		]));
+	});
+
+	it('names the fk a count() over a permission-cased to-many reads by', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'functionField',
+					name: 'count(comments)',
+					fieldKey: 'count(comments)',
+					query: {},
+					relatedCollection: 'comment',
+					cases: [{ status: { _eq: 'published' } }],
+					whenCase: [],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['comments', 'id']],
+			['comment', ['article', 'status']],
+		]));
+	});
+
+	it('leaves out a collection whose binding to its parent is unknown', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'functionField',
+					name: 'count(comments)',
+					fieldKey: 'total',
+					query: {},
+					relatedCollection: 'comment',
+					cases: [{ status: { _eq: 'published' } }],
+					whenCase: [],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['comments', 'id']],
+		]));
+	});
 });

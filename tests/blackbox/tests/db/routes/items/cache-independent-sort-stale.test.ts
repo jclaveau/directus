@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // RED until fixed. An enforced-FK M2O keyed by pk is `independent`; add a
 // scoped_cache_field to it and a sort across it is kept out of `beyond`
-// (read-tags.ts: sorted && !hasCoveringSlice is false), then `independent` +
+// (read-pins.ts: sorted && !hasCoveringSlice is false), then `independent` +
 // !nested + !beyond is skipped in readTags (item-scoped-cache-service.ts) — so
 // it gets NO tag and no covering pin, and a reorder serves a stale HIT.
 const ROOT = 'indep_sort_root';

@@ -18,7 +18,7 @@ vi.mock('../middleware/respond.js', () => ({ respond: vi.fn() }));
 
 const scopedCachePurgeEnabled = vi.fn();
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 

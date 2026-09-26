@@ -3,10 +3,11 @@
 // aggregates orders. The framework purges the order's own slice, but nothing reaches
 // the summary. This update hook resolves the owner of the order(s) being updated
 // (from meta.keys, read before the update commits), looks up that owner's summary
-// slice, and passes the lookup's returned scopedCacheTags to `scopedCache.purgeBy`.
+// slice, and passes that lookup's own `scopedCacheFingerprints` to
+// `scopedCache.purgeBy`.
 //
 // Resolving the owner from the updated keys keeps the purge precise. Reuses the
-// lookup's tags rather than build one, so the declared purge can't drift.
+// lookup's fingerprints rather than build one, so the declared purge can't drift.
 
 const ORDER = 'test_items_order';
 const SUMMARY = 'test_items_summary';
@@ -40,7 +41,9 @@ export default function registerHooks({ filter }, { services }) {
 			{ emitEvents: false },
 		);
 
-		context.scopedCache?.purgeBy(affected.getMeta?.()?.scopedCacheTags ?? []);
+		context.scopedCache?.purgeBy(
+			affected.getMeta?.()?.scopedCacheFingerprints ?? [],
+		);
 
 		return payload;
 	});

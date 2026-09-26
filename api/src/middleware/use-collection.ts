@@ -3,7 +3,7 @@
  * system collections
  */
 import type { RequestHandler } from 'express';
-import { readScopedCacheEpochs } from '../scoped-cache.js';
+import { readScopedCacheEpochs } from '../scoped-cache/index.js';
 import asyncHandler from '../utils/async-handler.js';
 
 const useCollection = (collection: string): RequestHandler => {
@@ -11,11 +11,11 @@ const useCollection = (collection: string): RequestHandler => {
 		req.collection = collection;
 
 		// The system controllers behind this middleware hand `respond` a payload with
-		// no capture of their own, and the fill guard needs one taken BEFORE the rows
+		// no reading of their own, and the fill guard needs one taken BEFORE the rows
 		// are read (`fill-guard.ts`). This is the earliest point that knows the
-		// collection every such response is tagged with, so the capture lives here.
+		// collection every such response is tagged with, so the reading is taken here.
 		if (req.method === 'GET') {
-			res.locals['scopedCacheEpochsAtRequest'] =
+			res.locals['scopedCacheEpochsBeforeQuery'] =
 				await readScopedCacheEpochs([collection]);
 		}
 

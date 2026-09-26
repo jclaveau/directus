@@ -3,7 +3,7 @@ import type {
 	Filter,
 	Item,
 	SchemaOverview,
-	ScopedCacheTag,
+	ScopedCacheCollectionPin,
 } from '@directus/types';
 import { toArray } from '@directus/utils';
 import {
@@ -18,6 +18,7 @@ import type {
 } from '../permissions/modules/process-ast/types.js';
 import type { AST } from '../types/ast.js';
 import { scopedCachePurgeEnabled } from './config.js';
+import { SCOPED_CACHE_ANY_FIELD } from './fingerprint.js';
 import type { ScopedCacheOwnershipInjection } from './ownership-injection.js';
 import {
 	resolveScopedCacheM2oJoinChainFromPath,
@@ -25,34 +26,40 @@ import {
 	type ScopedCacheFilterKeying,
 } from './paths.js';
 import {
-	pinnedScopedCacheTagsFromKeyedFilters,
-	pinnedScopedCacheTagsFromM2oParents,
-	pinnedScopedCacheTagsFromO2mChildren,
+	scopedCachePinsFromKeyedFilters,
+	scopedCachePinsFromM2oParents,
+	scopedCachePinsFromO2mChildren,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheFieldNamesByAliasedPath,
+	scopedCacheNestedRowBindings,
 	scopedCacheNodeBoundsByCollection,
 	scopedCacheRowsAtPathEnd,
 	scopedCacheUnaliasedPath,
+	scopedCacheViewFieldsBeyondFieldMap,
 	type ScopedCacheSortDeferral,
-} from './read-tags.js';
+} from './read-pins.js';
 
 const NO_FIELD_MAP: FieldMap = { read: new Map(), other: new Map() };
 
 /**
- * What one read's tags are assembled from, in the two halves the query splits it
- * into: what the AST alone decides, and what only the returned rows can say.
+ * What one read's fingerprints are assembled from, in the two halves the query
+ * splits it into: what the AST alone decides, and what only the returned rows can
+ * say.
  *
  * The split is why this is an object rather than one call. The pins that read rows
  * have to be filled from INSIDE `run-ast` — it is the only place the temporary
  * primary keys still exist — while everything else must be derived before it,
  * because `run-ast` returns early on an empty result and never reaches that
- * callback. Deriving the field map there too would drop every collection's tag on
- * exactly the reads that returned nothing.
+ * callback. Deriving the field map there too would bare every collection's
+ * fingerprint on exactly the reads that returned nothing.
  */
 export class ScopedCacheReadPlan {
 	readonly fieldMap: FieldMap;
+	// What the view depends on beyond the field map: the cases, the searches and
+	// the A2O collection columns.
+	readonly viewFieldMap: FieldMap;
 	readonly filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
-	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheTag[]>;
+	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheCollectionPin[]>;
 	readonly beyondNestedRows: Set<CollectionKey>;
 	// The field behind each nested path, which the field map files under its alias.
 	readonly fieldNames: ReadonlyMap<string, string>;
@@ -65,8 +72,8 @@ export class ScopedCacheReadPlan {
 	// What bounds each node's rows, per collection — its filter and its cases.
 	readonly nodeBounds: ReadonlyMap<CollectionKey, Array<Filter | null>>;
 
-	m2oParentPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
-	o2mChildPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
+	m2oParentPins: Map<CollectionKey, ScopedCacheCollectionPin[]> = new Map();
+	o2mChildPins: Map<CollectionKey, ScopedCacheCollectionPin[]> = new Map();
 	readonly o2mConflicted = new Set<CollectionKey>();
 
 	constructor(
@@ -81,6 +88,10 @@ export class ScopedCacheReadPlan {
 			? fieldMapFromAst(ast, schema)
 			: NO_FIELD_MAP;
 
+		this.viewFieldMap = enabled
+			? scopedCacheViewFieldsBeyondFieldMap(schema, ast)
+			: NO_FIELD_MAP;
+
 		this.fieldNames = enabled
 			? scopedCacheFieldNamesByAliasedPath(ast)
 			: new Map();
@@ -91,7 +102,7 @@ export class ScopedCacheReadPlan {
 			? scopedCacheFilterKeyingByCollection(schema, ast)
 			: new Map();
 
-		this.keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
+		this.keyedFilterPins = scopedCachePinsFromKeyedFilters(
 			schema,
 			collection,
 			this.filterKeying,
@@ -112,7 +123,7 @@ export class ScopedCacheReadPlan {
 
 		// An injected ancestor is nested to pin by key, and the case gating its node
 		// is decided on the row that carries the fk — a write to that row purges its
-		// own tags — so a partial `whenCase` alone must not bare it. A filter, sort
+		// own slices — so a partial `whenCase` alone must not bare it. A filter, sort
 		// or group reaching the ancestor still does: those depend on its rows beyond
 		// the nested ones, whichever way it came to be nested.
 		const injectedAncestors = new Set<CollectionKey>();
@@ -148,7 +159,7 @@ export class ScopedCacheReadPlan {
 	 * `run-ast` injects every level's primary key for the nesting to work and strips
 	 * it again before the response, so this is the one moment a parent row can be
 	 * pinned BY that key. Not called for an empty result, which needs no pin: with
-	 * no row nested, the bare tag is already what each collection deserves.
+	 * no row nested, the bare fingerprint is already what each collection deserves.
 	 */
 	pinFromRows(rows: Item | Item[]): void {
 		if (!scopedCachePurgeEnabled()) {
@@ -157,7 +168,7 @@ export class ScopedCacheReadPlan {
 
 		this.markSortsCutByALimit(toArray(rows));
 
-		this.m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
+		this.m2oParentPins = scopedCachePinsFromM2oParents(
 			this.schema,
 			this.collection,
 			this.fieldMap,
@@ -165,7 +176,7 @@ export class ScopedCacheReadPlan {
 			this.fieldNames,
 		);
 
-		this.o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
+		this.o2mChildPins = scopedCachePinsFromO2mChildren(
 			this.schema,
 			this.collection,
 			this.fieldMap,
@@ -224,10 +235,73 @@ export class ScopedCacheReadPlan {
 	}
 
 	/**
-	 * The collections whose purge counters this read has to capture: the ones its
-	 * tags will name. Both are known before the query — the field map is built off
-	 * the AST and the keying off the filter — which is what lets the capture predate
-	 * any purge racing the read.
+	 * Every field each collection this read touched is bound to: what the read
+	 * selected of it, sorted on and filtered by. A write touching none of them
+	 * cannot change the response, whichever slice it lands in.
+	 *
+	 * Both halves of the field map, unioned: it splits by the permission each
+	 * field needs — `read` holds what the filters and sorts name, `other` what the
+	 * selection does — and a read depends on either the same way.
+	 *
+	 * A collection nested at several paths unions them, and the pins the caller
+	 * adds afterwards ride on top: a pinned path is a field the read is bound to
+	 * by definition, and the field map files it under the collection it belongs to
+	 * rather than the one pinning it.
+	 *
+	 * The columns attaching each nested row to its parent join them — a to-many's
+	 * reverse fk, an A2O's collection column: the field map says which columns of
+	 * a nested row the read shows, and those say which rows it shows at all. So do
+	 * the fields the view map adds, which bound rows the same way a filter does.
+	 */
+	fieldsByCollection(): Map<CollectionKey, string[]> {
+		const byCollection = new Map<CollectionKey, Set<string>>();
+
+		const addFields = (
+			collection: CollectionKey,
+			fields: Iterable<string>,
+		): void => {
+			const knownFields = byCollection.get(collection) ?? new Set<string>();
+
+			for (const field of fields) {
+				knownFields.add(field);
+			}
+
+			byCollection.set(collection, knownFields);
+		};
+
+		for (const fieldMap of [this.fieldMap, this.viewFieldMap]) {
+			const rowBindings = scopedCacheNestedRowBindings(
+				this.schema,
+				this.collection,
+				fieldMap,
+				this.fieldNames,
+			);
+
+			for (const [collection, fields] of rowBindings) {
+				addFields(collection, fields);
+			}
+
+			for (const entries of [fieldMap.read, fieldMap.other]) {
+				for (const { collection, fields } of entries.values()) {
+					addFields(collection, fields);
+				}
+			}
+		}
+
+		// Left out, a collection's view is every field — what a binding the
+		// analysis could not resolve needs.
+		return new Map([...byCollection]
+			.filter(([, fields]) => !fields.has(SCOPED_CACHE_ANY_FIELD))
+			.map(([collection, fields]) => {
+				return [collection, [...fields].sort()];
+			}));
+	}
+
+	/**
+	 * The collections whose purge counters this read has to take: the ones its
+	 * fingerprints will name. Both are known before the query — the field map is
+	 * built off the AST and the keying off the filter — which is what lets the
+	 * reading predate any purge racing the read.
 	 */
 	collectionsToGuard(): string[] {
 		return [

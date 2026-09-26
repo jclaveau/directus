@@ -7,7 +7,7 @@ const TABLE = 'directus_scoped_cache_pending_purges';
 export interface PendingScopedCachePurge {
 	mode: CachePurgeMode;
 	collection: string | null;
-	scopedCacheTags: string[];
+	scopedCacheFingerprints: string[];
 }
 
 export interface PendingScopedCachePurgeRow extends PendingScopedCachePurge {
@@ -24,9 +24,9 @@ export interface PendingScopedCachePurgeRow extends PendingScopedCachePurge {
  * is what `scoped-cache.test.ts` mocks to drive the drain — folded into
  * `scoped-cache.ts` those tests would have to mock knex instead.
  *
- * Tags are stored as their display labels, never as Redis keys: a key embeds
- * `CACHE_NAMESPACE`, and a namespace change between the failure and the retry
- * would leave a row aimed at a key nothing reads.
+ * A target is stored as its rendered fingerprint, never as a Redis key: a key
+ * embeds `CACHE_NAMESPACE`, and a namespace change between the failure and the
+ * retry would leave a row aimed at a key nothing reads.
  *
  * Best-effort by construction, and its own failure is swallowed for the reason
  * the caller's was: the mutation has already committed, so throwing here would
@@ -38,19 +38,19 @@ export async function recordPendingScopedCachePurge(
 	purge: PendingScopedCachePurge,
 	error: unknown,
 ): Promise<void> {
-	// A coarse purge names no tag, so it is one row carrying only its mode and
-	// collection. `namespace` carries neither.
-	const scopedCacheTags: (string | null)[] = purge.scopedCacheTags.length > 0
-		? purge.scopedCacheTags
+	// A coarse purge names no fingerprint, so it is one row carrying only its mode
+	// and collection. `namespace` carries neither.
+	const recorded: (string | null)[] = purge.scopedCacheFingerprints.length > 0
+		? purge.scopedCacheFingerprints
 		: [null];
 
 	try {
-		await getDatabase()(TABLE).insert(scopedCacheTags.map((scopedCacheTag) => {
+		await getDatabase()(TABLE).insert(recorded.map((fingerprint) => {
 			return {
 				failed_at: new Date(),
 				mode: purge.mode,
 				collection: purge.collection,
-				scoped_cache_tag: scopedCacheTag,
+				scoped_cache_fingerprint: fingerprint,
 				attempts: 0,
 				last_error: errorText(error),
 			};
@@ -74,14 +74,14 @@ export async function listPendingScopedCachePurges(): Promise<
 	PendingScopedCachePurgeRow[]
 > {
 	const rows = await getDatabase()(TABLE)
-		.select('id', 'mode', 'collection', 'scoped_cache_tag')
+		.select('id', 'mode', 'collection', 'scoped_cache_fingerprint')
 		.orderBy('id', 'asc');
 
 	const byTarget = new Map<string, PendingScopedCachePurgeRow>();
 
 	for (const row of rows) {
 		const target =
-			`${row.mode} ${row.collection ?? ''} ${row.scoped_cache_tag ?? ''}`;
+			`${row.mode} ${row.collection ?? ''} ${row.scoped_cache_fingerprint ?? ''}`;
 
 		const seen = byTarget.get(target);
 
@@ -93,9 +93,9 @@ export async function listPendingScopedCachePurges(): Promise<
 		byTarget.set(target, {
 			mode: row.mode,
 			collection: row.collection,
-			scopedCacheTags: row.scoped_cache_tag === null
+			scopedCacheFingerprints: row.scoped_cache_fingerprint === null
 				? []
-				: [row.scoped_cache_tag],
+				: [row.scoped_cache_fingerprint],
 			ids: [row.id],
 		});
 	}

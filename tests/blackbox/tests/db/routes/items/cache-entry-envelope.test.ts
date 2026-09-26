@@ -74,7 +74,7 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 			const keys = await redis.keys(`${namespace}_response:*`);
 
 			const entries = keys.filter((key) => {
-				return !key.endsWith('__expires_at') && !key.endsWith('__tags');
+				return !key.endsWith('__expires_at') && !key.endsWith('__pins');
 			});
 
 			expect(entries).toHaveLength(1);
@@ -259,9 +259,13 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 
 				// An entry the audit cannot decode is `unreplayable`/`unreadable`; a
 				// diff on the one field moved is the body read back whole.
+				// Bound to the collection: the descriptors are the shard's, and an
+				// audit retires every one whose entry its own namespace does not hold
+				// — a parallel suite's under another namespace included.
 				for (let attempt = 0; attempt < 30; attempt++) {
 					const run = await request(url)
 						.post('/utils/cache/audit')
+						.send({ collection: COLLECTION })
 						.set('Authorization', auth)
 						.expect(200);
 
@@ -305,6 +309,7 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 				try {
 					const refused = await request(url)
 						.post('/utils/cache/audit')
+						.send({ collection: COLLECTION })
 						.set('Authorization', auth);
 
 					expect(refused.statusCode).toBe(503);

@@ -19,6 +19,7 @@ const env: Record<string, any> = {
 	CACHE_AUTO_PURGE_IGNORE_LIST: [],
 	CACHE_NAMESPACE: 'scalabus',
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+	CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	MAX_BATCH_MUTATION: 100000,
 };
 
@@ -61,7 +62,17 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
-const { createScopedCacheCollector } = await import('../scoped-cache.js');
+
+const { createScopedCacheHookDeclarations, scopedCachePinKeys } =
+	await import('../scoped-cache/index.js');
+
+// What a read ended up pinned to, as the dev headers and the telemetry spell it:
+// `collection`, or `collection:field=value` for a value slice.
+const pinnedSlices = (result: unknown): string[] => {
+	return scopedCachePinKeys(
+		readMeta(result)?.scopedCacheFingerprints ?? [],
+	);
+};
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -126,11 +137,12 @@ const cascadeChildSchema = new SchemaBuilder()
 cascadeChildSchema.collections['test']!.scopedCacheFields = ['student'];
 cascadeChildSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
 
-// Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
+// Drives the purge-pin resolution at every mutation site: which ScopedCacheTags
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
-// asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
-// itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
-// (capture-before-write, old ∪ new for update/delete/upsert).
+// asserted via toHaveBeenCalledWith(cache, collection, pins, context). The
+// pin-derivation
+// itself is unit-tested in scoped-cache-pins.test.ts; this pins the purge side
+// (snapshot-before-write, old ∪ new for update/delete/upsert).
 describe(oneLine`
 	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
 `, () => {
@@ -164,7 +176,7 @@ describe(oneLine`
 
 		await service(selfCascadeSchema).deleteMany([1]);
 
-		// Not twice: the slice purge the tags would have driven is a subset of this.
+		// Not twice: the slice purge the pins would have driven is a subset of this.
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
@@ -199,7 +211,7 @@ describe(oneLine`
 	it(oneLine`
 		updateMany purges old ∪ new — a row moved student A→B drops both slices
 	`, async () => {
-		// snapshotScopedCacheTags reads the pre-update row (old = A), then re-reads the
+		// snapshotScopedCachePins reads the pre-update row (old = A), then re-reads the
 		// committed row after the write (new = B) — the stored row is authoritative, not the
 		// payload, so a trigger/coercion rewrite still resolves the right slice. old ∪ new.
 		tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
@@ -211,47 +223,58 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		// Each snapshot also emits the mutated row's primary-key slice, so it appears
-		// once per capture (old and new) — the real purge dedups on the tag key.
+		// once per snapshot (old and new) — the real purge dedups on the pin key.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['b'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
 
 	it(oneLine`
-		updateMany that leaves the scope field untouched still purges the captured slice —
-		old and re-read new both resolve to A
+		updateMany that leaves the scope field untouched still purges the snapshotted
+		slice — old and re-read new both resolve to A
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
 		await service().updateMany([1], { name: 'renamed' });
 
-		// Exact, not arrayContaining: the tags are old ∪ new, so an unchanged value repeats
-		// (the real purge dedups via a Set on the tag key). Pinning the whole array also
+		// Exact, not arrayContaining: the pins are old ∪ new, so an unchanged value
+		// repeats
+		// (the real purge dedups via a Set on the pin key). Pinning the whole array also
 		// witnesses that no OTHER slice leaks in.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
 
 	it(oneLine`
-		updateMany with purgeCollectionTag:false drops the row's own slices and leaves
+		updateMany with purgeBareFingerprint:false drops the row's own slices and leaves
 		the bare tag warm — the reads it names never decided on the written column
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
@@ -260,7 +283,7 @@ describe(oneLine`
 		await service().updateMany(
 			[1],
 			{ name: 'renamed' },
-			{ purgeCollectionTag: false },
+			{ purgeBareFingerprint: false },
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
@@ -269,18 +292,24 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
 			],
 			expect.anything(),
-			{ includeCollectionTag: false },
+			// The rows the mutation wrote ride in the same options object; what this
+			// case is about is the bare pin the purge is told to leave warm.
+			expect.objectContaining({ includeBareFingerprint: false }),
 		);
 	});
 
 	it(oneLine`
-		purgeCollectionTag:false holds through a delete that cascades into another
+		purgeBareFingerprint:false holds through a delete that cascades into another
 		collection — the child takes its coarse purge, the parent keeps its bare tag
 	`, async () => {
 		purgeScopedCache.mockResolvedValue([]);
@@ -289,7 +318,7 @@ describe(oneLine`
 
 		await service(cascadeChildSchema).deleteMany(
 			[1],
-			{ purgeCollectionTag: false },
+			{ purgeBareFingerprint: false },
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(2);
@@ -297,11 +326,17 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+			[
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+			],
 			expect.anything(),
-			{ includeCollectionTag: false, scopedCachePurgeId: expect.any(String) },
+			expect.objectContaining({
+				includeBareFingerprint: false,
+				scopedCachePurgeId: expect.any(String),
+			}),
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
@@ -317,8 +352,9 @@ describe(oneLine`
 		updateMany falls back to a coarse purge (null) when a pre-update row is missing
 		the scope field
 	`, async () => {
-		// snapshotScopedCacheTags needs every row to resolve all scope fields; a row missing
-		// `student` makes the old value unknowable → null → coarse collection-wide purge.
+		// snapshotScopedCachePins needs every row to resolve all scope fields; a row
+		// missing `student` makes the old value unknowable → null → coarse
+		// collection-wide purge.
 		tracker.on.select('test').response([{ id: 1 }]);
 		tracker.on.update('test').response(1);
 
@@ -336,7 +372,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		deleteMany purges the scope slices of the rows it deleted (captured before delete)
+		deleteMany purges the scope slices of the rows it deleted (snapshotted
+		before delete)
 	`, async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
@@ -353,11 +390,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -367,7 +409,7 @@ describe(oneLine`
 		it rewrites, old slice and new
 	`, async () => {
 		// Row 2 hangs off the deleted row 1 through `parent`; the database rewrites
-		// it under the delete, so it is captured like an update: before, and again
+		// it under the delete, so it is snapshotted like an update: before, and again
 		// once committed.
 		tracker.on.select('test').responseOnce([{ id: 2 }]);
 
@@ -392,13 +434,20 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -424,25 +473,30 @@ describe(oneLine`
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
-		// Pure insert → empty old snapshot, so the new slice is the whole tag set (exact).
+		// Pure insert → empty old snapshot, so the new slice is the whole pin set
+		// (exact).
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
 
 	it(oneLine`
-		upsertMany (update) captures the pre-update slice — a keyed payload snapshots old
+		upsertMany (update) snapshots the pre-update slice — a keyed payload takes old
 		before the write (old ∪ new)
 	`, async () => {
 		// The payload carries the key → upsertOne takes the update path; the pre-snapshot
 		// reads the old slice (A) before the update runs. arrayContaining (not exact): upsert
-		// issues a non-fixed number of selects, so the old ∪ new tag count isn't pinnable — the
+		// issues a non-fixed number of selects, so the old ∪ new pin count isn't
+		// pinnable — the
 		// A→B exact-union witness lives in the updateMany test above.
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
@@ -452,9 +506,17 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+			[
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+			],
+			expect.anything(),
 			expect.anything(),
 		);
 
@@ -463,6 +525,7 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			null,
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -480,11 +543,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -514,13 +582,16 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -545,7 +616,7 @@ describe(oneLine`
 		);
 	});
 
-	// Purge tags come from the value actually stored, not the raw input: a
+	// Purge pins come from the value actually stored, not the raw input: a
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
 	it(oneLine`
@@ -566,9 +637,12 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['b'] },
+					},
 				],
+				expect.anything(),
 				expect.anything(),
 			);
 		}
@@ -592,14 +666,12 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{
 					collection: 'test',
-					field: 'student',
-					value: 'default-owner',
-					type: 'string',
+					pinnedScope: { 'id': ['1'], 'student': ['default-owner'] },
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -610,7 +682,8 @@ describe(oneLine`
 	`, async () => {
 		// The committed row resolves `student` to NULL (unset column, DB default null). The field
 		// key IS present, so it's a precise null-slice purge — distinct from a MISSING field key,
-		// which is the coarse (null-tags) fallback above. A read filtered `student: { _eq: null }`
+		// which is the coarse (null-pins) fallback above. A read filtered
+		// `student: { _eq: null }`
 		// pins the same slice, so the two sides meet.
 		tracker.on.insert('test').response([1]);
 		tracker.on.select('test').response([{ id: 1, student: null }]);
@@ -621,9 +694,12 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'test', field: 'student', value: null, type: 'string' },
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['\x00null'] },
+				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -633,7 +709,7 @@ describe(oneLine`
 		an update-in-disguise whose OLD slice the create path can't recover
 	`, async () => {
 		// The hook returns a PK but declares nothing. It might have moved that row
-		// between slices (an upsert), and createMany has no old∪new capture → the old
+		// between slices (an upsert), and createMany has no old∪new snapshot → the old
 		// slice would leak. So without a declaration the purge is coarse (null).
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
@@ -657,8 +733,8 @@ describe(oneLine`
 	it(oneLine`
 		a take-over the hook declares wrote nothing purges nothing at all
 	`, async () => {
-		// Nothing was written, so no entry can have gone stale — and an empty tag
-		// array is not "nothing": it still resolves to this collection's bare tag.
+		// Nothing was written, so no entry can have gone stale — and an empty pin
+		// array is not "nothing": it still resolves to this collection's bare pin.
 		const takeOver = async (_payload: any, _meta: any, ctx: any) => {
 			ctx.scopedCache.skipPurgeFor(99);
 			return 99;
@@ -706,9 +782,12 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
 				],
+				expect.anything(),
 				expect.anything(),
 			);
 		}
@@ -737,11 +816,16 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'student', value: 'C', type: 'string' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['c'] },
+					},
 				],
+				expect.anything(),
 				expect.anything(),
 			);
 		}
@@ -752,36 +836,35 @@ describe(oneLine`
 
 	// Regression: the `cache.scope` filter returns its payload unchanged when no
 	// extension listens, i.e. the SAME array reference. The read must still carry
-	// the bare collection tag — a clear-and-refill of that reference would wipe it,
-	// leaving every read untagged and unpurgeable (stale HIT after a write).
+	// the bare collection slice — a clear-and-refill of that reference would wipe
+	// it, leaving every read unpinned and unpurgeable (stale HIT after a write).
 	it(oneLine`
-		an unfiltered read carries the bare collection tag through the cache.scope filter
+		an unfiltered read carries the bare collection slice through the cache.scope
+		filter
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 		const result = await service().readByQuery({});
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+		expect(pinnedSlices(result)).toEqual(['test']);
 	});
 
 	// A filter that bounds the read to one scope value pins the value slice instead of the
-	// bare collection tag, so only that owner's/partition's writes purge it.
+	// bare collection, so only that owner's/partition's writes purge it.
 	it(oneLine`
-		a read filtered to a scope value carries the value-slice tag, not the bare collection
+		a read filtered to a scope value carries the value slice, not the bare collection
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([
-			{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-		]);
+		expect(pinnedSlices(result)).toEqual(['test:student=a']);
 	});
 
 	// The ancestor slice's LAST hop lands on a collection the filter names by primary
-	// key, which is classified `independent`: it needs no tag of its own, yet it holds
+	// key, which is classified `independent`: it needs no pin of its own, yet it holds
 	// the key the descendant slices by. Reading only the keyed pins loses that key, so
-	// every ownership chain ending on such a terminal fell back to the bare tag — one
+	// every ownership chain ending on such a terminal fell back to the bare pin — one
 	// write anywhere in `holder` then dropping every owner's entry.
 	it(oneLine`
 		an ancestor slice whose terminal is independent pins the slice, not the bare tag
@@ -800,12 +883,8 @@ describe(oneLine`
 		});
 
 		expect(
-			(readMeta(result)?.scopedCacheTags ?? [])
-				.filter((tag) => tag.collection === 'holder'),
-		).toEqual([
-			{ collection: 'holder', field: 'id', value: 5, type: 'integer' },
-			{ collection: 'holder', field: 'owner', value: 9, type: 'integer' },
-		]);
+			pinnedSlices(result).filter((slice) => slice.startsWith('holder')),
+		).toEqual(['holder:id=5', 'holder:owner=9']);
 	});
 
 	// A self-referential relation pulls rows of the root collection the root filter can't
@@ -813,7 +892,7 @@ describe(oneLine`
 	// leave the read stale after a write to another slice. The root falls back to bare.
 	it(oneLine`
 		a self-referential read does not pin the root — the nested same-collection rows are
-		unbounded, so it tags the bare collection
+		unbounded, so it carries the bare collection
 	`, async () => {
 		tracker.on
 			.select('test')
@@ -826,10 +905,10 @@ describe(oneLine`
 			fields: ['*', 'parent.*'],
 		});
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+		expect(pinnedSlices(result)).toEqual(['test']);
 	});
 
-	// A `cache.scope` listener can derive data-level tags: it receives the
+	// A `cache.scope` listener can derive data-level pins: it receives the
 	// post-`items.read` records and can append a value slice that the bare AST
 	// scoping wouldn't produce (e.g. an enriched related row).
 	it(oneLine`
@@ -867,12 +946,12 @@ describe(oneLine`
 				{ id: 2, student: 'B' },
 			]);
 
-			// The `cache.scope` listener adds these tags itself (no schema type on hand), so
-			// they stay untyped — an extension owns both sides of its own tags.
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'test' },
-				{ collection: 'test', field: 'student', value: 'A' },
-				{ collection: 'test', field: 'student', value: 'B' },
+			// The `cache.scope` listener adds these pins itself (no schema type on hand),
+			// so they stay untyped — an extension owns both sides of its own pins.
+			expect(pinnedSlices(result)).toEqual([
+				'test',
+				'test:student=A',
+				'test:student=B',
 			]);
 		}
 		finally {
@@ -882,13 +961,9 @@ describe(oneLine`
 
 	// `context.scopedCache` carries only the event's method: an `items.read` filter
 	// scopes the response via `scopeTo`; a create/update/delete filter purges via
-	// `purgeBy`. Additive to the framework tags — read tags into the meta rider,
-	// mutation tags into the purge.
+	// `purgeBy`. Additive to what the framework derived — read pins into the meta
+	// rider, declared fingerprints beside the mutation's own purge.
 	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
-		// A cross-collection dependency a hook declares (a read enriched from an authors
-		// row); shared so the hook's tag and the assertion can't drift.
-		const authorsDependency = { collection: 'authors', field: 'id', value: 5 };
-
 		it(oneLine`
 			an items.read hook scopes the response to a cross-collection tag, unioned with
 			the auto-derived collection tag on the meta rider
@@ -896,7 +971,11 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo(authorsDependency);
+				ctx.scopedCache.scopeTo({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
@@ -905,10 +984,7 @@ describe(oneLine`
 			try {
 				const result = await service().readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheTags).toEqual([
-					{ collection: 'test' },
-					authorsDependency,
-				]);
+				expect(pinnedSlices(result)).toEqual(['test', 'authors:id=5']);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -922,11 +998,15 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			// A FOREIGN collection, so nothing else on this response covers it: `other`
-			// is scoped on no `ghost` field, and no other tag names `other` either, so
+			// is scoped on no `ghost` field, and no other pin names `other` either, so
 			// no write reaches this entry through it. On the read's OWN collection the
-			// same tag would be harmless freight beside its computed slice.
+			// same pin would be harmless freight beside its computed slice.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo({ collection: 'other', field: 'ghost', value: 'g' });
+				ctx.scopedCache.scopeTo({
+					collection: 'other',
+					pinnedScope: { ghost: ['g'] },
+				});
+
 				return payload;
 			};
 
@@ -935,8 +1015,8 @@ describe(oneLine`
 			try {
 				const result = await service().readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
-					{ collection: 'other', field: 'ghost', value: 'g' },
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([
+					{ collection: 'other', pinnedScope: { ghost: ['g'] } },
 				]);
 			}
 			finally {
@@ -952,7 +1032,7 @@ describe(oneLine`
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo(
-					{ collection: 'other', field: 'ghost', value: 'g' },
+					{ collection: 'other', pinnedScope: { ghost: ['g'] } },
 					{ manuallyPurged: true },
 				);
 
@@ -963,7 +1043,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -979,8 +1059,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'test',
-					field: 'student',
-					value: 'A',
+					pinnedScope: { student: ['A'] },
 				});
 
 				return payload;
@@ -990,7 +1069,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -1006,7 +1085,7 @@ describe(oneLine`
 			// `test` is scoped on `student` only, so `id` reads as an undeclared field
 			// and used to be flagged — the key axis is what makes it reproducible.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo({ collection: 'test', field: 'id', value: 1 });
+				ctx.scopedCache.scopeTo({ collection: 'test', pinnedScope: { id: [1] } });
 				return payload;
 			};
 
@@ -1014,7 +1093,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -1030,8 +1109,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'A',
+					pinnedScope: { 'teaching_unit.discipline.enrollment.student': ['A'] },
 				});
 
 				return payload;
@@ -1045,7 +1123,7 @@ describe(oneLine`
 					schema: composedChainSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('student_enrollment.items.read', declare);
@@ -1060,8 +1138,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'student_course',
-					field: 'teaching_unit.id',
-					value: 10,
+					pinnedScope: { 'teaching_unit.id': [10] },
 				});
 
 				return payload;
@@ -1075,8 +1152,11 @@ describe(oneLine`
 					schema: composedChainSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
-					{ collection: 'student_course', field: 'teaching_unit.id', value: 10 },
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([
+					{
+						collection: 'student_course',
+						pinnedScope: { 'teaching_unit.id': ['10'] },
+					},
 				]);
 			}
 			finally {
@@ -1093,8 +1173,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'A',
+					pinnedScope: { 'teaching_unit.discipline.enrollment.student': ['A'] },
 				});
 
 				return payload;
@@ -1108,32 +1187,12 @@ describe(oneLine`
 					schema: composedChainSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheTags).toEqual([
-					{ collection: 'student_enrollment' },
-					{
-						collection: 'student_course',
-						field: 'teaching_unit.discipline.enrollment.student',
-						value: 'A',
-						type: 'string',
-					},
-					{
-						collection: 'student_teaching_unit',
-						field: 'discipline.enrollment.student',
-						value: 'A',
-						type: 'string',
-					},
-					{
-						collection: 'student_discipline',
-						field: 'enrollment.student',
-						value: 'A',
-						type: 'string',
-					},
-					{
-						collection: 'student_enrollment',
-						field: 'student',
-						value: 'A',
-						type: 'string',
-					},
+				expect(pinnedSlices(result)).toEqual([
+					'student_enrollment',
+					'student_course:teaching_unit.discipline.enrollment.student=a',
+					'student_teaching_unit:discipline.enrollment.student=a',
+					'student_discipline:enrollment.student=a',
+					'student_enrollment:student=a',
 				]);
 			}
 			finally {
@@ -1149,8 +1208,7 @@ describe(oneLine`
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo({
 					collection: 'course',
-					field: 'unit.owner',
-					value: 7,
+					pinnedScope: { 'unit.owner': [7] },
 				});
 
 				return payload;
@@ -1164,10 +1222,10 @@ describe(oneLine`
 					schema: declaredDottedSchema,
 				}).readByQuery({});
 
-				expect(readMeta(result)?.scopedCacheTags).toEqual([
-					{ collection: 'page' },
-					{ collection: 'course', field: 'unit.owner', value: 7, type: 'integer' },
-					{ collection: 'unit' },
+				expect(pinnedSlices(result)).toEqual([
+					'page',
+					'course:unit.owner=7',
+					'unit',
 				]);
 			}
 			finally {
@@ -1190,7 +1248,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableFingerprints).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -1198,14 +1256,18 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an items.create hook adds a tag, unioned after the committed-row slice in the
-			purge
+			an items.create hook declares a fingerprint, purged beside the committed-row
+			slice rather than inside its tag list
 		`, async () => {
 			tracker.on.insert('test').response([1]);
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
@@ -1218,11 +1280,18 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						authorsDependency,
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['a'] },
+						},
 					],
 					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					}),
 				);
 			}
 			finally {
@@ -1231,15 +1300,19 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an items.update hook adds a tag, unioned after the old ∪ new slices in the
-			purge
+			an items.update hook declares a fingerprint, purged beside the old ∪ new
+			slices rather than inside their tag list
 		`, async () => {
 			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
 			tracker.on.select('test').responseOnce([{ id: 1, student: 'B' }]);
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
@@ -1252,13 +1325,22 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
-						authorsDependency,
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['b'] },
+						},
 					],
 					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					}),
 				);
 			}
 			finally {
@@ -1267,14 +1349,18 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an items.delete hook adds a tag, unioned after the deleted rows' slices in the
-			purge
+			an items.delete hook declares a fingerprint, purged beside the deleted rows'
+			slices rather than inside their tag list
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 			tracker.on.delete('test').response(1);
 
 			const declare = async (keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return keys;
 			};
 
@@ -1287,11 +1373,18 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						authorsDependency,
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['1'], 'student': ['a'] },
+						},
 					],
 					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					}),
 				);
 			}
 			finally {
@@ -1300,17 +1393,21 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a take-over that DECLARES its footprint via addTag narrows to a precise purge —
-			the declaration opts out of the safe coarse fallback
+			a take-over that DECLARES its footprint narrows to a precise purge — the
+			declaration opts out of the safe coarse fallback
 		`, async () => {
 			// A take-over is coarse BY DEFAULT (old slice unrecoverable in the create
-			// path). Declaring a tag asserts the hook knows its footprint, so we trust it
-			// and narrow: the taken-over row's re-read slice (Z) UNION the declared tag —
-			// never the coarse null flush.
+			// path). A declaration asserts the hook knows its footprint, so we trust it
+			// and narrow: the taken-over row's re-read slice (Z) plus the declared
+			// fingerprint — never the coarse null flush.
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return 99;
 			};
 
@@ -1323,17 +1420,25 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
-						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
-						authorsDependency,
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['99'], 'student': ['z'] },
+						},
 					],
 					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					}),
 				);
 
 				expect(purgeScopedCache).not.toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
 					null,
+					expect.anything(),
 					expect.anything(),
 				);
 			}
@@ -1344,7 +1449,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a hook that declares a slice then cancels (null) purges only that slice —
-			includeCollectionTag:false keeps the cancelled collection's bare tag warm,
+			includeBareFingerprint:false keeps the cancelled collection's bare tag warm,
 			since nothing in it changed
 		`, async () => {
 			// updateMany snapshots the pre-update rows before the filter runs (old ∪ new),
@@ -1352,7 +1457,11 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declareThenCancel = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return null; // cancel the update
 			};
 
@@ -1365,15 +1474,21 @@ describe(oneLine`
 					{ allowFilterCancel: true },
 				);
 
-				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				// Only the declared fingerprint, and the 5th arg excludes the bare pin.
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[authorsDependency],
+					[],
 					expect.anything(),
-					{ includeCollectionTag: false },
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					},
 				);
 			}
 			finally {
@@ -1383,13 +1498,17 @@ describe(oneLine`
 
 		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only
-			that slice — includeCollectionTag:false keeps the cancelled
+			that slice — includeBareFingerprint:false keeps the cancelled
 			collection's bare tag warm, since nothing in it was deleted
 		`, async () => {
 			// deleteMany snapshots rows AFTER the filter, so a cancel returns
 			// before any select — only the hook-declared slice is purged.
 			const declareThenCancel = async (_keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return null; // cancel the delete
 			};
 
@@ -1398,15 +1517,21 @@ describe(oneLine`
 			try {
 				await service().deleteMany([1], { allowFilterCancel: true });
 
-				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				// Only the declared fingerprint, and the 5th arg excludes the bare pin.
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[authorsDependency],
+					[],
 					expect.anything(),
-					{ includeCollectionTag: false },
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					},
 				);
 			}
 			finally {
@@ -1415,23 +1540,29 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a coarse (null) purge carrying hook-declared tags reflects BOTH in the debug
+			a coarse (null) purge carrying a hook declaration reflects BOTH in the debug
 			header — the hook purge's result is unioned in, not dropped
 		`, async () => {
 			// Re-read missing `student` → snapshot null → coarse purge; the hook also
 			// declares a foreign slice, so purgeScopedCache runs twice (coarse null +
-			// hook tags) and scopedCachePurged must union both.
+			// hook pins) and scopedCachePurged must union both.
 			tracker.on.select('test').response([{ id: 1 }]);
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy(authorsDependency);
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
 				return payload;
 			};
 
 			purgeScopedCache
 				.mockResolvedValueOnce([{ collection: 'test' }])
-				.mockResolvedValueOnce([authorsDependency]);
+				.mockResolvedValueOnce([
+					{ collection: 'authors', pinnedScope: { id: [5] } },
+				]);
 
 			emitter.onFilter('test.items.update', declare);
 
@@ -1448,17 +1579,21 @@ describe(oneLine`
 					{ scopedCachePurgeId: expect.any(String) },
 				);
 
-				// Coarse already flushed this collection's bare tag + every slice, so the
-				// hook purge must NOT re-add it: includeCollectionTag:false (else the bare
-				// tag is purged twice and doubled in the debug header).
+				// Coarse already flushed this collection's bare pin + every slice, so the
+				// hook purge must NOT re-add it: includeBareFingerprint:false (else the bare
+				// pin is purged twice and doubled in the debug header).
 				expect(purgeScopedCache).toHaveBeenNthCalledWith(
 					2,
 					expect.anything(),
 					'test',
-					[authorsDependency],
+					[],
 					expect.anything(),
 					{
-						includeCollectionTag: false,
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
 						scopedCachePurgeId: expect.any(String),
 					},
 				);
@@ -1473,7 +1608,7 @@ describe(oneLine`
 
 				expect(svc.scopedCachePurged).toEqual([
 					{ collection: 'test' },
-					authorsDependency,
+					{ collection: 'authors', pinnedScope: { id: [5] } },
 				]);
 			}
 			finally {
@@ -1489,11 +1624,11 @@ describe(oneLine`
 			// A batch/upsert parent injects one shared collector across its children. Seed
 			// it as if an earlier child already declared a slice; a later child that takes
 			// over a row but declares nothing ITSELF must still fall back to coarse — else
-			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
-			const shared = createScopedCacheCollector(schema);
-			shared.purge.purgeBy({ collection: 'siblings', field: 'id', value: 1 });
+			// the pre-seeded pin reads as this row's declaration and its old slice leaks.
+			const shared = createScopedCacheHookDeclarations(schema);
+			shared.purge.purgeBy({ collection: 'siblings', pinnedScope: { id: [1] } });
 
-			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
+			// Coarse + hook-pins → purgeScopedCache runs twice and unions results; real
 			// module returns arrays, so give the spy an iterable (args are the check).
 			purgeScopedCache.mockResolvedValue([]);
 
@@ -1505,7 +1640,7 @@ describe(oneLine`
 			try {
 				await service().createMany(
 					[{ name: 'x', student: 'A' }],
-					{ scopedCacheCollector: shared },
+					{ scopedCacheHookDeclarations: shared },
 				);
 
 				// Coarse (null) despite the pre-seeded collector.
@@ -1526,6 +1661,7 @@ describe(oneLine`
 						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
 					]),
 					expect.anything(),
+					expect.anything(),
 				);
 			}
 			finally {
@@ -1542,16 +1678,14 @@ describe(oneLine`
 		};
 
 		it(oneLine`
-			readOne pins the row it is bounded to instead of the bare collection tag, on a
+			readOne pins the row it is bounded to instead of the bare collection, on a
 			collection declaring no scope field
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			const result = await unscopedService().readOne(1);
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
-				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-			]);
+			expect(pinnedSlices(result)).toEqual(['test:id=1']);
 		});
 
 		it(oneLine`
@@ -1569,7 +1703,7 @@ describe(oneLine`
 
 			const result = await selfRefService.readOne(1, { fields: ['*', 'parent.*'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+			expect(pinnedSlices(result)).toEqual(['test']);
 		});
 
 		it(oneLine`
@@ -1581,14 +1715,21 @@ describe(oneLine`
 			await unscopedService().updateMany([1], { name: 'renamed' });
 
 			// old ∪ new both resolve from the keys already in hand, so it repeats — the
-			// real purge dedups on the tag key.
+			// real purge dedups on the pin key.
 			expect(purgeScopedCache).toHaveBeenCalledWith(
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
-					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'] },
+					},
 				],
+				expect.anything(),
 				expect.anything(),
 			);
 
@@ -1641,9 +1782,7 @@ describe(oneLine`
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.purgeBy({
 					collection: 'test',
-					field: 'id',
-					value: 5,
-					type: 'integer',
+					pinnedScope: { id: [5] },
 				});
 
 				return 99;
@@ -1658,10 +1797,18 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
-						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
-						{ collection: 'test', field: 'id', value: 5, type: 'integer' },
+						{
+							collection: 'test',
+							pinnedScope: { 'id': ['99'] },
+						},
 					],
 					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'test',
+							pinnedScope: { id: ['5'] },
+						}],
+					}),
 				);
 			}
 			finally {
@@ -1673,7 +1820,7 @@ describe(oneLine`
 
 // Composition extends each path with one more hop, so `student_course` ends up with
 // three of them off the same chain. They resolve in ONE query with the hops shared,
-// which is what these pin: the count, the shape, and that the tags did not change.
+// which is what these pin: the count, the shape, and that the pins did not change.
 const composedChainSchema = new SchemaBuilder()
 	.collection('student_course', (c) => {
 		c.field('id').id();
@@ -1703,7 +1850,7 @@ composedChain['student_enrollment']!.scopedCacheFields = ['student'];
 
 // A dotted path DECLARED on the course, with the unit it crosses declaring no scope
 // of its own: a unit write emits its key slice only, so nothing finer than the
-// bare unit tag names the rows the path reads there.
+// bare unit pin names the rows the path reads there.
 const declaredDottedSchema = new SchemaBuilder()
 	.collection('page', (c) => {
 		c.field('id').id();
@@ -1747,7 +1894,7 @@ independentTerminal['note']!.scopedCacheFields = ['holder'];
 independentTerminal['holder']!.scopedCacheFields = ['owner'];
 
 // `independent` is granted only behind an enforced fk: every way the far row can
-// disappear writes the near row too, so the near row's own tag covers it.
+// disappear writes the near row too, so the near row's own pin covers it.
 for (const relation of independentTerminalSchema.relations) {
 	relation.schema = { on_delete: 'CASCADE' } as any;
 }
@@ -1799,13 +1946,13 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		hops the shorter paths already walked
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+			{ id: 1, teaching_unit: 10, '#path0': 20, '#path1': 30, '#path2': 'A' },
 		]);
 
 		tracker.on.update('student_course').response(1);
 
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+			{ id: 1, teaching_unit: 10, '#path0': 20, '#path1': 30, '#path2': 'A' },
 		]);
 
 		await new ItemsService(
@@ -1825,7 +1972,7 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		row and the committed one
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+			{ id: 1, teaching_unit: 10, '#path0': 20, '#path1': 30, '#path2': 'A' },
 		]);
 
 		tracker.on.update('student_course').response(1);
@@ -1833,7 +1980,7 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		// Every terminal differs from the old row's, so a column read off the wrong path
 		// would surface as a wrong value rather than passing on a shared one.
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 11, value0: 21, value1: 31, value2: 'B' },
+			{ id: 1, teaching_unit: 11, '#path0': 21, '#path1': 31, '#path2': 'B' },
 		]);
 
 		await new ItemsService(
@@ -1845,57 +1992,28 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 			expect.anything(),
 			'student_course',
 			[
-				{ collection: 'student_course', field: 'id', value: 1, type: 'integer' },
 				{
 					collection: 'student_course',
-					field: 'teaching_unit',
-					value: 10,
-					type: 'integer',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['10'],
+						'teaching_unit.discipline': ['20'],
+						'teaching_unit.discipline.enrollment': ['30'],
+						'teaching_unit.discipline.enrollment.student': ['a'],
+					},
 				},
 				{
 					collection: 'student_course',
-					field: 'teaching_unit.discipline',
-					value: 20,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment',
-					value: 30,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'A',
-					type: 'string',
-				},
-				{ collection: 'student_course', field: 'id', value: 1, type: 'integer' },
-				{
-					collection: 'student_course',
-					field: 'teaching_unit',
-					value: 11,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline',
-					value: 21,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment',
-					value: 31,
-					type: 'integer',
-				},
-				{
-					collection: 'student_course',
-					field: 'teaching_unit.discipline.enrollment.student',
-					value: 'B',
-					type: 'string',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['11'],
+						'teaching_unit.discipline': ['21'],
+						'teaching_unit.discipline.enrollment': ['31'],
+						'teaching_unit.discipline.enrollment.student': ['b'],
+					},
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -1908,8 +2026,8 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 			id: 1,
 			left_ref: 7,
 			right_ref: 8,
-			value0: 'left-owner',
-			value1: 'right-owner',
+			'#path0': 'left-owner',
+			'#path1': 'right-owner',
 		}]);
 
 		tracker.on.delete('note').response(1);
@@ -1921,22 +2039,18 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 			expect.anything(),
 			'note',
 			[
-				{ collection: 'note', field: 'id', value: 1, type: 'integer' },
-				{ collection: 'note', field: 'left_ref', value: 7, type: 'integer' },
-				{ collection: 'note', field: 'right_ref', value: 8, type: 'integer' },
 				{
 					collection: 'note',
-					field: 'left_ref.owner',
-					value: 'left-owner',
-					type: 'string',
-				},
-				{
-					collection: 'note',
-					field: 'right_ref.owner',
-					value: 'right-owner',
-					type: 'string',
+					pinnedScope: {
+						id: ['1'],
+						left_ref: ['7'],
+						right_ref: ['8'],
+						'left_ref.owner': ['left-owner'],
+						'right_ref.owner': ['right-owner'],
+					},
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -1979,8 +2093,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		reading every path off that row rather than the first one
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
-			{ id: 2, teaching_unit: 20, value0: 21, value1: 22, value2: 'B' },
+			{ id: 1, teaching_unit: 10, '#path0': 11, '#path1': 12, '#path2': 'A' },
+			{ id: 2, teaching_unit: 20, '#path0': 21, '#path1': 22, '#path2': 'B' },
 		]);
 
 		tracker.on.delete('student_course').response(2);
@@ -1995,66 +2109,27 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			`student_course`,
 			[
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['10'],
+						'teaching_unit.discipline': ['11'],
+						'teaching_unit.discipline.enrollment': ['12'],
+						'teaching_unit.discipline.enrollment.student': ['a'],
+					},
 				},
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 2,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 10,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 20,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: 11,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: 21,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: 12,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: 22,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: `A`,
-					type: `string`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: `B`,
-					type: `string`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['2'],
+						teaching_unit: ['20'],
+						'teaching_unit.discipline': ['21'],
+						'teaching_unit.discipline.enrollment': ['22'],
+						'teaching_unit.discipline.enrollment.student': ['b'],
+					},
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -2064,9 +2139,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		pins, and collapses two such rows onto one tag
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
-			{ id: 2, teaching_unit: null, value0: null, value1: null, value2: null },
-			{ id: 3, teaching_unit: null, value0: null, value1: null, value2: null },
+			{ id: 1, teaching_unit: 10, '#path0': 11, '#path1': 12, '#path2': 'A' },
+			{ id: 2, teaching_unit: null, '#path0': null, '#path1': null, '#path2': null },
+			{ id: 3, teaching_unit: null, '#path0': null, '#path1': null, '#path2': null },
 		]);
 
 		tracker.on.delete('student_course').response(3);
@@ -2081,72 +2156,37 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			`student_course`,
 			[
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['1'],
+						teaching_unit: ['10'],
+						'teaching_unit.discipline': ['11'],
+						'teaching_unit.discipline.enrollment': ['12'],
+						'teaching_unit.discipline.enrollment.student': ['a'],
+					},
 				},
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 2,
-					type: `integer`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['2'],
+						teaching_unit: ['\x00null'],
+						'teaching_unit.discipline': ['\x00null'],
+						'teaching_unit.discipline.enrollment': ['\x00null'],
+						'teaching_unit.discipline.enrollment.student': ['\x00null'],
+					},
 				},
 				{
-					collection: `student_course`,
-					field: `id`,
-					value: 3,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 10,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: null,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: 11,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline`,
-					value: null,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: 12,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment`,
-					value: null,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: `A`,
-					type: `string`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit.discipline.enrollment.student`,
-					value: null,
-					type: `string`,
+					collection: 'student_course',
+					pinnedScope: {
+						id: ['3'],
+						teaching_unit: ['\x00null'],
+						'teaching_unit.discipline': ['\x00null'],
+						'teaching_unit.discipline.enrollment': ['\x00null'],
+						'teaching_unit.discipline.enrollment.student': ['\x00null'],
+					},
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -2155,7 +2195,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		leaves out a path the schema cannot resolve, and still emits its sibling's slice
 	`, async () => {
 		tracker.on.select('note')
-			.responseOnce([{ id: 1, holder: 7, value0: 'owner-a' }]);
+			.responseOnce([{ id: 1, holder: 7, '#path0': 'owner-a' }]);
 
 		tracker.on.delete('note').response(1);
 
@@ -2169,24 +2209,15 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			`note`,
 			[
 				{
-					collection: `note`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
-				},
-				{
-					collection: `note`,
-					field: `holder`,
-					value: 7,
-					type: `integer`,
-				},
-				{
-					collection: `note`,
-					field: `holder.owner`,
-					value: `owner-a`,
-					type: `string`,
+					collection: 'note',
+					pinnedScope: {
+						id: ['1'],
+						holder: ['7'],
+						'holder.owner': ['owner-a'],
+					},
 				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});
@@ -2209,13 +2240,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			expect.anything(),
 			`student_course`,
 			[
-				{
-					collection: `student_course`,
-					field: `id`,
-					value: 1,
-					type: `integer`,
-				},
 			],
+			expect.anything(),
 			expect.anything(),
 		);
 	});

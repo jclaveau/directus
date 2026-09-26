@@ -1,12 +1,14 @@
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import type { Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 import { RelationsService } from './relations.js';
@@ -24,10 +26,28 @@ vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js', (
 	fetchAllowedFields: vi.fn(),
 }));
 
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../scoped-cache/index.js')>(),
+		flushResponseCache: vi.fn(),
+	};
+});
+
+vi.mock('../utils/should-clear-cache.js', () => {
+	return { shouldClearCache: vi.fn(() => true) };
+});
+
+vi.mock('../utils/transaction.js', () => {
+	return {
+		transaction: vi.fn((trxKnex, runInTransaction) => runInTransaction(trxKnex)),
+	};
+});
+
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
 		c.field('id').uuid().primary();
 		c.field('related').m2o('related');
+		c.field('owner').uuid();
 	})
 	.collection('related', (c) => {
 		c.field('id').uuid().primary();
@@ -63,6 +83,26 @@ describe('Services / Relations', () => {
 				`'test-user' is not allowed to create a relation`,
 			);
 		});
+
+		it(oneLine`
+			flushes the response cache: the scoped index is split by a path walked
+			through relations, and a purge after the change would read other buckets
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue(1);
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await service.createOne(
+				{ collection: 'test', field: 'owner' },
+				{ autoPurgeSystemCache: false },
+			);
+
+			expect(flushResponseCache).toHaveBeenCalledOnce();
+		});
 	});
 
 	describe('updateOne', () => {
@@ -92,14 +132,14 @@ describe('Services / Relations', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_relations', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 
 			const service = new RelationsService({ knex: db, schema });
 			const result = await service.readAll();
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
 				{ collection: 'directus_relations' },
 			]);
 		});
@@ -116,7 +156,7 @@ describe('Services / Relations', () => {
 					many_field: 'related',
 					one_collection: 'related',
 				},
-			], { scopedCacheTags: [] }));
+			], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([
 				{
@@ -135,7 +175,7 @@ describe('Services / Relations', () => {
 
 			const result = await service.readOne('test', 'related');
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
 				{ collection: 'directus_relations' },
 			]);
 		});
@@ -155,7 +195,7 @@ describe('Services / Relations', () => {
 
 		it('should throw ForbiddenError when no relation is found', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 

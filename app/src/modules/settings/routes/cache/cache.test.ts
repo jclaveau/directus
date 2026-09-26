@@ -830,8 +830,8 @@ describe('CachePage', () => {
 				const data = {
 					exists: true,
 					value: { hello: 'world' },
-					tags: ['articles', 'articles:id=5'],
-					tagCounts: { 'articles': 4, 'articles:id=5': 12 },
+					pins: ['articles', 'articles:id=5'],
+					pinCounts: { 'articles': 4, 'articles:id=5': 12 },
 					expiry: { exp: 0, createdAt: 0, ttlMs: 300000 },
 					sizes: { uncompressed: 2048, compressed: 512 },
 					tombstone: null,
@@ -856,7 +856,7 @@ describe('CachePage', () => {
 		});
 
 		const text = wrapper.text();
-		// descriptor rows + Redis metadata + tags (with blast-radius) + value
+		// descriptor rows + Redis metadata + pins (with blast-radius) + value
 		expect(text).toContain('ann@corp.io');
 		expect(text).toContain('articles:id=5');
 		expect(text).toContain('(12)'); // tag member count
@@ -1289,8 +1289,8 @@ describe('CachePage', () => {
 				const data = {
 					exists: true,
 					value: { x: 1 },
-					tags: null,
-					tagCounts: {},
+					pins: null,
+					pinCounts: {},
 					// ttlMs null → ∞; uncompressed 0 → 0% ratio; tombstone set.
 					expiry: { exp: 111, createdAt: 222, ttlMs: null },
 					sizes: { uncompressed: 0, compressed: 0 },

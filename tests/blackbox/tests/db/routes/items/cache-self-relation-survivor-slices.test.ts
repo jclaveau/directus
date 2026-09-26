@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // Deleting a parent through a direct self-relation that SETS NULL / SETS DEFAULT
 // rewrites the surviving children's fk at the database level: they are changed
-// rows, and the delete captures them like an update — every slice a survivor sits
+// rows, and the delete snapshots them like an update — every slice a survivor sits
 // in (its own key, another scope field) drops, and so does the slice the survivors
 // ARRIVE in (the default). Purging only the vacated `parent=<deleted>` slice left
 // all of those serving the fk the database had already rewritten.
@@ -107,7 +107,7 @@ describe(oneLine`
 			survivorNodeId = nodes[0].id;
 			bystanderNodeId = nodes[1].id;
 
-			// The doomed root sits in a slice no reader pins: its own capture must not
+			// The doomed root sits in a slice no reader pins: its own snapshot must not
 			// be what evicts the survivors' slice.
 			const ownedRoots = await CreateItem(vendor, {
 				collection: OWNED,

@@ -79,12 +79,14 @@ afterEach(() => {
 });
 
 describe('recordPendingScopedCachePurge', () => {
-	it('writes one row per failed tag, each aimed at its display label', async () => {
+	it(oneLine`
+		writes one row per failed fingerprint, each aimed at its rendered form
+	`, async () => {
 		await recordPendingScopedCachePurge(
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1', 'articles:author=7'],
+				scopedCacheFingerprints: ['articles:&id=,1,&', 'articles:&author=,7,&'],
 			},
 			new Error('Connection is closed.'),
 		);
@@ -97,7 +99,7 @@ describe('recordPendingScopedCachePurge', () => {
 				failed_at: expect.any(Date),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=1',
+				scoped_cache_fingerprint: 'articles:&id=,1,&',
 				attempts: 0,
 				last_error: 'Connection is closed.',
 			},
@@ -105,7 +107,7 @@ describe('recordPendingScopedCachePurge', () => {
 				failed_at: expect.any(Date),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:author=7',
+				scoped_cache_fingerprint: 'articles:&author=,7,&',
 				attempts: 0,
 				last_error: 'Connection is closed.',
 			},
@@ -113,10 +115,10 @@ describe('recordPendingScopedCachePurge', () => {
 	});
 
 	it(oneLine`
-		a coarse purge names no tag, so it is one row carrying only its reach
+		a coarse purge names no fingerprint, so it is one row carrying only its reach
 	`, async () => {
 		await recordPendingScopedCachePurge(
-			{ mode: 'collection', collection: 'articles', scopedCacheTags: [] },
+			{ mode: 'collection', collection: 'articles', scopedCacheFingerprints: [] },
 			new Error('Connection is closed.'),
 		);
 
@@ -124,7 +126,7 @@ describe('recordPendingScopedCachePurge', () => {
 			failed_at: expect.any(Date),
 			mode: 'collection',
 			collection: 'articles',
-			scoped_cache_tag: null,
+			scoped_cache_fingerprint: null,
 			attempts: 0,
 			last_error: 'Connection is closed.',
 		}]);
@@ -132,7 +134,7 @@ describe('recordPendingScopedCachePurge', () => {
 
 	it('carries no collection for a namespace purge', async () => {
 		await recordPendingScopedCachePurge(
-			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+			{ mode: 'namespace', collection: null, scopedCacheFingerprints: [] },
 			new Error('Connection is closed.'),
 		);
 
@@ -140,7 +142,7 @@ describe('recordPendingScopedCachePurge', () => {
 			failed_at: expect.any(Date),
 			mode: 'namespace',
 			collection: null,
-			scoped_cache_tag: null,
+			scoped_cache_fingerprint: null,
 			attempts: 0,
 			last_error: 'Connection is closed.',
 		}]);
@@ -153,7 +155,11 @@ describe('recordPendingScopedCachePurge', () => {
 		insertFails = new Error('deadlock detected');
 
 		await expect(recordPendingScopedCachePurge(
-			{ mode: 'slices', collection: 'articles', scopedCacheTags: ['articles:id=1'] },
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
+			},
 			new Error('Connection is closed.'),
 		)).resolves.toBeUndefined();
 
@@ -162,7 +168,11 @@ describe('recordPendingScopedCachePurge', () => {
 
 	it('truncates the recorded error to 500 characters', async () => {
 		await recordPendingScopedCachePurge(
-			{ mode: 'slices', collection: 'articles', scopedCacheTags: ['articles:id=1'] },
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
+			},
 			new Error('x'.repeat(900)),
 		);
 
@@ -171,7 +181,11 @@ describe('recordPendingScopedCachePurge', () => {
 
 	it('records a thrown non-Error by its string form', async () => {
 		await recordPendingScopedCachePurge(
-			{ mode: 'slices', collection: 'articles', scopedCacheTags: ['articles:id=1'] },
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
+			},
 			'ECONNREFUSED',
 		);
 
@@ -191,25 +205,25 @@ describe('listPendingScopedCachePurges', () => {
 				id: 1,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=1',
+				scoped_cache_fingerprint: 'articles:&id=,1,&',
 			},
 			{
 				id: 2,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=2',
+				scoped_cache_fingerprint: 'articles:&id=,2,&',
 			},
 			{
 				id: 3,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_tag: 'articles:id=1',
+				scoped_cache_fingerprint: 'articles:&id=,1,&',
 			},
 			{
 				id: 4,
 				mode: 'collection',
 				collection: 'articles',
-				scoped_cache_tag: null,
+				scoped_cache_fingerprint: null,
 			},
 		];
 
@@ -217,32 +231,47 @@ describe('listPendingScopedCachePurges', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=1'],
+				scopedCacheFingerprints: ['articles:&id=,1,&'],
 				ids: [1, 3],
 			},
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheTags: ['articles:id=2'],
+				scopedCacheFingerprints: ['articles:&id=,2,&'],
 				ids: [2],
 			},
 			{
 				mode: 'collection',
 				collection: 'articles',
-				scopedCacheTags: [],
+				scopedCacheFingerprints: [],
 				ids: [4],
 			},
 		]);
 	});
 
 	it(oneLine`
-		separates one tag spelling recorded under two modes — the mode decides what the
-		retry runs, so collapsing them would drop a purge
+		separates one target spelling recorded under two modes — the mode decides what
+		the retry runs, so collapsing them would drop a purge
 	`, async () => {
 		selectRows = [
-			{ id: 1, mode: 'slices', collection: 'articles', scoped_cache_tag: null },
-			{ id: 2, mode: 'collection', collection: 'articles', scoped_cache_tag: null },
-			{ id: 3, mode: 'namespace', collection: null, scoped_cache_tag: null },
+			{
+				id: 1,
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_fingerprint: null,
+			},
+			{
+				id: 2,
+				mode: 'collection',
+				collection: 'articles',
+				scoped_cache_fingerprint: null,
+			},
+			{
+				id: 3,
+				mode: 'namespace',
+				collection: null,
+				scoped_cache_fingerprint: null,
+			},
 		];
 
 		expect((await listPendingScopedCachePurges()).map((row) => row.mode))

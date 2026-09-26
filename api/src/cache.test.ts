@@ -1,5 +1,6 @@
+import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
-import type { ScopedCacheTag } from '@directus/types';
+import type { ScopedCacheDeclaredFingerprint } from '@directus/types';
 import type Keyv from 'keyv';
 import {
 	afterEach,
@@ -19,10 +20,11 @@ const env = mockEnv.current;
 const redis = vi.hoisted(() => {
 	const pipeline = {
 		sadd: vi.fn(),
+		persist: vi.fn(),
 		expire: vi.fn(),
 		eval: vi.fn(),
+		srem: vi.fn(),
 		scopedCacheTagExpiry: vi.fn(),
-		incr: vi.fn(),
 		sunion: vi.fn(),
 		unlink: vi.fn(),
 		exec: vi.fn(),
@@ -31,12 +33,18 @@ const redis = vi.hoisted(() => {
 	return {
 		isCluster: false,
 		defineCommand: vi.fn(),
+		scopedCacheEpochBump: vi.fn(),
 		smembers: vi.fn(),
+		sscan: vi.fn(
+			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
+		),
 		srem: vi.fn(),
 		eval: vi.fn(),
 		// What the sweep double drops through, standing in for the script's UNLINK.
 		unlink: vi.fn(),
-		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
+		scan: vi.fn(
+			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
+		),
 		get: vi.fn(async (): Promise<string | null> => '1'),
 		set: vi.fn(),
 		pipeline: vi.fn(() => pipeline),
@@ -47,9 +55,12 @@ const redis = vi.hoisted(() => {
 // Passthrough filter by default; individual tests override to assert extension
 // augmentation.
 // The only filter the code under test emits is `cache.purge`, whose payload is
-// the tag list, so the stand-in says so rather than taking an `unknown`.
+// the fingerprint list, so the stand-in says so rather than taking an `unknown`.
 const emitFilter = vi.hoisted(() => {
-	return vi.fn(async (_event: string, payload: ScopedCacheTag[]) => payload);
+	return vi.fn(async (
+		_event: string,
+		payload: ScopedCacheDeclaredFingerprint[],
+	) => payload);
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
@@ -125,11 +136,12 @@ const {
 const cacheHandlers = { ...busHandlers };
 
 const {
-	assertScopedCacheRedisSupported,
+	assertScopedCacheStoreSupported,
+	indexScopedCacheEntry,
 	purgeScopedCache,
+	scopedCacheFingerprintOf,
 	scopedCachePurgeEnabled,
-	tagScopedCacheKeys,
-} = await import('./scoped-cache.js');
+} = await import('./scoped-cache/index.js');
 
 function setEnv(values: Record<string, unknown>) {
 	for (const key of Object.keys(mockEnv.current)) {
@@ -153,17 +165,16 @@ afterEach(() => {
 // per test: chainable, and `exec` resolving because the epoch bump hangs its own
 // `.catch` off the returned promise.
 //
-// A purge reads its members with one `SUNION` over every tag key, queued on that
+// A purge reads its members with one `SUNION` over every pin key, queued on that
 // same pipeline. The double answers it as the union of the per-key `smembers` a
-// case arms, which is what the command does — so a case still says which tag sets
+// case arms, which is what the command does — so a case still says which index sets
 // hold what, and still sees the purge ask for them.
 beforeEach(() => {
 	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
 	redis._pipeline.expire.mockReturnValue(redis._pipeline);
 
 	// Answers a flush's unlinks with what was queued since the last exec — a real
-	// `pipeline()` hands back a fresh queue every call, and the epoch bump execs its
-	// own before the unlinks are queued — and an epoch bump alone with nothing.
+	// `pipeline()` hands back a fresh queue every call.
 	let executed = 0;
 
 	redis._pipeline.exec.mockImplementation(async () => {
@@ -173,24 +184,19 @@ beforeEach(() => {
 		return queued.map(([keys]) => [null, keys.length]);
 	});
 
-	// The sweep is one script, so the double runs what the script runs: read each tag
-	// set, drop them all, prune the slice index. It reads through `redis.smembers` and
-	// writes through `redis.unlink`/`redis.srem` so a case still arms which set holds
-	// what, and still sees the sweep ask for and drop exactly those.
+	// The sweep is one script, so the double runs what the script runs: read each
+	// index set and drop them all. It reads through `redis.smembers` and writes
+	// through `redis.unlink` so a case still arms which set holds what, and still
+	// sees the sweep ask for and drop exactly those.
 	redis.eval.mockImplementation(
 		async (_script: string, numKeys: number, ...args: string[]) => {
 			const tagKeys = args.slice(0, numKeys);
-			const prunings = args.slice(numKeys);
 
 			const memberLists = await Promise.all(
 				tagKeys.map((key) => redis.smembers(key)),
 			);
 
 			await redis.unlink(tagKeys);
-
-			for (let at = 0; at < prunings.length; at += 2) {
-				await redis.srem(prunings[at], prunings[at + 1]);
-			}
 
 			return [...new Set(memberLists.flat())];
 		},
@@ -263,7 +269,7 @@ describe('scoped cache purging', () => {
 		});
 
 		emitFilter.mockImplementation(
-			async (_event: string, payload: ScopedCacheTag[]) => payload,
+			async (_event: string, payload: ScopedCacheDeclaredFingerprint[]) => payload,
 		);
 	});
 
@@ -283,7 +289,7 @@ describe('scoped cache purging', () => {
 		});
 	});
 
-	describe('assertScopedCacheRedisSupported', () => {
+	describe('assertScopedCacheStoreSupported', () => {
 		afterEach(() => {
 			redis.isCluster = false;
 		});
@@ -293,26 +299,26 @@ describe('scoped cache purging', () => {
 			(SCAN/DEL are single-node)
 		`, () => {
 			redis.isCluster = true;
-			expect(() => assertScopedCacheRedisSupported()).toThrow(/cluster/i);
+			expect(() => assertScopedCacheStoreSupported()).toThrow(/cluster/i);
 		});
 
 		test('no-op on a standalone client', () => {
 			redis.isCluster = false;
-			expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+			expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 		});
 
 		test('no-op in full mode even against a cluster client', () => {
 			redis.isCluster = true;
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
-			expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+			expect(() => assertScopedCacheStoreSupported()).not.toThrow();
 		});
 	});
 
-	describe('tagScopedCacheKeys', () => {
+	describe('indexScopedCacheEntry', () => {
 		test(oneLine`
-			indexes the key + expires sibling under every collection-level tag, with a TTL
+			indexes the key + expires sibling in each collection's bare set, with a TTL
 		`, async () => {
-			await tagScopedCacheKeys('resp-key', [
+			await indexScopedCacheEntry('resp-key', [
 				{ collection: 'articles' },
 				{ collection: 'directus_users' },
 			]);
@@ -320,172 +326,254 @@ describe('scoped cache purging', () => {
 			// The members ride the script, which files them and moves the set's
 			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:articles',
+				'scalabus:scoped-cache-index:fingerprint:articles:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'articles:&|resp-key',
+				'articles:&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:directus_users',
+				'scalabus:scoped-cache-index:fingerprint:directus_users:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'directus_users:&|resp-key',
+				'directus_users:&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.exec).toHaveBeenCalledOnce();
 		});
 
-		test('scoped cache tags encode field=value into the tag key', async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 'A' },
-				{ collection: 'slots', field: 'student', value: 7 },
+		test(oneLine`
+			carries every value of a pin in ONE member, which is the AND a tag per value
+			could not spell
+		`, async () => {
+			await indexScopedCacheEntry('resp-key', [
+				{
+					collection: 'slots',
+					pinnedScope: { student: ['7', 'A'] },
+				},
 			]);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=A',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
-			);
-
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=7',
-				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'slots:&student=,7,A,&|resp-key',
+				'slots:&student=,7,A,&|resp-key__expires_at',
 			);
 		});
 
 		test('a null scope value serializes to a sentinel, not "null"', async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: null },
+			await indexScopedCacheEntry('resp-key', [
+				{
+					collection: 'slots',
+					pinnedScope: { student: ['\x00null'] },
+				},
 			]);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=\x00null',
+				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
+				'slots:&student=,\x00null,&|resp-key',
+				'slots:&student=,\x00null,&|resp-key__expires_at',
 			);
 		});
 
 		test(oneLine`
-			numeric and string scope values collapse to one tag key (stable column type)
+			files a read into the set its index value owns, and no other
 		`, async () => {
-			// A read pinned off a REST `_eq=7` carries the value as the string '7';
-			// the row it came from holds the numeric 7. Both must land on the SAME
-			// tag set or the purge would miss the read.
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 7 },
-				{ collection: 'slots', field: 'student', value: '7' },
-			]);
+			const schema = new SchemaBuilder()
+				.collection('slots', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+				})
+				.build();
 
-			// One tag set, plus the one index entry filing it under its collection.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
+			schema.collections['slots']!.scopedCacheFields = ['student'];
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=7',
-				600,
+			await indexScopedCacheEntry(
 				'resp-key',
-				'resp-key__expires_at',
+				[{
+					collection: 'slots',
+					pinnedScope: { student: ['7'] },
+				}],
+				[],
+				schema,
 			);
 
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledOnce();
+
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:slices:slots',
+				'scalabus:scoped-cache-index:fingerprint:slots:student=7',
 				600,
-				'scalabus:scoped-cache-index:tag:slots:student=7',
+				'slots:&student=,7,&|resp-key',
+				'slots:&student=,7,&|resp-key__expires_at',
 			);
 		});
 
 		test(oneLine`
-			every slice of one collection lands in a single index call, not one each
+			files a read bound to a LIST of index values under each of them: a write of
+			either value has to find it
 		`, async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 'A' },
-				{ collection: 'slots', field: 'student', value: 'B' },
-			]);
+			const schema = new SchemaBuilder()
+				.collection('slots', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+				})
+				.build();
 
-			// The index set is the same key for both, and its expiry is the same
-			// value both times: sending it twice buys an EXISTS and a TTL for
-			// nothing. Two tag sets plus the one index call that names them.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(3);
+			schema.collections['slots']!.scopedCacheFields = ['student'];
+
+			await indexScopedCacheEntry(
+				'resp-key',
+				[{
+					collection: 'slots',
+					pinnedScope: { student: ['A', 'B'] },
+				}],
+				[],
+				schema,
+			);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:slices:slots',
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A',
 				600,
-				'scalabus:scoped-cache-index:tag:slots:student=A',
-				'scalabus:scoped-cache-index:tag:slots:student=B',
+				'slots:&student=,A,B,&|resp-key',
+				'slots:&student=,A,B,&|resp-key__expires_at',
+			);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:fingerprint:slots:student=B',
+				600,
+				'slots:&student=,A,B,&|resp-key',
+				'slots:&student=,A,B,&|resp-key__expires_at',
 			);
 		});
 
-		test('duplicate tags collapse to a single SADD', async () => {
-			await tagScopedCacheKeys('resp-key', [
-				{ collection: 'slots', field: 'student', value: 'A' },
-				{ collection: 'slots', field: 'student', value: 'A' },
+		test('a duplicated fingerprint re-sends the same members', async () => {
+			await indexScopedCacheEntry('resp-key', [
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
-			// The tag set and its index entry, once each — not once per duplicate.
+			// Keyed off the array position rather than the rendered form, so the same
+			// bucket is sent once per duplicate — redundant but harmless, since a
+			// SADD of the same members twice leaves the set exactly as it was.
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:fingerprint:slots:',
+				600,
+				'slots:&student=,A,&|resp-key',
+				'slots:&student=,A,&|resp-key__expires_at',
+			);
 		});
 
 		test('no-op when no tags', async () => {
-			await tagScopedCacheKeys('resp-key', []);
+			await indexScopedCacheEntry('resp-key', []);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 
 		test('no-op in full mode', async () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
-			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }]);
+
+			await indexScopedCacheEntry('resp-key', [
+				{ collection: 'articles' },
+			]);
+
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 
-		test('tags the extra siblings alongside the key', async () => {
-			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }], [
-				'resp-key__tags',
+		test('indexes the extra siblings alongside the key', async () => {
+			await indexScopedCacheEntry('resp-key', [
+				{ collection: 'articles' },
+			], [
+				'resp-key__pins',
 			]);
 
 			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:articles',
+				'scalabus:scoped-cache-index:fingerprint:articles:',
 				600,
-				'resp-key',
-				'resp-key__expires_at',
-				'resp-key__tags',
+				'articles:&|resp-key',
+				'articles:&|resp-key__expires_at',
+				'articles:&|resp-key__pins',
 			);
 		});
 	});
 
 	describe('purgeScopedCache', () => {
+		// What each fingerprint set holds, keyed by the set a case expects the purge
+		// to read. A purge names a pin, never the set holding it, so a collection's
+		// sets are found by scanning its own prefix — which is why a case declares
+		// them under their whole key.
+		let indexedMembers: Record<string, string[]>;
+
+		// The keys handed to the collection sweep's script, one entry per call.
+		const swept: string[][] = [];
+
+		beforeEach(() => {
+			indexedMembers = {};
+			swept.length = 0;
+
+			redis.sscan.mockImplementation(async (indexKey: string) => {
+				return ['0', indexedMembers[indexKey] ?? []] as [string, string[]];
+			});
+
+			redis.scan.mockImplementation(async (
+				_cursor: string,
+				_match: string,
+				pattern: string,
+			) => {
+				const scanned = pattern.slice(0, -1);
+
+				return ['0', Object.keys(indexedMembers).filter((indexKey) => {
+					return indexKey.startsWith(scanned);
+				})] as [string, string[]];
+			});
+
+			// The sweep is one script, so the double runs what the script runs: read
+			// every set it was handed, and drop them. A case still arms which set
+			// holds what, and still sees the sweep ask for exactly those.
+			redis.eval.mockImplementation(async (
+				_script: string,
+				numKeys: number,
+				...args: string[]
+			) => {
+				const sweptKeys = args.slice(0, numKeys);
+				swept.push(sweptKeys);
+
+				return sweptKeys.flatMap((indexKey) => indexedMembers[indexKey] ?? []);
+			});
+		});
+
 		test(oneLine`
 			always purges the collection-level tag (global readers) alongside slices
 		`, async () => {
-			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:scoped-cache-index:tag:slots'
-					? ['global-key']
-					: ['key-a', 'key-a__expires_at'];
-			});
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:': ['slots:&|global-key'],
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|key-a',
+					'slots:&student=,A,&|key-a__expires_at',
+				],
+			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
-
-			expect(redis.smembers)
-				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots');
-
-			expect(redis.smembers)
-			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=A');
 
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
 
-			expect(redis.unlink).toHaveBeenCalledWith([
-				'scalabus:scoped-cache-index:tag:slots',
-				'scalabus:scoped-cache-index:tag:slots:student=A',
-			]);
+			// The members go, not the sets: a set is split by an index value, not by
+			// the pin this purge names, so dropping one would take every entry filed
+			// under that value whatever it is bound to.
+			expect(redis._pipeline.srem).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'slots:&|global-key',
+			);
 
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
@@ -494,7 +582,12 @@ describe('scoped cache purging', () => {
 			purges the tags it had when a cache.purge extension throws, rather than
 			failing a mutation whose write already committed
 		`, async () => {
-			redis.smembers.mockResolvedValue(['key-a']);
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|key-a',
+				],
+			};
+
 			emitFilter.mockRejectedValueOnce(new Error('extension exploded'));
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
@@ -503,46 +596,46 @@ describe('scoped cache purging', () => {
 			// a durable write — and, sitting outside `purgeOrRecord`, records nothing
 			// either, leaving the entries it was about to drop with nothing coming.
 			await expect(purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			])).resolves.toEqual([
 				{ collection: 'slots' },
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
-
-			expect(redis.smembers)
-				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots');
-
-			expect(redis.smembers)
-				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=A');
 
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
 		test('records the purge, how wide it reached and what it took', async () => {
-			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:scoped-cache-index:tag:slots'
-					? ['global-key', 'global-key__expires_at']
-					: ['key-a', 'key-a__expires_at', 'key-a__tags'];
-			});
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:': [
+					'slots:&|global-key',
+					'slots:&|global-key__expires_at',
+				],
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|key-a',
+					'slots:&student=,A,&|key-a__expires_at',
+					'slots:&student=,A,&|key-a__pins',
+				],
+			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
-			// Two tag sets, and TWO entries — not the five keys deleted. A tag set
-			// holds each entry alongside its `__expires_at` sibling and any extra
-			// sibling (`__tags`), so counting members would report every entry twice
-			// over and draw an eviction line at double the truth.
+			// Two pins, and TWO entries — not the five keys deleted. An entry is
+			// indexed alongside its `__expires_at` sibling and any extra sibling
+			// (`__pins`), so counting members would report every entry twice over and
+			// draw an eviction line at double the truth.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'slots',
 				mode: 'slices',
-				// The tags themselves, in the display form the entry sidecar stores,
+				// The pins themselves, in the display form the entry sidecar stores,
 				// so a purge row joins against an entry rather than merely counting.
-				scopedCacheTags: ['slots', 'slots:student=A'],
-				scopedCacheTagCount: 2,
+				scopedCachePins: ['slots', 'slots:student=A'],
+				scopedCachePinCount: 2,
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -550,21 +643,44 @@ describe('scoped cache purging', () => {
 
 			// The sidecars are still deleted — only the count excludes them.
 			expect(cache.delete).toHaveBeenCalledWith('global-key__expires_at');
-			expect(cache.delete).toHaveBeenCalledWith('key-a__tags');
+			expect(cache.delete).toHaveBeenCalledWith('key-a__pins');
 			expect(cache.delete).toHaveBeenCalledTimes(5);
 		});
 
-		test('counts only the entries that were still there to delete', async () => {
-			// Nothing ever SREMs a tag set, so a key that expired by TTL is still
-			// named by it until the set itself is dropped. Counting memberships would
-			// report it as evicted — and on the per-user keys this fork exists for,
-			// with a TTL shorter than the gap between mutations, that is most of a set.
-			redis.smembers.mockResolvedValue([
-				'live-key',
-				'live-key__expires_at',
-				'stale-key',
-				'stale-key__expires_at',
+		test(oneLine`
+			counts the pins it records, not the fingerprints they came in
+		`, async () => {
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			// Two fingerprints, the bare one and one holding both pairs, and three
+			// pins: the count is what the purge-pins rows hold, one per pin.
+			await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', pinnedScope: { student: ['A'], teacher: ['T'] } },
 			]);
+
+			expect(queueCachePurge).toHaveBeenCalledWith({
+				collection: 'slots',
+				mode: 'slices',
+				scopedCachePins: ['slots', 'slots:student=A', 'slots:teacher=T'],
+				scopedCachePinCount: 3,
+				evicted: 0,
+				durationMs: expect.any(Number),
+			});
+		});
+
+		test('counts only the entries that were still there to delete', async () => {
+			// Nothing SREMs a member until a purge matches it, so a key that expired
+			// by TTL is still named by its set. Counting memberships would report it
+			// as evicted — and on the per-user keys this fork exists for, with a TTL
+			// shorter than the gap between mutations, that is most of a set.
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|live-key',
+					'slots:&student=,A,&|live-key__expires_at',
+					'slots:&student=,A,&|stale-key',
+					'slots:&student=,A,&|stale-key__expires_at',
+				],
+			};
 
 			const cache = {
 				clear: vi.fn(),
@@ -575,7 +691,7 @@ describe('scoped cache purging', () => {
 			} as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			// One, not two: the stale entry was named by the set and deleted for
@@ -593,12 +709,14 @@ describe('scoped cache purging', () => {
 			drops a slice's entries in one UNLINK against redis, and reports what it
 			replied rather than one delete per key
 		`, async () => {
-			redis.smembers.mockResolvedValue([
-				'key-a',
-				'key-a__expires_at',
-				'key-b',
-				'key-b__expires_at',
-			]);
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|key-a',
+					'slots:&student=,A,&|key-a__expires_at',
+					'slots:&student=,A,&|key-b',
+					'slots:&student=,A,&|key-b__expires_at',
+				],
+			};
 
 			const unlink = vi.fn().mockResolvedValue(1);
 
@@ -616,7 +734,7 @@ describe('scoped cache purging', () => {
 			} as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			// A purge over a slice used to send one delete per key, so its cost grew
@@ -636,7 +754,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			// One, though two entries were named: a key that expired by TTL is still
-			// a member until the set is dropped, and UNLINK is the one thing that
+			// a member until the purge matches it, and UNLINK is the one thing that
 			// knows which of them was still there.
 			expect(queueCachePurge).toHaveBeenCalledWith(
 				expect.objectContaining({ evicted: 1 }),
@@ -644,33 +762,33 @@ describe('scoped cache purging', () => {
 		});
 
 		test('records the coarse fallback as the wider thing it is', async () => {
-			redis.smembers.mockImplementation(async (key: string) => {
-				if (key === 'scalabus:scoped-cache-index:slices:articles') {
-					return [
-						'scalabus:scoped-cache-index:tag:articles:author=1',
-						'scalabus:scoped-cache-index:tag:articles:author=2',
-					];
-				}
-
-				return key === 'scalabus:scoped-cache-index:tag:articles'
-					? ['global-key']
-					: ['slice-key'];
-			});
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:articles:': [
+					'articles:&|global-key',
+					'articles:&|global-key__expires_at',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+					'articles:&author=,1,&|slice-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=2': [
+					'articles:&author=,2,&|slice-key',
+				],
+			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			// Three tag sets: the bare tag plus every slice the index named. Two
-			// entries, because both slices pointed at the same key — deduped across
-			// the sets rather than counted per set.
+			// Three index sets: the bare one plus every split the scan found. Two
+			// entries, because both splits named the same key — deduped across the
+			// sets rather than counted per set.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
-				// Derived rather than chosen: every slice the scan found, unbounded.
+				// Derived rather than chosen: every set the scan found, unbounded.
 				// `collection` plus the mode already state the reach exactly.
-				scopedCacheTags: null,
-				scopedCacheTagCount: 3,
+				scopedCachePins: null,
+				scopedCachePinCount: 3,
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -678,20 +796,16 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			one coarse purge is one record, not one per tag set it swept
+			one coarse purge is one record, not one per index set it swept
 		`, async () => {
-			// The fallback scans up to every slice of the collection. It is still a
-			// single purge operation, so a bucket count of purges stays a count of
-			// purges rather than tracking how wide each one happened to reach.
-			redis.smembers.mockImplementation(async (key: string) => {
-				return key === 'scalabus:scoped-cache-index:slices:articles'
-					? [
-						'scalabus:scoped-cache-index:tag:articles:author=1',
-						'scalabus:scoped-cache-index:tag:articles:author=2',
-						'scalabus:scoped-cache-index:tag:articles:author=3',
-					]
-					: [];
-			});
+			// The fallback scans every set of the collection. It is still a single
+			// purge operation, so a bucket count of purges stays a count of purges
+			// rather than tracking how wide each one happened to reach.
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:articles:': [],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=2': [],
+			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
@@ -702,8 +816,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
-				scopedCacheTags: null,
-				scopedCacheTagCount: 4,
+				scopedCachePins: null,
+				scopedCachePinCount: 3,
 				evicted: 0,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -715,7 +829,7 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', [
-				{ collection: 'articles', field: 'author', value: '1' },
+				{ collection: 'articles', pinnedScope: { author: ['1'] } },
 			]);
 
 			expect(cache.clear).toHaveBeenCalledOnce();
@@ -726,8 +840,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: null,
 				mode: 'namespace',
-				scopedCacheTags: null,
-				scopedCacheTagCount: 0,
+				scopedCachePins: null,
+				scopedCachePinCount: 0,
 				evicted: null,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -735,136 +849,134 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			spares other slices — student=B is never touched when purging student=A
+			spares the entries bound to another value — student=B is left cached when
+			purging student=A, though both sit in the same collection
 		`, async () => {
-			redis.smembers.mockResolvedValue([]);
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|key-a',
+				],
+				'scalabus:scoped-cache-index:fingerprint:slots:student=B': [
+					'slots:&student=,B,&|key-b',
+				],
+			};
+
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
-			expect(redis.smembers).not.toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:tag:slots:student=B',
-			);
-
-			expect(redis.unlink)
-				.not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
+			expect(cache.delete).toHaveBeenCalledWith('key-a');
+			expect(cache.delete).not.toHaveBeenCalledWith('key-b');
 		});
 
 		test('no scoped cache tags purges only the collection-level tag', async () => {
-			redis.smembers.mockResolvedValue(['key-a', 'key-a__expires_at', 'key-b']);
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:articles:': [
+					'articles:&|key-a',
+					'articles:&|key-a__expires_at',
+					'articles:&|key-b',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+					'articles:&author=,1,&|sliced-key',
+				],
+			};
+
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles');
 
-			expect(redis.smembers)
-				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:articles');
-
-			expect(redis.smembers).toHaveBeenCalledOnce();
 			expect(cache.delete).toHaveBeenCalledTimes(3);
 
-			expect(redis.unlink)
-			.toHaveBeenCalledWith(['scalabus:scoped-cache-index:tag:articles']);
-
+			// The bare pin reaches the reads that pinned nothing, and stops there: an
+			// entry bound to a value is not made stale by a purge naming no value.
+			expect(cache.delete).not.toHaveBeenCalledWith('sliced-key');
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
 		test(oneLine`
-			null scopedCacheTags falls back to a collection-wide purge (bare tag + every
-			slice), sparing other collections
+			null scopedCachePins falls back to a collection-wide purge (every set the
+			collection owns), sparing other collections
 		`, async () => {
-			redis.smembers.mockImplementation(async (key: string) => {
-				if (key === 'scalabus:scoped-cache-index:slices:articles') {
-					return [
-						'scalabus:scoped-cache-index:tag:articles:author=1',
-						'scalabus:scoped-cache-index:tag:articles:author=2',
-					];
-				}
-
-				if (key === 'scalabus:scoped-cache-index:tag:articles') {
-					return ['global-key'];
-				}
-
-				return ['slice-key'];
-			});
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:articles:': [
+					'articles:&|global-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+					'articles:&author=,1,&|slice-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles_archive:': [
+					'articles_archive:&|archive-key',
+				],
+			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			// Its own index rather than a keyspace walk, which is also what keeps a
-			// prefix sibling (`articles_archive`) out of the purge.
-			expect(redis.smembers)
-				.toHaveBeenCalledWith('scalabus:scoped-cache-index:slices:articles');
-
-			expect(redis.scan).not.toHaveBeenCalled();
-
-			expect(redis.smembers)
-				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:articles');
-
-			expect(redis.smembers)
-			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:articles:author=1');
+			// The glob ends on the separator, which is what keeps a prefix sibling
+			// (`articles_archive`) out of a purge of `articles`.
+			expect(redis.scan).toHaveBeenCalledWith(
+				'0',
+				'MATCH',
+				'scalabus:scoped-cache-index:fingerprint:articles:*',
+				'COUNT',
+				expect.any(Number),
+			);
 
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
+			expect(cache.delete).not.toHaveBeenCalledWith('archive-key');
 
-			expect(redis.unlink).toHaveBeenCalledWith([
-				'scalabus:scoped-cache-index:tag:articles',
-				'scalabus:scoped-cache-index:tag:articles:author=1',
-				'scalabus:scoped-cache-index:tag:articles:author=2',
-			]);
-
-			// ONE command for every tag set the purge sweeps, and it is a script: a
+			// ONE command for every set the purge sweeps, and it is a script: a
 			// pipeline only orders its own commands, so another client could file a
 			// key into a set between the read and the drop and have that set deleted
 			// under it.
 			expect(redis.eval).toHaveBeenCalledOnce();
 
-			expect(redis.eval.mock.calls[0]?.slice(0, 5)).toEqual([
-				expect.stringContaining('SMEMBERS'),
-				3,
-				'scalabus:scoped-cache-index:tag:articles',
-				'scalabus:scoped-cache-index:tag:articles:author=1',
-				'scalabus:scoped-cache-index:tag:articles:author=2',
-			]);
+			expect(swept).toEqual([[
+				'scalabus:scoped-cache-index:fingerprint:articles:',
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1',
+			]]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('the collection-wide purge takes every slice the index names', async () => {
-			redis.smembers.mockImplementation(async (key: string) => {
-				return key === 'scalabus:scoped-cache-index:slices:articles'
-					? [
-						'scalabus:scoped-cache-index:tag:articles:author=1',
-						'scalabus:scoped-cache-index:tag:articles:author=2',
-					]
-					: [];
-			});
+		test(oneLine`
+			the collection-wide purge takes every set the scan names, and drops them
+			whole rather than member by member
+		`, async () => {
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:articles:': [
+					'articles:&|global-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+					'articles:&author=,1,&|first-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:articles:author=2': [
+					'articles:&author=,2,&|second-key',
+				],
+			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			expect(redis.unlink).toHaveBeenCalledWith([
-				'scalabus:scoped-cache-index:tag:articles',
-				'scalabus:scoped-cache-index:tag:articles:author=1',
-				'scalabus:scoped-cache-index:tag:articles:author=2',
-			]);
+			expect(swept).toEqual([[
+				'scalabus:scoped-cache-index:fingerprint:articles:',
+				'scalabus:scoped-cache-index:fingerprint:articles:author=1',
+				'scalabus:scoped-cache-index:fingerprint:articles:author=2',
+			]]);
 
-			// The index is pruned by the same purge — and inside the same script, so a
-			// slice re-added while the sweep ran cannot be pruned after the fact.
-			// Left naming keys it just dropped, it would grow without bound and
-			// inflate every count taken off it.
-			expect(redis.srem).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:slices:articles',
-				'scalabus:scoped-cache-index:tag:articles:author=1',
-			);
+			expect(cache.delete).toHaveBeenCalledWith('global-key');
+			expect(cache.delete).toHaveBeenCalledWith('first-key');
+			expect(cache.delete).toHaveBeenCalledWith('second-key');
 
-			expect(redis.srem).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:slices:articles',
-				'scalabus:scoped-cache-index:tag:articles:author=2',
-			);
+			// The sets go inside the script, so nothing prunes them afterwards: a
+			// member re-added while the sweep ran cannot be SREMed after the fact,
+			// and a set left naming keys it just dropped would grow without bound.
+			expect(redis._pipeline.srem).not.toHaveBeenCalled();
 		});
 
 		test('full mode flushes the whole cache and never touches redis', async () => {
@@ -872,43 +984,45 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', [
-				{ collection: 'articles', field: 'student', value: 'A' },
+				{ collection: 'articles', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(cache.clear).toHaveBeenCalledTimes(1);
 			expect(cache.delete).not.toHaveBeenCalled();
-			expect(redis.smembers).not.toHaveBeenCalled();
+			expect(redis.sscan).not.toHaveBeenCalled();
+			expect(redis.scan).not.toHaveBeenCalled();
 		});
 
 		test(oneLine`
 			a numeric mutation value resolves the same slice a string-pinned read tagged
 		`, async () => {
-			// Read side tagged `student=7` off a REST string; the mutation resolves the
-			// value as numeric 7 from the row. The purge must hit the string-keyed slice,
-			// not a separate `student=7` (number).
-			redis.smembers.mockResolvedValue(['read-key']);
+			// Read side pinned `student=7` off a REST string; the mutation resolves the
+			// value as numeric 7 from the row. The purge must hit the string-pinned
+			// entry, not a separate `student=7` (number).
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:student=7': [
+					'slots:&student=,7,&|read-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+					'slots:&student=,A,&|other-key',
+				],
+			};
+
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 7 },
+				scopedCacheFingerprintOf('slots', [{ field: 'student', value: 7 }]),
 			]);
-
-			expect(redis.smembers)
-			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=7');
 
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
-
-			expect(redis.unlink).toHaveBeenCalledWith([
-				'scalabus:scoped-cache-index:tag:slots',
-				'scalabus:scoped-cache-index:tag:slots:student=7',
-			]);
+			expect(cache.delete).not.toHaveBeenCalledWith('other-key');
 		});
 
 		test(oneLine`
 			a cache.purge filter that empties the tag set deletes nothing and never
-			unlinks
+			reads an index set
 		`, async () => {
-			// A delete with no keys throws; an extension is free to drop every tag, so
+			// A delete with no keys throws; an extension is free to drop every pin, so
 			// the empty set must be a no-op rather than a crash (and must not degrade
 			// into a full flush).
 			emitFilter.mockImplementation(async () => []);
@@ -916,23 +1030,37 @@ describe('scoped cache purging', () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
-			expect(redis.smembers).not.toHaveBeenCalled();
+			expect(redis.sscan).not.toHaveBeenCalled();
+			expect(redis.scan).not.toHaveBeenCalled();
 			expect(cache.delete).not.toHaveBeenCalled();
-			expect(redis.unlink).not.toHaveBeenCalled();
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
 		test(oneLine`
 			cache.purge filter augments the purge set (extension-resolved tags get dropped)
 		`, async () => {
-			emitFilter.mockImplementation(async (_event: string, tags: ScopedCacheTag[]) => {
-				return [...tags, { collection: 'slots', field: 'owner', value: 'B' }];
+			emitFilter.mockImplementation(async (
+				_event: string,
+				fingerprints: ScopedCacheDeclaredFingerprint[],
+			) => {
+				return [...fingerprints, {
+					collection: 'slots',
+					pinnedScope: { owner: ['B'] },
+				}];
 			});
 
-			redis.smembers.mockResolvedValue(['owned-key']);
+			indexedMembers = {
+				'scalabus:scoped-cache-index:fingerprint:slots:owner=B': [
+					'slots:&owner=,B,&|owned-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint:slots:owner=C': [
+					'slots:&owner=,C,&|unowned-key',
+				],
+			};
+
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'slots', []);
@@ -944,13 +1072,8 @@ describe('scoped cache purging', () => {
 				null,
 			);
 
-			expect(redis.smembers)
-			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:owner=B');
-
-			expect(redis.unlink).toHaveBeenCalledWith([
-				'scalabus:scoped-cache-index:tag:slots',
-				'scalabus:scoped-cache-index:tag:slots:owner=B',
-			]);
+			expect(cache.delete).toHaveBeenCalledWith('owned-key');
+			expect(cache.delete).not.toHaveBeenCalledWith('unowned-key');
 		});
 
 		test('returns null when scoped purge is off', async () => {
@@ -961,8 +1084,9 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).toHaveBeenCalledOnce();
 		});
 
-		test('returns the bare collection tag for a coarse purge', async () => {
-			redis.smembers.mockResolvedValue([]);
+		test(oneLine`
+			returns the bare collection fingerprint for a coarse purge
+		`, async () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			expect(await purgeScopedCache(cache, 'articles', null)).toEqual([
@@ -970,17 +1094,16 @@ describe('scoped cache purging', () => {
 			]);
 		});
 
-		test('returns the resolved slice tags it purged', async () => {
-			redis.smembers.mockResolvedValue([]);
+		test('returns the resolved slice fingerprints it purged', async () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			const purged = await purgeScopedCache(cache, 'slots', [
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
 			expect(purged).toEqual([
 				{ collection: 'slots' },
-				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 		});
 	});
@@ -1212,7 +1335,7 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:tag:articles:id=1']],
+			['0', ['scalabus:scoped-cache-index:fingerprint:articles:id=1']],
 		);
 
 		await flushCaches(true);
@@ -1230,7 +1353,9 @@ describe('flushCaches', () => {
 		);
 
 		expect(redis._pipeline.unlink)
-			.toHaveBeenCalledWith(['scalabus:scoped-cache-index:tag:articles:id=1']);
+			.toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:fingerprint:articles:id=1',
+			]);
 	});
 
 	test(oneLine`
@@ -1244,8 +1369,8 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(['0', [
-			'scalabus:scoped-cache-index:tag:articles',
-			'scalabus:scoped-cache-index:tag:articles:id=1',
+			'scalabus:scoped-cache-index:fingerprint:articles',
+			'scalabus:scoped-cache-index:fingerprint:articles:id=1',
 		]]);
 
 		await flushCaches(true);
@@ -1385,7 +1510,7 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:tag:articles']],
+			['0', ['scalabus:scoped-cache-index:fingerprint:articles']],
 		);
 
 		redis._pipeline.exec.mockResolvedValueOnce([
@@ -1433,8 +1558,14 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan
-		.mockResolvedValueOnce(['42', ['scalabus:scoped-cache-index:tag:articles']])
-		.mockResolvedValueOnce(['0', ['scalabus:scoped-cache-index:tag:authors']]);
+		.mockResolvedValueOnce([
+			'42',
+			['scalabus:scoped-cache-index:fingerprint:articles'],
+		])
+		.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:authors'],
+		]);
 
 		await flushCaches(true);
 
@@ -1588,7 +1719,7 @@ describe('clearCacheTargets', () => {
 
 	function refuseTheIndexUnlink() {
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:tag:articles']],
+			['0', ['scalabus:scoped-cache-index:fingerprint:articles']],
 		);
 
 		redis._pipeline.exec.mockResolvedValueOnce([
@@ -1622,10 +1753,11 @@ describe('clearCacheTargets', () => {
 });
 
 // A flush, like every purge, has to move the counters BEFORE it drops anything: a
-// read that captured earlier and rechecks between the clear and a bump made after
+// read that snapshotted earlier and rechecks between the clear and a bump made after
 // it compares equal, keeps the entry it just wrote, and the index drop that follows
-// unlinks the tag sets it was filed under — stale for its TTL, reachable to no
-// later purge. The clear is the first drop, so the bump goes in front of it.
+// unlinks the index sets it was filed under — stale for its TTL, reachable to no
+// later purge. The clear is the first drop, so the bump goes in front of it; a
+// second follows the index drop, for a fill that filed before it and wrote after.
 describe('the wholesale counter moves before the response clear', () => {
 	function recordFlushOrder() {
 		setEnv({
@@ -1645,9 +1777,11 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		onTestFinished(() => clear.mockRestore());
 
-		redis._pipeline.incr.mockImplementation((key: string) => {
-			calls.push(`incr ${key}`);
-		});
+		redis.scopedCacheEpochBump.mockImplementation(
+			(_epochKeyCount: number, epochKey: string) => {
+				calls.push(`bump ${epochKey}`);
+			},
+		);
 
 		redis.scan.mockImplementation(async () => {
 			calls.push('scan');
@@ -1662,7 +1796,12 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		await flushCaches(true);
 
-		expect(calls).toEqual(['incr scalabus:scoped-cache-epoch:*', 'clear', 'scan']);
+		expect(calls).toEqual([
+			'bump scalabus:scoped-cache-epoch:*',
+			'clear',
+			'scan',
+			'bump scalabus:scoped-cache-epoch:*',
+		]);
 	});
 
 	test('in clearCacheTargets', async () => {
@@ -1670,7 +1809,12 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		await clearCacheTargets(['response']);
 
-		expect(calls).toEqual(['incr scalabus:scoped-cache-epoch:*', 'clear', 'scan']);
+		expect(calls).toEqual([
+			'bump scalabus:scoped-cache-epoch:*',
+			'clear',
+			'scan',
+			'bump scalabus:scoped-cache-epoch:*',
+		]);
 	});
 });
 

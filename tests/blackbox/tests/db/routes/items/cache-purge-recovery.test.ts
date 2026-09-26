@@ -269,9 +269,9 @@ describe(oneLine`
 			await assertInstanceAlive();
 			expect(written.status).toBe(200);
 
-			// Recorded by its display label, so the retry can rebuild the key against
-			// whatever CACHE_NAMESPACE is set to when it runs.
-			const pending = await db(PENDING).select('mode', 'scoped_cache_tag');
+			// Recorded as a fingerprint rather than a Redis key, so the retry can rebuild
+			// the key against whatever CACHE_NAMESPACE is set to when it runs.
+			const pending = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 
 			// Every row, not only the one asserted below: `toContainEqual` permits others,
 			// and a `namespace` row drains as `cache.clear()` — which would wipe the
@@ -281,7 +281,11 @@ describe(oneLine`
 
 			expect(pending).toContainEqual({
 				mode: 'slices',
-				scoped_cache_tag: `${NOTE}:id=${readNote}`,
+				// The serialised form the index holds, with every value comma-wrapped
+				// so a partial fingerprint globs cleanly. Spelled out rather than
+				// imported: what is asserted is the string that reached Postgres, not
+				// the renderer that wrote it.
+				scoped_cache_fingerprint: `${NOTE}:&id=,${readNote},&`,
 			});
 
 			await proxy.open();
@@ -296,7 +300,7 @@ describe(oneLine`
 			let drained: Array<Record<string, unknown>> = [];
 
 			for (let attempt = 0; attempt < 80; attempt++) {
-				drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+				drained = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 
 				if (drained.length === 0) {
 					break;
@@ -534,9 +538,12 @@ describe(oneLine`
 			let tagged: any[] = [];
 
 			for (let attempt = 0; attempt < 45 && tagged.length < 2; attempt++) {
-				tagged = await db('directus_cache_stats_scoped_purge_tags')
-					.whereIn('scoped_cache_tag', pair.map((id) => `${NOTE}:id=${id}`))
-					.select('scoped_cache_tag', 'purge_id');
+				tagged = await db('directus_cache_stats_scoped_purge_pins')
+					// Labels here, fingerprints in the pending table above: the stats
+					// stream joins its tag list with a comma, which a rendered
+					// fingerprint carries raw.
+					.whereIn('scoped_cache_pin', pair.map((id) => `${NOTE}:id=${id}`))
+					.select('scoped_cache_pin', 'purge_id');
 
 				if (tagged.length < 2) {
 					await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -550,14 +557,14 @@ describe(oneLine`
 
 			const purged = await db('directus_cache_stats_purges')
 				.where({ purge_id: tagged[0].purge_id })
-				.select('mode', 'scoped_cache_tag_count', 'duration_ms');
+				.select('mode', 'scoped_cache_pin_count', 'duration_ms');
 
 			mark(`recorded purges: ${JSON.stringify(purged)}`);
 
 			// The three targets recorded above: the bare tag and one per key.
 			expect(purged).toHaveLength(3);
 			expect(purged.map((row) => row.mode)).toEqual(['slices', 'slices', 'slices']);
-			expect(purged.map((row) => row.scoped_cache_tag_count)).toEqual([1, 1, 1]);
+			expect(purged.map((row) => row.scoped_cache_pin_count)).toEqual([1, 1, 1]);
 			expect(purged.map((row) => row.duration_ms)).toEqual([null, null, null]);
 		}, 60_000);
 
@@ -599,7 +606,7 @@ describe(oneLine`
 
 			await assertInstanceAlive();
 
-			const recorded = await db(PENDING).select('mode', 'scoped_cache_tag');
+			const recorded = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 			mark(`recorded before the boot case: ${JSON.stringify(recorded)}`);
 			expect(recorded.length).toBeGreaterThan(0);
 
@@ -631,7 +638,7 @@ describe(oneLine`
 				let drained: Array<Record<string, unknown>> = [];
 
 				for (let attempt = 0; attempt < 60; attempt++) {
-					drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+					drained = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
 
 					if (drained.length === 0) {
 						break;

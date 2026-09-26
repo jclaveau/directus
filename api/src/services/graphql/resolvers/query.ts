@@ -1,6 +1,10 @@
 import type { Item, Query } from '@directus/types';
 import { parseFilterFunctionPath } from '@directus/utils';
 import type { GraphQLResolveInfo } from 'graphql';
+import {
+	mergeScopedCacheEpochs,
+	readScopedCacheEpochs,
+} from '../../../scoped-cache/index.js';
 import { omit } from '../../../utils/lodash-es-used.js';
 import { mergeVersionsRaw, mergeVersionsRecursive } from '../../../utils/merge-version-data.js';
 import { VersionsService } from '../../versions.js';
@@ -68,6 +72,19 @@ export async function resolveQuery(gql: GraphQLService, info: GraphQLResolveInfo
 	const result = await gql.read(collection, query);
 
 	if (args['version']) {
+		// The version saves are read below and never pinned, so a later write to
+		// directus_versions (a delete, a key rename, a save) would leave the merged
+		// response cached. The bare fingerprint makes any such write purge it; it
+		// goes before the lookup because a missing version is an answer too.
+		gql.scopedCacheFingerprints.push({ collection: 'directus_versions' });
+
+		// The fill guard refuses a fingerprint whose collection it never read a
+		// counter for, so the reading is taken here, before the lookup it guards.
+		mergeScopedCacheEpochs(
+			gql.scopedCacheEpochs,
+			await readScopedCacheEpochs(['directus_versions']),
+		);
+
 		const versionsService = new VersionsService({ accountability: gql.accountability, schema: gql.schema });
 
 		const saves = await versionsService.getVersionSaves(args['version'], collection, args['id']);

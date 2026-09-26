@@ -1,19 +1,19 @@
-// The sweep is not atomic: it reads its tag sets (SUNION), deletes the entries they
-// name one by one, and only then deletes the sets. A read that files its own key
-// into one of those sets in between has that set deleted underneath it — its entry
-// stays in Redis, correct, and indexed by nothing, so no later purge can reach it.
+// A slice purge reads its index sets in pages (SSCAN) and SREMs only the members it
+// matched, so a read filing its own member into one of those sets while the pass is
+// under way is either scanned and purged, or missed and left indexed — never left
+// indexed by nothing. That is the invariant this rig pins: the sweep it replaced
+// read its tag sets, deleted the entries they named, and only then deleted the sets,
+// so a fill landing between those last two steps kept its entry and lost its index.
 //
-// The window is two adjacent Redis commands wide, which is why the test inflates a
-// tag set first: the per-member delete phase between them then takes long enough to
-// aim at. This hook is the aiming — it holds a read between its query and the fill
-// that files its tags, so the fill can be placed inside a window that has already
-// opened.
+// The pass is as long as the set is wide, which is why the test inflates one first:
+// ~120k members take long enough to aim a read into. This hook is the aiming — it
+// holds a read between its query and the fill that files its fingerprint, so the
+// fill can be placed inside a pass that has already started.
 //
-// It also exposes the collection-wide sweep, which reaches its work through the
-// slice index rather than a named tag: a slice the sweep's SREM dropped while a fill
-// was re-adding it is invisible to that path even when its tag set survived.
+// It also exposes the collection-wide sweep, which finds its work by scanning for
+// the collection's index sets rather than by naming one.
 
-const COLLECTION = 'purge_tag_index_race';
+const COLLECTION = 'purge_fingerprint_index_race';
 
 // Only the read asking for this slice is held; every other read of the collection,
 // and every other collection, runs untouched.
@@ -48,7 +48,7 @@ export default function registerHooks({ filter }, { scopedCache }) {
 		}
 
 		// A row carrying no primary key is unresolvable, so the host degrades to the
-		// collection-wide purge — the one that finds its work through the slice index.
+		// collection-wide purge — the one that scans for the collection's index sets.
 		await scopedCache?.purgeForMutatedRows(COLLECTION, [{}]);
 
 		return payload;

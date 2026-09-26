@@ -1,15 +1,18 @@
 import type {
 	ApiExtensionContext,
 	ScopedCacheExtensionHandle,
+	ScopedCacheFingerprint,
 } from '@directus/types';
 import { getCache } from '../../cache.js';
 import {
 	composeScopedCachePaths,
 	type FieldTypesByField,
 	purgeScopedCache,
+	scopedCacheFingerprintOf,
+	scopedCacheIndexPath,
 	scopedCachePurgeEnabled,
-	scopedCacheTagsFromRows,
-} from '../../scoped-cache.js';
+	scopedCacheCollectionPinsFromRows,
+} from '../../scoped-cache/index.js';
 
 /**
  * Build the `context.scopedCache` handle for a register-type extension's
@@ -71,19 +74,48 @@ export function createScopedCacheExtensionHandle(
 				pinnedFields.map((field) => [field, collectionSchema?.fields[field]?.type]),
 			);
 
-			// 'coarse': a row missing a pinned field yields null → `purgeScopedCache`
-			// does a collection-wide purge (fail-safe), never a silently-stale slice.
-			// With every row resolved it returns the exact touched slices (surgical).
-			// That now covers a row handed over without its primary key.
-			const tags = scopedCacheTagsFromRows(
-				collection,
-				pinnedFields,
-				mutatedRows,
-				'coarse',
-				fieldTypes,
-			);
+			// One fingerprint per row, not one tag per value: a flat tag list spells a
+			// row's pins as separate slices, so a read bound to `owner=alpha AND
+			// method=spaced` would go on any write carrying either one. A fingerprint
+			// keeps them together, which is the whole query case the index purge tests
+			// each row against.
+			//
+			// 'coarse': a row missing a pinned field yields null → a collection-wide
+			// purge (fail-safe), never a silently-stale slice. That covers a row handed
+			// over without its primary key.
+			const rowFingerprints: ScopedCacheFingerprint[] = [];
 
-			await purgeScopedCache(cache, collection, tags);
+			for (const mutatedRow of mutatedRows) {
+				const rowPins = scopedCacheCollectionPinsFromRows(
+					collection,
+					pinnedFields,
+					[mutatedRow],
+					'coarse',
+					fieldTypes,
+				);
+
+				if (rowPins === null) {
+					await purgeScopedCache(cache, collection, null);
+					return;
+				}
+
+				rowFingerprints.push(scopedCacheFingerprintOf(collection, rowPins));
+			}
+
+			// Nothing for the rows to bind — a collection pinning no axis at all, or a
+			// write naming no row — leaves the bare collection fingerprint, which is
+			// what the reads it can still reach were filed under.
+			if (pinnedFields.length === 0 || rowFingerprints.length === 0) {
+				await purgeScopedCache(cache, collection, []);
+				return;
+			}
+
+			// No `changed`: a raw write says which rows it touched and nothing about
+			// which columns it rewrote, so every field reads as rewritten.
+			await purgeScopedCache(cache, collection, [], null, {
+				rowFingerprints,
+				indexPath: scopedCacheIndexPath(schema, collection),
+			});
 		},
 	};
 }

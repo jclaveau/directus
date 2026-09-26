@@ -1,14 +1,10 @@
 import { useEnv } from '@directus/env';
 import type {
-	MaybeWithMeta,
+	CanonicalScopedCachePinValue,
 	PrimaryKey,
-	ReadMeta,
-	SchemaOverview,
-	ScopedCacheCollector,
-	ScopedCacheDependency,
-	ScopedCacheTag,
+	ScopedCacheCollectionPin,
+	ScopedCachePin,
 	Type,
-	WithMeta,
 } from '@directus/types';
 
 const env = useEnv();
@@ -16,12 +12,12 @@ const env = useEnv();
 /**
  * Of two readings of one collection's purge counter, the one taken EARLIER.
  *
- * Merging captures cannot be "whichever arrived first". Reads that contribute them
+ * Merging snapshots cannot be "whichever arrived first". Reads that contribute them
  * run concurrently — GraphQL resolves its root fields in parallel, and a hook can
- * fan its dependency lookups out with `allSettled` — so arrival order is not capture
- * order. Keep the later of two and a purge that landed between them compares equal
- * at fill time and the response is cached already stale, which is the whole thing
- * the counters exist to catch.
+ * fan its dependency lookups out with `allSettled` — so arrival order is not
+ * snapshot order. Keep the later of two and a purge that landed between them
+ * compares equal at fill time and the response is cached already stale, which is
+ * the whole thing the counters exist to catch.
  *
  * Absent beats every count: a counter that did not exist yet is the earliest reading
  * there is, and any number later on proves a purge created it in between. A value
@@ -49,155 +45,17 @@ export function earlierScopedCacheEpoch(
 		: right;
 }
 
-/**
- * The meta of every fulfilled lookup inside a `dependOn` argument. A read result is
- * an array carrying a non-enumerable `getMeta`, so the rider is checked before the
- * array shape: with it, the value is one lookup; without it, a batch to walk, whose
- * entries are lookups or `allSettled` verdicts over them.
- */
-function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
-	if (dependency === null || typeof dependency !== 'object') {
-		return;
-	}
-
-	if (typeof (dependency as MaybeWithMeta<object>).getMeta === 'function') {
-		yield (dependency as WithMeta<object>).getMeta();
-		return;
-	}
-
-	if (!Array.isArray(dependency)) {
-		return;
-	}
-
-	for (const entry of dependency) {
-		if (entry !== null && typeof entry === 'object' && 'status' in entry) {
-			if (entry.status === 'fulfilled') {
-				yield* readMetasOf(entry.value);
-			}
-
-			continue;
-		}
-
-		yield* readMetasOf(entry);
-	}
-}
-
-/**
- * A per-operation collector backing the `context.scopedCache` hook handle. The
- * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
- * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
- * the service drains `tags` into the read's scope or the mutation's purge tags. Both
- * are the same idempotent sink. Safe with purging off (then `tags` is unread).
- */
-export function createScopedCacheCollector(
-	schema: SchemaOverview,
-): ScopedCacheCollector {
-	const tags: ScopedCacheTag[] = [];
-	const seen = new Set<string>();
-	const manuallyPurgedKeys = new Set<string>();
-	const epochs: Record<string, string | null> = {};
-	const purgeSkippedKeys = new Set<string>();
-	const takenOverKeys = new Set<string>();
-
-	// A hook names a slice by collection/field/value and rarely knows the column's
-	// type, but the type is what canonicalizes the value: `uuid` lowercases and
-	// `integer` strips a leading zero, so a type-less tag and the schema-typed one
-	// the purge side emits resolve DIFFERENT keys for the SAME row — a pin nothing
-	// ever purges. Fill it from the schema so both sides agree.
-	function withSchemaType(tag: ScopedCacheTag): ScopedCacheTag {
-		if (tag.type !== undefined || tag.field === undefined) {
-			return tag;
-		}
-
-		const schemaType = schema.collections[tag.collection]?.fields[tag.field]?.type;
-
-		return schemaType === undefined
-			? tag
-			: { ...tag, type: schemaType };
-	}
-
-	function add(
-		input: ScopedCacheTag | readonly ScopedCacheTag[],
-		manuallyPurged = false,
-		declaredEpochs?: Record<string, string | null>,
-	): void {
-		for (const [collection, epoch] of Object.entries(declaredEpochs ?? {})) {
-			epochs[collection] = collection in epochs
-				? earlierScopedCacheEpoch(epochs[collection], epoch)
-				: epoch;
-		}
-
-		const batch = Array.isArray(input)
-			? input
-			: [input];
-
-		for (const declaredTag of batch) {
-			const tag = withSchemaType(declaredTag);
-
-			// Idempotent: a hook looping over rows that resolve the same slice — or a
-			// batch/upsert parent's shared collector fed by many children — must not
-			// inflate the set. Key on the canonical tag key (the same one the purge side
-			// dedups on), so field order and value/type variants (7 vs '7') can't slip a
-			// duplicate past a raw JSON compare.
-			const key = scopedCacheTagKey(tag);
-
-			// Record the accept regardless of dedup: if ANY scopeTo of this tag marked it
-			// manuallyPurged, it's exempt from the unautopurgeable-scope anomaly.
-			if (manuallyPurged) {
-				manuallyPurgedKeys.add(key);
-			}
-
-			if (seen.has(key)) {
-				continue;
-			}
-
-			seen.add(key);
-			tags.push(tag);
-		}
-	}
-
-	return {
-		tags,
-		manuallyPurgedKeys,
-		purgeSkippedKeys,
-		takenOverKeys,
-		epochs,
-		scope: {
-			scopeTo: (input, options) => {
-				add(input, options?.manuallyPurged, options?.epochs);
-			},
-			dependOn: async (lookup) => {
-				const resolved = await lookup;
-
-				for (const meta of readMetasOf(resolved)) {
-					add(meta.scopedCacheTags, false, meta.scopedCacheEpochs);
-				}
-
-				return resolved;
-			},
-		},
-		purge: {
-			purgeBy: (input) => add(input),
-			// Deliberately not a tag: the take-over check reads the tag count, and
-			// declaring nothing to purge must not read as declaring a purge.
-			skipPurgeFor: (key) => {
-				purgeSkippedKeys.add(String(key));
-			},
-		},
-	};
-}
-
-// Canonicalize a scope value to a driver-stable token so a REST/GraphQL filter value
+// Canonicalize a pin's value to a driver-stable token so a REST/GraphQL filter value
 // and the native DB row value resolve the SAME slice. `String()` alone collapses the
 // common case (number 7 vs string "7"), but diverges for non-string scalars — a
 // boolean is `true` from a parsed filter but `1`/`0` (mysql/sqlite) or `'t'` (pg)
 // from a stored row; a datetime is an ISO string from a filter but a `Date` from the
 // driver; a decimal is `1.5` vs `'1.50'`. NULL gets a null-byte sentinel rather than
 // String(null)='null', so it can't collide with a literal "null" value.
-export function canonicalScopedCacheValue(
-	value: unknown,
-	type: Type | undefined,
-): string {
+export function canonicalizeScopedCachePinValue(
+	value: ScopedCachePin['value'],
+	type: ScopedCachePin['type'],
+): CanonicalScopedCachePinValue {
 	if (value === null || value === undefined) {
 		return '\x00null';
 	}
@@ -291,15 +149,15 @@ export function canonicalScopedCacheValue(
 }
 
 /** Each field of a collection mapped to its schema type, or undefined when the
- * schema does not carry it. What canonicalizes a tag value on both sides. */
+ * schema does not carry it. What canonicalizes a pin value on both sides. */
 export type FieldTypesByField = Record<string, Type | undefined>;
 
 // Types whose filter value and stored row value are NOT guaranteed to canonicalize
 // to the same token across drivers/timezones: a naive `dateTime`/`timestamp` column
 // comes back as a local `Date` from the driver but as an ISO string (possibly with
 // an explicit `Z`) from a filter, so the epoch-ms canonical can diverge. The read
-// side never pins these — it falls back to the bare collection tag so any write to
-// the collection invalidates the read (over-purge, never stale).
+// side never pins these — it falls back to the bare collection fingerprint so any
+// write to the collection invalidates the read (over-purge, never stale).
 export const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>([
 	'date',
 	'dateTime',
@@ -311,7 +169,7 @@ export function isPinnableScopeType(type: Type | undefined): boolean {
 }
 
 /**
- * How a row a create hook took over is named in the collector's set. Recorded
+ * How a row a create hook took over is named in the hook declarations' set. Recorded
  * where the take-over happens and read back in another method entirely, so the
  * two spellings have to come from one place or the lookup silently misses.
  */
@@ -322,95 +180,75 @@ export function takenOverScopedCacheKey(
 	return `${collection}:${String(key)}`;
 }
 
-// Every index key the scoped cache writes sits under one segment, so the full-flush
-// scan can ask Redis for exactly them. `<namespace>:` alone is shared with the
-// cache-stats stream, its per-entry tombstones and whatever family lands there
-// next, and a pattern wide enough to cover the index dragged all of those over the
-// wire to be filtered out here (https://github.com/jclaveau/directus/issues/468).
-// Named after the feature rather than `index`, because a flush unlinks the whole
-// segment: under a noun that broad, whatever a later feature parks there goes with
-// it. `<namespace>:stats` is the family that must not — it is the only place Redis
-// holds cache state no table can rebuild — and it stays outside.
-export function scopedCacheIndexPrefix(): string {
-	return `${env['CACHE_NAMESPACE']}:scoped-cache-index:`;
-}
-
-export function scopedCacheTagKeyPrefix(): string {
-	return `${scopedCacheIndexPrefix()}tag:`;
-}
-
-export function scopedCacheTagKey(tag: ScopedCacheTag): string {
-	const base = `${scopedCacheTagKeyPrefix()}${tag.collection}`;
-	return tag.field === undefined
-		? base
-		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
-}
-
-// Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
-// key suffix (no `<namespace>:scoped-cache-index:tag:` prefix) — `collection`, or
-// `collection:field=value` for a pinned slice (same canonical value as the Redis
-// key). Comma-joined.
-export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
-	if (tag.field === undefined) {
-		return tag.collection;
+/**
+ * What identifies a pin: its collection, its field, and the value canonicalized —
+ * so `7` and `'7'`, `TRUE` and `t` key one slice. Every set that dedups pins keys
+ * on this, and nothing else, so two spellings of one slice cannot both be carried.
+ *
+ * No Redis prefix on it: the index is keyed by fingerprint, and a pin is only ever
+ * an identity in memory.
+ */
+export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
+	if (pin.field === undefined) {
+		return pin.collection;
 	}
 
-	return `${tag.collection}:${tag.field}=${
-		canonicalScopedCacheValue(tag.value, tag.type)
+	return `${pin.collection}:${pin.field}=${
+		canonicalizeScopedCachePinValue(pin.value, pin.type)
 	}`;
 }
 
-export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
-	return tags
-		.map(scopedCacheTagLabel)
-		.join(', ');
-}
-
 /**
- * Build scoped cache tags from the distinct scope values present across `rows` — the
+ * One `ScopedCacheCollectionPin` per distinct scope value across `rows` — the
  * purge side.
+ *
+ * Pins, not fingerprints: each is ONE axis of the collection, and the caller
+ * composes the pins of ONE row into that row's fingerprint
+ * (`scopedCacheFingerprintOf`). Feeding a whole page of rows in therefore yields
+ * the axes those rows touch with the AND between them lost, which is what the
+ * callers wanting a per-row query case avoid by passing `[row]`.
  *
  * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*.
  * `'coarse'` returns `null` so the caller can fall back to a collection-wide purge
  * rather than leave a slice stale; `'skip'` best-effort skips just that row's
  * contribution. - The `'coarse'` path triggers for a caller feeding *unprojected*
- * rows. The purge side (`snapshotScopedCacheTags`) reads rows via an explicit
+ * rows. The purge side (`snapshotScopedCachePins`) reads rows via an explicit
  * projected `select`, so every field key is always present and it never returns
  * `null` there — an update/delete/create snapshot always resolves. A create whose
  * committed rows can't be trusted is caught upstream by the row-count check
  * (`someRowTakenOver`), not here. - The read side
- * (`pinnedScopedCacheTagsFromM2oParents`) is the caller that depends on the `null`:
+ * (`scopedCachePinsFromM2oParents`) is the caller that depends on the `null`:
  * one parent row missing its key has to take its whole collection down to the bare
- * tag, since pinning the rest would leave that row covered by nothing. -
- * `fieldTypes`: each field's schema type, so the tag value canonicalizes the same
+ * fingerprint, since pinning the rest would leave that row covered by nothing. -
+ * `fieldTypes`: each field's schema type, so the pin value canonicalizes the same
  * way the read side's filter value does.
  */
-export function scopedCacheTagsFromRows(
+export function scopedCacheCollectionPinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'skip',
 	fieldTypes?: FieldTypesByField,
-): ScopedCacheTag[];
-export function scopedCacheTagsFromRows(
+): ScopedCacheCollectionPin[];
+export function scopedCacheCollectionPinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse',
 	fieldTypes?: FieldTypesByField,
-): ScopedCacheTag[] | null;
-export function scopedCacheTagsFromRows(
+): ScopedCacheCollectionPin[] | null;
+export function scopedCacheCollectionPinsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse' | 'skip',
 	fieldTypes: FieldTypesByField = {},
-): ScopedCacheTag[] | null {
-	const tags: ScopedCacheTag[] = [];
+): ScopedCacheCollectionPin[] | null {
+	const pins: ScopedCacheCollectionPin[] = [];
 
 	for (const field of fields) {
 		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a
-		// boolean stored as `1`/`'t'`) collapse to one tag instead of emitting redundant
+		// boolean stored as `1`/`'t'`) collapse to one pin instead of emitting redundant
 		// slices.
 		const seen = new Set<string>();
 
@@ -424,23 +262,24 @@ export function scopedCacheTagsFromRows(
 			}
 
 			const value = row[field];
-			const token = canonicalScopedCacheValue(value, fieldTypes[field]);
+			const token = canonicalizeScopedCachePinValue(value, fieldTypes[field]);
 
 			if (seen.has(token)) {
 				continue;
 			}
 
 			seen.add(token);
-			tags.push({ collection, field, value, type: fieldTypes[field] });
+			pins.push({ collection, field, value, type: fieldTypes[field] });
 		}
 	}
 
-	return tags;
+	return pins;
 }
 
 /**
- * How many slices one nested collection may pin on a single read. Every tag costs
- * a Redis set plus a slice-index member, and the write side deletes them one by one.
+ * How many slices one nested collection may pin on a single read. Every pin costs
+ * a set in the store plus a fingerprint index member, and the write side deletes
+ * them one by one.
  *
  * Sized above a default page of nested parents (the default `limit` is 100), below
  * an import-sized one. NOT the bound
@@ -455,10 +294,25 @@ export function scopedCacheTagsFromRows(
  *   one response loses its pin and is still cached.
  *
  * Operator-tunable because the right number is deployment-specific — it weighs
- * Redis memory against the hit ratio the pin buys, and a pin costs a tag set plus a
- * member of the collection's slice index (130 B measured, on a TTL every write
+ * store memory against the hit ratio the pin buys, and a pin costs one set plus a
+ * member of the collection's fingerprint index (130 B measured, on a TTL every write
  * refreshes). No setting of it can serve a stale row.
  */
 export function scopedCacheMaxPinsPerCollection(): number {
 	return env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] as number;
+}
+
+/**
+ * How many ways to satisfy one filter are carried apart before they are carried
+ * side by side instead. A filter ANDing two `_in`s of ten values each has a
+ * hundred pairings, and an entry filed under a hundred index members costs a
+ * hundred writes to file and a hundred compares to purge — for a precision no
+ * read of that shape needs.
+ *
+ * Operator-tunable beside the pin ceiling above, and weighing the same two
+ * things: over it the read is pinned to each value on its own, which purges
+ * wider and never staler. Raise it for hit ratio, lower it for memory.
+ */
+export function scopedCacheMaxQueryCases(): number {
+	return env['CACHE_SCOPED_MAX_QUERY_CASES'] as number;
 }

@@ -1,7 +1,7 @@
 import { RouteNotFoundError } from '@directus/errors';
 import { Router } from 'express';
 import { respond } from '../middleware/respond.js';
-import { scopedCachePurgeEnabled } from '../scoped-cache.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import { ServerService } from '../services/server.js';
 import { SpecificationService } from '../services/specifications.js';
 import asyncHandler from '../utils/async-handler.js';

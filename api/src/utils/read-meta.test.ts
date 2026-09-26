@@ -4,21 +4,31 @@ import { readMeta, withMeta } from './read-meta.js';
 describe('withMeta / readMeta', () => {
 	test('round-trips the metadata via getMeta()', () => {
 		const meta = {
-			scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }],
+			scopedCacheFingerprints: [
+				{ collection: 'articles' },
+				{ collection: 'users' },
+			],
 		};
 
 		const result = withMeta([{ id: 1 }], meta);
 
 		expect(readMeta(result)).toBe(meta);
 
-		expect(readMeta(result)!.scopedCacheTags).toEqual([
+		expect(readMeta(result)!.scopedCacheFingerprints).toEqual([
 			{ collection: 'articles' },
 			{ collection: 'users' },
 		]);
 	});
 
 	test('getMeta is non-enumerable — invisible to JSON and spread', () => {
-		const rows = withMeta([{ id: 1 }], { scopedCacheTags: [{ collection: 'articles' }] });
+		const rows = withMeta(
+			[{ id: 1 }],
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
+			},
+		);
 
 		expect(JSON.stringify(rows)).toBe('[{"id":1}]');
 		expect(Object.keys(rows)).toEqual(['0']);
@@ -27,8 +37,16 @@ describe('withMeta / readMeta', () => {
 	});
 
 	test('works on a single object as well as an array', () => {
-		const item = withMeta({ id: 1 }, { scopedCacheTags: [{ collection: 'articles' }] });
-		expect(readMeta(item)!.scopedCacheTags).toEqual([{ collection: 'articles' }]);
+		expect(readMeta(withMeta(
+			{ id: 1 },
+			{
+				scopedCacheFingerprints: [{
+					collection: 'articles',
+				}],
+			},
+		))!.scopedCacheFingerprints).toEqual([
+			{ collection: 'articles' },
+		]);
 	});
 
 	test('readMeta is safe on values without metadata', () => {

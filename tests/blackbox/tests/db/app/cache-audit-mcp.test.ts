@@ -290,7 +290,7 @@ describe('Cache audit over the system MCP', () => {
 
 			const drifted = await callTool('read_cache_audit', {
 				id: run.id,
-				verdict: 'tag_drift',
+				verdict: 'pin_drift',
 			});
 
 			expect(drifted.body.result.structuredContent).toMatchObject({

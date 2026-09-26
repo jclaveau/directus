@@ -2,7 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	AbstractServiceOptions,
 	Accountability,
-	ScopedCacheTag,
+	ScopedCacheFingerprint,
 	GraphQLParams,
 	GQLScope,
 	Item,
@@ -15,7 +15,7 @@ import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
-import { mergeScopedCacheEpochs } from '../../scoped-cache.js';
+import { mergeScopedCacheEpochs } from '../../scoped-cache/index.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -36,42 +36,56 @@ export class GraphQLService {
 	schema: SchemaOverview;
 	scope: GQLScope;
 	/**
-	 * Union of cache tags across every read in this GraphQL request — a `/graphql` response is one
-	 * cached entry assembled from many reads, so this aggregate is by design (unlike a per-query read,
-	 * whose tags ride its result via `getMeta()`). Stamped onto the execute() result.
-	 */
-	scopedCacheTags: ScopedCacheTag[];
-
-	/**
-	 * Unautopurgeable scope tags across every read in this request. Non-empty → the
-	 * whole `/graphql` entry can't be safely cached, so respond.ts skips it (and names
-	 * them in the anomaly). Aggregated like `scopedCacheTags` (one entry, many reads).
-	 */
-	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
-
-	/**
-	 * The scoped cache purge counters this request's reads captured, merged across
-	 * every root. A `/graphql` response is ONE cached entry assembled from several
-	 * reads, and `respond` compares these after the fill to detect a purge that
-	 * landed while they were running — so an entry the aggregate never mentions is
-	 * filled with no such check at all.
+	 * Union of the cache fingerprints of every read in this GraphQL request — a
+	 * `/graphql` response is one cached entry assembled from many reads, so this
+	 * aggregate is by design (unlike a per-query read, whose fingerprints ride its
+	 * result via `getMeta()`). Stamped onto the execute() result.
 	 *
-	 * The EARLIEST capture wins per collection: a root reading `E+1` where another
+	 * Each read's own AND survives the union: the entry dies when a write matches
+	 * any ONE of them whole, which is what "assembled from many reads" means.
+	 */
+	scopedCacheFingerprints: ScopedCacheFingerprint[];
+
+	/**
+	 * Unautopurgeable scope fingerprints across every read in this request. Non-empty
+	 * → the whole `/graphql` entry can't be safely cached, so respond.ts skips it (and
+	 * names them in the anomaly). Aggregated like the fingerprints (one entry, many
+	 * reads).
+	 */
+	scopedCacheUnautopurgeableFingerprints: ScopedCacheFingerprint[];
+
+	/**
+	 * The scoped cache purge counters this request's reads took before their
+	 * queries, merged across every root. A `/graphql` response is ONE cached entry
+	 * assembled from several reads, and `respond` compares these after the fill to
+	 * detect a purge that landed while they were running — so an entry the aggregate
+	 * never mentions is filled with no such check at all.
+	 *
+	 * The EARLIEST reading wins per collection: a root reading `E+1` where another
 	 * read `E` means a purge landed between them, and only the earlier value makes
-	 * the post-fill comparison notice. By capture, not by arrival — graphql-js
+	 * the post-fill comparison notice. By reading, not by arrival — graphql-js
 	 * resolves root fields in parallel, so the first result back is not the first
 	 * counter taken.
 	 */
 	scopedCacheEpochs: Record<string, string | null>;
+
+	/**
+	 * A root read returned no read meta: nothing records what it depends on, so no
+	 * write can purge the response by it. Filing the entry under the other roots'
+	 * fingerprints alone would outlive such a write, so it is filed under none —
+	 * which `respond` refuses in scoped mode, as it does a query hitting nothing.
+	 */
+	unpinnedRootRead: boolean;
 
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
 		this.schema = options.schema;
 		this.scope = options.scope;
-		this.scopedCacheTags = [];
-		this.scopedCacheUnautopurgeableTags = [];
+		this.scopedCacheFingerprints = [];
+		this.scopedCacheUnautopurgeableFingerprints = [];
 		this.scopedCacheEpochs = {};
+		this.unpinnedRootRead = false;
 	}
 
 	/**
@@ -122,8 +136,11 @@ export class GraphQLService {
 		}
 
 		return withMeta(formattedResult, {
-			scopedCacheTags: this.scopedCacheTags,
-			scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
+			scopedCacheFingerprints: this.unpinnedRootRead
+				? []
+				: this.scopedCacheFingerprints,
+			scopedCacheUnautopurgeableFingerprints:
+				this.scopedCacheUnautopurgeableFingerprints,
 			scopedCacheEpochs: this.scopedCacheEpochs,
 		});
 	}
@@ -152,19 +169,36 @@ export class GraphQLService {
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
 
-		const resultMeta = readMeta(result);
-		this.scopedCacheTags.push(...(resultMeta?.scopedCacheTags ?? []));
+		this.foldReadMeta(result);
 
-		this.scopedCacheUnautopurgeableTags.push(
-			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
+		return result;
+	}
+
+	/**
+	 * Fold one root read's meta into this request's aggregate. The item roots go
+	 * through `read()`; the system roots (`users_me`, `fields`, …) call their
+	 * services directly and hand their result over here.
+	 */
+	foldReadMeta(readResult: unknown): void {
+		const resultMeta = readMeta(readResult);
+
+		if (resultMeta === undefined) {
+			this.unpinnedRootRead = true;
+			return;
+		}
+
+		this.scopedCacheFingerprints.push(
+			...resultMeta.scopedCacheFingerprints,
+		);
+
+		this.scopedCacheUnautopurgeableFingerprints.push(
+			...(resultMeta.scopedCacheUnautopurgeableFingerprints ?? []),
 		);
 
 		mergeScopedCacheEpochs(
 			this.scopedCacheEpochs,
-			resultMeta?.scopedCacheEpochs ?? {},
+			resultMeta.scopedCacheEpochs ?? {},
 		);
-
-		return result;
 	}
 
 	/**

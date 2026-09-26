@@ -14,7 +14,10 @@ import {
 	AutoIncrementHelperPostgres,
 } from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
-import { purgeScopedCache } from '../scoped-cache.js';
+import {
+	purgeScopedCache,
+	scopedCachePinKeys,
+} from '../scoped-cache/index.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -34,6 +37,7 @@ const env = vi.hoisted<Record<string, any>>(() => {
 		CACHE_NAMESPACE: 'scalabus',
 		// `useEnv` merges defaults.ts, so the real one always carries this.
 		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+		CACHE_SCOPED_MAX_QUERY_CASES: 16,
 		MAX_BATCH_MUTATION: 100000,
 		// The Integration Tests' nested-relation path dynamically loads notifications -> mail, which
 		// resolves this at import time.
@@ -189,7 +193,7 @@ describe('Integration Tests', () => {
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
 				service.readByQuery = vi.fn(async () => {
-					return withMeta([], { scopedCacheTags: [] });
+					return withMeta([], { scopedCacheFingerprints: [] });
 				});
 
 				const error = await service.readOne(999).catch((err) => err);
@@ -1330,7 +1334,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const record = await service.readSingleton({ fields: ['*'] });
 
 			expect(record).toEqual({ id: null, theme: 'auto' });
-			expect(readMeta(record)?.scopedCacheTags).toBeDefined();
+			expect(readMeta(record)?.scopedCacheFingerprints).toBeDefined();
 		});
 
 		it('readSingleton returns the existing record when present', async () => {
@@ -1564,7 +1568,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		// SchemaBuilder can't set scoped_cache_fields, so inject them. `item` is an M2O
 		// whose target scopes `owner`, so a 2-hop `item.owner` path auto-composes; the
 		// explicit `item.owner` dedups against it; `name.foo` has a scalar head so it
-		// resolves to null and drops to the bare tag.
+		// resolves to null and drops to the bare pin.
 		pathSchema.collections['sub']!.scopedCacheFields = [
 			'item',
 			'item.owner',
@@ -1579,7 +1583,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const service = new ItemsService('sub', { knex: db, schema: pathSchema });
 			const result = await service.readByQuery({ fields: ['*'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toBeDefined();
+			expect(readMeta(result)?.scopedCacheFingerprints).toBeDefined();
 		});
 	});
 
@@ -1601,7 +1605,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			})
 			.build();
 
-		// The read path only builds tags — writing them is respond.ts's job — so naming
+		// The read path only builds pins — writing them is respond.ts's job — so naming
 		// a Redis config is enough to reach it, with no client involved.
 		beforeEach(() => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
@@ -1634,12 +1638,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(result).toEqual([]);
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
 			// Nothing was nested, so nothing is pinned — but both collections the read
-			// touched have to carry the tag a write to them drops.
-			expect(tags).toContainEqual({ collection: 'owned_item' });
-			expect(tags).toContainEqual({ collection: 'owner' });
+			// touched have to carry the bare slice a write to them drops.
+			expect(pinned).toContain('owned_item');
+			expect(pinned).toContain('owner');
 		});
 
 		it('pins an M2O parent by the key the response nested', async () => {
@@ -1656,21 +1662,18 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owner.id', 'owner.space'],
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({
-				collection: 'owner',
-				field: 'id',
-				value: 100,
-				type: 'integer',
-			});
+			expect(pinned).toContain('owner:id=100');
 
-			// The regression this exists for: a bare tag beside the pin would make any
+			// The regression this exists for: a bare slice beside the pin would make any
 			// write to any owner drop the read, which is what the pin is here to stop.
-			expect(tags).not.toContainEqual({ collection: 'owner' });
+			expect(pinned).not.toContain('owner');
 
-			// The root keeps its bare tag — its filter bounds nothing.
-			expect(tags).toContainEqual({ collection: 'owned_item' });
+			// The root keeps its bare slice — its filter bounds nothing.
+			expect(pinned).toContain('owned_item');
 		});
 
 		it(oneLine`
@@ -1691,18 +1694,15 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestedSchema,
 			}).readByQuery({ fields: ['label', 'owner.space'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toContainEqual({
-				collection: 'owner',
-				field: 'id',
-				value: 100,
-				type: 'integer',
-			});
+			expect(scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			)).toContain('owner:id=100');
 
 			expect(result).toEqual([{ label: 'a', owner: { space: 's' } }]);
 		});
 
-		it('leaves a value-pinned root without its bare tag', async () => {
-			// The bare tag is what any write to the collection drops, so emitting it
+		it('leaves a value-pinned root without its bare slice', async () => {
+			// The bare slice is what any write to the collection drops, so emitting it
 			// beside the root's own slices would undo the root pin entirely.
 			tracker.on.select('owned_item').response([{ id: 1, label: 'a' }]);
 
@@ -1714,16 +1714,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				filter: { id: { _eq: 1 } },
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({
-				collection: 'owned_item',
-				field: 'id',
-				value: 1,
-				type: 'integer',
-			});
-
-			expect(tags).not.toContainEqual({ collection: 'owned_item' });
+			expect(pinned).toContain('owned_item:id=1');
+			expect(pinned).not.toContain('owned_item');
 		});
 
 		it('keeps a collection it reached across a to-many hop bare', async () => {
@@ -1744,16 +1740,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owned_sub_items.id'],
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({ collection: 'owned_sub_item' });
-
-			expect(tags).not.toContainEqual({
-				collection: 'owned_sub_item',
-				field: 'id',
-				value: 7,
-				type: 'integer',
-			});
+			expect(pinned).toContain('owned_sub_item');
+			expect(pinned).not.toContain('owned_sub_item:id=7');
 		});
 	});
 });
@@ -1777,7 +1769,9 @@ describe('Services / Items / purgeScopedCache', () => {
 
 		service.scopedCache['cache'] = null;
 
-		await service.scopedCache.purge([{ collection: 'test' }]);
+		await service.scopedCache.purge([
+			{ collection: 'test' },
+		]);
 
 		expect(purgeScopedCache).not.toHaveBeenCalled();
 	});
@@ -1785,13 +1779,19 @@ describe('Services / Items / purgeScopedCache', () => {
 	it('purges the collection when the service has a cache', async () => {
 		const service = new ItemsService('test', { knex: db, schema });
 
-		await service.scopedCache.purge([{ collection: 'test' }]);
+		await service.scopedCache.purge([
+			{ collection: 'test' },
+		]);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			service.cache,
 			'test',
 			[{ collection: 'test' }],
 			expect.anything(),
+			// A purge shown no rows carries none of their narrowing and sweeps its
+			// pins whole, as it did before composite pins. The declared list is the
+			// hooks' channel, and this purge answers for no hook.
+			{ declaredFingerprints: [] },
 		);
 	});
 });

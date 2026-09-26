@@ -22,7 +22,7 @@ vi.mock('../middleware/rate-limiter-registration.js', () => {
 
 const scopedCachePurgeEnabled = vi.fn();
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 
@@ -62,7 +62,7 @@ describe('users controller /me/track/page', () => {
 		expect(updateOne).toHaveBeenCalledWith(
 			'u-1',
 			{ last_page: '/content/articles' },
-			{ autoPurgeCache: true, purgeCollectionTag: false },
+			{ autoPurgeCache: true, purgeBareFingerprint: false },
 		);
 
 		expect(next).toHaveBeenCalledWith();
@@ -78,7 +78,7 @@ describe('users controller /me/track/page', () => {
 		expect(updateOne).toHaveBeenCalledWith(
 			'u-1',
 			{ last_page: '/content/articles' },
-			{ autoPurgeCache: false, purgeCollectionTag: false },
+			{ autoPurgeCache: false, purgeBareFingerprint: false },
 		);
 
 		expect(next).toHaveBeenCalledWith();

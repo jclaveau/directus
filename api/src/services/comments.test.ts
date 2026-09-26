@@ -100,18 +100,18 @@ describe('Services / Comments', () => {
 				first_name: 'Sam',
 				last_name: 'Sender',
 				email: 'sam@x.com',
-			}, { scopedCacheTags: [] }))
+			}, { scopedCacheFingerprints: [] }))
 			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
 				role: { id: null },
-			}, { scopedCacheTags: [] }));
+			}, { scopedCacheFingerprints: [] }));
 
 		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([
 			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
-		], { scopedCacheTags: [] }));
+		], { scopedCacheFingerprints: [] }));
 
 		const result = await service.createMany([
 			{
