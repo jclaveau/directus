@@ -278,8 +278,8 @@ export function scopedCacheCollectionPinsFromRows(
 
 /**
  * How many slices one nested collection may pin on a single read. Every pin costs
- * a set in the store plus a slice-index member, and the write side deletes them one
- * by one.
+ * a set in the store plus a fingerprint index member, and the write side deletes
+ * them one by one.
  *
  * Sized above a default page of nested parents (the default `limit` is 100), below
  * an import-sized one. NOT the bound
@@ -295,7 +295,7 @@ export function scopedCacheCollectionPinsFromRows(
  *
  * Operator-tunable because the right number is deployment-specific — it weighs
  * store memory against the hit ratio the pin buys, and a pin costs one set plus a
- * member of the collection's slice index (130 B measured, on a TTL every write
+ * member of the collection's fingerprint index (130 B measured, on a TTL every write
  * refreshes). No setting of it can serve a stale row.
  */
 export function scopedCacheMaxPinsPerCollection(): number {

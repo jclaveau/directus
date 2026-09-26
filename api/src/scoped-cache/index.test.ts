@@ -1013,30 +1013,22 @@ function redisPipelineDouble() {
 }
 
 /**
- * Stand in for the sweep script: read each pin set, drop them all, prune the slice
- * index. `members` is what the sets between them hold, and the recorded `swept` and
- * `pruned` are what a case asserts the sweep asked for — the script does those
- * inside Redis, so there is no command of its own to spy on.
+ * Stand in for the sweep script: read each index set and drop them all. `members` is
+ * what the sets between them hold, and the recorded `swept` is what a case asserts
+ * the sweep asked for — the script does it inside Redis, so there is no command of
+ * its own to spy on.
  */
 function redisSweepDouble(members: () => Promise<string[]>) {
 	const swept: string[][] = [];
-	const pruned: [string, string][] = [];
 
 	return {
 		swept,
-		pruned,
 		eval: vi.fn(async (
 			_script: string,
 			numKeys: number,
 			...args: string[]
 		) => {
 			swept.push(args.slice(0, numKeys));
-
-			const prunings = args.slice(numKeys);
-
-			for (let at = 0; at < prunings.length; at += 2) {
-				pruned.push([prunings[at]!, prunings[at + 1]!]);
-			}
 
 			return members();
 		}),

@@ -167,7 +167,7 @@ afterEach(() => {
 //
 // A purge reads its members with one `SUNION` over every pin key, queued on that
 // same pipeline. The double answers it as the union of the per-key `smembers` a
-// case arms, which is what the command does — so a case still says which pin sets
+// case arms, which is what the command does — so a case still says which index sets
 // hold what, and still sees the purge ask for them.
 beforeEach(() => {
 	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
@@ -185,24 +185,19 @@ beforeEach(() => {
 		return queued.map(([keys]) => [null, keys.length]);
 	});
 
-	// The sweep is one script, so the double runs what the script runs: read each pin
-	// set, drop them all, prune the slice index. It reads through `redis.smembers` and
-	// writes through `redis.unlink`/`redis.srem` so a case still arms which set holds
-	// what, and still sees the sweep ask for and drop exactly those.
+	// The sweep is one script, so the double runs what the script runs: read each
+	// index set and drop them all. It reads through `redis.smembers` and writes
+	// through `redis.unlink` so a case still arms which set holds what, and still
+	// sees the sweep ask for and drop exactly those.
 	redis.eval.mockImplementation(
 		async (_script: string, numKeys: number, ...args: string[]) => {
 			const tagKeys = args.slice(0, numKeys);
-			const prunings = args.slice(numKeys);
 
 			const memberLists = await Promise.all(
 				tagKeys.map((key) => redis.smembers(key)),
 			);
 
 			await redis.unlink(tagKeys);
-
-			for (let at = 0; at < prunings.length; at += 2) {
-				await redis.srem(prunings[at], prunings[at + 1]);
-			}
 
 			return [...new Set(memberLists.flat())];
 		},
@@ -1740,7 +1735,7 @@ describe('clearCacheTargets', () => {
 // A flush, like every purge, has to move the counters BEFORE it drops anything: a
 // read that snapshotted earlier and rechecks between the clear and a bump made after
 // it compares equal, keeps the entry it just wrote, and the index drop that follows
-// unlinks the pin sets it was filed under — stale for its TTL, reachable to no
+// unlinks the index sets it was filed under — stale for its TTL, reachable to no
 // later purge. The clear is the first drop, so the bump goes in front of it; a
 // second follows the index drop, for a fill that filed before it and wrote after.
 describe('the wholesale counter moves before the response clear', () => {

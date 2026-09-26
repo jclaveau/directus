@@ -732,10 +732,10 @@ export async function purgeCollectionScopedCache(
 		retried?: boolean;
 	} = {},
 ): Promise<void> {
-	// Not the sweep's own bump repeated: this one has to precede the slice-index
-	// read below, which the sweep never sees. A read filing a NEW slice between that
-	// read and the sweep is missed by this purge either way — bumped first, it
-	// declines to cache instead of surviving under a slice nothing swept.
+	// Not the sweep's own bump repeated: this one has to precede the fingerprint
+	// index read below, which the sweep never sees. A read filing a NEW slice between
+	// that read and the sweep is missed by this purge either way — bumped first, it
+	// declines to cache instead of surviving under an index set nothing swept.
 	await bumpScopedCacheEpochs([collection]);
 
 	const startedAt = Date.now();
@@ -1175,10 +1175,10 @@ async function reportRecoveredScopedCacheEntries(
  * whole namespace.
  *
  * To purge EVERY entry of a collection, pass `null` — it dispatches to
- * `purgeCollectionScopedCache`, which reads the collection's own slice index and
- * drops the bare fingerprint plus every slice key it names. A bare fingerprint in
- * the list is NOT that: this function deletes exactly the keys it is handed, and a
- * read pinned to a slice (an owner, or its primary key) is filed under that slice
+ * `purgeCollectionScopedCache`, which reads the collection's own fingerprint index
+ * and drops the bare fingerprint plus every slice key it names. A bare fingerprint
+ * in the list is NOT that: this function deletes exactly the keys it is handed, and
+ * a read pinned to a slice (an owner, or its primary key) is filed under that slice
  * alone, so it survives.
  *
  * `includeBareFingerprint: false` drops the bare fingerprint from the purge — for
@@ -1242,7 +1242,7 @@ export async function purgeScopedCache(
 		// operator acting, this is a mutation invalidating everything because
 		// scoped mode is off.
 		//
-		// No pin sets and no member list to count here: the clear takes the whole
+		// No index sets and no member list to count here: the clear takes the whole
 		// namespace, so the row records the reach and leaves the size unknown.
 		// Zero would draw the most destructive event here as one that took nothing.
 		queueCachePurge({

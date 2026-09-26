@@ -45,8 +45,8 @@ const env = useEnv();
  * How many members one command carries.
  *
  * `SADD`/`SREM` take their members as arguments, and both ioredis and Lua's
- * `unpack` have a stack ceiling well below the number of slices one read can be
- * pinned to. The expiry the call carries is the same value for every chunk, so
+ * `unpack` have a stack ceiling well below the number of index sets one read can be
+ * filed under. The expiry the call carries is the same value for every chunk, so
  * splitting changes nothing but how many calls it takes.
  */
 const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
@@ -73,13 +73,14 @@ const SCOPED_CACHE_SCAN_COUNT = 1000;
 const SCOPED_CACHE_UNLINK_CHUNK = 1000;
 
 /**
- * File a key under a tag set and give that set an expiry that only ever moves OUT.
+ * File members into a fingerprint index set and give that set an expiry that only
+ * ever moves OUT.
  *
- * A bare `EXPIRE` overwrites, and a tag set is SHARED by every entry pinned to that
- * slice: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
+ * A bare `EXPIRE` overwrites, and an index set is SHARED by every entry filed into
+ * it: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
  * indexing an entry cached for an hour, leaving that entry unreachable to every
  * purge for the rest of its life. Redis 7 has `EXPIRE … GT`, but GT reads a key
- * carrying no TTL as infinite: it refuses the very first expiry a fresh tag set
+ * carrying no TTL as infinite: it refuses the very first expiry a fresh index set
  * needs, and cannot tell that set from one deliberately left unbounded. So the
  * comparison runs as a script — atomic, one pipeline slot, and `EXISTS` telling
  * those two apart.
@@ -119,8 +120,8 @@ const clientsCarryingScripts = new WeakSet<Redis>();
  *
  * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
  * `NOSCRIPT` — so the 316-byte script crosses the wire once per server rather than
- * once per tag. A read pinned to 200 slices files 402 of these in one pipeline, and
- * as `EVAL` that is 124 KB of Lua per fill against 193 KB sent in total.
+ * once per index set. A read filed under 200 index sets sends 402 in one pipeline,
+ * and as `EVAL` that is 124 KB of Lua per fill against 193 KB sent in total.
  *
  * Registration is per client and idempotent, but `defineCommand` rebuilds the
  * command each time, so the set keeps it to the first call per connection.
@@ -141,18 +142,18 @@ function useScriptedRedis(): Redis & ScopedCacheTagExpiryCommand {
 }
 
 /**
- * Read a set of tag sets, drop them, and prune the slice index that names them — as
- * one step, so no other client can act between any two of those. A read filing its
- * key into one of those sets between the read and the drop would otherwise have that
- * set deleted underneath it, leaving a correct entry indexed by nothing.
+ * Read a batch of fingerprint index sets and drop them as one step, so no other
+ * client can act between the two. A read filing its key into one of those sets
+ * between the read and the drop would otherwise have that set deleted underneath
+ * it, leaving a correct entry indexed by nothing.
  *
  * Members are gathered with a `SMEMBERS` per key and deduped in Lua rather than by
  * `SUNION`: the union has to be built before the sets are dropped anyway, and
  * `unpack`ing a key list into one call overflows Lua's stack.
  *
- * KEYS are the tag sets; ARGV is `sliceIndexKey, tagKey` pairs for the prunings. The
- * counter bumps are NOT in here — they are one pipeline of their own, sent first, so
- * they still land when the sweep behind them is refused.
+ * KEYS are the index sets. The counter bumps are NOT in here — they are one
+ * pipeline of their own, sent first, so they still land when the sweep behind them
+ * is refused.
  */
 export const scopedCacheSweepScript = `
 local seen = {}
@@ -173,15 +174,11 @@ for i = 1, #KEYS do
 	redis.call('UNLINK', KEYS[i])
 end
 
-for i = 1, #ARGV, 2 do
-	redis.call('SREM', ARGV[i], ARGV[i + 1])
-end
-
 return members
 `;
 
 /**
- * How many tag sets one sweep call carries.
+ * How many index sets one sweep call carries.
  *
  * Two bounds, same number. A key list is spread into the `eval` call, and a spread
  * long enough throws `RangeError` before Redis is reached
@@ -557,7 +554,7 @@ const redisStore: ScopedCacheStore = {
 	/**
 	 * Scoped purging drives SCAN + multi-key DEL over a single node, so it only
 	 * works on a standalone client. A cluster client would silently under-purge —
-	 * keys on other nodes are never scanned — and leave stale slices. `useRedis()`
+	 * keys on other nodes are never scanned — and leave stale entries. `useRedis()`
 	 * always builds a standalone `Redis` in core, so this only bites a custom
 	 * override.
 	 */
