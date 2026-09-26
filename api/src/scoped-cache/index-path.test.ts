@@ -54,4 +54,35 @@ describe('scopedCacheIndexPath', () => {
 	it('has no path for a collection declaring no scope at all', () => {
 		expect(scopedCacheIndexPath(schema, 'loose')).toBe(null);
 	});
+
+	it('stops at a scope relation pointing back at its own collection', () => {
+		const selfSchema = new SchemaBuilder()
+			.collection('node', (c) => {
+				c.field('id').id();
+				c.field('parent').m2o('node');
+			})
+			.build();
+
+		selfSchema.collections['node']!.scopedCacheFields = ['parent'];
+
+		expect(scopedCacheIndexPath(selfSchema, 'node')).toBe('parent');
+	});
+
+	it('skips a composed field rather than indexing by its path', () => {
+		const composedSchema = new SchemaBuilder()
+			.collection('slot', (c) => {
+				c.field('id').id();
+				c.field('owner').string();
+				c.field('method').string();
+			})
+			.build();
+
+		composedSchema.collections['slot']!.scopedCacheFields = [
+			'owner',
+			'method',
+			'method_range.method',
+		];
+
+		expect(scopedCacheIndexPath(composedSchema, 'slot')).toBe('owner');
+	});
 });
