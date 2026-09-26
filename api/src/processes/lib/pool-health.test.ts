@@ -26,6 +26,7 @@ type Subscribe = (
 
 const publish = vi.fn<Publish>(async () => {});
 const subscribe = vi.fn<Subscribe>(async () => {});
+const onResubscribe = vi.fn<(callback: () => void) => void>();
 
 let env: Record<string, unknown> = {};
 let redisAvailable = true;
@@ -38,7 +39,12 @@ async function freshMirror() {
 	vi.resetModules();
 
 	const { useBus } = await import('../../bus/index.js');
-	vi.mocked(useBus).mockReturnValue({ publish, subscribe } as never);
+
+	vi.mocked(useBus).mockReturnValue({
+		publish,
+		subscribe,
+		onResubscribe,
+	} as never);
 
 	const { useEnv } = await import('@directus/env');
 	vi.mocked(useEnv).mockReturnValue(env);
@@ -76,7 +82,7 @@ test('carries the reading the bus delivers', async () => {
 	});
 });
 
-test('keeps a reading however long nothing changes it', async () => {
+test('keeps a reading for two refreshes, then forgets it', async () => {
 	vi.useFakeTimers();
 
 	const { initPoolHealthMirror, poolHealthReading } = await freshMirror();
@@ -96,6 +102,31 @@ test('keeps a reading however long nothing changes it', async () => {
 		onlineWorkers: 3,
 		targetWorkers: 5,
 	});
+
+	// A reporter that was killed took nothing back, and the pool it described
+	// may have recovered since.
+	vi.advanceTimersByTime(1);
+
+	expect(poolHealthReading()).toBeNull();
+});
+
+test('expires a reading on the refresh the deployment names', async () => {
+	vi.useFakeTimers();
+	env = { PM2_POOL_HEALTH_REFRESH: '5s' };
+
+	const { initPoolHealthMirror, poolHealthReading } = await freshMirror();
+
+	initPoolHealthMirror();
+
+	subscribe.mock.calls[0]![1]({
+		failedWorkers: 2,
+		onlineWorkers: 3,
+		targetWorkers: 5,
+	});
+
+	vi.advanceTimersByTime(10_001);
+
+	expect(poolHealthReading()).toBeNull();
 });
 
 test('forgets a reading its reporter took back', async () => {
@@ -123,6 +154,43 @@ test('asks for the reading once subscribed', async () => {
 	});
 });
 
+test('asks for the reading again once the bus is back', async () => {
+	const { initPoolHealthMirror } = await freshMirror();
+
+	initPoolHealthMirror();
+
+	await vi.waitFor(() => {
+		expect(publish).toHaveBeenCalledTimes(1);
+	});
+
+	// Whatever changed while the connection was down never arrived.
+	onResubscribe.mock.calls[0]![0]();
+
+	await vi.waitFor(() => {
+		expect(publish).toHaveBeenNthCalledWith(2, 'poolHealth:query', {});
+	});
+});
+
+test('says so when the bus that came back refuses the question', async () => {
+	const { initPoolHealthMirror } = await freshMirror();
+
+	initPoolHealthMirror();
+
+	await vi.waitFor(() => {
+		expect(publish).toHaveBeenCalledTimes(1);
+	});
+
+	publish.mockRejectedValueOnce(new Error('no redis'));
+	onResubscribe.mock.calls[0]![0]();
+
+	await vi.waitFor(() => {
+		expect(warn).toHaveBeenCalledWith(
+			new Error('no redis'),
+			'[pool-health] could not ask for the reading',
+		);
+	});
+});
+
 test('reports a pool, and reads its own report', async () => {
 	const { reportPoolHealth, poolHealthReading } = await freshMirror();
 
@@ -142,19 +210,24 @@ test('reports a pool, and reads its own report', async () => {
 	});
 });
 
-test('sends an unchanged reading once, however long it holds', async () => {
+test('sends an unchanged reading again only once a refresh went by', async () => {
 	vi.useFakeTimers();
 
 	const { reportPoolHealth } = await freshMirror();
 
 	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
 
-	// A pool holding still puts nothing on the bus, so a platform that stops an
-	// idle service after ten minutes without traffic can stop this one.
-	vi.advanceTimersByTime(3_600_000);
+	// A pool holding still puts nothing on the bus for half an hour, so a
+	// platform that stops an idle service after ten minutes can stop this one.
+	vi.advanceTimersByTime(1_799_999);
 	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
 
 	expect(publish).toHaveBeenCalledTimes(1);
+
+	vi.advanceTimersByTime(1);
+	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
+
+	expect(publish).toHaveBeenCalledTimes(2);
 });
 
 test('answers a query with the last reading', async () => {
@@ -184,7 +257,7 @@ test('answers no query before the pool was measured', async () => {
 	expect(publish).not.toHaveBeenCalled();
 });
 
-test('takes the reading back, and sends it again on the next tick', async () => {
+test('takes the reading back, and sends nothing after it', async () => {
 	const {
 		answerPoolHealthQueries,
 		reportPoolHealth,
@@ -201,8 +274,9 @@ test('takes the reading back, and sends it again on the next tick', async () => 
 	subscribe.mock.calls[0]![1](null);
 	expect(publish).toHaveBeenCalledTimes(2);
 
+	// A tick already running when the reporter stopped.
 	reportPoolHealth({ failedWorkers: 1, onlineWorkers: 5, targetWorkers: 6 });
-	expect(publish).toHaveBeenCalledTimes(3);
+	expect(publish).toHaveBeenCalledTimes(2);
 });
 
 test('sends a reading the bus refused again on the next tick', async () => {

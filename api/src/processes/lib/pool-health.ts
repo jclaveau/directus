@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
 import { redisConfigAvailable } from '../../redis/index.js';
+import { getMilliseconds } from '../../utils/get-milliseconds.js';
 
 /**
  * The channel the process holding the supervisor connection reports the pool
@@ -32,17 +33,31 @@ export interface PoolHealth {
 /**
  * The channel a process that has just subscribed asks for the reading on.
  *
- * The reading is sent when it changes and at no other time, so a worker the
- * pool gained after the last change would otherwise have nothing to answer
- * for until the next one. Asked once, on boot: a deployment whose pool holds
- * still puts nothing on the bus, and a platform that stops an idle service
- * after a stretch without traffic can stop it.
+ * The reading is sent when it changes and otherwise only on a long floor, so a
+ * worker the pool gained after the last change would have nothing to answer
+ * for until then. Asked on boot, and again whenever the bus comes back from a
+ * lost connection: pub/sub keeps nothing for a subscriber that is away.
  */
 const POOL_QUERY_CHANNEL = 'poolHealth:query';
 
 let reading: PoolHealth | null = null;
+let readingHeardAt = 0;
 let reported: PoolHealth | null = null;
+let reportedAt = 0;
+let withdrawn = false;
 let cameUp = false;
+
+/**
+ * How often an unchanged reading is sent again.
+ *
+ * The floor a lost message heals on, and what expires a reading whose reporter
+ * died without taking it back. Long, because a platform that stops an idle
+ * service after a stretch without traffic cannot stop one that sends on a
+ * shorter one: the default sits well above Railway's ten minutes.
+ */
+function refreshMs(): number {
+	return getMilliseconds(useEnv()['PM2_POOL_HEALTH_REFRESH'], 1_800_000);
+}
 
 /**
  * Whether this deployment asked for a pool bigger than the one it starts with,
@@ -72,6 +87,7 @@ function awaitsPrewarm(): boolean {
 
 function record(health: PoolHealth | null): void {
 	reading = health;
+	readingHeardAt = Date.now();
 
 	if (health === null) {
 		return;
@@ -99,9 +115,15 @@ export function poolHasComeUp(): boolean {
 	return cameUp || awaitsPrewarm() === false;
 }
 
-/** What the supervisor last said about the pool, unless its reporter stopped. */
+/**
+ * What the supervisor last said about the pool, unless its reporter stopped.
+ *
+ * Read as nothing said once two refreshes went by without it: a reporter that
+ * was killed takes nothing back, and a reading nobody repeats may describe a
+ * pool that recovered since.
+ */
 export function poolHealthReading(): PoolHealth | null {
-	if (reading === null) {
+	if (reading === null || Date.now() - readingHeardAt > 2 * refreshMs()) {
 		return null;
 	}
 
@@ -129,22 +151,30 @@ async function publishPoolHealth(health: PoolHealth | null): Promise<boolean> {
 /**
  * Tell the deployment what the supervisor says about its pool.
  *
- * Sent when it changes and at no other time: pub/sub reaches every node of the
- * deployment, and a pool that holds still has nothing new to say. A worker
- * that boots after the last change asks for it instead, see
+ * Sent when it changes, and otherwise once a refresh: pub/sub reaches every
+ * node of the deployment, and a pool that holds still has little new to say.
+ * A worker that boots after the last change asks for it instead, see
  * `answerPoolHealthQueries`.
  */
 export function reportPoolHealth(health: PoolHealth): void {
+	// A tick that was already running when the reporter stopped would otherwise
+	// send the reading again after it was taken back.
+	if (withdrawn) {
+		return;
+	}
+
 	if (
 		reported !== null
 		&& reported.failedWorkers === health.failedWorkers
 		&& reported.onlineWorkers === health.onlineWorkers
 		&& reported.targetWorkers === health.targetWorkers
+		&& Date.now() - reportedAt < refreshMs()
 	) {
 		return;
 	}
 
 	reported = { ...health };
+	reportedAt = Date.now();
 
 	// Kept locally as well as sent: the process that reports is a process of the
 	// deployment like any other, and an unreachable bus should not leave it
@@ -179,13 +209,14 @@ export async function answerPoolHealthQueries(): Promise<void> {
 /**
  * Take the reading back, on the reporter's way out.
  *
- * Nothing repeats a reading any more, so nothing would expire it either: a pool
- * that recovered while the reporter was down would leave every worker
- * answering for the failure that was true when it stopped. A reporter that
+ * A reading expires on its own only after two refreshes, and a pool that
+ * recovered while the reporter was down would leave every worker answering for
+ * the failure that was true when it stopped until then. A reporter that
  * crashes is restarted by its supervisor, and its first tick sends a reading
  * again.
  */
 export async function withdrawPoolHealth(): Promise<void> {
+	withdrawn = true;
 	reported = null;
 	await publishPoolHealth(null);
 }
@@ -198,15 +229,24 @@ export async function withdrawPoolHealth(): Promise<void> {
  * which is what it says today everywhere.
  */
 export function initPoolHealthMirror(): void {
+	const askForReading = async () => {
+		await useBus().publish(POOL_QUERY_CHANNEL, {});
+	};
+
 	const subscribed = useBus()
 		.subscribe<PoolHealth | null>(POOL_CHANNEL, (health) => {
 			record(health);
 		});
 
-	// Asked once subscribed, so the answer is not sent before anything listens.
-	const asked = subscribed.then(async () => {
-		await useBus().publish(POOL_QUERY_CHANNEL, {});
+	// Whatever changed while the connection was down never reached this process.
+	useBus().onResubscribe(() => {
+		askForReading().catch((error: unknown) => {
+			useLogger().warn(error, '[pool-health] could not ask for the reading');
+		});
 	});
+
+	// Asked once subscribed, so the answer is not sent before anything listens.
+	const asked = subscribed.then(askForReading);
 
 	asked.catch((error: unknown) => {
 		useLogger().warn(
