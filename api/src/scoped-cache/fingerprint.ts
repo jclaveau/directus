@@ -277,11 +277,28 @@ export function scopedCacheDeclaredPins(
 
 	const pinnedScope: ScopedCacheDeclaredScope = declared.pinnedScope ?? {};
 
-	return Object.entries(pinnedScope).flatMap(([field, values]) => {
-		return values.map((value) => {
-			return { field, value, type: fields?.[field]?.type };
+	const declaredPins: ScopedCachePin[] = Object.entries(pinnedScope)
+		.flatMap(([field, values]) => {
+			return values.map((value) => {
+				return { field, value, type: fields?.[field]?.type };
+			});
 		});
-	});
+
+	// The tag a hook written before fingerprints still hands over, which no type
+	// check stops in a plain-JS extension. Read as the bare fingerprint it would
+	// purge only the reads pinning nothing, leaving the slice it names stale.
+	const legacyTag = declared as ScopedCacheDeclaredFingerprint
+		& ScopedCacheCollectionPin;
+
+	if (typeof legacyTag.field !== 'string') {
+		return declaredPins;
+	}
+
+	return [...declaredPins, {
+		field: legacyTag.field,
+		value: legacyTag.value,
+		type: fields?.[legacyTag.field]?.type ?? legacyTag.type,
+	}];
 }
 
 /**

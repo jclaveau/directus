@@ -1,5 +1,10 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Filter, Item, Query } from '@directus/types';
+import type {
+	Filter,
+	Item,
+	Query,
+	ScopedCacheDeclaredFingerprint,
+} from '@directus/types';
 import type {
 	A2MNode,
 	AST,
@@ -665,6 +670,32 @@ describe('createScopedCacheHookDeclarations', () => {
 			{ collection: 'articles', pinnedScope: { author: ['5'] } },
 			{ collection: 'authors' },
 		]);
+	});
+
+	it(oneLine`
+		reads a pre-fingerprint tag as the slice it names, not as the bare
+		collection — which would purge only the reads pinning nothing
+	`, () => {
+		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		const legacyTag = {
+			collection: 'articles',
+			field: 'author',
+			value: 5,
+		} as ScopedCacheDeclaredFingerprint;
+
+		scope.scopeTo(legacyTag);
+		purge.purgeBy(legacyTag);
+
+		expect(scopeQueryCases).toEqual([
+			[{ collection: 'articles', field: 'author', value: 5 }],
+		]);
+
+		expect(purgeFingerprints).toEqual([{
+			collection: 'articles',
+			pinnedScope: { author: ['5'] },
+		}]);
 	});
 
 	it('accepts a batch, deduping within it and against prior declarations', () => {
