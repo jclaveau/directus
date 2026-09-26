@@ -1136,6 +1136,180 @@ describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 		expect(queryCases.every((queryCase) => queryCase.length === 1)).toBe(true);
 	});
 
+	test('an _and of two _or is every pairing of their branches', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				_and: [
+					{ _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] },
+					{ _or: [{ course: { _eq: 'math' } }, { course: { _eq: 'art' } }] },
+				],
+			},
+		)).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'art' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'B' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'B' },
+				{ collection: 'slots', field: 'course', value: 'art' },
+			],
+		]);
+	});
+
+	test('keeps every pairing when they number exactly the cap', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				student: { _eq: 'A' },
+				_or: [
+					{ course: { _eq: 'c1' } },
+					{ course: { _eq: 'c2' } },
+					{ course: { _eq: 'c3' } },
+					{ course: { _eq: 'c4' } },
+					{ course: { _eq: 'c5' } },
+					{ course: { _eq: 'c6' } },
+					{ course: { _eq: 'c7' } },
+					{ course: { _eq: 'c8' } },
+					{ course: { _eq: 'c9' } },
+					{ course: { _eq: 'c10' } },
+					{ course: { _eq: 'c11' } },
+					{ course: { _eq: 'c12' } },
+					{ course: { _eq: 'c13' } },
+					{ course: { _eq: 'c14' } },
+					{ course: { _eq: 'c15' } },
+					{ course: { _eq: 'c16' } },
+				],
+			},
+		)).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c1' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c2' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c3' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c4' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c5' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c6' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c7' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c8' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c9' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c10' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c11' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c12' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c13' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c14' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c15' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c16' },
+			],
+		]);
+	});
+
+	test(oneLine`
+		carries the pin beside every _or branch, each standing alone, one branch
+		past the cap
+	`, () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				student: { _eq: 'A' },
+				_or: [
+					{ course: { _eq: 'c1' } },
+					{ course: { _eq: 'c2' } },
+					{ course: { _eq: 'c3' } },
+					{ course: { _eq: 'c4' } },
+					{ course: { _eq: 'c5' } },
+					{ course: { _eq: 'c6' } },
+					{ course: { _eq: 'c7' } },
+					{ course: { _eq: 'c8' } },
+					{ course: { _eq: 'c9' } },
+					{ course: { _eq: 'c10' } },
+					{ course: { _eq: 'c11' } },
+					{ course: { _eq: 'c12' } },
+					{ course: { _eq: 'c13' } },
+					{ course: { _eq: 'c14' } },
+					{ course: { _eq: 'c15' } },
+					{ course: { _eq: 'c16' } },
+					{ course: { _eq: 'c17' } },
+				],
+			},
+		)).toEqual([
+			[{ collection: 'slots', field: 'student', value: 'A' }],
+			[{ collection: 'slots', field: 'course', value: 'c1' }],
+			[{ collection: 'slots', field: 'course', value: 'c2' }],
+			[{ collection: 'slots', field: 'course', value: 'c3' }],
+			[{ collection: 'slots', field: 'course', value: 'c4' }],
+			[{ collection: 'slots', field: 'course', value: 'c5' }],
+			[{ collection: 'slots', field: 'course', value: 'c6' }],
+			[{ collection: 'slots', field: 'course', value: 'c7' }],
+			[{ collection: 'slots', field: 'course', value: 'c8' }],
+			[{ collection: 'slots', field: 'course', value: 'c9' }],
+			[{ collection: 'slots', field: 'course', value: 'c10' }],
+			[{ collection: 'slots', field: 'course', value: 'c11' }],
+			[{ collection: 'slots', field: 'course', value: 'c12' }],
+			[{ collection: 'slots', field: 'course', value: 'c13' }],
+			[{ collection: 'slots', field: 'course', value: 'c14' }],
+			[{ collection: 'slots', field: 'course', value: 'c15' }],
+			[{ collection: 'slots', field: 'course', value: 'c16' }],
+			[{ collection: 'slots', field: 'course', value: 'c17' }],
+		]);
+	});
+
 	test('an unbound branch drops the pin, as it does for tags', () => {
 		expect(pinnedScopedCacheQueryCasesFromFilter(
 			'slots',
