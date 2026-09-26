@@ -1379,4 +1379,100 @@ describe('scopedCacheNestedRowBindings', () => {
 			new Map([['chapters', 'parts']]),
 		)).toEqual(new Map([['part', new Set(['course'])]]));
 	});
+
+	test('binds the rows a count() reads by the fk of the to-many it counts', () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map(),
+				other: new Map([
+					['count(parts)', { collection: 'part', fields: new Set() }],
+				]),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['part', new Set(['course'])]]));
+	});
+
+	test(oneLine`
+		binds the rows a three-argument $FOLLOW reaches by its item column and
+		its collection column
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					[
+						'$FOLLOW(note,item,collection)',
+						{ collection: 'note', fields: new Set(['text']) },
+					],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['note', new Set(['item', 'collection'])]]));
+	});
+
+	test(oneLine`
+		binds the junction a filter reaches an A2O item through by its collection
+		column too
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			{
+				collections: {
+					page: { collection: 'page', primary: 'id', fields: {} },
+					page_block: { collection: 'page_block', primary: 'id', fields: {} },
+					heading: { collection: 'heading', primary: 'id', fields: {} },
+				},
+				relations: [
+					{
+						collection: 'page_block',
+						field: 'page',
+						related_collection: 'page',
+						meta: { one_field: 'blocks' },
+					},
+					{
+						collection: 'page_block',
+						field: 'item',
+						related_collection: null,
+						meta: {
+							one_collection_field: 'collection',
+							one_allowed_collections: ['heading'],
+						},
+					},
+				],
+			} as unknown as SchemaOverview,
+			'page',
+			{
+				read: new Map([
+					['blocks', { collection: 'page_block', fields: new Set(['item']) }],
+					[
+						'blocks.item:heading',
+						{ collection: 'heading', fields: new Set(['title']) },
+					],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([
+			['page_block', new Set(['page', 'item', 'collection'])],
+		]));
+	});
+
+	test(oneLine`
+		binds a collection reached through a hop it cannot resolve to any field
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					['chapters', { collection: 'part', fields: new Set(['id']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['part', new Set(['*'])]]));
+	});
 });

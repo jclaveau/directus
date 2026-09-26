@@ -5103,4 +5103,79 @@ describe('ScopedCacheReadPlan.fieldsByCollection', () => {
 			['owner', ['id']],
 		]));
 	});
+
+	it('names the fk a count() over a permission-cased to-many reads by', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'functionField',
+					name: 'count(comments)',
+					fieldKey: 'count(comments)',
+					query: {},
+					relatedCollection: 'comment',
+					cases: [{ status: { _eq: 'published' } }],
+					whenCase: [],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['comments', 'id']],
+			['comment', ['article', 'status']],
+		]));
+	});
+
+	it('leaves out a collection whose binding to its parent is unknown', () => {
+		const schema = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		const plan = new ScopedCacheReadPlan('article', schema, {
+			type: 'root',
+			name: 'article',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [] },
+				{
+					type: 'functionField',
+					name: 'count(comments)',
+					fieldKey: 'total',
+					query: {},
+					relatedCollection: 'comment',
+					cases: [{ status: { _eq: 'published' } }],
+					whenCase: [],
+				},
+			],
+		} as unknown as AST, []);
+
+		expect(plan.fieldsByCollection()).toEqual(new Map([
+			['article', ['comments', 'id']],
+		]));
+	});
 });

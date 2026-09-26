@@ -17,6 +17,7 @@ import {
 	getInfoForPath,
 } from '../permissions/modules/process-ast/utils/get-info-for-path.js';
 import type { AST } from '../types/ast.js';
+import { parseFilterKey } from '../utils/parse-filter-key.js';
 import {
 	getRelationInfo,
 } from '../utils/get-relation-info.js';
@@ -36,6 +37,7 @@ import {
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheKeyedFieldType,
 } from './paths.js';
+import { SCOPED_CACHE_ANY_FIELD } from './fingerprint.js';
 import {
 	FieldTypesByField,
 	canonicalizeScopedCachePinValue,
@@ -277,8 +279,97 @@ export function scopedCacheUnaliasedPath(
 }
 
 /**
- * The field each nested collection's rows are filed under the parent they were
- * read through: the reverse fk of the to-many they hang off.
+ * One hop of a field-map path: the collection it lands on, and the columns that
+ * attach the rows there to the row it left — on whichever collection holds them.
+ *
+ * A to-many (`$FOLLOW` too) and a `count()` over one attach the child by its
+ * reverse fk; the three-argument `$FOLLOW` and a scoped A2O (`item:headings`)
+ * by the item column AND the collection column. An M2O attaches nothing: its fk
+ * is a field of the near collection, which the field map already records, and
+ * the row it names is reached by its own immutable key. Null for a hop that is
+ * none of these.
+ */
+function scopedCacheRowBindingOfHop(
+	schema: SchemaOverview,
+	parentCollection: CollectionKey,
+	pathField: string,
+): {
+	relatedCollection: CollectionKey;
+	boundCollection: CollectionKey;
+	boundFields: string[];
+} | null {
+	const isFollow = pathField.startsWith('$FOLLOW(');
+
+	if (!isFollow && pathField.includes(':')) {
+		const [a2oField, scopeCollection] = pathField.split(':') as [string, string];
+
+		const { relation } = getRelationInfo(
+			schema.relations,
+			parentCollection,
+			a2oField,
+		);
+
+		const collectionField = relation?.meta?.one_collection_field;
+
+		if (
+			!relation
+			|| !collectionField
+			|| relation.collection !== parentCollection
+		) {
+			return null;
+		}
+
+		return {
+			relatedCollection: scopeCollection,
+			boundCollection: parentCollection,
+			boundFields: [relation.field, collectionField],
+		};
+	}
+
+	const { relation, relationType } = getRelationInfo(
+		schema.relations,
+		parentCollection,
+		isFollow
+			? pathField
+			: parseFilterKey(pathField).fieldName,
+	);
+
+	if (!relation) {
+		return null;
+	}
+
+	if (relationType === 'm2o' && relation.related_collection) {
+		return {
+			relatedCollection: relation.related_collection,
+			boundCollection: parentCollection,
+			boundFields: [],
+		};
+	}
+
+	if (relationType === 'o2m') {
+		return {
+			relatedCollection: relation.collection,
+			boundCollection: relation.collection,
+			boundFields: [relation.field],
+		};
+	}
+
+	const collectionField = relation.meta?.one_collection_field;
+
+	if (relationType === 'o2a' && collectionField) {
+		return {
+			relatedCollection: relation.collection,
+			boundCollection: relation.collection,
+			boundFields: [relation.field, collectionField],
+		};
+	}
+
+	return null;
+}
+
+/**
+ * The columns that attach each nested collection's rows to the parent they were
+ * read through, filed under the collection holding them.
  *
  * A read of `course` reaching `parts` holds the parts whose `course` names that
  * course, so a part rewritten onto another course leaves the read's result set —
@@ -287,8 +378,9 @@ export function scopedCacheUnaliasedPath(
  * records what decides which of its rows the read holds at all, and the purge's
  * field test has to count both.
  *
- * An M2O adds nothing: the fk lives on the near collection, where the field map
- * already records it, and the row it names is reached by its own immutable key.
+ * A path whose hops it cannot resolve binds its collection to
+ * `SCOPED_CACHE_ANY_FIELD`: the columns attaching those rows are unknown, so the
+ * view has to be every field.
  */
 export function scopedCacheNestedRowBindings(
 	schema: SchemaOverview,
@@ -298,6 +390,20 @@ export function scopedCacheNestedRowBindings(
 ): Map<CollectionKey, Set<string>> {
 	const boundFieldsByCollection = new Map<CollectionKey, Set<string>>();
 
+	const addBoundFields = (
+		collection: CollectionKey,
+		fields: string[],
+	): void => {
+		const boundFields = boundFieldsByCollection.get(collection)
+			?? new Set<string>();
+
+		for (const field of fields) {
+			boundFields.add(field);
+		}
+
+		boundFieldsByCollection.set(collection, boundFields);
+	};
+
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 		if (path === '') {
 			continue;
@@ -305,41 +411,31 @@ export function scopedCacheNestedRowBindings(
 
 		const pathSegments = path.split('.');
 		const unaliasedFields = scopedCacheUnaliasedPath(fieldNames, pathSegments);
-		const aliasField = unaliasedFields[unaliasedFields.length - 1];
+		let parentCollection: CollectionKey | null = rootCollection;
 
-		if (aliasField === undefined) {
+		for (const hopField of unaliasedFields.slice(0, -1)) {
+			parentCollection = parentCollection === null
+				? null
+				: scopedCacheRowBindingOfHop(schema, parentCollection, hopField)
+					?.relatedCollection ?? null;
+		}
+
+		const lastHop = parentCollection === null
+			? null
+			: scopedCacheRowBindingOfHop(
+				schema,
+				parentCollection,
+				unaliasedFields[unaliasedFields.length - 1]!,
+			);
+
+		if (lastHop === null || lastHop.relatedCollection !== entry.collection) {
+			addBoundFields(entry.collection, [SCOPED_CACHE_ANY_FIELD]);
 			continue;
 		}
 
-		const parentCollection = scopedCacheCollectionAtPathEnd(
-			schema,
-			rootCollection,
-			unaliasedFields.slice(0, -1),
-		);
-
-		if (parentCollection === null) {
-			continue;
+		if (lastHop.boundFields.length > 0) {
+			addBoundFields(lastHop.boundCollection, lastHop.boundFields);
 		}
-
-		const { relation, relationType } = getRelationInfo(
-			schema.relations,
-			parentCollection,
-			aliasField,
-		);
-
-		if (
-			relationType !== 'o2m'
-			|| !relation
-			|| relation.collection !== entry.collection
-		) {
-			continue;
-		}
-
-		const boundFields = boundFieldsByCollection.get(entry.collection)
-			?? new Set<string>();
-
-		boundFields.add(relation.field);
-		boundFieldsByCollection.set(entry.collection, boundFields);
 	}
 
 	return boundFieldsByCollection;
