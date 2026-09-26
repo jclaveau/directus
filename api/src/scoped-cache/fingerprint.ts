@@ -48,6 +48,26 @@ export function escapeScopedCacheFingerprintGlob(rendered: string): string {
 }
 
 /**
+ * Where the first `separator` the escapes do not cover sits, or `-1`. An escaped
+ * one still spells the character raw — `\|` — so a plain `indexOf` would stop at
+ * it and cut a value carrying one in two.
+ */
+export function indexOfUnescaped(input: string, separator: string): number {
+	for (let characterAt = 0; characterAt < input.length; characterAt++) {
+		if (input[characterAt] === '\\') {
+			characterAt++;
+			continue;
+		}
+
+		if (input[characterAt] === separator) {
+			return characterAt;
+		}
+	}
+
+	return -1;
+}
+
+/**
  * Split on a separator the escapes do not cover, keeping the escapes in the parts
  * so each can be unescaped on its own. A plain `String.split` cannot: it cuts at an
  * escaped separator too, and a value carrying `&` would come back as two pins.

@@ -187,6 +187,30 @@ describe('renderScopedCacheIndexMember', () => {
 			});
 	});
 
+	it('reads a member back past the escaped pipes its pinned values carry', () => {
+		expect(parseScopedCacheIndexMember('slot:&owner=,a\\|b,c\\\\,&|ns:abc'))
+			.toEqual({
+				fingerprint: {
+					collection: 'slot',
+					pinnedScope: { owner: ['a|b', 'c\\'] },
+				},
+				key: 'ns:abc',
+			});
+	});
+
+	it('round-trips a pinned value spelling a backslash then a pipe', () => {
+		expect(parseScopedCacheIndexMember(renderScopedCacheIndexMember(
+			{ collection: 'slot', pinnedScope: { owner: ['a\\|b', 'c|'] } },
+			'ns:a|b',
+		))).toEqual({
+			fingerprint: {
+				collection: 'slot',
+				pinnedScope: { owner: ['a\\|b', 'c|'] },
+			},
+			key: 'ns:a|b',
+		});
+	});
+
 	it('reads a member holding no key as a fingerprint alone', () => {
 		expect(parseScopedCacheIndexMember('slot:&'))
 			.toEqual({ fingerprint: parseScopedCacheFingerprint('slot:&'), key: '' });

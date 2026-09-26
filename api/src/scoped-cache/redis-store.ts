@@ -24,6 +24,7 @@ import type { ChainableCommander, Redis } from 'ioredis';
 import {
 	escapeScopedCacheFingerprintGlob,
 	escapeScopedCacheFingerprintToken,
+	indexOfUnescaped,
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
 	SCOPED_CACHE_FINGERPRINT_VIEW,
@@ -425,7 +426,8 @@ export function scopedCacheRowIndexGlobs(
  * whose query cases have been merged into an OR.
  *
  * `|` splits them, and a fingerprint escapes every `|` it carries, so the split is
- * on the FIRST one however the cache key is spelled. This is the one place a
+ * on the first UNESCAPED one however the cache key is spelled: an escaped `\|`
+ * still holds the raw character. This is the one place a
  * fingerprint leaves Node as a string; `parseScopedCacheIndexMember` is the one
  * place it comes back.
  */
@@ -439,7 +441,7 @@ export function renderScopedCacheIndexMember(
 export function parseScopedCacheIndexMember(
 	member: string,
 ): { fingerprint: ScopedCacheFingerprint; key: string } {
-	const splitAt = member.indexOf('|');
+	const splitAt = indexOfUnescaped(member, '|');
 
 	if (splitAt === -1) {
 		return { fingerprint: parseScopedCacheFingerprint(member), key: '' };
