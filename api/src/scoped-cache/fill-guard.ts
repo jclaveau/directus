@@ -21,14 +21,23 @@ export type ScopedCacheEpochs = Record<string, string | null>;
  * before-query reading, short enough that a collection nobody writes to stops
  * holding a key.
  *
- * A value the environment cannot parse falls back to the default rather than to
- * `0`, which would expire the counter on the command that bumps it and leave every
- * fill racing that purge unguarded.
+ * A value that is not a positive duration falls back to the default: `EXPIRE`
+ * with `0` or less deletes the counter on the command that bumps it, and every
+ * fill racing that purge would read no counter on both sides and be kept.
  */
 function scopedCacheEpochTtlSeconds(): number {
-	return Math.ceil(
-		getMilliseconds(env['CACHE_SCOPED_EPOCH_TTL'], 24 * 60 * 60 * 1000) / 1000,
+	const defaultTtlMilliseconds = 24 * 60 * 60 * 1000;
+
+	const ttlMilliseconds = getMilliseconds(
+		env['CACHE_SCOPED_EPOCH_TTL'],
+		defaultTtlMilliseconds,
 	);
+
+	if (!Number.isFinite(ttlMilliseconds) || ttlMilliseconds <= 0) {
+		return defaultTtlMilliseconds / 1000;
+	}
+
+	return Math.ceil(ttlMilliseconds / 1000);
 }
 
 /**
