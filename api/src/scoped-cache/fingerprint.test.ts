@@ -68,6 +68,14 @@ describe('renderScopedCacheFingerprint', () => {
 			pinnedScope: { title: ['a*b?c[d]'] },
 		})).toBe('note:&title=,a\\*b\\?c\\[d\\],&');
 	});
+
+	it('renders a pin on a field named view apart from the view', () => {
+		expect(renderScopedCacheFingerprint({
+			collection: 'note',
+			pinnedScope: { view: ['7'] },
+			viewFields: ['title', 'view'],
+		})).toBe('note:&\\view=,7,&view=,title,view,&');
+	});
 });
 
 describe('parseScopedCacheFingerprint', () => {
@@ -117,6 +125,16 @@ describe('parseScopedCacheFingerprint', () => {
 			['__proto__', ['alpha']],
 			['constructor', ['beta']],
 		]);
+	});
+
+	it('reads a pin on a field named view back apart from the view', () => {
+		expect(parseScopedCacheFingerprint(
+			'note:&\\view=,7,&view=,title,view,&',
+		)).toEqual({
+			collection: 'note',
+			pinnedScope: { view: ['7'] },
+			viewFields: ['title', 'view'],
+		});
 	});
 
 	it('reads back a value whose escapes only look like two values', () => {
@@ -411,6 +429,22 @@ describe('scopedCacheFingerprintPurgedBy', () => {
 			read,
 			[parseScopedCacheFingerprint('slot:&id=,1,&method=,spaced,&owner=,alpha,&')],
 			['note'],
+		)).toBe(false);
+	});
+
+	it('purges a read pinned on a field named view by a row carrying it', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint('note:&\\view=,7,&view=,title,&'),
+			[{ collection: 'note', pinnedScope: { view: ['7'] } }],
+			['title'],
+		)).toBe(true);
+	});
+
+	it('leaves a read pinned on a field named view to other rows', () => {
+		expect(scopedCacheFingerprintPurgedBy(
+			parseScopedCacheFingerprint('note:&\\view=,7,&view=,title,&'),
+			[{ collection: 'note', pinnedScope: { view: ['8'] } }],
+			['title'],
 		)).toBe(false);
 	});
 

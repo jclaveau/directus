@@ -430,7 +430,7 @@ describe.each(vendors)('%s', (vendor) => {
 			const [field, values] = pin.split(/(?<!\\)=/);
 			const tokens = (values?.match(/(?:\\.|[^,])+/g) ?? []).map(unescaped);
 
-			if (unescaped(field!) === 'view') {
+			if (field === 'view') {
 				viewFields = tokens;
 			}
 			else if (unescaped(field!) === 'id' && parentIds.has(collection)) {

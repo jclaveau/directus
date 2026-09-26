@@ -13,7 +13,11 @@ import {
 
 export type { ScopedCacheFingerprint } from '@directus/types';
 
-/** The pin naming what the read selected, sorted or filtered on. */
+/**
+ * The pin naming what the read selected, sorted or filtered on. It is the one key
+ * rendered raw: a field of that name renders as `\view`, which unescapes to the
+ * same field and never reads back as the view.
+ */
 export const SCOPED_CACHE_FINGERPRINT_VIEW = 'view';
 
 /** The `view` value a read of every column carries: any write touches it. */
@@ -31,6 +35,14 @@ const RESERVED = /[\\,&|*?[\]]/g;
 
 export function escapeScopedCacheFingerprintToken(token: string): string {
 	return token.replace(RESERVED, (reservedCharacter) => `\\${reservedCharacter}`);
+}
+
+export function escapeScopedCacheFingerprintPinKey(field: string): string {
+	const escapedField = escapeScopedCacheFingerprintToken(field);
+
+	return escapedField === SCOPED_CACHE_FINGERPRINT_VIEW
+		? `\\${escapedField}`
+		: escapedField;
 }
 
 export function unescapeScopedCacheFingerprintToken(token: string): string {
@@ -116,9 +128,11 @@ function splitUnescaped(input: string, separator: string): string[] {
 export function renderScopedCacheFingerprint(
 	fingerprint: ScopedCacheFingerprint,
 ): string {
-	const renderedPins = new Map<string, readonly string[]>(
-		Object.entries(fingerprint.pinnedScope ?? {}),
-	);
+	const renderedPins = new Map<string, readonly string[]>();
+
+	for (const [field, values] of Object.entries(fingerprint.pinnedScope ?? {})) {
+		renderedPins.set(escapeScopedCacheFingerprintPinKey(field), values);
+	}
 
 	const viewFields = fingerprint.viewFields ?? [];
 
@@ -133,7 +147,7 @@ export function renderScopedCacheFingerprint(
 			...new Set(renderedPins.get(key)!.map(escapeScopedCacheFingerprintToken)),
 		].sort();
 
-		renderedFingerprint += `&${escapeScopedCacheFingerprintToken(key)}=,`
+		renderedFingerprint += `&${key}=,`
 			+ `${sortedValues.join(',')},`;
 	}
 
@@ -173,21 +187,20 @@ export function parseScopedCacheFingerprint(
 			continue;
 		}
 
-		const pinKey = unescapeScopedCacheFingerprintToken(
-			serialisedPin.slice(0, assignAt),
-		);
+		const renderedKey = serialisedPin.slice(0, assignAt);
 
 		// The wrapping commas are separators, not values: `,a,b,` is two values.
 		const pinValues = splitUnescaped(serialisedPin.slice(assignAt + 1), ',')
 			.slice(1, -1)
 			.map(unescapeScopedCacheFingerprintToken);
 
-		if (pinKey === SCOPED_CACHE_FINGERPRINT_VIEW) {
+		// Compared before unescaping: a field named `view` is rendered `\view`.
+		if (renderedKey === SCOPED_CACHE_FINGERPRINT_VIEW) {
 			parsedFields = pinValues;
 			continue;
 		}
 
-		parsedScope[pinKey] = pinValues;
+		parsedScope[unescapeScopedCacheFingerprintToken(renderedKey)] = pinValues;
 	}
 
 	// Only what it carries: an absent member is how every other fingerprint spells

@@ -242,6 +242,16 @@ describe('scopedCacheRowIndexGlobs', () => {
 		]);
 	});
 
+	it('names a field called view by its escaped key, not the view\'s', () => {
+		expect(scopedCacheRowIndexGlobs('note', [
+			{ collection: 'note', pinnedScope: { view: ['7'] } },
+		])).toEqual([
+			'note:&|*',
+			'note:&view=,*',
+			'note:*&\\\\view=*,7,*',
+		]);
+	});
+
 	// The value is stored escaped (`a\*b`), and a glob eats a backslash rather than
 	// matching one, so the pattern doubles what the serialiser wrote.
 	it('escapes a value carrying a glob metacharacter', () => {
