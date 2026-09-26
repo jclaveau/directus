@@ -500,6 +500,7 @@ describe.each(vendors)('%s', (vendor) => {
 		const filed = [...new Set(members.map(fingerprintOf))].map(decodeFingerprint);
 
 		expect(filed).toEqual(expect.arrayContaining(expectedFingerprints));
+		expect(expectedFingerprints).toEqual(expect.arrayContaining(filed));
 		expect(filed).toHaveLength(expectedFingerprints.length);
 	}
 
