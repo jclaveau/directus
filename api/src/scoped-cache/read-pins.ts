@@ -363,9 +363,6 @@ const SEARCHABLE_TYPES: readonly Type[] = [
  * The columns a node's `search` can match, by the types `applySearch` searches.
  * It narrows them further by the search value and the permitted fields; naming
  * them all over-purges at worst.
- *
- * The collection column of every A2O, which only `run-ast` selects: rewriting it
- * alone points the row at another collection's item.
  */
 export function scopedCacheViewFieldsBeyondFieldMap(
 	schema: SchemaOverview,
@@ -411,11 +408,7 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 		}
 	};
 
-	const addFieldsOf = (
-		collection: CollectionKey,
-		children: AST['children'],
-		path: QueryPath,
-	): void => {
+	const addFieldsOf = (children: AST['children'], path: QueryPath): void => {
 		for (const child of children) {
 			if (child.type === 'field') {
 				continue;
@@ -435,14 +428,6 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 			}
 
 			if (child.type === 'a2o') {
-				const collectionField = child.relation.meta?.one_collection_field;
-
-				if (collectionField) {
-					getInfoForPath(viewFieldMap, 'read', path, collection)
-						.fields
-						.add(collectionField);
-				}
-
 				for (const relatedCollection of child.names) {
 					const namedPath = [
 						...path,
@@ -456,23 +441,19 @@ export function scopedCacheViewFieldsBeyondFieldMap(
 						namedPath,
 					);
 
-					addFieldsOf(
-						relatedCollection,
-						child.children[relatedCollection] ?? [],
-						namedPath,
-					);
+					addFieldsOf(child.children[relatedCollection] ?? [], namedPath);
 				}
 
 				continue;
 			}
 
 			addNodeFields(child.name, child.query, child.cases, childPath);
-			addFieldsOf(child.name, child.children, childPath);
+			addFieldsOf(child.children, childPath);
 		}
 	};
 
 	addNodeFields(ast.name, ast.query, ast.cases, []);
-	addFieldsOf(ast.name, ast.children, []);
+	addFieldsOf(ast.children, []);
 
 	return viewFieldMap;
 }

@@ -54,8 +54,7 @@ const NO_FIELD_MAP: FieldMap = { read: new Map(), other: new Map() };
  */
 export class ScopedCacheReadPlan {
 	readonly fieldMap: FieldMap;
-	// What the view depends on beyond the field map: the cases, the searches and
-	// the A2O collection columns.
+	// What the view depends on beyond the field map: the cases and searches.
 	readonly viewFieldMap: FieldMap;
 	readonly filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
 	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheCollectionPin[]>;
