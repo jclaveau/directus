@@ -18,7 +18,6 @@ import type {
 } from '../permissions/modules/process-ast/types.js';
 import type { AST } from '../types/ast.js';
 import { scopedCachePurgeEnabled } from './config.js';
-import { SCOPED_CACHE_ANY_FIELD } from './fingerprint.js';
 import type { ScopedCacheOwnershipInjection } from './ownership-injection.js';
 import {
 	resolveScopedCacheM2oJoinChainFromPath,
@@ -248,10 +247,10 @@ export class ScopedCacheReadPlan {
 	 * by definition, and the field map files it under the collection it belongs to
 	 * rather than the one pinning it.
 	 *
-	 * The columns attaching each nested row to its parent join them — a to-many's
-	 * reverse fk, an A2O's collection column: the field map says which columns of
-	 * a nested row the read shows, and those say which rows it shows at all. So do
-	 * the fields the view map adds, which bound rows the same way a filter does.
+	 * The reverse fk of each to-many the read descends joins them: the field map
+	 * says which columns of a nested row the read shows, and that one says which
+	 * rows it shows at all. So do the fields the view map adds, which bound rows
+	 * the same way a filter does.
 	 */
 	fieldsByCollection(): Map<CollectionKey, string[]> {
 		const byCollection = new Map<CollectionKey, Set<string>>();
@@ -288,13 +287,9 @@ export class ScopedCacheReadPlan {
 			}
 		}
 
-		// Left out, a collection's view is every field — what a binding the
-		// analysis could not resolve needs.
-		return new Map([...byCollection]
-			.filter(([, fields]) => !fields.has(SCOPED_CACHE_ANY_FIELD))
-			.map(([collection, fields]) => {
-				return [collection, [...fields].sort()];
-			}));
+		return new Map([...byCollection].map(([collection, fields]) => {
+			return [collection, [...fields].sort()];
+		}));
 	}
 
 	/**
