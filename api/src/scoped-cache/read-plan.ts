@@ -34,7 +34,6 @@ import {
 	scopedCacheNodeBoundsByCollection,
 	scopedCacheRowsAtPathEnd,
 	scopedCacheUnaliasedPath,
-	scopedCacheViewFieldsBeyondFieldMap,
 	type ScopedCacheSortDeferral,
 } from './read-pins.js';
 
@@ -54,8 +53,6 @@ const NO_FIELD_MAP: FieldMap = { read: new Map(), other: new Map() };
  */
 export class ScopedCacheReadPlan {
 	readonly fieldMap: FieldMap;
-	// What the view depends on beyond the field map: the permission cases.
-	readonly viewFieldMap: FieldMap;
 	readonly filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
 	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheCollectionPin[]>;
 	readonly beyondNestedRows: Set<CollectionKey>;
@@ -84,10 +81,6 @@ export class ScopedCacheReadPlan {
 
 		this.fieldMap = enabled
 			? fieldMapFromAst(ast, schema)
-			: NO_FIELD_MAP;
-
-		this.viewFieldMap = enabled
-			? scopedCacheViewFieldsBeyondFieldMap(schema, ast)
 			: NO_FIELD_MAP;
 
 		this.fieldNames = enabled
@@ -248,41 +241,25 @@ export class ScopedCacheReadPlan {
 	 *
 	 * The reverse fk of each to-many the read descends joins them: the field map
 	 * says which columns of a nested row the read shows, and that one says which
-	 * rows it shows at all. So do the fields the view map adds, which bound rows
-	 * the same way a filter does.
+	 * rows it shows at all.
 	 */
 	fieldsByCollection(): Map<CollectionKey, string[]> {
-		const byCollection = new Map<CollectionKey, Set<string>>();
+		const byCollection = scopedCacheNestedRowBindings(
+			this.schema,
+			this.collection,
+			this.fieldMap,
+			this.fieldNames,
+		);
 
-		const addFields = (
-			collection: CollectionKey,
-			fields: Iterable<string>,
-		): void => {
-			const knownFields = byCollection.get(collection) ?? new Set<string>();
+		for (const entries of [this.fieldMap.read, this.fieldMap.other]) {
+			for (const { collection, fields } of entries.values()) {
+				const knownFields = byCollection.get(collection) ?? new Set<string>();
 
-			for (const field of fields) {
-				knownFields.add(field);
-			}
-
-			byCollection.set(collection, knownFields);
-		};
-
-		for (const fieldMap of [this.fieldMap, this.viewFieldMap]) {
-			const rowBindings = scopedCacheNestedRowBindings(
-				this.schema,
-				this.collection,
-				fieldMap,
-				this.fieldNames,
-			);
-
-			for (const [collection, fields] of rowBindings) {
-				addFields(collection, fields);
-			}
-
-			for (const entries of [fieldMap.read, fieldMap.other]) {
-				for (const { collection, fields } of entries.values()) {
-					addFields(collection, fields);
+				for (const field of fields) {
+					knownFields.add(field);
 				}
+
+				byCollection.set(collection, knownFields);
 			}
 		}
 

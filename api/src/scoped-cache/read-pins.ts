@@ -9,9 +9,6 @@ import type {
 	FieldMap,
 	QueryPath,
 } from '../permissions/modules/process-ast/types.js';
-import {
-	formatA2oKey,
-} from '../permissions/modules/process-ast/utils/format-a2o-key.js';
 import type { AST } from '../types/ast.js';
 import {
 	getRelationInfo,
@@ -339,73 +336,6 @@ export function scopedCacheNestedRowBindings(
 	}
 
 	return boundFieldsByCollection;
-}
-
-/**
- * The fields a read depends on that `fieldMapFromAst` leaves out, filed the way
- * the field map files its own: per path, under the collection at that path.
- *
- * The permission cases of every node: they decide which rows come back as much
- * as the query's own filter does, so a write moving a row across one of them
- * changes the response on a column the read may never have selected.
- */
-export function scopedCacheViewFieldsBeyondFieldMap(
-	schema: SchemaOverview,
-	ast: AST,
-): FieldMap {
-	const viewFieldMap: FieldMap = { read: new Map(), other: new Map() };
-
-	const addNodeFields = (
-		collection: CollectionKey,
-		cases: Filter[],
-		path: QueryPath,
-	): void => {
-		const casesFilter = joinFilterWithCases(null, cases);
-
-		if (casesFilter) {
-			extractFieldsFromQuery(
-				collection,
-				{ filter: casesFilter },
-				viewFieldMap,
-				schema,
-				path,
-			);
-		}
-	};
-
-	const addFieldsOf = (children: AST['children'], path: QueryPath): void => {
-		for (const child of children) {
-			if (child.type === 'field') {
-				continue;
-			}
-
-			const childPath = [...path, child.fieldKey];
-
-			if (child.type === 'functionField') {
-				addNodeFields(child.relatedCollection, child.cases, childPath);
-				continue;
-			}
-
-			if (child.type === 'a2o') {
-				for (const name of child.names) {
-					const namedPath = [...path, formatA2oKey(child.fieldKey, name)];
-
-					addNodeFields(name, child.cases[name] ?? [], namedPath);
-					addFieldsOf(child.children[name] ?? [], namedPath);
-				}
-
-				continue;
-			}
-
-			addNodeFields(child.name, child.cases, childPath);
-			addFieldsOf(child.children, childPath);
-		}
-	};
-
-	addNodeFields(ast.name, ast.cases, []);
-	addFieldsOf(ast.children, []);
-
-	return viewFieldMap;
 }
 
 /**
