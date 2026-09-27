@@ -18,6 +18,7 @@ import { readMeta, withMeta } from '../../utils/read-meta.js';
 import { mergeScopedCacheEpochs } from '../../scoped-cache.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
+import { executingService } from './schema-cache.js';
 import { generateSchema } from './schema/index.js';
 import { addPathToValidationError } from './utils/add-path-to-validation-error.js';
 import processError from './utils/process-error.js';
@@ -95,12 +96,14 @@ export class GraphQLService {
 		let result: ExecutionResult;
 
 		try {
-			result = await execute({
-				schema,
-				document,
-				contextValue,
-				variableValues: variables,
-				operationName,
+			result = await executingService.run(this, () => {
+				return execute({
+					schema,
+					document,
+					contextValue,
+					variableValues: variables,
+					operationName,
+				});
 			});
 		}
 		catch (err: any) {

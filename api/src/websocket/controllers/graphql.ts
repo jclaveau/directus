@@ -1,10 +1,12 @@
 import type { Server } from 'graphql-ws';
+import { execute, subscribe, type ExecutionArgs } from 'graphql';
 import { CloseCode, MessageType, makeServer } from 'graphql-ws';
 import type { Server as httpServer } from 'node:http';
 import type { WebSocket } from 'ws';
 import type { WebSocketMessage } from '@directus/types';
 import { useLogger } from '../../logger/index.js';
 import { createDefaultAccountability } from '../../permissions/utils/create-default-accountability.js';
+import { executingService } from '../../services/graphql/schema-cache.js';
 import { bindPubSub } from '../../services/graphql/subscription.js';
 import { GraphQLService } from '../../services/index.js';
 import { getAddress } from '../../utils/get-address.js';
@@ -19,6 +21,19 @@ import { registerWebSocketEvents } from './hooks.js';
 
 const logger = useLogger();
 
+async function createClientService(client: WebSocketClient) {
+	// for now only the items will be watched, system events tbd
+	return new GraphQLService({
+		schema: await getSchema(),
+		scope: 'items',
+		accountability: client.accountability,
+	});
+}
+
+function serviceOf({ contextValue }: ExecutionArgs) {
+	return (contextValue as { service: GraphQLService }).service;
+}
+
 export class GraphQLSubscriptionController extends SocketController {
 	gql: Server<GraphQLSocket>;
 	constructor(httpServer: httpServer) {
@@ -31,16 +46,20 @@ export class GraphQLSubscriptionController extends SocketController {
 
 		this.gql = makeServer<ConnectionParams, GraphQLSocket>({
 			schema: async (ctx) => {
-				const accountability = ctx.extra.client.accountability;
-
-				// for now only the items will be watched, system events tbd
-				const service = new GraphQLService({
-					schema: await getSchema(),
-					scope: 'items',
-					accountability,
-				});
+				const service = await createClientService(ctx.extra.client);
 
 				return service.getSchema();
+			},
+			// The service an operation runs as, so the resolvers of a cached schema
+			// read this client's accountability, not the one that built the schema.
+			context: async (ctx) => {
+				return { service: await createClientService(ctx.extra.client) };
+			},
+			execute: (args) => {
+				return executingService.run(serviceOf(args), () => execute(args));
+			},
+			subscribe: (args) => {
+				return executingService.run(serviceOf(args), () => subscribe(args));
 			},
 		});
 
@@ -72,6 +91,8 @@ export class GraphQLSubscriptionController extends SocketController {
 											},
 											{
 												ip: client.accountability?.ip ?? null,
+												userAgent: client.accountability?.userAgent,
+												origin: client.accountability?.origin,
 											},
 										);
 
@@ -122,9 +143,14 @@ export class GraphQLSubscriptionController extends SocketController {
 		}, this.authentication.timeout);
 	}
 
-	protected override async handleHandshakeUpgrade({ request, socket, head }: UpgradeContext) {
+	protected override async handleHandshakeUpgrade(
+		{ request, socket, head, accountabilityOverrides }: UpgradeContext,
+	) {
 		this.server.handleUpgrade(request, socket, head, async (ws) => {
-			this.server.emit('connection', ws, { accountability: createDefaultAccountability(), expires_at: null });
+			// Kept until connection_init authenticates, which reads the IP from here.
+			const accountability = createDefaultAccountability(accountabilityOverrides);
+
+			this.server.emit('connection', ws, { accountability, expires_at: null });
 			// actual enforcement is handled by the setTokenExpireTimer function
 		});
 	}
