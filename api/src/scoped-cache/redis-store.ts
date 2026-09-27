@@ -337,10 +337,9 @@ function scopedCacheIndexKey(collection: string, indexPin: string): string {
  * sets a collection owns: a registry would be a second write on every fill, which
  * is the cost the split exists to avoid.
  *
- * The trailing colon bounds it. The key is `fingerprint:<collection>:<indexPin>`,
- * so a pattern ending at that one reaches a longer name only through a colon the
- * longer name carries — `a` reaches `a:b` — which reads and purges wider, never
- * narrower.
+ * The trailing colon bounds it. The key is `fingerprint:<collection>:<indexPin>`
+ * and a collection name carries no colon, so a pattern ending at that one cannot
+ * reach a longer name this one is a prefix of.
  */
 export function scopedCacheCollectionIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
@@ -431,15 +430,7 @@ export function scopedCacheRowIndexGlobs(
 	collection: string,
 	rowFingerprints: readonly ScopedCacheFingerprint[],
 ): string[] | null {
-	const renderedCollection = escapeScopedCacheFingerprintToken(collection);
-
-	// A member filed before the collection was escaped spells it raw, and no
-	// pattern names both spellings: the sets are read whole instead.
-	if (renderedCollection !== collection) {
-		return null;
-	}
-
-	const collectionToken = escapeScopedCacheFingerprintGlob(renderedCollection);
+	const collectionToken = escapeScopedCacheFingerprintGlob(collection);
 
 	const globPatterns = new Set<string>([
 		// Pins nothing at all, and pins nothing but its fields — the two ways a
