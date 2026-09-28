@@ -1618,6 +1618,10 @@ describe('retryPendingScopedCachePurges', () => {
 		indexedMembers = {};
 		swept.length = 0;
 
+		// clearAllMocks keeps the Once queue: a case failing before its queued
+		// answers are used would hand them to the cases after it.
+		cache.delete.mockReset().mockResolvedValue(true);
+
 		// The shape a deployment with CACHE_STATS off returns for every entry, so a
 		// case has to opt IN to being able to name what it recovered.
 		vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
