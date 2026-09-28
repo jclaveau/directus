@@ -323,8 +323,17 @@ describe(oneLine`
 
 			// Redis's own clock rather than a probe's round trip, so a busy runner
 			// cannot pass for a stall. The slowlog keeps every command slower than
-			// 10 ms, by default; only the ones naming an index set count, since the
-			// purge also drops the 120k cache keys the decoys name.
+			// 10 ms — set here, not trusted to the image's default, since a higher
+			// threshold would pass this with nothing measured. Only the ones naming an
+			// index set count, since the purge also drops the 120k cache keys the
+			// decoys name.
+			expect(await redisCommand(REDIS_PORT, [
+				'CONFIG',
+				'SET',
+				'slowlog-log-slower-than',
+				'10000',
+			])).toBe('+OK');
+
 			const lastSlowCommand = await redisCommand(REDIS_PORT, [
 				'EVAL',
 				"local last = redis.call('SLOWLOG', 'GET', 1)[1] "
