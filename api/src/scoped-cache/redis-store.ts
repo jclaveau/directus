@@ -951,15 +951,9 @@ const redisStore: ScopedCacheStore = {
 	},
 
 	onStoreReady(listener: () => void): void {
-		const redis = useRedis();
-
-		// The boot talks to Redis before the recovery registers, so the first
-		// connection's `ready` has usually fired already and would never reach it.
-		if (redis.status === 'ready') {
-			listener();
-		}
-
-		redis.on('ready', listener);
+		// ioredis emits `ready` on the first connect too, so a caller registering at
+		// boot is called once for the connection it is already on.
+		useRedis().on('ready', listener);
 	},
 };
 
