@@ -13,6 +13,8 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
 const INDEX_REAP = 'index_reap';
+const INDEX_REAP_PINNED = 'index_reap_pinned';
+const INDEX_REAP_WINDOW = 'index_reap_window';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTtlSeconds = 8;
 
@@ -37,19 +39,40 @@ describe.each(vendors)('%s', (vendor) => {
 	const bareIndexKey =
 		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP}:`;
 
+	const pinnedIndexKey =
+		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP_PINNED}:name=`;
+
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess;
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
-			collections: [{
-				collection: INDEX_REAP,
-				fields: [
-					{ field: 'name', type: 'string', meta: {} },
-					{ field: 'label', type: 'string', meta: {} },
-				],
-			}],
+			collections: [
+				{
+					collection: INDEX_REAP,
+					fields: [
+						{ field: 'name', type: 'string', meta: {} },
+						{ field: 'label', type: 'string', meta: {} },
+					],
+				},
+				{
+					collection: INDEX_REAP_PINNED,
+					meta: { scoped_cache_fields: ['name'] },
+					fields: [
+						{ field: 'name', type: 'string', meta: {} },
+						{ field: 'label', type: 'string', meta: {} },
+					],
+				},
+				{
+					// Held by the cache-index-reap-window hook.
+					collection: INDEX_REAP_WINDOW,
+					fields: [
+						{ field: 'name', type: 'string', meta: {} },
+						{ field: 'label', type: 'string', meta: {} },
+					],
+				},
+			],
 		});
 
 		env[vendor].PORT = String(await getPort());
@@ -72,6 +95,8 @@ describe.each(vendors)('%s', (vendor) => {
 		await redisClient.quit();
 
 		await DeleteCollection(vendor, { collection: INDEX_REAP });
+		await DeleteCollection(vendor, { collection: INDEX_REAP_PINNED });
+		await DeleteCollection(vendor, { collection: INDEX_REAP_WINDOW });
 	});
 
 	defineFeature(feature, (scenario) => {
@@ -142,6 +167,135 @@ describe.each(vendors)('%s', (vendor) => {
 					async (table: Record<string, string>[]) => {
 						const updated = await request(getUrl(vendor, env))
 							.patch(`/items/${INDEX_REAP}/${rowIds.get('bob')}`)
+							.send(table[0])
+							.set('Authorization', auth);
+
+						expect(updated.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					'the read of bob is filled again:',
+					async (table: Record<string, string>[]) => {
+						const refilled = await readByName('bob');
+
+						expect(refilled.headers[cacheStatusHeader]).toBe('MISS');
+						expect(refilled.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a pinned set loses the members of a read that expired',
+			({ given, and, then }) => {
+				let bobMembers: string[] = [];
+
+				function readByName(name: string) {
+					return request(getUrl(vendor, env))
+						.get(`/items/${INDEX_REAP_PINNED}`)
+						.query({ 'filter[name][_eq]': name, fields: 'name,label' })
+						.set('Authorization', auth);
+				}
+
+				given(
+					`these rows of ${INDEX_REAP_PINNED}:`,
+					async (table: Record<string, string>[]) => {
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${INDEX_REAP_PINNED}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				and('the read of ada is cached, then expires', async () => {
+					expect((await readByName('ada')).headers[cacheStatusHeader])
+						.toBe('MISS');
+
+					expect(await redisClient.exists(`${pinnedIndexKey}ada`)).toBe(1);
+
+					await new Promise((resolve) => {
+						setTimeout(resolve, cacheTtlSeconds * 1000 + 500);
+					});
+				});
+
+				and('the read of bob is cached', async () => {
+					await expect.poll(async () => {
+						return (await readByName('bob')).headers[cacheStatusHeader];
+					}, { timeout: 5_000 }).toBe('HIT');
+
+					bobMembers = await redisClient.smembers(`${pinnedIndexKey}bob`);
+
+					expect(bobMembers).not.toEqual([]);
+				});
+
+				// Before the set's own TTL, twice CACHE_TTL, could have dropped it.
+				then('the index set of ada is gone', async () => {
+					await expect.poll(async () => {
+						return redisClient.exists(`${pinnedIndexKey}ada`);
+					}, { timeout: 5_000 }).toBe(0);
+				});
+
+				and('the index set of bob still names the read of bob', async () => {
+					expect((await redisClient.smembers(`${pinnedIndexKey}bob`)).sort())
+						.toEqual([...bobMembers].sort());
+				});
+			},
+			60_000,
+		);
+
+		scenario(
+			'a reap between a fill\'s index and its value evicts the entry',
+			({ given, when, then }) => {
+				const rowIds = new Map<string, number>();
+				let heldRead: request.Response;
+
+				function readByName(name: string) {
+					return request(getUrl(vendor, env))
+						.get(`/items/${INDEX_REAP_WINDOW}`)
+						.query({ 'filter[name][_eq]': name, fields: 'name,label' })
+						.set('Authorization', auth);
+				}
+
+				given(
+					`these rows of ${INDEX_REAP_WINDOW}:`,
+					async (table: Record<string, string>[]) => {
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${INDEX_REAP_WINDOW}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+
+						for (const row of created.body.data) {
+							rowIds.set(row.name, row.id);
+						}
+					},
+				);
+
+				when(
+					'the read of bob is held between its index and its value, until a reap',
+					async () => {
+						heldRead = await readByName('bob');
+					},
+				);
+
+				then(
+					'the read of bob answers:',
+					async (table: Record<string, string>[]) => {
+						expect(heldRead.headers[cacheStatusHeader]).toBe(table[0]!.cache);
+						expect(heldRead.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					'the label of bob is written:',
+					async (table: Record<string, string>[]) => {
+						const updated = await request(getUrl(vendor, env))
+							.patch(`/items/${INDEX_REAP_WINDOW}/${rowIds.get('bob')}`)
 							.send(table[0])
 							.set('Authorization', auth);
 

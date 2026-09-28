@@ -13,6 +13,7 @@ import {
 	writeCacheTombstone,
 } from '../cache-events.js';
 import getDatabase from '../database/index.js';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import {
 	indexScopedCacheEntry,
@@ -266,6 +267,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				req.schema,
 				cacheTtl,
 			);
+
+			// Awaited: a hook holding it opens the window between the index and the
+			// value, where a reap finds the entry's members naming nothing.
+			await emitter.emitAction('cache.indexed', {
+				redisKey,
+				fingerprints: scopedCacheFingerprints,
+			});
 
 			// Handed over together rather than awaited in turn: node-redis corks its
 			// socket and drains the whole queue per tick, so the pair costs one round

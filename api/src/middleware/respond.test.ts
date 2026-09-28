@@ -162,6 +162,7 @@ vi.mock('../services/import-export.js', () => {
 });
 
 import { setCacheValue } from '../cache.js';
+import emitter from '../emitter.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -272,6 +273,41 @@ describe('respond middleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
+	});
+
+	test(oneLine`
+		announces the entry between its index and its value, and waits for the hook
+	`, async () => {
+		const writesWhenIndexed: unknown[] = [];
+
+		const holdIndexed = vi.fn(async () => {
+			writesWhenIndexed.push([
+				indexScopedCacheEntry.mock.calls.length,
+				vi.mocked(setCacheValue).mock.calls.length,
+			]);
+		});
+
+		emitter.onAction('cache.indexed', holdIndexed);
+
+		await respond(makeReq(), makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheFingerprints: [{ collection: 'articles' }] },
+		), next);
+
+		emitter.offAction('cache.indexed', holdIndexed);
+
+		expect(holdIndexed).toHaveBeenCalledWith(
+			{
+				event: 'cache.indexed',
+				redisKey: 'cache-key',
+				fingerprints: [{ collection: 'articles' }],
+			},
+			expect.anything(),
+		);
+
+		// Indexed once, written not yet.
+		expect(writesWhenIndexed).toEqual([[1, 0]]);
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledOnce();
 	});
 
 	test(oneLine`
