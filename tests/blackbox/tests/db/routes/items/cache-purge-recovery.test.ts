@@ -531,7 +531,7 @@ describe(oneLine`
 			expect(Number(named.count)).toBe(1);
 
 			// What the drain purged is recorded like the purge it finished: one
-			// row per target under one id, with no latency — no write waited on it
+			// row per collection under one id, with no latency — no write waited on it
 			// (#507). Polled like the anomaly: it reaches Postgres on the stats
 			// drain too. These pins are this case's own, and the write's purge
 			// recorded nothing (it failed), so the id they name is the drain's.
@@ -561,11 +561,13 @@ describe(oneLine`
 
 			mark(`recorded purges: ${JSON.stringify(purged)}`);
 
-			// The three targets recorded above: the bare pin and one per key.
-			expect(purged).toHaveLength(3);
-			expect(purged.map((row) => row.mode)).toEqual(['slices', 'slices', 'slices']);
-			expect(purged.map((row) => row.scoped_cache_pin_count)).toEqual([1, 1, 1]);
-			expect(purged.map((row) => row.duration_ms)).toEqual([null, null, null]);
+			// The three targets recorded above, the bare pin and one per key, are
+			// slices of one collection: the drain retries them in one scan.
+			expect(purged).toEqual([{
+				mode: 'slices',
+				scoped_cache_pin_count: 3,
+				duration_ms: null,
+			}]);
 		}, 60_000);
 
 		it(oneLine`
