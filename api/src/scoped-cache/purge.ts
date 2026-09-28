@@ -575,10 +575,12 @@ async function purgeScopedCacheIndexWhere(
 		return { evicted: 0, matchedKeys };
 	}
 
-	const [evicted] = await Promise.all([
-		dropSweptScopedCacheEntries(cache, matchedKeys),
-		useScopedCacheStore().removeIndexedEntries(matched, indexPath),
-	]);
+	const evicted = await dropSweptScopedCacheEntries(cache, matchedKeys);
+
+	// After the drop, never beside it: the index and the entries sit behind two
+	// clients, and members pruned while the drop throws leave the retry recorded
+	// for this purge nothing to find the entries by.
+	await useScopedCacheStore().removeIndexedEntries(matched, indexPath);
 
 	return { evicted, matchedKeys };
 }

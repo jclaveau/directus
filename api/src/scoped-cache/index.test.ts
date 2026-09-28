@@ -1653,6 +1653,7 @@ describe('retryPendingScopedCachePurges', () => {
 		);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(srem).toHaveBeenCalled();
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
 
@@ -1779,6 +1780,32 @@ describe('retryPendingScopedCachePurges', () => {
 			mode: 'collection',
 			durationMs: null,
 		}));
+	});
+
+	it(oneLine`
+		keeps a matched entry's index members when the entry drop fails, so the
+		record it leaves behind still reaches the entry
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
+			ids: [7],
+		}]);
+
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
+		cache.delete.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(srem).not.toHaveBeenCalled();
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
