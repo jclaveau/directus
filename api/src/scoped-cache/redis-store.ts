@@ -312,6 +312,15 @@ function scopedCacheIndexPrefix(): string {
 }
 
 /**
+ * The prefix as a SCAN pattern opens it. The namespace is the operator's to
+ * pick, and one holding a `*`, `?` or `[` would match other namespaces' sets —
+ * which a flush then unlinks.
+ */
+function scopedCacheIndexGlobPrefix(): string {
+	return escapeScopedCacheFingerprintGlob(scopedCacheIndexPrefix());
+}
+
+/**
  * The key of the set a fingerprint is filed in, and of the set a write reads back.
  *
  * One set per collection would work and is what correctness asks for: every
@@ -370,7 +379,7 @@ async function* takeSweptIndexKeys(
 export function scopedCacheSweptIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
 
-	return `${scopedCacheIndexPrefix()}swept:${matched}:*`;
+	return `${scopedCacheIndexGlobPrefix()}swept:${matched}:*`;
 }
 
 /**
@@ -420,7 +429,7 @@ async function collectSweptIndexKeys(
 export function scopedCacheCollectionIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
 
-	return `${scopedCacheIndexPrefix()}fingerprint:${matched}:*`;
+	return `${scopedCacheIndexGlobPrefix()}fingerprint:${matched}:*`;
 }
 
 /**
@@ -909,7 +918,7 @@ const redisStore: ScopedCacheStore = {
 	},
 
 	takeStrandedSweptIndexKeys(): AsyncGenerator<ScopedCacheIndexTake> {
-		return takeSweptIndexKeys(`${scopedCacheIndexPrefix()}swept:*`);
+		return takeSweptIndexKeys(`${scopedCacheIndexGlobPrefix()}swept:*`);
 	},
 
 	releaseSweptIndexKeys(
@@ -931,7 +940,7 @@ const redisStore: ScopedCacheStore = {
 		const tally = { dropped: 0, refused: 0 };
 
 		for await (const batch of scanScopedCacheKeys(
-			`${scopedCacheIndexPrefix()}*`,
+			`${scopedCacheIndexGlobPrefix()}*`,
 		)) {
 			const batchTally = await unlinkScopedCacheKeys(batch);
 

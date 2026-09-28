@@ -1,5 +1,5 @@
 import { oneLine } from '@directus/utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	parseScopedCacheIndexMember,
 	redisScopedCacheStore,
@@ -12,8 +12,12 @@ import {
 } from './redis-store.js';
 import { parseScopedCacheFingerprint } from './fingerprint.js';
 
+const env = vi.hoisted((): Record<string, string> => {
+	return { CACHE_NAMESPACE: 'scalabus' };
+});
+
 vi.mock('@directus/env', () => {
-	return { useEnv: () => ({ CACHE_NAMESPACE: 'scalabus' }) };
+	return { useEnv: () => env };
 });
 
 const srem = vi.fn();
@@ -551,6 +555,30 @@ describe('takeStrandedSweptIndexKeys', () => {
 		for (const command of [scan, sscan, evalScript, unlink]) {
 			command.mockReset();
 		}
+	});
+
+	afterEach(() => {
+		env['CACHE_NAMESPACE'] = 'scalabus';
+	});
+
+	it(oneLine`
+		escapes the namespace in the pattern: a namespace holding glob characters
+		would otherwise match the sets of every namespace it spells
+	`, async () => {
+		env['CACHE_NAMESPACE'] = 'tenant-[a]*';
+		scan.mockResolvedValueOnce(['0', []]);
+
+		await redisScopedCacheStore()
+			.takeStrandedSweptIndexKeys()
+			.next();
+
+		expect(scan.mock.calls).toEqual([[
+			'0',
+			'MATCH',
+			'tenant-\\[a\\]\\*:scoped-cache-index:swept:*',
+			'COUNT',
+			1000,
+		]]);
 	});
 
 	it(oneLine`
