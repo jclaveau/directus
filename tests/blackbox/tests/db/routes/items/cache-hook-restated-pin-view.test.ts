@@ -41,6 +41,10 @@ describe.each(vendors)('%s', (vendor) => {
 			collections: [DEPEND_ON, CACHE_SCOPE].map((collection) => {
 				return {
 					collection,
+					// A collection scoping on nothing never reads its rows back on a
+					// write, so every update of it touches every field and no view
+					// could keep an entry: the scope field is what makes it compare.
+					meta: { scoped_cache_fields: ['name'] },
 					fields: [
 						{ field: 'name', type: 'string', meta: {} },
 						{ field: 'bio', type: 'string', meta: {} },

@@ -13,7 +13,8 @@ Feature: A hook naming a row the read already pins drops that collection's view
   Both hook channels restate the pin: `scopedCache.dependOn` handing over a
   lookup of the row, and a `cache.scope` filter returning the row's key pin. Each
   collection carries a `note` no read names, so no view covers the whole
-  collection.
+  collection, and scopes on `name`, so a write reads its row back and compares
+  the columns it rewrote.
 
   Scenario: a write to the column a dependOn lookup added purges the read
     Given this row of hook_restated_depend_on:
