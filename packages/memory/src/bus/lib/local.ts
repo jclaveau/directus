@@ -32,4 +32,7 @@ export class BusLocal implements Bus {
 	async unsubscribe<T = unknown>(channel: string, callback: MessageHandler<T>) {
 		this.handlers[channel]?.delete(callback);
 	}
+
+	// Memory has no connection to lose, so nothing is ever resubscribed.
+	onResubscribe(_callback: () => void) {}
 }

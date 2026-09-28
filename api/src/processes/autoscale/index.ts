@@ -12,7 +12,11 @@ import {
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
 import { validateBooleanEnv } from '../../utils/validate-env.js';
 import { PROCESSES_BOOLEAN_ENV } from '../lib/boolean-env.js';
-import { reportPoolHealth } from '../lib/pool-health.js';
+import {
+	answerPoolHealthQueries,
+	reportPoolHealth,
+	withdrawPoolHealth,
+} from '../lib/pool-health.js';
 import { chooseVictims } from './lib/choose-victims.js';
 import { decide } from './lib/decide.js';
 import { inFlightOf, watchInFlightReports } from './lib/in-flight.js';
@@ -40,6 +44,9 @@ import type { AutoscaleConfig, Decision } from './types.js';
  * for.
  */
 const SAMPLE_INTERVAL_MS = 1000;
+
+/** How long a stop waits on the reading it takes back before exiting anyway. */
+const WITHDRAW_TIMEOUT_MS = 1000;
 
 /**
  * Shrinks the pool by stopping workers this picks, rather than a size pm2 picks
@@ -181,6 +188,12 @@ export async function runAutoscaler(): Promise<void> {
 		logger.warn(error, '[autoscale] could not answer processes queries');
 	});
 
+	// Beside the report and for the same reason: a worker that boots between
+	// two changes of the pool asks for the reading, and this is who answers.
+	answerPoolHealthQueries().catch((error) => {
+		logger.warn(error, '[autoscale] could not answer pool health queries');
+	});
+
 	// The pool cannot restart itself: a worker running the restart would be
 	// retiring the process serving the request. This is the process that holds
 	// the supervisor connection and is not a member of the pool, so it listens
@@ -195,7 +208,13 @@ export async function runAutoscaler(): Promise<void> {
 
 	const stop = () => {
 		disconnectFromSupervisor();
-		process.exit(0);
+
+		// Bounded, since a publish over a Redis that is down waits with no
+		// deadline (jclaveau/directus#463) and a stop must still stop.
+		void Promise.race([
+			withdrawPoolHealth(),
+			new Promise((resolve) => setTimeout(resolve, WITHDRAW_TIMEOUT_MS)),
+		]).finally(() => process.exit(0));
 	};
 
 	process.on('SIGINT', stop);
