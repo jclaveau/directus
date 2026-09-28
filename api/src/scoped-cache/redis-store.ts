@@ -202,11 +202,14 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
  * every read of it that pinned no index value. The moved sets are read afterwards
  * in pages, outside any script.
  *
- * KEYS are the index sets, ARGV[1] the prefix each is moved under, and ARGV[2] how
- * many seconds a moved set is held — long past any sweep, so only a sweep that
- * died between the move and the drop leaves one behind, and not for good. Answers
- * with the keys it moved to: a set that expired since the scan found it has
- * nothing to move, and `RENAME` refuses a missing key.
+ * KEYS are the index sets and ARGV[1] the prefix each is moved under. Answers with
+ * the keys it moved to: a set that expired since the scan found it has nothing to
+ * move, and `RENAME` refuses a missing key.
+ *
+ * No expiry of its own: `RENAME` carries the set's, and a set's expiry only ever
+ * moves out past every entry filed in it. So a set a failed sweep leaves behind
+ * outlives every entry it names, and the next sweep of the collection still finds
+ * it — a shorter hold would leave those entries cached and named by nothing.
  *
  * The counter bumps are NOT in here — they are a script of their own, sent first,
  * so they still land when the sweep behind them is refused.
@@ -218,19 +221,12 @@ for i = 1, #KEYS do
 	if redis.call('EXISTS', KEYS[i]) == 1 then
 		local sweptKey = ARGV[1] .. i
 		redis.call('RENAME', KEYS[i], sweptKey)
-		redis.call('EXPIRE', sweptKey, ARGV[2])
 		moved[#moved + 1] = sweptKey
 	end
 end
 
 return moved
 `;
-
-/**
- * How long a set moved aside for a sweep is held, in seconds. The sweep drops it
- * as soon as it has read it; this is only the reap for one that never got there.
- */
-const SCOPED_CACHE_SWEEP_HOLD_SECONDS = 3600;
 
 /**
  * How many index sets one sweep call carries.
@@ -338,13 +334,55 @@ function scopedCacheIndexKey(collection: string, indexPin: string): string {
 }
 
 /**
- * Where one sweep moves the sets it takes: outside `fingerprint:`, so no fill,
- * scan or later sweep of the collection reaches them, and inside the prefix, so a
- * full flush still drops one a dead sweep left behind. One per sweep call, so two
- * sweeps of the same collection never move onto each other's keys.
+ * Where one sweep moves the sets it takes: outside `fingerprint:`, so no fill
+ * reaches them, and inside the prefix, so a full flush still drops one a failed
+ * sweep left behind. One per sweep call, so two sweeps of the same collection
+ * never move onto each other's keys.
  */
-function scopedCacheSweptIndexKeyPrefix(): string {
-	return `${scopedCacheIndexPrefix()}swept:${randomUUID()}:`;
+function scopedCacheSweptIndexKeyPrefix(collection: string): string {
+	return `${scopedCacheIndexPrefix()}swept:${collection}:${randomUUID()}:`;
+}
+
+/**
+ * The glob matching every set a sweep of one collection moved aside and has not
+ * released yet — bounded by its trailing colon the way the collection's own glob
+ * is.
+ */
+export function scopedCacheSweptIndexGlob(collection: string): string {
+	const matched = escapeScopedCacheFingerprintGlob(collection);
+
+	return `${scopedCacheIndexPrefix()}swept:${matched}:*`;
+}
+
+/**
+ * Append every entry key a moved set names to `keys`, read in pages rather than
+ * whole. Appended one at a time rather than returned for a spread: one set can
+ * name more keys than a spread survives
+ * (https://github.com/jclaveau/directus/issues/397).
+ */
+async function collectSweptIndexKeys(
+	sweptKey: string,
+	keys: string[],
+): Promise<void> {
+	let scanCursor = '0';
+
+	do {
+		const [next, members] = await useRedis().sscan(
+			sweptKey,
+			scanCursor,
+			'COUNT',
+			SCOPED_CACHE_INDEX_SCAN_COUNT,
+		);
+
+		scanCursor = next;
+
+		// The fingerprint half is read past rather than parsed: this purge drops
+		// the key whichever query case filed it.
+		for (const member of members) {
+			keys.push(parseScopedCacheIndexMember(member).key);
+		}
+	}
+	while (scanCursor !== '0');
 }
 
 /**
@@ -816,10 +854,26 @@ const redisStore: ScopedCacheStore = {
 	): AsyncGenerator<ScopedCacheIndexTake> {
 		const redis = useRedis();
 
+		// First, what an earlier sweep moved aside and never released: its entries
+		// may still be cached, and this is the only purge that can still reach
+		// them. Before this sweep's own move, so it does not read its sets twice.
+		for await (const leftoverKeys of scanScopedCacheKeys(
+			scopedCacheSweptIndexGlob(collection),
+		)) {
+			const keys: string[] = [];
+
+			for (const leftoverKey of leftoverKeys) {
+				await collectSweptIndexKeys(leftoverKey, keys);
+			}
+
+			yield { indexKeys: leftoverKeys.length, keys, sweptKeys: leftoverKeys };
+		}
+
 		for await (const indexKeys of scanScopedCacheKeys(
 			scopedCacheCollectionIndexGlob(collection),
 		)) {
 			const keys: string[] = [];
+			const movedKeys: string[] = [];
 
 			for (
 				let at = 0;
@@ -832,40 +886,23 @@ const redisStore: ScopedCacheStore = {
 					scopedCacheSweepMoveScript,
 					chunk.length,
 					...chunk,
-					scopedCacheSweptIndexKeyPrefix(),
-					SCOPED_CACHE_SWEEP_HOLD_SECONDS,
+					scopedCacheSweptIndexKeyPrefix(collection),
 				) as string[];
 
 				for (const sweptKey of sweptKeys) {
-					let scanCursor = '0';
-
-					do {
-						const [next, members] = await redis.sscan(
-							sweptKey,
-							scanCursor,
-							'COUNT',
-							SCOPED_CACHE_INDEX_SCAN_COUNT,
-						);
-
-						scanCursor = next;
-
-						// The fingerprint half is read past rather than parsed: this purge
-						// drops the key whichever query case filed it.
-						for (const member of members) {
-							keys.push(parseScopedCacheIndexMember(member).key);
-						}
-					}
-					while (scanCursor !== '0');
+					movedKeys.push(sweptKey);
+					await collectSweptIndexKeys(sweptKey, keys);
 				}
-
-				// A refused drop leaves the moved sets to their hold: no fill reaches
-				// them, so what they still name costs memory until then, never a
-				// stale hit.
-				await unlinkScopedCacheKeys(sweptKeys);
 			}
 
-			yield { indexKeys: indexKeys.length, keys };
+			yield { indexKeys: indexKeys.length, keys, sweptKeys: movedKeys };
 		}
+	},
+
+	releaseSweptIndexKeys(
+		sweptKeys: string[],
+	): Promise<ScopedCacheUnlinkTally> {
+		return unlinkScopedCacheKeys(sweptKeys);
 	},
 
 	/**

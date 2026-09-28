@@ -692,6 +692,7 @@ async function purgeScopedCacheCollectionIndex(
 ): Promise<{ evicted: number; indexKeys: number }> {
 	const keys: string[] = [];
 	const seenKeys = new Set<string>();
+	const sweptKeys: string[] = [];
 	let indexKeys = 0;
 
 	// Taken rather than read then dropped: a read filing its key in between would
@@ -700,6 +701,10 @@ async function purgeScopedCacheCollectionIndex(
 		const taken of useScopedCacheStore().takeCollectionIndexedKeys(collection)
 	) {
 		indexKeys += taken.indexKeys;
+
+		for (const sweptKey of taken.sweptKeys) {
+			sweptKeys.push(sweptKey);
+		}
 
 		// One at a time rather than spread: a take is free to answer with more than
 		// one page's worth, and a spread long enough throws before the array is
@@ -713,7 +718,21 @@ async function purgeScopedCacheCollectionIndex(
 		}
 	}
 
-	return { evicted: await dropSweptScopedCacheEntries(cache, keys), indexKeys };
+	const evicted = await dropSweptScopedCacheEntries(cache, keys);
+
+	// After the drop, never before: a drop that throws leaves the moved sets for
+	// the retry's take to find. A refused release costs memory until their expiry,
+	// never a stale hit, so it is logged rather than thrown.
+	const released = await useScopedCacheStore().releaseSweptIndexKeys(sweptKeys);
+
+	if (released.refused > 0) {
+		useLogger().warn(
+			`[scoped-cache] ${released.refused} release(s) of the index sets swept `
+			+ `for ${collection} were refused; they expire with their entries`,
+		);
+	}
+
+	return { evicted, indexKeys };
 }
 
 /**

@@ -438,15 +438,24 @@ describe('bumpPurgeEpochs', () => {
 });
 
 describe('takeCollectionIndexedKeys', () => {
-	it(oneLine`
-		moves each index set aside, reads it in pages, then drops it
-	`, async () => {
-		scan.mockResolvedValue([
-			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:'],
-		]);
+	beforeEach(() => {
+		for (const command of [scan, sscan, evalScript, unlink]) {
+			command.mockReset();
+		}
+	});
 
-		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:a1:1']);
+	it(oneLine`
+		moves each index set aside, reads it in pages, and leaves it for the caller
+		to release once its entries are gone
+	`, async () => {
+		scan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce([
+				'0',
+				['scalabus:scoped-cache-index:fingerprint:slot:'],
+			]);
+
+		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
 
 		sscan
 			.mockResolvedValueOnce(['7', ['slot:&|key-a']])
@@ -460,25 +469,93 @@ describe('takeCollectionIndexedKeys', () => {
 			taken.push(take);
 		}
 
-		expect(taken).toEqual([{ indexKeys: 1, keys: ['key-a', 'key-b'] }]);
+		expect(taken).toEqual([
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+			{
+				indexKeys: 1,
+				keys: ['key-a', 'key-b'],
+				sweptKeys: ['scalabus:scoped-cache-index:swept:slot:a1:1'],
+			},
+		]);
+
+		expect(scan.mock.calls).toEqual([
+			['0', 'MATCH', 'scalabus:scoped-cache-index:swept:slot:*', 'COUNT', 1000],
+			[
+				'0',
+				'MATCH',
+				'scalabus:scoped-cache-index:fingerprint:slot:*',
+				'COUNT',
+				1000,
+			],
+		]);
 
 		expect(evalScript).toHaveBeenCalledWith(
 			scopedCacheSweepMoveScript,
 			1,
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 			expect.stringMatching(
-				/^scalabus:scoped-cache-index:swept:[0-9a-f-]{36}:$/,
+				/^scalabus:scoped-cache-index:swept:slot:[0-9a-f-]{36}:$/,
 			),
-			3600,
 		);
 
 		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:swept:a1:1', '0', 'COUNT', 1000],
-			['scalabus:scoped-cache-index:swept:a1:1', '7', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:swept:slot:a1:1', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:swept:slot:a1:1', '7', 'COUNT', 1000],
+		]);
+
+		// Dropped before its entries, a set leaves them cached and named by nothing
+		// when the entry drop fails.
+		expect(unlink).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		reads the sets an earlier sweep of the collection moved aside and never
+		released, without moving them again
+	`, async () => {
+		scan
+			.mockResolvedValueOnce([
+				'0',
+				['scalabus:scoped-cache-index:swept:slot:dead:1'],
+			])
+			.mockResolvedValueOnce(['0', []]);
+
+		sscan.mockResolvedValueOnce(['0', ['slot:&|key-left']]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([
+			{
+				indexKeys: 1,
+				keys: ['key-left'],
+				sweptKeys: ['scalabus:scoped-cache-index:swept:slot:dead:1'],
+			},
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+		]);
+
+		expect(evalScript).not.toHaveBeenCalled();
+	});
+
+	it('gives a moved set no expiry of its own: it keeps the one it had', () => {
+		expect(scopedCacheSweepMoveScript).not.toContain('EXPIRE');
+	});
+});
+
+describe('releaseSweptIndexKeys', () => {
+	beforeEach(() => unlink.mockReset());
+
+	it('drops the sets a take moved aside', async () => {
+		await redisScopedCacheStore().releaseSweptIndexKeys([
+			'scalabus:scoped-cache-index:swept:slot:a1:1',
 		]);
 
 		expect(unlink.mock.calls).toEqual([
-			[['scalabus:scoped-cache-index:swept:a1:1']],
+			[['scalabus:scoped-cache-index:swept:slot:a1:1']],
 		]);
 	});
 });

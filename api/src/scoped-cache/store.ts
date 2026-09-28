@@ -51,10 +51,14 @@ export interface ScopedCacheIndexedEntry {
 	location: unknown;
 }
 
-/** One batch of a whole-collection take: what it dropped, and what it named. */
+/**
+ * One batch of a whole-collection take: what it dropped, what it named, and the
+ * moved sets the caller releases once those keys are gone.
+ */
 export interface ScopedCacheIndexTake {
 	indexKeys: number;
 	keys: string[];
+	sweptKeys: string[];
 }
 
 /**
@@ -163,6 +167,13 @@ export interface ScopedCacheStore {
 	takeCollectionIndexedKeys(
 		collection: string,
 	): AsyncGenerator<ScopedCacheIndexTake>;
+
+	/**
+	 * Drop the sets a take moved aside. Only once the entries they name are gone:
+	 * a set dropped first leaves an entry cached and named by nothing when the
+	 * entry drop fails, and the retry of that purge cannot find it.
+	 */
+	releaseSweptIndexKeys(sweptKeys: string[]): Promise<ScopedCacheUnlinkTally>;
 
 	/** Drop the whole index, reporting what it cost. */
 	dropIndex(): Promise<ScopedCacheUnlinkTally>;

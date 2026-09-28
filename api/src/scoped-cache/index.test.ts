@@ -992,6 +992,12 @@ describe('a collection-wide purge', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: async (_cursor: string, _match: string, pattern: string) => {
 				calls.push(`scan ${pattern}`);
+
+				// The pass over what earlier sweeps left moved aside finds nothing.
+				if (pattern.includes(':swept:')) {
+					return ['0', []];
+				}
+
 				return ['0', ['ns:scoped-cache-index:fingerprint:articles:']];
 			},
 			del: vi.fn(),
@@ -1010,6 +1016,7 @@ describe('a collection-wide purge', () => {
 
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:articles',
+			'scan ns:scoped-cache-index:swept:articles:*',
 			'scan ns:scoped-cache-index:fingerprint:articles:*',
 			'eval',
 		]);
@@ -1266,7 +1273,10 @@ describe('dropScopedCacheIndex', () => {
 		});
 
 		vi.mocked(useRedis).mockReturnValue({
-			scan: vi.fn().mockResolvedValue(['0', indexKeys]),
+			// The pass over what earlier sweeps left moved aside finds nothing.
+			scan: vi.fn()
+				.mockResolvedValueOnce(['0', []])
+				.mockResolvedValue(['0', indexKeys]),
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: sweep.eval,
@@ -1585,8 +1595,15 @@ describe('retryPendingScopedCachePurges', () => {
 					srem(...args);
 					return chain;
 				},
-				// The sweep drops the sets it moved aside once it has read them.
-				unlink: () => chain,
+				// The purge releases the sets its sweep moved aside once their entries
+				// are gone.
+				unlink: (keys: string[]) => {
+					for (const key of keys) {
+						delete indexedMembers[key];
+					}
+
+					return chain;
+				},
 				exec: async () => [],
 			};
 
@@ -1684,6 +1701,48 @@ describe('retryPendingScopedCachePurges', () => {
 		// purge.
 		const [first, second] = vi.mocked(queueCachePurge).mock.calls;
 		expect(second![0].purgeId).toBe(first![0].purgeId);
+	});
+
+	it(oneLine`
+		drops the entries a set moved aside by an earlier sweep names — that sweep
+		failed before its entries went, and the set is the only thing naming them
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'collection',
+			collection: 'articles',
+			scopedCacheFingerprints: [],
+			ids: [7],
+		}]);
+
+		indexedMembers = {
+			'ns:scoped-cache-index:swept:articles:a1:1': ['articles:&|ns:entry-left'],
+		};
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-left');
+		expect(indexedMembers).toEqual({});
+	});
+
+	it(oneLine`
+		keeps the sets a sweep moved aside when the entry drop fails, so the retry
+		can still reach the entries they name
+	`, async () => {
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': ['articles:&|ns:entry-bare'],
+		};
+
+		cache.delete.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		await expect(purgeCollectionScopedCache(cache as any, 'articles'))
+			.rejects.toThrow('Connection is closed.');
+
+		expect(Object.entries(indexedMembers)).toEqual([[
+			expect.stringMatching(
+				/^ns:scoped-cache-index:swept:articles:[0-9a-f-]{36}:1$/,
+			),
+			['articles:&|ns:entry-bare'],
+		]]);
 	});
 
 	it(oneLine`
