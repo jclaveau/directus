@@ -994,7 +994,10 @@ async function persistStreamBatch(
 					: null,
 				purge_id: f['purgeId'] ?? '',
 				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
-				scoped_cache_pin_count: Number(f['scopedCachePinCount'] ?? 0),
+				// Under its old name when the build before this one queued it.
+				scoped_cache_pin_count: Number(
+					f['scopedCachePinCount'] ?? f['scopedCacheTagCount'] ?? 0,
+				),
 				// Empty came off a namespace clear: unknown, not none.
 				evicted: f['evicted']
 					? Number(f['evicted'])

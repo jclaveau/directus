@@ -1187,6 +1187,40 @@ describe('drainCacheEvents', () => {
 		);
 	});
 
+	it(oneLine`
+		counts the pins of a purge the build before this one left in the stream
+	`, async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'p',
+				purgeId: 'p-old',
+				collection: 'articles',
+				mode: 'slices',
+				scopedCacheTags: 'articles:author=2,articles:author=3',
+				scopedCacheTagCount: '2',
+				evicted: '5',
+				durationMs: '4',
+				ts: '8000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_purges',
+			[{
+				time: new Date(8000),
+				purge_id: 'p-old',
+				collection: 'articles',
+				mode: 'slices',
+				scoped_cache_pin_count: 2,
+				evicted: 5,
+				duration_ms: 4,
+			}],
+			expect.any(Number),
+		);
+	});
+
 	it('drains a pin list the build before this one left in the stream', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
