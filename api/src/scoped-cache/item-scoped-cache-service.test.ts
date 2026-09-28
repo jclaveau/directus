@@ -3,6 +3,7 @@ import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { scopedCacheIndexPath } from './index-path.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 
 vi.mock('./config.js', async (importOriginal) => {
@@ -221,6 +222,69 @@ describe('snapshot', () => {
 
 		expect(await scopedCache.snapshot([1]))
 			.toEqual({ canResolveSlicesFromRows: true, rows: [] });
+	});
+
+	// The index sets a write reads are named by the row's value at the index path,
+	// so a row that could come back without one would read the bare set alone and
+	// miss every read filed under its old value. The path is one the row always
+	// resolves: an ancestor that is gone joins as null and pins as null.
+	it(oneLine`
+		pins the index path of a row whose ancestors are gone, as null
+	`, async () => {
+		const chainSchema = new SchemaBuilder()
+			.collection('slot', (c) => {
+				c.field('id').id();
+				c.field('method').string();
+				c.field('zone').m2o('zone');
+			})
+			.collection('zone', (c) => {
+				c.field('id').id();
+				c.field('region').m2o('region');
+			})
+			.collection('region', (c) => {
+				c.field('id').id();
+				c.field('owner').string();
+			})
+			.build();
+
+		chainSchema.collections['slot']!.scopedCacheFields = ['method', 'zone'];
+		chainSchema.collections['zone']!.scopedCacheFields = ['region'];
+		chainSchema.collections['region']!.scopedCacheFields = ['owner'];
+
+		tracker.on.select('slot').response([
+			{ id: 1, method: 'spaced', zone: 4, '#path0': null, '#path1': null },
+		]);
+
+		const scopedCache =
+			new ItemScopedCacheService('slot', chainSchema, db, null, null);
+
+		expect(scopedCacheIndexPath(chainSchema, 'slot')).toBe('zone.region.owner');
+
+		expect(await scopedCache.snapshot([1])).toEqual({
+			canResolveSlicesFromRows: true,
+			rows: [
+				{
+					key: 1,
+					row: {
+						id: 1,
+						method: 'spaced',
+						zone: 4,
+						'zone.region': null,
+						'zone.region.owner': null,
+					},
+					fingerprint: {
+						collection: 'slot',
+						pinnedScope: {
+							id: ['1'],
+							method: ['spaced'],
+							zone: ['4'],
+							'zone.region': ['\x00null'],
+							'zone.region.owner': ['\x00null'],
+						},
+					},
+				},
+			],
+		});
 	});
 
 	it('snapshots nothing for a collection absent from the schema', async () => {

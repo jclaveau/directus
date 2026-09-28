@@ -403,11 +403,11 @@ export function scopedCacheFingerprintIndexKeys(
  * rows' values at the index path names.
  *
  * The row is read as a fingerprint of its own, so the value it pins there is
- * looked up the same way a cached read's is. A row whose index path does not
- * resolve — the ancestor was deleted, or the write never carried it — reads the
- * bare set alone, and the sets it cannot name are left to the collection-wide
- * purge. The collection is the written one rather than the rows', so an empty
- * write still names the bare set.
+ * looked up the same way a cached read's is. Every snapshotted row pins the index
+ * path: `scopedCacheIndexPath` only walks hops the snapshot joins through, and the
+ * snapshot reads the committed row, so an ancestor that is gone pins as null
+ * rather than not at all. The collection is the written one rather than the
+ * rows', so an empty write still names the bare set.
  */
 export function scopedCacheRowIndexKeys(
 	collection: string,
