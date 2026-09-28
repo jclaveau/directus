@@ -12,12 +12,15 @@ name: Refresh dialect CI branches
 # `mergeable=CONFLICTING` stops every `pull_request` workflow silently, so the checks
 # would not go red, they would stop existing.
 
+# Parked with sqlite3 and maria: their standing PRs (#332, #333) are closed until
+# needed, and a force-push onto a closed PR's branch stops GitHub from reopening
+# it. Restore the push trigger, then reopen the PRs, to run the dialects again.
 on:
-  push:
-    # ONLY the trunk. Adding the dialect branches here would make each force-push
-    # below re-trigger this workflow, forever.
-    branches:
-      - v11.10.1-hhh-dev
+  # push:
+  #   # ONLY the trunk. Adding the dialect branches here would make each force-push
+  #   # below re-trigger this workflow, forever.
+  #   branches:
+  #     - v11.10.1-hhh-dev
   workflow_dispatch:
 
 permissions:
