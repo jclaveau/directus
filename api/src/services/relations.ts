@@ -307,18 +307,16 @@ export class RelationsService {
 						opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 				});
 			});
+		} finally {
+			if (runPostColumnChange) {
+				await this.helpers.schema.postColumnChange();
+			}
 
 			// The scoped index is split by a path walked through relations, so a
 			// relation change can move it, and a purge would then read buckets no fill
 			// was filed in. The nested `directus_relations` write only purges its own.
-			// After the transaction rather than in the `finally`: a change that rolled
-			// back moved nothing.
 			if (shouldClearCache(this.cache, opts)) {
 				await flushResponseCache(this.cache);
-			}
-		} finally {
-			if (runPostColumnChange) {
-				await this.helpers.schema.postColumnChange();
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -445,13 +443,13 @@ export class RelationsService {
 					}
 				}
 			});
-
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
 		} finally {
 			if (runPostColumnChange) {
 				await this.helpers.schema.postColumnChange();
+			}
+
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -537,13 +535,13 @@ export class RelationsService {
 					nestedActionEvents.push(actionEvent);
 				}
 			});
-
-			if (shouldClearCache(this.cache, opts)) {
-				await flushResponseCache(this.cache);
-			}
 		} finally {
 			if (runPostColumnChange) {
 				await this.helpers.schema.postColumnChange();
+			}
+
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {

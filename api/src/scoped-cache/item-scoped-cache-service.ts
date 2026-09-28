@@ -379,10 +379,10 @@ export class ItemScopedCacheService {
 		return {
 			canResolveSlicesFromRows: true,
 			rows: scopedRows.map((row) => {
-				// 'skip' is safe only because the select projects every field below.
-				// A row missing one would carry no value on that field, and a read
-				// pinned on it would not match the row: FEWER reads purged, never
-				// more. The guard above refuses rows missing a flat field.
+				// 'skip' over 'coarse': every field below is projected by the select,
+				// and a row that somehow lost one is better pinned by the rest of
+				// itself than dropped — the fingerprint then matches MORE reads,
+				// never fewer.
 				const rowPins = scopedCacheCollectionPinsFromRows(
 					this.collection,
 					pinnableFields,
@@ -1321,12 +1321,6 @@ export class ItemScopedCacheService {
 		// not flagged for it.
 		const computedPinKeys = new Set(readPins.map(scopedCachePinKey));
 
-		// The pins themselves, not their keys: a hook restating a computed pin is
-		// deduplicated by key above, yet it still says the hook read that collection
-		// through columns the AST never selected. A `cache.scope` filter passing the
-		// list through keeps these references, so only what a hook built is missing.
-		const computedPins = new Set(readPins);
-
 		readPins = (await emitter.emitFilter(
 			'cache.scope',
 			readPins,
@@ -1354,12 +1348,6 @@ export class ItemScopedCacheService {
 		for (const queryCase of hookDeclarations.scopeQueryCases) {
 			readPins.push(...queryCase);
 		}
-
-		const hookNamedCollections = new Set(
-			readPins
-				.filter((pin) => !computedPins.has(pin))
-				.map((pin) => pin.collection),
-		);
 
 		// A hook naming a dotted slice (`course:unit.owner=O`) declares a dependency
 		// the purge answers from the course side only: a unit moved under another
@@ -1411,10 +1399,6 @@ export class ItemScopedCacheService {
 				if (!seenPinKeys.has(crossedKey)) {
 					seenPinKeys.add(crossedKey);
 					crossedPins.push(crossedPin);
-				}
-
-				if (!computedPins.has(pin)) {
-					hookNamedCollections.add(crossed);
 				}
 			}
 
@@ -1506,15 +1490,15 @@ export class ItemScopedCacheService {
 		});
 
 		// The view of each collection, folded into its fingerprint at fill time.
-		// Attached only for a collection no hook named, even by restating a
-		// computed pin: a hook's pin comes from enrichment outside the AST, so which
-		// fields that enrichment read is unknown, and a `fields` pin narrower than
-		// the truth would keep an entry a write did change. A collection left out
-		// defaults to a view of every field, which every write touches.
+		// Attached only for a collection whose pins are ALL computed: a hook's pin
+		// comes from enrichment outside the AST, so which fields that enrichment
+		// read is unknown, and a `fields` pin narrower than the truth would keep an
+		// entry a write did change. A collection left out defaults to a view of
+		// every field, which every write touches.
 		const queryCaseFields = plan.fieldsByCollection();
 
-		for (const collection of hookNamedCollections) {
-			queryCaseFields.delete(collection);
+		for (const pin of hookAddedPins.values()) {
+			queryCaseFields.delete(pin.collection);
 		}
 
 		// A view naming every field the collection has says what a fingerprint

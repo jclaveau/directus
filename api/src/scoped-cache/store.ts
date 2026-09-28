@@ -169,13 +169,6 @@ export interface ScopedCacheStore {
 	): AsyncGenerator<ScopedCacheIndexTake>;
 
 	/**
-	 * Every set a take moved aside and never released, whichever collection it
-	 * swept. A process that dies between its move and its release leaves these
-	 * behind, naming entries no write's own sets still reach.
-	 */
-	takeStrandedSweptIndexKeys(): AsyncGenerator<ScopedCacheIndexTake>;
-
-	/**
 	 * Drop the sets a take moved aside. Only once the entries they name are gone:
 	 * a set dropped first leaves an entry cached and named by nothing when the
 	 * entry drop fails, and the retry of that purge cannot find it.
