@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/permissions`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/permissions/${t}`,params:n??{},method:`GET`}),r=(t,n)=>()=>(e(String(t),`Collection cannot be empty`),{path:`/permissions/me/${n?`${t}/${n}`:`${t}`}`,method:`GET`}),i=()=>()=>({path:`/permissions/me`,method:`GET`});export{r as readItemPermissions,n as readPermission,t as readPermissions,i as readUserPermissions};
+//# sourceMappingURL=permissions.js.map

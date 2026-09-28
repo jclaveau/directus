@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/panels`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/panels/${t}`,params:n??{},method:`GET`});export{n as readPanel,t as readPanels};
+//# sourceMappingURL=panels.js.map

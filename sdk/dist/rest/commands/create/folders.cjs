@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/folders`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/folders`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createFolder=t,exports.createFolders=e;
+//# sourceMappingURL=folders.cjs.map

@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/assets/${t}`,params:n??{},method:`GET`,onResponse:e=>e.body}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/assets/${t}`,params:n??{},method:`GET`,onResponse:e=>e.blob()}),r=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/assets/${t}`,params:n??{},method:`GET`,onResponse:e=>e.arrayBuffer()});exports.readAssetArrayBuffer=r,exports.readAssetBlob=n,exports.readAssetRaw=t;
+//# sourceMappingURL=assets.cjs.map
