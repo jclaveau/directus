@@ -49,11 +49,14 @@ export default function registerHooks({ filter }, { services }) {
 			return pins;
 		}
 
+		// Copies of the read's own key pins: a pin built from `record.id` would
+		// carry the value in another form than the key the read computed, and so be
+		// a new pin, which dropped the view even before the fix.
 		return [
 			...pins,
-			...meta.records.map((record) => {
-				return { collection: CACHE_SCOPE, field: 'id', value: record.id };
-			}),
+			...pins
+				.filter((pin) => pin.collection === CACHE_SCOPE)
+				.map((pin) => ({ ...pin })),
 		];
 	});
 }

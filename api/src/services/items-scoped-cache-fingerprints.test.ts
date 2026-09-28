@@ -50,6 +50,7 @@ import {
 	scopedCachePurgeEnabled,
 } from '../scoped-cache/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
+import emitter from '../emitter.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/pins.js';
 import { readMeta } from '../utils/read-meta.js';
@@ -123,6 +124,39 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 
 		expect(readMeta(someFields)?.scopedCacheFingerprints)
 			.toEqual([{ collection: 'articles', viewFields: ['id', 'title'] }]);
+	});
+
+	test(oneLine`
+		files no view for a collection a cache.scope hook restates the key pin of:
+		the hook read the row through columns the AST never selected
+	`, async () => {
+		const service = new ItemsService('articles', {
+			knex: db,
+			schema,
+			accountability: null,
+		});
+
+		// Copies, so each carries the key of a computed pin but not its identity.
+		const restateKeyPin = (pins: object[]) => {
+			return [...pins, ...pins.map((pin) => ({ ...pin }))];
+		};
+
+		emitter.onFilter('cache.scope', restateKeyPin);
+
+		try {
+			const result = await service.readByQuery(
+				{ fields: ['id'], filter: { id: { _eq: 1 } } },
+				{ emitEvents: false },
+			);
+
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([{
+				collection: 'articles',
+				pinnedScope: { id: ['1'] },
+			}]);
+		}
+		finally {
+			emitter.offFilter('cache.scope', restateKeyPin);
+		}
 	});
 
 	test(oneLine`
