@@ -81,6 +81,7 @@ export const DEFAULTS = {
 	CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	CACHE_SCOPED_PURGE_RETRY_INTERVAL: '1m',
 	CACHE_SCOPED_EPOCH_TTL: '24h',
+	CACHE_SCOPED_INDEX_REAP_SCHEDULE: '0 * * * *',
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
 	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in

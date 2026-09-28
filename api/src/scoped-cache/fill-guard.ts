@@ -30,7 +30,7 @@ export type ScopedCacheEpochs = Record<string, string | null>;
  * purge, so a shorter hold would drop the counter under a slow read and keep a
  * fill that raced a purge before the expiry.
  */
-function scopedCacheEpochTtlSeconds(): number {
+export function scopedCacheEpochTtlSeconds(): number {
 	const defaultTtlMilliseconds = 24 * 60 * 60 * 1000;
 
 	const ttlMilliseconds = getMilliseconds(
@@ -51,7 +51,7 @@ function scopedCacheEpochTtlSeconds(): number {
  * Kept outside `scoped-cache-index:`: a flush bumps `*` and then unlinks that
  * whole segment, and the counter has to survive the flush it counts.
  */
-function scopedCacheEpochKey(collection: string): string {
+export function scopedCacheEpochKey(collection: string): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-epoch:${collection}`;
 }
 

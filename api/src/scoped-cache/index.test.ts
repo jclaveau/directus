@@ -42,6 +42,7 @@ import {
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	readScopedCacheEpochs,
+	reapScopedCacheIndex,
 	resolveScopedCacheM2oJoinChainFromPath,
 	releaseStrandedScopedCacheSweeps,
 	retryPendingScopedCachePurges,
@@ -1833,6 +1834,25 @@ describe('retryPendingScopedCachePurges', () => {
 
 		expect(indexedMembers).toEqual({
 			'ns:scoped-cache-index:swept:articles:dead:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		});
+	});
+
+	it(oneLine`
+		reaps nothing on a cache that is not Redis, which no EXISTS can ask
+		whether an entry is still there
+	`, async () => {
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
+		expect(await reapScopedCacheIndex()).toBe(0);
+
+		expect(indexedMembers).toEqual({
+			'ns:scoped-cache-index:fingerprint:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		});

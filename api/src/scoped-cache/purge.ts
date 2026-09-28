@@ -32,7 +32,7 @@ import type {
 	ScopedCacheDeclaredFingerprint,
 } from '@directus/types';
 import type { Keyv } from 'keyv';
-import { dropCacheEntries } from '../cache-drop.js';
+import { cacheEntryRawKeyOf, dropCacheEntries } from '../cache-drop.js';
 import {
 	scopedCachePurgeEnabled,
 	scopedCacheIndexStoreAvailable,
@@ -56,6 +56,8 @@ import {
 } from './fingerprint.js';
 import {
 	bumpScopedCacheEpochs,
+	scopedCacheEpochKey,
+	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
 import { scopedCacheIndexPath } from './index-path.js';
 
@@ -943,6 +945,43 @@ async function dropStrandedScopedCacheSweeps(): Promise<number> {
 	}
 
 	return evicted;
+}
+
+/**
+ * Remove the index members naming entries the cache no longer holds. Returns how
+ * many it removed.
+ *
+ * An entry expires and its members stay: every read filed into a set pushes the
+ * set's expiry out, so the set of a collection read all day never expires, and
+ * each write to that collection tests every read ever cached in it.
+ *
+ * Only on a Redis-backed cache: whether an entry is still there is asked of Redis
+ * directly, one `EXISTS` per member, since asking the cache would read every
+ * entry's value to learn it exists.
+ */
+export async function reapScopedCacheIndex(): Promise<number> {
+	if (!scopedCacheIndexStoreAvailable()) {
+		return 0;
+	}
+
+	const { getCache } = await import('../cache.js');
+	const { cache } = getCache();
+
+	const rawKeyOf = cache
+		? cacheEntryRawKeyOf(cache)
+		: null;
+
+	if (rawKeyOf === null) {
+		return 0;
+	}
+
+	const { reaped } = await useScopedCacheStore().reapIndexedEntries(
+		rawKeyOf,
+		scopedCacheEpochKey,
+		scopedCacheEpochTtlSeconds(),
+	);
+
+	return reaped;
 }
 
 /**

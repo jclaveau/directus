@@ -6,6 +6,7 @@ import {
 	renderScopedCacheIndexMember,
 	scopedCacheEpochBumpScript,
 	scopedCacheFingerprintIndexKeys,
+	scopedCacheIndexReapScript,
 	scopedCacheRowIndexGlobs,
 	scopedCacheRowIndexKeys,
 	scopedCacheSweepMoveScript,
@@ -24,6 +25,7 @@ const srem = vi.fn();
 const unlink = vi.fn();
 const defineCommand = vi.fn();
 const scopedCacheEpochBump = vi.fn();
+const scopedCacheIndexReap = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const evalScript = vi.fn();
@@ -36,6 +38,7 @@ vi.mock('../redis/index.js', () => {
 			return {
 				defineCommand,
 				scopedCacheEpochBump,
+				scopedCacheIndexReap,
 				scan,
 				sscan,
 				eval: evalScript,
@@ -624,6 +627,156 @@ describe('takeStrandedSweptIndexKeys', () => {
 
 		expect(evalScript).not.toHaveBeenCalled();
 		expect(unlink).not.toHaveBeenCalled();
+	});
+});
+
+describe('reapIndexedEntries', () => {
+	beforeEach(() => {
+		for (const command of [scan, sscan, defineCommand, scopedCacheIndexReap]) {
+			command.mockReset();
+		}
+	});
+
+	it(oneLine`
+		asks one script per set to remove the members whose entry is gone, and
+		to bump the counter of the set's collection
+	`, async () => {
+		scan.mockResolvedValueOnce([
+			'0',
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-index:fingerprint:note:owner=ana',
+			],
+		]);
+
+		sscan
+			.mockResolvedValueOnce(['0', ['slot:&|key-a', 'slot:&|key-b']])
+			.mockResolvedValueOnce(['0', ['note:&owner=,ana,&|key-c']]);
+
+		scopedCacheIndexReap
+			.mockResolvedValueOnce(1)
+			.mockResolvedValueOnce(0);
+
+		const tally = await redisScopedCacheStore().reapIndexedEntries(
+			(key) => `raw:${key}`,
+			(collection) => `scalabus:scoped-cache-epoch:${collection}`,
+			86400,
+		);
+
+		expect(tally).toEqual({ indexKeys: 2, reaped: 1 });
+
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheIndexReap',
+			{ numberOfKeys: 2, lua: scopedCacheIndexReapScript },
+		);
+
+		expect(scan.mock.calls).toEqual([[
+			'0',
+			'MATCH',
+			'scalabus:scoped-cache-index:fingerprint:*',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(scopedCacheIndexReap.mock.calls).toEqual([
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-epoch:slot',
+				86400,
+				'slot:&|key-a',
+				'raw:key-a',
+				'slot:&|key-b',
+				'raw:key-b',
+			],
+			[
+				'scalabus:scoped-cache-index:fingerprint:note:owner=ana',
+				'scalabus:scoped-cache-epoch:note',
+				86400,
+				'note:&owner=,ana,&|key-c',
+				'raw:key-c',
+			],
+		]);
+	});
+
+	it(oneLine`
+		reads a set page by page, and sends a page of more than 500 members in
+		chunks of 500
+	`, async () => {
+		scan.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
+		]);
+
+		const members = Array.from({ length: 501 }, (_, at) => `slot:&|key-${at}`);
+
+		sscan
+			.mockResolvedValueOnce(['7', members])
+			.mockResolvedValueOnce(['0', ['slot:&|key-last']]);
+
+		scopedCacheIndexReap.mockResolvedValue(0);
+
+		await redisScopedCacheStore().reapIndexedEntries(
+			(key) => key,
+			(collection) => collection,
+			86400,
+		);
+
+		expect(sscan.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:fingerprint:slot:', '7', 'COUNT', 1000],
+		]);
+
+		expect(scopedCacheIndexReap).toHaveBeenCalledTimes(3);
+		expect(scopedCacheIndexReap.mock.calls[0]).toHaveLength(1003);
+
+		expect(scopedCacheIndexReap.mock.calls[1]).toEqual([
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			'slot',
+			86400,
+			'slot:&|key-500',
+			'key-500',
+		]);
+
+		expect(scopedCacheIndexReap.mock.calls[2]).toEqual([
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			'slot',
+			86400,
+			'slot:&|key-last',
+			'key-last',
+		]);
+	});
+
+	it('leaves a member naming no key alone', async () => {
+		scan.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
+		]);
+
+		sscan.mockResolvedValueOnce(['0', ['slot:&']]);
+
+		const tally = await redisScopedCacheStore().reapIndexedEntries(
+			(key) => key,
+			(collection) => collection,
+			86400,
+		);
+
+		expect(tally).toEqual({ indexKeys: 1, reaped: 0 });
+		expect(scopedCacheIndexReap).not.toHaveBeenCalled();
+	});
+
+	// A fill files its members before it writes its entry: the bump is what makes
+	// one caught between the two evict the entry this unnamed.
+	it('bumps the counter in the same script as the removal', () => {
+		expect(scopedCacheIndexReapScript).toContain(
+			"if redis.call('EXISTS', ARGV[i + 1]) == 0 then",
+		);
+
+		expect(scopedCacheIndexReapScript).toContain(
+			"redis.call('SET', KEYS[2], seed, 'NX')\n"
+			+ "redis.call('INCR', KEYS[2])\n"
+			+ "redis.call('EXPIRE', KEYS[2], ARGV[1])\n"
+			+ "redis.call('SREM', KEYS[1], unpack(gone))",
+		);
 	});
 });
 
