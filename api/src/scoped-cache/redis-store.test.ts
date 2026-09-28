@@ -8,6 +8,7 @@ import {
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheRowIndexGlobs,
 	scopedCacheRowIndexKeys,
+	scopedCacheSweepMoveScript,
 } from './redis-store.js';
 import { parseScopedCacheFingerprint } from './fingerprint.js';
 
@@ -16,8 +17,12 @@ vi.mock('@directus/env', () => {
 });
 
 const srem = vi.fn();
+const unlink = vi.fn();
 const defineCommand = vi.fn();
 const scopedCacheEpochBump = vi.fn();
+const scan = vi.fn();
+const sscan = vi.fn();
+const evalScript = vi.fn();
 
 vi.mock('../redis/index.js', () => {
 	return {
@@ -25,7 +30,10 @@ vi.mock('../redis/index.js', () => {
 			return {
 				defineCommand,
 				scopedCacheEpochBump,
-				pipeline: () => ({ srem, exec: async () => [] }),
+				scan,
+				sscan,
+				eval: evalScript,
+				pipeline: () => ({ srem, unlink, exec: async () => [] }),
 			};
 		},
 	};
@@ -426,5 +434,51 @@ describe('bumpPurgeEpochs', () => {
 			['ns:scoped-cache-epoch:slot'],
 			86400,
 		)).rejects.toThrow('OOM command not allowed');
+	});
+});
+
+describe('takeCollectionIndexedKeys', () => {
+	it(oneLine`
+		moves each index set aside, reads it in pages, then drops it
+	`, async () => {
+		scan.mockResolvedValue([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
+		]);
+
+		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:a1:1']);
+
+		sscan
+			.mockResolvedValueOnce(['7', ['slot:&|key-a']])
+			.mockResolvedValueOnce(['0', ['slot:&owner=,kappa,&|key-b']]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([{ indexKeys: 1, keys: ['key-a', 'key-b'] }]);
+
+		expect(evalScript).toHaveBeenCalledWith(
+			scopedCacheSweepMoveScript,
+			1,
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			expect.stringMatching(
+				/^scalabus:scoped-cache-index:swept:[0-9a-f-]{36}:$/,
+			),
+			3600,
+		);
+
+		expect(sscan.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:swept:a1:1', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:swept:a1:1', '7', 'COUNT', 1000],
+		]);
+
+		expect(unlink.mock.calls).toEqual([
+			[['scalabus:scoped-cache-index:swept:a1:1']],
+		]);
 	});
 });

@@ -148,12 +148,13 @@ export interface ScopedCacheStore {
 	): Promise<void>;
 
 	/**
-	 * Read the cache keys of a whole collection and drop its index, as ONE step per
-	 * batch.
+	 * Read the cache keys of a whole collection and drop its index, taking each
+	 * part of the index out of every fill's reach before reading it.
 	 *
-	 * Atomicity is the point: a fill filing its key between a read and a separate
+	 * The order is the point: a fill filing its key between a read and a separate
 	 * drop would have that filing deleted underneath it, leaving a correct entry
-	 * indexed by nothing.
+	 * indexed by nothing. Taken out first, the fill files into a fresh one the next
+	 * purge reaches.
 	 *
 	 * Keys rather than entries, because this purge drops them whatever query case
 	 * filed them — and `indexKeys` beside them, so the caller can report how split

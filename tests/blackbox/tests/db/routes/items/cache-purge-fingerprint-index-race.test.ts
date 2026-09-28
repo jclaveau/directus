@@ -177,12 +177,7 @@ describe(oneLine`
 		 */
 		const purgeMustOutlastMs = readLeadsMs[0]! + readHoldMs;
 
-		/**
-		 * Run one purge with reads aimed into it, and answer with the limits those
-		 * reads cached under. The purge is the write's own, over the held slice; the
-		 * decoys are what make its pass over that slice's set long enough to aim at.
-		 */
-		async function fillDuringPurge(label: string): Promise<number[]> {
+		async function plantDecoys() {
 			for (let sent = 0; sent < decoyMemberCount; sent += decoyChunkSize) {
 				await redisCommand(REDIS_PORT, ['SADD', heldIndexKey, ...Array.from(
 					{ length: Math.min(decoyChunkSize, decoyMemberCount - sent) },
@@ -194,6 +189,15 @@ describe(oneLine`
 			}
 
 			mark(`decoys planted (${decoyMemberCount})`);
+		}
+
+		/**
+		 * Run one purge with reads aimed into it, and answer with the limits those
+		 * reads cached under. The purge is the write's own, over the held slice; the
+		 * decoys are what make its pass over that slice's set long enough to aim at.
+		 */
+		async function fillDuringPurge(label: string): Promise<number[]> {
+			await plantDecoys();
 
 			const held = readLeadsMs.map(async (lead, index) => {
 				await new Promise((resolve) => setTimeout(resolve, lead));
@@ -309,6 +313,56 @@ describe(oneLine`
 
 			expect(served.map((response) => response.headers[cacheStatusHeader]))
 				.toEqual(limits.map(() => 'MISS'));
+		}, 120_000);
+
+		it(oneLine`
+			a collection-wide purge of a set holding 120k reads never holds Redis for
+			10 ms, and leaves no index set behind
+		`, async () => {
+			await plantDecoys();
+
+			// Redis's own clock rather than a probe's round trip, so a busy runner
+			// cannot pass for a stall. The slowlog keeps every command slower than
+			// 10 ms, by default; only the ones naming an index set count, since the
+			// purge also drops the 120k cache keys the decoys name.
+			const lastSlowCommand = await redisCommand(REDIS_PORT, [
+				'EVAL',
+				"local last = redis.call('SLOWLOG', 'GET', 1)[1] "
+				+ 'return last and last[1] or -1',
+				'0',
+			]);
+
+			const created = await request(getUrl(vendor, env))
+				.post(`/items/${COLLECTION}`)
+				.send({ slot: 'elsewhere', label: 'sweep' })
+				.set('Authorization', auth);
+
+			expect(created.status).toBe(200);
+
+			const slowIndexCommands = await redisCommand(REDIS_PORT, [
+				'EVAL',
+				"local count = 0 "
+				+ "for _, entry in ipairs(redis.call('SLOWLOG', 'GET', 128)) do "
+				+ 'if entry[1] > tonumber(ARGV[1]) then '
+				+ 'for _, arg in ipairs(entry[4]) do '
+				+ 'if string.find(arg, ARGV[2], 1, true) then '
+				+ 'count = count + 1 break '
+				+ 'end end end end '
+				+ 'return count',
+				'0',
+				lastSlowCommand.slice(1),
+				`${namespace}:scoped-cache-index:`,
+			]);
+
+			expect(slowIndexCommands).toBe(':0');
+			expect(await redisCommand(REDIS_PORT, ['EXISTS', heldIndexKey])).toBe(':0');
+
+			expect(await redisCommand(REDIS_PORT, [
+				'EVAL',
+				"return #redis.call('KEYS', ARGV[1])",
+				'0',
+				`${namespace}:scoped-cache-index:swept:*`,
+			])).toBe(':0');
 		}, 120_000);
 	});
 });
