@@ -8,6 +8,7 @@ import { CreateCollections, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import Redis from 'ioredis';
@@ -20,8 +21,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 // the `directus_` prefix, and a field any string at all.
 const EQUALS_FIELD_COLLECTION = 'reserved_name_field';
 const PIPE_COLLECTION = 'reserved_name|pipe';
+const PIPE_VALUE_COLLECTION = 'reserved_name_value';
+const VIEW_FIELD_COLLECTION = 'reserved_name_view';
 
-const COLLECTIONS = [EQUALS_FIELD_COLLECTION, PIPE_COLLECTION];
+const COLLECTIONS = [
+	EQUALS_FIELD_COLLECTION,
+	PIPE_COLLECTION,
+	PIPE_VALUE_COLLECTION,
+	VIEW_FIELD_COLLECTION,
+];
 
 const cacheStatusHeader = 'x-cache-status';
 
@@ -68,6 +76,22 @@ describe.each(vendors)('%s', (vendor) => {
 					meta: { scoped_cache_fields: ['owner'] },
 					fields: [
 						{ field: 'owner', type: 'string', meta: {} },
+						{ field: 'note', type: 'string', meta: {} },
+					],
+				},
+				{
+					collection: PIPE_VALUE_COLLECTION,
+					meta: { scoped_cache_fields: ['owner'] },
+					fields: [
+						{ field: 'owner', type: 'string', meta: {} },
+						{ field: 'note', type: 'string', meta: {} },
+					],
+				},
+				{
+					collection: VIEW_FIELD_COLLECTION,
+					meta: { scoped_cache_fields: ['view'] },
+					fields: [
+						{ field: 'view', type: 'string', meta: {} },
 						{ field: 'note', type: 'string', meta: {} },
 					],
 				},
@@ -439,6 +463,21 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'a write to a collection named with a pipe purges the read pinned on it',
 			(steps) => defineScenarioSteps(steps, PIPE_COLLECTION),
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a write to a row whose value carries a pipe purges the read pinned on
+				it
+			`,
+			(steps) => defineScenarioSteps(steps, PIPE_VALUE_COLLECTION),
+			60_000,
+		);
+
+		scenario(
+			'a write to a field named view purges the read pinned on it',
+			(steps) => defineScenarioSteps(steps, VIEW_FIELD_COLLECTION),
 			60_000,
 		);
 	});

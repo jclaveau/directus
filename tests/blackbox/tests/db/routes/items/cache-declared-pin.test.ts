@@ -13,7 +13,9 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import getPort from 'get-port';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
@@ -348,6 +350,73 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// Every SCAN and SSCAN of the slot's index `signalsSent` caused, as the set it
+	// read past `fingerprint:`. MONITOR streams commands in the order Redis ran
+	// them, so the two sentinel GETs bracket what the signals sent.
+	async function recordIndexReads(
+		signalsSent: () => Promise<void>,
+	): Promise<Record<string, string>[]> {
+		const fingerprintPrefix = `${env[vendor]['CACHE_NAMESPACE']}`
+			+ ':scoped-cache-index:fingerprint:';
+
+		const slotPrefix = `${fingerprintPrefix}${SLOT}:`;
+		const monitor = await redis.monitor();
+		const recordedReads = new Map<string, Record<string, string>>();
+
+		monitor.on('monitor', (_time: string, commandArgs: string[]) => {
+			const command = commandArgs[0]!.toLowerCase();
+
+			const readSet = command === 'scan'
+				? commandArgs[3]
+				: commandArgs[1];
+
+			if (
+				(command === 'scan' || command === 'sscan')
+				&& readSet?.startsWith(slotPrefix)
+			) {
+				const indexSet = readSet.slice(fingerprintPrefix.length);
+
+				recordedReads.set(`${command} ${indexSet}`, {
+					'command': command,
+					'index set': indexSet,
+				});
+			}
+		});
+
+		const sentinelSeen = (sentinelKey: string) => {
+			return new Promise<void>((resolveSentinel) => {
+				monitor.on('monitor', (_time: string, commandArgs: string[]) => {
+					if (commandArgs[1] === sentinelKey) {
+						resolveSentinel();
+					}
+				});
+			});
+		};
+
+		const sentinelPrefix = `${env[vendor]['CACHE_NAMESPACE']}:monitor-sentinel`;
+		const startSentinel = `${sentinelPrefix}:${randomUUID()}`;
+		const endSentinel = `${sentinelPrefix}:${randomUUID()}`;
+
+		await Promise.all([
+			sentinelSeen(startSentinel),
+			redis.get(startSentinel),
+		]);
+
+		recordedReads.clear();
+		await signalsSent();
+
+		await Promise.all([
+			sentinelSeen(endSentinel),
+			redis.get(endSentinel),
+		]);
+
+		monitor.disconnect();
+
+		return [...recordedReads.keys()].sort().map((readKey) => {
+			return recordedReads.get(readKey)!;
+		});
+	}
+
 	const queryKey = (query: Record<string, string | string[]>) =>
 		JSON.stringify(query);
 
@@ -473,7 +542,12 @@ describe.each(vendors)('%s', (vendor) => {
 	// The `query` cell names the slots the signal rewrites and the note each gets,
 	// and `declared` the fingerprints of the slot collection the hook passes to
 	// `purgeBy`, which the step completes with the collection.
-	function defineWhenSteps({ when }: StepFunctions, ids: Map<string, number>) {
+	function defineWhenSteps(
+		{ when, and }: StepFunctions,
+		ids: Map<string, number>,
+	) {
+		let indexReads: Record<string, string>[] = [];
+
 		when(
 			'the signal rewrites the slots and declares:',
 			async (table: Record<string, string>[]) => {
@@ -483,24 +557,33 @@ describe.each(vendors)('%s', (vendor) => {
 
 				const filedBefore = await indexedMembers();
 
-				for (const { marker, note } of cellRows(table[0]!['query']!)) {
-					const response = await request(getUrl(vendor, env))
-						.post(`/items/${SIGNAL}`)
-						.send({
-							rewritten_collection: SLOT,
-							rewritten_id: ids.get(marker as string),
-							rewritten_note: note,
-							declared,
-						})
-						.set('Authorization', auth);
+				indexReads = await recordIndexReads(async () => {
+					for (const { marker, note } of cellRows(table[0]!['query']!)) {
+						const response = await request(getUrl(vendor, env))
+							.post(`/items/${SIGNAL}`)
+							.send({
+								rewritten_collection: SLOT,
+								rewritten_id: ids.get(marker as string),
+								rewritten_note: note,
+								declared,
+							})
+							.set('Authorization', auth);
 
-					expect(response.statusCode).toBe(200);
-				}
+						expect(response.statusCode).toBe(200);
+					}
+				});
 
 				await expectPurgedFingerprints(
 					filedBefore,
 					cellRows(table[0]!['purged fingerprints']!),
 				);
+			},
+		);
+
+		and.optional(
+			'the declaration read only the index sets its value names:',
+			(table: Record<string, string>[]) => {
+				expect(indexReads).toEqual(table);
 			},
 		);
 	}
@@ -579,6 +662,42 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			'a purge declared on a value purges the reads pinning nothing',
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a purge declared as a pre-fingerprint tag purges the read pinned on
+				it
+			`,
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a purge declared on another collection reads only the sets it
+				names
+			`,
 			(steps) => {
 				const ids = new Map<string, number>();
 				const filedMembers = new Map<string, string[]>();

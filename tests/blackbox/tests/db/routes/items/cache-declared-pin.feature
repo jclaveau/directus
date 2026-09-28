@@ -18,6 +18,14 @@ Feature: A purge a hook declares reaches every read its slice could answer
   filed under a bare fingerprint and holds that slice's rows as much as a read
   pinned to it does.
 
+  A hook written before fingerprints still declares a tag, `{ collection,
+  field, value }`, and the tag names the slice its field and value spell: read
+  as a fingerprint pinning nothing, it would purge only the reads that do.
+
+  A declaration on another collection reads that collection's index the way its
+  fills were filed there: the bare set and the set its value names, never every
+  set the collection owns. Which sets were read is taken off Redis `MONITOR`.
+
   A read and a write are stated the way `cache-composite-tag.feature` states
   them: the `query` a read sends, the `response` it answers and the
   `fingerprints` it is filed under; the rows a signal rewrites, the fingerprints
@@ -138,6 +146,112 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |   - id   |   note: rewritten     |   viewFields:     |
       |   - note | - marker: other_owner |     - id          |
       |          |   note: third         |     - note        |
+    And the witness reads are still cached, not matching "owner: beta":
+      | query         | response              | fingerprints   |
+      | fields:       | - marker: other_owner | - pinnedScope: |+
+      |   - id        |   note: third         |     owner:     |
+      |   - note      |                       |       - beta   |
+      | filter:       |                       |   viewFields:  |
+      |   owner: beta |                       |     - id       |
+      |               |                       |     - note     |
+      |               |                       |     - owner    |
+
+  Scenario: a purge declared as a pre-fingerprint tag purges the read pinned on it
+    Given the slots:
+      | marker      | owner | note  | amount |
+      | target_slot | alpha | first | 10     |
+      | other_owner | beta  | third | 30     |
+    And this read is cached:
+      | query          | response              | fingerprints   |
+      | fields:        | - marker: target_slot | - pinnedScope: |+
+      |   - id         |   note: first         |     owner:     |
+      |   - note       |                       |       - alpha  |
+      | filter:        |                       |   viewFields:  |
+      |   owner: alpha |                       |     - id       |
+      |                |                       |     - note     |
+      |                |                       |     - owner    |
+    And the witness reads are cached:
+      | query         | response              | fingerprints   |
+      | fields:       | - marker: other_owner | - pinnedScope: |+
+      |   - id        |   note: third         |     owner:     |
+      |   - note      |                       |       - beta   |
+      | filter:       |                       |   viewFields:  |
+      |   owner: beta |                       |     - id       |
+      |               |                       |     - note     |
+      |               |                       |     - owner    |
+    When the signal rewrites the slots and declares:
+      | query                 | declared       | purged fingerprints |
+      | - marker: target_slot | - field: owner | - pinnedScope:      |+
+      |   note: rewritten     |   value: alpha |     owner:          |
+      |                       |                |       - alpha       |
+      |                       |                |   viewFields:       |
+      |                       |                |     - id            |
+      |                       |                |     - note          |
+      |                       |                |     - owner         |
+    Then the read is purged, the tag naming "owner: alpha":
+      | query          | response              | fingerprints   |
+      | fields:        | - marker: target_slot | - pinnedScope: |+
+      |   - id         |   note: rewritten     |     owner:     |
+      |   - note       |                       |       - alpha  |
+      | filter:        |                       |   viewFields:  |
+      |   owner: alpha |                       |     - id       |
+      |                |                       |     - note     |
+      |                |                       |     - owner    |
+    And the witness reads are still cached, not matching "owner: beta":
+      | query         | response              | fingerprints   |
+      | fields:       | - marker: other_owner | - pinnedScope: |+
+      |   - id        |   note: third         |     owner:     |
+      |   - note      |                       |       - beta   |
+      | filter:       |                       |   viewFields:  |
+      |   owner: beta |                       |     - id       |
+      |               |                       |     - note     |
+      |               |                       |     - owner    |
+
+  Scenario: a purge declared on another collection reads only the sets it names
+    Given the slots:
+      | marker      | owner | note  | amount |
+      | target_slot | alpha | first | 10     |
+      | other_owner | beta  | third | 30     |
+    And this read is cached:
+      | query          | response              | fingerprints   |
+      | fields:        | - marker: target_slot | - pinnedScope: |+
+      |   - id         |   note: first         |     owner:     |
+      |   - note       |                       |       - alpha  |
+      | filter:        |                       |   viewFields:  |
+      |   owner: alpha |                       |     - id       |
+      |                |                       |     - note     |
+      |                |                       |     - owner    |
+    And the witness reads are cached:
+      | query         | response              | fingerprints   |
+      | fields:       | - marker: other_owner | - pinnedScope: |+
+      |   - id        |   note: third         |     owner:     |
+      |   - note      |                       |       - beta   |
+      | filter:       |                       |   viewFields:  |
+      |   owner: beta |                       |     - id       |
+      |               |                       |     - note     |
+      |               |                       |     - owner    |
+    When the signal rewrites the slots and declares:
+      | query                 | declared       | purged fingerprints |
+      | - marker: target_slot | - pinnedScope: | - pinnedScope:      |+
+      |   note: rewritten     |     owner:     |     owner:          |
+      |                       |       - alpha  |       - alpha       |
+      |                       |                |   viewFields:       |
+      |                       |                |     - id            |
+      |                       |                |     - note          |
+      |                       |                |     - owner         |
+    And the declaration read only the index sets its value names:
+      | command | index set                     |
+      | sscan   | declared_pin_slot:            |
+      | sscan   | declared_pin_slot:owner=alpha |
+    Then the read is purged, its own set among the two read:
+      | query          | response              | fingerprints   |
+      | fields:        | - marker: target_slot | - pinnedScope: |+
+      |   - id         |   note: rewritten     |     owner:     |
+      |   - note       |                       |       - alpha  |
+      | filter:        |                       |   viewFields:  |
+      |   owner: alpha |                       |     - id       |
+      |                |                       |     - note     |
+      |                |                       |     - owner    |
     And the witness reads are still cached, not matching "owner: beta":
       | query         | response              | fingerprints   |
       | fields:       | - marker: other_owner | - pinnedScope: |+
