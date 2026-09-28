@@ -14,7 +14,6 @@
  */
 
 import { useEnv } from '@directus/env';
-import { randomUUID } from 'node:crypto';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -190,47 +189,40 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 }
 
 /**
- * Move a batch of fingerprint index sets aside, each under a key no fill writes to,
- * so the sweep reads what they held while every later filing lands in a fresh set.
- * A read filing its key into a set between a read of it and a separate drop would
- * otherwise have that set deleted underneath it, leaving a correct entry indexed by
- * nothing.
+ * Read a batch of fingerprint index sets and drop them as one step, so no other
+ * client can act between the two. A read filing its key into one of those sets
+ * between the read and the drop would otherwise have that set deleted underneath
+ * it, leaving a correct entry indexed by nothing.
  *
- * `RENAME` rather than reading the sets in here: a rename is O(1) whatever the set
- * holds, and a script is one command — one reading a set whole holds Redis for
- * every client until the last member is copied, and a collection's bare set holds
- * every read of it that pinned no index value. The moved sets are read afterwards
- * in pages, outside any script.
+ * Members are gathered with a `SMEMBERS` per key and deduped in Lua rather than by
+ * `SUNION`: the union has to be built before the sets are dropped anyway, and
+ * `unpack`ing a key list into one call overflows Lua's stack.
  *
- * KEYS are the index sets, ARGV[1] the prefix each is moved under, and ARGV[2] how
- * many seconds a moved set is held — long past any sweep, so only a sweep that
- * died between the move and the drop leaves one behind, and not for good. Answers
- * with the keys it moved to: a set that expired since the scan found it has
- * nothing to move, and `RENAME` refuses a missing key.
- *
- * The counter bumps are NOT in here — they are a script of their own, sent first,
- * so they still land when the sweep behind them is refused.
+ * KEYS are the index sets. The counter bumps are NOT in here — they are a script
+ * of their own, sent first, so they still land when the sweep behind them is
+ * refused.
  */
-export const scopedCacheSweepMoveScript = `
-local moved = {}
+export const scopedCacheSweepScript = `
+local seen = {}
+local members = {}
 
 for i = 1, #KEYS do
-	if redis.call('EXISTS', KEYS[i]) == 1 then
-		local sweptKey = ARGV[1] .. i
-		redis.call('RENAME', KEYS[i], sweptKey)
-		redis.call('EXPIRE', sweptKey, ARGV[2])
-		moved[#moved + 1] = sweptKey
+	local batch = redis.call('SMEMBERS', KEYS[i])
+
+	for j = 1, #batch do
+		local member = batch[j]
+
+		if not seen[member] then
+			seen[member] = true
+			members[#members + 1] = member
+		end
 	end
+
+	redis.call('UNLINK', KEYS[i])
 end
 
-return moved
+return members
 `;
-
-/**
- * How long a set moved aside for a sweep is held, in seconds. The sweep drops it
- * as soon as it has read it; this is only the reap for one that never got there.
- */
-const SCOPED_CACHE_SWEEP_HOLD_SECONDS = 3600;
 
 /**
  * How many index sets one sweep call carries.
@@ -338,16 +330,6 @@ function scopedCacheIndexKey(collection: string, indexPin: string): string {
 }
 
 /**
- * Where one sweep moves the sets it takes: outside `fingerprint:`, so no fill,
- * scan or later sweep of the collection reaches them, and inside the prefix, so a
- * full flush still drops one a dead sweep left behind. One per sweep call, so two
- * sweeps of the same collection never move onto each other's keys.
- */
-function scopedCacheSweptIndexKeyPrefix(): string {
-	return `${scopedCacheIndexPrefix()}swept:${randomUUID()}:`;
-}
-
-/**
  * The glob matching every set one collection's fingerprints are filed in — the
  * bare one and every split the index path produced.
  *
@@ -403,11 +385,11 @@ export function scopedCacheFingerprintIndexKeys(
  * rows' values at the index path names.
  *
  * The row is read as a fingerprint of its own, so the value it pins there is
- * looked up the same way a cached read's is. Every snapshotted row pins the index
- * path: `scopedCacheIndexPath` only walks hops the snapshot joins through, and the
- * snapshot reads the committed row, so an ancestor that is gone pins as null
- * rather than not at all. The collection is the written one rather than the
- * rows', so an empty write still names the bare set.
+ * looked up the same way a cached read's is. A row whose index path does not
+ * resolve — the ancestor was deleted, or the write never carried it — reads the
+ * bare set alone, and the sets it cannot name are left to the collection-wide
+ * purge. The collection is the written one rather than the rows', so an empty
+ * write still names the bare set.
  */
 export function scopedCacheRowIndexKeys(
 	collection: string,
@@ -828,40 +810,17 @@ const redisStore: ScopedCacheStore = {
 			) {
 				const chunk = indexKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
 
-				const sweptKeys = await redis.eval(
-					scopedCacheSweepMoveScript,
+				const swept = await redis.eval(
+					scopedCacheSweepScript,
 					chunk.length,
 					...chunk,
-					scopedCacheSweptIndexKeyPrefix(),
-					SCOPED_CACHE_SWEEP_HOLD_SECONDS,
 				) as string[];
 
-				for (const sweptKey of sweptKeys) {
-					let scanCursor = '0';
-
-					do {
-						const [next, members] = await redis.sscan(
-							sweptKey,
-							scanCursor,
-							'COUNT',
-							SCOPED_CACHE_INDEX_SCAN_COUNT,
-						);
-
-						scanCursor = next;
-
-						// The fingerprint half is read past rather than parsed: this purge
-						// drops the key whichever query case filed it.
-						for (const member of members) {
-							keys.push(parseScopedCacheIndexMember(member).key);
-						}
-					}
-					while (scanCursor !== '0');
+				// The fingerprint half is read past rather than parsed: this purge
+				// drops the key whichever query case filed it.
+				for (const member of swept) {
+					keys.push(parseScopedCacheIndexMember(member).key);
 				}
-
-				// A refused drop leaves the moved sets to their hold: no fill reaches
-				// them, so what they still name costs memory until then, never a
-				// stale hit.
-				await unlinkScopedCacheKeys(sweptKeys);
 			}
 
 			yield { indexKeys: indexKeys.length, keys };
