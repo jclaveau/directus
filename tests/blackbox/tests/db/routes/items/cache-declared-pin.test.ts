@@ -360,7 +360,20 @@ describe.each(vendors)('%s', (vendor) => {
 			+ ':scoped-cache-index:fingerprint:';
 
 		const slotPrefix = `${fingerprintPrefix}${SLOT}:`;
-		const monitor = await redis.monitor();
+		const monitor = redis.duplicate({ monitor: true, lazyConnect: false });
+
+		await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
+			monitor.once('monitoring', resolveMonitoring);
+
+			// ioredis flips to monitoring only after the OK resolves, so a
+			// line landing in the same chunk finds an empty command queue.
+			monitor.on('error', (monitorError: Error) => {
+				if (!monitorError.message.startsWith('Command queue state error')) {
+					rejectMonitoring(monitorError);
+				}
+			});
+		});
+
 		const recordedReads = new Map<string, Record<string, string>>();
 
 		monitor.on('monitor', (_time: string, commandArgs: string[]) => {
