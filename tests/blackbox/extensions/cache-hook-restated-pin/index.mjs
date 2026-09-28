@@ -3,29 +3,40 @@
 // row's `bio`, which the read never selected, and names the row it read it from
 // through one of the two hook channels. The pin is the one the read computed for
 // its own key, so it only reaches the index if the collection loses its view.
+//
+// `bio` is read with the raw knex, as enrichment outside the AST does: a read
+// through the service would file its own view of `bio` beside the read's.
 
 const DEPEND_ON = 'hook_restated_depend_on';
 const CACHE_SCOPE = 'hook_restated_cache_scope';
 
 export default function registerHooks({ filter }, { services }) {
-	const serviceOf = (collection, context) => {
-		return new services.ItemsService(collection, {
-			schema: context.schema,
-			accountability: context.accountability,
-			knex: context.database,
-		});
+	const bioOf = async (collection, id, context) => {
+		const row = await context.database(collection)
+			.where({ id })
+			.first('bio');
+
+		return row.bio;
 	};
 
 	filter(`${DEPEND_ON}.items.read`, async (records, _meta, context) => {
 		for (const record of records) {
-			const [row] = await context.scopedCache.dependOn(
-				serviceOf(DEPEND_ON, context).readByQuery(
-					{ filter: { id: { _eq: record.id } }, fields: ['bio'], limit: 1 },
+			// The lookup names the row by its key and selects nothing the read did
+			// not: all it adds is the pin.
+			const service = new services.ItemsService(DEPEND_ON, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.database,
+			});
+
+			await context.scopedCache.dependOn(
+				service.readByQuery(
+					{ filter: { id: { _eq: record.id } }, fields: ['id'], limit: 1 },
 					{ emitEvents: false },
 				),
 			);
 
-			record.bio = row.bio;
+			record.bio = await bioOf(DEPEND_ON, record.id, context);
 		}
 
 		return records;
@@ -33,12 +44,7 @@ export default function registerHooks({ filter }, { services }) {
 
 	filter(`${CACHE_SCOPE}.items.read`, async (records, _meta, context) => {
 		for (const record of records) {
-			const [row] = await serviceOf(CACHE_SCOPE, context).readByQuery(
-				{ filter: { id: { _eq: record.id } }, fields: ['bio'], limit: 1 },
-				{ emitEvents: false },
-			);
-
-			record.bio = row.bio;
+			record.bio = await bioOf(CACHE_SCOPE, record.id, context);
 		}
 
 		return records;
