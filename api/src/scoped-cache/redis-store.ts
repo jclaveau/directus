@@ -23,7 +23,6 @@ import {
 import type { ChainableCommander, Redis } from 'ioredis';
 import {
 	escapeScopedCacheFingerprintGlob,
-	escapeScopedCacheFingerprintPinKey,
 	escapeScopedCacheFingerprintToken,
 	indexOfUnescaped,
 	parseScopedCacheFingerprint,
@@ -404,7 +403,7 @@ export function scopedCacheRowIndexGlobs(
 	for (const { pinnedScope = {} } of rowFingerprints) {
 		for (const [field, values] of Object.entries(pinnedScope)) {
 			const pinKey = escapeScopedCacheFingerprintGlob(
-				escapeScopedCacheFingerprintPinKey(field),
+				escapeScopedCacheFingerprintToken(field),
 			);
 
 			for (const value of values) {
