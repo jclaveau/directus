@@ -65,10 +65,16 @@ export async function recordPendingScopedCachePurge(
 }
 
 /**
- * Every pending purge, oldest first, collapsed to one entry per distinct target:
- * an outage records the same slice once per write that touched it, and retrying
- * one slice N times is wasted round trips rather than a wrong result. Each entry
- * carries the row ids it stands for so the drain can clear all of them together.
+ * Every pending purge, oldest first, collapsed to one entry per mode and
+ * collection: an outage records the same slice once per write that touched it,
+ * and retrying one slice N times is wasted round trips rather than a wrong
+ * result. Each entry carries the row ids it stands for so the drain can clear all
+ * of them together.
+ *
+ * Slices of one collection share an entry rather than each taking its own: the
+ * retry cannot tell which sets the schema filed a fingerprint under, so it scans
+ * every set of the collection, and one scan per recorded slice repeated that
+ * keyspace-wide scan for each.
  */
 export async function listPendingScopedCachePurges(): Promise<
 	PendingScopedCachePurgeRow[]
@@ -80,22 +86,29 @@ export async function listPendingScopedCachePurges(): Promise<
 	const byTarget = new Map<string, PendingScopedCachePurgeRow>();
 
 	for (const row of rows) {
-		const target =
-			`${row.mode} ${row.collection ?? ''} ${row.scoped_cache_fingerprint ?? ''}`;
-
+		const target = `${row.mode} ${row.collection ?? ''}`;
+		const fingerprint = row.scoped_cache_fingerprint;
 		const seen = byTarget.get(target);
 
 		if (seen !== undefined) {
 			seen.ids.push(row.id);
+
+			if (
+				fingerprint !== null
+				&& seen.scopedCacheFingerprints.includes(fingerprint) === false
+			) {
+				seen.scopedCacheFingerprints.push(fingerprint);
+			}
+
 			continue;
 		}
 
 		byTarget.set(target, {
 			mode: row.mode,
 			collection: row.collection,
-			scopedCacheFingerprints: row.scoped_cache_fingerprint === null
+			scopedCacheFingerprints: fingerprint === null
 				? []
-				: [row.scoped_cache_fingerprint],
+				: [fingerprint],
 			ids: [row.id],
 		});
 	}

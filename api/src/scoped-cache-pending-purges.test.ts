@@ -195,8 +195,8 @@ describe('recordPendingScopedCachePurge', () => {
 
 describe('listPendingScopedCachePurges', () => {
 	it(oneLine`
-		collapses repeats of one target to a single retry carrying every row it stands
-		for, and keeps distinct targets apart
+		collapses every slice of one collection to a single retry carrying every row
+		it stands for, and keeps the modes apart
 	`, async () => {
 		// An outage records the same slice once per write that touched it, so the
 		// duplicates here are the normal shape rather than an edge case.
@@ -231,14 +231,8 @@ describe('listPendingScopedCachePurges', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheFingerprints: ['articles:&id=,1,&'],
-				ids: [1, 3],
-			},
-			{
-				mode: 'slices',
-				collection: 'articles',
-				scopedCacheFingerprints: ['articles:&id=,2,&'],
-				ids: [2],
+				scopedCacheFingerprints: ['articles:&id=,1,&', 'articles:&id=,2,&'],
+				ids: [1, 2, 3],
 			},
 			{
 				mode: 'collection',
