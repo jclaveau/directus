@@ -1818,7 +1818,10 @@ describe('retryPendingScopedCachePurges', () => {
 			],
 		};
 
-		cache.delete.mockRejectedValueOnce(new Error('Connection is closed.'));
+		// The first delete is the store probe's, the second the entry drop.
+		cache.delete
+			.mockResolvedValueOnce(true)
+			.mockRejectedValueOnce(new Error('Connection is closed.'));
 
 		await expect(releaseStrandedScopedCacheSweeps()).rejects.toThrow(
 			'Connection is closed.',
@@ -1848,7 +1851,10 @@ describe('retryPendingScopedCachePurges', () => {
 			],
 		};
 
-		cache.delete.mockRejectedValueOnce(new Error('Connection is closed.'));
+		// The first delete is the store probe's, the second the entry drop.
+		cache.delete
+			.mockResolvedValueOnce(true)
+			.mockRejectedValueOnce(new Error('Connection is closed.'));
 
 		expect(await retryPendingScopedCachePurges()).toBe(0);
 
