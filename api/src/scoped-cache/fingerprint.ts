@@ -295,22 +295,7 @@ export function scopedCacheDeclaredPins(
 			});
 		});
 
-	// The tag a hook written before fingerprints still hands over, which no type
-	// check stops in a plain-JS extension. Read as the bare fingerprint it would
-	// purge only the reads pinning nothing, leaving the slice it names stale.
-	const legacyTag = declared as ScopedCacheDeclaredFingerprint
-		& ScopedCacheCollectionPin;
-
-	if (typeof legacyTag.field !== 'string') {
-		return declaredPins;
-	}
-
-	return [...declaredPins, {
-		field: legacyTag.field,
-		value: legacyTag.value,
-		type: declaredPinType(schema, declared.collection, legacyTag.field)
-			?? legacyTag.type,
-	}];
+	return declaredPins;
 }
 
 /**
