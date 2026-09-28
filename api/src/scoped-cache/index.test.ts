@@ -1585,6 +1585,8 @@ describe('retryPendingScopedCachePurges', () => {
 					srem(...args);
 					return chain;
 				},
+				// The sweep drops the sets it moved aside once it has read them.
+				unlink: () => chain,
 				exec: async () => [],
 			};
 
