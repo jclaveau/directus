@@ -546,6 +546,55 @@ describe('takeCollectionIndexedKeys', () => {
 	});
 });
 
+describe('takeStrandedSweptIndexKeys', () => {
+	beforeEach(() => {
+		for (const command of [scan, sscan, evalScript, unlink]) {
+			command.mockReset();
+		}
+	});
+
+	it(oneLine`
+		reads every set a sweep moved aside and never released, whichever
+		collection it swept, without moving or dropping anything
+	`, async () => {
+		scan.mockResolvedValueOnce([
+			'0',
+			[
+				'scalabus:scoped-cache-index:swept:slot:dead:1',
+				'scalabus:scoped-cache-index:swept:note:dead:1',
+			],
+		]);
+
+		sscan
+			.mockResolvedValueOnce(['0', ['slot:&|key-slot']])
+			.mockResolvedValueOnce(['0', ['note:&|key-note']]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeStrandedSweptIndexKeys()
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([{
+			indexKeys: 2,
+			keys: ['key-slot', 'key-note'],
+			sweptKeys: [
+				'scalabus:scoped-cache-index:swept:slot:dead:1',
+				'scalabus:scoped-cache-index:swept:note:dead:1',
+			],
+		}]);
+
+		expect(scan.mock.calls).toEqual([
+			['0', 'MATCH', 'scalabus:scoped-cache-index:swept:*', 'COUNT', 1000],
+		]);
+
+		expect(evalScript).not.toHaveBeenCalled();
+		expect(unlink).not.toHaveBeenCalled();
+	});
+});
+
 describe('releaseSweptIndexKeys', () => {
 	beforeEach(() => unlink.mockReset());
 

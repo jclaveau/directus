@@ -43,6 +43,7 @@ import {
 	purgeScopedCache,
 	readScopedCacheEpochs,
 	resolveScopedCacheM2oJoinChainFromPath,
+	releaseStrandedScopedCacheSweeps,
 	retryPendingScopedCachePurges,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
@@ -1780,6 +1781,54 @@ describe('retryPendingScopedCachePurges', () => {
 			mode: 'collection',
 			durationMs: null,
 		}));
+	});
+
+	it(oneLine`
+		drops the entries a sweep that died moved aside, then releases its sets —
+		with nothing recorded, the only thing still naming them is the moved set
+	`, async () => {
+		indexedMembers = {
+			'ns:scoped-cache-index:swept:articles:dead:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,2,&|ns:entry-b',
+			],
+		};
+
+		expect(await releaseStrandedScopedCacheSweeps()).toBe(1);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-b');
+
+		expect(indexedMembers).toEqual({
+			'ns:scoped-cache-index:fingerprint:articles:': [
+				'articles:&id=,2,&|ns:entry-b',
+			],
+		});
+	});
+
+	it(oneLine`
+		keeps a stranded sweep's sets when dropping their entries fails, so the next
+		connection still finds them
+	`, async () => {
+		indexedMembers = {
+			'ns:scoped-cache-index:swept:articles:dead:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
+		cache.delete.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		await expect(releaseStrandedScopedCacheSweeps()).rejects.toThrow(
+			'Connection is closed.',
+		);
+
+		expect(indexedMembers).toEqual({
+			'ns:scoped-cache-index:swept:articles:dead:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		});
 	});
 
 	it(oneLine`

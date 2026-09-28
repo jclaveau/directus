@@ -344,6 +344,25 @@ function scopedCacheSweptIndexKeyPrefix(collection: string): string {
 }
 
 /**
+ * Every moved set `sweptGlob` matches, with the entry keys each names. Nothing
+ * is moved here: these sets were taken by a sweep before, and only need their
+ * entries dropped and then releasing.
+ */
+async function* takeSweptIndexKeys(
+	sweptGlob: string,
+): AsyncGenerator<ScopedCacheIndexTake> {
+	for await (const sweptKeys of scanScopedCacheKeys(sweptGlob)) {
+		const keys: string[] = [];
+
+		for (const sweptKey of sweptKeys) {
+			await collectSweptIndexKeys(sweptKey, keys);
+		}
+
+		yield { indexKeys: sweptKeys.length, keys, sweptKeys };
+	}
+}
+
+/**
  * The glob matching every set a sweep of one collection moved aside and has not
  * released yet — bounded by its trailing colon the way the collection's own glob
  * is.
@@ -855,19 +874,9 @@ const redisStore: ScopedCacheStore = {
 		const redis = useRedis();
 
 		// First, what an earlier sweep moved aside and never released: its entries
-		// may still be cached, and this is the only purge that can still reach
-		// them. Before this sweep's own move, so it does not read its sets twice.
-		for await (const leftoverKeys of scanScopedCacheKeys(
-			scopedCacheSweptIndexGlob(collection),
-		)) {
-			const keys: string[] = [];
-
-			for (const leftoverKey of leftoverKeys) {
-				await collectSweptIndexKeys(leftoverKey, keys);
-			}
-
-			yield { indexKeys: leftoverKeys.length, keys, sweptKeys: leftoverKeys };
-		}
+		// may still be cached, and no write's own sets name them any more. Before
+		// this sweep's own move, so it does not read its sets twice.
+		yield* takeSweptIndexKeys(scopedCacheSweptIndexGlob(collection));
 
 		for await (const indexKeys of scanScopedCacheKeys(
 			scopedCacheCollectionIndexGlob(collection),
@@ -897,6 +906,10 @@ const redisStore: ScopedCacheStore = {
 
 			yield { indexKeys: indexKeys.length, keys, sweptKeys: movedKeys };
 		}
+	},
+
+	takeStrandedSweptIndexKeys(): AsyncGenerator<ScopedCacheIndexTake> {
+		return takeSweptIndexKeys(`${scopedCacheIndexPrefix()}swept:*`);
 	},
 
 	releaseSweptIndexKeys(

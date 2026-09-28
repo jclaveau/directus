@@ -894,6 +894,58 @@ export function retryPendingScopedCachePurges(): Promise<number> {
 }
 
 /**
+ * Drop the entries every stranded sweep still names, then release its sets.
+ * Returns how many entries it dropped.
+ *
+ * A collection purge moves its sets aside before it drops their entries, and a
+ * process that dies in between leaves both behind with no record to retry: the
+ * failure was never caught. No write's own sets name those entries any more, so
+ * until a later purge of the same whole collection they stay cached with their
+ * old value.
+ *
+ * Whichever process swept them: one that is still alive only finds its sets gone
+ * or their entries already dropped, which is where its own sweep was heading.
+ * Serialized with the drain for the same reason the drain is serialized with
+ * itself.
+ */
+export function releaseStrandedScopedCacheSweeps(): Promise<number> {
+	const released = pendingScopedCachePurgeDrain
+		.catch(() => 0)
+		.then(() => dropStrandedScopedCacheSweeps());
+
+	pendingScopedCachePurgeDrain = released;
+
+	return released;
+}
+
+async function dropStrandedScopedCacheSweeps(): Promise<number> {
+	if (!scopedCacheIndexStoreAvailable()) {
+		return 0;
+	}
+
+	const { getCache } = await import('../cache.js');
+	const { cache } = getCache();
+
+	// Probed first for the reason the drain probes: a store dropping nothing
+	// would have the sets released while their entries stay cached.
+	if (!cache || await cacheStoreDropsEntries(cache) === false) {
+		return 0;
+	}
+
+	let evicted = 0;
+
+	for await (
+		const taken of useScopedCacheStore().takeStrandedSweptIndexKeys()
+	) {
+		evicted += await dropSweptScopedCacheEntries(cache, taken.keys);
+
+		await useScopedCacheStore().releaseSweptIndexKeys(taken.sweptKeys);
+	}
+
+	return evicted;
+}
+
+/**
  * Retries the recorded targets, never the namespace: a failure records what it
  * could not drop, so recovery drops exactly that and every other slice stays
  * warm. Returns how many recorded rows it cleared — not how many targets they
@@ -1102,7 +1154,27 @@ export function startScopedCachePurgeRecovery(): void {
 			});
 	};
 
-	useScopedCacheStore().onStoreReady(recover);
+	// On `ready` only, never on the timer below: finding a stranded sweep scans
+	// the whole keyspace, and it only strands when a process dies mid-sweep, which
+	// its restart's own `ready` answers.
+	useScopedCacheStore().onStoreReady(() => {
+		releaseStrandedScopedCacheSweeps()
+			.then((evicted) => {
+				if (evicted > 0) {
+					logger.info(
+						`[scoped-cache] dropped ${evicted} entries a stranded sweep named`,
+					);
+				}
+			})
+			.catch((error: any) => {
+				logger.warn(
+					error,
+					`[scoped-cache] releasing stranded sweeps failed: ${error}`,
+				);
+			});
+
+		recover();
+	});
 
 	// A purge can also fail with the link UP — `OOM command not allowed` under
 	// maxmemory/noeviction, a WRONGTYPE, a LOADING replica — and then no `ready`
