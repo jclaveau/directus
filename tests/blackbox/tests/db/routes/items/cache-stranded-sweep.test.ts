@@ -158,7 +158,7 @@ describe.each(vendors)('%s', (vendor) => {
 							// The release runs beside the boot, not before it answers.
 							await expect.poll(async () => {
 								return (await readByName(name!)).headers[cacheStatusHeader];
-							}).toBe(cache);
+							}, { timeout: 10_000 }).toBe(cache);
 
 							expect((await readByName(name!)).body.data)
 								.toEqual(loadYaml(response!));

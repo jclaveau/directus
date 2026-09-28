@@ -27,6 +27,8 @@ const scopedCacheEpochBump = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const evalScript = vi.fn();
+const onEvent = vi.fn();
+const redisState = { status: 'connecting' };
 
 vi.mock('../redis/index.js', () => {
 	return {
@@ -37,6 +39,8 @@ vi.mock('../redis/index.js', () => {
 				scan,
 				sscan,
 				eval: evalScript,
+				on: onEvent,
+				status: redisState.status,
 				pipeline: () => ({ srem, unlink, exec: async () => [] }),
 			};
 		},
@@ -634,5 +638,34 @@ describe('releaseSweptIndexKeys', () => {
 		expect(unlink.mock.calls).toEqual([
 			[['scalabus:scoped-cache-index:swept:slot:a1:1']],
 		]);
+	});
+});
+
+describe('onStoreReady', () => {
+	afterEach(() => {
+		onEvent.mockReset();
+		redisState.status = 'connecting';
+	});
+
+	it(oneLine`
+		runs the listener at once on a connection already up: the boot uses the
+		client before the recovery registers, so that first ready has fired
+	`, () => {
+		redisState.status = 'ready';
+		const listener = vi.fn();
+
+		redisScopedCacheStore().onStoreReady(listener);
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(onEvent).toHaveBeenCalledWith('ready', listener);
+	});
+
+	it('waits for the ready of a connection still coming up', () => {
+		const listener = vi.fn();
+
+		redisScopedCacheStore().onStoreReady(listener);
+
+		expect(listener).not.toHaveBeenCalled();
+		expect(onEvent).toHaveBeenCalledWith('ready', listener);
 	});
 });
