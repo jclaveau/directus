@@ -184,23 +184,9 @@ beforeEach(() => {
 		return queued.map(([keys]) => [null, keys.length]);
 	});
 
-	// The sweep is one script, so the double runs what the script runs: read each
-	// index set and drop them all. It reads through `redis.smembers` and writes
-	// through `redis.unlink` so a case still arms which set holds what, and still
-	// sees the sweep ask for and drop exactly those.
-	redis.eval.mockImplementation(
-		async (_script: string, numKeys: number, ...args: string[]) => {
-			const indexKeys = args.slice(0, numKeys);
-
-			const memberLists = await Promise.all(
-				indexKeys.map((key) => redis.smembers(key)),
-			);
-
-			await redis.unlink(indexKeys);
-
-			return [...new Set(memberLists.flat())];
-		},
-	);
+	// The sweep's script moves the sets it is handed aside and answers with where
+	// it put them. Outside `purgeScopedCache` no case arms a set, so it moves none.
+	redis.eval.mockImplementation(async (): Promise<string[]> => []);
 });
 
 describe('getRedisConnection', () => {
@@ -531,18 +517,31 @@ describe('scoped cache purging', () => {
 				})] as [string, string[]];
 			});
 
-			// The sweep is one script, so the double runs what the script runs: read
-			// every set it was handed, and drop them. A case still arms which set
-			// holds what, and still sees the sweep ask for exactly those.
+			// The double runs what the script runs: move every set it was handed that
+			// exists to `<prefix><position>`, and answer with where it moved them, so
+			// the `SSCAN` after it reads the moved set.
 			redis.eval.mockImplementation(async (
 				_script: string,
 				numKeys: number,
 				...args: string[]
 			) => {
 				const sweptKeys = args.slice(0, numKeys);
+				const movedPrefix = args[numKeys];
 				swept.push(sweptKeys);
 
-				return sweptKeys.flatMap((indexKey) => indexedMembers[indexKey] ?? []);
+				return sweptKeys.flatMap((indexKey, position) => {
+					const members = indexedMembers[indexKey];
+
+					if (members === undefined) {
+						return [];
+					}
+
+					const movedKey = `${movedPrefix}${position + 1}`;
+					delete indexedMembers[indexKey];
+					indexedMembers[movedKey] = members;
+
+					return [movedKey];
+				});
 			});
 		});
 

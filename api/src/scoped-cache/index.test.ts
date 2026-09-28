@@ -1018,12 +1018,12 @@ describe('a collection-wide purge', () => {
 });
 
 /**
- * Stand in for the sweep script: read each index set and drop them all. `members` is
- * what the sets between them hold, and the recorded `swept` is what a case asserts
- * the sweep asked for — the script does it inside Redis, so there is no command of
- * its own to spy on.
+ * Stand in for the sweep's move script, moving none of the sets it is handed, as
+ * when all of them expired since the scan. The recorded `swept` is what a case
+ * asserts the sweep asked for — the script does it inside Redis, so there is no
+ * command of its own to spy on.
  */
-function redisSweepDouble(members: () => Promise<string[]>) {
+function redisSweepDouble() {
 	const swept: string[][] = [];
 
 	return {
@@ -1032,10 +1032,10 @@ function redisSweepDouble(members: () => Promise<string[]>) {
 			_script: string,
 			numKeys: number,
 			...args: string[]
-		) => {
+		): Promise<string[]> => {
 			swept.push(args.slice(0, numKeys));
 
-			return members();
+			return [];
 		}),
 	};
 }
@@ -1257,7 +1257,7 @@ describe('dropScopedCacheIndex', () => {
 		into the script call, and a spread long enough throws RangeError before Redis
 		is reached (#397), taking a purge that can then never complete on retry
 	`, async () => {
-		const sweep = redisSweepDouble(async () => []);
+		const sweep = redisSweepDouble();
 
 		// One set per index value, which is what a per-user-scoped collection
 		// accumulates.
@@ -1554,11 +1554,27 @@ describe('retryPendingScopedCachePurges', () => {
 				}),
 			];
 		}),
+		// Moves every set it was handed that exists to `<prefix><position>` and
+		// answers with where, as the script does, so the `SSCAN` after it reads the
+		// moved set.
 		eval: vi.fn(async (_script: string, numKeys: number, ...args: string[]) => {
 			const sweptKeys = args.slice(0, numKeys);
+			const movedPrefix = args[numKeys];
 			swept.push(sweptKeys);
 
-			return sweptKeys.flatMap((indexKey) => indexedMembers[indexKey] ?? []);
+			return sweptKeys.flatMap((indexKey, position) => {
+				const members = indexedMembers[indexKey];
+
+				if (members === undefined) {
+					return [];
+				}
+
+				const movedKey = `${movedPrefix}${position + 1}`;
+				delete indexedMembers[indexKey];
+				indexedMembers[movedKey] = members;
+
+				return [movedKey];
+			});
 		}),
 		del: vi.fn(),
 		defineCommand: vi.fn(),
