@@ -379,10 +379,10 @@ export class ItemScopedCacheService {
 		return {
 			canResolveSlicesFromRows: true,
 			rows: scopedRows.map((row) => {
-				// 'skip' over 'coarse': every field below is projected by the select,
-				// and a row that somehow lost one is better pinned by the rest of
-				// itself than dropped — the fingerprint then matches MORE reads,
-				// never fewer.
+				// 'skip' is safe only because the select projects every field below.
+				// A row missing one would carry no value on that field, and a read
+				// pinned on it would not match the row: FEWER reads purged, never
+				// more. The guard above refuses rows missing a flat field.
 				const rowPins = scopedCacheCollectionPinsFromRows(
 					this.collection,
 					pinnableFields,
