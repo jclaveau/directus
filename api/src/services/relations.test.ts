@@ -103,6 +103,27 @@ describe('Services / Relations', () => {
 
 			expect(flushResponseCache).toHaveBeenCalledOnce();
 		});
+
+		it(oneLine`
+			flushes nothing when the change rolled back: the relation it would have
+			moved the index along never came to be
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockRejectedValue(new Error('insert or update violates foreign key'));
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await expect(service.createOne(
+				{ collection: 'test', field: 'owner' },
+				{ autoPurgeSystemCache: false },
+			)).rejects.toThrow('insert or update violates foreign key');
+
+			expect(flushResponseCache).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('updateOne', () => {
