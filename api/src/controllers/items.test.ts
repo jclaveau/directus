@@ -244,7 +244,7 @@ describe('items controller', () => {
 		});
 
 		// Without this the pin never reaches respond.ts, which then falls back to the
-		// bare collection tag — so the key slice a single-item read pinned would be
+		// bare collection pin — so the key slice a single-item read pinned would be
 		// indexed under nothing, and any write to the collection would drop the entry.
 		test(oneLine`
 			stamps the read's pins and its unautopurgeable fingerprints

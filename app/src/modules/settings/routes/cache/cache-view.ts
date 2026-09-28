@@ -32,7 +32,7 @@ export interface CacheEntry {
 	hitMs: number | null;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
-	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
+	coarse: boolean; // scoped collection pinned bare — over-purges (a tuning signal)
 }
 
 export type LatencyPercentile = 'p50' | 'p95' | 'p99';
@@ -87,7 +87,7 @@ export interface QueryGroup {
 	entries: CacheEntry[];
 	anomalies: CacheAnomaly[];
 	anomalyCount: number; // total not-cached/error anomaly occurrences
-	coarseCount: number; // cached entries here that over-purge (bare-tagged scoped reads)
+	coarseCount: number; // cached entries here that over-purge (bare-pinned scoped reads)
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;

@@ -98,8 +98,9 @@ describe('App Caching Tests', () => {
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'full';
 			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_purge`;
 
-			// Auto-purge with scoped (tag-based) invalidation: a mutation drops only the cache entries
-			// that read the mutated collection, leaving other collections warm.
+			// Auto-purge with scoped (pin-based) invalidation: a mutation drops only
+			// the cache entries that read the mutated collection, leaving other
+			// collections warm.
 			const envRedisScopedPurge = cloneDeep(envRedisPurge);
 			envRedisScopedPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
 			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_scoped`;
@@ -488,7 +489,7 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		Scoped purge invalidates a pure-aggregate (count) read of the mutated collection —
-		an empty field map still yields the bare collection tag
+		an empty field map still yields the bare collection pin
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -501,7 +502,7 @@ describe('App Caching Tests', () => {
 
 			// Warm the aggregate reads. A `count(*)` names no field, so the read's field map has
 			// only the root collection (no value slice to pin) — it must fall back to the bare
-			// collection tag, or a later write leaves a stale HIT.
+			// collection pin, or a later write leaves a stale HIT.
 			await request(url)
 				.get(`/items/${collectionFirst}`)
 				.query({ 'aggregate[count]': '*' })
@@ -526,7 +527,8 @@ describe('App Caching Tests', () => {
 				.send({ string_field: randomUUID() })
 				.set('Authorization', auth);
 
-			// The bare collection tag must have been applied → the write drops the aggregate.
+			// The bare collection pin must have been applied → the write drops the
+			// aggregate.
 			const invalidated = await request(url)
 				.get(`/items/${collectionFirst}`)
 				.query({ 'aggregate[count]': '*' })
@@ -567,7 +569,7 @@ describe('App Caching Tests', () => {
 				.send({ string_field: randomUUID(), related: related.id })
 				.set('Authorization', auth);
 
-			// A read that joins the related collection — tagged under both collections.
+			// A read that joins the related collection — pinned under both collections.
 			const read = `/items/${collectionFirst}?fields=*,related.*`;
 
 			await request(url).post(`/utils/cache/clear`)
@@ -625,7 +627,7 @@ describe('App Caching Tests', () => {
 				.send({ string_field: randomUUID(), related: related.id })
 				.set('Authorization', auth);
 
-			// A read two relations deep — the AST tags first, related AND grand.
+			// A read two relations deep — the AST pins first, related AND grand.
 			const read = `/items/${collectionFirst}?fields=*,related.grand.*`;
 
 			await request(url).post(`/utils/cache/clear`)
@@ -654,10 +656,10 @@ describe('App Caching Tests', () => {
 		});
 	});
 
-	// o2m / m2m / m2a: a read that joins the target collection is tagged with it (from the
-	// query AST, regardless of whether any rows are linked), so a write to that target
-	// collection must drop the cached read. The deep field paths embed the target's own
-	// data (`tags.<fk>.*`, `blocks.item:<col>.*`).
+	// o2m / m2m / m2a: a read that joins the target collection is pinned by it
+	// (from the query AST, regardless of whether any rows are linked), so a write to
+	// that target collection must drop the cached read. The deep field paths embed
+	// the target's own data (`tags.<fk>.*`, `blocks.item:<col>.*`).
 	describe.each([
 		{
 			relation: 'o2m',
@@ -694,7 +696,7 @@ describe('App Caching Tests', () => {
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
-			// A write to the joined target collection — the join read is tagged with it, so
+			// A write to the joined target collection — the join read is pinned by it, so
 			// it must drop.
 			await request(url).post(`/items/${target}`)
 				.send({ string_field: randomUUID() })
@@ -708,9 +710,10 @@ describe('App Caching Tests', () => {
 		});
 	});
 
-	// Depth-2 chains, one per first-hop relation type, ending on a second-hop leaf (grandRelated
-	// via m2o, grandChild via o2m). The read tags the whole path from the AST, so a write to the
-	// leaf — two relations down — must drop the cached read even though nothing is linked.
+	// Depth-2 chains, one per first-hop relation type, ending on a second-hop leaf
+	// (grandRelated via m2o, grandChild via o2m). The read pins the whole path from
+	// the AST, so a write to the leaf — two relations down — must drop the cached
+	// read even though nothing is linked.
 	describe.each([
 		{
 			chain: 'm2o→o2m',
@@ -758,7 +761,8 @@ describe('App Caching Tests', () => {
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
-			// A write to the leaf two hops down — the read is tagged with it, so it must drop.
+			// A write to the leaf two hops down — the read is pinned by it, so it must
+			// drop.
 			await request(url).post(`/items/${target}`)
 				.send({ string_field: randomUUID() })
 				.set('Authorization', auth);
@@ -781,7 +785,7 @@ describe('App Caching Tests', () => {
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 			// `related` is used only in the filter (not selected) — the read still gets
-			// tagged with it, because its result set depends on collectionRelated.
+			// pinned by it, because its result set depends on collectionRelated.
 			const relatedFilter = `filter[related][string_field][_eq]=${randomUUID()}`;
 			const read = `/items/${collectionFirst}?fields=id&${relatedFilter}`;
 
@@ -863,7 +867,7 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		Dev headers expose scope tags: a scoped read emits the slice on MISS+HIT, a
+		Dev headers expose scope pins: a scoped read emits the slice on MISS+HIT, a
 		scoped write emits the purged slice
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
@@ -982,7 +986,7 @@ describe('App Caching Tests', () => {
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
 			// Mutate a DIFFERENT owner (B). An owner-A-pinned read would wrongly survive; the
-			// self-reference guard tags this read bare, so it must drop.
+			// self-reference guard pins this read bare, so it must drop.
 			await request(url)
 				.post(`/items/${collectionScoped}`)
 				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
@@ -1005,8 +1009,8 @@ describe('App Caching Tests', () => {
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-			// A pinned owner-A read, an unfiltered (bare-tagged) read of the same collection,
-			// and a read of another collection.
+			// A pinned owner-A read, an unfiltered (bare-pinned) read of the same
+			// collection, and a read of another collection.
 			const readA = `/items/${collectionScoped}?filter[owner_field][_eq]=${scopedOwnerA}`;
 			const readBare = `/items/${collectionScoped}`;
 			const otherRead = `/items/${collectionIgnored}`;
@@ -1228,12 +1232,14 @@ describe('App Caching Tests', () => {
 		literal token — sanitizeQuery substitutes it before the read, so the
 		owner's own write purges the read
 	`, () => {
-		// Regression guard: the read-side pin consumes updatedQuery.filter, which looks like it
-		// could still hold the literal '$CURRENT_USER'. It doesn't — sanitizeQuery (REST middleware
-		// + GraphQL parse-query) resolves the dynamic var to the concrete user id before the service
-		// runs, so the scope tag is owner_field=<uuid>, matching what a write derives from the row.
-		// If that resolution ever regressed, the read would tag the literal token, the write would
-		// tag the uuid, they'd never match, and this read would stay a stale HIT after the write.
+		// Regression guard: the read-side pin consumes updatedQuery.filter, which looks
+		// like it could still hold the literal '$CURRENT_USER'. It doesn't —
+		// sanitizeQuery (REST middleware + GraphQL parse-query) resolves the dynamic var
+		// to the concrete user id before the service runs, so the scope pin is
+		// owner_field=<uuid>, matching what a write derives from the row. If that
+		// resolution ever regressed, the read would pin the literal token, the write
+		// would pin the uuid, they'd never match, and this read would stay a stale HIT
+		// after the write.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -1304,7 +1310,7 @@ describe('App Caching Tests', () => {
 		// them to `owner_field = $CURRENT_USER`. That predicate lives in the permission rule,
 		// injected as `ast.cases`, not in the query — so the pin off
 		// `joinFilterWithCases(filter, cases)` (its `{ _or: cases }`) scopes the read.
-		// Without it the read falls back to the bare collection tag and any other user's
+		// Without it the read falls back to the bare collection pin and any other user's
 		// write purges it (the over-purge this fixes). The "spared" witness below is the
 		// proof it's value-scoped and not bare.
 		it.each(vendors)('%s', async (vendor) => {
@@ -1380,8 +1386,8 @@ describe('App Caching Tests', () => {
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
-			// A write in ANOTHER owner's slice. A bare-tagged read would MISS here; a case-pinned
-			// read to <me.id> is spared.
+			// A write in ANOTHER owner's slice. A bare-pinned read would MISS here; a
+			// case-pinned read to <me.id> is spared.
 			await request(url).post(`/items/${collectionScoped}`)
 				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
 				.set('Authorization', admin);
@@ -1512,7 +1518,7 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		Two permission cases (OR-joined) do NOT bound the read — it falls back to the bare
-		collection tag, so a write to ANY owner's slice purges it
+		collection pin, so a write to ANY owner's slice purges it
 	`, () => {
 		// The single-case soundness gate: joinFilterWithCases applies cases as { _or: cases },
 		// so 2 rules mean a row need match only one — the read is not bounded to owner=me and
@@ -1593,7 +1599,7 @@ describe('App Caching Tests', () => {
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
-			// Write in ANOTHER owner's slice. A bare-tagged read MISSes here; a wrongly
+			// Write in ANOTHER owner's slice. A bare-pinned read MISSes here; a wrongly
 			// owner=me-pinned read would survive.
 			await request(url).post(`/items/${collectionScoped}`)
 				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
@@ -1892,7 +1898,7 @@ describe('App Caching Tests', () => {
 
 			// The relational-pk filter pinned owner_ref=<ownerA>, so B's write dropped only B
 			// (MISS) and left A cached (HIT). Without the relational unwrap the read would pin
-			// nothing → bare collection tag → B's write would leave A a MISS too.
+			// nothing → bare collection pin → B's write would leave A a MISS too.
 			expect(afterA.statusCode).toBe(200);
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterB.statusCode).toBe(200);
@@ -1908,7 +1914,7 @@ describe('App Caching Tests', () => {
 		// scoped_cache_fields = ['owned_item.owner_ref'] on owned_sub_item: the owner is
 		// owned_sub_item → owned_item → owner_ref, so the mutated row only carries
 		// `owned_item` — the write must join through it to recover the owner. Without
-		// path resolution the read pins nothing → bare tag → B's write leaves A a MISS.
+		// path resolution the read pins nothing → bare pin → B's write leaves A a MISS.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -2160,7 +2166,7 @@ describe('App Caching Tests', () => {
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
-			// A write in ANOTHER owner's slice. A bare-tagged read would MISS; the
+			// A write in ANOTHER owner's slice. A bare-pinned read would MISS; the
 			// relational case pin to <ownerA> spares it.
 			await addItem(ownerB);
 
@@ -2298,12 +2304,12 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		A cached custom-controller read (/settings) is purged when its collection is
-		mutated: the bare-collection-tag fallback keeps it from orphaning in scoped mode
+		mutated: the bare-collection-pin fallback keeps it from orphaning in scoped mode
 	`, () => {
-		// The /settings controller sets res.locals.payload but no scopedCacheTags. Its
-		// cached response would be tagged [] and no scoped purge could drop it (a stale
+		// The /settings controller sets res.locals.payload but no scopedCachePins. Its
+		// cached response would be pinned [] and no scoped purge could drop it (a stale
 		// HIT after a settings PATCH: the license reask). respond.ts adds the bare
-		// `directus_settings` tag, so the PATCH's scoped purge reaches it.
+		// `directus_settings` pin, so the PATCH's scoped purge reaches it.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -2340,7 +2346,7 @@ describe('App Caching Tests', () => {
 		A collection-less read (/server/info) is not cached in scoped mode: nothing
 		could purge it, so respond.ts skips it rather than orphan a stale entry
 	`, () => {
-		// /server/info runs respond without useCollection → no scopedCacheTags and no
+		// /server/info runs respond without useCollection → no scopedCachePins and no
 		// req.collection. In scoped mode nothing could ever purge it, so it isn't cached
 		// (MISS every read) — unlike an item read, which HITs in the same env.
 		it.each(vendors)('%s', async (vendor) => {
@@ -2371,7 +2377,7 @@ describe('App Caching Tests', () => {
 		data: a business-row write leaves it cached; a schema mutation purges it
 	`, () => {
 		// /collections describes the SCHEMA. useCollection('directus_collections') + the
-		// respond.ts fallback tag its cached response with directus_collections, so it
+		// respond.ts fallback pins its cached response with directus_collections, so it
 		// survives item writes (schema, not data); only a schema mutation drops it.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -2386,7 +2392,7 @@ describe('App Caching Tests', () => {
 			await request(url).post(`/utils/cache/clear`)
 				.set('Authorization', auth);
 
-			// Warm. Non-vacuity: cached now (was orphaned/uncached before the tag).
+			// Warm. Non-vacuity: cached now (was orphaned/uncached before the pin).
 			await readCollections();
 			const warm = await readCollections();
 
@@ -2414,12 +2420,12 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		/fields, /relations and /schema/snapshot are tagged by their system collections:
+		/fields, /relations and /schema/snapshot are pinned by their system collections:
 		a business write leaves them cached; a field mutation purges all
 	`, () => {
 		// The param reads (/fields/:c, /relations/:c) set an explicit directus_fields /
-		// directus_relations tag — validateCollection had reset req.collection to the
-		// data collection. /schema/snapshot tags {collections,fields,relations}. So an
+		// directus_relations pin — validateCollection had reset req.collection to the
+		// data collection. /schema/snapshot pins {collections,fields,relations}. So an
 		// item write spares them, a field create/delete drops all three.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -2508,7 +2514,7 @@ describe('App Caching Tests', () => {
 		A collection-less read (/server/info) IS cached in full-purge mode — the skip is
 		scoped-mode-only, since full mode's cache.clear() can't orphan
 	`, () => {
-		// The mirror of the scoped-mode skip above: in full mode the same tagless,
+		// The mirror of the scoped-mode skip above: in full mode the same pinless,
 		// collection-less response is cached (a mutation clears the whole cache, so it
 		// can't go stale). Proves the behavior split is intentional, not a blanket skip.
 		it.each(vendors)('%s', async (vendor) => {
@@ -2548,7 +2554,7 @@ describe('App Caching Tests', () => {
 			await request(url).post('/utils/cache/stats/truncate')
 				.set('Authorization', auth);
 
-			// Fill, then hit — the entry is now tagged with the collection it read.
+			// Fill, then hit — the entry is now pinned by the collection it read.
 			await request(url).get(`/items/${collectionFirst}`)
 				.set('Authorization', auth);
 
@@ -2556,12 +2562,12 @@ describe('App Caching Tests', () => {
 				.set('Authorization', auth);
 
 			// `collectionIgnored`, not `collectionRelated`: a related collection's
-			// read can legitimately carry the mutated collection's tag, so only the
+			// read can legitimately carry the mutated collection's pin, so only the
 			// pair the isolation test above already proves separate can assert zero.
 			await request(url).get(`/items/${collectionIgnored}`)
 				.set('Authorization', auth);
 
-			// Mutating the first collection purges the tags its read carries.
+			// Mutating the first collection purges the pins its read carries.
 			await request(url).post(`/items/${collectionFirst}`)
 				.set('Authorization', auth)
 				.send({ name: 'purge-counter' });
@@ -2601,7 +2607,7 @@ describe('App Caching Tests', () => {
 			// ...and this one's was not. `collectionIgnored` sits in
 			// CACHE_AUTO_PURGE_IGNORE_LIST, so what this pins is that the count is
 			// per-entry rather than one global number repeated on every row — a
-			// broken attribution would show the same figure here. Tag-level
+			// broken attribution would show the same figure here. Pin-level
 			// isolation between two purge-eligible collections is covered by the
 			// join's own unit tests, not from here.
 			expect(untouched).toBeDefined();
@@ -2613,7 +2619,7 @@ describe('App Caching Tests', () => {
 		The entry read names the purges that covered it since it was filled
 	`, () => {
 		// What replaced the cached payload on the MCP entry read: a body only ever
-		// *looks* stale, whereas "filled at T0, a purge covering its tags fired at
+		// *looks* stale, whereas "filled at T0, a purge covering its pins fired at
 		// T1, still held" is a proof of a missed invalidation.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -2704,8 +2710,8 @@ describe('App Caching Tests', () => {
 			expect(newest.collection).toBe(collectionFirst);
 
 			// A purge that reached this entry by naming its collection carries no
-			// tag of its own, so the field says so with null rather than an empty
-			// string a reader could mistake for a tag.
+			// pin of its own, so the field says so with null rather than an empty
+			// string a reader could mistake for a pin.
 			if (newest.mode === 'collection') {
 				expect(newest.scopedCachePin).toBeNull();
 			}
@@ -3080,7 +3086,7 @@ describe('App Caching Tests', () => {
 				.set('Authorization', auth);
 
 			// missing_scope: `{__typename}` reads no collection, so it carries no scope
-			// tags under scoped purge — caching it would orphan a stale entry, so it is
+			// pins under scoped purge — caching it would orphan a stale entry, so it is
 			// skipped and flagged. (/server/info can't stand in here: it opts out of the
 			// cache entirely in scoped mode, so it is never cacheable and so never
 			// flagged. Neither can /server/specs/oas: at ~150kb it trips the 8kb cap
@@ -3623,11 +3629,11 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		A collection-wide purge counts against every entry that read the collection,
-		once per purge however many of that entry's tags it covered
+		once per purge however many of that entry's pins it covered
 	`, () => {
-		// The coarse half of the attribution, which the tag-level join can never
-		// reach: a `collection` purge names no tag, and a pinned entry carries only
-		// its slice tag. It is joined on the collection instead. Seeded rather than
+		// The coarse half of the attribution, which the pin-level join can never
+		// reach: a `collection` purge names no pin, and a pinned entry carries only
+		// its slice pin. It is joined on the collection instead. Seeded rather than
 		// provoked — driving a real purge into the collection fallback needs a scope
 		// that cannot be resolved, and what is under test is the join.
 		it.each(vendors)('%s', async (vendor) => {
@@ -3644,7 +3650,7 @@ describe('App Caching Tests', () => {
 			await request(url).post('/utils/cache/stats/truncate')
 				.set('Authorization', auth);
 
-			// Fill, then hit: the entry now has a descriptor and its own tag rows.
+			// Fill, then hit: the entry now has a descriptor and its own pin rows.
 			await request(url).get(`/items/${collectionFirst}`)
 				.set('Authorization', auth);
 
@@ -3675,7 +3681,7 @@ describe('App Caching Tests', () => {
 			// Nothing has purged it yet — the baseline the assertion below moves off.
 			expect(entry.purges).toBe(0);
 
-			// A second tag of the same collection on the same entry, so the coarse
+			// A second pin of the same collection on the same entry, so the coarse
 			// join has two rows through which to reach one purge.
 			await db('directus_cache_stats_scoped_entry_pins').insert({
 				cache_key: entry.key,
@@ -3689,7 +3695,7 @@ describe('App Caching Tests', () => {
 			const now = Date.now();
 
 			await db('directus_cache_stats_scoped_purge_pins').insert([
-				// The purge that covered it: one tag-less row naming the collection,
+				// The purge that covered it: one pin-less row naming the collection,
 				// which is all a collection-wide purge knows about its own reach.
 				{
 					purge_id: covering,
@@ -3723,7 +3729,7 @@ describe('App Caching Tests', () => {
 				return row.key === entry.key;
 			});
 
-			// One. Not two for the entry's two matching tag rows — the count is
+			// One. Not two for the entry's two matching pin rows — the count is
 			// DISTINCT on the purge, not on what it matched through. Not two for
 			// another collection's purge, and not two for the one that has aged out
 			// of the window.

@@ -97,7 +97,7 @@ describe('Services / Fields', () => {
 	// Last, since the spies below survive clearAllMocks and would otherwise leak the
 	// stubbed columnInfo into readOne (which needs the real one to throw).
 	describe('readAll', () => {
-		it('tags the result with directus_fields', async () => {
+		it('pins the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
 				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 

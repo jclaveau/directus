@@ -130,7 +130,7 @@ describe('Services / Relations', () => {
 	});
 
 	describe('readAll', () => {
-		it('tags the result with directus_relations', async () => {
+		it('pins the result with directus_relations', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
 				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
 
@@ -146,7 +146,7 @@ describe('Services / Relations', () => {
 	});
 
 	describe('readOne', () => {
-		it('tags a found relation with directus_relations', async () => {
+		it('pins a found relation with directus_relations', async () => {
 			vi.mocked(validateAccess).mockResolvedValue(undefined);
 			vi.mocked(fetchAllowedFields).mockResolvedValue(['related']);
 

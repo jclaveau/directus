@@ -26,7 +26,7 @@ vi.mock('../../cache.js', () => {
 	};
 });
 
-// Keep scopedCacheCollectionPinsFromRows + composeScopedCachePaths real so tag
+// Keep scopedCacheCollectionPinsFromRows + composeScopedCachePaths real so pin
 // derivation and relational-scope detection run; only spy the purge sink and pin
 // scoped mode.
 vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
@@ -118,7 +118,7 @@ describe('createScopedCacheExtensionHandle', () => {
 		await handle.purgeForMutatedRows('logs', [{ id: 1 }]);
 
 		// A collection declaring nothing still pins its key on every single-row read,
-		// so a bypassed write owes that slice — the bare tag alone would leave it
+		// so a bypassed write owes that slice — the bare pin alone would leave it
 		// stale. It splits its index by nothing, so the purge reads the bare set.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			state.cache,
@@ -135,8 +135,8 @@ describe('createScopedCacheExtensionHandle', () => {
 	});
 
 	it(oneLine`
-		collection absent from the schema: purges its bare tag only — it resolves no key
-		and no scope field, and that tag still drops its reads
+		collection absent from the schema: purges its bare pin only — it resolves no key
+		and no scope field, and that pin still drops its reads
 	`, async () => {
 		const handle = createScopedCacheExtensionHandle(getSchema);
 
@@ -178,7 +178,7 @@ describe('createScopedCacheExtensionHandle', () => {
 		await handle.purgeForMutatedRows('articles', [{ account: 42 }]);
 
 		// A raw row carries only the first-hop fk (account=42), not the pinned terminal,
-		// so it must fall back to collection-wide rather than emit a wrong fk tag.
+		// so it must fall back to collection-wide rather than emit a wrong fk pin.
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 

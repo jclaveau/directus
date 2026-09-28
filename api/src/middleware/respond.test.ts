@@ -220,7 +220,7 @@ afterEach(() => {
 
 describe('respond middleware', () => {
 	test(oneLine`
-		cacheable GET MISS: sets cache value + expires_at and tags the scoped-cache keys
+		cacheable GET MISS: sets cache value + expires_at and pins the scoped-cache keys
 	`, async () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
@@ -258,7 +258,7 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		// #205 scoped-cache tagging fires with the request's fingerprints, the legacy
+		// #205 scoped-cache pinning fires with the request's fingerprints, the legacy
 		// flat pins the old index is still written under, and the schema the index
 		// path of each collection is read off — this one declares no scope field, so
 		// every fingerprint goes in the bare set.
@@ -436,7 +436,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('falls back to the bare collection tag when tags are absent', async () => {
+	test('falls back to the bare collection pin when pins are absent', async () => {
 		const res = makeRes({ data: [] });
 		const req = makeReq();
 
@@ -522,7 +522,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		guards the payload's tags by the counters the read took before its query,
+		guards the payload's pins by the counters the read took before its query,
 		folded into the ones useCollection took for the route's own collection
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
@@ -585,7 +585,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a pinned read reporting total_count keeps the bare collection tag beside its
+		a pinned read reporting total_count keeps the bare collection pin beside its
 		pins — the count drops the filter, so a row the pins never bounded changes it
 	`, async () => {
 		const res = makeRes(
@@ -639,7 +639,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		meta=* keeps the bare tag too — it expands to every counter, so the read carries
+		meta=* keeps the bare pin too — it expands to every counter, so the read carries
 		total_count without ever naming it
 	`, async () => {
 		const res = makeRes(
@@ -673,8 +673,8 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		total_count on an unpinned read adds no duplicate — the bare collection tag it
-		already fell back to is the same tag the count needs
+		total_count on an unpinned read adds no duplicate — the bare collection pin it
+		already fell back to is the same pin the count needs
 	`, async () => {
 		const res = makeRes({ meta: { total_count: 2 }, data: [{ id: 1 }] });
 		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } });
@@ -691,7 +691,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a cache-audit replay answers the tags a fill would pin, and stores nothing
+		a cache-audit replay answers the pins a fill would set, and stores nothing
 	`, async () => {
 		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
 
@@ -747,7 +747,7 @@ describe('respond middleware', () => {
 	});
 
 	test('caches a collection-less response in full-purge mode', async () => {
-		// scopedCachePurgeEnabled defaults to false → full mode. The same tagless,
+		// scopedCachePurgeEnabled defaults to false → full mode. The same pinless,
 		// collection-less response IS cached (a mutation clears the whole cache).
 		const res = makeRes({ data: {} });
 		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
@@ -848,7 +848,7 @@ describe('respond middleware', () => {
 
 	test(oneLine`
 		a purge that swept while the fill was writing takes the entry back out — its
-		sweep read the tag index before this key was filed into it
+		sweep read the fingerprint index before this key was filed into it
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -932,7 +932,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		guards a system route's fallback tag by the reading useCollection took, so a
+		guards a system route's fallback pin by the reading useCollection took, so a
 		read handing over no reading of its own is still compared after the fill
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
@@ -989,8 +989,8 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a refused tag index leaves NO value cached: an untagged entry is unreachable to
-		every purge and would serve stale for its whole TTL
+		a refused fingerprint index leaves NO value cached: an unpinned entry is
+		unreachable to every purge and would serve stale for its whole TTL
 	`, async () => {
 		vi.mocked(indexScopedCacheEntry).mockRejectedValueOnce(new Error('OOM'));
 		const res = makeRes({ data: [] });
@@ -1095,11 +1095,11 @@ describe('respond middleware', () => {
 	} as unknown as Request['schema'];
 
 	test(oneLine`
-		a scoped collection tagged bare is marked coarse on the descriptor
+		a scoped collection pinned bare is marked coarse on the descriptor
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// articles has scoped_cache_fields but the read tagged bare (no value slice) →
+		// articles has scoped_cache_fields but the read pinned bare (no value slice) →
 		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
@@ -1143,7 +1143,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		the descriptor carries the tags in the same spelling the purge side records
+		the descriptor carries the pins in the same spelling the purge side records
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
@@ -1171,7 +1171,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('a bare tag on a NON-scoped collection is not coarse', async () => {
+	test('a bare pin on a NON-scoped collection is not coarse', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
 		// No scoped_cache_fields → the bare pin is the only correct pin, not a fallback.
@@ -1322,7 +1322,7 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		CACHE_TAGS_HEADER MISS: emits the pins header, tags the __pins sibling
+		CACHE_TAGS_HEADER MISS: emits the pins header, writes the __pins sibling
 	`, async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 
@@ -1390,7 +1390,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('CACHE_PURGED_TAGS_HEADER emits purged tags on a mutation', async () => {
+	test('CACHE_PURGED_TAGS_HEADER emits purged pins on a mutation', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 
 		const res = makeRes(
@@ -1438,7 +1438,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	// A batch write pins one tag per row; past CACHE_TAGS_HEADER_MAX_SIZE the header
+	// A batch write pins one pin per row; past CACHE_TAGS_HEADER_MAX_SIZE the header
 	// stops and the __pins sibling still keeps every pin.
 	test('clamps both tag headers, the sibling keeps every pin', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';

@@ -34,9 +34,10 @@ export function createScopedCacheExtensionHandle(
 				return;
 			}
 
-			// Scoped purging off (memory store / CI): no tag index to target a slice,
-			// so a bypassed write can only stay correct by dropping the whole data
-			// cache. (The same fallback `purgeScopedCache` runs when scoped is off.)
+			// Scoped purging off (memory store / CI): no fingerprint index to target a
+			// slice, so a bypassed write can only stay correct by dropping the whole
+			// data cache. (The same fallback `purgeScopedCache` runs when scoped is
+			// off.)
 			if (!scopedCachePurgeEnabled()) {
 				await cache.clear();
 				return;
@@ -49,8 +50,8 @@ export function createScopedCacheExtensionHandle(
 			// A relational scope — an explicit dotted field, or an M2O field that
 			// composes to a deeper terminal — can't be resolved from the mutated rows:
 			// a raw row carries only the first-hop fk, not the terminal value the read
-			// side pinned, so a flat fk tag would miss the real slice and leave it
-			// stale. Fall back to a collection-wide purge (this collection's bare tag +
+			// side pinned, so a flat fk pin would miss the real slice and leave it
+			// stale. Fall back to a collection-wide purge (this collection's bare pin +
 			// every slice, still sparing other collections).
 			const hasRelationalScope =
 				scopeFields.some((field) => field.includes('.'))
@@ -74,7 +75,7 @@ export function createScopedCacheExtensionHandle(
 				pinnedFields.map((field) => [field, collectionSchema?.fields[field]?.type]),
 			);
 
-			// One fingerprint per row, not one tag per value: a flat tag list spells a
+			// One fingerprint per row, not one pin per value: a flat pin list spells a
 			// row's pins as separate slices, so a read bound to `owner=alpha AND
 			// method=spaced` would go on any write carrying either one. A fingerprint
 			// keeps them together, which is the whole query case the index purge tests

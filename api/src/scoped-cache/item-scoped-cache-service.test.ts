@@ -86,9 +86,10 @@ describe('snapshot', () => {
 		});
 	});
 
-	// The whole point of a composite tag: a read pinned to BOTH owner=alpha and
-	// method=slow depends on neither of these rows, and would be purged by them if
-	// their values were emitted as separate tags to be matched one at a time.
+	// The whole point of a composite fingerprint: a read pinned to BOTH
+	// owner=alpha and method=slow depends on neither of these rows, and would be
+	// purged by them if their values were emitted as separate pins to be
+	// matched one at a time.
 	it('keeps two rows apart rather than pooling their values', async () => {
 		tracker.on.select('item').response([
 			{ id: 1, owner: 'alpha', method: 'spaced', parent: 9, '#path0': 'north' },

@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //     The declared slice reaches the collection's bare entries too, so the global
 //     read goes with it; a sibling slice stays warm.
 //   - a pure veto's GLOBAL (unscoped) read stays warm too: the cancel changed
-//     nothing, so not even the bare collection tag is purged (a pure cancel must
+//     nothing, so not even the bare collection pin is purged (a pure cancel must
 //     not drain the declarations, else every rejected write flushes all global
 //     reads).
 
@@ -265,7 +265,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a pure update veto leaves the collection's GLOBAL (unscoped) read warm — the
-			cancel changed nothing, so the bare collection tag is left untouched
+			cancel changed nothing, so the bare collection pin is left untouched
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -273,7 +273,7 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			// Warm an unscoped list read → carried by the bare collection tag.
+			// Warm an unscoped list read → carried by the bare collection pin.
 			await readAll(EDITABLE);
 
 			// Pure veto: the hook cancels the update without declaring any purge.
@@ -289,7 +289,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a pure delete veto leaves the collection's GLOBAL (unscoped) read warm — the
-			cancel deleted nothing, so the bare collection tag is left untouched
+			cancel deleted nothing, so the bare collection pin is left untouched
 		`, async () => {
 			const url = getUrl(vendor, env);
 

@@ -922,7 +922,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 					purge: {
 						type: 'boolean',
-						description: 'Evict the stale and tag-drifted entries once '
+						description: 'Evict the stale and pin-drifted entries once '
 							+ 'reported. Off by default.',
 					},
 					ignore: {

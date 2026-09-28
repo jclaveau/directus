@@ -2,7 +2,7 @@ get:
   summary: Read one cache entry
   description: >
     The live state of a single response-cache entry: the payload still held for
-    it, its scoped-cache tags, when it was written and when it expires, its size
+    it, its scoped-cache pins, when it was written and when it expires, its size
     raw and compressed, any tombstone, and the purges that covered it since it
     was filled. Takes the `redisKey` a cache entry listing returned — not its
     `key`, which is the stats identity and a different string wherever

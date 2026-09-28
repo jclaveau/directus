@@ -18,8 +18,8 @@ Feature: A purge a hook declares reaches every read its slice could answer
   filed under a bare fingerprint and holds that slice's rows as much as a read
   pinned to it does.
 
-  A hook written before fingerprints still declares a tag, `{ collection,
-  field, value }`, and the tag names the slice its field and value spell: read
+  A hook written before fingerprints still declares a pin, `{ collection,
+  field, value }`, and the pin names the slice its field and value spell: read
   as a fingerprint pinning nothing, it would purge only the reads that do.
 
   A declaration on another collection reads that collection's index the way its
@@ -156,7 +156,7 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |               |                       |     - note     |
       |               |                       |     - owner    |
 
-  Scenario: a purge declared as a pre-fingerprint tag purges the read pinned on it
+  Scenario: a purge declared as a pre-fingerprint pin purges the read pinned on it
     Given the slots:
       | marker      | owner | note  | amount |
       | target_slot | alpha | first | 10     |
@@ -188,7 +188,7 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |                       |                |     - id            |
       |                       |                |     - note          |
       |                       |                |     - owner         |
-    Then the read is purged, the tag naming "owner: alpha":
+    Then the read is purged, the pin naming "owner: alpha":
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |   note: rewritten     |     owner:     |

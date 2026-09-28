@@ -24,7 +24,7 @@ const redis = vi.hoisted(() => {
 		expire: vi.fn(),
 		eval: vi.fn(),
 		srem: vi.fn(),
-		scopedCacheTagExpiry: vi.fn(),
+		scopedCacheIndexExpiry: vi.fn(),
 		sunion: vi.fn(),
 		unlink: vi.fn(),
 		exec: vi.fn(),
@@ -190,13 +190,13 @@ beforeEach(() => {
 	// sees the sweep ask for and drop exactly those.
 	redis.eval.mockImplementation(
 		async (_script: string, numKeys: number, ...args: string[]) => {
-			const tagKeys = args.slice(0, numKeys);
+			const indexKeys = args.slice(0, numKeys);
 
 			const memberLists = await Promise.all(
-				tagKeys.map((key) => redis.smembers(key)),
+				indexKeys.map((key) => redis.smembers(key)),
 			);
 
-			await redis.unlink(tagKeys);
+			await redis.unlink(indexKeys);
 
 			return [...new Set(memberLists.flat())];
 		},
@@ -325,14 +325,14 @@ describe('scoped cache purging', () => {
 
 			// The members ride the script, which files them and moves the set's
 			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:articles:',
 				600,
 				'articles:&|resp-key',
 				'articles:&|resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:directus_users:',
 				600,
 				'directus_users:&|resp-key',
@@ -343,7 +343,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			carries every value of a pin in ONE member, which is the AND a tag per value
+			carries every value of a pin in ONE member, which is the AND a pin per value
 			could not spell
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
@@ -353,7 +353,7 @@ describe('scoped cache purging', () => {
 				},
 			]);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
 				'slots:&student=,7,A,&|resp-key',
@@ -370,7 +370,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
 				'slots:&student=,\x00null,&|resp-key',
@@ -400,9 +400,9 @@ describe('scoped cache purging', () => {
 				schema,
 			);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledOnce();
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledOnce();
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:student=7',
 				600,
 				'slots:&student=,7,&|resp-key',
@@ -433,16 +433,16 @@ describe('scoped cache purging', () => {
 				schema,
 			);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledTimes(2);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:student=A',
 				600,
 				'slots:&student=,A,B,&|resp-key',
 				'slots:&student=,A,B,&|resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:student=B',
 				600,
 				'slots:&student=,A,B,&|resp-key',
@@ -459,9 +459,9 @@ describe('scoped cache purging', () => {
 			// Keyed off the array position rather than the rendered form, so the same
 			// bucket is sent once per duplicate — redundant but harmless, since a
 			// SADD of the same members twice leaves the set exactly as it was.
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledTimes(2);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:slots:',
 				600,
 				'slots:&student=,A,&|resp-key',
@@ -469,7 +469,7 @@ describe('scoped cache purging', () => {
 			);
 		});
 
-		test('no-op when no tags', async () => {
+		test('no-op when no pins', async () => {
 			await indexScopedCacheEntry('resp-key', []);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
@@ -491,7 +491,7 @@ describe('scoped cache purging', () => {
 				'resp-key__pins',
 			]);
 
-			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
 				'scalabus:scoped-cache-index:fingerprint:articles:',
 				600,
 				'articles:&|resp-key',
@@ -547,7 +547,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			always purges the collection-level tag (global readers) alongside slices
+			always purges the collection-level pin (global readers) alongside slices
 		`, async () => {
 			indexedMembers = {
 				'scalabus:scoped-cache-index:fingerprint:slots:': ['slots:&|global-key'],
@@ -579,7 +579,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			purges the tags it had when a cache.purge extension throws, rather than
+			purges the pins it had when a cache.purge extension throws, rather than
 			failing a mutation whose write already committed
 		`, async () => {
 			indexedMembers = {
@@ -871,7 +871,7 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).not.toHaveBeenCalledWith('key-b');
 		});
 
-		test('no scoped cache tags purges only the collection-level tag', async () => {
+		test('no scoped cache pins purges only the collection-level pin', async () => {
 			indexedMembers = {
 				'scalabus:scoped-cache-index:fingerprint:articles:': [
 					'articles:&|key-a',
@@ -994,7 +994,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			a numeric mutation value resolves the same slice a string-pinned read tagged
+			a numeric mutation value resolves the same slice a string-pinned read pinned
 		`, async () => {
 			// Read side pinned `student=7` off a REST string; the mutation resolves the
 			// value as numeric 7 from the row. The purge must hit the string-pinned
@@ -1019,7 +1019,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			a cache.purge filter that empties the tag set deletes nothing and never
+			a cache.purge filter that empties the pin set deletes nothing and never
 			reads an index set
 		`, async () => {
 			// A delete with no keys throws; an extension is free to drop every pin, so
@@ -1040,7 +1040,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			cache.purge filter augments the purge set (extension-resolved tags get dropped)
+			cache.purge filter augments the purge set (extension-resolved pins get dropped)
 		`, async () => {
 			emitFilter.mockImplementation(async (
 				_event: string,
@@ -1324,7 +1324,7 @@ describe('flushCaches', () => {
 	});
 
 	test(oneLine`
-		drops the scoped-tag index too — those SETs live in raw redis outside the Keyv
+		drops the fingerprint index too — those SETs live in raw redis outside the Keyv
 		namespace, so the response clear misses them and they would linger as pointers
 		to keys that no longer exist
 	`, async () => {
@@ -1525,7 +1525,7 @@ describe('flushCaches', () => {
 
 	test(oneLine`
 		walks the index keyspace once, not once per kind — the layout this replaced
-		took a pass for the tags and another for the slices, and a SCAN pass costs the
+		took a pass for the pins and another for the slices, and a SCAN pass costs the
 		whole keyspace whatever it matches
 	`, async () => {
 		setEnv({

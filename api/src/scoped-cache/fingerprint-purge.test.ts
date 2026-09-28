@@ -265,7 +265,7 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		leaves an entry pinning nothing alone when the mutation keeps the collection
-		tag warm: that entry is what the tag covers
+		pin warm: that entry is what the pin covers
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
@@ -398,7 +398,7 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		purges by the pins it holds when it is shown no rows, which is what a purge
-		that knows none can do: the declared pin, and the bare tag's own reach
+		that knows none can do: the declared pin, and the bare pin's own reach
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
@@ -415,7 +415,7 @@ describe('a purge shown the rows it wrote', () => {
 			null,
 		);
 
-		// The bare tag it carries covers the read that could not be narrowed, and
+		// The bare pin it carries covers the read that could not be narrowed, and
 		// the declared pin covers the entry bound to that value — the entry bound to
 		// another value of the same field stands.
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bare');
@@ -447,7 +447,7 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
-		records the collection tag its rows carry, so the retry that replays the
+		records the collection pin its rows carry, so the retry that replays the
 		record by pin still reaches the reads no value narrows
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({

@@ -226,7 +226,7 @@ describe(oneLine`
 			expect(survivor.headers[cacheStatusHeader]).toBe('MISS');
 			expect(bystander.headers[cacheStatusHeader]).toBe('MISS');
 
-			// Non-vacuity: the key slice alone, which the bare tag a delete emits
+			// Non-vacuity: the key slice alone, which the bare pin a delete emits
 			// never reaches.
 			expect(survivor.headers[cacheTagsHeader])
 				.toBe(`${NODE}:id=${survivorNodeId}`);

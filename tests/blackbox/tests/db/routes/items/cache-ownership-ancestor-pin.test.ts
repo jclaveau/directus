@@ -161,20 +161,20 @@ describe(oneLine`
 		}
 
 		it('pins the two-hop ancestor by key, never bare', async () => {
-			const tags = (await readNotes()).headers[cacheTagsHeader];
+			const pins = (await readNotes()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${GRANDOWNER}:id=${ownedGrandownerId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${GRANDOWNER}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${GRANDOWNER}(,|$)`));
 		});
 
 		it('still pins the direct-fk ancestor by key', async () => {
-			const tags = (await readNotes()).headers[cacheTagsHeader];
+			const pins = (await readNotes()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${OWNER}:id=${ownerId}(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${OWNER}:id=${ownerId}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
 		});
 
 		it(oneLine`

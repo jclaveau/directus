@@ -1327,16 +1327,16 @@ describe('the loopback replayer', () => {
 		related key, and 370 of them ended every audit of that entry in a header
 		overflow
 	`, async () => {
-		const tags = Array.from({ length: 370 }, (_, index) => {
+		const pins = Array.from({ length: 370 }, (_, index) => {
 			return `student_course_part:teaching_unit.course=${6986500 + index}`;
 		}).join(',');
 
-		expect(Buffer.byteLength(tags)).toBeGreaterThan(16 * 1024);
+		expect(Buffer.byteLength(pins)).toBeGreaterThan(16 * 1024);
 
 		server.removeAllListeners('request');
 
 		server.on('request', (_req, res) => {
-			res.setHeader('x-cache-audit-pins', tags);
+			res.setHeader('x-cache-audit-pins', pins);
 			res.end('{"data":[]}');
 		});
 
@@ -1346,7 +1346,7 @@ describe('the loopback replayer', () => {
 			headers: {},
 		});
 
-		expect(response.headers['x-cache-audit-pins']).toBe(tags);
+		expect(response.headers['x-cache-audit-pins']).toBe(pins);
 	});
 
 	test('rejects when nothing listens there', async () => {

@@ -76,7 +76,7 @@ describe(oneLine`
 					{
 						collection: CONFLICT_CHILD,
 						// Both fks declared, so each alias clears the "the write side
-						// emits this shallow tag" gate on its own and the refusal below
+						// emits this shallow pin" gate on its own and the refusal below
 						// is about the disagreement, not about the gate.
 						meta: { scoped_cache_fields: ['parent', 'alt_parent'] },
 						fields: [{ field: 'body', type: 'string', meta: {} }],
@@ -124,7 +124,7 @@ describe(oneLine`
 			});
 
 			// A second to-many hop: `grandchildren` sits under `children`, so its prefix
-			// is O2M and the pin must decline it to the bare tag.
+			// is O2M and the pin must decline it to the bare pin.
 			await CreateFieldO2M(vendor, {
 				collection: CHILD,
 				field: 'grandchildren',
@@ -230,17 +230,17 @@ describe(oneLine`
 		}
 
 		it('pins the embedded child by its parent fk, never bare', async () => {
-			const tags = (await readParent()).headers[cacheTagsHeader];
+			const pins = (await readParent()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${CHILD}:parent=${ownedParentId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
 		});
 
 		it('pins the embedded child reached through an M2O prefix', async () => {
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({
 					'filter[id][_eq]': String(rootId),
@@ -248,35 +248,35 @@ describe(oneLine`
 				})
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${CHILD}:parent=${ownedParentId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
 
 			// The M2O ancestor on the prefix slices too — both pins coexist.
-			expect(tags).toMatch(new RegExp(`(^|, )${PARENT}:id=${ownedParentId}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${PARENT}:id=${ownedParentId}(,|$)`));
 		});
 
 		it('pins one slice per parent row across a multi-parent read', async () => {
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${PARENT}`)
 				.query({ fields: '*,children.*' })
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${CHILD}:parent=${ownedParentId}(,|$)`),
 			);
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${CHILD}:parent=${siblingParentId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
 		});
 
 		it('slices an O2M nested under another to-many by its parent fk', async () => {
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${PARENT}`)
 				.query({
 					'filter[id][_eq]': String(ownedParentId),
@@ -286,13 +286,13 @@ describe(oneLine`
 
 			// The prefix descends the `children` array to reach the child pks the
 			// grandchild is keyed by, so a deep pivot slices instead of falling bare.
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${GRANDCHILD}:child=${ownedChildId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${GRANDCHILD}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${GRANDCHILD}(,|$)`));
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${CHILD}:parent=${ownedParentId}(,|$)`),
 			);
 		});
@@ -300,7 +300,7 @@ describe(oneLine`
 		it('leaves the child bare when a filter reaches into it', async () => {
 			// Filtering parents by a non-key child field makes the read depend on child
 			// rows beyond the nested ones, so the parent-fk pin would serve stale — bare.
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${PARENT}`)
 				.query({
 					'filter[children][body][_eq]': 'owned child',
@@ -308,9 +308,9 @@ describe(oneLine`
 				})
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}:parent=`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${CHILD}:parent=`));
 		});
 
 		it('a write to a sibling parent\'s child keeps the read cached', async () => {
@@ -340,7 +340,7 @@ describe(oneLine`
 		`, async () => {
 			// The root carries no `main`, so descending that prefix finds null where
 			// a relation was expected and yields no parent to key on. Pinning the
-			// child to nothing would drop its tag, so it stays bare and any write to
+			// child to nothing would drop its pin, so it stays bare and any write to
 			// the collection still evicts.
 			await clearCache();
 

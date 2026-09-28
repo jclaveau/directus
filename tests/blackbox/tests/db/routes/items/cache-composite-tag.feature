@@ -1,25 +1,26 @@
 Feature: A cached read is purged only by a write matching its whole fingerprint
 
-  A read carries one tag per collection it touched, holding that read's whole
-  fingerprint: every pin it resolved, and every field it selected, sorted or
-  filtered on. A write purges the entry only when every pin holds on the row it
-  wrote — reading the row as it was or as it became — and only when it touched a
-  field the read is bound to.
+  A read carries one fingerprint per collection it touched, holding that read's
+  whole fingerprint: every pin it resolved, and every field it selected, sorted
+  or filtered on. A write purges the entry only when every pin holds on the row
+  it wrote — reading the row as it was or as it became — and only when it
+  touched a field the read is bound to.
 
-  Today each pin is a tag of its own and any one of them matching is enough, so a
-  read of owner=alpha AND method=spaced is purged by every write carrying
-  method=spaced, whoever owns it. That is what made a scoped read behave like a
-  global one in production.
+  Today each pin is a fingerprint of its own and any one of them matching is
+  enough, so a read of owner=alpha AND method=spaced is purged by every write
+  carrying method=spaced, whoever owns it. That is what made a scoped read
+  behave like a global one in production.
 
   A read is stated as the three things that make it one: the `query` it sends,
   the `response` it answers with, and the `fingerprints` it is filed under —
   every time the feature names a read, whether it is caching one or reading one
-  back after the write. The query is the `Query` the service receives rather than
-  a URL encoding of it, and the fingerprints are the entry's own tags read back
-  out of the index, so a scenario says which pins a read resolved instead of
-  inferring them from what survived a purge. A fingerprint of the collection the
-  Background declares carries no `collection`, and the binder fills it in; the
-  last two scenarios read collections of their own, whose `scoped_cache_fields`
+  back after the write. The query is the `Query` the service receives rather
+  than a URL encoding of it, and the fingerprints are the entry's own index
+  members read back out of the index, so a scenario says which pins a read
+  resolved instead of inferring them from what survived a purge. A fingerprint
+  of the collection the Background declares carries no `collection`, and the
+  binder fills it in; the last two scenarios read collections of their own,
+  whose `scoped_cache_fields`
   compose into paths, so every fingerprint there names its `collection`.
 
   A write is stated the way a read is. The `query` cell names the row it writes

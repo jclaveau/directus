@@ -115,14 +115,14 @@ describe(oneLine`
 		}
 
 		it('pins the tag by its scoped label value, not by pk, never bare', async () => {
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({ 'filter[tag][label][_eq]': 'alpha', fields: '*' })
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}:id=`));
+			expect(pins).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${TAG}:id=`));
 		});
 
 		it('a write to a tag with another label keeps the read cached', async () => {
@@ -225,18 +225,18 @@ describe(oneLine`
 		});
 
 		it('slices each value of an _in filter on the scoped field', async () => {
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({ 'filter[tag][label][_in]': 'alpha,gamma', fields: '*' })
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=gamma(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${TAG}:label=gamma(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
 		});
 
 		it('unions the slices of an _or over one scoped field', async () => {
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({
 					'filter[_or][0][tag][label][_eq]': 'alpha',
@@ -245,9 +245,9 @@ describe(oneLine`
 				})
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=gamma(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${TAG}:label=gamma(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
 		});
 
 		it('slices one axis when the filter names two scoped fields', async () => {
@@ -265,9 +265,9 @@ describe(oneLine`
 					.set('Authorization', auth);
 			};
 
-			const tags = (await readByTwoFields()).headers[cacheTagsHeader];
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
+			const pins = (await readByTwoFields()).headers[cacheTagsHeader];
+			expect(pins).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
 
 			await clearCache();
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');

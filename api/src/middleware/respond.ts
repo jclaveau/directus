@@ -377,7 +377,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							: 0;
 					}
 
-					// Coarse: a scoped collection read tagged bare (no value slice) caches
+					// Coarse: a scoped collection read pinned bare (no value slice) caches
 					// fine but over-purges — a tuning signal, on the descriptor.
 					const scopedFields = req.collection
 						? req.schema?.collections?.[req.collection]?.scopedCacheFields ?? []

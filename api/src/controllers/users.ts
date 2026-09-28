@@ -177,7 +177,7 @@ router.patch(
 
 		// Full mode would flush the whole cache on every navigation (upstream's
 		// reason for the silence); scoped mode drops only the user's own slices.
-		// The bare tag stays warm: any session can call this at the limiter's
+		// The bare pin stays warm: any session can call this at the limiter's
 		// rate, and the reads it names (listings, user hops) never decide on
 		// `last_page`.
 		await service.updateOne(

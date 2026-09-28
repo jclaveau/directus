@@ -40,8 +40,8 @@ export class PermissionsService extends ItemsService {
 	): Promise<WithMeta<Partial<Item>[]>> {
 		const result = await super.readByQuery(query, opts);
 
-		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
-		// tag rider across.
+		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped
+		// cache fingerprint rider across.
 		return withMeta(
 			withAppMinimalPermissions(
 				this.accountability,

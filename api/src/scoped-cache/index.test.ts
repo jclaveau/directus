@@ -165,7 +165,7 @@ afterEach(() => {
 // The one spelling of a pin that the fingerprint index, the purge attribution and
 // the dev headers all share — if these drift, a purge stops matching the entries it
 // actually dropped and the attribution silently reads zero.
-describe('the legacy tag form', () => {
+describe('the legacy pin form', () => {
 	it('renders a bare collection and a pinned slice', () => {
 		expect(scopedCachePinKey({ collection: 'articles' })).toBe('articles');
 
@@ -245,7 +245,7 @@ describe('the exit form', () => {
 		.toBe('articles:slug=a%1Fb%7F');
 	});
 
-	it('leaves a printable tag list untouched', () => {
+	it('leaves a printable pin list untouched', () => {
 		expect(printableScopedCachePin('articles, articles:author=7'))
 		.toBe('articles, articles:author=7');
 	});
@@ -441,7 +441,7 @@ describe('countScopedCachePinMembers', () => {
 	});
 
 	it(oneLine`
-		counts the entries each legacy tag reaches: the bare one the reads no value
+		counts the entries each legacy pin reaches: the bare one the reads no value
 		narrows, a pinned one those reads and the entries bound to that value
 	`, async () => {
 		countedMembers = {
@@ -488,7 +488,7 @@ describe('countScopedCachePinMembers', () => {
 		.toEqual({ 'articles:id=5': 1 });
 	});
 
-	it('reads a null scope slice by the legacy tag\'s own byte', async () => {
+	it('reads a null scope slice by the legacy pin\'s own byte', async () => {
 		countedMembers = {
 			'ns:scoped-cache-index:fingerprint:articles:': [
 				'articles:&author=,\u0000null,&|ns:entry-unassigned',
@@ -505,7 +505,7 @@ describe('countScopedCachePinMembers', () => {
 		.toEqual({ [nullSlice]: 1 });
 	});
 
-	it('counts a legacy tag its collection holds nothing for as zero', async () => {
+	it('counts a legacy pin its collection holds nothing for as zero', async () => {
 		expect(await countScopedCachePinMembers(['orphan'])).toEqual({ orphan: 0 });
 	});
 
@@ -515,7 +515,7 @@ describe('countScopedCachePinMembers', () => {
 		expect(await countScopedCachePinMembers(['articles'])).toEqual({});
 	});
 
-	it('returns {} for an empty tag list', async () => {
+	it('returns {} for an empty pin list', async () => {
 		expect(await countScopedCachePinMembers([])).toEqual({});
 	});
 });
@@ -668,20 +668,20 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it(oneLine`
-		reads a pre-fingerprint tag as the slice it names, not as the bare
+		reads a pre-fingerprint pin as the slice it names, not as the bare
 		collection — which would purge only the reads pinning nothing
 	`, () => {
 		const { scope, purge, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		const legacyTag = {
+		const legacyPin = {
 			collection: 'articles',
 			field: 'author',
 			value: 5,
 		} as ScopedCacheDeclaredFingerprint;
 
-		scope.scopeTo(legacyTag);
-		purge.purgeBy(legacyTag);
+		scope.scopeTo(legacyPin);
+		purge.purgeBy(legacyPin);
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'articles', field: 'author', value: 5 }],
@@ -745,7 +745,7 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it(oneLine`
-		fills a type-less tag's type from the schema — the type is what canonicalizes
+		fills a type-less pin's type from the schema — the type is what canonicalizes
 		the value, so an uppercase uuid a hook names would otherwise resolve a
 		different key from the lowercase one the purge side emits for the same row
 	`, () => {
@@ -1054,7 +1054,7 @@ describe('indexScopedCacheEntry', () => {
 			pipeline: () => {
 				return {
 					sadd: vi.fn().mockReturnThis(),
-					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
+					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
 					expire: vi.fn().mockReturnThis(),
 					persist: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
@@ -1074,7 +1074,7 @@ describe('indexScopedCacheEntry', () => {
 		only ever extends an index set's expiry, so a later write carrying a shorter
 		TTL cannot outlive-orphan the entries an earlier one indexed
 	`, async () => {
-		const tagExpiry = vi.fn().mockReturnThis();
+		const indexExpiry = vi.fn().mockReturnThis();
 		const expire = vi.fn().mockReturnThis();
 		env['CACHE_TTL'] = '30m';
 
@@ -1084,7 +1084,7 @@ describe('indexScopedCacheEntry', () => {
 				return {
 					sadd: vi.fn().mockReturnThis(),
 					expire,
-					scopedCacheTagExpiry: tagExpiry,
+					scopedCacheIndexExpiry: indexExpiry,
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1105,7 +1105,7 @@ describe('indexScopedCacheEntry', () => {
 		// can then reach.
 		expect(expire).not.toHaveBeenCalled();
 
-		expect(tagExpiry).toHaveBeenCalledWith(
+		expect(indexExpiry).toHaveBeenCalledWith(
 			'ns:scoped-cache-index:fingerprint:articles:',
 			3600,
 			'articles:&author=,7,&|entry',
@@ -1126,7 +1126,7 @@ describe('indexScopedCacheEntry', () => {
 				return {
 					sadd,
 					persist,
-					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
+					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1705,7 +1705,7 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		purges a whole collection for a record naming it by its legacy tag — a row
+		purges a whole collection for a record naming it by its legacy pin — a row
 		written before the fingerprint index existed says which collection went stale
 		and nothing narrower, so its reach is the collection
 	`, async () => {
@@ -1741,7 +1741,7 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		purges a whole collection for a legacy tag whose value ends in an ampersand —
+		purges a whole collection for a legacy pin whose value ends in an ampersand —
 		it is no fingerprint, and read as one it pins nothing the index files
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
@@ -2254,7 +2254,7 @@ describe('a purge that fails after its mutation committed', () => {
 			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
-		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, tags) => tags);
+		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, pins) => pins);
 		cache.clear.mockResolvedValue(undefined);
 	});
 
@@ -3387,14 +3387,14 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 	// The SQL each of these compiles to is pinned by
 	// `apply-query/filter/related-key-join.test.ts`, which is what makes the
 	// key the whole dependency rather than a guess about the planner.
-	it('needs no tag for an M2O terminating on the related primary key', () => {
+	it('needs no pin for an M2O terminating on the related primary key', () => {
 		// `owned_item.owner = 7` is answered by the row's own column, and behind
 		// an enforced constraint the owner cannot vanish without writing it.
 		expect(keyingOf({ filter: { owner: { id: { _eq: 7 } } } }).get('owner'))
 			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7]) });
 	});
 
-	it('needs no tag for an M2O whichever operator its key carries', () => {
+	it('needs no pin for an M2O whichever operator its key carries', () => {
 		expect(keyingOf({ filter: { owner: { id: { _in: [7, 8] } } } }).get('owner'))
 			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7, 8]) });
 
@@ -3584,7 +3584,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 	// Non-vacuity for the case above: unkeyed is the answer because the
 	// collection IS reached, not because the walk lost sight of it.
 	it.each(['_eq', '_gt'])(oneLine`
-		still reports the to-many a %s function key counts, keeping a bare tag
+		still reports the to-many a %s function key counts, keeping a bare pin
 	`, (operator) => {
 		expect([...keyingOf({
 			filter: { 'count(owned_sub_items)': { [operator]: 7 } } as Filter,
@@ -4293,7 +4293,7 @@ describe('scopedCachePinsFromKeyedFilters', () => {
 		return scopedCachePinsFromKeyedFilters(schema, 'owned_item', keying);
 	}
 
-	it('pins one primary-key tag per key the filter named', () => {
+	it('pins one primary-key pin per key the filter named', () => {
 		expect(pinsFor(
 			new Map([['owner', { kind: 'keyed', field: 'id', keys: new Set([7, 8]) }]]),
 		).get('owner')).toEqual([

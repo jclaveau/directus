@@ -690,7 +690,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			oneLine`
-				a purge declared as a pre-fingerprint tag purges the read pinned on
+				a purge declared as a pre-fingerprint pin purges the read pinned on
 				it
 			`,
 			(steps) => {

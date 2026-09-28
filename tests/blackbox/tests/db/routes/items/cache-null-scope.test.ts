@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // The NULL scope token opens with a raw NUL so it can never collide with a
 // literal 'null' in a Redis key. That byte is illegal in an HTTP header, so
-// rendering the tag into `CACHE_PURGED_TAGS_HEADER` made `res.setHeader` throw
+// rendering the pin into `CACHE_PURGED_TAGS_HEADER` made `res.setHeader` throw
 // ERR_INVALID_CHAR — AFTER the row had committed. Every write to a collection
 // whose scope field was null came back 500 with the item created, and only
 // while the debug header was on. A unit test on the display form cannot see
@@ -43,7 +43,7 @@ describe(oneLine`
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-null-scope-${vendor}`;
-		// The trigger: without it the tags are never rendered and the write survives.
+		// The trigger: without it the pins are never rendered and the write survives.
 		env[vendor]['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 		env[vendor]['CACHE_TAGS_HEADER'] = tagsHeader;
 		env[vendor]['CACHE_STATUS_HEADER'] = statusHeader;
@@ -140,7 +140,7 @@ describe(oneLine`
 		});
 
 		// The other place the raw token has to survive: the blast radius the admin
-		// tree shows is an SCARD of the tag's own Redis key, rebuilt from the display
+		// tree shows is an SCARD of the pin's own Redis key, rebuilt from the display
 		// label. A label spelled `null` where the key holds `\x00null` scards a key
 		// that does not exist and reports 0 — a slice indexing entries would read as
 		// reaching none of them.
@@ -189,13 +189,13 @@ describe(oneLine`
 			expect(entry.statusCode).toBe(200);
 			expect(entry.body.data.exists).toBe(true);
 
-			const nullTag = `${COLLECTION}:owner=\u0000null`;
+			const nullPin = `${COLLECTION}:owner=\u0000null`;
 
-			expect(entry.body.data.pins).toContain(nullTag);
+			expect(entry.body.data.pins).toContain(nullPin);
 
 			// Zero is exactly what a mis-spelled key returns, so this is the whole
 			// assertion — the entry and its sidecars are all filed under the slice.
-			expect(entry.body.data.pinCounts[nullTag]).toBeGreaterThan(0);
+			expect(entry.body.data.pinCounts[nullPin]).toBeGreaterThan(0);
 		}, 60_000);
 
 		// The control: a present scope value was never affected, so a regression that

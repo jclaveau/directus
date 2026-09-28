@@ -28,7 +28,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //
 // `dateTime` is the deliberate exception: a naive column comes back as a local
 // `Date` from the driver but as an ISO string from a filter, so no token is
-// stable across drivers and the read refuses to pin it at all — the bare tag
+// stable across drivers and the read refuses to pin it at all — the bare pin
 // instead, which over-purges and cannot go stale.
 
 const TYPED = 'test_scope_value_types';
@@ -153,10 +153,10 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
-		function headerTags(response: request.Response, header: string): string[] {
+		function headerPins(response: request.Response, header: string): string[] {
 			return String(response.headers[header] ?? '')
 				.split(', ')
-				.filter((tag) => tag !== '');
+				.filter((pin) => pin !== '');
 		}
 
 		// Asserting the two labels against each other would pass on a pair that agree
@@ -166,9 +166,9 @@ describe(oneLine`
 			field: string;
 			filterValue: string;
 			rowId: number;
-			expectedTag: string;
+			expectedPin: string;
 		}) {
-			const { field, filterValue, rowId, expectedTag } = options;
+			const { field, filterValue, rowId, expectedPin } = options;
 
 			await clearCache();
 
@@ -176,12 +176,12 @@ describe(oneLine`
 			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
 			expect(miss.body.data).toHaveLength(1);
 
-			const pinned = headerTags(miss, cacheTagsHeader);
-			expect(pinned).toContain(expectedTag);
+			const pinned = headerPins(miss, cacheTagsHeader);
+			expect(pinned).toContain(expectedPin);
 
-			// The bare tag is a live outcome in this very collection — it is what the
+			// The bare pin is a live outcome in this very collection — it is what the
 			// `due` case below asserts — and a read carrying it too would be dropped by
-			// the write through the bare tag alone. The MISS at the end would then pass
+			// the write through the bare pin alone. The MISS at the end would then pass
 			// with the slice matching nothing, which is the whole subject here.
 			expect(pinned).not.toContain(TYPED);
 
@@ -191,7 +191,7 @@ describe(oneLine`
 			const written = await touch(rowId);
 			expect(written.statusCode).toBe(200);
 
-			expect(headerTags(written, purgedTagsHeader)).toContain(expectedTag);
+			expect(headerPins(written, purgedTagsHeader)).toContain(expectedPin);
 
 			const after = await readWhere(field, filterValue);
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
@@ -205,7 +205,7 @@ describe(oneLine`
 				field: 'flag',
 				filterValue: 'true',
 				rowId: flaggedId,
-				expectedTag: `${TYPED}:flag=true`,
+				expectedPin: `${TYPED}:flag=true`,
 			});
 		}, 60_000);
 
@@ -221,7 +221,7 @@ describe(oneLine`
 				field: 'flag',
 				filterValue,
 				rowId: flaggedId,
-				expectedTag: `${TYPED}:flag=true`,
+				expectedPin: `${TYPED}:flag=true`,
 			});
 		}, 60_000);
 
@@ -235,7 +235,7 @@ describe(oneLine`
 				// surgery, while the write only ever emits `42`.
 				filterValue: '0042',
 				rowId: serialId,
-				expectedTag: `${TYPED}:serial=42`,
+				expectedPin: `${TYPED}:serial=42`,
 			});
 		}, 60_000);
 
@@ -247,7 +247,7 @@ describe(oneLine`
 				field: 'amount',
 				filterValue: '1.5',
 				rowId: amountId,
-				expectedTag: `${TYPED}:amount=1.5`,
+				expectedPin: `${TYPED}:amount=1.5`,
 			});
 		}, 60_000);
 
@@ -259,7 +259,7 @@ describe(oneLine`
 				field: 'tenant',
 				filterValue: 'acme',
 				rowId: tenantId,
-				expectedTag: `${TYPED}:tenant=acme`,
+				expectedPin: `${TYPED}:tenant=acme`,
 			});
 		}, 60_000);
 
@@ -275,7 +275,7 @@ describe(oneLine`
 			// matches nothing, and the read still has to pin the slice it would have
 			// served — folding two real slices into one there over-purges rather than
 			// serving stale.
-			expect(headerTags(upper, cacheTagsHeader))
+			expect(headerPins(upper, cacheTagsHeader))
 				.toContain(`${TYPED}:tenant=acme`);
 		}, 60_000);
 
@@ -287,7 +287,7 @@ describe(oneLine`
 				field: 'ref',
 				filterValue: REF,
 				rowId: refId,
-				expectedTag: `${TYPED}:ref=${REF}`,
+				expectedPin: `${TYPED}:ref=${REF}`,
 			});
 		}, 60_000);
 
@@ -303,10 +303,10 @@ describe(oneLine`
 			// ever reads the stored lowercase back off the driver. Pinning the caller's
 			// spelling would file a key no write emits, and the entry would serve stale
 			// for its whole TTL.
-			const pinned = headerTags(upper, cacheTagsHeader);
+			const pinned = headerPins(upper, cacheTagsHeader);
 			expect(pinned).toContain(`${TYPED}:ref=${REF}`);
 
-			// Same reason as the round-trip helper: were the read bare-tagged as well,
+			// Same reason as the round-trip helper: were the read bare-pinned as well,
 			// the touch below would drop it without the uuid folding doing anything.
 			expect(pinned).not.toContain(TYPED);
 
@@ -315,7 +315,7 @@ describe(oneLine`
 
 			const written = await touch(refId);
 
-			expect(headerTags(written, purgedTagsHeader))
+			expect(headerPins(written, purgedTagsHeader))
 				.toContain(`${TYPED}:ref=${REF}`);
 
 			const after = await readWhere('ref', REF.toUpperCase());
@@ -323,7 +323,7 @@ describe(oneLine`
 		}, 60_000);
 
 		it(oneLine`
-			refuses to pin a dateTime slice and takes the bare tag instead, so a write
+			refuses to pin a dateTime slice and takes the bare pin instead, so a write
 			to any row of the collection invalidates the read
 		`, async () => {
 			await clearCache();
@@ -331,17 +331,17 @@ describe(oneLine`
 			const miss = await readWhere('due', '2024-03-04T05:06:07');
 			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
 
-			const tags = headerTags(miss, cacheTagsHeader);
+			const pins = headerPins(miss, cacheTagsHeader);
 
-			expect(tags).toContain(TYPED);
-			expect(tags.some((tag) => tag.startsWith(`${TYPED}:due=`))).toBe(false);
+			expect(pins).toContain(TYPED);
+			expect(pins.some((pin) => pin.startsWith(`${TYPED}:due=`))).toBe(false);
 
 			expect(
 				(await readWhere('due', '2024-03-04T05:06:07'))
 					.headers[cacheStatusHeader],
 			).toBe('HIT');
 
-			// A row the filter never matched, so only the bare tag can carry this
+			// A row the filter never matched, so only the bare pin can carry this
 			// invalidation — the cost the refusal buys.
 			await touch(flaggedId);
 

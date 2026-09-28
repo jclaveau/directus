@@ -182,7 +182,7 @@ describe(oneLine`
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
 			expect(warm.body.data[0].parent.label).toBe('parent-v1');
 
-			// PRIMARY (RED until fixed): the root carries its bare tag, never the
+			// PRIMARY (RED until fixed): the root carries its bare pin, never the
 			// `owner.org=<read org>` slice its nested parent sits outside of.
 			expect(warm.headers[cacheTagsHeader]).toEqual(
 				`${NODE}, ${OWNER}:org=${readOrgId}`,

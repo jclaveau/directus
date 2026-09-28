@@ -1623,7 +1623,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			delete env['RELATIONAL_BATCH_SIZE'];
 		});
 
-		it('tags every collection it read, even when no row came back', async () => {
+		it('pins every collection it read, even when no row came back', async () => {
 			// `run-ast` returns early on an empty result, before the hook the pins are
 			// read from. The field map does not come from that hook — it is derived
 			// from the AST — and a read matching nothing must still be purgeable.

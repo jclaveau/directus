@@ -13,7 +13,7 @@ const useCollection = (collection: string): RequestHandler => {
 		// The system controllers behind this middleware hand `respond` a payload with
 		// no reading of their own, and the fill guard needs one taken BEFORE the rows
 		// are read (`fill-guard.ts`). This is the earliest point that knows the
-		// collection every such response is tagged with, so the reading is taken here.
+		// collection every such response is pinned with, so the reading is taken here.
 		if (req.method === 'GET') {
 			res.locals['scopedCacheEpochsBeforeQuery'] =
 				await readScopedCacheEpochs([collection]);

@@ -38,11 +38,11 @@ const makeService = (schema: object) => {
 	});
 };
 
-describe('GraphQLService scoped cache tags', () => {
+describe('GraphQLService scoped cache pins', () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	test(oneLine`
-		read() unions each child read’s tags into the request-level aggregate
+		read() unions each child read’s pins into the request-level aggregate
 	`, async () => {
 		const schema = {
 			collections: {
@@ -298,7 +298,9 @@ describe('GraphQLService scoped cache tags', () => {
 		});
 	});
 
-	test('execute() stamps the unioned tags onto its result via getMeta()', async () => {
+	test(oneLine`
+		execute() stamps the unioned pins onto its result via getMeta()
+	`, async () => {
 		const gql = makeService({});
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 

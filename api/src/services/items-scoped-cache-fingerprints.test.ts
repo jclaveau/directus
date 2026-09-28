@@ -75,7 +75,9 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
 	});
 
-	test('tags the root collection AND every collection reached through relations', async () => {
+	test(oneLine`
+		pins the root collection AND every collection reached through relations
+	`, async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
@@ -87,7 +89,7 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles', 'users']);
 	});
 
-	test('tags only the root collection for a non-relational read', async () => {
+	test('pins only the root collection for a non-relational read', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
 		const result = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
@@ -123,7 +125,9 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 			.toEqual([{ collection: 'articles', viewFields: ['id', 'title'] }]);
 	});
 
-	test('tags are bounded per read — they do not accumulate across reads on one instance', async () => {
+	test(oneLine`
+		pins are bounded per read — they do not accumulate across reads on one instance
+	`, async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
 		const shallow = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
@@ -144,7 +148,7 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles', 'users']);
 	});
 
-	test('readOne carries the read tags onto the single returned item', async () => {
+	test('readOne carries the read pins onto the single returned item', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 		vi.mocked(runAst).mockResolvedValueOnce([{ id: 1, title: 't' }]);
 
@@ -157,7 +161,7 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles', 'users']);
 	});
 
-	test('readSingleton carries the read tags onto the returned record', async () => {
+	test('readSingleton carries the read pins onto the returned record', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 		vi.mocked(runAst).mockResolvedValueOnce([{ id: 1, title: 't' }]);
 
@@ -170,7 +174,9 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles', 'users']);
 	});
 
-	test('readSingleton carries the read tags onto the synthesized defaults when empty', async () => {
+	test(oneLine`
+		readSingleton carries the read pins onto the synthesized defaults when empty
+	`, async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 		vi.mocked(runAst).mockResolvedValueOnce([]); // no row → readSingleton builds a defaults object
 
@@ -183,7 +189,9 @@ describe('readByQuery scoped cache fingerprint accumulation', () => {
 		).toEqual(['articles']);
 	});
 
-	test('emits empty tags (but still a meta rider) when scoped purge is disabled', async () => {
+	test(oneLine`
+		emits empty pins (but still a meta rider) when scoped purge is disabled
+	`, async () => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(false);
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
@@ -206,7 +214,7 @@ describe(oneLine`
 	});
 
 	test(oneLine`
-		resolves no tag rather than throwing, leaving the bare collection tag
+		resolves no pin rather than throwing, leaving the bare collection pin
 	`, async () => {
 		const service = new ItemsService('ghost', {
 			knex: db,
@@ -247,7 +255,7 @@ describe(oneLine`
 // Each case feeds the rows runAst would return — the pinners read parent keys off
 // them — and asserts the serialized pin list, so a pin, a slice and a bare pin are
 // told apart by the exact string a purge matches against.
-describe('read tags at the merge', () => {
+describe('read pins at the merge', () => {
 	// Cloned: the ownership strip collapses the fed rows in place, and a fixture
 	// two cases share must reach the second one intact.
 	const feed = (rows: Record<string, unknown>[]): void => {
@@ -258,7 +266,7 @@ describe('read tags at the merge', () => {
 		});
 	};
 
-	const tagsOf = async (
+	const pinsOf = async (
 		service: ItemsService,
 		query: Parameters<ItemsService['readByQuery']>[0],
 	): Promise<string[]> => {
@@ -314,7 +322,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				fields: ['*'],
 				filter: { enrollment: { status: { _eq: 'active' } } },
 			})).toEqual(['course', 'enrollment', 'student:id=100']);
@@ -380,7 +388,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(service, { fields: ['*'] }))
+			expect(await pinsOf(service, { fields: ['*'] }))
 				.toEqual(['course', 'enrollment:id=10', 'student:id=100']);
 		});
 	});
@@ -416,7 +424,7 @@ describe('read tags at the merge', () => {
 				comments: [{ id: 5, body: 'y', article: 1 }],
 			}]);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				fields: ['featured_comment.body', 'comments.body'],
 			})).toEqual(['article', 'comment']);
 		});
@@ -432,7 +440,7 @@ describe('read tags at the merge', () => {
 
 			feed([{ id: 1, comments: [{ id: 5, body: 'y', article: 1 }] }]);
 
-			expect(await tagsOf(service, { fields: ['comments.body'] }))
+			expect(await pinsOf(service, { fields: ['comments.body'] }))
 				.toEqual(['article', 'comment:article=1']);
 		});
 	});
@@ -478,7 +486,7 @@ describe('read tags at the merge', () => {
 			// Only the field asked for: the paths a filter alone crosses nest no row.
 			feed([{ id: 1 }]);
 
-			const tags = await tagsOf(service(), {
+			const pins = await pinsOf(service(), {
 				fields: ['id'],
 				filter: {
 					_and: [
@@ -489,8 +497,8 @@ describe('read tags at the merge', () => {
 				},
 			});
 
-			expect(tags).toContain('note');
-			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+			expect(pins).toContain('note');
+			expect(pins.filter((pin) => pin.startsWith('note:'))).toEqual([]);
 		});
 
 		test(oneLine`
@@ -509,7 +517,7 @@ describe('read tags at the merge', () => {
 				},
 			}]);
 
-			const tags = await tagsOf(service(), {
+			const pins = await pinsOf(service(), {
 				fields: ['discipline.notes.body', 'unit.notes.body'],
 				deep: {
 					discipline: { notes: { _filter: { discipline: { _eq: 1 } } } },
@@ -517,9 +525,9 @@ describe('read tags at the merge', () => {
 				},
 			});
 
-			expect(tags).toContain('note:discipline=1');
-			expect(tags).toContain('note:unit=2');
-			expect(tags).not.toContain('note');
+			expect(pins).toContain('note:discipline=1');
+			expect(pins).toContain('note:unit=2');
+			expect(pins).not.toContain('note');
 		});
 
 		test(oneLine`
@@ -538,7 +546,7 @@ describe('read tags at the merge', () => {
 				},
 			}]);
 
-			const tags = await tagsOf(service(), {
+			const pins = await pinsOf(service(), {
 				fields: ['discipline.notes.body', 'unit.notes.body'],
 				filter: { discipline: { notes: { body: { _eq: 'a' } } } },
 				deep: {
@@ -547,8 +555,8 @@ describe('read tags at the merge', () => {
 				},
 			});
 
-			expect(tags).toContain('note');
-			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+			expect(pins).toContain('note');
+			expect(pins.filter((pin) => pin.startsWith('note:'))).toEqual([]);
 		});
 
 		test(oneLine`
@@ -566,13 +574,13 @@ describe('read tags at the merge', () => {
 				},
 			}]);
 
-			const tags = await tagsOf(service(), {
+			const pins = await pinsOf(service(), {
 				fields: ['discipline.notes.body', 'unit.notes.body'],
 				deep: { unit: { notes: { _filter: { unit: { _eq: 2 } } } } },
 			});
 
-			expect(tags).toContain('note');
-			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+			expect(pins).toContain('note');
+			expect(pins.filter((pin) => pin.startsWith('note:'))).toEqual([]);
 		});
 	});
 
@@ -607,7 +615,7 @@ describe('read tags at the merge', () => {
 				reviewed_notes: [{ id: 3, body: 'b', student: 8, reviewer: 7 }],
 			}]);
 
-			expect(await tagsOf(service(), {
+			expect(await pinsOf(service(), {
 				filter: { id: { _eq: 7 } },
 				fields: ['reviewed_notes.body'],
 			})).toEqual(['note', 'owner:id=7']);
@@ -618,7 +626,7 @@ describe('read tags at the merge', () => {
 		`, async () => {
 			feed([{ id: 7, notes: [{ id: 3, body: 'b', student: 7, reviewer: 8 }] }]);
 
-			expect(await tagsOf(service(), {
+			expect(await pinsOf(service(), {
 				filter: { id: { _eq: 7 } },
 				fields: ['notes.body'],
 			})).toEqual(['note:student=7', 'owner:id=7']);
@@ -631,7 +639,7 @@ describe('read tags at the merge', () => {
 				reviewed_notes: [{ id: 4, body: 'c', student: 8, reviewer: 7 }],
 			}]);
 
-			expect(await tagsOf(service(), {
+			expect(await pinsOf(service(), {
 				filter: { id: { _eq: 7 } },
 				fields: ['notes.body', 'reviewed_notes.body'],
 			})).toEqual(['note', 'owner:id=7']);
@@ -689,7 +697,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(service, query)).toEqual([
+			expect(await pinsOf(service, query)).toEqual([
 				'course:student=3',
 				'part:course.student=3',
 				'part:course=20',
@@ -715,7 +723,7 @@ describe('read tags at the merge', () => {
 				parts: [{ id: 200, title: 't', status: 'x', course: 20 }],
 			}]);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				filter: { student: { _eq: 3 }, parts: { status: { _eq: 'x' } } },
 				fields: ['parts.title'],
 			})).toEqual(['course:student=3', 'part']);
@@ -734,14 +742,14 @@ describe('read tags at the merge', () => {
 
 			feed([{ id: 20, student: 3 }]);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				filter: { parts: { id: { _in: [200, 201, 202] } } },
 				fields: ['id'],
 			})).toEqual(['course', 'part']);
 
 			feed([{ id: 20, student: 3 }]);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				filter: { parts: { id: { _in: [200, 201] } } },
 				fields: ['id'],
 			})).toEqual(['course', 'part:course=20', 'part:id=200', 'part:id=201']);
@@ -825,7 +833,7 @@ describe('read tags at the merge', () => {
 			permitting({});
 			feed(rows);
 
-			expect(await tagsOf(asUser(), {
+			expect(await pinsOf(asUser(), {
 				fields: ['*'],
 				filter: { owner: { id: { _eq: 1 } } },
 			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root:id=1']);
@@ -842,7 +850,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(asUser(), {
+			expect(await pinsOf(asUser(), {
 				fields: ['*'],
 				filter: { owner: { id: { _eq: 1 } } },
 			})).toEqual([
@@ -861,7 +869,7 @@ describe('read tags at the merge', () => {
 			permitting({ grandowner: { root: { kind: { _eq: 'open' } } } });
 			feed(rows);
 
-			expect(await tagsOf(asUser(), {
+			expect(await pinsOf(asUser(), {
 				fields: ['*'],
 				filter: { owner: { id: { _eq: 1 } } },
 			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
@@ -875,7 +883,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(asUser(), {
+			expect(await pinsOf(asUser(), {
 				fields: ['*'],
 				filter: { owner: { id: { _eq: 1 } } },
 			})).toEqual([
@@ -906,7 +914,7 @@ describe('read tags at the merge', () => {
 				permitting({ grandowner: { root: condition } as Filter });
 				feed(rows);
 
-				expect(await tagsOf(asUser(), {
+				expect(await pinsOf(asUser(), {
 					fields: ['*'],
 					filter: { owner: { id: { _eq: 1 } } },
 				})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
@@ -925,7 +933,7 @@ describe('read tags at the merge', () => {
 				permitting({ grandowner: { root: { kind: { x: { _eq: 1 } } } } as Filter });
 				feed(rows);
 
-				expect(await tagsOf(asUser(), {
+				expect(await pinsOf(asUser(), {
 					fields: ['*'],
 					filter: { owner: { id: { _eq: 1 } } },
 				})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
@@ -1121,7 +1129,7 @@ describe('read tags at the merge', () => {
 			permitting();
 			feed(rows);
 
-			expect(await tagsOf(asUser(), query)).toEqual([
+			expect(await pinsOf(asUser(), query)).toEqual([
 				'configuration:item=7',
 				'configuration:range.user_created=u1',
 				'course:id=3',
@@ -1152,7 +1160,7 @@ describe('read tags at the merge', () => {
 			permitting({ id: { _eq: 1 } });
 			feed(rows);
 
-			expect(await tagsOf(asUser(), query)).toEqual([
+			expect(await pinsOf(asUser(), query)).toEqual([
 				'configuration:item=7',
 				'configuration:range.user_created=u1',
 				'course:id=3',
@@ -1182,7 +1190,7 @@ describe('read tags at the merge', () => {
 			permitting({ name: { _eq: 'Ada' } });
 			feed(rows);
 
-			expect(await tagsOf(asUser(), query)).toEqual([
+			expect(await pinsOf(asUser(), query)).toEqual([
 				'configuration:item=7',
 				'configuration:range.user_created=u1',
 				'course',
@@ -1216,13 +1224,13 @@ describe('read tags at the merge', () => {
 				permitting();
 				feed(rows);
 
-				const tags = await tagsOf(asUser(), query);
+				const pins = await pinsOf(asUser(), query);
 
-				expect(tags).toContain(
+				expect(pins).toContain(
 					'slot:part.course.tu.discipline.enrollment.student.user=u1',
 				);
 
-				expect(tags).not.toContain('slot');
+				expect(pins).not.toContain('slot');
 			});
 
 			test(oneLine`
@@ -1231,10 +1239,10 @@ describe('read tags at the merge', () => {
 				permitting({ name: { _eq: 'Ada' } });
 				feed(rows);
 
-				const tags = await tagsOf(asUser(), query);
+				const pins = await pinsOf(asUser(), query);
 
-				expect(tags).toContain('slot');
-				expect(tags.filter((tag) => tag.startsWith('slot:'))).toEqual([]);
+				expect(pins).toContain('slot');
+				expect(pins.filter((pin) => pin.startsWith('slot:'))).toEqual([]);
 			});
 		});
 
@@ -1242,7 +1250,7 @@ describe('read tags at the merge', () => {
 			['a null hop', { tu: null, __scoped_cache_tu: null }],
 			['a hop whose case withheld its row', { tu: 30, __scoped_cache_tu: null }],
 		])(oneLine`
-			tags no ancestor the ownership injection nested through %s: a chain
+			pins no ancestor the ownership injection nested through %s: a chain
 			reaching no row leaves the response as it was
 		`, async (_shape, hop) => {
 			permitting();
@@ -1253,15 +1261,15 @@ describe('read tags at the merge', () => {
 			}]);
 
 			const service = asUser();
-			const tags = await tagsOf(service, query);
+			const pins = await pinsOf(service, query);
 
 			for (const ancestor of ['tu', 'discipline', 'enrollment', 'student']) {
-				expect(tags).not.toContain(ancestor);
-				expect(tags.some((tag) => tag.startsWith(`${ancestor}:id=`))).toBe(false);
+				expect(pins).not.toContain(ancestor);
+				expect(pins.some((pin) => pin.startsWith(`${ancestor}:id=`))).toBe(false);
 			}
 
-			expect(tags).toContain('tu:discipline.enrollment.student.user=u1');
-			expect(tags).toContain('range:id=50');
+			expect(pins).toContain('tu:discipline.enrollment.student.user=u1');
+			expect(pins).toContain('range:id=50');
 
 			// The foreign key the caller asked for is what the row carried, not what
 			// the injected hop came back as.
@@ -1320,7 +1328,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				fields: ['*', 'courses.*'],
 				filter: { _or: [{ id: { _eq: 1 } }, { user: { _eq: 'x' } }] },
 			})).toEqual(['course', 'student:id=1', 'student:user=x']);
@@ -1335,7 +1343,7 @@ describe('read tags at the merge', () => {
 
 			feed(rows);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				fields: ['*', 'courses.*'],
 				filter: { _or: [{ id: { _eq: 1 } }, { id: { _eq: 5 } }] },
 			})).toEqual([
@@ -1376,7 +1384,7 @@ describe('read tags at the merge', () => {
 
 			feed([{ id: 1, days: [first, last], start: [first], end: [last] }]);
 
-			expect(await tagsOf(service, {
+			expect(await pinsOf(service, {
 				fields: ['id', 'days.date', 'start.date', 'end.date'],
 				alias: { start: 'days', end: 'days' },
 				filter: { id: { _eq: 1 } },
@@ -1432,7 +1440,7 @@ describe('read tags at the merge', () => {
 
 			feed([slot(1, 1), slot(2, 2)]);
 
-			expect(await tagsOf(service, { fields, filter })).toEqual([
+			expect(await pinsOf(service, { fields, filter })).toEqual([
 				'course:id=1',
 				'course:id=2',
 				'part:course=1',
@@ -1458,7 +1466,7 @@ describe('read tags at the merge', () => {
 
 			feed([slot(1, 1), slot(2, 2)]);
 
-			expect(await tagsOf(service, { fields, filter })).toEqual([
+			expect(await pinsOf(service, { fields, filter })).toEqual([
 				'course',
 				'part',
 				'slot:id=1',
@@ -1479,7 +1487,7 @@ describe('read tags at the merge', () => {
 
 			feed([slot(1, 1), slot(2, null)]);
 
-			expect(await tagsOf(service, { fields, filter })).toEqual([
+			expect(await pinsOf(service, { fields, filter })).toEqual([
 				'course:id=1',
 				'part',
 				'slot:id=1',
@@ -1556,7 +1564,7 @@ describe('read tags at the merge', () => {
 		])('keeps the key pins %s', async (_shape, node) => {
 			feed(rows);
 
-			expect(await tagsOf(service(), sorted(node))).toEqual(whole);
+			expect(await pinsOf(service(), sorted(node))).toEqual(whole);
 		});
 
 		test.each([
@@ -1566,7 +1574,7 @@ describe('read tags at the merge', () => {
 		])('bares the sorted-through collections %s', async (_shape, node) => {
 			feed(rows);
 
-			expect(await tagsOf(service(), sorted(node))).toEqual([
+			expect(await pinsOf(service(), sorted(node))).toEqual([
 				'course',
 				'part',
 				'round:id=1',
@@ -1577,7 +1585,7 @@ describe('read tags at the merge', () => {
 		test('keeps the key pins when the cut sorts on an own column', async () => {
 			feed(rows);
 
-			expect(await tagsOf(service(), {
+			expect(await pinsOf(service(), {
 				...sorted({ _limit: 3 }),
 				deep: { slots: { _sort: ['id'], _limit: 3 } },
 			})).toEqual(whole);

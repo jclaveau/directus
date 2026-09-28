@@ -12,17 +12,17 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // The UNAUTOPURGEABLE-scope safety net (#292). A read hook that scopes TO a value
-// slice on a field the target collection isn't scoped on declares a tag no write can
+// slice on a field the target collection isn't scoped on declares a pin no write can
 // auto-purge — so caching the response would poison it. The framework instead leaves
 // the response UNCACHED (surfacing an `unautopurgeable_scope` anomaly), UNLESS the
-// hook marks it `manuallyPurged`, promising to reproduce the tag via its purgeBy.
+// hook marks it `manuallyPurged`, promising to reproduce the pin via its purgeBy.
 //   - CANCEL: unautopurgeable scopeTo, no flag → the read is never cached (two
 //     reads, no write between, both MISS).
-//   - MANUAL: same tag with manuallyPurged → cached (second read HIT); and a
+//   - MANUAL: same pin with manuallyPurged → cached (second read HIT); and a
 //     matching purgeBy on the dep's update invalidates it (post-write MISS).
-//   - COVERED: the same unreproducible tag on a collection the response already
-//     carries a reproducible tag for → cached, and a write to that collection still
-//     purges it through the other tag. The audit is per collection, not per tag.
+//   - COVERED: the same unreproducible pin on a collection the response already
+//     carries a reproducible pin for → cached, and a write to that collection still
+//     purges it through the other pin. The audit is per collection, not per pin.
 // The cache-unautopurgeable-scope extension hosts the hooks.
 
 const CANCEL_READ = 'p_unauto_read';
@@ -51,7 +51,7 @@ describe(oneLine`
 		env[vendor]['CACHE_NAMESPACE'] = `directus-unauto-${vendor}`;
 
 		// The cancellation is silent to the caller, so the anomaly is the only place
-		// the unreproducible tag is named.
+		// the unreproducible pin is named.
 		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
 		let instance: ChildProcess;
@@ -62,7 +62,7 @@ describe(oneLine`
 		beforeAll(async () => {
 			// Seed on the default instance BEFORE the scoped instance spawns. All scoped
 			// by space; the read hooks scopeTo a `ghost` slice of a dep — a field neither
-			// dep is scoped on, so the tag is unautopurgeable.
+			// dep is scoped on, so the pin is unautopurgeable.
 			await CreateCollections(vendor, {
 				collections: [
 					{
@@ -261,7 +261,7 @@ describe(oneLine`
 
 		it(oneLine`
 			manuallyPurged caches the read, and the dep's matching purgeBy invalidates it —
-			the valid custom-tag round-trip
+			the valid custom-pin round-trip
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -282,15 +282,15 @@ describe(oneLine`
 				.send({ val: 'changed' })
 				.set('Authorization', auth);
 
-			// The author's own purgeBy reproduced the tag → the read is invalidated.
+			// The author's own purgeBy reproduced the pin → the read is invalidated.
 			const purged = await readSlice(MANUAL_READ, 'z');
 			expect(purged.headers[cacheStatusHeader]).toBe('MISS');
 		});
 
 		it(oneLine`
-			an unreproducible tag on a collection the response is already sliced on does
+			an unreproducible pin on a collection the response is already sliced on does
 			NOT cancel caching — a write to that collection purges the entry through the
-			other tag, so the audit is per collection, not per tag
+			other pin, so the audit is per collection, not per pin
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -301,7 +301,7 @@ describe(oneLine`
 			const first = await readSlice(COVERED_READ, 'z');
 			const cached = await readSlice(COVERED_READ, 'z');
 
-			// RED before the fix: the `ghost` tag was flagged on its own and the response
+			// RED before the fix: the `ghost` pin was flagged on its own and the response
 			// was never stored, costing the cache every ownership-ancestor read.
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');
 			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
@@ -311,14 +311,14 @@ describe(oneLine`
 				.send({ title: 'changed' })
 				.set('Authorization', auth);
 
-			// The soundness half: the entry is indexed under BOTH tags, so the write's
+			// The soundness half: the entry is indexed under BOTH pins, so the write's
 			// own `space` purge reaches it and nothing goes stale.
 			const purged = await readSlice(COVERED_READ, 'z');
 			expect(purged.headers[cacheStatusHeader]).toBe('MISS');
 		});
 
 		it(oneLine`
-			an unautopurgeable tag appended by a cache.scope hook cancels caching too —
+			an unautopurgeable pin appended by a cache.scope hook cancels caching too —
 			the audit reads both hook channels, not just the declarations (#428)
 		`, async () => {
 			const url = getUrl(vendor, env);
@@ -330,15 +330,15 @@ describe(oneLine`
 			const first = await readSlice(SCOPE_HOOK_READ, 'z');
 			const second = await readSlice(SCOPE_HOOK_READ, 'z');
 
-			// RED until fixed: auditing only the declarations let this tag through, so the
-			// second read HIT an entry no write can ever purge. The tag names a foreign
+			// RED until fixed: auditing only the declarations let this pin through, so the
+			// second read HIT an entry no write can ever purge. The pin names a foreign
 			// collection so nothing else on the response makes the entry reachable.
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');
 			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});
 
 		it(oneLine`
-			files the cancellation as an anomaly naming the tag no write reproduces, so
+			files the cancellation as an anomaly naming the pin no write reproduces, so
 			the hook that has to claim manuallyPurged can be found
 		`, async () => {
 			await readSlice(CANCEL_READ, 'z');

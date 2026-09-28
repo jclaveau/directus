@@ -188,13 +188,13 @@ describe(oneLine`
 		}
 
 		it('slices a beyond ancestor by its ownership chain', async () => {
-			const tags = (await readConfig()).headers[cacheTagsHeader];
+			const pins = (await readConfig()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(
+			expect(pins).toMatch(new RegExp(
 				`(^|, )${UNIT}:discipline.student.owner=${ownedOwnerId}(,|$)`,
 			));
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
 		});
 
 		it('a write to an ancestor in the owner slice evicts the read', async () => {

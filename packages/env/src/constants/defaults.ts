@@ -111,8 +111,8 @@ export const DEFAULTS = {
 	// `!== false`. No single type-map entry fits, so it stays on per-value guessType.
 	CACHE_VALUE_MAX_SIZE: false,
 	// Node's fetch refuses a response past 16kb of headers in total, a batch write
-	// pins one tag per row and answers with both tag headers. `0` or an unparseable
-	// size emits every tag.
+	// carries one pin per row and answers with both tag headers. `0` or an
+	// unparseable size emits every pin.
 	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly

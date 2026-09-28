@@ -109,7 +109,7 @@ describe('canonicalizeScopedCachePinValue', () => {
 	test(oneLine`
 		integer: every spelling \`validateKeys\` lets through collapses — it only asks
 		\`Number.isInteger(Number(key))\`, so whitespace, exponent and hex forms reach a
-		tag, and postgres trims whitespace casting text to int, so \` 1\` really is row 1
+		pin, and postgres trims whitespace casting text to int, so \` 1\` really is row 1
 	`, () => {
 		for (const spelling of [' 1', '1 ', '1.0']) {
 			expect(canonicalizeScopedCachePinValue(spelling, 'integer')).toBe('1');
@@ -155,12 +155,13 @@ describe('canonicalizeScopedCachePinValue', () => {
 	});
 });
 
-// The field type must ride onto derived tags so key canonicalization sees it on both sides.
-describe('scope-tag type propagation', () => {
+// The field type must ride onto derived pins so key canonicalization sees it on
+// both sides.
+describe('scope-pin type propagation', () => {
 	test(oneLine`
-		scopedCacheCollectionPinsFromRows stamps each tag with its field type
+		scopedCacheCollectionPinsFromRows stamps each pin with its field type
 	`, () => {
-		const tags = scopedCacheCollectionPinsFromRows(
+		const pins = scopedCacheCollectionPinsFromRows(
 			'slots',
 			['active'],
 			[{ active: 1 }],
@@ -168,31 +169,31 @@ describe('scope-tag type propagation', () => {
 			{ active: 'boolean' },
 		);
 
-		expect(tags).toEqual([
+		expect(pins).toEqual([
 			{ collection: 'slots', field: 'active', value: 1, type: 'boolean' },
 		]);
 	});
 
 	test(oneLine`
-		scopedCachePinsFromFilter stamps the pinned tag with its field type
+		scopedCachePinsFromFilter stamps the pin with its field type
 	`, () => {
-		const tags = scopedCachePinsFromFilter(
+		const pins = scopedCachePinsFromFilter(
 			'slots',
 			['active'],
 			{ active: { _eq: true } },
 			{ active: 'boolean' },
 		);
 
-		expect(tags).toEqual([
+		expect(pins).toEqual([
 			{ collection: 'slots', field: 'active', value: true, type: 'boolean' },
 		]);
 	});
 });
 
-// Pure scope-tag derivation behind update-payload / create tagging
+// Pure scope-pin derivation behind update-payload / create pinning
 // (onUnresolvable picks coarse-fallback vs skip on a missing field).
 describe('scopedCacheCollectionPinsFromRows', () => {
-	test('one tag per distinct value per field', () => {
+	test('one pin per distinct value per field', () => {
 		const rows = [
 			{ student: 'A', course: 'math' },
 			{ student: 'B', course: 'math' },
@@ -214,7 +215,7 @@ describe('scopedCacheCollectionPinsFromRows', () => {
 		]);
 	});
 
-	test('dedups on the canonical token, so 7 and "7" collapse to one tag', () => {
+	test('dedups on the canonical token, so 7 and "7" collapse to one pin', () => {
 		const rows = [{ student: 7 }, { student: '7' }];
 
 		expect(
@@ -277,15 +278,15 @@ describe('scopedCacheCollectionPinsFromRows', () => {
 	});
 
 	test(oneLine`
-		empty rows resolve to an empty tag list, not null (caller falls back to a
-		collection-level tag)
+		empty rows resolve to an empty pin list, not null (caller falls back to a
+		collection-level pin)
 	`, () => {
 		expect(
 			scopedCacheCollectionPinsFromRows('slots', ['student'], [], 'coarse'),
 		).toEqual([]);
 	});
 
-	test('no configured fields yields no scoped cache tags', () => {
+	test('no configured fields yields no scoped cache pins', () => {
 		expect(
 			scopedCacheCollectionPinsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
 		).toEqual([]);
@@ -294,7 +295,7 @@ describe('scopedCacheCollectionPinsFromRows', () => {
 
 // Read-side scoping: only a filter that BOUNDS the read to a scope value may scope it
 // (else an insert of a new value would silently miss the cached read). An empty result
-// means "not bounded → bare tag".
+// means "not bounded → bare pin".
 describe('scopedCachePinsFromFilter', () => {
 	test('_eq on a scope field pins that value', () => {
 		expect(
@@ -306,7 +307,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		_eq: null pins the null slice — the read↔purge symmetry witness for a null-valued
-		scope (matches the null-value purge tag)
+		scope (matches the null-value purge pin)
 	`, () => {
 		expect(
 			scopedCachePinsFromFilter('slots', ['student'], { student: { _eq: null } }),
@@ -424,7 +425,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		an empty _in bounds the field to no value, so nothing pins — the read stays bare (a
-		later insert of any value is caught by the bare collection tag)
+		later insert of any value is caught by the bare collection pin)
 	`, () => {
 		expect(
 			scopedCachePinsFromFilter('slots', ['student'], { student: { _in: [] } }),
@@ -447,7 +448,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		an _or with one branch binding no pinnable field is bare even when the others bind
-		different scope fields — that branch's rows carry no pinned tag
+		different scope fields — that branch's rows carry no pinned value
 	`, () => {
 		const filter = {
 			_or: [
@@ -464,7 +465,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		a date-ish scope field is not pin-safe (filter↔row canonical can diverge), so an _eq
-		on it yields no pin — the read falls back to the bare collection tag
+		on it yields no pin — the read falls back to the bare collection pin
 	`, () => {
 		expect(
 			scopedCachePinsFromFilter(
@@ -499,7 +500,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		a filter on a non-scope field yields no pin (read falls back to the bare collection
-		tag)
+		pin)
 	`, () => {
 		expect(
 			scopedCachePinsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
@@ -552,7 +553,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		a relation filtered by a non-primary-key attribute does not pin — the fk value is
-		undetermined, so the read falls back to the bare collection tag
+		undetermined, so the read falls back to the bare collection pin
 	`, () => {
 		expect(
 			scopedCachePinsFromFilter(
@@ -590,7 +591,7 @@ describe('scopedCachePinsFromFilter', () => {
 
 	test(oneLine`
 		a two-hop relation path ({ fk: { rel: { pk: { _eq } } } }) does not pin — it
-		bounds the hop, not the fk value, so the read falls back to the bare tag
+		bounds the hop, not the fk value, so the read falls back to the bare pin
 	`, () => {
 		expect(
 			scopedCachePinsFromFilter(
@@ -656,7 +657,7 @@ describe('scopedCachePinsFromFilter — implicit primary key', () => {
 
 	test(oneLine`
 		a filter leaving the key unbound still pins nothing — a list read has no key to
-		pin, so it stays on the bare collection tag
+		pin, so it stays on the bare collection pin
 	`, () => {
 		expect(unscoped({ name: { _eq: 'a' } })).toEqual([]);
 		expect(unscoped({ id: { _gt: 7 } })).toEqual([]);
@@ -693,7 +694,7 @@ describe('scopedCachePinsFromFilter — implicit primary key', () => {
 	});
 
 	test(oneLine`
-		a project that also lists its key as a scope field gets one tag, not two — the
+		a project that also lists its key as a scope field gets one pin, not two — the
 		purge side dedups its projection for the same reason
 	`, () => {
 		expect(
@@ -932,7 +933,7 @@ describe('scopedCachePinsFromFilter — relational paths (multi-hop)', () => {
 });
 
 // A pin's key is what the fingerprint index, the dev `X-Scoped-Cache-*` headers
-// and the stored tag lists all spell it as — the collection alone, or the slice it
+// and the stored pin lists all spell it as — the collection alone, or the slice it
 // pins, with the value canonicalized exactly as the index writes it.
 describe('scopedCachePinKey', () => {
 	test(oneLine`
@@ -1310,7 +1311,7 @@ describe('pinnedScopedCacheQueryCasesFromFilter', () => {
 		]);
 	});
 
-	test('an unbound branch drops the pin, as it does for tags', () => {
+	test('an unbound branch drops the pin, as it does for pins', () => {
 		expect(pinnedScopedCacheQueryCasesFromFilter(
 			'slots',
 			['student'],

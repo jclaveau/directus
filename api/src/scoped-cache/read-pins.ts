@@ -1732,7 +1732,7 @@ export function pinnedScopedCacheQueryCasesFromFilter(
 
 /**
  * Query cases flattened: every pin any of them names, deduplicated — the axes a
- * read touched, with the AND between them dropped. What the legacy tag rendering
+ * read touched, with the AND between them dropped. What the legacy pin rendering
  * and the anomaly detail speak; the invalidation itself keeps the query cases.
  */
 export function scopedCachePinsOfQueryCases(

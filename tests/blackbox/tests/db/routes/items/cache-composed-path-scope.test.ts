@@ -140,7 +140,7 @@ describe(oneLine`
 			// against the wrong path surfaces as a wrong value, not a missing label.
 			// The update purges the snapshot taken before the write and the one taken
 			// after: here they resolve to the same slices, and the header names each
-			// one once — the bare collection tag rides along.
+			// one once — the bare collection pin rides along.
 			expect(response.headers[purgedTagsHeader].split(', ').sort()).toEqual([
 				ENTRY,
 				`${ENTRY}:account.org.owner=acme`,

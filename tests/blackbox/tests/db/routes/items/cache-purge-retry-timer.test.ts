@@ -102,7 +102,7 @@ describe(oneLine`
 		// it wholesale: a sibling's in-flight record deleted from under it drains
 		// nothing and still lets that spec's "the purge ran" MISS pass. Both shapes a
 		// failure over this collection records name it — `collection` mode in the
-		// column, tags mode in the label — and no other spec writes either.
+		// column, slices mode in the label — and no other spec writes either.
 		function ownRows() {
 			return db(PENDING)
 				.where({ collection: NOTE })
@@ -134,7 +134,7 @@ describe(oneLine`
 			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
 			expect(cached.body.data[0].label).toBe('v1');
 
-			// The refusal: a SET over the collection's bare tag leaves a string where
+			// The refusal: a SET over the collection's bare pin leaves a string where
 			// the sweep expects a set. Every other command still works, and the
 			// connection is never dropped — so nothing will emit `ready`.
 			expect(

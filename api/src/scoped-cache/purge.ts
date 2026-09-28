@@ -230,7 +230,7 @@ export async function countScopedCachePinMembers(
 		// The keys each pin reached, not a running total: an entry bound to a list
 		// of index values is named by one set per value, and a blast radius counting
 		// it once per set would claim a purge frees more than it can.
-		const reachedByTag = new Map<string, Set<string>>();
+		const reachedByPin = new Map<string, Set<string>>();
 
 		for await (
 			const indexedEntries of store.scanCollectionIndexedEntries(collection)
@@ -242,15 +242,15 @@ export async function countScopedCachePinMembers(
 
 				for (const { pinKey, declared } of pinKeyed) {
 					if (scopedCacheFingerprintReachedByPin(fingerprint, declared)) {
-						const reached = reachedByTag.get(pinKey) ?? new Set();
+						const reached = reachedByPin.get(pinKey) ?? new Set();
 						reached.add(key);
-						reachedByTag.set(pinKey, reached);
+						reachedByPin.set(pinKey, reached);
 					}
 				}
 			}
 		}
 
-		for (const [pinKey, reached] of reachedByTag) {
+		for (const [pinKey, reached] of reachedByPin) {
 			counts[pinKey] = reached.size;
 		}
 	}

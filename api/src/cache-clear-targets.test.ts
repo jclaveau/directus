@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache } from './cache.js';
 import { dropScopedCacheIndex } from './scoped-cache/index.js';
@@ -55,7 +56,9 @@ afterEach(() => {
 });
 
 describe('clearCacheTargets', () => {
-	it('response: drops response cache + tag index, spares the rest', async () => {
+	it(oneLine`
+		response: drops response cache + fingerprint index, spares the rest
+	`, async () => {
 		const { cache, systemCache, lockCache } = await seedAllTiers();
 
 		await clearCacheTargets(['response']);

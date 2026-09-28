@@ -62,7 +62,7 @@ export type ScopedCacheDeclaredScope = Readonly<Record<
 /**
  * One collection's whole dependency, in one value.
  *
- * A set of tags dies on ANY match, so every extra pin is an extra way to be
+ * A set of pins dies on ANY match, so every extra pin is an extra way to be
  * evicted: a read bounded to `owner=alpha AND method=spaced` is dropped by every
  * write carrying `method=spaced`, whoever owns it. A fingerprint carries the same
  * pins as ONE value, so a write purges it only when the row it wrote satisfies the
@@ -82,7 +82,7 @@ export interface ScopedCacheFingerprint {
 	 * OR — what an `_in` means — and the fields together are an AND.
 	 *
 	 * Absent pins nothing, so there is nothing left to fail and every write to the
-	 * collection matches — `{ collection }` is what a tag naming only a collection
+	 * collection matches — `{ collection }` is what a pin naming only a collection
 	 * said. An empty object says the same, since a pin has to name a field before
 	 * it can rule a row out: every reader takes the two alike, and the serialiser
 	 * renders them alike.
@@ -221,9 +221,9 @@ export interface ScopedCachePurgeHandle {
 	 * this one holds of, and — for a fingerprint pinning nothing — the reads of
 	 * that collection that could not be narrowed.
 	 *
-	 * A fingerprint, not a tag, because a set of tags is an OR and the scope a
+	 * A fingerprint, not a pin, because a set of pins is an OR and the scope a
 	 * write touched is an AND: `{ owner: ['alpha'], method: ['spaced'] }` purges
-	 * the entries bound to BOTH, where two tags would purge every entry bound to
+	 * the entries bound to BOTH, where two pins would purge every entry bound to
 	 * either. What a read returns is already in this shape, so a hook purging what
 	 * a lookup read hands `result.getMeta().scopedCacheFingerprints` over whole.
 	 */
@@ -267,7 +267,7 @@ export interface ScopedCachePurgeHandle {
  * `ItemsService` (auto-purge); reach for this ONLY when you deliberately bypass it.
  *
  * And it is now needed where it once wasn't. A collection declaring no
- * `scopedCacheFields` used to carry ONE tag — its bare collection tag — so any write
+ * `scopedCacheFields` used to carry ONE pin — its bare collection pin — so any write
  * anywhere in it dropped every cached read of it, and a bypassing write was covered
  * by accident. With the primary key pinned on every collection, a read of row K is
  * dropped only by a purge that names K, so rows you write outside `ItemsService` —

@@ -31,7 +31,7 @@ export class SchemaService {
 		if (this.accountability?.admin !== true)
 			throw new ForbiddenError({ reason: 'Only administrators can read a schema snapshot.' });
 
-		// A snapshot is the whole SCHEMA. Tag by the system collections it derives from,
+		// A snapshot is the whole SCHEMA. Pin by the system collections it derives from,
 		// so a schema mutation purges the response, not a business-row write. Their
 		// purge counters are read first, so a schema change landing mid-read refuses
 		// the fill (`fill-guard.ts`).

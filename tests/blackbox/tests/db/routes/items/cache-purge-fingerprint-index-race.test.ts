@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // member's fingerprint, and SREMs the ones it matched — it never deletes a set. So a
 // read filing its own member into one of those sets mid-pass is either scanned and
 // purged, or missed and left indexed; it cannot come out of the pass holding data no
-// later purge can reach. The sweep this replaced could: it SUNIONed the tag sets,
+// later purge can reach. The sweep this replaced could: it SUNIONed the index sets,
 // deleted the entries they named, and only then DELETED THE SETS, so a fill landing
 // between those two steps kept its entry and lost its index for the rest of its TTL
 // — and the counter guard cannot help, because the read snapshotted AFTER the bump
@@ -290,7 +290,7 @@ describe(oneLine`
 
 			const limits = await survivorsOf(await fillDuringPurge('v4'));
 
-			// A create purges the bare tag, the new row's own slice and its key — never
+			// A create purges the bare pin, the new row's own slice and its key — never
 			// the held slice. The hook it carries raises the collection-wide sweep, so
 			// that is the only thing here that can reach these entries, and it reaches
 			// them only if the set they were filed in is still there to be scanned.

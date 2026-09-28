@@ -53,7 +53,7 @@ describe('users controller /me/track/page', () => {
 
 	test(oneLine`
 		lets the scoped purge hear the write, so /users/me follows — the user's own
-		slices only, the bare tag any session could drain at the limiter's rate stays
+		slices only, the bare pin any session could drain at the limiter's rate stays
 	`, async () => {
 		scopedCachePurgeEnabled.mockReturnValue(true);
 

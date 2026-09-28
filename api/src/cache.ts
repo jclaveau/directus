@@ -218,9 +218,10 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// Same reason as the `response` target in `clearCacheTargets`: the fingerprint
 	// index sits in raw Redis outside the Keyv namespace, so the clear above misses
 	// it. Both callers here — the migration runner and the build-identity self-heal
-	// — mean "the response cache is gone", and leaving the index behind strands tag
-	// SETs pointing at keys that no longer exist until their `ttl*2` self-expiry,
-	// or forever when `CACHE_TTL` is unset and they are deliberately unbounded.
+	// — mean "the response cache is gone", and leaving the index behind strands
+	// index SETs pointing at keys that no longer exist until their `ttl*2`
+	// self-expiry, or forever when `CACHE_TTL` is unset and they are deliberately
+	// unbounded.
 	//
 	// Never fatal, unlike the `clearCacheTargets` call: `database/migrations/run.ts`
 	// calls this right after recording the version it just applied and does not catch,

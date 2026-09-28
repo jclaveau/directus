@@ -137,14 +137,14 @@ const cascadeChildSchema = new SchemaBuilder()
 cascadeChildSchema.collections['test']!.scopedCacheFields = ['student'];
 cascadeChildSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
 
-// Drives the purge-pin resolution at every mutation site: which ScopedCacheTags
-// (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
-// asserted via toHaveBeenCalledWith(cache, collection, pins, context). The
-// pin-derivation
+// Drives the purge-pin resolution at every mutation site: which
+// ScopedCacheFingerprint[] (or null = coarse collection-wide purge) each mutation
+// hands to purgeScopedCache — asserted via
+// toHaveBeenCalledWith(cache, collection, pins, context). The pin-derivation
 // itself is unit-tested in scoped-cache-pins.test.ts; this pins the purge side
 // (snapshot-before-write, old ∪ new for update/delete/upsert).
 describe(oneLine`
-	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
+	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache pins)
 `, () => {
 	let db: Knex;
 	let tracker: Tracker;
@@ -275,7 +275,7 @@ describe(oneLine`
 
 	it(oneLine`
 		updateMany with purgeBareFingerprint:false drops the row's own slices and leaves
-		the bare tag warm — the reads it names never decided on the written column
+		the bare pin warm — the reads it names never decided on the written column
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
@@ -310,7 +310,7 @@ describe(oneLine`
 
 	it(oneLine`
 		purgeBareFingerprint:false holds through a delete that cascades into another
-		collection — the child takes its coarse purge, the parent keeps its bare tag
+		collection — the child takes its coarse purge, the parent keeps its bare pin
 	`, async () => {
 		purgeScopedCache.mockResolvedValue([]);
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
@@ -678,7 +678,7 @@ describe(oneLine`
 
 	it(oneLine`
 		create with a NULL scope value purges that null slice — a present-but-null value is a
-		real slice (canonical \x00null tag), not the coarse fallback
+		real slice (canonical \x00null pin), not the coarse fallback
 	`, async () => {
 		// The committed row resolves `student` to NULL (unset column, DB default null). The field
 		// key IS present, so it's a precise null-slice purge — distinct from a MISSING field key,
@@ -867,7 +867,7 @@ describe(oneLine`
 	// every ownership chain ending on such a terminal fell back to the bare pin — one
 	// write anywhere in `holder` then dropping every owner's entry.
 	it(oneLine`
-		an ancestor slice whose terminal is independent pins the slice, not the bare tag
+		an ancestor slice whose terminal is independent pins the slice, not the bare pin
 	`, async () => {
 		tracker.on.select('note').response([{ id: 1, holder: 5 }]);
 		tracker.on.select('holder').response([{ id: 5, owner: 9 }]);
@@ -913,7 +913,7 @@ describe(oneLine`
 	// scoping wouldn't produce (e.g. an enriched related row).
 	it(oneLine`
 		exposes the enriched records to a cache.scope listener, which can add data-derived
-		tags
+		pins
 	`, async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
@@ -922,10 +922,10 @@ describe(oneLine`
 
 		let seenRecords: unknown;
 
-		const listener = async (tags: any, meta: any) => {
+		const listener = async (pins: any, meta: any) => {
 			seenRecords = meta.records;
 			return [
-				...tags,
+				...pins,
 				...meta.records.map((r: any) => {
 					return {
 						collection: 'test',
@@ -965,8 +965,8 @@ describe(oneLine`
 	// rider, declared fingerprints beside the mutation's own purge.
 	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
 		it(oneLine`
-			an items.read hook scopes the response to a cross-collection tag, unioned with
-			the auto-derived collection tag on the meta rider
+			an items.read hook scopes the response to a cross-collection pin, unioned with
+			the auto-derived collection pin on the meta rider
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
@@ -1025,7 +1025,7 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			does NOT flag the same tag when the hook declares manuallyPurged — the author
+			does NOT flag the same pin when the hook declares manuallyPurged — the author
 			reproduces it via their own purgeBy
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
@@ -1234,7 +1234,7 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			does NOT flag a bare collection tag — it names no slice, so any write to the
+			does NOT flag a bare collection pin — it names no slice, so any write to the
 			collection reproduces it
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
@@ -1257,7 +1257,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an items.create hook declares a fingerprint, purged beside the committed-row
-			slice rather than inside its tag list
+			slice rather than inside its pin list
 		`, async () => {
 			tracker.on.insert('test').response([1]);
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
@@ -1301,7 +1301,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an items.update hook declares a fingerprint, purged beside the old ∪ new
-			slices rather than inside their tag list
+			slices rather than inside their pin list
 		`, async () => {
 			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
 			tracker.on.select('test').responseOnce([{ id: 1, student: 'B' }]);
@@ -1350,7 +1350,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an items.delete hook declares a fingerprint, purged beside the deleted rows'
-			slices rather than inside their tag list
+			slices rather than inside their pin list
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 			tracker.on.delete('test').response(1);
@@ -1449,7 +1449,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a hook that declares a slice then cancels (null) purges only that slice —
-			includeBareFingerprint:false keeps the cancelled collection's bare tag warm,
+			includeBareFingerprint:false keeps the cancelled collection's bare pin warm,
 			since nothing in it changed
 		`, async () => {
 			// updateMany snapshots the pre-update rows before the filter runs (old ∪ new),
@@ -1499,7 +1499,7 @@ describe(oneLine`
 		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only
 			that slice — includeBareFingerprint:false keeps the cancelled
-			collection's bare tag warm, since nothing in it was deleted
+			collection's bare pin warm, since nothing in it was deleted
 		`, async () => {
 			// deleteMany snapshots rows AFTER the filter, so a cancel returns
 			// before any select — only the hook-declared slice is purged.
@@ -1618,7 +1618,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an UNDECLARED take-over stays coarse (null) even when an injected shared
-			collector already carries a sibling operation's tags — the fallback keys off
+			collector already carries a sibling operation's pins — the fallback keys off
 			THIS call's own declarations, not the collector's running total
 		`, async () => {
 			// A batch/upsert parent injects one shared collector across its children. Seed
@@ -1746,7 +1746,7 @@ describe(oneLine`
 			// The hook writes a row it never names (the shape a merge/dedup take-over
 			// has) and returns a different key. Only 99 is knowable here, so a precise
 			// purge of 99 alone leaves 5's own keyed read serving the pre-write row.
-			// Before the key axis, an unscoped collection was entirely bare-tagged and
+			// Before the key axis, an unscoped collection was entirely bare-pinned and
 			// the bare purge covered 5 by accident; now nothing does.
 			const takeOver = async () => {
 				await db('test')
@@ -2136,7 +2136,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 
 	it(oneLine`
 		keeps a row whose join chain resolves to nothing, as the null slice the read side
-		pins, and collapses two such rows onto one tag
+		pins, and collapses two such rows onto one pin
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
 			{ id: 1, teaching_unit: 10, '#path0': 11, '#path1': 12, '#path2': 'A' },

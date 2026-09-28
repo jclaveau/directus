@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // RED until fixed. A note reached by two disagreeing O2M reverse fks is
 // `o2mConflicted` (should be bare), yet is also KEYED by filter and never nested, so
 // it skips the nested-bare branch (~759) for the union branch (~781) — which emits
-// its keyed slice `note:id=<pinnedNote>` and no bare tag. The fix forces bare on
+// its keyed slice `note:id=<pinnedNote>` and no bare pin. The fix forces bare on
 // `o2mConflicted` first (~731). Filters, not nesting: a nested conflicted note can't
 // reach the union branch, since `scopedCachePinsFromM2oParents` drops any
 // collection carrying an o2m-terminal path, so it is never m2o-pinned.
@@ -31,7 +31,7 @@ const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
 describe(oneLine`
-	an o2m-conflicted collection also reached by an m2o is tagged only by the m2o
+	an o2m-conflicted collection also reached by an m2o is pinned only by the m2o
 	slice, so a write to a reverse-fk-nested row serves stale (#402)
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
@@ -71,7 +71,7 @@ describe(oneLine`
 					{
 						collection: NOTE,
 						// Both reverse fks declared, so each O2M path clears the "the write
-						// side emits this shallow tag" gate on its own and the refusal is
+						// side emits this shallow pin" gate on its own and the refusal is
 						// about the disagreement, not the gate (read-pins.ts ~645-651).
 						meta: {
 							scoped_cache_fields: ['discipline_id', 'teaching_unit_id'],
@@ -205,7 +205,7 @@ describe(oneLine`
 		}
 
 		it(oneLine`
-			tags a conflicted, keyed note only by its pk slice, missing the bare tag
+			pins a conflicted, keyed note only by its pk slice, missing the bare pin
 			a reverse-fk write needs
 		`, async () => {
 			await clearCache();
@@ -217,7 +217,7 @@ describe(oneLine`
 			// Non-vacuity: the filter really matched the enrollment.
 			expect(warm.body.data[0].id).toBe(enrollmentId);
 
-			// PRIMARY (RED on buggy): the fix forces the bare `note` tag; buggy
+			// PRIMARY (RED on buggy): the fix forces the bare `note` pin; buggy
 			// carries only `note:id=<pinnedNoteId>` a reverse-fk write can't purge.
 			expect(warm.headers[cacheTagsHeader])
 				.toMatch(new RegExp(`(^|, )${NOTE}(,|$)`));

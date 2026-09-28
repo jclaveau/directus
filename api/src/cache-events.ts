@@ -1732,7 +1732,7 @@ export async function listCacheEntries(
 			: [{ ...descriptor, ...row }];
 	});
 
-	// Counted in its own pass rather than joined in above: entry_tags × purge_tags
+	// Counted in its own pass rather than joined in above: entry_pins × purge_pins
 	// multiplies the descriptor's rows, which would inflate the hit/miss/fill SUMs
 	// beside it. DISTINCT on the purge id so a purge covering two of an entry's
 	// pins counts once.

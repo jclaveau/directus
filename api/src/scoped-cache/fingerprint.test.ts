@@ -203,7 +203,7 @@ describe('scopedCacheFingerprintOf', () => {
 		});
 	});
 
-	it('canonicalizes each value the way the tag key does', () => {
+	it('canonicalizes each value the way the pin key does', () => {
 		expect(scopedCacheFingerprintOf(
 			'note',
 			[
@@ -449,7 +449,7 @@ describe('scopedCacheFingerprintsByCollection', () => {
 		]);
 	});
 
-	it('renders a bare tag as a fingerprint pinning nothing but its fields', () => {
+	it('renders a bare pin as a fingerprint pinning nothing but its fields', () => {
 		expect(scopedCacheFingerprintsByCollection(
 			[[{ collection: 'slot' }]],
 			new Map([['slot', ['id', 'note']]]),

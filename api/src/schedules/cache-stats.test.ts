@@ -145,7 +145,7 @@ describe('cache-stats schedule', () => {
 		expect(reapCacheAnomalies).toHaveBeenCalled();
 
 		// The order is the rule: a fact aging out is what orphans a descriptor,
-		// and a descriptor going is what orphans its entry tags. On two jobs at two
+		// and a descriptor going is what orphans its entry pins. On two jobs at two
 		// cadences each link waited for the next tick of the one behind it.
 		const order = (job: any) => vi.mocked(job).mock.invocationCallOrder[0]!;
 

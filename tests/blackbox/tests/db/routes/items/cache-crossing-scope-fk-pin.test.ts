@@ -17,10 +17,10 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // A filter that crosses an M2O and lands on the FAR primary key is answered by the
-// near row's own foreign key column, so the far collection needs no tag. When that
+// near row's own foreign key column, so the far collection needs no pin. When that
 // foreign key IS a flat scope field of the near collection, the same filter bounds
 // the near collection to that value — so it pins `near:<fk>=value` instead of the
-// bare tag it used to carry. The write side already emits that slice on every write
+// bare pin it used to carry. The write side already emits that slice on every write
 // of the near collection (flat scope field, old ∪ new), so read and write agree.
 // The shape mirrors the planner's cursus menu: membership → profile → account, with
 // a filter `profile.account._eq $CURRENT_USER` on the `account` scope field.
@@ -130,7 +130,7 @@ describe(oneLine`
 
 			// A profile of the OTHER account, reachable through the declined o2m — the
 			// row a keyed `account=bound` slice would wrongly exclude, so the read must
-			// keep the bare tag when it fetches profile rows.
+			// keep the bare pin when it fetches profile rows.
 			const fetchedProfiles = await CreateItem(vendor, {
 				collection: PROFILE,
 				item: [{
@@ -162,7 +162,7 @@ describe(oneLine`
 		});
 
 		// `fields` asks for no profile column, so the profile is reached through the
-		// filter and nowhere else — the join-only shape that used to tag it bare.
+		// filter and nowhere else — the join-only shape that used to pin it bare.
 		function readMembershipsOfBoundAccount() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${MEMBERSHIP}`)
@@ -196,25 +196,25 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			const tags = (await readMembershipsOfBoundAccount())
+			const pins = (await readMembershipsOfBoundAccount())
 				.headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 		});
 
 		it(oneLine`
-			leaves the far collection the fk answers untagged
+			leaves the far collection the fk answers unpinned
 		`, async () => {
 			await clearCache();
 
-			const tags = (await readMembershipsOfBoundAccount())
+			const pins = (await readMembershipsOfBoundAccount())
 				.headers[cacheTagsHeader];
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${ACCOUNT}(:|,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${ACCOUNT}(:|,|$)`));
 		});
 
 		it(oneLine`
@@ -222,7 +222,7 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[profile][account][_in]':
@@ -232,15 +232,15 @@ describe(oneLine`
 				.set('Authorization', auth))
 				.headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
 			);
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${PROFILE}:account=${otherAccountId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 		});
 
 		it(oneLine`
@@ -250,7 +250,7 @@ describe(oneLine`
 			// could have pinned, so the honest answer stays bare.
 			await clearCache();
 
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[profile][reviewer][_eq]': String(otherAccountId),
@@ -259,9 +259,9 @@ describe(oneLine`
 				.set('Authorization', auth))
 				.headers[cacheTagsHeader];
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}:reviewer=`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}:reviewer=`));
 
-			expect(tags).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 		});
 
 		it(oneLine`
@@ -327,19 +327,19 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			keeps the bare tag when it also fetches the collection it keyed
+			keeps the bare pin when it also fetches the collection it keyed
 		`, async () => {
 			// The keyed slice bounds the FILTERED rows, but this read also nests
 			// profile rows through the declined o2m, which the filter never bounded —
-			// so the bare tag must win, or a write to a fetched row would leave it stale.
+			// so the bare pin must win, or a write to a fetched row would leave it stale.
 			await clearCache();
 
-			const tags = (await readMembershipWithProfiles())
+			const pins = (await readMembershipWithProfiles())
 				.headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}:account=`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}:account=`));
 
 			// Non-vacuity: a write to the fetched OTHER-account profile — a row a keyed
 			// `account=bound` slice would not name — still drops the read.
@@ -360,7 +360,7 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[_or][0][profile][account][_eq]': String(boundAccountId),
@@ -370,15 +370,15 @@ describe(oneLine`
 				.set('Authorization', auth))
 				.headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
 			);
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${PROFILE}:account=${otherAccountId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 		});
 
 		it(oneLine`
@@ -389,7 +389,7 @@ describe(oneLine`
 			// and bare wins (an _or is sound only when every branch is covered).
 			await clearCache();
 
-			const tags = (await request(getUrl(vendor, env))
+			const pins = (await request(getUrl(vendor, env))
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[_or][0][profile][account][_eq]': String(boundAccountId),
@@ -399,9 +399,9 @@ describe(oneLine`
 				.set('Authorization', auth))
 				.headers[cacheTagsHeader];
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}:account=`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}:account=`));
 
-			expect(tags).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 		});
 
 		it(oneLine`
@@ -421,13 +421,13 @@ describe(oneLine`
 					.set('Authorization', auth);
 			};
 
-			const tags = (await readSorted()).headers[cacheTagsHeader];
+			const pins = (await readSorted()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(
+			expect(pins).toMatch(
 				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
 			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 
 			// Non-vacuity: the slice pin actually drops the read when an in-slice
 			// profile is written — a named-but-inert pin would stay HIT here.

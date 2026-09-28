@@ -1111,7 +1111,7 @@ describe('drainCacheEvents', () => {
 				path: '/items/a', collection: 'articles', userId: '', query: '{}',
 				url: '/items/a', bytes: '42', fillMs: '5',
 				// A read spanning two collections carries a pin from each, so the
-				// collection comes off the TAG rather than off the descriptor.
+				// collection comes off the PIN rather than off the descriptor.
 				scopedCachePins: '["articles:owner=7","directus_users"]', ts: '1000',
 			}),
 		];
@@ -3259,7 +3259,7 @@ describe('readCacheAuditQueue', () => {
 
 	it(oneLine`
 		answers the described entries least recently verified first, without
-		their tags
+		their pins
 	`, async () => {
 		rowsByTable['directus_cache_stats_descriptors'] = [
 			descriptorRow(),
@@ -3364,9 +3364,9 @@ describe('readScopedCacheEntryPins', () => {
 			{ cache_key: 'ck3', scoped_cache_pin: 'authors' },
 		];
 
-		const tags = await readScopedCacheEntryPins(['ck1', 'ck2', 'ck3']);
+		const pins = await readScopedCacheEntryPins(['ck1', 'ck2', 'ck3']);
 
-		expect([...tags]).toEqual([
+		expect([...pins]).toEqual([
 			['ck1', ['articles:owner=acme', 'authors']],
 			['ck3', ['authors']],
 		]);
@@ -3575,7 +3575,7 @@ describe('listPurgesCoveringEntry', () => {
 	});
 
 	// A namespace clear names neither a pin nor a collection, so it leaves no
-	// `purge_tags` row for either reach to join — and it took every entry, this
+	// `purge_pins` row for either reach to join — and it took every entry, this
 	// one included. Missing it would answer "nothing purged this" about the most
 	// total invalidation there is.
 	it('names a namespace clear, which no pin or collection joins', async () => {

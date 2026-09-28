@@ -61,7 +61,7 @@ router.get(
 		res.locals['payload'] = { data };
 
 		// serverInfo reads directus_settings (+ a public_background files join) plus
-		// env/version constants. Scoped-purge mode can't tag a service-layer read, and
+		// env/version constants. Scoped-purge mode can't pin a service-layer read, and
 		// no write event covers the env fields, so opt out rather than let respond flag
 		// it a `missing_scope` anomaly the operator can never resolve. Full-purge mode
 		// has no such problem — a mutation clears the whole cache, so nothing can go

@@ -88,7 +88,7 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * A set that already carries NO expiry outlives every entry by construction, so it
  * keeps none — only a freshly created set takes one unconditionally.
  */
-export const scopedCacheTagExpiryScript = `
+export const scopedCacheIndexExpiryScript = `
 local existed = redis.call('EXISTS', KEYS[1])
 redis.call('SADD', KEYS[1], unpack(ARGV, 2))
 local want = tonumber(ARGV[1])
@@ -133,15 +133,15 @@ end
 return #KEYS
 `;
 
-type ScopedCacheTagExpiryCommand = {
-	scopedCacheTagExpiry(
-		tagKey: string,
+type ScopedCacheIndexExpiryCommand = {
+	scopedCacheIndexExpiry(
+		indexKey: string,
 		ttlSeconds: number,
 		...members: string[]
 	): ChainableCommander;
 };
 
-type ScopedCacheTagPipeline = ChainableCommander & ScopedCacheTagExpiryCommand;
+type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexExpiryCommand;
 
 type ScopedCacheEpochBumpCommand = {
 	scopedCacheEpochBump(
@@ -151,17 +151,17 @@ type ScopedCacheEpochBumpCommand = {
 };
 
 type ScopedCacheScriptedRedis = Redis
-	& ScopedCacheTagExpiryCommand
+	& ScopedCacheIndexExpiryCommand
 	& ScopedCacheEpochBumpCommand;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
 /**
- * The shared client, with the tag-expiry and counter-bump scripts registered as
+ * The shared client, with the index-expiry and counter-bump scripts registered as
  * commands on it.
  *
  * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
- * `NOSCRIPT` — so the 316-byte tag-expiry script crosses the wire once per server
+ * `NOSCRIPT` — so the 316-byte index-expiry script crosses the wire once per server
  * rather than once per index set. A read filed under 200 index sets sends 402 in
  * one pipeline, and as `EVAL` that is 124 KB of Lua per fill against 193 KB sent
  * in total.
@@ -173,9 +173,9 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 	const redis = useRedis();
 
 	if (! clientsCarryingScripts.has(redis)) {
-		redis.defineCommand('scopedCacheTagExpiry', {
+		redis.defineCommand('scopedCacheIndexExpiry', {
 			numberOfKeys: 1,
-			lua: scopedCacheTagExpiryScript,
+			lua: scopedCacheIndexExpiryScript,
 		});
 
 		redis.defineCommand('scopedCacheEpochBump', {
@@ -632,7 +632,7 @@ const redisStore: ScopedCacheStore = {
 			return;
 		}
 
-		const pipeline = useScriptedRedis().pipeline() as ScopedCacheTagPipeline;
+		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
 
 		for (const { fingerprint, keys, indexPath } of filings) {
 			const members = keys.map((key) => {
@@ -644,7 +644,7 @@ const redisStore: ScopedCacheStore = {
 				indexPath,
 			)) {
 				if (ttlSeconds > 0) {
-					pipeline.scopedCacheTagExpiry(indexKey, ttlSeconds, ...members);
+					pipeline.scopedCacheIndexExpiry(indexKey, ttlSeconds, ...members);
 				}
 				else {
 					pipeline.sadd(indexKey, ...members);

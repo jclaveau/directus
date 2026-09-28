@@ -17,9 +17,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // A purge that failed after its mutation committed is recorded, and the retry
 // dispatches on the mode it was recorded under: `namespace` clears the store,
-// `collection` re-runs the collection scan, `tags` drops the named keys. The
+// `collection` re-runs the collection scan, `slices` drops the named keys. The
 // existing recovery spec drives the recording end — an outage — and only ever
-// produces the tags mode, so the two coarse branches are reached by nothing.
+// produces the slices mode, so the two coarse branches are reached by nothing.
 //
 // Seeded straight into the table rather than provoked, because what needs
 // covering is the retry's dispatch, not the failure that wrote the row: an
