@@ -195,11 +195,11 @@ describe('The cache audit replays through the pressure limiter', () => {
 			const startedAt = Date.now();
 			let runFinished = false;
 
-			const running = audit()
-				.set(replayHeader, marker)
-				.then((response) => {
+			// Settled either way: a rejected run would otherwise ping until the
+			// timeout and report that instead of its own error.
+			const running = Promise.resolve(audit().set(replayHeader, marker))
+				.finally(() => {
 					runFinished = true;
-					return response;
 				});
 
 			const pingAnswers: request.Response[] = [];

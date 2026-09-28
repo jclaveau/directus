@@ -877,18 +877,34 @@ export async function CreateItem(vendor: Vendor, options: OptionsCreateItem) {
 			.get(`/fields/${options.collection}`)
 			.set('Authorization', auth);
 
-		const primaryKeyField: string = fields.body.data.find(
+		const primaryKeyField: string | undefined = fields.body?.data?.find(
 			(field: { schema?: { is_primary_key?: boolean } }) => {
 				return field.schema?.is_primary_key;
 			},
-		).field;
+		)?.field;
 
-		await request(getNoCacheUrl(vendor))
+		// Thrown rather than retried past: a retry over rows still there creates
+		// them twice, and every count a seed reads is off with nothing saying why.
+		if (primaryKeyField === undefined) {
+			throw new Error(
+				`Could not read the primary key of "${options.collection}": `
+				+ `${fields.status} ${JSON.stringify(fields.body)}`,
+			);
+		}
+
+		const removed = await request(getNoCacheUrl(vendor))
 			.delete(`/items/${options.collection}`)
 			.set('Authorization', auth)
 			.send(createdRows.map((createdRow) => {
 				return (createdRow as Record<string, unknown>)[primaryKeyField];
 			}));
+
+		if (!removed.ok) {
+			throw new Error(
+				`Could not remove the rows created in "${options.collection}" without `
+				+ `their fields: ${removed.status} ${JSON.stringify(removed.body)}`,
+			);
+		}
 	}
 
 	if (response.status === 403 || droppedField) {
