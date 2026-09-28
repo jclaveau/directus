@@ -166,12 +166,6 @@ if #gone == 0 then
 	return 0
 end
 
-local now = redis.call('TIME')
-local seed = now[1] .. string.format('%06d', tonumber(now[2]))
-
-redis.call('SET', KEYS[2], seed, 'NX')
-redis.call('INCR', KEYS[2])
-redis.call('EXPIRE', KEYS[2], ARGV[1])
 redis.call('SREM', KEYS[1], unpack(gone))
 
 return #gone
@@ -1045,7 +1039,7 @@ const redisStore: ScopedCacheStore = {
 		const tally: ScopedCacheReapTally = { indexKeys: 0, reaped: 0 };
 
 		for await (const indexKeys of scanScopedCacheKeys(
-			`${scopedCacheIndexGlobPrefix()}fingerprint:*`,
+			`${scopedCacheIndexGlobPrefix()}fingerprint:*:`,
 		)) {
 			tally.indexKeys += indexKeys.length;
 
