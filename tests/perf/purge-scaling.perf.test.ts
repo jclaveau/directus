@@ -37,7 +37,9 @@ import { summarise, type Summary } from './measure.js';
  *
  * Seeded through the api rather than written into Redis: a layout the bench
  * wrote itself would measure the bench's idea of the index, and the point is to
- * compare layouts.
+ * compare layouts. What a write purges and refills goes over HTTP; the rest of
+ * the cache is filled in-process by `purge-extensions/perf-cache-fill`, which
+ * runs the same read and the same filing without a request per entry.
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -54,7 +56,7 @@ const outputDir = process.env['PERF_OUTPUT_DIR']
 	?? join(root, 'tests', 'perf', 'results');
 
 // Cumulative: each size warms on top of the one before.
-const cacheSizes = (process.env['PERF_PURGE_SIZES'] ?? '1000,10000,100000')
+const cacheSizes = (process.env['PERF_PURGE_SIZES'] ?? '1000,100000')
 	.split(',')
 	.map(Number);
 
@@ -63,6 +65,10 @@ const warmConcurrency = Number(process.env['PERF_PURGE_WARM_CONCURRENCY'] ?? 32)
 
 // How many cached reads each warmed row is part of: one per `limit`.
 const SLICE_ENTRIES = 50;
+
+// Entries per call to the filler, and how many calls are in flight.
+const FILL_BATCH_ENTRIES = 1000;
+const FILL_CONCURRENCY = 4;
 
 const maxCommandScaling =
 	Number(process.env['PERF_PURGE_MAX_COMMAND_SCALING'] ?? 1.5);
@@ -157,7 +163,7 @@ async function startInstance(): Promise<ChildProcess> {
 			SERVE_APP: 'false',
 			LOG_LEVEL: 'warn',
 			TELEMETRY: 'false',
-			EXTENSIONS_PATH: join(root, 'tests', 'perf', 'cache-extensions'),
+			EXTENSIONS_PATH: join(root, 'tests', 'perf', 'purge-extensions'),
 			PORT: String(instancePort),
 			PUBLIC_URL: base,
 			CACHE_ENABLED: 'true',
@@ -335,6 +341,49 @@ async function warmEntries(from: number, to: number): Promise<Set<string>> {
 	return statuses;
 }
 
+/**
+ * Cache every entry in `[from, to)` in-process, `FILL_BATCH_ENTRIES` a call:
+ * the reads `slicePath` names, under the keys and pins a GET of them files.
+ */
+async function fillEntries(from: number, to: number): Promise<number> {
+	const batches: { id: number; limits: number[] }[][] = [];
+
+	for (let at = from; at < to; at += FILL_BATCH_ENTRIES) {
+		const rows = new Map<number, number[]>();
+		const batchEnd = Math.min(at + FILL_BATCH_ENTRIES, to);
+
+		for (let entryIndex = at; entryIndex < batchEnd; entryIndex++) {
+			const rowId = rowIds[Math.floor(entryIndex / SLICE_ENTRIES)]!;
+			const limits = rows.get(rowId) ?? [];
+
+			limits.push(1 + (entryIndex % SLICE_ENTRIES));
+			rows.set(rowId, limits);
+		}
+
+		batches.push([...rows].map(([id, limits]) => ({ id, limits })));
+	}
+
+	let filled = 0;
+	let next = 0;
+
+	async function drain(): Promise<void> {
+		while (next < batches.length) {
+			const rows = batches[next++]!;
+
+			const answer = await api('/perf-cache-fill', {
+				method: 'POST',
+				body: JSON.stringify({ collection: SLICE, fields: 'id,label', rows }),
+			});
+
+			filled += answer.filled;
+		}
+	}
+
+	await Promise.all(Array.from({ length: FILL_CONCURRENCY }, () => drain()));
+
+	return filled;
+}
+
 /** Cache every read of the versioned collection a version save purges. */
 async function warmVersionedEntries(): Promise<Set<string>> {
 	const statuses = new Set<string>();
@@ -448,8 +497,6 @@ function timeCollectionPurge(idleRate: number): Promise<WriteSample> {
 }
 
 beforeAll(async () => {
-	await mkdir(join(root, 'tests', 'perf', 'cache-extensions'), { recursive: true });
-
 	redis = new Redis(redisUrl);
 	instance = await startInstance();
 
@@ -471,15 +518,38 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 	const report: string[] = [];
 	let warmed = 0;
 
+	// The slices the writes purge, read over HTTP like their refills are.
+	const writtenEntries = writeReps * SLICE_ENTRIES;
+
 	for (const size of [...cacheSizes].sort((a, b) => a - b)) {
 		const warmStartedAt = performance.now();
-		const warmStatuses = await warmEntries(warmed, size);
+		const readEnd = Math.min(Math.max(warmed, writtenEntries), size);
+
+		if (warmed < readEnd) {
+			const warmStatuses = await warmEntries(warmed, readEnd);
+
+			// A warm that never filled measured an empty cache at every size.
+			expect([...warmStatuses], `warming to ${size}`).toContain('MISS');
+		}
+
+		const filled = await fillEntries(readEnd, size);
+
+		expect(filled, `entries filled to ${size}`).toBe(size - readEnd);
+
 		const warmSeconds = (performance.now() - warmStartedAt) / 1000;
 
 		warmed = size;
 
-		// A warm that never filled measured an empty cache at every size.
-		expect([...warmStatuses], `warming to ${size}`).toContain('MISS');
+		// A filled entry a GET does not find was filed under a key or a layout no
+		// read of it uses.
+		const filledRead = await fetch(`${base}${slicePath(size - 1)}`, {
+			headers: authHeaders,
+		});
+
+		await filledRead.text();
+
+		expect(filledRead.headers.get(STATUS_HEADER), `the last entry of ${size}`)
+			.toBe('HIT');
 
 		const keyspace = await redis.dbsize();
 

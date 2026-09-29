@@ -321,6 +321,7 @@ jobs:
             'api/src/utils/compress.ts' \
             'tests/perf/cache.perf.test.ts' \
             'tests/perf/purge-scaling.perf.test.ts' \
+            'tests/perf/purge-extensions/**' \
             'tests/perf/measure.ts' \
             '.github/workflows/bench.yml')
 
