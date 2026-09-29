@@ -246,6 +246,16 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		// Read before the refill: an index-key set that expired first would be
+		// recreated with the fill's expiry rather than kept longer.
+		and.optional(/^the index-key set of \w+ still exists$/, async () => {
+			expect(await redisClient.exists(
+				`${indexPrefix}collection-index-keys:${collection}`,
+			)).toBe(1);
+		});
+
+		// Under half a second past the whole one: `TTL` reads it rounded down, so
+		// an index-key set kept that many seconds would fall short of the set.
 		and.optional(
 			'the set of ada is given this expiry:',
 			async (table: Record<string, string>[]) => {

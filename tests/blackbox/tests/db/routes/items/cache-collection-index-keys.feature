@@ -85,7 +85,8 @@ Feature: A collection-wide purge reaches every set through the index-key set
       | ada  | name,label |
     And the index-key set of index_keys_short is given this expiry:
       | milliseconds |
-      | 2000         |
+      | 60000        |
+    And the index-key set of index_keys_short still exists
     And these reads fill the same set:
       | name | fields |
       | ada  | name   |
@@ -100,7 +101,7 @@ Feature: A collection-wide purge reaches every set through the index-key set
       | ada  | name,label |
     And the set of ada is given this expiry:
       | milliseconds |
-      | 36000000     |
+      | 36000499     |
     And these reads fill the same set:
       | name | fields |
       | ada  | name   |
