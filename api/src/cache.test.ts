@@ -340,7 +340,8 @@ describe('scoped cache purging', () => {
 
 	describe('indexScopedCacheEntry', () => {
 		test(oneLine`
-			indexes the key + expires sibling in each collection's bare set, with a TTL
+			indexes the key + expires sibling in each collection's bare set and legacy
+			bare set, with a TTL
 		`, async () => {
 			await indexScopedCacheEntry('resp-key', [
 				{ collection: 'articles' },
@@ -353,19 +354,27 @@ describe('scoped cache purging', () => {
 			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
 			expect(redis._pipeline.scopedCacheIndexFile.mock.calls).toEqual([
 				[
-					2,
+					3,
 					'scalabus:scoped-cache-index:collection-index-keys:articles',
+					'scalabus:scoped-cache-index:fingerprint:articles:bare',
 					'scalabus:scoped-cache-index:fingerprint:articles:',
 					600,
 					2,
 					'articles:&|resp-key',
 					'articles:&|resp-key__expires_at',
+					2,
+					'articles:&|resp-key',
+					'articles:&|resp-key__expires_at',
 				],
 				[
-					2,
+					3,
 					'scalabus:scoped-cache-index:collection-index-keys:directus_users',
+					'scalabus:scoped-cache-index:fingerprint:directus_users:bare',
 					'scalabus:scoped-cache-index:fingerprint:directus_users:',
 					600,
+					2,
+					'directus_users:&|resp-key',
+					'directus_users:&|resp-key__expires_at',
 					2,
 					'directus_users:&|resp-key',
 					'directus_users:&|resp-key__expires_at',
@@ -385,14 +394,19 @@ describe('scoped cache purging', () => {
 			]);
 
 			// Filed under its home pin, once per value, so a write of either value
-			// reads the entry without reading the collection's bare set.
+			// reads the entry without reading the collection's bare set — and in the
+			// legacy bare set, the only one an older build's write reads for it.
 			expect(redis._pipeline.scopedCacheIndexFile.mock.calls).toEqual([
 				[
-					3,
+					4,
 					'scalabus:scoped-cache-index:collection-index-keys:slots',
 					'scalabus:scoped-cache-index:fingerprint:slots:pin:student=7',
 					'scalabus:scoped-cache-index:fingerprint:slots:pin:student=A',
+					'scalabus:scoped-cache-index:fingerprint:slots:',
 					600,
+					2,
+					'slots:&student=,7,A,&|resp-key',
+					'slots:&student=,7,A,&|resp-key__expires_at',
 					2,
 					'slots:&student=,7,A,&|resp-key',
 					'slots:&student=,7,A,&|resp-key__expires_at',
@@ -414,10 +428,14 @@ describe('scoped cache purging', () => {
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.scopedCacheIndexFile.mock.calls).toEqual([
 				[
-					2,
+					3,
 					'scalabus:scoped-cache-index:collection-index-keys:slots',
 					'scalabus:scoped-cache-index:fingerprint:slots:pin:student=\x00null',
+					'scalabus:scoped-cache-index:fingerprint:slots:',
 					600,
+					2,
+					'slots:&student=,\x00null,&|resp-key',
+					'slots:&student=,\x00null,&|resp-key__expires_at',
 					2,
 					'slots:&student=,\x00null,&|resp-key',
 					'slots:&student=,\x00null,&|resp-key__expires_at',
@@ -511,11 +529,19 @@ describe('scoped cache purging', () => {
 			// SADD of the same members twice leaves the set exactly as it was.
 			expect(redis._pipeline.scopedCacheIndexFile.mock.calls).toEqual([
 				[
-					3,
+					5,
 					'scalabus:scoped-cache-index:collection-index-keys:slots',
 					'scalabus:scoped-cache-index:fingerprint:slots:pin:student=A',
+					'scalabus:scoped-cache-index:fingerprint:slots:',
 					'scalabus:scoped-cache-index:fingerprint:slots:pin:student=A',
+					'scalabus:scoped-cache-index:fingerprint:slots:',
 					600,
+					2,
+					'slots:&student=,A,&|resp-key',
+					'slots:&student=,A,&|resp-key__expires_at',
+					2,
+					'slots:&student=,A,&|resp-key',
+					'slots:&student=,A,&|resp-key__expires_at',
 					2,
 					'slots:&student=,A,&|resp-key',
 					'slots:&student=,A,&|resp-key__expires_at',
@@ -550,10 +576,15 @@ describe('scoped cache purging', () => {
 
 			expect(redis._pipeline.scopedCacheIndexFile.mock.calls).toEqual([
 				[
-					2,
+					3,
 					'scalabus:scoped-cache-index:collection-index-keys:articles',
+					'scalabus:scoped-cache-index:fingerprint:articles:bare',
 					'scalabus:scoped-cache-index:fingerprint:articles:',
 					600,
+					3,
+					'articles:&|resp-key',
+					'articles:&|resp-key__expires_at',
+					'articles:&|resp-key__pins',
 					3,
 					'articles:&|resp-key',
 					'articles:&|resp-key__expires_at',
