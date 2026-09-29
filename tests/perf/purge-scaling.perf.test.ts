@@ -821,6 +821,13 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		if (phase.timesCollectionPurge) {
 			const collectionPurges = await timeCollectionPurges(idleRate);
 
+			// Reaped, so the index-key sets vouch for the collection's sets: a SCAN
+			// means the purge measured the keyspace fallback instead.
+			for (const [rep, sample] of collectionPurges.entries()) {
+				expect(sample.byCommand, `collection purge ${rep} at ${size}`)
+					.not.toHaveProperty('scan');
+			}
+
 			collectionPurgesBySize.set(size, collectionPurges);
 
 			collectionReport = '; last collection purge:'
@@ -1519,7 +1526,14 @@ test('a scoped purge costs the same however much has expired', async () => {
 
 		const afterRowWrites = await countIndexMembers(phase.collection);
 
-		collectionPurgesBySize.set(size, await timeCollectionPurges(idleRate));
+		const collectionPurges = await timeCollectionPurges(idleRate);
+
+		for (const [rep, sample] of collectionPurges.entries()) {
+			expect(sample.byCommand, `expired: collection purge ${rep} at ${size}`)
+				.not.toHaveProperty('scan');
+		}
+
+		collectionPurgesBySize.set(size, collectionPurges);
 
 		countsBeforeSlicePurgeBySize.set(
 			size,
@@ -1557,6 +1571,11 @@ test('a scoped purge costs the same however much has expired', async () => {
 
 			expect(refilled, `live entries refilled after save ${rep}`)
 				.toBe(smallestSize);
+		}
+
+		for (const [rep, sample] of slicePurges.entries()) {
+			expect(sample.byCommand, `expired: ${phase.collection} save ${rep} at ${size}`)
+				.not.toHaveProperty('scan');
 		}
 
 		slicePurgesBySize.set(size, slicePurges);
