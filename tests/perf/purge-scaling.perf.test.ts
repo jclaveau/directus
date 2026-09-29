@@ -42,9 +42,12 @@ import { summarise, type Summary } from './measure.js';
  *
  * A last phase holds the live cache at the smallest size and grows what has
  * expired instead: entries filled under a short TTL, measured once Redis has
- * dropped them while their index members stay. Production's index is mostly
- * those, between two reaps. A layout that forgets them on the purge pays for it
- * on the first write, so that write is reported on its own beside the medians.
+ * dropped them, while what named them may stay: index members on a layout
+ * whose sets outlive them, registry names on one whose sets expire with them.
+ * Production's index is mostly those, between two reaps. A layout that forgets
+ * them on the purge pays for it on the first write, so that write is reported
+ * on its own beside the medians. A version save on the same collection reports
+ * what walking them costs a collection-wide purge.
  *
  * Seeded through the api rather than written into Redis: a layout the bench
  * wrote itself would measure the bench's idea of the index, and the point is to
@@ -1280,12 +1283,23 @@ test.each([PK_PHASE, BOOLEAN_PHASE])(
 	60 * 60 * 1000,
 );
 
+// What the index of one collection still files, and what its registry names.
+type IndexCount = {
+	members: number;
+	indexSets: number;
+	registryNames: number;
+	deadRegistryNames: number;
+};
+
 /**
- * How many members the index sets of `collection` hold, whatever the layout
- * names them or stores them as.
+ * How many members the index sets of `collection` hold and how many sets hold
+ * them, whatever the layout names them or stores them as, and how many sets
+ * its registry names, of which how many Redis no longer holds. A layout
+ * without a registry names none.
  */
-async function countIndexMembers(collection: string): Promise<number> {
+async function countIndexMembers(collection: string): Promise<IndexCount> {
 	let members = 0;
+	let indexSets = 0;
 	let cursor = '0';
 
 	do {
@@ -1304,14 +1318,51 @@ async function countIndexMembers(collection: string): Promise<number> {
 
 			if (type === 'zset') {
 				members += await redis.zcard(key);
+				indexSets++;
 			}
 			else if (type === 'set') {
 				members += await redis.scard(key);
+				indexSets++;
 			}
 		}
 	} while (cursor !== '0');
 
-	return members;
+	const registryKeys = await redis.keys(
+		`*:scoped-cache-index:fingerprint-registry:${collection}`,
+	);
+
+	let registryNames = 0;
+	let deadRegistryNames = 0;
+
+	for (const registryKey of registryKeys) {
+		let registryCursor = '0';
+
+		do {
+			const [nextCursor, names] = await redis.sscan(
+				registryKey,
+				registryCursor,
+				'COUNT',
+				1000,
+			);
+
+			registryCursor = nextCursor;
+			registryNames += names.length;
+
+			const existing = await Promise.all(names.map((name) => {
+				return redis.exists(name);
+			}));
+
+			deadRegistryNames += existing.filter((held) => held === 0).length;
+		} while (registryCursor !== '0');
+	}
+
+	return { members, indexSets, registryNames, deadRegistryNames };
+}
+
+function describeIndexCount(count: IndexCount): string {
+	return `${count.members} members in ${count.indexSets} sets,`
+		+ ` ${count.registryNames} registry names`
+		+ ` (${count.deadRegistryNames} dead)`;
 }
 
 /** Seconds until Redis holds none of `rawKeys`. */
@@ -1332,6 +1383,24 @@ async function waitUntilExpired(rawKeys: string[]): Promise<number> {
 
 test('a scoped purge costs the same however much has expired', async () => {
 	const phase = PK_PHASE;
+	const rowIds = phaseRowIds.get(phase.phaseName)!;
+
+	// A version save purges its collection whole, so versioning the one the
+	// expired entries were filed in walks whatever its index still names.
+	await api(`/collections/${phase.collection}`, {
+		method: 'PATCH',
+		body: JSON.stringify({ meta: { versioning: true } }),
+	});
+
+	const sliceVersion = await api('/versions?fields=id', {
+		method: 'POST',
+		body: JSON.stringify({
+			key: 'bench-expired',
+			name: 'bench-expired',
+			collection: phase.collection,
+			item: String(rowIds[writeReps]),
+		}),
+	});
 
 	await clearResponseCache();
 
@@ -1347,7 +1416,8 @@ test('a scoped purge costs the same however much has expired', async () => {
 
 	const bySize = new Map<number, WriteSample[]>();
 	const collectionPurgesBySize = new Map<number, WriteSample[]>();
-	const membersBySize = new Map<number, number>();
+	const slicePurgesBySize = new Map<number, WriteSample[]>();
+	const countsBySize = new Map<number, IndexCount>();
 	const report: string[] = [];
 	let filed = smallestSize;
 
@@ -1403,24 +1473,76 @@ test('a scoped purge costs the same however much has expired', async () => {
 		const keyspace = await redis.dbsize();
 		const lingering = await countIndexMembers(phase.collection);
 
-		// Every entry filed is still named, live or not.
-		expect(lingering, `index members once ${size} entries are filed`)
-			.toBeGreaterThanOrEqual(size);
+		// Every live entry is still filed. What a layout keeps of the expired
+		// ones is what this phase reports, not what it requires.
+		expect(lingering.members, `index members once ${size} entries are filed`)
+			.toBeGreaterThanOrEqual(smallestSize);
 
-		membersBySize.set(size, lingering);
+		// A registry names every set still standing, dead names or not.
+		if (lingering.registryNames > 0) {
+			expect(
+				lingering.registryNames - lingering.deadRegistryNames,
+				`live registry names once ${size} entries are filed`,
+			).toBeGreaterThanOrEqual(lingering.indexSets);
+		}
+
+		countsBySize.set(size, lingering);
 
 		const samples = await timeSliceWrites(phase, idleRate);
 
 		bySize.set(size, samples);
+
+		const afterRowWrites = await countIndexMembers(phase.collection);
+
 		collectionPurgesBySize.set(size, await timeCollectionPurges(idleRate));
+
+		const slicePurges: WriteSample[] = [];
+		let afterFirstSlicePurge = afterRowWrites;
+
+		for (let rep = 0; rep < writeReps; rep++) {
+			slicePurges.push(await timeRedisCost(() => {
+				return api(`/versions/${sliceVersion.data.id}/save`, {
+					method: 'POST',
+					body: JSON.stringify({ label: `saved ${Date.now()}` }),
+				});
+			}, idleRate));
+
+			const purgedRead = await fetch(`${base}${slicePath(phase, 0)}`, {
+				headers: authHeaders,
+			});
+
+			await purgedRead.text();
+
+			expect(
+				purgedRead.headers.get(STATUS_HEADER),
+				`the ${phase.collection} save ${rep} at ${size}`,
+			).toBe('MISS');
+
+			if (rep === 0) {
+				afterFirstSlicePurge = await countIndexMembers(phase.collection);
+			}
+
+			// Put the live entries back, so the next save finds the same cache.
+			const refilled = await fillEntries(phase, 0, smallestSize);
+
+			expect(refilled, `live entries refilled after save ${rep}`)
+				.toBe(smallestSize);
+		}
+
+		slicePurgesBySize.set(size, slicePurges);
 
 		const membersAfter = await countIndexMembers(phase.collection);
 
 		report.push(
-			`- ${size} filed: ${expiryNote}; ${keyspace} Redis keys, ${lingering}`
-			+ ` index members before the writes, ${membersAfter} after; rep 1:`
+			`- ${size} filed: ${expiryNote}; ${keyspace} Redis keys; before the`
+			+ ` writes ${describeIndexCount(lingering)}; after the row writes`
+			+ ` ${describeIndexCount(afterRowWrites)}; after the first`
+			+ ` ${phase.collection} save ${describeIndexCount(afterFirstSlicePurge)};`
+			+ ` at the end ${describeIndexCount(membersAfter)}; rep 1:`
 			+ ` ${commandBreakdown(samples[0]!)}; last write:`
-			+ ` ${commandBreakdown(samples.at(-1)!)}`,
+			+ ` ${commandBreakdown(samples.at(-1)!)}; first ${phase.collection}`
+			+ ` save: ${commandBreakdown(slicePurges[0]!)}; last:`
+			+ ` ${commandBreakdown(slicePurges.at(-1)!)}`,
 		);
 	}
 
@@ -1431,7 +1553,10 @@ test('a scoped purge costs the same however much has expired', async () => {
 			const wallMs = seriesOf(samplesBySize, size, (sample) => sample.wallMs);
 			const firstRep = samplesBySize.get(size)![0]!;
 
-			return `| ${size} | ${size - smallestSize} | ${membersBySize.get(size)}`
+			const counted = countsBySize.get(size)!;
+
+			return `| ${size} | ${size - smallestSize} | ${counted.members}`
+				+ ` | ${counted.registryNames} | ${counted.deadRegistryNames}`
 				+ ` | ${commands.median.toFixed(1)} | ${redisMs.median.toFixed(2)} ms`
 				+ ` | ${wallMs.median.toFixed(1)} ms | ${wallMs.p95.toFixed(1)} ms`
 				+ ` | ${firstRep.commands.toFixed(1)}`
@@ -1447,6 +1572,9 @@ test('a scoped purge costs the same however much has expired', async () => {
 
 	const firstRepScaling = bySize.get(largestSize)![0]!.commands
 		/ Math.max(bySize.get(smallestSize)![0]!.commands, Number.EPSILON);
+
+	const firstSlicePurgeScaling = slicePurgesBySize.get(largestSize)![0]!.commands
+		/ Math.max(slicePurgesBySize.get(smallestSize)![0]!.commands, Number.EPSILON);
 
 	const gates = [
 		['Redis commands per write', commandScaling, maxCommandScaling],
@@ -1473,9 +1601,11 @@ test('a scoped purge costs the same however much has expired', async () => {
 	});
 
 	const tableHeader = [
-		'| entries filed | expired | index members | Redis commands | Redis time'
-		+ ' | wall | wall p95 | rep 1 commands | rep 1 Redis time | rep 1 wall |',
-		'| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+		'| entries filed | expired | index members | registry names'
+		+ ' | dead registry names | Redis commands | Redis time | wall | wall p95'
+		+ ' | rep 1 commands | rep 1 Redis time | rep 1 wall |',
+		'| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+		+ ' ---: | ---: |',
 	];
 
 	const markdown = [
@@ -1483,7 +1613,8 @@ test('a scoped purge costs the same however much has expired', async () => {
 		'',
 		`${smallestSize} live entries at every size; the rest of each size filled`
 		+ ` with a ${EXPIRING_TTL_MS} ms TTL and measured once Redis had dropped`
-		+ ' them, their index members still filed. One scoped PATCH per rep,'
+		+ ' them, whatever the layout still names of them counted beside each'
+		+ ' size. One scoped PATCH per rep,'
 		+ ` ${writeReps} reps per size, each purging a slice of ${SLICE_ENTRIES}`
 		+ ' live entries. Medians, and rep 1 on its own: a purge that forgets'
 		+ ' expired members pays for them on the first write after they expire,'
@@ -1498,6 +1629,14 @@ test('a scoped purge costs the same however much has expired', async () => {
 		'',
 		...tableHeader,
 		...expiredFigureRowsOf(collectionPurgesBySize),
+		'',
+		`One version save per rep on ${phase.collection} itself, ${writeReps} reps`
+		+ ` per size, each purging its ${smallestSize} live entries and walking`
+		+ ' whatever its index still names of the expired ones, the live entries'
+		+ ' refilled between reps. Reported, gates nothing.',
+		'',
+		...tableHeader,
+		...expiredFigureRowsOf(slicePurgesBySize),
 		'',
 		...report,
 		'',
@@ -1519,9 +1658,10 @@ test('a scoped purge costs the same however much has expired', async () => {
 			measuredAt: new Date().toISOString(),
 			liveEntries: smallestSize,
 			expiringTtlMs: EXPIRING_TTL_MS,
-			indexMembers: Object.fromEntries(membersBySize),
+			indexCounts: Object.fromEntries(countsBySize),
 			samples: Object.fromEntries(bySize),
 			collectionPurgeSamples: Object.fromEntries(collectionPurgesBySize),
+			slicePurgeSamples: Object.fromEntries(slicePurgesBySize),
 		}, null, 2)}\n`,
 	);
 
@@ -1538,7 +1678,8 @@ test('a scoped purge costs the same however much has expired', async () => {
 		`${breached}${earlierStatus.trim()}; expired ${expiredAtLargest} vs 0:`
 		+ ` ${commandScaling.toFixed(2)}x redis cmds,`
 		+ ` ${redisTimeScaling.toFixed(2)}x redis time,`
-		+ ` rep 1 ${firstRepScaling.toFixed(2)}x redis cmds\n`,
+		+ ` rep 1 ${firstRepScaling.toFixed(2)}x redis cmds,`
+		+ ` ${phase.collection} save rep 1 ${firstSlicePurgeScaling.toFixed(2)}x\n`,
 	);
 
 	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
