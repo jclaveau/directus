@@ -7,6 +7,7 @@ import {
 	scopedCacheEpochBumpScript,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
+	scopedCacheIndexFileScript,
 	scopedCacheIndexReapScript,
 	scopedCacheCollectionIndexKeysRegisterScript,
 	scopedCacheCollectionIndexKeysPruneScript,
@@ -26,10 +27,8 @@ vi.mock('@directus/env', () => {
 
 const srem = vi.fn();
 const unlink = vi.fn();
-const sadd = vi.fn();
-const persist = vi.fn();
-const indexExpiry = vi.fn();
-const pipelinedCollectionIndexKeysRegister = vi.fn();
+const indexFile = vi.fn();
+const pipelineExec = vi.fn(async (): Promise<unknown[]> => []);
 const scopedCacheCollectionIndexKeysRegister = vi.fn();
 const scopedCacheCollectionIndexKeysPrune = vi.fn();
 const pttl = vi.fn();
@@ -38,6 +37,7 @@ const scopedCacheEpochBump = vi.fn();
 const scopedCacheIndexReap = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
+const sadd = vi.fn();
 const evalScript = vi.fn();
 const onEvent = vi.fn();
 const redisState = { status: 'connecting' };
@@ -62,12 +62,8 @@ vi.mock('../redis/index.js', () => {
 					return {
 						srem,
 						unlink,
-						sadd,
-						persist,
-						scopedCacheIndexExpiry: indexExpiry,
-						scopedCacheCollectionIndexKeysRegister:
-							pipelinedCollectionIndexKeysRegister,
-						exec: async () => [],
+						scopedCacheIndexFile: indexFile,
+						exec: pipelineExec,
 					};
 				},
 			};
@@ -642,18 +638,17 @@ describe('bumpPurgeEpochs', () => {
 describe('fileIndexedEntries', () => {
 	beforeEach(() => {
 		for (const command of [
-			sadd,
-			persist,
-			indexExpiry,
-			pipelinedCollectionIndexKeysRegister,
+			indexFile,
+			defineCommand,
+			scopedCacheCollectionIndexKeysRegister,
 		]) {
 			command.mockReset();
 		}
 	});
 
 	it(oneLine`
-		names every set it files in the collection's index-key set, once, after the
-		last of them, with the expiry in milliseconds
+		files a collection's sets in one script call, naming the index-key set first
+		and each set once, as a key
 	`, async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
 			[
@@ -673,26 +668,65 @@ describe('fileIndexedEntries', () => {
 			3600,
 		);
 
-		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([[
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheIndexFile',
+			{ lua: scopedCacheIndexFileScript },
+		);
+
+		expect(indexFile.mock.calls).toEqual([[
+			4,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			3600000,
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=bo',
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
+			3600,
+			1,
+			'slot:&owner=,ana,bo,&|key-a',
+			1,
+			'slot:&owner=,ana,bo,&|key-a',
+			1,
+			'slot:&owner=,ana,&|key-b',
 		]]);
+	});
 
-		// Registered before a set holds its members, a name can be pruned as
-		// missing and the set then filed with nothing naming it.
-		expect(indexExpiry).toHaveBeenCalledTimes(3);
+	// The script decides which sets it creates; a separate register call would
+	// send every name again on every refill.
+	it('sends no register call of its own, on a first fill or a refill', async () => {
+		const filing = {
+			fingerprint: parseScopedCacheFingerprint('slot:&owner=,ana,&'),
+			keys: ['key-a'],
+			indexPath: 'owner',
+			homePinFields: [],
+		};
 
-		expect(indexExpiry.mock.invocationCallOrder[2])
-			.toBeLessThan(
-				pipelinedCollectionIndexKeysRegister.mock.invocationCallOrder[0]!,
-			);
+		await redisScopedCacheStore().fileIndexedEntries([filing], 60);
+		await redisScopedCacheStore().fileIndexedEntries([filing], 60);
+
+		expect(scopedCacheCollectionIndexKeysRegister).not.toHaveBeenCalled();
+
+		expect(indexFile.mock.calls).toEqual([
+			[
+				2,
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
+				60,
+				1,
+				'slot:&owner=,ana,&|key-a',
+			],
+			[
+				2,
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
+				60,
+				1,
+				'slot:&owner=,ana,&|key-a',
+			],
+		]);
 	});
 
 	it(oneLine`
-		names a home pin's sets in the collection's index-key set, beside the index
-		path's, so a collection-wide purge reaches the reads filed there
+		files a home pin's sets in the same call as the index path's, so the sets it
+		creates are named where a collection-wide purge looks
 	`, async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
 			[
@@ -712,12 +746,19 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([[
+		expect(indexFile.mock.calls).toEqual([[
+			4,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			60000,
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=8',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
+			60,
+			1,
+			'slot:&id=,7,8,&|key-a',
+			1,
+			'slot:&id=,7,8,&|key-a',
+			1,
+			'slot:&owner=,ana,&|key-b',
 		]]);
 	});
 
@@ -740,45 +781,100 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([
+		expect(indexFile.mock.calls).toEqual([
 			[
+				2,
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				60000,
 				'scalabus:scoped-cache-index:fingerprint:slot:',
+				60,
+				1,
+				'slot:&|key-a',
 			],
 			[
+				2,
 				'scalabus:scoped-cache-index:collection-index-keys:note',
-				60000,
 				'scalabus:scoped-cache-index:fingerprint:note:',
+				60,
+				1,
+				'note:&|key-b',
 			],
 		]);
 	});
 
-	it('leaves the index-key set of a never-expiring set with no expiry', async () => {
+	it('passes a never-expiring fill its ttl of 0 for the script', async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
 			[{
 				fingerprint: { collection: 'slot' },
-				keys: ['key-a'],
+				keys: ['key-a', 'key-a__expires_at'],
 				indexPath: null,
 				homePinFields: [],
 			}],
 			0,
 		);
 
-		expect(persist).toHaveBeenCalledWith(
-			'scalabus:scoped-cache-index:fingerprint:slot:',
-		);
-
-		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([[
+		expect(indexFile.mock.calls).toEqual([[
+			2,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			-1,
 			'scalabus:scoped-cache-index:fingerprint:slot:',
+			0,
+			2,
+			'slot:&|key-a',
+			'slot:&|key-a__expires_at',
 		]]);
 	});
 
+	it('starts a new call past 500 sets of one collection', async () => {
+		await redisScopedCacheStore().fileIndexedEntries(
+			Array.from({ length: 501 }, (_, index) => {
+				return {
+					fingerprint: parseScopedCacheFingerprint(
+						`slot:&owner=,v${index},&`,
+					),
+					keys: [`key-${index}`],
+					indexPath: 'owner',
+					homePinFields: [],
+				};
+			}),
+			60,
+		);
+
+		expect(indexFile).toHaveBeenCalledTimes(2);
+		expect(indexFile.mock.calls[0]![0]).toBe(501);
+
+		expect(indexFile.mock.calls[1]).toEqual([
+			2,
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=v500',
+			60,
+			1,
+			'slot:&owner=,v500,&|key-500',
+		]);
+	});
+
 	it(oneLine`
-		registers the collection index-key set script, which only ever moves the
-		expiry out and compares it in milliseconds
+		throws a filing the server refused, so the caller skips the write
+	`, async () => {
+		pipelineExec.mockResolvedValueOnce([
+			[new Error('OOM command not allowed'), null],
+		]);
+
+		await expect(redisScopedCacheStore().fileIndexedEntries(
+			[{
+				fingerprint: { collection: 'slot' },
+				keys: ['key-a'],
+				indexPath: null,
+				homePinFields: [],
+			}],
+			60,
+		)).rejects.toThrow('OOM command not allowed');
+	});
+});
+
+// The hourly reap still names the sets it finds through this script, which is
+// how a set an older build filed without naming it gets adopted.
+describe('scopedCacheCollectionIndexKeysRegisterScript', () => {
+	it(oneLine`
+		only ever moves the expiry out and compares it in milliseconds
 	`, () => {
 		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
 			"local existed = redis.call('EXISTS', KEYS[1])\n"
@@ -794,9 +890,85 @@ describe('fileIndexedEntries', () => {
 			+ 'if existed == 0 or (ttl >= 0 and ttl < want) then\n'
 			+ "\tredis.call('PEXPIRE', KEYS[1], want)",
 		);
+	});
+});
 
-		expect(scopedCacheCollectionIndexKeysRegisterScript).not.toContain("'EXPIRE'");
-		expect(scopedCacheCollectionIndexKeysRegisterScript).not.toContain("'TTL'");
+describe('scopedCacheIndexFileScript', () => {
+	// A set can exist while its name is gone (a flush dropping the index-key set
+	// after a fill recreated the set, an eviction), and a collection-wide purge
+	// reads only the index-key set: every fill names every set it files into.
+	it('names every set of the call, whether it creates it or not', () => {
+		expect(scopedCacheIndexFileScript).toContain(
+			"local held = redis.call('PTTL', KEYS[1])\n"
+			+ "local named = redis.call('SADD', KEYS[1], unpack(KEYS, 2))\n"
+			+ 'if unbounded then',
+		);
+	});
+
+	// Named after its set holds members, a name can be pruned as missing in
+	// between, leaving the set filed with nothing naming it.
+	it('names a set before filing into it', () => {
+		expect(scopedCacheIndexFileScript).toMatch(
+			/'SADD', KEYS\[1\][\s\S]*'SADD', KEYS\[i\]/,
+		);
+	});
+
+	// TTL rounds to the nearest second, so a set's `left` can be 499 ms short:
+	// one second more keeps the index-key set past it.
+	it(oneLine`
+		moves the index-key set's expiry only outward, past the longest-lived set,
+		before touching any set
+	`, () => {
+		expect(scopedCacheIndexFileScript).toContain(
+			'\telseif left >= want then\n'
+			+ '\t\tlongest = math.max(longest, (left + 1) * 1000)',
+		);
+
+		expect(scopedCacheIndexFileScript).toContain(
+			'elseif held == -2 or (held >= 0 and held < longest) then\n'
+			+ "\tredis.call('PEXPIRE', KEYS[1], longest)",
+		);
+
+		expect(scopedCacheIndexFileScript).toMatch(
+			/'PEXPIRE', KEYS\[1\][\s\S]*'SADD', KEYS\[i\]/,
+		);
+	});
+
+	it(oneLine`
+		keeps the index-key set with no expiry while a set it names has none
+	`, () => {
+		expect(scopedCacheIndexFileScript).toContain(
+			'local unbounded = want <= 0\n',
+		);
+
+		expect(scopedCacheIndexFileScript).toContain(
+			'\telseif left == -1 then\n'
+			+ '\t\tunbounded = true',
+		);
+
+		expect(scopedCacheIndexFileScript).toContain(
+			'if unbounded then\n'
+			+ '\tif held >= 0 then\n'
+			+ "\t\tredis.call('PERSIST', KEYS[1])",
+		);
+	});
+
+	it(oneLine`
+		files each set's members and moves its own expiry only outward, or clears it
+		for a ttl of 0
+	`, () => {
+		expect(scopedCacheIndexFileScript).toContain(
+			'\tif count > 0 then\n'
+			+ "\t\tredis.call('SADD', KEYS[i], unpack(ARGV, at + 1, at + count))\n"
+			+ '\tend\n'
+			+ '\tat = at + count + 1\n'
+			+ '\tif want <= 0 then\n'
+			+ '\t\tif lefts[i] >= 0 then\n'
+			+ "\t\t\tredis.call('PERSIST', KEYS[i])\n"
+			+ '\t\tend\n'
+			+ '\telseif lefts[i] == -2 or (lefts[i] >= 0 and lefts[i] < want) then\n'
+			+ "\t\tredis.call('EXPIRE', KEYS[i], want)",
+		);
 	});
 });
 

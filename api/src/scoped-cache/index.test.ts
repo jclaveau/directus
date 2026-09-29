@@ -1085,11 +1085,7 @@ describe('indexScopedCacheEntry', () => {
 			defineCommand: vi.fn(),
 			pipeline: () => {
 				return {
-					sadd: vi.fn().mockReturnThis(),
-					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
-					scopedCacheCollectionIndexKeysRegister: vi.fn().mockReturnThis(),
-					expire: vi.fn().mockReturnThis(),
-					persist: vi.fn().mockReturnThis(),
+					scopedCacheIndexFile: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
 					// REJECTS on a connection-level failure, so an ignored reply
 					// reads as success.
@@ -1107,7 +1103,7 @@ describe('indexScopedCacheEntry', () => {
 		only ever extends an index set's expiry, so a later write carrying a shorter
 		TTL cannot outlive-orphan the entries an earlier one indexed
 	`, async () => {
-		const indexExpiry = vi.fn().mockReturnThis();
+		const indexFile = vi.fn().mockReturnThis();
 		const expire = vi.fn().mockReturnThis();
 		env['CACHE_TTL'] = '30m';
 
@@ -1115,10 +1111,8 @@ describe('indexScopedCacheEntry', () => {
 			defineCommand: vi.fn(),
 			pipeline: () => {
 				return {
-					sadd: vi.fn().mockReturnThis(),
 					expire,
-					scopedCacheIndexExpiry: indexExpiry,
-					scopedCacheCollectionIndexKeysRegister: vi.fn().mockReturnThis(),
+					scopedCacheIndexFile: indexFile,
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1139,29 +1133,28 @@ describe('indexScopedCacheEntry', () => {
 		// can then reach.
 		expect(expire).not.toHaveBeenCalled();
 
-		expect(indexExpiry).toHaveBeenCalledWith(
+		expect(indexFile.mock.calls).toEqual([[
+			2,
+			'ns:scoped-cache-index:collection-index-keys:articles',
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 			3600,
+			2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-		);
+		]]);
 	});
 
 	it(oneLine`
 		clears an index set's expiry under a TTL of 0, since the entries it names
 		then never expire
 	`, async () => {
-		const sadd = vi.fn().mockReturnThis();
-		const persist = vi.fn().mockReturnThis();
+		const indexFile = vi.fn().mockReturnThis();
 
 		vi.mocked(useRedis).mockReturnValue({
 			defineCommand: vi.fn(),
 			pipeline: () => {
 				return {
-					sadd,
-					persist,
-					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
-					scopedCacheCollectionIndexKeysRegister: vi.fn().mockReturnThis(),
+					scopedCacheIndexFile: indexFile,
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1176,16 +1169,17 @@ describe('indexScopedCacheEntry', () => {
 		);
 
 		// A set filed while a TTL was in force keeps that expiry through a plain
-		// SADD, and expires under entries that no purge can reach any more.
-		expect(sadd).toHaveBeenCalledWith(
+		// SADD, and expires under entries that no purge can reach any more: a ttl
+		// of 0 tells the script to clear it.
+		expect(indexFile.mock.calls).toEqual([[
+			2,
+			'ns:scoped-cache-index:collection-index-keys:articles',
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
+			0,
+			2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-		);
-
-		expect(persist).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
-		);
+		]]);
 	});
 });
 
