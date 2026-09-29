@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
@@ -40,6 +40,12 @@ import { summarise, type Summary } from './measure.js';
  * field whose one value every cached read shares, the way production's reads
  * pin `enabled` or `status` beside a narrower field.
  *
+ * A last phase holds the live cache at the smallest size and grows what has
+ * expired instead: entries filled under a short TTL, measured once Redis has
+ * dropped them while their index members stay. Production's index is mostly
+ * those, between two reaps. A layout that forgets them on the purge pays for it
+ * on the first write, so that write is reported on its own beside the medians.
+ *
  * Seeded through the api rather than written into Redis: a layout the bench
  * wrote itself would measure the bench's idea of the index, and the point is to
  * compare layouts. What a write purges and refills goes over HTTP; the rest of
@@ -79,6 +85,10 @@ const FILL_CONCURRENCY = 4;
 
 // How many entries the filler is checked against a GET on, before any size.
 const FIDELITY_ENTRIES = 1000;
+
+// The TTL the expired-entries phase fills with: long enough that a batch's
+// entries are still there when it answers, short enough to wait out.
+const EXPIRING_TTL_MS = 2000;
 
 const maxCommandScaling =
 	Number(process.env['PERF_PURGE_MAX_COMMAND_SCALING'] ?? 1.5);
@@ -417,14 +427,23 @@ async function warmEntries(
 	return statuses;
 }
 
+// A fill under a short TTL, and the Redis names it sampled to watch expire.
+type ExpiringFill = {
+	ttlMs: number;
+	sampledKeys: string[];
+	aliveOnAnswer: number;
+};
+
 /**
  * Cache every entry in `[from, to)` in-process, `FILL_BATCH_ENTRIES` a call:
  * the reads `slicePath` names, under the keys and pins a GET of them files.
+ * With `expiring`, under its TTL, sampling one entry per call.
  */
 async function fillEntries(
 	phase: PurgePhase,
 	from: number,
 	to: number,
+	expiring?: ExpiringFill,
 ): Promise<number> {
 	const rowIds = phaseRowIds.get(phase.phaseName)!;
 	const batches: { id: number; limits: number[] }[][] = [];
@@ -458,10 +477,18 @@ async function fillEntries(
 					fields: 'id,label',
 					filter: phase.fillFilter,
 					rows,
+					ttlMs: expiring?.ttlMs,
 				}),
 			});
 
 			filled += answer.filled;
+
+			if (expiring) {
+				const sampled: string[] = answer.expiringKeys;
+
+				expiring.sampledKeys.push(...sampled);
+				expiring.aliveOnAnswer += await redis.exists(...sampled);
+			}
 		}
 	}
 
@@ -628,6 +655,46 @@ function timeCollectionPurge(idleRate: number): Promise<WriteSample> {
 	}, idleRate);
 }
 
+/** `writeReps` scoped PATCHes, each on a row the smallest size has warmed. */
+async function timeSliceWrites(
+	phase: PurgePhase,
+	idleRate: number,
+): Promise<WriteSample[]> {
+	const samples: WriteSample[] = [];
+
+	for (let rep = 0; rep < writeReps; rep++) {
+		samples.push(await timeWrite(phase, rep, idleRate));
+
+		// Put the purged slice back, so the next write finds the same cache.
+		const refill = await warmEntries(
+			phase,
+			rep * SLICE_ENTRIES,
+			(rep + 1) * SLICE_ENTRIES,
+		);
+
+		expect([...refill], `the slice ${phase.phaseName} write ${rep} purged`)
+			.toContain('MISS');
+	}
+
+	return samples;
+}
+
+/** `writeReps` version saves, each over a freshly cached versioned collection. */
+async function timeCollectionPurges(idleRate: number): Promise<WriteSample[]> {
+	const collectionPurges: WriteSample[] = [];
+
+	for (let rep = 0; rep < writeReps; rep++) {
+		const versionedWarm = await warmVersionedEntries();
+
+		expect([...versionedWarm], `the versioned reads before save ${rep}`)
+			.toContain('MISS');
+
+		collectionPurges.push(await timeCollectionPurge(idleRate));
+	}
+
+	return collectionPurges;
+}
+
 function commandBreakdown(sample: WriteSample): string {
 	return Object.entries(sample.byCommand)
 		.sort(([, a], [, b]) => b - a)
@@ -735,37 +802,14 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 			.toBeGreaterThanOrEqual(size);
 
 		const filedUnder = await largestIndexSets(phase);
-		const samples: WriteSample[] = [];
-
-		for (let rep = 0; rep < writeReps; rep++) {
-			samples.push(await timeWrite(phase, rep, idleRate));
-
-			// Put the purged slice back, so the next write finds the same cache.
-			const refill = await warmEntries(
-				phase,
-				rep * SLICE_ENTRIES,
-				(rep + 1) * SLICE_ENTRIES,
-			);
-
-			expect([...refill], `the slice ${phase.phaseName} write ${rep} purged`)
-				.toContain('MISS');
-		}
+		const samples = await timeSliceWrites(phase, idleRate);
 
 		bySize.set(size, samples);
 
 		let collectionReport = '';
 
 		if (phase.timesCollectionPurge) {
-			const collectionPurges: WriteSample[] = [];
-
-			for (let rep = 0; rep < writeReps; rep++) {
-				const versionedWarm = await warmVersionedEntries();
-
-				expect([...versionedWarm], `the versioned reads before save ${rep}`)
-					.toContain('MISS');
-
-				collectionPurges.push(await timeCollectionPurge(idleRate));
-			}
+			const collectionPurges = await timeCollectionPurges(idleRate);
 
 			collectionPurgesBySize.set(size, collectionPurges);
 
@@ -1235,3 +1279,267 @@ test.each([PK_PHASE, BOOLEAN_PHASE])(
 	},
 	60 * 60 * 1000,
 );
+
+/**
+ * How many members the index sets of `collection` hold, whatever the layout
+ * names them or stores them as.
+ */
+async function countIndexMembers(collection: string): Promise<number> {
+	let members = 0;
+	let cursor = '0';
+
+	do {
+		const [nextCursor, page] = await redis.scan(
+			cursor,
+			'MATCH',
+			`*:scoped-cache-index:fingerprint*:${collection}:*`,
+			'COUNT',
+			1000,
+		);
+
+		cursor = nextCursor;
+
+		for (const key of page) {
+			const type = await redis.type(key);
+
+			if (type === 'zset') {
+				members += await redis.zcard(key);
+			}
+			else if (type === 'set') {
+				members += await redis.scard(key);
+			}
+		}
+	} while (cursor !== '0');
+
+	return members;
+}
+
+/** Seconds until Redis holds none of `rawKeys`. */
+async function waitUntilExpired(rawKeys: string[]): Promise<number> {
+	const startedAt = performance.now();
+	const deadline = Date.now() + 120_000;
+
+	while (await redis.exists(...rawKeys) > 0) {
+		if (Date.now() > deadline) {
+			throw new Error('the expiring entries were still in Redis after 120 s');
+		}
+
+		await new Promise((wake) => setTimeout(wake, 250));
+	}
+
+	return (performance.now() - startedAt) / 1000;
+}
+
+test('a scoped purge costs the same however much has expired', async () => {
+	const phase = PK_PHASE;
+
+	await clearResponseCache();
+
+	const idleRate = await measureIdleCommands();
+	const writtenEntries = writeReps * SLICE_ENTRIES;
+	const liveWarm = await warmEntries(phase, 0, writtenEntries);
+
+	expect([...liveWarm], 'the live warm').toContain('MISS');
+
+	const liveFilled = await fillEntries(phase, writtenEntries, smallestSize);
+
+	expect(liveFilled, 'live entries filled').toBe(smallestSize - writtenEntries);
+
+	const bySize = new Map<number, WriteSample[]>();
+	const collectionPurgesBySize = new Map<number, WriteSample[]>();
+	const membersBySize = new Map<number, number>();
+	const report: string[] = [];
+	let filed = smallestSize;
+
+	for (const size of [...cacheSizes].sort((a, b) => a - b)) {
+		let expiryNote = 'nothing expired';
+
+		if (filed < size) {
+			const expiring: ExpiringFill = {
+				ttlMs: EXPIRING_TTL_MS,
+				sampledKeys: [],
+				aliveOnAnswer: 0,
+			};
+
+			const filled = await fillEntries(phase, filed, size, expiring);
+			const filledAt = Date.now();
+
+			expect(filled, `expiring entries filled to ${size}`).toBe(size - filed);
+
+			// Names Redis never held would read as expired from the start.
+			expect(expiring.aliveOnAnswer, 'sampled keys alive as their call answered')
+				.toBeGreaterThan(0);
+
+			const goneAfter = await waitUntilExpired(expiring.sampledKeys);
+
+			// A filing may be kept twice its entry's TTL: past that, a layout that
+			// forgets members by their expiry has had every chance to.
+			const indexMarginMs = filledAt + 2 * EXPIRING_TTL_MS + 1000 - Date.now();
+
+			await new Promise((wake) => setTimeout(wake, Math.max(indexMarginMs, 0)));
+
+			const sidecars = expiring.sampledKeys
+				.filter((key) => key.endsWith('__expires_at'))
+				.length;
+
+			expiryNote = `${size - filed} filled with a ${EXPIRING_TTL_MS} ms TTL;`
+				+ ` sampled ${expiring.sampledKeys.length - sidecars} payload and`
+				+ ` ${sidecars} \`__expires_at\` keys, ${expiring.aliveOnAnswer}`
+				+ ` alive as their call answered, all gone ${goneAfter.toFixed(1)} s`
+				+ ' after the fill';
+
+			filed = size;
+		}
+
+		const liveRead = await fetch(`${base}${slicePath(phase, smallestSize - 1)}`, {
+			headers: authHeaders,
+		});
+
+		await liveRead.text();
+
+		expect(liveRead.headers.get(STATUS_HEADER), `the last live entry at ${size}`)
+			.toBe('HIT');
+
+		const keyspace = await redis.dbsize();
+		const lingering = await countIndexMembers(phase.collection);
+
+		// Every entry filed is still named, live or not.
+		expect(lingering, `index members once ${size} entries are filed`)
+			.toBeGreaterThanOrEqual(size);
+
+		membersBySize.set(size, lingering);
+
+		const samples = await timeSliceWrites(phase, idleRate);
+
+		bySize.set(size, samples);
+		collectionPurgesBySize.set(size, await timeCollectionPurges(idleRate));
+
+		const membersAfter = await countIndexMembers(phase.collection);
+
+		report.push(
+			`- ${size} filed: ${expiryNote}; ${keyspace} Redis keys, ${lingering}`
+			+ ` index members before the writes, ${membersAfter} after; rep 1:`
+			+ ` ${commandBreakdown(samples[0]!)}; last write:`
+			+ ` ${commandBreakdown(samples.at(-1)!)}`,
+		);
+	}
+
+	const expiredFigureRowsOf = (samplesBySize: Map<number, WriteSample[]>) => {
+		return cacheSizes.map((size) => {
+			const commands = seriesOf(samplesBySize, size, (sample) => sample.commands);
+			const redisMs = seriesOf(samplesBySize, size, (sample) => sample.redisMs);
+			const wallMs = seriesOf(samplesBySize, size, (sample) => sample.wallMs);
+			const firstRep = samplesBySize.get(size)![0]!;
+
+			return `| ${size} | ${size - smallestSize} | ${membersBySize.get(size)}`
+				+ ` | ${commands.median.toFixed(1)} | ${redisMs.median.toFixed(2)} ms`
+				+ ` | ${wallMs.median.toFixed(1)} ms | ${wallMs.p95.toFixed(1)} ms`
+				+ ` | ${firstRep.commands.toFixed(1)}`
+				+ ` | ${firstRep.redisMs.toFixed(2)} ms`
+				+ ` | ${firstRep.wallMs.toFixed(1)} ms |`;
+		});
+	};
+
+	const expiredAtLargest = largestSize - smallestSize;
+
+	const commandScaling = scalingIn(bySize, (sample) => sample.commands);
+	const redisTimeScaling = scalingIn(bySize, (sample) => sample.redisMs);
+
+	const firstRepScaling = bySize.get(largestSize)![0]!.commands
+		/ Math.max(bySize.get(smallestSize)![0]!.commands, Number.EPSILON);
+
+	const gates = [
+		['Redis commands per write', commandScaling, maxCommandScaling],
+		['Redis time per write', redisTimeScaling, maxRedisTimeScaling],
+		[
+			'Redis commands per collection purge',
+			scalingIn(collectionPurgesBySize, (sample) => sample.commands),
+			maxCommandScaling,
+		],
+		[
+			'Redis time per collection purge',
+			scalingIn(collectionPurgesBySize, (sample) => sample.redisMs),
+			maxRedisTimeScaling,
+		],
+	] as const;
+
+	const verdicts = gates.map(([label, measured, ceiling]) => {
+		const verdict = measured <= ceiling
+			? 'ok'
+			: 'OVER';
+
+		return `| expired: ${label}, ${expiredAtLargest} expired against 0`
+			+ ` | ${measured.toFixed(2)} | ${ceiling} | ${verdict} |`;
+	});
+
+	const tableHeader = [
+		'| entries filed | expired | index members | Redis commands | Redis time'
+		+ ' | wall | wall p95 | rep 1 commands | rep 1 Redis time | rep 1 wall |',
+		'| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+	];
+
+	const markdown = [
+		'### Purge scaling, expired entries',
+		'',
+		`${smallestSize} live entries at every size; the rest of each size filled`
+		+ ` with a ${EXPIRING_TTL_MS} ms TTL and measured once Redis had dropped`
+		+ ' them, their index members still filed. One scoped PATCH per rep,'
+		+ ` ${writeReps} reps per size, each purging a slice of ${SLICE_ENTRIES}`
+		+ ' live entries. Medians, and rep 1 on its own: a purge that forgets'
+		+ ' expired members pays for them on the first write after they expire,'
+		+ ' and the medians hide it.',
+		'',
+		...tableHeader,
+		...expiredFigureRowsOf(bySize),
+		'',
+		`One version save per rep, ${writeReps} reps per size, each purging the whole`
+		+ ` ${VERSIONED} collection, beside the same expired entries. Index members`
+		+ ` are ${phase.collection}'s.`,
+		'',
+		...tableHeader,
+		...expiredFigureRowsOf(collectionPurgesBySize),
+		'',
+		...report,
+		'',
+		'#### Gates',
+		'',
+		'| ratio | measured | ceiling | |',
+		'| --- | ---: | ---: | --- |',
+		...verdicts,
+		'',
+	];
+
+	await mkdir(outputDir, { recursive: true });
+	await appendFile(join(outputDir, 'purge-scaling.md'), `${markdown.join('\n')}\n`);
+
+	await writeFile(
+		join(outputDir, 'purge-scaling-expired.json'),
+		`${JSON.stringify({
+			commit: process.env['PERF_HEAD_SHA'] ?? 'local',
+			measuredAt: new Date().toISOString(),
+			liveEntries: smallestSize,
+			expiringTtlMs: EXPIRING_TTL_MS,
+			indexMembers: Object.fromEntries(membersBySize),
+			samples: Object.fromEntries(bySize),
+			collectionPurgeSamples: Object.fromEntries(collectionPurgesBySize),
+		}, null, 2)}\n`,
+	);
+
+	const over = verdicts.filter((line) => line.endsWith('OVER |'));
+	const statusFile = join(outputDir, 'purge-scaling.status.txt');
+	const earlierStatus = await readFile(statusFile, 'utf8').catch(() => '');
+
+	const breached = over.length > 0
+		? `expired: ${over.length} gate(s) OVER — `
+		: '';
+
+	await writeFile(
+		statusFile,
+		`${breached}${earlierStatus.trim()}; expired ${expiredAtLargest} vs 0:`
+		+ ` ${commandScaling.toFixed(2)}x redis cmds,`
+		+ ` ${redisTimeScaling.toFixed(2)}x redis time,`
+		+ ` rep 1 ${firstRepScaling.toFixed(2)}x redis cmds\n`,
+	);
+
+	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
+}, 60 * 60 * 1000);
