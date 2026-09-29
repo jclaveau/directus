@@ -320,6 +320,7 @@ jobs:
             'api/src/middleware/respond.ts' \
             'api/src/utils/compress.ts' \
             'tests/perf/cache.perf.test.ts' \
+            'tests/perf/purge-scaling.perf.test.ts' \
             'tests/perf/measure.ts' \
             '.github/workflows/bench.yml')
 
@@ -420,6 +421,17 @@ jobs:
           PERF_BENCH_SHA: ${{ steps.commits.outputs.bench }}
           PERF_REDIS: redis://127.0.0.1:6108
 
+      # After the cache bench rather than beside it: both drive the same Redis, and
+      # a purge timed while another instance fills measures the other instance.
+      - name: Measure purge scaling
+        id: purge
+        if: '!cancelled()'
+        run: pnpm --filter tests-perf bench:purge-scaling
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+          PERF_REDIS: redis://127.0.0.1:6108
+
       - name: Write the summary
         if: always()
         run: |
@@ -431,6 +443,10 @@ jobs:
               echo ""
               echo "The measurement did not finish. See the job log."
             } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -f tests/perf/results/purge-scaling.md ]; then
+            cat tests/perf/results/purge-scaling.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # The status file is written before the gates are judged, so that a breach
@@ -475,6 +491,44 @@ jobs:
             -f state="$state" \
             -f context='Bench / cache' \
             -f description="$description" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      # Its own status, so a purge that stops scaling is named as that rather than
+      # folded into the cache bench's verdict. Scoped like it.
+      - name: Report purge scaling on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MEASURED: ${{ steps.purge.outcome }}
+          BLOCKING: ${{ steps.scope.outputs.blocking }}
+        run: |
+          status_file=tests/perf/results/purge-scaling.status.txt
+
+          if [ -f "$status_file" ]; then
+            description=$(cat "$status_file")
+          else
+            description='the measurement did not finish'
+          fi
+
+          if [ "$MEASURED" = success ]; then
+            state=success
+          elif [ "$BLOCKING" = true ] || [ ! -f "$status_file" ]; then
+            state=failure
+          else
+            state=success
+            description="advisory, no cache path touched: $description"
+          fi
+
+          if [ "${{ steps.commits.outputs.head }}" != "${{ steps.commits.outputs.bench }}" ]; then
+            echo "Not posted on the commit, judged by the bench of" \
+              "${{ steps.commits.outputs.bench_short }}: $state, $description"
+            exit 0
+          fi
+
+          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+            -f state="$state" \
+            -f context='Bench / purge scaling' \
+            -f description="${description:0:140}" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Upload the results
