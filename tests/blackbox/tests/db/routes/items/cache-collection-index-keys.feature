@@ -15,7 +15,8 @@ Feature: A collection-wide purge reaches every set through the index-key set
   and marked them complete, with the index generation as it read before its
   walk. Until then, and once a flush has moved that generation, it scans the
   keyspace for the collection's sets as before the index-key sets existed. Here
-  the marking is done by hand, the reap being set to once a year.
+  the marking is done by hand, the reap being set to once a year; only a flush
+  or a boot asks for a pass of its own.
 
   Scenario: a set created after the index-key set exists is purged with the collection
     Given these rows of index_keys_new:
@@ -179,6 +180,7 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And the index-key sets are marked complete
     And the marker is kept as it reads now
     When the cache is flushed
+    And the reap the flush asked for has marked the index-key sets complete
     And these reads are cached again:
       | name | fields     |
       | ada  | name,label |

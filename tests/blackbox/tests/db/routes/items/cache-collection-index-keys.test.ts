@@ -180,6 +180,22 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(flushed.statusCode).toBe(200);
 				});
 
+				// Before the kept marker goes back: a pass finishing after that would
+				// write its own over it.
+				and.optional(
+					'the reap the flush asked for has marked the index-key sets complete',
+					async () => {
+						await expect.poll(async () => {
+							const [marker, generation] = await redisClient.mget(
+								markerKey,
+								generationKey,
+							);
+
+							return marker === generation && marker !== keptMarker;
+						}, { timeout: 15_000 }).toBe(true);
+					},
+				);
+
 				and.optional('these reads are cached again:', cacheReads);
 
 				// What a flush dropping the index-key set after the set was filed
