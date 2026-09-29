@@ -70,7 +70,7 @@ vi.mock('../autoscale/lib/state.js', () => {
 	return { autoscaleState: autoscale.autoscaleState };
 });
 
-vi.mock('../../cache-build-identity.js', () => {
+vi.mock('../../core-build-id.js', () => {
 	return { resolveCoreBuildId: () => 'build-b' };
 });
 

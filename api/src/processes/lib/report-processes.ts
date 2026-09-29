@@ -1,7 +1,7 @@
 import type { ProcessDetail, ProcessRuntimeStats } from '@directus/types';
 import { hostname } from 'node:os';
-import { resolveCoreBuildId } from '../../cache-build-identity.js';
 import { useBus } from '../../bus/index.js';
+import { resolveCoreBuildId } from '../../core-build-id.js';
 import { useLogger } from '../../logger/index.js';
 import { nodeId } from '../../utils/node-id.js';
 import {
