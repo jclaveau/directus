@@ -1466,12 +1466,16 @@ const redisStore: ScopedCacheStore = {
 	): Promise<ScopedCacheReapTally> {
 		const tally: ScopedCacheReapTally = { indexKeys: 0, reaped: 0 };
 		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
+		const indexKeyPrefix = `${scopedCacheIndexPrefix()}fingerprint:`;
 
+		// The whole prefix rather than `fingerprint:*` alone, so the index-key
+		// sets come back from the same pass: MATCH filters after the walk, so the
+		// wider pattern costs only the replies, not a second walk.
 		for await (const foundKeys of scanScopedCacheKeys(
-			`${scopedCacheIndexGlobPrefix()}fingerprint*`,
+			`${scopedCacheIndexGlobPrefix()}*`,
 		)) {
 			const indexKeys = foundKeys.filter((foundKey) => {
-				return ! foundKey.startsWith(collectionIndexKeysPrefix);
+				return foundKey.startsWith(indexKeyPrefix);
 			});
 
 			for (const collectionIndexKeysKey of foundKeys) {
