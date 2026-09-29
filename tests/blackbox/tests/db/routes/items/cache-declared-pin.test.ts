@@ -570,16 +570,28 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
-		// What a reap's full pass writes: the index generation as it reads now.
-		// Without it a declaration scans the keyspace for the home pins' sets.
-		and.optional('the index-key sets are marked complete', async () => {
-			const namespace = env[vendor]['CACHE_NAMESPACE'];
+		// What a reap's full pass writes: the index generation as it reads now, in
+		// the completeness marker and in the adopted marker of each collection it
+		// found a legacy bare set for. Without the first a declaration scans the
+		// keyspace for the home pins' sets; without the second, whether it reads
+		// the legacy bare set hangs on whether a pass ran after the fills.
+		and.optional(
+			'the index-key sets are marked complete, the legacy bare set adopted',
+			async () => {
+				const namespace = env[vendor]['CACHE_NAMESPACE'];
 
-			expect(await redis.set(
-				`${namespace}:scoped-cache-index:collection-index-keys-complete`,
-				await redis.get(`${namespace}:scoped-cache-index-generation`) ?? '',
-			)).toBe('OK');
-		});
+				const generation = await redis.get(
+					`${namespace}:scoped-cache-index-generation`,
+				) ?? '';
+
+				expect(await redis.mset(
+					`${namespace}:scoped-cache-index:collection-index-keys-complete`,
+					generation,
+					`${namespace}:scoped-cache-index:legacy-bare-adopted:${SLOT}`,
+					generation,
+				)).toBe('OK');
+			},
+		);
 	}
 
 	// The `query` cell names the slots the signal rewrites and the note each gets,
