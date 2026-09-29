@@ -14,6 +14,8 @@ import { randomUUID } from 'crypto';
 import getPort from 'get-port';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
+import fs from 'node:fs/promises';
+import { join } from 'node:path';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 
@@ -37,6 +39,7 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['CACHE_NAMESPACE'] = `directus-content-version-${vendor}`;
 
 	let instance: ChildProcess;
+	let instanceOutput = '';
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -64,6 +67,11 @@ describe.each(vendors)('%s', (vendor) => {
 			cwd: paths.cwd,
 			env: env[vendor],
 		});
+
+		// Saved where CI prints the shared servers' logs: a 500 this instance
+		// answered is otherwise logged nowhere a failed run can show.
+		instance.stdout?.on('data', (chunk) => instanceOutput += chunk);
+		instance.stderr?.on('data', (chunk) => instanceOutput += chunk);
 
 		await awaitDirectusConnection(port);
 
@@ -125,6 +133,13 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 
 		instance.kill();
+
+		if (process.env['TEST_SAVE_LOGS']) {
+			await fs.writeFile(
+				join(paths.cwd, `server-log-content-version-${vendor}.txt`),
+				instanceOutput,
+			);
+		}
 
 		await DeleteCollection(vendor, { collection: NOTE });
 	});
