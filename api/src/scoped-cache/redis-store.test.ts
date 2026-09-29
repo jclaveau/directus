@@ -38,6 +38,12 @@ const scopedCacheIndexReap = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
+
+// The marker and the wholesale counter agreeing: a reap has vouched for the
+// index-key sets since the last flush.
+const mget = vi.fn(async (): Promise<(string | null)[]> => ['7', '7']);
+const get = vi.fn();
+const set = vi.fn();
 const evalScript = vi.fn();
 const onEvent = vi.fn();
 const redisState = { status: 'connecting' };
@@ -55,6 +61,9 @@ vi.mock('../redis/index.js', () => {
 				scan,
 				sscan,
 				sadd,
+				mget,
+				get,
+				set,
 				eval: evalScript,
 				on: onEvent,
 				status: redisState.status,
@@ -1022,7 +1031,12 @@ describe('scopedCacheIndexFileScript', () => {
 
 describe('scanCollectionIndexedEntries', () => {
 	beforeEach(() => {
-		for (const command of [scan, sscan, scopedCacheCollectionIndexKeysPrune]) {
+		for (const command of [
+			scan,
+			sscan,
+			scopedCacheCollectionIndexKeysPrune,
+			mget,
+		]) {
 			command.mockReset();
 		}
 	});
@@ -1079,6 +1093,90 @@ describe('scanCollectionIndexedEntries', () => {
 			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
 		]);
 
+		expect(mget.mock.calls).toEqual([[[
+			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'scalabus:scoped-cache-epoch:*',
+		]]]);
+
+		expect(scan).not.toHaveBeenCalled();
+	});
+
+	// A set filed while nothing named it — by an older build, or before a flush
+	// that dropped the index-key set and not the set — is found only by a SCAN
+	// until a reap names it.
+	it.each([
+		['no reap has written the marker', null, '7'],
+		['a flush moved the counter past the marker', '7', '8'],
+		['the counter expired after the marker was written', '7', null],
+	])(oneLine`
+		scans the keyspace for the collection's sets when %s
+	`, async (_case, marker, flushEpoch) => {
+		mget.mockResolvedValueOnce([marker, flushEpoch]);
+
+		scan.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:name=ada'],
+		]);
+
+		sscan.mockResolvedValueOnce(['0', ['slot:&name=,ada,&|key-a']]);
+
+		const scanned = [];
+
+		for await (
+			const page of redisScopedCacheStore().scanCollectionIndexedEntries('slot')
+		) {
+			scanned.push(page);
+		}
+
+		expect(scanned).toEqual([[{
+			fingerprint: { collection: 'slot', pinnedScope: { name: ['ada'] } },
+			key: 'key-a',
+			location: {
+				indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
+				member: 'slot:&name=,ada,&|key-a',
+			},
+		}]]);
+
+		expect(scan.mock.calls).toEqual([[
+			'0',
+			'MATCH',
+			'scalabus:scoped-cache-index:fingerprint:slot:*',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(sscan.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
+			'0',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(scopedCacheCollectionIndexKeysPrune).not.toHaveBeenCalled();
+	});
+
+	// A reap finding no counter writes an empty marker, which stays good until a
+	// flush creates one.
+	it(oneLine`
+		trusts the index-key set when the reap found no counter and there is still
+		none
+	`, async () => {
+		mget.mockResolvedValueOnce(['', null]);
+		sscan.mockResolvedValueOnce(['0', []]);
+
+		for await (
+			const _page of redisScopedCacheStore().scanCollectionIndexedEntries('slot')
+		) {
+			continue;
+		}
+
+		expect(sscan.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'0',
+			'COUNT',
+			1000,
+		]]);
+
 		expect(scan).not.toHaveBeenCalled();
 	});
 
@@ -1098,11 +1196,200 @@ describe('scanCollectionIndexedEntries', () => {
 	});
 });
 
-describe('takeCollectionIndexedKeys', () => {
+describe('scanDeclaredIndexedEntries', () => {
 	beforeEach(() => {
-		for (const command of [scan, sscan, evalScript, unlink]) {
+		for (const command of [
+			scan,
+			sscan,
+			scopedCacheCollectionIndexKeysPrune,
+			mget,
+		]) {
 			command.mockReset();
 		}
+	});
+
+	it(oneLine`
+		reads the home pins' sets off the index-key set while a reap vouches for
+		it
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce([
+				'0',
+				['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7'],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
+
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+		]);
+
+		const scanned = [];
+
+		for await (const page of redisScopedCacheStore().scanDeclaredIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: { name: ['ada'] } }],
+			'name',
+		)) {
+			scanned.push(page);
+		}
+
+		expect(scanned).toEqual([[], [{
+			fingerprint: { collection: 'slot', pinnedScope: { id: ['7'] } },
+			key: 'key-home',
+			location: {
+				indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+				member: 'slot:&id=,7,&|key-home',
+			},
+		}]]);
+
+		expect(sscan.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
+				'0',
+				'COUNT',
+				1000,
+			],
+			[
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'0',
+				'MATCH',
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:*',
+				'COUNT',
+				1000,
+			],
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+				'0',
+				'COUNT',
+				1000,
+			],
+		]);
+
+		expect(scan).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		scans the keyspace for the home pins' sets while no reap vouches for the
+		index-key set
+	`, async () => {
+		mget.mockResolvedValueOnce([null, '7']);
+
+		sscan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
+
+		scan.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7'],
+		]);
+
+		const scanned = [];
+
+		for await (const page of redisScopedCacheStore().scanDeclaredIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: { name: ['ada'] } }],
+			'name',
+		)) {
+			scanned.push(page);
+		}
+
+		expect(scanned).toEqual([[], [{
+			fingerprint: { collection: 'slot', pinnedScope: { id: ['7'] } },
+			key: 'key-home',
+			location: {
+				indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+				member: 'slot:&id=,7,&|key-home',
+			},
+		}]]);
+
+		expect(scan.mock.calls).toEqual([[
+			'0',
+			'MATCH',
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:*',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(scopedCacheCollectionIndexKeysPrune).not.toHaveBeenCalled();
+	});
+});
+
+describe('takeCollectionIndexedKeys', () => {
+	beforeEach(() => {
+		for (const command of [scan, sscan, evalScript, unlink, mget]) {
+			command.mockReset();
+		}
+	});
+
+	it(oneLine`
+		moves the sets a keyspace scan finds while no reap vouches for the
+		index-key set
+	`, async () => {
+		mget.mockResolvedValueOnce([null, '7']);
+		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
+
+		sscan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce(['0', ['slot:&name=,ada,&|key-ada']]);
+
+		scan.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:name=ada'],
+		]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+			{
+				indexKeys: 1,
+				keys: ['key-ada'],
+				sweptKeys: ['scalabus:scoped-cache-index:swept:slot:a1:1'],
+			},
+		]);
+
+		expect(scan.mock.calls).toEqual([[
+			'0',
+			'MATCH',
+			'scalabus:scoped-cache-index:fingerprint:slot:*',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(sscan.mock.calls).toEqual([
+			[
+				'scalabus:scoped-cache-index:swept-index-keys',
+				'0',
+				'MATCH',
+				'scalabus:scoped-cache-index:swept:slot:*',
+				'COUNT',
+				1000,
+			],
+			['scalabus:scoped-cache-index:swept:slot:a1:1', '0', 'COUNT', 1000],
+		]);
+
+		expect(evalScript.mock.calls).toEqual([[
+			scopedCacheSweepMoveScript,
+			3,
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'scalabus:scoped-cache-index:swept-index-keys',
+			'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
+			expect.stringMatching(
+				/^scalabus:scoped-cache-index:swept:slot:[0-9a-f-]{36}:$/,
+			),
+		]]);
 	});
 
 	it(oneLine`
@@ -1393,11 +1680,82 @@ describe('reapIndexedEntries', () => {
 			scopedCacheCollectionIndexKeysPrune,
 			pttl,
 			sadd,
+			get,
+			set,
 		]) {
 			command.mockReset();
 		}
 
 		pttl.mockResolvedValue(-2);
+	});
+
+	it(oneLine`
+		marks the index-key sets complete with the wholesale counter it read before
+		its scan, once the pass ends
+	`, async () => {
+		get.mockResolvedValueOnce('41');
+
+		scan
+			.mockResolvedValueOnce(['3', []])
+			.mockResolvedValueOnce(['0', []]);
+
+		await redisScopedCacheStore().reapIndexedEntries(
+			(key) => key,
+			(collection) => collection,
+			86400,
+		);
+
+		expect(get.mock.calls).toEqual([['scalabus:scoped-cache-epoch:*']]);
+
+		expect(set.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'41',
+		]]);
+
+		expect(get.mock.invocationCallOrder[0])
+			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
+
+		expect(set.mock.invocationCallOrder[0])
+			.toBeGreaterThan(scan.mock.invocationCallOrder[1]!);
+	});
+
+	it('marks them complete with an empty value when no counter exists', async () => {
+		get.mockResolvedValueOnce(null);
+		scan.mockResolvedValueOnce(['0', []]);
+
+		await redisScopedCacheStore().reapIndexedEntries(
+			(key) => key,
+			(collection) => collection,
+			86400,
+		);
+
+		expect(set.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'',
+		]]);
+	});
+
+	// A pass cut short may have left a set unnamed: marking it complete would
+	// let a collection-wide purge miss that set's reads.
+	it('leaves the marker as it was when the pass throws', async () => {
+		get.mockResolvedValueOnce('41');
+
+		scan
+			.mockResolvedValueOnce([
+				'3',
+				['scalabus:scoped-cache-index:fingerprint:slot:'],
+			])
+			.mockRejectedValueOnce(new Error('LOADING'));
+
+		sscan.mockResolvedValueOnce(['0', []]);
+
+		await expect(redisScopedCacheStore().reapIndexedEntries(
+			(key) => key,
+			(collection) => collection,
+			86400,
+		)).rejects.toThrow('LOADING');
+
+		expect(set).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`

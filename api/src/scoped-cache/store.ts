@@ -210,7 +210,10 @@ export interface ScopedCacheStore {
 	 * after the write and evicts the entry its members no longer name.
 	 *
 	 * A moved set no swept index-key set names is named there, for the recovery
-	 * to release (`releaseStrandedScopedCacheSweeps`).
+	 * to release (`releaseStrandedScopedCacheSweeps`). And every set is named in
+	 * its collection's index-key set, so a pass that reaches its end lets the
+	 * collection-wide reads trust those sets until the next flush, rather than
+	 * SCAN the keyspace.
 	 */
 	reapIndexedEntries(
 		rawKeyOf: (key: string) => string,

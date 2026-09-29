@@ -450,6 +450,8 @@ describe('countScopedCachePinMembers', () => {
 
 				return ['0', countedMembers[setKey] ?? []];
 			}),
+			// A reap has marked the index-key sets complete since the last flush.
+			mget: vi.fn(async () => ['1', '1']),
 			defineCommand: vi.fn(),
 			scopedCacheCollectionIndexKeysPrune: vi.fn(async (
 				_keyCount: number,
@@ -986,6 +988,8 @@ describe('a collection-wide purge', () => {
 			smembers,
 			scan,
 			sscan,
+			// A reap has marked the index-key sets complete since the last flush.
+			mget: vi.fn(async () => ['1', '1']),
 			srem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
 			defineCommand: vi.fn(),
@@ -1024,6 +1028,7 @@ describe('a collection-wide purge', () => {
 
 				return ['0', ['ns:scoped-cache-index:fingerprint:articles:']];
 			},
+			mget: async () => ['1', '1'],
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: async () => {
@@ -1299,6 +1304,7 @@ describe('dropScopedCacheIndex', () => {
 			sscan: vi.fn()
 				.mockResolvedValueOnce(['0', []])
 				.mockResolvedValue(['0', indexKeys]),
+			mget: vi.fn(async () => ['1', '1']),
 			del: vi.fn(),
 			srem: vi.fn(),
 			eval: sweep.eval,
@@ -1609,7 +1615,11 @@ describe('retryPendingScopedCachePurges', () => {
 
 			return ['0', indexedMembers[setKey] ?? []];
 		}),
-		// Only the reap still walks the keyspace.
+		// A reap has marked the index-key sets complete since the last flush, so
+		// only the reap walks the keyspace.
+		mget: vi.fn(async () => ['1', '1']),
+		get: vi.fn(async () => '1'),
+		set: vi.fn(),
 		scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
 			const scanned = pattern.slice(0, -1);
 
@@ -2597,6 +2607,7 @@ describe('a purge that fails after its mutation committed', () => {
 			smembers: vi.fn().mockResolvedValue([]),
 			scan: vi.fn().mockResolvedValue(['0', []]),
 			sscan: vi.fn().mockResolvedValue(['0', []]),
+			mget: vi.fn().mockResolvedValue(['1', '1']),
 			srem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
 			defineCommand: vi.fn(),
@@ -2613,6 +2624,7 @@ describe('a purge that fails after its mutation committed', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: vi.fn().mockRejectedValue(closed),
 			sscan: vi.fn().mockRejectedValue(closed),
+			mget: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),
@@ -2649,6 +2661,7 @@ describe('a purge that fails after its mutation committed', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: vi.fn().mockRejectedValue(closed),
 			sscan: vi.fn().mockRejectedValue(closed),
+			mget: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),

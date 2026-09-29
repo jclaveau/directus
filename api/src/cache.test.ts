@@ -53,6 +53,8 @@ const redis = vi.hoisted(() => {
 			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
 		),
 		get: vi.fn(async (): Promise<string | null> => '1'),
+		// A reap has marked the index-key sets complete since the last flush.
+		mget: vi.fn(async (): Promise<(string | null)[]> => ['1', '1']),
 		set: vi.fn(),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,

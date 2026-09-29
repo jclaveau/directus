@@ -570,7 +570,8 @@ function scopedCacheSweptIndexKeyPrefix(collection: string): string {
 
 /**
  * The set naming every index set of one collection, so a collection-wide purge
- * reads its sets from here instead of a SCAN of the whole keyspace.
+ * reads its sets from here instead of a SCAN of the whole keyspace — once a
+ * reap has vouched that it names them all (`collectionIndexKeysComplete`).
  *
  * Outside `fingerprint:` and `swept:` so neither family's glob reaches it, and
  * inside the prefix so a full flush drops it with the sets it names. A name
@@ -589,6 +590,117 @@ function scopedCacheCollectionIndexKeysKey(collection: string): string {
  */
 function scopedCacheSweptIndexKeysKey(): string {
 	return `${scopedCacheIndexPrefix()}swept-index-keys`;
+}
+
+/**
+ * A per-collection purge counter, bumped every time that collection's entries are
+ * dropped. `*` is the wholesale entry, bumped by a flush that names no collection.
+ * Kept outside `scoped-cache-index:`: a flush bumps `*` and then unlinks that
+ * whole segment, and the counter has to survive the flush it counts.
+ */
+export function scopedCacheEpochKey(collection: string): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-epoch:${collection}`;
+}
+
+/**
+ * The key saying the index-key sets name every set the index holds. It holds the
+ * wholesale counter as the reap read it before its SCAN, and vouches for them
+ * only while that counter still reads the same (`collectionIndexKeysComplete`).
+ * No expiry: a flush is what ends it, by moving the counter, and inside the
+ * prefix so the flush's own drop takes it too.
+ */
+function scopedCacheCollectionIndexKeysCompleteKey(): string {
+	return `${scopedCacheIndexPrefix()}collection-index-keys-complete`;
+}
+
+/**
+ * The glob matching every set one collection's fingerprints are filed in — the
+ * bare one, every split the index path produced and every home pin's. What a
+ * collection-wide read SCANs the keyspace for while the index-key sets are not
+ * known to be complete.
+ *
+ * The trailing colon bounds it. The key is `fingerprint:<collection>:<indexPin>`,
+ * so a pattern ending at that one reaches a longer name only through a colon the
+ * longer name carries — `a` reaches `a:b` — which reads and purges wider, never
+ * narrower.
+ */
+function scopedCacheCollectionIndexGlob(collection: string): string {
+	const matched = escapeScopedCacheFingerprintGlob(collection);
+
+	return `${scopedCacheIndexGlobPrefix()}fingerprint:${matched}:*`;
+}
+
+/**
+ * Whether the index-key sets can be trusted to name every set the index holds,
+ * or a collection-wide read has to SCAN the keyspace for them as it did before
+ * they existed.
+ *
+ * A fill names every set it files into, but some sets were filed with nothing
+ * naming them: by the build before the index-key sets, or before a flush that
+ * dropped an index-key set and failed to drop a set it named. Only the reap
+ * names those, so the marker is written by a reap that walked the whole index,
+ * and holds the wholesale counter as it was BEFORE that walk. A flush moves the
+ * counter, so one landing during the walk, whose drop the walk may have read
+ * half of, leaves a marker that already vouches for nothing. A counter that
+ * expired reads as none and a counter the store recreates never repeats a value,
+ * so neither can match a marker written before it.
+ *
+ * Accepted: a node still running a build older than the index-key sets, during
+ * a rolling deploy, files sets nothing names after the marker was written. The
+ * next reap names them; until then a collection-wide purge misses their entries.
+ */
+async function collectionIndexKeysComplete(): Promise<boolean> {
+	const [marker, flushEpoch] = await useCacheRedis().mget([
+		scopedCacheCollectionIndexKeysCompleteKey(),
+		scopedCacheEpochKey('*'),
+	]);
+
+	return marker !== null && marker === (flushEpoch ?? '');
+}
+
+/**
+ * The sets one collection's fingerprints are filed in, a page at a time: the
+ * names its index-key set holds while `collectionIndexKeysComplete` vouches for
+ * them, a keyspace SCAN otherwise. `nameGlob` narrows either to the sets whose
+ * key matches it. A name read from the index-key set may outlive its set; the
+ * callers read an absent set as empty.
+ */
+async function* scanCollectionIndexKeyNames(
+	collection: string,
+	nameGlob: string | null = null,
+): AsyncGenerator<string[]> {
+	if (await collectionIndexKeysComplete()) {
+		yield* scanCollectionIndexKeys(
+			scopedCacheCollectionIndexKeysKey(collection),
+			nameGlob,
+		);
+
+		return;
+	}
+
+	yield* scanScopedCacheKeys(
+		nameGlob ?? scopedCacheCollectionIndexGlob(collection),
+	);
+}
+
+/** The members of one set, a page at a time. */
+async function* scanScopedCacheSetMembers(
+	setKey: string,
+): AsyncGenerator<string[]> {
+	let scanCursor = '0';
+
+	do {
+		const [next, members] = await useCacheRedis().sscan(
+			setKey,
+			scanCursor,
+			'COUNT',
+			SCOPED_CACHE_INDEX_SCAN_COUNT,
+		);
+
+		scanCursor = next;
+		yield members;
+	}
+	while (scanCursor !== '0');
 }
 
 /**
@@ -727,8 +839,8 @@ async function collectSweptIndexKeys(
 /**
  * The glob matching every home pin's set of one collection: what a declared pin
  * has to read beside the index path's, since an entry filed under a home pin can
- * hold a row of any index value. Matched against the collection's index-key set, not
- * the keyspace.
+ * hold a row of any index value. Matched against the collection's index-key set
+ * while it is known complete, against the keyspace otherwise.
  */
 export function scopedCacheHomePinIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
@@ -1306,8 +1418,8 @@ const redisStore: ScopedCacheStore = {
 				scopedCacheRowIndexKeys(collection, declared, indexPath),
 			);
 
-			for await (const homePinKeys of scanCollectionIndexKeys(
-				scopedCacheCollectionIndexKeysKey(collection),
+			for await (const homePinKeys of scanCollectionIndexKeyNames(
+				collection,
 				scopedCacheHomePinIndexGlob(collection),
 			)) {
 				yield* scanScopedCacheIndexKeys(homePinKeys);
@@ -1322,9 +1434,7 @@ const redisStore: ScopedCacheStore = {
 	async* scanCollectionIndexedEntries(
 		collection: string,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
-		for await (const indexKeys of scanCollectionIndexKeys(
-			scopedCacheCollectionIndexKeysKey(collection),
-		)) {
+		for await (const indexKeys of scanCollectionIndexKeyNames(collection)) {
 			yield* scanScopedCacheIndexKeys(indexKeys);
 		}
 	},
@@ -1412,21 +1522,17 @@ const redisStore: ScopedCacheStore = {
 		yield* takeSweptIndexKeys(scopedCacheSweptIndexGlob(collection));
 
 		const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(collection);
-		let scanCursor = '0';
 
-		// SSCAN returns every name that stays in the index-key set for the whole
-		// read, so the ones this moves out as it goes skip none. A name added
-		// meanwhile is a fill that started after the purge counters moved, which its
-		// own guard evicts — the same bound the keyspace SCAN this replaced gave.
-		do {
-			const [next, indexKeys] = await redis.sscan(
-				collectionIndexKeysKey,
-				scanCursor,
-				'COUNT',
-				SCOPED_CACHE_INDEX_SCAN_COUNT,
-			);
+		// The index-key set's names while they are known complete, the keyspace's
+		// otherwise (`collectionIndexKeysComplete`). SSCAN and SCAN both return
+		// every name or key that stays for the whole read, so the ones this moves
+		// out as it goes skip none. One added meanwhile is a fill that started after
+		// the purge counters moved, which its own guard evicts.
+		const indexKeyPages = await collectionIndexKeysComplete()
+			? scanScopedCacheSetMembers(collectionIndexKeysKey)
+			: scanScopedCacheKeys(scopedCacheCollectionIndexGlob(collection));
 
-			scanCursor = next;
+		for await (const indexKeys of indexKeyPages) {
 			const keys: string[] = [];
 			const movedKeys: string[] = [];
 
@@ -1456,7 +1562,6 @@ const redisStore: ScopedCacheStore = {
 			// report more sets purged than were.
 			yield { indexKeys: movedKeys.length, keys, sweptKeys: movedKeys };
 		}
-		while (scanCursor !== '0');
 	},
 
 	takeStrandedSweptIndexKeys(): AsyncGenerator<ScopedCacheIndexTake> {
@@ -1498,9 +1603,10 @@ const redisStore: ScopedCacheStore = {
 	 * or the recovery that releases it, and pruning it first would hide from them
 	 * what they are about to drop.
 	 *
-	 * The one keyspace SCAN left on a schedule rather than a purge, and so the one
-	 * place that can find a set no index-key set names — one filed by a node
-	 * still running the build before the index-key set, during a rolling deploy.
+	 * The one keyspace SCAN that names what it finds, and so the one place that
+	 * can make the index-key sets complete again — after a set filed by a node
+	 * still running the build before them, during a rolling deploy, or a flush
+	 * that dropped an index-key set and not every set it named.
 	 * Each set it reads is named in its collection's index-key set again, and
 	 * each index-key set it meets loses the names of the sets that are gone.
 	 *
@@ -1509,6 +1615,11 @@ const redisStore: ScopedCacheStore = {
 	 * its sets aside without naming them, and one dying mid-sweep strands them
 	 * where no recovery looks. A set a live sweep released between the SCAN and
 	 * the SADD leaves a name without a set, which the recovery reads as empty.
+	 *
+	 * A pass that reaches its end has named every set the index held when it
+	 * began, so it writes the marker `collectionIndexKeysComplete` trusts, holding
+	 * the wholesale counter read before the SCAN. A pass that throws writes
+	 * nothing and leaves the marker as it was.
 	 */
 	async reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
@@ -1524,6 +1635,10 @@ const redisStore: ScopedCacheStore = {
 		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
 		const indexKeyPrefix = `${scopedCacheIndexPrefix()}fingerprint:`;
 		const sweptKeyPrefix = `${scopedCacheIndexPrefix()}swept:`;
+
+		// Before the SCAN: a flush landing during it moves the counter past what
+		// the marker will hold.
+		const flushEpoch = await useCacheRedis().get(scopedCacheEpochKey('*'));
 
 		// The whole prefix rather than `fingerprint:*` alone, so the index-key
 		// sets come back from the same pass: MATCH filters after the walk, so the
@@ -1600,6 +1715,11 @@ const redisStore: ScopedCacheStore = {
 				}
 			}
 		}
+
+		await useCacheRedis().set(
+			scopedCacheCollectionIndexKeysCompleteKey(),
+			flushEpoch ?? '',
+		);
 
 		return tally;
 	},

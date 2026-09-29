@@ -117,6 +117,8 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
+		// A reap has marked the index-key sets complete since the last flush.
+		mget: async () => ['1', '1'],
 		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
@@ -608,6 +610,7 @@ describe('a purge shown the rows it wrote', () => {
 				throw new Error('redis is down');
 			}),
 			scan,
+			mget: async () => ['1', '1'],
 			eval: evalScript,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),
