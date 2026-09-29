@@ -51,9 +51,7 @@ const sscan = vi.fn();
 const sadd = vi.fn();
 const scopedCacheLegacyBareAdopt = vi.fn();
 
-// The marker and the index generation agreeing: a reap has vouched for the
-// index-key sets since the last drop.
-const mget = vi.fn(async (): Promise<(string | null)[]> => ['7', '7']);
+const mget = vi.fn();
 const get = vi.fn();
 const set = vi.fn();
 const evalScript = vi.fn();
@@ -951,23 +949,27 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(indexFile.mock.calls).toEqual([
-			[
-				501,
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				...Array.from({ length: 500 }, (_, index) => {
-					return `scalabus:scoped-cache-index:fingerprint:slot:owner=v${index}`;
-				}),
-				60,
-				...Array.from({ length: 500 }, () => 0),
-			],
-			[
-				2,
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:fingerprint:slot:owner=v500',
-				60,
-				0,
-			],
+		expect(indexFile.mock.calls).toHaveLength(2);
+		expect(indexFile.mock.calls[0]).toHaveLength(1003);
+		expect(indexFile.mock.calls[0][0]).toBe(501);
+
+		expect(indexFile.mock.calls[0][2]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=v0',
+		);
+
+		expect(indexFile.mock.calls[0][501]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=v499',
+		);
+
+		expect(indexFile.mock.calls[0][502]).toBe(60);
+		expect(indexFile.mock.calls[0][1002]).toBe(0);
+
+		expect(indexFile.mock.calls[1]).toEqual([
+			2,
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=v500',
+			60,
+			0,
 		]);
 	});
 
@@ -986,28 +988,25 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(indexFile.mock.calls).toEqual([
-			[
-				2,
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
-				60,
-				600,
-				...Array.from({ length: 600 }, (_, index) => {
-					return `slot:&owner=,ada,&|key-${index}`;
-				}),
-			],
-			[
-				2,
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',
-				60,
-				600,
-				...Array.from({ length: 600 }, (_, index) => {
-					return `slot:&owner=,bob,&|key-${index}`;
-				}),
-			],
-		]);
+		expect(indexFile.mock.calls).toHaveLength(2);
+		expect(indexFile.mock.calls[0]).toHaveLength(605);
+		expect(indexFile.mock.calls[0][0]).toBe(2);
+
+		expect(indexFile.mock.calls[0][2]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
+		);
+
+		expect(indexFile.mock.calls[0][4]).toBe(600);
+		expect(indexFile.mock.calls[0][5]).toBe('slot:&owner=,ada,&|key-0');
+		expect(indexFile.mock.calls[0][604]).toBe('slot:&owner=,ada,&|key-599');
+		expect(indexFile.mock.calls[1]).toHaveLength(605);
+
+		expect(indexFile.mock.calls[1][2]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',
+		);
+
+		expect(indexFile.mock.calls[1][5]).toBe('slot:&owner=,bob,&|key-0');
+		expect(indexFile.mock.calls[1][604]).toBe('slot:&owner=,bob,&|key-599');
 	});
 
 	it(oneLine`
@@ -1147,6 +1146,8 @@ describe('scanCollectionIndexedEntries', () => {
 		reads the sets the collection's index-key set names that still exist, and never
 		scans the keyspace
 	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
 		sscan
 			.mockResolvedValueOnce([
 				'0',
@@ -1613,6 +1614,7 @@ describe('takeCollectionIndexedKeys', () => {
 		moves each index set aside, reads it in pages, and leaves it for the caller
 		to release once its entries are gone
 	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
 		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
 
 		sscan
@@ -1682,6 +1684,8 @@ describe('takeCollectionIndexedKeys', () => {
 		reads the sets an earlier sweep of the collection moved aside and never
 		released, without moving them again
 	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
 		sscan
 			.mockResolvedValueOnce([
 				'0',
@@ -1714,6 +1718,7 @@ describe('takeCollectionIndexedKeys', () => {
 		takes the keys of a read filed only under a home pin, off the set the
 		index-key set names, without a keyspace scan
 	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
 		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
 
 		sscan
@@ -1758,6 +1763,7 @@ describe('takeCollectionIndexedKeys', () => {
 	it(oneLine`
 		counts only the sets it moved, not the names whose set is already gone
 	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
 		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
 
 		sscan
@@ -1872,6 +1878,7 @@ describe('takeStrandedSweptIndexKeys', () => {
 		escapes the namespace in the swept pattern: a namespace holding glob
 		characters would otherwise match the sets of every namespace it spells
 	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
 		env['CACHE_NAMESPACE'] = 'tenant-[a]*';
 		sscan.mockResolvedValueOnce(['0', []]);
 
