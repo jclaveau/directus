@@ -105,6 +105,26 @@ describe('cacheRedisDatabase', () => {
 		expect(cacheRedisDatabase()).toBeUndefined();
 	});
 
+	test(oneLine`
+		refuses database 0 beside a db query parameter, which node-redis ignores
+	`, () => {
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'redis://h:6379?db=3',
+			CACHE_REDIS_DB: 0,
+		});
+
+		expect(cacheRedisDatabase()).toBeUndefined();
+	});
+
+	test('takes a database apart from both readings of a db query parameter', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'redis://h:6379?db=3',
+			CACHE_REDIS_DB: 1,
+		});
+
+		expect(cacheRedisDatabase()).toBe(1);
+	});
+
 	test('reads the path before a db query parameter, as ioredis does', () => {
 		vi.mocked(useEnv).mockReturnValue({
 			REDIS: 'redis://h:6379/2?db=3',

@@ -27,17 +27,21 @@ function databaseNumber(raw: unknown): number | undefined {
 }
 
 /**
- * The database `REDIS` itself selects, read the way ioredis reads it: the URL's
- * path, else its `db` query parameter, else 0. `undefined` for an address this
- * cannot read — a unix socket path, a `host:port` with no scheme.
+ * The databases `REDIS` itself selects. ioredis reads the URL's path, else its
+ * `db` query parameter, else 0; node-redis, under the system, schema and lock
+ * tiers, reads the path, else 0. `undefined` for an address this cannot read — a
+ * unix socket path, a `host:port` with no scheme.
  */
-function sharedRedisDatabase(): number | undefined {
+function sharedRedisDatabases(): number[] | undefined {
 	const url = useEnv()['REDIS'];
 
 	if (!url) {
 		const { db } = getConfigFromEnv('REDIS');
+		const database = databaseNumber(db ?? 0);
 
-		return databaseNumber(db ?? 0);
+		return database === undefined
+			? undefined
+			: [database];
 	}
 
 	let redisAddress: URL;
@@ -56,11 +60,22 @@ function sharedRedisDatabase(): number | undefined {
 		return undefined;
 	}
 
-	return databaseNumber(
-		redisAddress.pathname.slice(1)
-		|| redisAddress.searchParams.get('db')
-		|| 0,
-	);
+	const pathDatabase = databaseNumber(redisAddress.pathname.slice(1) || 0);
+	const queryDatabase = redisAddress.searchParams.get('db');
+
+	if (pathDatabase === undefined) {
+		return undefined;
+	}
+
+	if (redisAddress.pathname.length > 1 || queryDatabase === null) {
+		return [pathDatabase];
+	}
+
+	const ioredisDatabase = databaseNumber(queryDatabase);
+
+	return ioredisDatabase === undefined
+		? undefined
+		: [ioredisDatabase, pathDatabase];
 }
 
 function readCacheRedisDatabase(): number | undefined {
@@ -78,11 +93,11 @@ function readCacheRedisDatabase(): number | undefined {
 		return undefined;
 	}
 
-	const shared = sharedRedisDatabase();
+	const shared = sharedRedisDatabases();
 
 	// A FLUSHDB there would take the locks, the synchronization clocks and the
 	// stats buffer with it.
-	if (shared === undefined || shared === database) {
+	if (shared === undefined || shared.includes(database)) {
 		logger.warn(
 			`[cache] CACHE_REDIS_DB=${database} is not apart from the database `
 			+ 'REDIS selects, so the cache stays in it and is flushed key by key',
