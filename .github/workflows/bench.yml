@@ -424,10 +424,11 @@ jobs:
           PERF_REDIS: redis://127.0.0.1:6108
 
       # After the cache bench, not beside it: both boot instances on the one
-      # Redis, and a flush would empty the other's cache mid-measurement.
+      # Redis, and a flush would empty the other's cache mid-measurement. Past
+      # a breach of the cache bench, never past a build that never produced it.
       - name: Measure the flush
         id: measure_flush
-        if: '!cancelled()'
+        if: ${{ !cancelled() && steps.measure.outcome != 'skipped' }}
         run: pnpm --filter tests-perf bench:cache-flush
         env:
           PERF_CLI: ${{ github.workspace }}/dist/cli

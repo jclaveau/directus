@@ -85,6 +85,14 @@ const maxScansAddedByGrowth = Number(
 	process.env['PERF_FLUSH_MAX_SCANS_ADDED'] ?? 2,
 );
 
+// A NaN ceiling would pass every flush: nothing compares greater than NaN.
+if (!Number.isFinite(maxScansAddedByGrowth) || maxScansAddedByGrowth < 0) {
+	throw new Error(
+		'PERF_FLUSH_MAX_SCANS_ADDED has to be 0 or more,'
+		+ ` not ${String(maxScansAddedByGrowth)}`,
+	);
+}
+
 // Below this the shared arm's SCANs never met the grown cache, and the `own-db`
 // figures would pass for a reason that has nothing to do with its database: a
 // MATCH SCAN walks COUNT 1000 keys per call, so 18k keys are ~18 calls a pass.
@@ -292,16 +300,26 @@ async function scanFirst(client: Redis, pattern: string): Promise<string | null>
 async function readKeyShapes(arm: Arm): Promise<KeyShapes> {
 	const namespace = arm.env['CACHE_NAMESPACE']!;
 
+	const found: KeyShapes[] = [];
+
 	for (const client of [redis, cacheRedis]) {
 		const responseKey = await scanFirst(client, `${namespace}_response*`);
 		const indexKey = await scanFirst(client, `${namespace}:scoped-cache-index:*`);
 
 		if (responseKey && indexKey) {
-			return { client, responseKey, indexKey };
+			found.push({ client, responseKey, indexKey });
 		}
 	}
 
-	throw new Error(`The ${arm.name} arm filed no entry and no index set.`);
+	// Both would mean a run left the namespace behind, and the growth could land
+	// in the database this build does not use.
+	if (found.length !== 1) {
+		throw new Error(
+			`The ${arm.name} arm's cache is in ${found.length} databases, not 1.`,
+		);
+	}
+
+	return found[0]!;
 }
 
 /**
@@ -344,7 +362,9 @@ async function fillCache(arm: Arm, port: number): Promise<void> {
 
 	try {
 		for (let index = 0; index < filledEntries; index += 10) {
-			await Promise.all(Array.from({ length: 10 }, async (_, step) => {
+			const batchSize = Math.min(10, filledEntries - index);
+
+			await Promise.all(Array.from({ length: batchSize }, async (_, step) => {
 				const slot = `s${index + step}`;
 
 				await (await api(
