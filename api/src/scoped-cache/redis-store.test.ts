@@ -917,7 +917,7 @@ describe('reapIndexedEntries', () => {
 		expect(scan.mock.calls).toEqual([[
 			'0',
 			'MATCH',
-			'scalabus:scoped-cache-index:fingerprint*',
+			'scalabus:scoped-cache-index:*',
 			'COUNT',
 			1000,
 		]]);
@@ -1069,11 +1069,16 @@ describe('reapIndexedEntries', () => {
 	});
 
 	it(oneLine`
-		prunes the index-key sets it meets instead of reaping them as index sets
+		prunes the index-key sets it meets instead of reaping them as index sets,
+		and leaves the swept sets to the recovery
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:collection-index-keys:slot'],
+			[
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:swept:slot:4f1c:',
+				'scalabus:scoped-cache-index:swept-index-keys',
+			],
 		]);
 
 		sscan.mockResolvedValueOnce([
@@ -1090,6 +1095,22 @@ describe('reapIndexedEntries', () => {
 		);
 
 		expect(tally).toEqual({ indexKeys: 0, reaped: 0 });
+
+		// The pattern the index-key sets have to match for Redis to return them.
+		expect(scan.mock.calls).toEqual([[
+			'0',
+			'MATCH',
+			'scalabus:scoped-cache-index:*',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(sscan.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'0',
+			'COUNT',
+			1000,
+		]]);
 
 		expect(scopedCacheCollectionIndexKeysPrune.mock.calls).toEqual([[
 			2,
