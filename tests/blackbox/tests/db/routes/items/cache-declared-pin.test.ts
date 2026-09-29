@@ -55,6 +55,7 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['REDIS_HOST'] = 'localhost';
 	env[vendor]['REDIS_PORT'] = '6108';
 	env[vendor]['CACHE_NAMESPACE'] = `directus-declared-pin-${vendor}`;
+	env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '0 0 1 1 *';
 
 	let instance: ChildProcess;
 

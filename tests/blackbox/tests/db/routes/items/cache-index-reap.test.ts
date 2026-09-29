@@ -41,7 +41,7 @@ describe.each(vendors)('%s', (vendor) => {
 	// No scope fields, so every read of the collection is filed in its bare set:
 	// the one every fill keeps from expiring.
 	const bareIndexKey =
-		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP}:`;
+		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP}:bare`;
 
 	const pinnedIndexKey =
 		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP_PINNED}:name=`;

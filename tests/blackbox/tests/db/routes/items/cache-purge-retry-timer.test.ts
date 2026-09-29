@@ -41,8 +41,11 @@ describe(oneLine`
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
 		const namespace = `directus-retry-timer-${vendor}`;
+
 		// The bucket every write to the collection reads, whichever row it wrote.
-		const noteIndexKey = `${namespace}:scoped-cache-index:fingerprint:${NOTE}:`;
+		const noteIndexKey
+			= `${namespace}:scoped-cache-index:fingerprint:${NOTE}:bare`;
+
 		env[vendor]['CACHE_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
 		env[vendor]['CACHE_AUTO_PURGE'] = 'true';

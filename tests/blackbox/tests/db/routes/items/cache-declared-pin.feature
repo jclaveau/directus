@@ -26,8 +26,10 @@ Feature: A purge a hook declares reaches every read its slice could answer
   fills were filed there: the bare set, the set its value names, and the home pin
   sets a read pinning something else was filed under, never the sets of another
   index value. The home pin sets come off the collection's index-key set once a
-  reap has marked those complete, marked by hand here. Which sets were read is
-  taken off Redis `MONITOR`.
+  reap has marked those complete, marked by hand here. The legacy bare set, the
+  one an older build files every read off the index path in, is read too until a
+  reap adopts the collection, and the reap is set to once a year here. Which sets
+  were read is taken off Redis `MONITOR`.
 
   A read and a write are stated the way `cache-composite-tag.feature` states
   them: the `query` a read sends, the `response` it answers and the
@@ -247,8 +249,9 @@ Feature: A purge a hook declares reaches every read its slice could answer
       | command | index set                                 | matching |
       | sscan   | collection-index-keys:declared_pin_slot   | pin:*    |
       | sscan   | fingerprint:declared_pin_slot:            |          |
+      | sscan   | fingerprint:declared_pin_slot:bare        |          |
       | sscan   | fingerprint:declared_pin_slot:owner=alpha |          |
-    Then the read is purged, its own set among the two read:
+    Then the read is purged, its own set among the three read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |   note: rewritten     |     owner:     |
