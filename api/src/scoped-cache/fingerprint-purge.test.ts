@@ -119,15 +119,8 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
-		// A reap has marked the index-key sets complete since the last flush, and
-		// adopted no collection's legacy bare set.
-		mget: async (keys: string[]) => {
-			return keys.map((key) => {
-				return key.includes(':legacy-bare-adopted:')
-					? null
-					: '1';
-			});
-		},
+		// A reap has marked the index-key sets complete since the last flush.
+		mget: async () => ['1', '1'],
 		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
@@ -152,7 +145,7 @@ describe('a purge shown the rows it wrote', () => {
 		bound to another value of a field the row also carries
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:bare': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
@@ -175,8 +168,8 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
-		reads the bare set, the one its row owns, the home pin set of each value it
-		carries, and the legacy bare set last, and no other
+		reads the bare set, the one its row owns, and the home pin set of each value
+		it carries, and no other
 	`, async () => {
 		await purgeScopedCache(cache, 'slot', [], null, {
 			rowFingerprints: [{
@@ -188,12 +181,11 @@ describe('a purge shown the rows it wrote', () => {
 		});
 
 		expect([...new Set(sscan.mock.calls.map(([key]) => key))]).toEqual([
-			'ns:scoped-cache-index:fingerprint:slot:bare',
+			'ns:scoped-cache-index:fingerprint:slot:',
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
 			'ns:scoped-cache-index:fingerprint:slot:pin:id=1',
 			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced',
 			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha',
-			'ns:scoped-cache-index:fingerprint:slot:',
 		]);
 	});
 
@@ -401,14 +393,13 @@ describe('a purge shown the rows it wrote', () => {
 
 		// One pass per set the row can drop something in — the bare one plus one per
 		// value it carries — sent together, and the first of them takes a second
-		// page once the round is back. The legacy bare set is read after them.
+		// page once the round is back.
 		expect(sscan.mock.calls.map(([key, cursor]) => [key, cursor])).toEqual([
-			['ns:scoped-cache-index:fingerprint:slot:bare', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:', '0'],
 			['ns:scoped-cache-index:fingerprint:slot:pin:id=1', '0'],
 			['ns:scoped-cache-index:fingerprint:slot:pin:method=spaced', '0'],
 			['ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha', '0'],
-			['ns:scoped-cache-index:fingerprint:slot:bare', '7'],
-			['ns:scoped-cache-index:fingerprint:slot:', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:', '7'],
 		]);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-first');
@@ -420,7 +411,7 @@ describe('a purge shown the rows it wrote', () => {
 		pin warm: that entry is what the pin covers
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:bare': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 			],
@@ -445,7 +436,7 @@ describe('a purge shown the rows it wrote', () => {
 		wrote, and nothing read back can resolve it
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:other:bare': ['other:&x=,y,&|ns:entry-x'],
+			'ns:scoped-cache-index:fingerprint:other:': ['other:&x=,y,&|ns:entry-x'],
 		};
 
 		await purgeScopedCache(
@@ -536,7 +527,7 @@ describe('a purge shown the rows it wrote', () => {
 		carrying that pin is in it
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:other:bare': [
+			'ns:scoped-cache-index:fingerprint:other:': [
 				'other:&x=,z,&|ns:entry-z',
 			],
 		};
@@ -567,7 +558,7 @@ describe('a purge shown the rows it wrote', () => {
 		that knows none can do: the declared pin, and the bare pin's own reach
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:bare': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
 				'slot:&id=,1,&owner=,alpha,&|ns:entry-one',
 				'slot:&id=,2,&owner=,alpha,&|ns:entry-two',
@@ -594,7 +585,7 @@ describe('a purge shown the rows it wrote', () => {
 		a read no value narrows holds that slice's rows too
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:bare': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 			],
@@ -621,13 +612,7 @@ describe('a purge shown the rows it wrote', () => {
 				throw new Error('redis is down');
 			}),
 			scan,
-			mget: async (keys: string[]) => {
-				return keys.map((key) => {
-					return key.includes(':legacy-bare-adopted:')
-						? null
-						: '1';
-				});
-			},
+			mget: async () => ['1', '1'],
 			eval: evalScript,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),

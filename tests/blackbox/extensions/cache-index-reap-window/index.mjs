@@ -27,7 +27,7 @@ export default function registerHooks({ action }) {
 		});
 
 		const indexKey = `${process.env['CACHE_NAMESPACE']}:scoped-cache-index:`
-			+ `fingerprint:${INDEX_REAP_WINDOW}:bare`;
+			+ `fingerprint:${INDEX_REAP_WINDOW}:`;
 
 		const deadline = Date.now() + reapWaitMs;
 

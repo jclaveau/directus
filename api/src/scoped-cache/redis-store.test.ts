@@ -5,7 +5,6 @@ import {
 	redisScopedCacheStore,
 	renderScopedCacheIndexMember,
 	scopedCacheEpochBumpScript,
-	scopedCacheFingerprintFilesLegacyBare,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
 	scopedCacheIndexBuildRecordScript,
@@ -14,7 +13,6 @@ import {
 	scopedCacheIndexGenerationReadScript,
 	scopedCacheIndexInvalidateScript,
 	scopedCacheIndexReapScript,
-	scopedCacheLegacyBareAdoptScript,
 	scopedCacheCollectionIndexKeysRegisterScript,
 	scopedCacheCollectionIndexKeysPruneScript,
 	scopedCacheRowHomePinKeys,
@@ -49,7 +47,6 @@ const scopedCacheIndexBuildRecord = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
-const scopedCacheLegacyBareAdopt = vi.fn();
 
 const mget = vi.fn();
 const get = vi.fn();
@@ -75,7 +72,6 @@ vi.mock('../redis/index.js', () => {
 				scan,
 				sscan,
 				sadd,
-				scopedCacheLegacyBareAdopt,
 				mget,
 				get,
 				set,
@@ -155,7 +151,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 			parseScopedCacheFingerprint('loose:&view=,id,&'),
 			null,
 			[],
-		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:bare']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:']);
 	});
 
 	it('files a home pin by its escaped key and value', () => {
@@ -185,18 +181,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 			{ collection: 'slot' },
 			'constructor',
 			[],
-		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:bare']);
-	});
-
-	it(oneLine`
-		files a read under an index path named bare apart from the bare set, as
-		every index value's set carries a =
-	`, () => {
-		expect(scopedCacheFingerprintIndexKeys(
-			parseScopedCacheFingerprint('slot:&bare=,ana,&'),
-			'bare',
-			[],
-		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:bare=ana']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	it('files a read under an index path named after an object member', () => {
@@ -205,32 +190,6 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 			'constructor',
 			[],
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:constructor=ana']);
-	});
-});
-
-describe('scopedCacheFingerprintFilesLegacyBare', () => {
-	it('files a read pinning the index path under its value alone', () => {
-		expect(scopedCacheFingerprintFilesLegacyBare(
-			parseScopedCacheFingerprint('slot:&id=,7,&owner=,ana,&'),
-			'owner',
-		)).toBe(false);
-	});
-
-	it(oneLine`
-		files a home-pinned read in the legacy bare set too, the one set an older
-		build's write reads for it
-	`, () => {
-		expect(scopedCacheFingerprintFilesLegacyBare(
-			parseScopedCacheFingerprint('slot:&id=,7,&'),
-			'owner',
-		)).toBe(true);
-	});
-
-	it('files a bare read in the legacy bare set too', () => {
-		expect(scopedCacheFingerprintFilesLegacyBare(
-			{ collection: 'loose' },
-			null,
-		)).toBe(true);
 	});
 });
 
@@ -248,7 +207,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			],
 			'zone.region.owner',
 		)).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=bo',
 		]);
@@ -263,7 +222,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			],
 			'zone.region.owner',
 		)).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
 		]);
 	});
@@ -273,7 +232,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			'slot',
 			[parseScopedCacheFingerprint('slot:&id=,1,&')],
 			'zone.region.owner',
-		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:bare']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	// A collection may declare a column named after an Object member, and the
@@ -283,7 +242,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			'slot',
 			[{ collection: 'slot' }],
 			'constructor',
-		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:bare']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
 	it('reads the set of an index path named after an object member', () => {
@@ -292,7 +251,7 @@ describe('scopedCacheRowIndexKeys', () => {
 			[parseScopedCacheFingerprint('slot:&constructor=,ana,&')],
 			'constructor',
 		)).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'scalabus:scoped-cache-index:fingerprint:slot:constructor=ana',
 		]);
 	});
@@ -302,12 +261,12 @@ describe('scopedCacheRowIndexKeys', () => {
 			'loose',
 			[parseScopedCacheFingerprint('loose:&id=,1,&')],
 			null,
-		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:bare']);
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:']);
 	});
 
 	it('names the bare set even when the write carried no row', () => {
 		expect(scopedCacheRowIndexKeys('slot', [], 'zone.region.owner'))
-			.toEqual(['scalabus:scoped-cache-index:fingerprint:slot:bare']);
+			.toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 });
 
@@ -568,7 +527,7 @@ describe('removeIndexedEntries', () => {
 
 	it(oneLine`
 		prunes a read off the index path from every value's home pin set, and from
-		the legacy bare set an older build filed it in
+		where it was found
 	`, async () => {
 		const member = 'slot:&id=,4,7,&view=,id,&|cache-key';
 
@@ -588,28 +547,6 @@ describe('removeIndexedEntries', () => {
 			['scalabus:scoped-cache-index:fingerprint:slot:', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=4', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7', member],
-		]);
-	});
-
-	it(oneLine`
-		prunes a bare read from the bare set and from the legacy bare set a fill
-		filed it in beside
-	`, async () => {
-		await redisScopedCacheStore().removeIndexedEntries(
-			[{
-				fingerprint: { collection: 'slot' },
-				key: 'cache-key',
-				location: {
-					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:bare',
-					member: 'slot:&|cache-key',
-				},
-			}],
-			'owner',
-		);
-
-		expect(srem.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:slot:bare', 'slot:&|cache-key'],
-			['scalabus:scoped-cache-index:fingerprint:slot:', 'slot:&|cache-key'],
 		]);
 	});
 
@@ -634,7 +571,6 @@ describe('removeIndexedEntries', () => {
 		expect(srem.mock.calls).toEqual([
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:enabled=true', member],
-			['scalabus:scoped-cache-index:fingerprint:slot:', member],
 		]);
 	});
 
@@ -665,7 +601,6 @@ describe('removeIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:pin:owner=kappa',
 				member,
 			],
-			['scalabus:scoped-cache-index:fingerprint:slot:', member],
 		]);
 	});
 });
@@ -832,20 +767,18 @@ describe('fileIndexedEntries', () => {
 		);
 
 		expect(indexFile.mock.calls).toEqual([[
-			5,
+			4,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=8',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
-			'scalabus:scoped-cache-index:fingerprint:slot:',
 			60,
-			-1,
+			1,
 			'slot:&id=,7,8,&|key-a',
 			1,
 			'slot:&id=,7,8,&|key-a',
 			1,
 			'slot:&owner=,ana,&|key-b',
-			0,
 		]]);
 	});
 
@@ -870,62 +803,22 @@ describe('fileIndexedEntries', () => {
 
 		expect(indexFile.mock.calls).toEqual([
 			[
-				3,
+				2,
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				60,
-				-1,
+				1,
 				'slot:&|key-a',
-				0,
 			],
 			[
-				3,
+				2,
 				'scalabus:scoped-cache-index:collection-index-keys:note',
-				'scalabus:scoped-cache-index:fingerprint:note:bare',
 				'scalabus:scoped-cache-index:fingerprint:note:',
 				60,
-				-1,
+				1,
 				'note:&|key-b',
-				0,
 			],
 		]);
-	});
-
-	it(oneLine`
-		files the legacy bare set once per call, off members already sent
-	`, async () => {
-		await redisScopedCacheStore().fileIndexedEntries(
-			[
-				{
-					fingerprint: parseScopedCacheFingerprint('slot:&id=,7,&'),
-					keys: ['key-a'],
-					indexPath: 'owner',
-					homePinFields: ['id'],
-				},
-				{
-					fingerprint: { collection: 'slot' },
-					keys: ['key-b'],
-					indexPath: 'owner',
-					homePinFields: ['id'],
-				},
-			],
-			60,
-		);
-
-		expect(indexFile.mock.calls).toEqual([[
-			4,
-			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
-			'scalabus:scoped-cache-index:fingerprint:slot:',
-			60,
-			-1,
-			'slot:&id=,7,&|key-a',
-			-1,
-			'slot:&|key-b',
-			0,
-		]]);
 	});
 
 	it('passes a never-expiring fill its ttl of 0 for the script', async () => {
@@ -940,15 +833,13 @@ describe('fileIndexedEntries', () => {
 		);
 
 		expect(indexFile.mock.calls).toEqual([[
-			3,
+			2,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 			0,
-			-2,
+			2,
 			'slot:&|key-a',
 			'slot:&|key-a__expires_at',
-			0,
 		]]);
 	});
 
@@ -971,18 +862,18 @@ describe('fileIndexedEntries', () => {
 
 		expect(indexFile.mock.calls).toHaveLength(2);
 		expect(indexFile.mock.calls[0]).toHaveLength(1003);
-		expect(indexFile.mock.calls[0]![0]).toBe(501);
+		expect(indexFile.mock.calls[0][0]).toBe(501);
 
-		expect(indexFile.mock.calls[0]![2]).toBe(
+		expect(indexFile.mock.calls[0][2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=v0',
 		);
 
-		expect(indexFile.mock.calls[0]![501]).toBe(
+		expect(indexFile.mock.calls[0][501]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=v499',
 		);
 
-		expect(indexFile.mock.calls[0]![502]).toBe(60);
-		expect(indexFile.mock.calls[0]![1002]).toBe(0);
+		expect(indexFile.mock.calls[0][502]).toBe(60);
+		expect(indexFile.mock.calls[0][1002]).toBe(0);
 
 		expect(indexFile.mock.calls[1]).toEqual([
 			2,
@@ -1010,23 +901,23 @@ describe('fileIndexedEntries', () => {
 
 		expect(indexFile.mock.calls).toHaveLength(2);
 		expect(indexFile.mock.calls[0]).toHaveLength(605);
-		expect(indexFile.mock.calls[0]![0]).toBe(2);
+		expect(indexFile.mock.calls[0][0]).toBe(2);
 
-		expect(indexFile.mock.calls[0]![2]).toBe(
+		expect(indexFile.mock.calls[0][2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
 		);
 
-		expect(indexFile.mock.calls[0]![4]).toBe(600);
-		expect(indexFile.mock.calls[0]![5]).toBe('slot:&owner=,ada,&|key-0');
-		expect(indexFile.mock.calls[0]![604]).toBe('slot:&owner=,ada,&|key-599');
+		expect(indexFile.mock.calls[0][4]).toBe(600);
+		expect(indexFile.mock.calls[0][5]).toBe('slot:&owner=,ada,&|key-0');
+		expect(indexFile.mock.calls[0][604]).toBe('slot:&owner=,ada,&|key-599');
 		expect(indexFile.mock.calls[1]).toHaveLength(605);
 
-		expect(indexFile.mock.calls[1]![2]).toBe(
+		expect(indexFile.mock.calls[1][2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',
 		);
 
-		expect(indexFile.mock.calls[1]![5]).toBe('slot:&owner=,bob,&|key-0');
-		expect(indexFile.mock.calls[1]![604]).toBe('slot:&owner=,bob,&|key-599');
+		expect(indexFile.mock.calls[1][5]).toBe('slot:&owner=,bob,&|key-0');
+		expect(indexFile.mock.calls[1][604]).toBe('slot:&owner=,bob,&|key-599');
 	});
 
 	it(oneLine`
@@ -1080,23 +971,6 @@ describe('scopedCacheIndexFileScript', () => {
 			"local held = redis.call('PTTL', KEYS[1])\n"
 			+ "local named = redis.call('SADD', KEYS[1], unpack(KEYS, 2))\n"
 			+ 'if unbounded then',
-		);
-	});
-
-	it(oneLine`
-		files the members a negative count passes on in the last set, the legacy
-		bare set
-	`, () => {
-		expect(scopedCacheIndexFileScript).toContain(
-			'\tif count < 0 then\n'
-			+ '\t\tcount = -count\n'
-			+ '\t\tfor m = at + 1, at + count do\n'
-			+ '\t\t\tpassed[#passed + 1] = ARGV[m]',
-		);
-
-		expect(scopedCacheIndexFileScript).toContain(
-			'\tif i == #KEYS and #passed > 0 then\n'
-			+ "\t\tredis.call('SADD', KEYS[i], unpack(passed))",
 		);
 	});
 
@@ -1156,9 +1030,6 @@ describe('scopedCacheIndexFileScript', () => {
 			'\tif count > 0 then\n'
 			+ "\t\tredis.call('SADD', KEYS[i], unpack(ARGV, at + 1, at + count))\n"
 			+ '\tend\n'
-			+ '\tif i == #KEYS and #passed > 0 then\n'
-			+ "\t\tredis.call('SADD', KEYS[i], unpack(passed))\n"
-			+ '\tend\n'
 			+ '\tat = at + count + 1\n'
 			+ '\tif want <= 0 then\n'
 			+ '\t\tif lefts[i] >= 0 then\n'
@@ -1192,14 +1063,14 @@ describe('scanCollectionIndexedEntries', () => {
 			.mockResolvedValueOnce([
 				'0',
 				[
-					'scalabus:scoped-cache-index:fingerprint:slot:bare',
+					'scalabus:scoped-cache-index:fingerprint:slot:',
 					'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 				],
 			])
 			.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
 
 		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 		]);
 
 		const scanned = [];
@@ -1214,7 +1085,7 @@ describe('scanCollectionIndexedEntries', () => {
 			fingerprint: { collection: 'slot' },
 			key: 'key-a',
 			location: {
-				indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:bare',
+				indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:',
 				member: 'slot:&|key-a',
 			},
 		}]]);
@@ -1222,7 +1093,7 @@ describe('scanCollectionIndexedEntries', () => {
 		expect(scopedCacheCollectionIndexKeysPrune.mock.calls).toEqual([[
 			3,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 		]]);
 
@@ -1233,7 +1104,7 @@ describe('scanCollectionIndexedEntries', () => {
 				'COUNT',
 				1000,
 			],
-			['scalabus:scoped-cache-index:fingerprint:slot:bare', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
 		]);
 
 		expect(mget.mock.calls).toEqual([[[
@@ -1331,12 +1202,9 @@ describe('scanDeclaredIndexedEntries', () => {
 		reads the home pins' sets off the index-key set while a reap vouches for
 		it
 	`, async () => {
-		mget
-			.mockResolvedValueOnce([null, '7'])
-			.mockResolvedValueOnce(['7', '7']);
+		mget.mockResolvedValueOnce(['7', '7']);
 
 		sscan
-			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce([
@@ -1359,7 +1227,7 @@ describe('scanDeclaredIndexedEntries', () => {
 			scanned.push(page);
 		}
 
-		expect(scanned).toEqual([[], [], [{
+		expect(scanned).toEqual([[], [{
 			fingerprint: { collection: 'slot', pinnedScope: { id: ['7'] } },
 			key: 'key-home',
 			location: {
@@ -1369,14 +1237,13 @@ describe('scanDeclaredIndexedEntries', () => {
 		}]]);
 
 		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:slot:bare', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
 			[
 				'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
 				'0',
 				'COUNT',
 				1000,
 			],
-			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
 			[
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'0',
@@ -1400,12 +1267,9 @@ describe('scanDeclaredIndexedEntries', () => {
 		scans the keyspace for the home pins' sets while no reap vouches for the
 		index-key set
 	`, async () => {
-		mget
-			.mockResolvedValueOnce([null, '7'])
-			.mockResolvedValueOnce([null, '7']);
+		mget.mockResolvedValueOnce([null, '7']);
 
 		sscan
-			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
@@ -1425,7 +1289,7 @@ describe('scanDeclaredIndexedEntries', () => {
 			scanned.push(page);
 		}
 
-		expect(scanned).toEqual([[], [], [{
+		expect(scanned).toEqual([[], [{
 			fingerprint: { collection: 'slot', pinnedScope: { id: ['7'] } },
 			key: 'key-home',
 			location: {
@@ -1443,134 +1307,6 @@ describe('scanDeclaredIndexedEntries', () => {
 		]]);
 
 		expect(scopedCacheCollectionIndexKeysPrune).not.toHaveBeenCalled();
-	});
-});
-
-describe('scanRowIndexedEntries', () => {
-	beforeEach(() => {
-		for (const command of [sscan, mget]) {
-			command.mockReset();
-		}
-	});
-
-	it(oneLine`
-		reads the legacy bare set after the write's own sets until a reap has
-		adopted the collection
-	`, async () => {
-		mget.mockResolvedValueOnce([null, '41']);
-
-		sscan
-			.mockResolvedValueOnce(['0', ['slot:&|key-a']])
-			.mockResolvedValueOnce(['0', ['slot:&|key-a', 'slot:&id=,7,&|key-b']]);
-
-		const scanned = [];
-
-		for await (const page of redisScopedCacheStore().scanRowIndexedEntries(
-			'slot',
-			[],
-			null,
-		)) {
-			scanned.push(page);
-		}
-
-		expect(scanned).toEqual([
-			[{
-				fingerprint: { collection: 'slot' },
-				key: 'key-a',
-				location: {
-					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:bare',
-					member: 'slot:&|key-a',
-				},
-			}],
-			[{
-				fingerprint: { collection: 'slot', pinnedScope: { id: ['7'] } },
-				key: 'key-b',
-				location: {
-					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:',
-					member: 'slot:&id=,7,&|key-b',
-				},
-			}],
-		]);
-
-		expect(mget.mock.calls).toEqual([[[
-			'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
-			'scalabus:scoped-cache-index-generation',
-		]]]);
-
-		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:slot:bare', '0', 'COUNT', 1000],
-			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
-		]);
-	});
-
-	it('reads the legacy bare set when Redis cannot say it was adopted', async () => {
-		mget.mockRejectedValueOnce(new Error('LOADING'));
-		sscan.mockResolvedValue(['0', []]);
-
-		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
-			'loose',
-			[],
-			null,
-		)) {
-			continue;
-		}
-
-		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:loose:bare', '0', 'COUNT', 1000],
-			['scalabus:scoped-cache-index:fingerprint:loose:', '0', 'COUNT', 1000],
-		]);
-	});
-
-	it(oneLine`
-		stops reading the legacy bare set once a reap adopted the collection, and
-		stops asking
-	`, async () => {
-		mget.mockResolvedValueOnce(['41', '41']);
-		sscan.mockResolvedValue(['0', []]);
-
-		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
-			'note',
-			[],
-			null,
-		)) {
-			continue;
-		}
-
-		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
-			'note',
-			[],
-			null,
-		)) {
-			continue;
-		}
-
-		expect(mget).toHaveBeenCalledTimes(1);
-
-		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:note:bare', '0', 'COUNT', 1000],
-			['scalabus:scoped-cache-index:fingerprint:note:bare', '0', 'COUNT', 1000],
-		]);
-	});
-
-	it(oneLine`
-		reads the legacy bare set when its adoption names a generation that moved
-		since
-	`, async () => {
-		mget.mockResolvedValueOnce(['40', '41']);
-		sscan.mockResolvedValue(['0', []]);
-
-		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
-			'room',
-			[],
-			null,
-		)) {
-			continue;
-		}
-
-		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:room:bare', '0', 'COUNT', 1000],
-			['scalabus:scoped-cache-index:fingerprint:room:', '0', 'COUNT', 1000],
-		]);
 	});
 });
 
@@ -1661,7 +1397,7 @@ describe('takeCollectionIndexedKeys', () => {
 			.mockResolvedValueOnce(['0', []])
 			.mockResolvedValueOnce([
 				'0',
-				['scalabus:scoped-cache-index:fingerprint:slot:bare'],
+				['scalabus:scoped-cache-index:fingerprint:slot:'],
 			])
 			.mockResolvedValueOnce(['7', ['slot:&|key-a']])
 			.mockResolvedValueOnce(['0', ['slot:&owner=,kappa,&|key-b']]);
@@ -1690,7 +1426,7 @@ describe('takeCollectionIndexedKeys', () => {
 			3,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			'scalabus:scoped-cache-index:swept-index-keys',
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			expect.stringMatching(
 				/^scalabus:scoped-cache-index:swept:slot:[0-9a-f-]{36}:$/,
 			),
@@ -2128,7 +1864,6 @@ describe('reapIndexedEntries', () => {
 			sscan,
 			defineCommand,
 			scopedCacheIndexReap,
-			scopedCacheLegacyBareAdopt,
 			scopedCacheCollectionIndexKeysRegister,
 			scopedCacheCollectionIndexKeysPrune,
 			pttl,
@@ -2248,7 +1983,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		scan
 			.mockResolvedValueOnce([
 				'3',
-				['scalabus:scoped-cache-index:fingerprint:slot:bare'],
+				['scalabus:scoped-cache-index:fingerprint:slot:'],
 			])
 			.mockRejectedValueOnce(new Error('LOADING'));
 
@@ -2270,7 +2005,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		scan.mockResolvedValueOnce([
 			'0',
 			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
+				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-index:fingerprint:note:owner=ana',
 			],
 		]);
@@ -2311,7 +2046,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		expect(scopedCacheIndexReap.mock.calls).toEqual([
 			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
+				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-epoch:slot',
 				86400,
 				'slot:&|key-a',
@@ -2335,7 +2070,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:bare'],
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
 		]);
 
 		const members = Array.from({ length: 501 }, (_, at) => `slot:&|key-${at}`);
@@ -2353,15 +2088,15 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		);
 
 		expect(sscan.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:fingerprint:slot:bare', '0', 'COUNT', 1000],
-			['scalabus:scoped-cache-index:fingerprint:slot:bare', '7', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:fingerprint:slot:', '7', 'COUNT', 1000],
 		]);
 
 		expect(scopedCacheIndexReap).toHaveBeenCalledTimes(3);
 		expect(scopedCacheIndexReap.mock.calls[0]).toHaveLength(1003);
 
 		expect(scopedCacheIndexReap.mock.calls[1]).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'slot',
 			86400,
 			'slot:&|key-500',
@@ -2369,7 +2104,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		]);
 
 		expect(scopedCacheIndexReap.mock.calls[2]).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'slot',
 			86400,
 			'slot:&|key-last',
@@ -2380,7 +2115,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 	it('leaves a member naming no key alone', async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:bare'],
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
 		]);
 
 		sscan.mockResolvedValueOnce(['0', ['slot:&']]);
@@ -2408,8 +2143,8 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		scan.mockResolvedValueOnce([
 			'0',
 			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-				'scalabus:scoped-cache-index:fingerprint:note:bare',
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-index:fingerprint:note:',
 			],
 		]);
 
@@ -2433,12 +2168,12 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			[
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				5000,
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
+				'scalabus:scoped-cache-index:fingerprint:slot:',
 			],
 			[
 				'scalabus:scoped-cache-index:collection-index-keys:note',
 				-1,
-				'scalabus:scoped-cache-index:fingerprint:note:bare',
+				'scalabus:scoped-cache-index:fingerprint:note:',
 			],
 		]);
 	});
@@ -2472,7 +2207,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 	it('names nothing for a set gone by the end of its read', async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:bare'],
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
 		]);
 
 		sscan.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
@@ -2593,184 +2328,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			+ "redis.call('INCR', KEYS[2])\n"
 			+ "redis.call('EXPIRE', KEYS[2], ARGV[1])\n"
 			+ "redis.call('SREM', KEYS[1], unpack(gone))",
-		);
-	});
-
-	it(oneLine`
-		adopts a legacy bare set page by page once each page is reaped, naming
-		every set a member can be in beside it, and marks it on the last call
-	`, async () => {
-		scan.mockResolvedValueOnce([
-			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:'],
-		]);
-
-		sscan
-			.mockResolvedValueOnce(['7', ['slot:&id=,7,&|key-a']])
-			.mockResolvedValueOnce(['0', ['slot:&|key-b']]);
-
-		scopedCacheIndexReap.mockResolvedValue(0);
-
-		await redisScopedCacheStore().reapIndexedEntries(
-			(key) => key,
-			(collection) => collection,
-			86400,
-		);
-
-		expect(defineCommand).toHaveBeenCalledWith(
-			'scopedCacheLegacyBareAdopt',
-			{ numberOfKeys: 6, lua: scopedCacheLegacyBareAdoptScript },
-		);
-
-		expect(scopedCacheLegacyBareAdopt.mock.calls).toEqual([
-			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-				'scalabus:scoped-cache-index:fingerprint:slot:',
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
-				'scalabus:scoped-cache-index-generation',
-				'scalabus:scoped-cache-epoch:*',
-				0,
-				'41',
-				'9',
-				'slot:&id=,7,&|key-a',
-				2,
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
-			],
-			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-				'scalabus:scoped-cache-index:fingerprint:slot:',
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
-				'scalabus:scoped-cache-index-generation',
-				'scalabus:scoped-cache-epoch:*',
-				1,
-				'41',
-				'9',
-				'slot:&|key-b',
-				1,
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-			],
-		]);
-
-		expect(scopedCacheIndexReap.mock.invocationCallOrder[0])
-			.toBeLessThan(scopedCacheLegacyBareAdopt.mock.invocationCallOrder[0]!);
-	});
-
-	it('marks a legacy bare set adopted when its last page is empty', async () => {
-		scan.mockResolvedValueOnce([
-			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:'],
-		]);
-
-		sscan
-			.mockResolvedValueOnce(['7', ['slot:&|key-a']])
-			.mockResolvedValueOnce(['0', []]);
-
-		scopedCacheIndexReap.mockResolvedValue(0);
-
-		await redisScopedCacheStore().reapIndexedEntries(
-			(key) => key,
-			(collection) => collection,
-			86400,
-		);
-
-		expect(scopedCacheLegacyBareAdopt.mock.calls).toEqual([
-			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-				'scalabus:scoped-cache-index:fingerprint:slot:',
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
-				'scalabus:scoped-cache-index-generation',
-				'scalabus:scoped-cache-epoch:*',
-				0,
-				'41',
-				'9',
-				'slot:&|key-a',
-				1,
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-			],
-			[
-				'scalabus:scoped-cache-index:fingerprint:slot:bare',
-				'scalabus:scoped-cache-index:fingerprint:slot:',
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
-				'scalabus:scoped-cache-index-generation',
-				'scalabus:scoped-cache-epoch:*',
-				1,
-				'41',
-				'9',
-			],
-		]);
-	});
-
-	it('adopts nothing from the bare set, whose members are its own', async () => {
-		scan.mockResolvedValueOnce([
-			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:bare'],
-		]);
-
-		sscan.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
-		scopedCacheIndexReap.mockResolvedValue(0);
-
-		await redisScopedCacheStore().reapIndexedEntries(
-			(key) => key,
-			(collection) => collection,
-			86400,
-		);
-
-		expect(scopedCacheLegacyBareAdopt).not.toHaveBeenCalled();
-	});
-});
-
-describe('scopedCacheLegacyBareAdoptScript', () => {
-	// A member this build filed sits in its own set too; filing it bare would put
-	// it in the one set every write reads whole.
-	it(oneLine`
-		files only a member still in the legacy bare set and in none of the sets
-		it can be in
-	`, () => {
-		expect(scopedCacheLegacyBareAdoptScript).toContain(
-			"local skipped = redis.call('SISMEMBER', KEYS[2], ARGV[at]) == 0\n"
-			+ '\tfor i = at + 2, at + count + 1 do\n'
-			+ "\t\tskipped = skipped or redis.call('SISMEMBER', ARGV[i], ARGV[at]) == 1",
-		);
-	});
-
-	it(oneLine`
-		names the bare set and moves the index-key set's expiry before filing into
-		it
-	`, () => {
-		expect(scopedCacheLegacyBareAdoptScript).toContain(
-			"redis.call('SADD', KEYS[3], KEYS[1])\n"
-			+ '\tif want == -1 then\n'
-			+ '\t\tif namedLeft >= 0 then\n'
-			+ "\t\t\tredis.call('PERSIST', KEYS[3])\n"
-			+ '\t\tend\n'
-			+ '\telseif namedLeft == -2 or (namedLeft >= 0 and namedLeft < want) then\n'
-			+ "\t\tredis.call('PEXPIRE', KEYS[3], want)\n"
-			+ '\tend\n'
-			+ "\tredis.call('SADD', KEYS[1], unpack(adopted))",
-		);
-	});
-
-	it(oneLine`
-		writes the adopted marker only on the call that ends the pass, and only
-		while the generation and the wholesale counter read as the reap read them
-	`, () => {
-		expect(scopedCacheLegacyBareAdoptScript).toContain(
-			"if ARGV[1] == '1'\n"
-			+ "\tand redis.call('GET', KEYS[5]) == ARGV[2]\n"
-			+ "\tand (redis.call('GET', KEYS[6]) or '') == ARGV[3] then\n"
-			+ "\tredis.call('SET', KEYS[4], ARGV[2])",
-		);
-	});
-
-	it('reads the first member after the pass end and the two reads', () => {
-		expect(scopedCacheLegacyBareAdoptScript).toContain(
-			'local adopted = {}\n'
-			+ 'local at = 4\n',
 		);
 	});
 });

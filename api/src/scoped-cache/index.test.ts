@@ -1152,15 +1152,13 @@ describe('indexScopedCacheEntry', () => {
 		expect(expire).not.toHaveBeenCalled();
 
 		expect(indexFile.mock.calls).toEqual([[
-			3,
+			2,
 			'ns:scoped-cache-index:collection-index-keys:articles',
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
-			'ns:scoped-cache-index:fingerprint:articles:',
 			3600,
-			-2,
+			2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-			0,
 		]]);
 	});
 
@@ -1192,15 +1190,13 @@ describe('indexScopedCacheEntry', () => {
 		// SADD, and expires under entries that no purge can reach any more: a ttl
 		// of 0 tells the script to clear it.
 		expect(indexFile.mock.calls).toEqual([[
-			3,
+			2,
 			'ns:scoped-cache-index:collection-index-keys:articles',
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
-			'ns:scoped-cache-index:fingerprint:articles:',
 			0,
-			-2,
+			2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-			0,
 		]]);
 	});
 });

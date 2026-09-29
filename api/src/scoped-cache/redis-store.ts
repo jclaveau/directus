@@ -117,10 +117,8 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * KEYS[1] is the index-key set and the rest the index sets. ARGV[1] is the
  * expiry in seconds, `0` for none — the entries then never expire, so neither
  * may a set filed while a TTL was in force — then for each index set in order
- * how many members it takes followed by them. A negative count takes as many,
- * and files them in the last set too: the legacy bare set, filed once per call
- * from members already sent rather than sent again. Answers with how many names
- * it added.
+ * how many members it takes followed by them. Answers with how many names it
+ * added.
  */
 export const scopedCacheIndexFileScript = `
 local want = tonumber(ARGV[1])
@@ -149,20 +147,10 @@ elseif held == -2 or (held >= 0 and held < longest) then
 end
 
 local at = 2
-local passed = {}
 for i = 2, #KEYS do
 	local count = tonumber(ARGV[at])
-	if count < 0 then
-		count = -count
-		for m = at + 1, at + count do
-			passed[#passed + 1] = ARGV[m]
-		end
-	end
 	if count > 0 then
 		redis.call('SADD', KEYS[i], unpack(ARGV, at + 1, at + count))
-	end
-	if i == #KEYS and #passed > 0 then
-		redis.call('SADD', KEYS[i], unpack(passed))
 	end
 	at = at + count + 1
 	if want <= 0 then
@@ -311,94 +299,6 @@ return live
 `;
 
 /**
- * File in the bare set the members of the legacy bare set no other set holds:
- * the entries a build before home pins filed off the index path, which this
- * build's writes find only in the legacy bare set otherwise. A member this
- * build filed there sits in its own set too, and stays out of the bare one,
- * which every write reads whole.
- *
- * One script, so a member cannot be pruned from its own set between the check
- * and the filing — it would then be filed bare after its entry was dropped,
- * which costs a compare. A member no longer in the legacy bare set is left.
- *
- * The bare set is named in the index-key set, and both keep an expiry at
- * least the legacy bare set's, or none while it has none. The last call of a
- * pass writes the adopted marker, holding the generation the reap read, and
- * only while nothing dropped the index since it read it
- * (`scopedCacheIndexCompleteMarkScript`): a drop cutting the bare set would
- * otherwise leave a marker vouching for what it cut.
- *
- * KEYS are the bare set, the legacy bare set, the index-key set, the adopted
- * marker, the index generation and the wholesale counter. ARGV[1] is `1` on the
- * call that ends the pass, ARGV[2] and ARGV[3] the generation and the counter as
- * the reap read them, then each member followed by how many other sets can hold
- * it and their keys. Answers with how many members it filed.
- */
-export const scopedCacheLegacyBareAdoptScript = `
-local adopted = {}
-local at = 4
-while at <= #ARGV do
-	local count = tonumber(ARGV[at + 1])
-	local skipped = redis.call('SISMEMBER', KEYS[2], ARGV[at]) == 0
-	for i = at + 2, at + count + 1 do
-		skipped = skipped or redis.call('SISMEMBER', ARGV[i], ARGV[at]) == 1
-	end
-	if not skipped then
-		adopted[#adopted + 1] = ARGV[at]
-	end
-	at = at + count + 2
-end
-
-local legacyLeft = redis.call('PTTL', KEYS[2])
-if #adopted > 0 and legacyLeft ~= -2 then
-	local bareLeft = redis.call('PTTL', KEYS[1])
-	local want = legacyLeft
-	if legacyLeft == -1 or bareLeft == -1 then
-		want = -1
-	elseif bareLeft > want then
-		want = bareLeft
-	end
-	local namedLeft = redis.call('PTTL', KEYS[3])
-	redis.call('SADD', KEYS[3], KEYS[1])
-	if want == -1 then
-		if namedLeft >= 0 then
-			redis.call('PERSIST', KEYS[3])
-		end
-	elseif namedLeft == -2 or (namedLeft >= 0 and namedLeft < want) then
-		redis.call('PEXPIRE', KEYS[3], want)
-	end
-	redis.call('SADD', KEYS[1], unpack(adopted))
-	if want == -1 then
-		if bareLeft >= 0 then
-			redis.call('PERSIST', KEYS[1])
-		end
-	elseif bareLeft == -2 or bareLeft < want then
-		redis.call('PEXPIRE', KEYS[1], want)
-	end
-end
-
-if ARGV[1] == '1'
-	and redis.call('GET', KEYS[5]) == ARGV[2]
-	and (redis.call('GET', KEYS[6]) or '') == ARGV[3] then
-	redis.call('SET', KEYS[4], ARGV[2])
-end
-
-return #adopted
-`;
-
-type ScopedCacheLegacyBareAdoptCommand = {
-	scopedCacheLegacyBareAdopt(
-		bareKey: string,
-		legacyBareKey: string,
-		collectionIndexKeysKey: string,
-		adoptedKey: string,
-		generationKey: string,
-		flushEpochKey: string,
-		...passEndThenReadsThenMembers: Array<string | number>
-	): Promise<number>;
-};
-
-/**
  * Take back what the completeness marker vouches for before a drop unlinks
  * anything: the marker goes, and the index generation moves, so a reap that read
  * the generation before this cannot write the marker back
@@ -511,7 +411,6 @@ type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexFileCommand
 type ScopedCacheIndexFileCall = {
 	indexKeys: string[];
 	filingArguments: Array<string | number>;
-	legacyBareFiled: boolean;
 };
 
 type ScopedCacheCollectionIndexKeysPruneCommand = {
@@ -576,7 +475,6 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheEpochBumpCommand
 	& ScopedCacheIndexReapCommand
 	& ScopedCacheCollectionIndexKeysPruneCommand
-	& ScopedCacheLegacyBareAdoptCommand
 	& ScopedCacheCollectionIndexKeysRegisterCommand<Promise<number>>
 	& ScopedCacheIndexInvalidateCommand
 	& ScopedCacheIndexGenerationReadCommand
@@ -620,11 +518,6 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 
 		redis.defineCommand('scopedCacheCollectionIndexKeysPrune', {
 			lua: scopedCacheCollectionIndexKeysPruneScript,
-		});
-
-		redis.defineCommand('scopedCacheLegacyBareAdopt', {
-			numberOfKeys: 6,
-			lua: scopedCacheLegacyBareAdoptScript,
 		});
 
 		redis.defineCommand('scopedCacheIndexInvalidate', {
@@ -756,20 +649,9 @@ async function unlinkScopedCacheKeys(
 }
 
 /**
- * The pin naming nothing, whose set every write to the collection reads. Spelled
- * out, since the empty pin is the legacy bare set's, and no other pin is spelled
- * like it: an index value's and a home pin's both carry a `=`.
+ * The pin naming nothing, whose set every write to the collection reads.
  */
-const SCOPED_CACHE_BARE_PIN = 'bare';
-
-/**
- * The set the builds before home pins read as bare, and still the only one they
- * read for an entry off the index path. So every entry filed off it is also
- * filed here, bare or home-pinned alike, and a write of an older build still
- * reaches it. No write of this build reads it once its collection is adopted
- * (`scopedCacheLegacyBareAdoptedKey`).
- */
-const SCOPED_CACHE_LEGACY_BARE_PIN = '';
+const SCOPED_CACHE_BARE_PIN = '';
 
 /**
  * The segment a home pin's sets sit under, beside the index path's. An index path
@@ -818,17 +700,12 @@ function scopedCacheIndexGlobPrefix(): string {
  * nothing at all goes bare, which every write to the collection reads.
  *
  * `indexPin` is what the split is keyed by — `<path>=<value>`,
- * `pin:<pinKey>=<value>` for a home pin, `bare` for the bare set, or empty for
- * the legacy bare set (`SCOPED_CACHE_LEGACY_BARE_PIN`). It never
+ * `pin:<pinKey>=<value>` for a home pin, or empty for the bare set. It never
  * leaves this file: a caller asks the store for the entries it has to test, not
  * for the sets holding them.
  */
 function scopedCacheIndexKey(collection: string, indexPin: string): string {
 	return `${scopedCacheIndexPrefix()}fingerprint:${collection}:${indexPin}`;
-}
-
-function scopedCacheLegacyBareIndexKey(collection: string): string {
-	return scopedCacheIndexKey(collection, SCOPED_CACHE_LEGACY_BARE_PIN);
 }
 
 /**
@@ -884,59 +761,6 @@ export function scopedCacheEpochKey(collection: string): string {
  */
 function scopedCacheCollectionIndexKeysCompleteKey(): string {
 	return `${scopedCacheIndexPrefix()}collection-index-keys-complete`;
-}
-
-/**
- * The key saying a reap of this build has read one collection's legacy bare set
- * to its end and filed in the bare set every entry only it held. Until then a
- * write reads the legacy bare set whole too. No expiry, and inside the prefix,
- * outside every family a glob or the reap reads: a flush drops it with the sets.
- *
- * It holds the index generation the reap read, and vouches only while that
- * still reads the same: a changed build moves the generation, since a build
- * before home pins, rolled back to, filed in the legacy bare set alone.
- */
-function scopedCacheLegacyBareAdoptedKey(collection: string): string {
-	return `${scopedCacheIndexPrefix()}legacy-bare-adopted:${collection}`;
-}
-
-/** The collections this process has seen adopted, so it stops asking. */
-const legacyBareAdoptedCollections = new Set<string>();
-
-/**
- * The legacy bare set, while a write still has to read it: before a reap has
- * adopted the collection, or when Redis cannot say. Asked beside the write's
- * own first round of reads, so it costs no round trip of its own.
- */
-async function scopedCacheLegacyBareReadKeys(
-	collection: string,
-): Promise<string[]> {
-	if (legacyBareAdoptedCollections.has(collection)) {
-		return [];
-	}
-
-	const legacyBareKeys = [
-		scopedCacheLegacyBareIndexKey(collection),
-	];
-
-	// A refused answer reads the set, as the builds before this one did.
-	try {
-		const [adoptedGeneration, generation] = await useCacheRedis().mget([
-			scopedCacheLegacyBareAdoptedKey(collection),
-			scopedCacheIndexGenerationKey(),
-		]);
-
-		if (adoptedGeneration === null || adoptedGeneration !== generation) {
-			return legacyBareKeys;
-		}
-	}
-	catch {
-		return legacyBareKeys;
-	}
-
-	legacyBareAdoptedCollections.add(collection);
-
-	return [];
 }
 
 /**
@@ -1344,22 +1168,6 @@ export function scopedCacheFingerprintIndexKeys(
 }
 
 /**
- * Whether a fill files one fingerprint in the legacy bare set beside its own
- * sets: any off the index path, which is all a write of an older build reads
- * for it.
- */
-export function scopedCacheFingerprintFilesLegacyBare(
-	fingerprint: ScopedCacheFingerprint,
-	indexPath: string | null,
-): boolean {
-	const indexValues = indexPath === null
-		? undefined
-		: fingerprint.pinnedScope?.[indexPath];
-
-	return indexValues === undefined || indexValues.length === 0;
-}
-
-/**
  * The keys of the sets a write reads back for the index path: the bare one, and
  * the one each of its rows' values at the index path names.
  *
@@ -1428,8 +1236,7 @@ export function scopedCacheRowHomePinKeys(
 /**
  * The keys of every set a fingerprint can have been filed in, whichever home pin
  * its filing chose: one per value it pins the index path to, else one per field
- * and value it pins, else the bare set — and, off the index path, the legacy bare
- * set a fill files it in beside them.
+ * and value it pins, else the bare set.
  *
  * What a prune names rather than the filing's own keys, because the home pin is
  * ranked off the schema (the primary key, then the declared scope fields) and a
@@ -1455,14 +1262,9 @@ export function scopedCacheFingerprintPrunedIndexKeys(
 		[fingerprint],
 	);
 
-	const offIndexKeys = homePinKeys.length > 0
+	return homePinKeys.length > 0
 		? homePinKeys
 		: [scopedCacheIndexKey(fingerprint.collection, SCOPED_CACHE_BARE_PIN)];
-
-	return [
-		...offIndexKeys,
-		scopedCacheLegacyBareIndexKey(fingerprint.collection),
-	];
 }
 
 /**
@@ -1520,39 +1322,19 @@ interface ScopedCacheMemberLocation {
  * so the round costs one round trip, and a refused one rejects the round the way
  * a single `SSCAN` did. A member met twice — a set rehashed under the cursor, or
  * one entry filed under two of the sets read — is answered once.
- *
- * `laterIndexKeys` are read after the others, in the same pass so a member
- * both hold is still answered once: the sets a write learns it has to read
- * only while its first round is in flight.
  */
 async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
-	laterIndexKeys: Promise<readonly string[]> | null = null,
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useCacheRedis();
 	const scannedMembers = new Set<string>();
-	const scannedKeys = [...indexKeys];
-	let pendingLaterKeys = laterIndexKeys;
 
-	for (let at = 0; ; ) {
-		if (at >= scannedKeys.length && pendingLaterKeys !== null) {
-			scannedKeys.push(...await pendingLaterKeys);
-			pendingLaterKeys = null;
-		}
-
-		if (at >= scannedKeys.length) {
-			return;
-		}
-
-		// Past what this round read, not a whole round on: a short round moving
-		// the cursor that far would skip the later keys pushed after it.
-		const roundKeys = scannedKeys.slice(at, at + SCOPED_CACHE_INDEX_SCAN_SETS);
-
-		at += roundKeys.length;
-
-		let pendingScans = roundKeys.map((indexKey) => {
-			return { indexKey, scanCursor: '0' };
-		});
+	for (let at = 0; at < indexKeys.length; at += SCOPED_CACHE_INDEX_SCAN_SETS) {
+		let pendingScans = indexKeys
+			.slice(at, at + SCOPED_CACHE_INDEX_SCAN_SETS)
+			.map((indexKey) => {
+				return { indexKey, scanCursor: '0' };
+			});
 
 		while (pendingScans.length > 0) {
 			const scanReplies = await Promise.all(
@@ -1679,55 +1461,6 @@ async function reapIndexMembers(
 }
 
 /**
- * Adopt one page of a collection's legacy bare set
- * (`scopedCacheLegacyBareAdoptScript`), a chunk per call. Each member is checked
- * against the bare set and every home pin's set it can have been filed in, the
- * same ones a prune names. `passEnds` marks the page that ends the pass, whose
- * last call writes the adopted marker even when the page is empty, unless the
- * index moved past `indexRead`, what the reap read before its SCAN.
- */
-async function adoptLegacyBareMembers(
-	collection: string,
-	members: readonly string[],
-	passEnds: boolean,
-	indexRead: readonly [string, string],
-): Promise<void> {
-	const bareKey = scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN);
-
-	const adoptKeys = [
-		bareKey,
-		scopedCacheLegacyBareIndexKey(collection),
-		scopedCacheCollectionIndexKeysKey(collection),
-		scopedCacheLegacyBareAdoptedKey(collection),
-		scopedCacheIndexGenerationKey(),
-		scopedCacheEpochKey('*'),
-	] as const;
-
-	let at = 0;
-
-	do {
-		const chunk = members.slice(at, at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS);
-
-		at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS;
-
-		const memberArguments = chunk.flatMap((member) => {
-			const { fingerprint } = parseScopedCacheIndexMember(member);
-			const homePinKeys = scopedCacheRowHomePinKeys(collection, [fingerprint]);
-
-			return [member, homePinKeys.length + 1, bareKey, ...homePinKeys];
-		});
-
-		await useScriptedRedis().scopedCacheLegacyBareAdopt(
-			...adoptKeys,
-			Number(passEnds && at >= members.length),
-			...indexRead,
-			...memberArguments,
-		);
-	}
-	while (at < members.length);
-}
-
-/**
  * Name one set in its collection's index-key set with the set's own expiry,
  * which the index-key set then keeps at least. Not one script with the read: a
  * fill moving the set's expiry out in between moves the index-key set's past
@@ -1779,22 +1512,21 @@ const redisStore: ScopedCacheStore = {
 		}
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
-		const callsByCollection = new Map<string, ScopedCacheIndexFileCall[]>();
+		const callsByCollectionKey = new Map<string, ScopedCacheIndexFileCall[]>();
 
 		for (const { fingerprint, keys, indexPath, homePinFields } of filings) {
 			const members = keys.map((key) => {
 				return renderScopedCacheIndexMember(fingerprint, key);
 			});
 
-			const collectionCalls = callsByCollection.get(fingerprint.collection)
+			const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(
+				fingerprint.collection,
+			);
+
+			const collectionCalls = callsByCollectionKey.get(collectionIndexKeysKey)
 				?? [];
 
-			callsByCollection.set(fingerprint.collection, collectionCalls);
-
-			let legacyBarePending = scopedCacheFingerprintFilesLegacyBare(
-				fingerprint,
-				indexPath,
-			);
+			callsByCollectionKey.set(collectionIndexKeysKey, collectionCalls);
 
 			for (const indexKey of scopedCacheFingerprintIndexKeys(
 				fingerprint,
@@ -1810,42 +1542,22 @@ const redisStore: ScopedCacheStore = {
 				);
 
 				if (fileCall === undefined || callIsFull) {
-					fileCall = {
-						indexKeys: [],
-						filingArguments: [],
-						legacyBareFiled: false,
-					};
-
+					fileCall = { indexKeys: [], filingArguments: [] };
 					collectionCalls.push(fileCall);
 				}
 
-				// A negative count passes the members on to the legacy bare set,
-				// which the call files last: once per fingerprint, not once per set.
-				const memberCount = legacyBarePending
-					? -members.length
-					: members.length;
-
 				fileCall.indexKeys.push(indexKey);
-				fileCall.filingArguments.push(memberCount, ...members);
-				fileCall.legacyBareFiled ||= legacyBarePending;
-				legacyBarePending = false;
+				fileCall.filingArguments.push(members.length, ...members);
 			}
 		}
 
 		// One call per collection files its sets and names them, so a set's name
 		// crosses the wire once per fill, as the set's own key.
-		for (const [collection, collectionCalls] of callsByCollection) {
-			for (const fileCall of collectionCalls) {
-				const { indexKeys, filingArguments, legacyBareFiled } = fileCall;
-
-				if (legacyBareFiled) {
-					indexKeys.push(scopedCacheLegacyBareIndexKey(collection));
-					filingArguments.push(0);
-				}
-
+		for (const [collectionIndexKeysKey, collectionCalls] of callsByCollectionKey) {
+			for (const { indexKeys, filingArguments } of collectionCalls) {
 				pipeline.scopedCacheIndexFile(
 					indexKeys.length + 1,
-					scopedCacheCollectionIndexKeysKey(collection),
+					collectionIndexKeysKey,
 					...indexKeys,
 					ttlSeconds,
 					...filingArguments,
@@ -1873,15 +1585,12 @@ const redisStore: ScopedCacheStore = {
 		indexPath: string | null,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 		// Every set an entry some row can drop is filed in: its index value's, its
-		// home pin's, or the bare one. The legacy bare set too, until the reap has
-		// moved into the bare one what only the builds before this one filed there.
-		return scanScopedCacheIndexKeys(
-			[
-				...scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
-				...scopedCacheRowHomePinKeys(collection, rowFingerprints),
-			],
-			scopedCacheLegacyBareReadKeys(collection),
-		);
+		// home pin's, or the bare one. The bare set also still holds what the
+		// layout before home pins filed there, read whole now.
+		return scanScopedCacheIndexKeys([
+			...scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
+			...scopedCacheRowHomePinKeys(collection, rowFingerprints),
+		]);
 	},
 
 	async* scanDeclaredIndexedEntries(
@@ -1904,7 +1613,6 @@ const redisStore: ScopedCacheStore = {
 		if (pinsIndexPath) {
 			yield* scanScopedCacheIndexKeys(
 				scopedCacheRowIndexKeys(collection, declared, indexPath),
-				scopedCacheLegacyBareReadKeys(collection),
 			);
 
 			for await (const homePinKeys of scanCollectionIndexKeyNames(
@@ -2109,10 +1817,7 @@ const redisStore: ScopedCacheStore = {
 	 * where no recovery looks. A set a live sweep released between the SCAN and
 	 * the SADD leaves a name without a set, which the recovery reads as empty.
 	 *
-	 * A legacy bare set it reads is adopted page by page (`adoptLegacyBareMembers`),
- * which is what lets a write of this build stop reading it.
- *
- * A pass that reaches its end has named every set the index held when it
+	 * A pass that reaches its end has named every set the index held when it
 	 * began, so it writes the marker `collectionIndexKeysComplete` trusts, holding
 	 * the index generation read before the SCAN — unless a drop moved it since
 	 * (`scopedCacheIndexCompleteMarkScript`). A pass that throws writes nothing
@@ -2209,19 +1914,6 @@ const redisStore: ScopedCacheStore = {
 						epochKeyOf,
 						epochTtlSeconds,
 					);
-
-					// After the reap of the page, so an expired entry is not adopted.
-					if (
-						setCollection !== null
-						&& indexKey === scopedCacheLegacyBareIndexKey(setCollection)
-					) {
-						await adoptLegacyBareMembers(
-							setCollection,
-							members,
-							scanCursor === '0',
-							[generationRead, flushEpochRead],
-						);
-					}
 				}
 				while (scanCursor !== '0');
 
