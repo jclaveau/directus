@@ -1203,6 +1203,40 @@ describe('takeCollectionIndexedKeys', () => {
 		expect(scan).not.toHaveBeenCalled();
 	});
 
+	it(oneLine`
+		counts only the sets it moved, not the names whose set is already gone
+	`, async () => {
+		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
+
+		sscan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
+					'scalabus:scoped-cache-index:fingerprint:slot:name=gone',
+				],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&name=,ada,&|key-ada']]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+			{
+				indexKeys: 1,
+				keys: ['key-ada'],
+				sweptKeys: ['scalabus:scoped-cache-index:swept:slot:a1:1'],
+			},
+		]);
+	});
+
 	it('gives a moved set no expiry of its own: it keeps the one it had', () => {
 		expect(scopedCacheSweepMoveScript).not.toContain('EXPIRE');
 	});

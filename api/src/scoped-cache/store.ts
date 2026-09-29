@@ -56,8 +56,9 @@ export interface ScopedCacheIndexedEntry {
 }
 
 /**
- * One batch of a whole-collection take: what it dropped, what it named, and the
- * moved sets the caller releases once those keys are gone.
+ * One batch of a whole-collection take: how many index sets it took, the keys
+ * they held, and the moved sets the caller releases once those keys are gone. A
+ * name whose set was already gone is not a set taken.
  */
 export interface ScopedCacheIndexTake {
 	indexKeys: number;

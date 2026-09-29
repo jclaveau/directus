@@ -1452,7 +1452,9 @@ const redisStore: ScopedCacheStore = {
 				}
 			}
 
-			yield { indexKeys: indexKeys.length, keys, sweptKeys: movedKeys };
+			// A name whose set is already gone moves nothing, and counting it would
+			// report more sets purged than were.
+			yield { indexKeys: movedKeys.length, keys, sweptKeys: movedKeys };
 		}
 		while (scanCursor !== '0');
 	},
