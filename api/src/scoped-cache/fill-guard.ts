@@ -46,10 +46,6 @@ export function scopedCacheEpochTtlSeconds(): number {
 	return Math.max(Math.ceil(ttlMilliseconds / 1000), 5 * 60);
 }
 
-// Spelled beside the index it guards: the store reads the wholesale counter to
-// tell whether the index-key sets are complete.
-export { scopedCacheEpochKey };
-
 /**
  * Read the purge counters of the collections a read depends on.
  *

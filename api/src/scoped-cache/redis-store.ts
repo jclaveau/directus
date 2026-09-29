@@ -119,8 +119,7 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * KEYS[1] is the index-key set and the rest the index sets. ARGV[1] is the
  * expiry in seconds, `0` for none — the entries then never expire, so neither
  * may a set filed while a TTL was in force — then for each index set in order
- * how many members it takes followed by them. Answers with how many names it
- * added.
+ * how many members it takes followed by them.
  */
 export const scopedCacheIndexFileScript = `
 local want = tonumber(ARGV[1])
@@ -139,7 +138,7 @@ for i = 2, #KEYS do
 end
 
 local held = redis.call('PTTL', KEYS[1])
-local named = redis.call('SADD', KEYS[1], unpack(KEYS, 2))
+redis.call('SADD', KEYS[1], unpack(KEYS, 2))
 if unbounded then
 	if held >= 0 then
 		redis.call('PERSIST', KEYS[1])
@@ -163,8 +162,6 @@ for i = 2, #KEYS do
 		redis.call('EXPIRE', KEYS[i], want)
 	end
 end
-
-return named
 `;
 
 /**
@@ -259,13 +256,12 @@ redis.call('SADD', KEYS[1], unpack(ARGV, 2))
 local want = tonumber(ARGV[1])
 if want < 0 then
 	redis.call('PERSIST', KEYS[1])
-	return existed
+	return
 end
 local ttl = redis.call('PTTL', KEYS[1])
 if existed == 0 or (ttl >= 0 and ttl < want) then
 	redis.call('PEXPIRE', KEYS[1], want)
 end
-return existed
 `;
 
 /**
@@ -471,12 +467,12 @@ type ScopedCacheIndexFileCommand = {
 	): ChainableCommander;
 };
 
-type ScopedCacheCollectionIndexKeysRegisterCommand<Answer> = {
+type ScopedCacheCollectionIndexKeysRegisterCommand = {
 	scopedCacheCollectionIndexKeysRegister(
 		collectionIndexKeysKey: string,
 		expiryMilliseconds: number,
 		...indexKeys: string[]
-	): Answer;
+	): Promise<null>;
 };
 
 type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexFileCommand;
@@ -569,7 +565,7 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheEpochBumpCommand
 	& ScopedCacheIndexReapCommand
 	& ScopedCacheCollectionIndexKeysPruneCommand
-	& ScopedCacheCollectionIndexKeysRegisterCommand<Promise<number>>
+	& ScopedCacheCollectionIndexKeysRegisterCommand
 	& ScopedCacheIndexInvalidateCommand
 	& ScopedCacheIndexGenerationReadCommand
 	& ScopedCacheIndexCompleteMarkCommand
@@ -1113,7 +1109,7 @@ async function* scanCollectionIndexKeys(
  * released yet — bounded by its trailing colon the way the collection's own glob
  * is.
  */
-export function scopedCacheSweptIndexGlob(collection: string): string {
+function scopedCacheSweptIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
 
 	return `${scopedCacheIndexGlobPrefix()}swept:${matched}:*`;
@@ -1160,7 +1156,7 @@ async function collectSweptIndexKeys(
  * hold a row of any index value. Matched against the collection's index-key set
  * while it is known complete, against the keyspace otherwise.
  */
-export function scopedCacheHomePinIndexGlob(collection: string): string {
+function scopedCacheHomePinIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
 
 	return `${scopedCacheIndexGlobPrefix()}fingerprint:${matched}:`
@@ -1366,7 +1362,7 @@ export function scopedCacheRowHomePinKeys(
  * way was filed elsewhere. A set that never held the member costs an `SREM` of
  * nothing.
  */
-export function scopedCacheFingerprintPrunedIndexKeys(
+function scopedCacheFingerprintPrunedIndexKeys(
 	fingerprint: ScopedCacheFingerprint,
 	indexPath: string | null,
 ): string[] {
@@ -1544,7 +1540,6 @@ async function reapIndexMembers(
 	indexKey: string,
 	members: readonly string[],
 	rawKeyOf: (key: string) => string,
-	epochKeyOf: (collection: string) => string,
 	epochTtlSeconds: number,
 ): Promise<number> {
 	const argumentsByCollection = new Map<string, string[]>();
@@ -1571,7 +1566,7 @@ async function reapIndexMembers(
 		for (let at = 0; at < memberArguments.length; at += chunkArguments) {
 			reapedMembers += await useScriptedRedis().scopedCacheIndexReap(
 				indexKey,
-				epochKeyOf(collection),
+				scopedCacheEpochKey(collection),
 				epochTtlSeconds,
 				...memberArguments.slice(at, at + chunkArguments),
 			);
@@ -1946,14 +1941,12 @@ const redisStore: ScopedCacheStore = {
 	 */
 	async reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
-		epochKeyOf: (collection: string) => string,
 		epochTtlSeconds: number,
 	): Promise<ScopedCacheReapTally> {
 		const tally: ScopedCacheReapTally = {
 			indexKeys: 0,
 			reaped: 0,
 			strandedSweptKeys: 0,
-			markedComplete: false,
 		};
 
 		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
@@ -2032,7 +2025,6 @@ const redisStore: ScopedCacheStore = {
 						indexKey,
 						members,
 						rawKeyOf,
-						epochKeyOf,
 						epochTtlSeconds,
 					);
 				}
@@ -2044,7 +2036,7 @@ const redisStore: ScopedCacheStore = {
 			}
 		}
 
-		tally.markedComplete = await useScriptedRedis()
+		const markedComplete = await useScriptedRedis()
 			.scopedCacheIndexCompleteMark(
 				scopedCacheCollectionIndexKeysCompleteKey(),
 				scopedCacheIndexGenerationKey(),
@@ -2055,11 +2047,12 @@ const redisStore: ScopedCacheStore = {
 			) === 1;
 
 		useLogger().info(
-			tally.markedComplete
+			markedComplete
 				? `[scoped-cache] index-key sets marked complete at generation `
 				+ `${generationRead}`
 				: `[scoped-cache] index-key sets not marked complete: the index was `
-				+ `dropped since generation ${generationRead}`,
+				+ `dropped since generation ${generationRead}, or a deploy's fill `
+				+ 'pause runs',
 		);
 
 		return tally;

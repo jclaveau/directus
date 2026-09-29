@@ -32,7 +32,7 @@ export interface ReportedProcess {
 	/**
 	 * The core build this process runs (`resolveCoreBuildId`). Absent from a
 	 * process of a build older than the field, which is how the fill pause after
-	 * a deploy tells a node of the build before (`watchScopedCacheFillPause`).
+	 * a deploy tells a node of the build before (`onlyThisBuildAnswers`).
 	 */
 	coreBuildId?: string;
 }

@@ -79,15 +79,13 @@ export interface ScopedCacheUnlinkTally {
 }
 
 /**
- * What a reap read, how many members it removed from it, how many moved sets it
- * found that no swept index-key set named, and whether it could mark the
- * index-key sets complete: not when a drop started during the pass.
+ * What a reap read, how many members it removed from it, and how many moved
+ * sets it found that no swept index-key set named.
  */
 export interface ScopedCacheReapTally {
 	indexKeys: number;
 	reaped: number;
 	strandedSweptKeys: number;
-	markedComplete: boolean;
 }
 
 /** What recording the build found (`ScopedCacheStore.recordBuildIdentity`). */
@@ -220,9 +218,9 @@ export interface ScopedCacheStore {
 	 * set outlives what it names, so without this it grows with every read ever
 	 * cached.
 	 *
-	 * `rawKeyOf` names an entry the way the cache store holds it. `epochKeyOf` is
-	 * the purge counter of a collection, bumped in the same step as a removal from
-	 * that collection's sets: a fill files its members before it writes its entry,
+	 * `rawKeyOf` names an entry the way the cache store holds it. A collection's
+	 * purge counter is bumped in the same step as a removal from that collection's
+	 * sets: a fill files its members before it writes its entry,
 	 * and one caught in between looks expired. Bumped, it compares its counter
 	 * after the write and evicts the entry its members no longer name.
 	 *
@@ -234,7 +232,6 @@ export interface ScopedCacheStore {
 	 */
 	reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
-		epochKeyOf: (collection: string) => string,
 		epochTtlSeconds: number,
 	): Promise<ScopedCacheReapTally>;
 

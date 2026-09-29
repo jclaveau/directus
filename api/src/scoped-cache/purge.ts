@@ -58,12 +58,14 @@ import {
 import {
 	bumpScopedCacheEpochs,
 	bumpScopedCacheEpochsInEveryMode,
-	scopedCacheEpochKey,
 	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
 import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
-import { scopedCacheEpochBumpScript } from './redis-store.js';
+import {
+	scopedCacheEpochBumpScript,
+	scopedCacheEpochKey,
+} from './redis-store.js';
 
 const env = useEnv();
 
@@ -1035,7 +1037,6 @@ export async function reapScopedCacheIndex(): Promise<number> {
 	const { reaped, strandedSweptKeys } = await useScopedCacheStore()
 		.reapIndexedEntries(
 			rawKeyOf,
-			scopedCacheEpochKey,
 			scopedCacheEpochTtlSeconds(),
 		);
 

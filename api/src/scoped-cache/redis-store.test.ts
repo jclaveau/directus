@@ -975,7 +975,7 @@ describe('scopedCacheIndexFileScript', () => {
 	it('names every set of the call, whether it creates it or not', () => {
 		expect(scopedCacheIndexFileScript).toContain(
 			"local held = redis.call('PTTL', KEYS[1])\n"
-			+ "local named = redis.call('SADD', KEYS[1], unpack(KEYS, 2))\n"
+			+ "redis.call('SADD', KEYS[1], unpack(KEYS, 2))\n"
 			+ 'if unbounded then',
 		);
 	});
@@ -2018,7 +2018,6 @@ describe('reapIndexedEntries', () => {
 
 		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2026,7 +2025,6 @@ describe('reapIndexedEntries', () => {
 			indexKeys: 0,
 			reaped: 0,
 			strandedSweptKeys: 0,
-			markedComplete: true,
 		});
 
 		expect(scopedCacheIndexGenerationRead.mock.calls).toEqual([[
@@ -2055,27 +2053,6 @@ describe('reapIndexedEntries', () => {
 			.toBeGreaterThan(scan.mock.invocationCallOrder[1]!);
 
 		expect(set).not.toHaveBeenCalled();
-	});
-
-	it(oneLine`
-		reports the index-key sets unmarked when a drop moved the generation during
-		the pass
-	`, async () => {
-		scan.mockResolvedValueOnce(['0', []]);
-		scopedCacheIndexCompleteMark.mockResolvedValueOnce(0);
-
-		const tally = await redisScopedCacheStore().reapIndexedEntries(
-			(key) => key,
-			(collection) => collection,
-			86400,
-		);
-
-		expect(tally).toEqual({
-			indexKeys: 0,
-			reaped: 0,
-			strandedSweptKeys: 0,
-			markedComplete: false,
-		});
 	});
 
 	it(oneLine`
@@ -2126,7 +2103,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		await expect(redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		)).rejects.toThrow('LOADING');
 
@@ -2155,7 +2131,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => `raw:${key}`,
-			(collection) => `scalabus:scoped-cache-epoch:${collection}`,
 			86400,
 		);
 
@@ -2163,7 +2138,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			indexKeys: 2,
 			reaped: 1,
 			strandedSweptKeys: 0,
-			markedComplete: true,
 		});
 
 		expect(defineCommand).toHaveBeenCalledWith(
@@ -2218,7 +2192,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2232,7 +2205,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		expect(scopedCacheIndexReap.mock.calls[1]).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:',
-			'slot',
+			'scalabus:scoped-cache-epoch:slot',
 			86400,
 			'slot:&|key-500',
 			'key-500',
@@ -2240,7 +2213,7 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		expect(scopedCacheIndexReap.mock.calls[2]).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:',
-			'slot',
+			'scalabus:scoped-cache-epoch:slot',
 			86400,
 			'slot:&|key-last',
 			'key-last',
@@ -2257,7 +2230,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2265,7 +2237,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			indexKeys: 1,
 			reaped: 0,
 			strandedSweptKeys: 0,
-			markedComplete: true,
 		});
 
 		expect(scopedCacheIndexReap).not.toHaveBeenCalled();
@@ -2295,7 +2266,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2328,7 +2298,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2350,7 +2319,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2374,7 +2342,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2382,7 +2349,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			indexKeys: 0,
 			reaped: 0,
 			strandedSweptKeys: 0,
-			markedComplete: true,
 		});
 
 		// The pattern the index-key sets have to match for Redis to return them.
@@ -2428,7 +2394,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 
 		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
-			(collection) => collection,
 			86400,
 		);
 
@@ -2436,7 +2401,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			indexKeys: 0,
 			reaped: 0,
 			strandedSweptKeys: 1,
-			markedComplete: true,
 		});
 
 		expect(sadd.mock.calls).toEqual([[
