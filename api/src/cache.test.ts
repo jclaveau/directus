@@ -2,6 +2,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import type { ScopedCacheDeclaredFingerprint } from '@directus/types';
 import type Keyv from 'keyv';
+import type { CacheDatabaseFlush } from './redis/index.js';
 import {
 	afterEach,
 	beforeEach,
@@ -113,7 +114,9 @@ const cacheRedisDatabase = vi.hoisted(() => {
 });
 
 const flushCacheRedisDatabase = vi.hoisted(() => {
-	return vi.fn(async (_queueAfterFlush?: (transaction: any) => void) => false);
+	return vi.fn(async (
+		_queueAfterFlush?: (transaction: any) => void,
+	): Promise<CacheDatabaseFlush> => 'not-flushed');
 });
 
 vi.mock('./cache-events.js', async (importOriginal) => {
@@ -171,7 +174,7 @@ afterEach(() => {
 	redis.scan.mockImplementation(async () => ['0', []] as [string, string[]]);
 	redis.get.mockImplementation(async () => '1');
 	cacheRedisDatabase.mockReturnValue(undefined);
-	flushCacheRedisDatabase.mockResolvedValue(false);
+	flushCacheRedisDatabase.mockResolvedValue('not-flushed');
 });
 
 // `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
@@ -1422,7 +1425,7 @@ describe('flushCaches', () => {
 		await cache!.set('response-key', 'r');
 
 		cacheRedisDatabase.mockReturnValue(1);
-		flushCacheRedisDatabase.mockResolvedValueOnce(true);
+		flushCacheRedisDatabase.mockResolvedValueOnce('flushed');
 
 		await flushCaches(true);
 
@@ -1884,7 +1887,7 @@ describe('the wholesale counter moves before the response clear', () => {
 				},
 			});
 
-			return true;
+			return 'flushed';
 		});
 
 		await flushCaches(true);
@@ -1893,6 +1896,26 @@ describe('the wholesale counter moves before the response clear', () => {
 			'bump scalabus:scoped-cache-epoch:*',
 			'FLUSHDB',
 			"bump scalabus:scoped-cache-epoch:* in the FLUSHDB's MULTI",
+			'scan',
+			'bump scalabus:scoped-cache-epoch:*',
+		]);
+	});
+
+	test('and once more when Redis refused the move inside the MULTI', async () => {
+		const calls = recordFlushOrder();
+
+		flushCacheRedisDatabase.mockImplementationOnce(async () => {
+			calls.push('FLUSHDB, the move in its MULTI refused');
+
+			return 'flushed-queued-command-failed';
+		});
+
+		await flushCaches(true);
+
+		expect(calls).toEqual([
+			'bump scalabus:scoped-cache-epoch:*',
+			'FLUSHDB, the move in its MULTI refused',
+			'bump scalabus:scoped-cache-epoch:*',
 			'scan',
 			'bump scalabus:scoped-cache-epoch:*',
 		]);

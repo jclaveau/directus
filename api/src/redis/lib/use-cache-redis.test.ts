@@ -224,7 +224,7 @@ describe('flushCacheRedisDatabase', () => {
 			flushTransaction.set('kept', '1');
 		});
 
-		expect(flushed).toBe(true);
+		expect(flushed).toBe('flushed');
 		expect(flushTransaction.flushdb).toHaveBeenCalledWith('ASYNC');
 		expect(flushTransaction.set).toHaveBeenCalledWith('kept', '1');
 		expect(warn).not.toHaveBeenCalled();
@@ -241,7 +241,7 @@ describe('flushCacheRedisDatabase', () => {
 			CACHE_STORE: 'redis',
 		});
 
-		expect(await flushCacheRedisDatabase()).toBe(false);
+		expect(await flushCacheRedisDatabase()).toBe('not-flushed');
 		expect(multi).not.toHaveBeenCalled();
 	});
 
@@ -255,7 +255,7 @@ describe('flushCacheRedisDatabase', () => {
 			CACHE_REDIS_DB: 1,
 		});
 
-		expect(await flushCacheRedisDatabase()).toBe(false);
+		expect(await flushCacheRedisDatabase()).toBe('not-flushed');
 		expect(multi).not.toHaveBeenCalled();
 	});
 
@@ -280,7 +280,7 @@ describe('flushCacheRedisDatabase', () => {
 			CACHE_REDIS_DB: 1,
 		});
 
-		expect(await flushCacheRedisDatabase()).toBe(false);
+		expect(await flushCacheRedisDatabase()).toBe('not-flushed');
 
 		expect(warn).toHaveBeenCalledWith(
 			refusal,
@@ -290,8 +290,8 @@ describe('flushCacheRedisDatabase', () => {
 	});
 
 	test(oneLine`
-		answers true and warns when the FLUSHDB ran and a command queued after it
-		failed
+		answers flushed-queued-command-failed and warns when the FLUSHDB ran and a
+		command queued after it failed
 	`, async () => {
 		const refusal = new Error('OOM command not allowed');
 
@@ -308,7 +308,8 @@ describe('flushCacheRedisDatabase', () => {
 			CACHE_REDIS_DB: 1,
 		});
 
-		expect(await flushCacheRedisDatabase()).toBe(true);
+		expect(await flushCacheRedisDatabase())
+			.toBe('flushed-queued-command-failed');
 
 		expect(warn).toHaveBeenCalledWith(
 			refusal,

@@ -120,22 +120,28 @@ export const useCacheRedis = (): Redis => {
 	return _cache.redis;
 };
 
+export type CacheDatabaseFlush =
+	| 'not-flushed'
+	| 'flushed'
+	| 'flushed-queued-command-failed';
+
 /**
  * Empty the cache's own database in one command, answering whether it did.
  *
- * `false` sends the caller to its key-by-key clear: no database of its own, a
- * memory store, or a Redis that refused — a managed one may rename FLUSHDB away.
+ * `not-flushed` sends the caller to its key-by-key clear: no database of its own,
+ * a memory store, or a Redis that refused — a managed one may rename FLUSHDB away.
  * `ASYNC` so the memory is reclaimed off Redis's main thread: the keys are gone
  * for every client the moment the command returns.
  *
  * `queueAfterFlush` adds commands to the FLUSHDB's own MULTI, so no other client
- * runs between the two. A refused FLUSHDB discards them with it.
+ * runs between the two. A refused FLUSHDB discards them with it; one of them
+ * refused after the FLUSHDB ran answers `flushed-queued-command-failed`.
  */
 export async function flushCacheRedisDatabase(
 	queueAfterFlush?: (flushTransaction: ChainableCommander) => void,
-): Promise<boolean> {
+): Promise<CacheDatabaseFlush> {
 	if (useEnv()['CACHE_STORE'] !== 'redis' || cacheRedisDatabase() === undefined) {
-		return false;
+		return 'not-flushed';
 	}
 
 	const flushTransaction = useCacheRedis()
@@ -155,11 +161,15 @@ export async function flushCacheRedisDatabase(
 			`[cache] FLUSHDB refused, clearing the cache key by key: ${error}`,
 		);
 
-		return false;
+		return 'not-flushed';
 	}
+
+	let databaseFlush: CacheDatabaseFlush = 'flushed';
 
 	for (const [error] of transactionReplies?.slice(1) ?? []) {
 		if (error) {
+			databaseFlush = 'flushed-queued-command-failed';
+
 			useLogger().warn(
 				error,
 				`[cache] FLUSHDB ran, a command queued after it failed: ${error}`,
@@ -167,5 +177,5 @@ export async function flushCacheRedisDatabase(
 		}
 	}
 
-	return true;
+	return databaseFlush;
 }

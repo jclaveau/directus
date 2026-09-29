@@ -641,12 +641,14 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
  * one FLUSHDB takes the index and the counters too, the wholesale one it just
  * moved included: a read that took none would compare equal after its fill. So
  * the same MULTI moves it again, from the server's clock, and no fill can recheck
- * in between. Answers whether it was that FLUSHDB.
+ * in between. A Redis that refused that move — out of memory — gets it once more
+ * after the MULTI, which leaves a fill rechecking in between kept. Answers
+ * whether it was that FLUSHDB.
  */
 export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
 	await bumpScopedCacheEpochs(['*']);
 
-	const flushedDatabase = await flushCacheRedisDatabase((flushTransaction) => {
+	const databaseFlush = await flushCacheRedisDatabase((flushTransaction) => {
 		if (scopedCachePurgeEnabled()) {
 			flushTransaction.eval(
 				scopedCacheEpochBumpScript,
@@ -657,7 +659,11 @@ export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
 		}
 	});
 
-	if (flushedDatabase) {
+	if (databaseFlush === 'flushed-queued-command-failed') {
+		await bumpScopedCacheEpochs(['*']);
+	}
+
+	if (databaseFlush !== 'not-flushed') {
 		return true;
 	}
 

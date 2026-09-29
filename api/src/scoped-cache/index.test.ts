@@ -62,6 +62,7 @@ import {
 } from './index.js';
 import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
 import {
+	flushCacheRedisDatabase,
 	redisConfigAvailable,
 	useCacheRedis,
 	useRedis,
@@ -159,6 +160,7 @@ beforeEach(() => {
 	env['CACHE_STORE'] = 'redis';
 	env['CACHE_NAMESPACE'] = 'ns';
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(flushCacheRedisDatabase).mockResolvedValue('not-flushed');
 	vi.mocked(useRedis).mockReturnValue({ pipeline: () => pipeline } as any);
 	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());
 	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);

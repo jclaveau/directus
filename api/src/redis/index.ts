@@ -1,5 +1,6 @@
 export { createRedis, withRedisDatabase } from './lib/create-redis.js';
 export {
+	type CacheDatabaseFlush,
 	cacheRedisDatabase,
 	flushCacheRedisDatabase,
 	useCacheRedis,
