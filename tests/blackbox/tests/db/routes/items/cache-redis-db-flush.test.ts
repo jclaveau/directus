@@ -166,8 +166,23 @@ describe.each(vendors)('%s', (vendor) => {
 				cli.stdout.on('data', (chunk) => (output += String(chunk)));
 				cli.stderr.on('data', (chunk) => (output += String(chunk)));
 
-				const code = await new Promise<number | null>((resolve) => {
-					cli.on('exit', resolve);
+				// `close` waits for the output streams to drain, where `exit` can
+				// land before the last log line does.
+				const code = await new Promise<number | null>((resolve, reject) => {
+					const killTimer = setTimeout(() => {
+						cli.kill();
+						reject(new Error(`directus cache flush hung:\n${output}`));
+					}, 30_000);
+
+					cli.on('error', (spawnError) => {
+						clearTimeout(killTimer);
+						reject(spawnError);
+					});
+
+					cli.on('close', (exitCode) => {
+						clearTimeout(killTimer);
+						resolve(exitCode);
+					});
 				});
 
 				flushRun = { code, output };

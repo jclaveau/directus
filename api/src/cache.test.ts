@@ -1745,12 +1745,18 @@ describe('a flush over redis tiers still connecting', () => {
 
 		const flushing = flushCaches(true);
 
+		stores.response.client.isReady = true;
+		stores.response.client.emit('ready');
+		stores.lock.client.isReady = true;
+		stores.lock.client.emit('ready');
+
 		await new Promise((resolve) => setImmediate(resolve));
 
-		for (const store of Object.values(stores)) {
-			store.client.isReady = true;
-			store.client.emit('ready');
-		}
+		expect([...stores.response.entries])
+			.toEqual([['scalabus_response:read', 'r']]);
+
+		stores.system.client.isReady = true;
+		stores.system.client.emit('ready');
 
 		await expect(flushing).resolves.toMatchObject({ failures: [] });
 		expect([...stores.system.entries]).toEqual([]);
