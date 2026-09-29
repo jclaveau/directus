@@ -80,7 +80,8 @@ describe('scoped-cache-reap', () => {
 
 		expect(warn).toHaveBeenCalledWith(
 			'[scoped-cache] CACHE_SCOPED_INDEX_REAP_SCHEDULE is not a cron rule '
-			+ '(hourly) — expired entries stay in the index',
+			+ '(hourly) — only a flush or a boot reaps the index, so '
+			+ 'expired entries pile up in it between them',
 		);
 	});
 });

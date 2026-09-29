@@ -965,9 +965,12 @@ function scopedCacheCollectionIndexGlob(collection: string): string {
  * generation that is gone. A generation a FLUSHDB took reads as none and is
  * recreated at a value it never held, so neither can match an earlier marker.
  *
- * Accepted: a node still running a build older than the index-key sets, during
- * a rolling deploy, files sets nothing names after the marker was written. The
- * next reap names them; until then a collection-wide purge misses their entries.
+ * A boot of a build other than the last one recorded takes the marker back
+ * (`recordBuildIdentity`), so a build rolled back to and forward again leaves
+ * none standing over the sets it filed. Accepted: a node still running a build
+ * older than the index-key sets, during a rolling deploy, files sets nothing
+ * names after the marker was written. The next reap names them; until then a
+ * collection-wide purge misses their entries.
  */
 async function collectionIndexKeysComplete(): Promise<boolean> {
 	const [marker, generation] = await useCacheRedis().mget([

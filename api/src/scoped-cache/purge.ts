@@ -606,12 +606,17 @@ async function purgeScopedCacheIndexWhere(
  * still there (https://github.com/jclaveau/directus/issues/468).
  *
  * Runs AFTER `clearResponseCache`, always, and moves the wholesale counter again
- * once the index is gone. The move before the clear cannot catch a fill that took
- * the counter after it, filed its fingerprints before the drop below and wrote its
- * entry after it: that entry compares equal and is indexed by nothing, reachable
- * to no later purge. The move here makes that fill's recheck evict it. A fill that
- * also rechecked before this move still keeps its entry
+ * once the index is gone, in every mode, as the drop runs in every mode. The
+ * move before the clear cannot catch a fill that took the counter after it,
+ * filed its fingerprints before the drop below and wrote its entry after it:
+ * that entry compares equal and is indexed by nothing, reachable to no later
+ * purge. The move here makes that fill's recheck evict it. A fill that also
+ * rechecked before this move still keeps its entry
  * (https://github.com/jclaveau/directus/issues/547).
+ *
+ * The store takes the completeness marker back before it unlinks anything, so
+ * every collection-wide purge SCANs from here on; the reap requested once the
+ * drop is over writes the marker back, schedule or none.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!scopedCacheIndexStoreAvailable()) {
@@ -626,8 +631,6 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 		// of the fills in flight with it. And in every mode, as the drop is.
 		await bumpScopedCacheEpochsInEveryMode(['*']);
 
-		// The drop took the completeness marker, and every collection-wide purge
-		// SCANs until a reap writes it back.
 		void requestScopedCacheIndexReap();
 	}
 }
@@ -766,8 +769,8 @@ async function purgeScopedCacheCollectionIndex(
 	// the retry's take to find. A refused or failed release costs memory until
 	// their expiry, never a stale hit, so it is logged rather than thrown: thrown,
 	// it would record a retry for entries already gone. The swept index-key set
-	// still names the sets, so the collection's next collection-wide purge or a
-	// restart's recovery releases them.
+	// still names the sets, so the collection's next collection-wide purge, the
+	// recovery on the next `ready` or the next flush releases them.
 	let released: ScopedCacheUnlinkTally;
 
 	try {
@@ -1225,17 +1228,6 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	return cleared;
 }
 
-/**
- * Start finishing purges that failed after their mutation committed.
- *
- * Two triggers, because there are two ways a recorded purge becomes runnable
- * again: the process restarted (boot) and the client reconnected (`ready`).
- * ioredis emits `ready` on the first connect too, so the boot call only matters
- * when the client was already up before this listener existed.
- *
- * Not awaited by the caller — recovery is bounded by how much failed, and a boot
- * that blocked on it would be held up by the same Redis that is still down.
- */
 // Before the request, which skips on a marker the build change is to clear.
 // Lazily: `cache-build-identity.ts` imports `cache.js`, which imports this.
 async function clearIndexMarkerThenRequestReap(): Promise<void> {
@@ -1247,6 +1239,17 @@ async function clearIndexMarkerThenRequestReap(): Promise<void> {
 	await requestScopedCacheIndexReap();
 }
 
+/**
+ * Start finishing purges that failed after their mutation committed.
+ *
+ * Two triggers, because there are two ways a recorded purge becomes runnable
+ * again: the process restarted (boot) and the client reconnected (`ready`).
+ * ioredis emits `ready` on the first connect too, so the boot call only matters
+ * when the client was already up before this listener existed.
+ *
+ * Not awaited by the caller — recovery is bounded by how much failed, and a boot
+ * that blocked on it would be held up by the same Redis that is still down.
+ */
 export function startScopedCachePurgeRecovery(): void {
 	if (!scopedCacheIndexStoreAvailable()) {
 		return;
@@ -1287,8 +1290,8 @@ export function startScopedCachePurgeRecovery(): void {
 
 		recover();
 
-		// A boot, or a reconnect after an outage a flush may have landed in:
-		// nothing reaps until the schedule's next tick, if it has one.
+		// A boot, or a reconnect after an outage a flush may have landed in,
+		// whose own reap request may have found Redis down.
 		clearIndexMarkerThenRequestReap().catch((error: any) => {
 			logger.warn(error, `[scoped-cache] boot index reap failed: ${error}`);
 		});

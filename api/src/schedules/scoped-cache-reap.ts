@@ -21,7 +21,8 @@ export default async function schedule(): Promise<boolean> {
 	if (!validateCron(reapSchedule)) {
 		logger.warn(
 			`[scoped-cache] CACHE_SCOPED_INDEX_REAP_SCHEDULE is not a cron rule `
-			+ `(${reapSchedule}) — expired entries stay in the index`,
+			+ `(${reapSchedule}) — only a flush or a boot reaps the index, so `
+			+ 'expired entries pile up in it between them',
 		);
 
 		return false;
