@@ -281,7 +281,7 @@ export async function recordScopedCacheBuild(): Promise<void> {
 				getMilliseconds(useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE'], 0),
 			);
 
-		pauseScopedCacheFills(fillPauseLeftMs);
+		pauseScopedCacheFills(fillPauseLeftMs, buildIdentity);
 
 		if (buildChanged) {
 			logger.info(
@@ -292,7 +292,8 @@ export async function recordScopedCacheBuild(): Promise<void> {
 
 		if (fillPauseLeftMs > 0) {
 			logger.info(
-				`[scoped-cache] fills paused for ${fillPauseLeftMs} ms after a deploy`,
+				`[scoped-cache] fills paused after a deploy, for at most `
+				+ `${fillPauseLeftMs} ms`,
 			);
 		}
 	}

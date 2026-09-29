@@ -10,10 +10,12 @@ Feature: The index-key sets are trusted again without waiting for the schedule
   generation, whatever CACHE_AUTO_FLUSH_ON_DEPLOY says, here off: a build rolled
   back to may have filed sets the index-key sets do not name.
 
-  It also opens a fill pause of CACHE_SCOPED_DEPLOY_FILL_PAUSE, off everywhere
-  but on the restarts that name one: through a rolling deploy the nodes of the
-  build before go on filling, and neither build's purges reach every set the
-  other files. A replica booting on the recorded build joins the pause running.
+  It also opens a fill pause of at most CACHE_SCOPED_DEPLOY_FILL_PAUSE, off
+  everywhere but on the restarts that name one: through a rolling deploy the
+  nodes of the build before go on filling, and neither build's purges reach
+  every set the other files. It ends once no process of another build answers
+  the processes query three looks in a row. A replica booting on the recorded
+  build joins the pause running.
 
   Scenario: a flush with no reap scheduled has the index-key sets marked complete again
     Given these rows of index_marker_flush:
@@ -65,11 +67,12 @@ Feature: The index-key sets are trusted again without waiting for the schedule
     When the instance restarts on the build marker-build-b
     Then the kept marker no longer names the index generation
 
-  Scenario: a restart on another build serves every read uncached until its fill pause ends
+  Scenario: a restart on another build serves every read uncached while the build before answers
     Given these rows of index_marker_pause:
       | name | label |
       | ada  | old   |
-    When the instance restarts on marker-build-c pausing fills for 30s
+    And a second instance runs on marker-build-b
+    When the instance restarts on marker-build-c pausing fills for at most 2m
     Then these reads are not cached:
       | name | fields     |
       | ada  | name,label |
@@ -80,8 +83,9 @@ Feature: The index-key sets are trusted again without waiting for the schedule
       | name | fields     |
       | ada  | name,label |
     And the index-key sets are not marked complete
-    When the fill pause ends
-    Then the index-key sets are marked complete
+    When the second instance stops
+    Then the fill pause ends long before its ceiling
+    And the index-key sets are marked complete
     And these reads are cached:
       | name | fields     |
       | ada  | name,label |

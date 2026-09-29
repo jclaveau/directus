@@ -419,14 +419,17 @@ describe('recordScopedCacheBuild', () => {
 		expect(recordBuildIdentity)
 			.toHaveBeenCalledExactlyOnceWith('build-b', 600_000);
 
-		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(600_000);
+		expect(pauseScopedCacheFills)
+			.toHaveBeenCalledExactlyOnceWith(600_000, 'build-b');
 
 		expect(logger.info.mock.calls).toEqual([
 			[
 				'[scoped-cache] build build-b differs from the last boot\'s: '
 				+ 'index-key sets untrusted until the next reap',
 			],
-			['[scoped-cache] fills paused for 600000 ms after a deploy'],
+			[
+				'[scoped-cache] fills paused after a deploy, for at most 600000 ms',
+			],
 		]);
 	});
 
@@ -444,10 +447,10 @@ describe('recordScopedCacheBuild', () => {
 
 		await recordScopedCacheBuild();
 
-		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(4_000);
+		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(4_000, 'build-b');
 
 		expect(logger.info).toHaveBeenCalledExactlyOnceWith(
-			'[scoped-cache] fills paused for 4000 ms after a deploy',
+			'[scoped-cache] fills paused after a deploy, for at most 4000 ms',
 		);
 	});
 
@@ -462,7 +465,7 @@ describe('recordScopedCacheBuild', () => {
 
 		await recordScopedCacheBuild();
 
-		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(0);
+		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(0, 'build-b');
 		expect(logger.info).not.toHaveBeenCalled();
 	});
 

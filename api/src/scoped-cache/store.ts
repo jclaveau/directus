@@ -97,6 +97,14 @@ export interface ScopedCacheBuildRecord {
 	fillPauseLeftMs: number;
 }
 
+/** One node's look at the fill pause (`ScopedCacheStore.watchFillPause`). */
+export interface ScopedCacheFillPauseLook {
+	/** What is left of the fill pause; 0 when none runs. */
+	fillPauseLeftMs: number;
+	/** Whether this node is the one asking for the build before to be gone. */
+	watching: boolean;
+}
+
 export interface ScopedCacheStore {
 	/**
 	 * Refuse scoped mode at startup on a store that cannot answer for the whole
@@ -247,6 +255,21 @@ export interface ScopedCacheStore {
 		buildIdentity: string,
 		fillPauseMs: number,
 	): Promise<ScopedCacheBuildRecord>;
+
+	/**
+	 * Look at the fill pause, claiming or renewing its watch for `watchMs`
+	 * unless another node holds it. One node watches at a time.
+	 */
+	watchFillPause(
+		watcherNodeId: string,
+		watchMs: number,
+	): Promise<ScopedCacheFillPauseLook>;
+
+	/**
+	 * End the fill pause `buildIdentity` opened, early. False when none runs, or
+	 * when a later deploy's replaced it.
+	 */
+	endFillPause(buildIdentity: string): Promise<boolean>;
 
 	/**
 	 * Drop the whole index, reporting what it cost. The collection-wide reads stop

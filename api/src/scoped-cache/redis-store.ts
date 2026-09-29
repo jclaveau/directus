@@ -34,6 +34,7 @@ import {
 } from './fingerprint.js';
 import type {
 	ScopedCacheBuildRecord,
+	ScopedCacheFillPauseLook,
 	ScopedCacheIndexedEntry,
 	ScopedCacheIndexFiling,
 	ScopedCacheIndexTake,
@@ -379,7 +380,7 @@ return 1
  * index-key sets, rolled back to and forward from, filed sets nothing names while
  * the marker a later build wrote still vouched for them.
  *
- * A change also opens the fill pause, for as long as ARGV[2] says: the nodes
+ * A change also opens the fill pause, for at most ARGV[2] ms: the nodes
  * of the build before go on filling through a rolling deploy, and neither
  * build's purges reach every set the other files. Held in Redis rather than per
  * process, so a replica booting on the recorded build joins the window already
@@ -416,6 +417,51 @@ if pauseLeft < 0 then
 end
 
 return { changed, pauseLeft }
+`;
+
+/**
+ * One node's look at the fill pause, every few seconds while it runs: what is
+ * left of it, and whether this node is the one that watches for the build
+ * before to be gone. One node watches, so a deploy of many asks the processes
+ * of the build before once a tick, not once per node; the watch is held for
+ * ARGV[2] ms, renewed on every look, so a watcher that dies hands it on.
+ *
+ * KEYS are the fill pause and the watch; ARGV the node and the watch in ms.
+ * Answers the ms left of the pause, 0 when none runs, and whether this node
+ * watches, 1 or 0.
+ */
+export const scopedCacheFillPauseWatchScript = `
+local pauseLeft = redis.call('PTTL', KEYS[1])
+
+if pauseLeft < 0 then
+	return { 0, 0 }
+end
+
+local watching = 0
+
+if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[2])
+	or redis.call('GET', KEYS[2]) == ARGV[1] then
+	redis.call('PEXPIRE', KEYS[2], ARGV[2])
+	watching = 1
+end
+
+return { pauseLeft, watching }
+`;
+
+/**
+ * End the fill pause the build ARGV[1] opened, and its watch. Left alone when
+ * a later deploy's pause replaced it: that one waits for this build to go.
+ *
+ * KEYS are the fill pause and the watch. Answers 1 when it ended the pause.
+ */
+export const scopedCacheFillPauseEndScript = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+	return 0
+end
+
+redis.call('DEL', KEYS[1], KEYS[2])
+
+return 1
 `;
 
 type ScopedCacheIndexFileCommand = {
@@ -501,6 +547,23 @@ type ScopedCacheIndexBuildRecordCommand = {
 	): Promise<[number, number]>;
 };
 
+type ScopedCacheFillPauseWatchCommand = {
+	scopedCacheFillPauseWatch(
+		fillPauseKey: string,
+		fillPauseWatchKey: string,
+		watcherNodeId: string,
+		watchMs: number,
+	): Promise<[number, number]>;
+};
+
+type ScopedCacheFillPauseEndCommand = {
+	scopedCacheFillPauseEnd(
+		fillPauseKey: string,
+		fillPauseWatchKey: string,
+		buildIdentity: string,
+	): Promise<number>;
+};
+
 type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexFileCommand
 	& ScopedCacheEpochBumpCommand
@@ -510,7 +573,9 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexInvalidateCommand
 	& ScopedCacheIndexGenerationReadCommand
 	& ScopedCacheIndexCompleteMarkCommand
-	& ScopedCacheIndexBuildRecordCommand;
+	& ScopedCacheIndexBuildRecordCommand
+	& ScopedCacheFillPauseWatchCommand
+	& ScopedCacheFillPauseEndCommand;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
@@ -569,6 +634,16 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 		redis.defineCommand('scopedCacheIndexBuildRecord', {
 			numberOfKeys: 4,
 			lua: scopedCacheIndexBuildRecordScript,
+		});
+
+		redis.defineCommand('scopedCacheFillPauseWatch', {
+			numberOfKeys: 2,
+			lua: scopedCacheFillPauseWatchScript,
+		});
+
+		redis.defineCommand('scopedCacheFillPauseEnd', {
+			numberOfKeys: 2,
+			lua: scopedCacheFillPauseEndScript,
 		});
 
 		clientsCarryingScripts.add(redis);
@@ -815,6 +890,11 @@ function scopedCacheIndexBuildKey(): string {
  */
 function scopedCacheFillPauseKey(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause`;
+}
+
+/** Names the node watching the fill pause (`scopedCacheFillPauseWatchScript`). */
+function scopedCacheFillPauseWatchKey(): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause-watch`;
 }
 
 /**
@@ -2059,6 +2139,31 @@ const redisStore: ScopedCacheStore = {
 			);
 
 		return { buildChanged: changed === 1, fillPauseLeftMs };
+	},
+
+	async watchFillPause(
+		watcherNodeId: string,
+		watchMs: number,
+	): Promise<ScopedCacheFillPauseLook> {
+		const [fillPauseLeftMs, watching] = await useScriptedRedis()
+			.scopedCacheFillPauseWatch(
+				scopedCacheFillPauseKey(),
+				scopedCacheFillPauseWatchKey(),
+				watcherNodeId,
+				watchMs,
+			);
+
+		return { fillPauseLeftMs, watching: watching === 1 };
+	},
+
+	async endFillPause(buildIdentity: string): Promise<boolean> {
+		const ended = await useScriptedRedis().scopedCacheFillPauseEnd(
+			scopedCacheFillPauseKey(),
+			scopedCacheFillPauseWatchKey(),
+			buildIdentity,
+		);
+
+		return ended === 1;
 	},
 
 	onStoreReady(listener: () => void): void {

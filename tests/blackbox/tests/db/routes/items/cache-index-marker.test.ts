@@ -49,16 +49,22 @@ describe.each(vendors)('%s', (vendor) => {
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess;
+	let secondInstance: ChildProcess | null = null;
+
+	async function spawnInstance(instanceEnv: NodeJS.ProcessEnv) {
+		const spawned = spawn('node', [paths.cli, 'start'], {
+			cwd: paths.cwd,
+			env: instanceEnv,
+		});
+
+		await awaitDirectusConnection(Number(instanceEnv['PORT']));
+
+		return spawned;
+	}
 
 	async function startInstance() {
 		env[vendor].PORT = String(await getPort());
-
-		instance = spawn('node', [paths.cli, 'start'], {
-			cwd: paths.cwd,
-			env: env[vendor],
-		});
-
-		await awaitDirectusConnection(Number(env[vendor].PORT));
+		instance = await spawnInstance(env[vendor]);
 	}
 
 	beforeAll(async () => {
@@ -80,6 +86,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	afterAll(async () => {
 		instance.kill();
+		secondInstance?.kill();
 
 		for (const key of await redisClient.keys(`${namespace}:*`)) {
 			await redisClient.del(key);
@@ -308,8 +315,8 @@ describe.each(vendors)('%s', (vendor) => {
 		// Its own steps: jest-cucumber binds definitions to steps in order, and
 		// this one restarts and reads twice.
 		scenario(
-			'a restart on another build serves every read uncached until its fill '
-			+ 'pause ends',
+			'a restart on another build serves every read uncached while the build '
+			+ 'before answers',
 			({ given, when, then, and }) => {
 				const collection = 'index_marker_pause';
 				let keptPauseLeftMs = 0;
@@ -358,8 +365,22 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
+				// Beside the instance, on the bus and the Redis it shares, as a node
+				// of the build before goes on running through a rolling deploy.
+				and(
+					/^a second instance runs on ([\w-]+)$/,
+					async (buildId: string) => {
+						secondInstance = await spawnInstance({
+							...env[vendor],
+							PORT: String(await getPort()),
+							CACHE_BUILD_ID: buildId,
+							CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
+						});
+					},
+				);
+
 				when(
-					/^the instance restarts on ([\w-]+) pausing fills for (\w+)$/,
+					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
 					async (buildId: string, fillPause: string) => {
 						env[vendor]['CACHE_BUILD_ID'] = buildId;
 						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE'] = fillPause;
@@ -394,14 +415,26 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(await redisClient.get(markerKey)).toBeNull();
 				});
 
-				when('the fill pause ends', async () => {
+				when('the second instance stops', async () => {
+					secondInstance!.kill();
+					await once(secondInstance!, 'exit');
+					secondInstance = null;
+				});
+
+				// Three quiet looks 5s apart, after a watch the restarted instance's
+				// predecessor held for 15s: well inside the 2m ceiling.
+				then('the fill pause ends long before its ceiling', async () => {
+					const pauseLeftMs = await redisClient.pttl(fillPauseKey);
+
 					await expect.poll(() => redisClient.exists(fillPauseKey), {
-						timeout: 40_000,
+						timeout: 45_000,
 					}).toBe(0);
+
+					expect(pauseLeftMs).toBeGreaterThan(50_000);
 				});
 
 				// By the reap the pause asked for as it closed.
-				then('the index-key sets are marked complete', async () => {
+				and('the index-key sets are marked complete', async () => {
 					await expect.poll(async () => {
 						const [marker, generation] = await redisClient.mget(
 							markerKey,

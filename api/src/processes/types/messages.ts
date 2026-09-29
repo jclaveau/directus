@@ -29,6 +29,12 @@ export interface ReportedProcess {
 	env: ResolvedEnvVariable[] | null;
 	/** What this process is scaling, `null` from every process that scales nothing. */
 	autoscale: AutoscaleNodeState | null;
+	/**
+	 * The core build this process runs (`resolveCoreBuildId`). Absent from a
+	 * process of a build older than the field, which is how the fill pause after
+	 * a deploy tells a node of the build before (`watchScopedCacheFillPause`).
+	 */
+	coreBuildId?: string;
 }
 
 export interface ProcessesReportMessage {

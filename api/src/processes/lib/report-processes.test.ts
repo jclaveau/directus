@@ -70,6 +70,10 @@ vi.mock('../autoscale/lib/state.js', () => {
 	return { autoscaleState: autoscale.autoscaleState };
 });
 
+vi.mock('../../cache-build-identity.js', () => {
+	return { resolveCoreBuildId: () => 'build-b' };
+});
+
 import { initProcessReports } from './report-processes.js';
 
 const platform = { ...process.env };
@@ -144,6 +148,11 @@ test('Answers with what this process is and what it measured', async () => {
 	// rather than inferred from what the memory figures look like.
 	expect(message.self.runtime?.execArgv).toEqual(process.execArgv);
 	expect(message.self.env).toHaveLength(1);
+});
+
+// What the fill pause after a deploy reads to tell a node of the build before.
+test('Answers with the core build it runs', async () => {
+	expect((await query()).self.coreBuildId).toBe('build-b');
 });
 
 // The process that scales the pool answers no HTTP of its own, so what it is

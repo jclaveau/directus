@@ -1,5 +1,6 @@
 import type { ProcessDetail, ProcessRuntimeStats } from '@directus/types';
 import { hostname } from 'node:os';
+import { resolveCoreBuildId } from '../../cache-build-identity.js';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
 import { nodeId } from '../../utils/node-id.js';
@@ -82,6 +83,7 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 			// Answered whatever was asked for: it is one small object, and it is
 			// the only channel the process that resizes the pool has.
 			autoscale: autoscaleState(),
+			coreBuildId: resolveCoreBuildId(),
 		},
 		// Every supervised process attaches the container-wide `pm2 list` and the
 		// collector keeps one copy per replica. Electing a single reporter by

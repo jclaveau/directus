@@ -8,6 +8,8 @@ import {
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
 	scopedCacheIndexBuildRecordScript,
+	scopedCacheFillPauseEndScript,
+	scopedCacheFillPauseWatchScript,
 	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
 	scopedCacheIndexGenerationReadScript,
@@ -44,6 +46,8 @@ const scopedCacheIndexInvalidate = vi.fn();
 const scopedCacheIndexGenerationRead = vi.fn();
 const scopedCacheIndexCompleteMark = vi.fn();
 const scopedCacheIndexBuildRecord = vi.fn();
+const scopedCacheFillPauseWatch = vi.fn();
+const scopedCacheFillPauseEnd = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
@@ -66,6 +70,8 @@ vi.mock('../redis/index.js', () => {
 				scopedCacheIndexGenerationRead,
 				scopedCacheIndexCompleteMark,
 				scopedCacheIndexBuildRecord,
+				scopedCacheFillPauseWatch,
+				scopedCacheFillPauseEnd,
 				scopedCacheCollectionIndexKeysRegister,
 				scopedCacheCollectionIndexKeysPrune,
 				pttl,
@@ -1873,6 +1879,107 @@ if pauseLeft < 0 then
 end
 
 return { changed, pauseLeft }
+`);
+	});
+});
+
+describe('watchFillPause', () => {
+	beforeEach(() => {
+		scopedCacheFillPauseWatch.mockReset();
+	});
+
+	it(oneLine`
+		reads what is left of the pause and whether this node holds its watch,
+		claimed or renewed in the same script
+	`, async () => {
+		scopedCacheFillPauseWatch.mockResolvedValueOnce([40_000, 1]);
+
+		expect(
+			await redisScopedCacheStore().watchFillPause('node-1', 15_000),
+		).toEqual({ fillPauseLeftMs: 40_000, watching: true });
+
+		expect(scopedCacheFillPauseWatch.mock.calls).toEqual([[
+			'scalabus:scoped-cache-fill-pause',
+			'scalabus:scoped-cache-fill-pause-watch',
+			'node-1',
+			15_000,
+		]]);
+
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheFillPauseWatch',
+			{ numberOfKeys: 2, lua: scopedCacheFillPauseWatchScript },
+		);
+	});
+
+	it('answers a node another one watches for', async () => {
+		scopedCacheFillPauseWatch.mockResolvedValueOnce([40_000, 0]);
+
+		expect(
+			await redisScopedCacheStore().watchFillPause('node-2', 15_000),
+		).toEqual({ fillPauseLeftMs: 40_000, watching: false });
+	});
+
+	it(oneLine`
+		claims the watch only while a pause runs, and keeps it for the node
+		already holding it
+	`, () => {
+		expect(scopedCacheFillPauseWatchScript).toBe(`
+local pauseLeft = redis.call('PTTL', KEYS[1])
+
+if pauseLeft < 0 then
+	return { 0, 0 }
+end
+
+local watching = 0
+
+if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[2])
+	or redis.call('GET', KEYS[2]) == ARGV[1] then
+	redis.call('PEXPIRE', KEYS[2], ARGV[2])
+	watching = 1
+end
+
+return { pauseLeft, watching }
+`);
+	});
+});
+
+describe('endFillPause', () => {
+	beforeEach(() => {
+		scopedCacheFillPauseEnd.mockReset();
+	});
+
+	it('ends the pause this build opened, and its watch', async () => {
+		scopedCacheFillPauseEnd.mockResolvedValueOnce(1);
+
+		expect(await redisScopedCacheStore().endFillPause('build-b')).toBe(true);
+
+		expect(scopedCacheFillPauseEnd.mock.calls).toEqual([[
+			'scalabus:scoped-cache-fill-pause',
+			'scalabus:scoped-cache-fill-pause-watch',
+			'build-b',
+		]]);
+
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheFillPauseEnd',
+			{ numberOfKeys: 2, lua: scopedCacheFillPauseEndScript },
+		);
+	});
+
+	it('answers false for a pause a later deploy replaced', async () => {
+		scopedCacheFillPauseEnd.mockResolvedValueOnce(0);
+
+		expect(await redisScopedCacheStore().endFillPause('build-b')).toBe(false);
+	});
+
+	it('leaves a pause another build opened alone', () => {
+		expect(scopedCacheFillPauseEndScript).toBe(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+	return 0
+end
+
+redis.call('DEL', KEYS[1], KEYS[2])
+
+return 1
 `);
 	});
 });
