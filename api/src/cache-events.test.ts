@@ -16,6 +16,7 @@ import {
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	drainCacheEvents,
+	drainCacheEventsBeforeRead,
 	effectiveTtlByBucket,
 	flushCacheEventBuffer,
 	getCacheStatsState,
@@ -1412,6 +1413,111 @@ describe('drainCacheEvents', () => {
 		);
 
 		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '7-0');
+	});
+});
+
+describe('drainCacheEventsBeforeRead', () => {
+	// The 5s interval is module state: each test starts a minute after the last.
+	let fakeNow = 1_000_000_000_000;
+
+	beforeEach(() => {
+		fakeNow += 60_000;
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(fakeNow);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('drains the stream before the read', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'h', cacheKey: 'k1', ageMs: '1', ttlMs: '1', ts: '1',
+			}),
+		];
+
+		await drainCacheEventsBeforeRead();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_stats_events',
+			[expect.objectContaining({ cache_key: 'k1' })],
+			500,
+		);
+	});
+
+	it('drains at most once per 5s', async () => {
+		await drainCacheEventsBeforeRead();
+		vi.setSystemTime(fakeNow + 4_999);
+		await drainCacheEventsBeforeRead();
+
+		// One drain is XGROUP, XAUTOCLAIM, XREADGROUP.
+		expect(mockRedis.call).toHaveBeenCalledTimes(3);
+
+		vi.setSystemTime(fakeNow + 5_000);
+		await drainCacheEventsBeforeRead();
+
+		expect(mockRedis.call).toHaveBeenCalledTimes(6);
+	});
+
+	it('waits for a running drain instead of answering before it', async () => {
+		let releaseRead: () => void = () => {};
+
+		let readCalls = 0;
+
+		const gate = new Promise<void>((resolve) => {
+			releaseRead = resolve;
+		});
+
+		mockRedis.call.mockImplementation(async (command: string) => {
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
+			}
+
+			if (command === 'XREADGROUP') {
+				readCalls += 1;
+				await gate;
+				return null;
+			}
+
+			return null;
+		});
+
+		const scheduledDrain = drainCacheEvents();
+		let readSettled = false;
+
+		const beforeRead = drainCacheEventsBeforeRead().then(() => {
+			readSettled = true;
+		});
+
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect(readSettled).toBe(false);
+
+		releaseRead();
+		await Promise.all([scheduledDrain, beforeRead]);
+
+		expect(readSettled).toBe(true);
+		expect(readCalls).toBe(1);
+	});
+
+	it('warns and resolves when the drain fails', async () => {
+		mockRedis.call.mockRejectedValue(new Error('redis down'));
+
+		await expect(drainCacheEventsBeforeRead()).resolves.toBeUndefined();
+
+		expect(mockLogger.warn).toHaveBeenCalledWith(
+			expect.any(Error),
+			'[cache-stats] drain before read failed. redis down',
+		);
+	});
+
+	it('does nothing when cache stats are not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		await drainCacheEventsBeforeRead();
+
+		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 });
 

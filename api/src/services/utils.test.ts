@@ -15,6 +15,7 @@ import {
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
+	drainCacheEventsBeforeRead,
 	evictCacheEntriesForPath,
 	evictCacheEntry as registryEvictCacheEntry,
 	getCacheStatsState,
@@ -485,6 +486,22 @@ describe('Services / Utils', () => {
 			expect(listCacheGroupLatencies).toHaveBeenCalledWith(3600_000);
 		});
 
+		// The drain on the cron can lag the window the page reads by minutes (#568).
+		it.each([
+			['getCacheEntries', listCacheEntries],
+			['getCacheAnomalies', listCacheAnomalies],
+			['getCacheGroupLatencies', listCacheGroupLatencies],
+			['getCacheTimeseries', readCacheTimeseries],
+		] as const)('%s drains the stream before it reads', async (
+			serviceRead,
+			persistedRead,
+		) => {
+			await adminService()[serviceRead]();
+
+			expect(vi.mocked(drainCacheEventsBeforeRead).mock.invocationCallOrder[0])
+				.toBeLessThan(vi.mocked(persistedRead).mock.invocationCallOrder[0]!);
+		});
+
 		// The window guard every cache read shares. `GET /utils/cache*` and the MCP
 		// tools both hand their value here unread, so a duration one of them accepts
 		// cannot be one the other refuses.
@@ -520,6 +537,7 @@ describe('Services / Utils', () => {
 			expect(listCacheAnomalies).not.toHaveBeenCalled();
 			expect(listCacheGroupLatencies).not.toHaveBeenCalled();
 			expect(readCacheTimeseries).not.toHaveBeenCalled();
+			expect(drainCacheEventsBeforeRead).not.toHaveBeenCalled();
 		});
 
 		it.each([

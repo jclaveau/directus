@@ -42,6 +42,7 @@ import {
 	type CacheTimeseries,
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
+	drainCacheEventsBeforeRead,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	getCacheStatsState,
@@ -404,22 +405,28 @@ export class UtilsService {
 	 */
 	async getCacheEntries(window?: unknown): Promise<CacheEntryRecord[]> {
 		this.assertAdmin('inspect the cache');
+		const windowMs = requestedStatsWindow(window);
+		await drainCacheEventsBeforeRead();
 
-		return listCacheEntries(requestedStatsWindow(window));
+		return listCacheEntries(windowMs);
 	}
 
 	async getCacheAnomalies(window?: unknown): Promise<CacheAnomalyRecord[]> {
 		this.assertAdmin('inspect cache anomalies');
+		const windowMs = requestedStatsWindow(window);
+		await drainCacheEventsBeforeRead();
 
-		return listCacheAnomalies(requestedStatsWindow(window));
+		return listCacheAnomalies(windowMs);
 	}
 
 	async getCacheGroupLatencies(
 		window?: unknown,
 	): Promise<CacheGroupLatencyRecord[]> {
 		this.assertAdmin('inspect cache latencies');
+		const windowMs = requestedStatsWindow(window);
+		await drainCacheEventsBeforeRead();
 
-		return listCacheGroupLatencies(requestedStatsWindow(window));
+		return listCacheGroupLatencies(windowMs);
 	}
 
 	async getCacheTimeseries(
@@ -427,11 +434,11 @@ export class UtilsService {
 		buckets?: unknown,
 	): Promise<CacheTimeseries> {
 		this.assertAdmin('inspect the cache timeseries');
+		const windowMs = requestedStatsWindow(window);
+		const bucketCount = requestedTimeseriesBuckets(buckets);
+		await drainCacheEventsBeforeRead();
 
-		return readCacheTimeseries(
-			requestedStatsWindow(window),
-			requestedTimeseriesBuckets(buckets),
-		);
+		return readCacheTimeseries(windowMs, bucketCount);
 	}
 
 	// The live Redis state for a single key — the cached response plus its

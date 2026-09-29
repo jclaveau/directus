@@ -333,8 +333,13 @@ const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
 // restart. Seeded false; the schedule primes it before the first request.
 let cacheStatsActiveFlag = false;
 
-// Single-flight latch for the drain (see drainCacheEvents).
-let cacheEventDrainInProgress = false;
+// Single-flight latch for the drain (see drainCacheEvents), held as the running
+// drain itself so a stats read can wait for it instead of answering before it.
+let cacheEventDrainInFlight: Promise<number> | null = null;
+
+// A panel polls every second: at most one read-triggered drain per interval.
+const DRAIN_BEFORE_READ_INTERVAL = getMilliseconds('5s', 5_000);
+let drainBeforeReadStartedAt = 0;
 
 function statsNamespace(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:stats`;
@@ -805,17 +810,49 @@ function dbPoolSaturated(db: Knex): boolean {
  * reads through a shared consumer group (each entry to one consumer), not XRANGE.
  */
 export async function drainCacheEvents(): Promise<number> {
-	if (!cacheStatsConfigured() || cacheEventDrainInProgress) {
+	if (!cacheStatsConfigured() || cacheEventDrainInFlight) {
 		return 0;
 	}
 
-	cacheEventDrainInProgress = true;
+	cacheEventDrainInFlight = drainCacheEventStream();
 
 	try {
-		return await drainCacheEventStream();
+		return await cacheEventDrainInFlight;
 	}
 	finally {
-		cacheEventDrainInProgress = false;
+		cacheEventDrainInFlight = null;
+	}
+}
+
+/**
+ * Drain before a stats read, so the read sees events up to the request however
+ * slow CACHE_STATS_DRAIN_SCHEDULE is — a sleeping environment drains every 20m,
+ * which left a 10m window empty. A drain already running is waited for, not
+ * skipped. A failed drain never fails the read: it answers what is persisted.
+ */
+export async function drainCacheEventsBeforeRead(): Promise<void> {
+	if (!cacheStatsConfigured()) {
+		return;
+	}
+
+	try {
+		if (cacheEventDrainInFlight) {
+			await cacheEventDrainInFlight;
+			return;
+		}
+
+		if (Date.now() - drainBeforeReadStartedAt < DRAIN_BEFORE_READ_INTERVAL) {
+			return;
+		}
+
+		drainBeforeReadStartedAt = Date.now();
+		await drainCacheEvents();
+	}
+	catch (err: any) {
+		useLogger().warn(
+			err,
+			`[cache-stats] drain before read failed. ${err.message}`,
+		);
 	}
 }
 
