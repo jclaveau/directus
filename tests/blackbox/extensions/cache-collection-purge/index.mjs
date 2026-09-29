@@ -8,8 +8,19 @@
 
 export default function registerEndpoint(router, { scopedCache }) {
 	router.post('/:collection', async (req, res) => {
-		await scopedCache.purgeForMutatedRows(req.params.collection, [{}]);
+		if (!req.accountability?.admin) {
+			return res.status(403).json({ errors: [{ message: 'admin only' }] });
+		}
 
-		res.json({ purged: req.params.collection });
+		try {
+			await scopedCache.purgeForMutatedRows(req.params.collection, [{}]);
+
+			return res.json({ purged: req.params.collection });
+		}
+		catch (error) {
+			// A bare extension route has no async-error wrapper: a throw here would
+			// hang the request rather than answer it.
+			return res.status(500).json({ errors: [{ message: error.message }] });
+		}
 	});
 }

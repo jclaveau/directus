@@ -144,11 +144,17 @@ export default function registerEndpoint(router, { services, getSchema, env }) {
 	 * turns off, and names in Redis the key marking the index-key sets complete
 	 * and the wholesale counter it has to hold.
 	 */
-	router.post('/reap', async (_request, response, next) => {
+	router.post('/reap', async (request, response) => {
+		if (!request.accountability?.admin) {
+			return response.status(403).json({
+				errors: [{ message: 'admin only' }],
+			});
+		}
+
 		try {
 			const reaped = await reapScopedCacheIndex();
 
-			response.json({
+			return response.json({
 				reaped,
 				markerKey: `${env['CACHE_NAMESPACE']}:scoped-cache-index:`
 					+ 'collection-index-keys-complete',
@@ -156,7 +162,7 @@ export default function registerEndpoint(router, { services, getSchema, env }) {
 			});
 		}
 		catch (error) {
-			next(error);
+			return response.status(500).json({ errors: [{ message: error.message }] });
 		}
 	});
 
