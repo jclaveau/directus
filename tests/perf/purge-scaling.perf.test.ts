@@ -143,6 +143,10 @@ const VERSIONED = 'perf_versioned';
 const VERSIONED_ROWS = 4;
 const VERSIONED_ENTRIES = 5;
 
+// Creating a row of it runs a hook's `purgeBy` with the fingerprints the row
+// carries (`purge-extensions/perf-declared-purge`).
+const DECLARED_SIGNAL = 'perf_declared_signal';
+
 const rowCount = Math.ceil(largestSize / SLICE_ENTRIES);
 
 type PurgePhase = {
@@ -392,6 +396,33 @@ async function seedVersioned(): Promise<void> {
 	});
 
 	versionId = version.data.id;
+}
+
+async function seedDeclaredSignal(): Promise<void> {
+	const droppedSignal = await fetch(`${base}/collections/${DECLARED_SIGNAL}`, {
+		method: 'DELETE',
+		headers: authHeaders,
+	});
+
+	await droppedSignal.text();
+
+	await api('/collections', {
+		method: 'POST',
+		body: JSON.stringify({
+			collection: DECLARED_SIGNAL,
+			meta: {},
+			schema: {},
+			fields: [
+				{
+					field: 'id',
+					type: 'integer',
+					meta: { hidden: true },
+					schema: { is_primary_key: true, has_auto_increment: true },
+				},
+				{ field: 'declared', type: 'json', meta: {}, schema: {} },
+			],
+		}),
+	});
 }
 
 // Pinned on the primary key, and selecting the column a write changes, so the
@@ -704,6 +735,40 @@ async function timeCollectionPurges(idleRate: number): Promise<WriteSample[]> {
 	return collectionPurges;
 }
 
+/**
+ * A hook's `purgeBy` on `tenant`, the index path. A read pinning only the
+ * primary key is filed under its home pin and could hold a row of any tenant,
+ * so the purge reads every home pin's set the collection has.
+ */
+async function timeDeclaredPurge(
+	phase: PurgePhase,
+	idleRate: number,
+): Promise<WriteSample> {
+	const declaredPurge = await timeRedisCost(() => {
+		return api(`/items/${DECLARED_SIGNAL}`, {
+			method: 'POST',
+			body: JSON.stringify({
+				declared: [
+					{ collection: phase.collection, pinnedScope: { tenant: ['t0'] } },
+				],
+			}),
+		});
+	}, idleRate);
+
+	// The first row is t0's: a read of it the purge left cached measured a
+	// declaration that reached nothing.
+	const declaredRead = await fetch(`${base}${slicePath(phase, 0)}`, {
+		headers: authHeaders,
+	});
+
+	await declaredRead.text();
+
+	expect(declaredRead.headers.get(STATUS_HEADER), 'a t0 read, declared purged')
+		.toBe('MISS');
+
+	return declaredPurge;
+}
+
 function commandBreakdown(sample: WriteSample): string {
 	return Object.entries(sample.byCommand)
 		.sort(([, a], [, b]) => b - a)
@@ -741,6 +806,59 @@ function scalingIn(
 	return largest.median / Math.max(smallest.median, Number.EPSILON);
 }
 
+function ratioOf(measured: number, against: number): string {
+	return `${(measured / Math.max(against, Number.EPSILON)).toFixed(2)}x`;
+}
+
+/** Reaped against flushed at one size, and whether the flushed arm scanned. */
+function flushedFigureOf(
+	size: number,
+	reapedPurges: WriteSample[],
+	flushedPurges: WriteSample[],
+): string {
+	const reapedCommands = summarise('reaped', reapedPurges.map((sample) => {
+		return sample.commands;
+	})).median;
+
+	const flushedCommands = summarise('flushed', flushedPurges.map((sample) => {
+		return sample.commands;
+	})).median;
+
+	const reapedMs = summarise('reaped', reapedPurges.map((sample) => {
+		return sample.redisMs;
+	})).median;
+
+	const flushedMs = summarise('flushed', flushedPurges.map((sample) => {
+		return sample.redisMs;
+	})).median;
+
+	return `- ${size} entries: reaped registry ${reapedCommands.toFixed(1)} vs`
+		+ ` flushed, no reap ${flushedCommands.toFixed(1)} Redis commands`
+		+ ` (${ratioOf(flushedCommands, reapedCommands)}); reaped registry`
+		+ ` ${reapedMs.toFixed(2)} ms vs flushed, no reap ${flushedMs.toFixed(2)} ms`
+		+ ` Redis time (${ratioOf(flushedMs, reapedMs)}); \`scan\` calls, flushed:`
+		+ ` rep 1 ${flushedPurges[0]!.byCommand['scan'] ?? 0}, last`
+		+ ` ${flushedPurges.at(-1)!.byCommand['scan'] ?? 0}`;
+}
+
+/** The declared purge at the largest size against the smallest. */
+function declaredFigureOf(declaredBySize: Map<number, WriteSample[]>): string {
+	const largest = declaredBySize.get(largestSize)![0]!;
+	const smallest = declaredBySize.get(smallestSize)![0]!;
+
+	return `- declared purge: ${largestSize} entries`
+		+ ` ${largest.commands.toFixed(1)} vs ${smallestSize} entries`
+		+ ` ${smallest.commands.toFixed(1)} Redis commands`
+		+ ` (${ratioOf(largest.commands, smallest.commands)}); ${largestSize}`
+		+ ` entries ${largest.redisMs.toFixed(2)} ms vs ${smallestSize} entries`
+		+ ` ${smallest.redisMs.toFixed(2)} ms Redis time`
+		+ ` (${ratioOf(largest.redisMs, smallest.redisMs)}); ${largestSize} entries`
+		+ ` ${largest.wallMs.toFixed(1)} ms vs ${smallestSize} entries`
+		+ ` ${smallest.wallMs.toFixed(1)} ms wall`
+		+ ` (${ratioOf(largest.wallMs, smallest.wallMs)}); \`scan\` calls:`
+		+ ` ${largest.byCommand['scan'] ?? 0} vs ${smallest.byCommand['scan'] ?? 0}`;
+}
+
 const FIGURE_HEADER = [
 	'| cache entries | Redis commands | Redis time | wall | wall p95 |',
 	'| ---: | ---: | ---: | ---: | ---: |',
@@ -751,6 +869,8 @@ type PhaseResult = {
 	idleRate: number;
 	bySize: Map<number, WriteSample[]>;
 	collectionPurgesBySize: Map<number, WriteSample[]>;
+	flushedPurgesBySize: Map<number, WriteSample[]>;
+	declaredPurgesBySize: Map<number, WriteSample[]>;
 	markdown: string[];
 	verdicts: string[];
 	scaling: Record<string, number>;
@@ -766,6 +886,8 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 	const idleRate = await measureIdleCommands();
 	const bySize = new Map<number, WriteSample[]>();
 	const collectionPurgesBySize = new Map<number, WriteSample[]>();
+	const flushedPurgesBySize = new Map<number, WriteSample[]>();
+	const declaredPurgesBySize = new Map<number, WriteSample[]>();
 	const report: string[] = [];
 	let warmed = 0;
 
@@ -830,8 +952,30 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 
 			collectionPurgesBySize.set(size, collectionPurges);
 
+			// Reaches every entry of the collection, so the cache is refilled below.
+			const declaredPurge = await timeDeclaredPurge(phase, idleRate);
+
+			declaredPurgesBySize.set(size, [declaredPurge]);
+
+			// No reap between the flush and the saves: whichever way the purge then
+			// finds the collection's sets is what a flush leaves until the next one.
+			await clearResponseCache();
+
+			const refilled = await fillEntries(phase, 0, size);
+
+			expect(refilled, `${phase.phaseName} refilled to ${size} after the flush`)
+				.toBe(size);
+
+			const flushedPurges = await timeCollectionPurges(idleRate);
+
+			flushedPurgesBySize.set(size, flushedPurges);
+
+			await markIndexKeySetsComplete();
+
 			collectionReport = '; last collection purge:'
-				+ ` ${commandBreakdown(collectionPurges.at(-1)!)}`;
+				+ ` ${commandBreakdown(collectionPurges.at(-1)!)}; declared purge:`
+				+ ` ${commandBreakdown(declaredPurge)}; last flushed collection`
+				+ ` purge: ${commandBreakdown(flushedPurges.at(-1)!)}`;
 		}
 
 		report.push(
@@ -886,6 +1030,22 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 			'',
 			...FIGURE_HEADER,
 			...figureRowsOf(collectionPurgesBySize),
+			'',
+			'The same version saves right after a flush, no reap run since: reaped'
+			+ ' registry vs flushed, no reap. Medians; reported, gated on nothing.',
+			'',
+			...cacheSizes.map((size) => {
+				return flushedFigureOf(
+					size,
+					collectionPurgesBySize.get(size)!,
+					flushedPurgesBySize.get(size)!,
+				);
+			}),
+			'',
+			'One `purgeBy` on `tenant`, the index path, per size, over reads each'
+			+ ' filed under its primary key\'s home pin. Reported, gated on nothing.',
+			'',
+			declaredFigureOf(declaredPurgesBySize),
 			'',
 		);
 	}
@@ -944,6 +1104,8 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		idleRate,
 		bySize,
 		collectionPurgesBySize,
+		flushedPurgesBySize,
+		declaredPurgesBySize,
 		markdown,
 		verdicts,
 		scaling,
@@ -975,6 +1137,10 @@ async function writeResults(): Promise<string[]> {
 						samples: Object.fromEntries(result.bySize),
 						collectionPurgeSamples:
 							Object.fromEntries(result.collectionPurgesBySize),
+						flushedCollectionPurgeSamples:
+							Object.fromEntries(result.flushedPurgesBySize),
+						declaredPurgeSamples:
+							Object.fromEntries(result.declaredPurgesBySize),
 						scaling: result.scaling,
 					},
 				];
@@ -1017,6 +1183,7 @@ beforeAll(async () => {
 	await seedPhase(PK_PHASE);
 	await seedPhase(BOOLEAN_PHASE);
 	await seedVersioned();
+	await seedDeclaredSignal();
 });
 
 afterAll(async () => {
