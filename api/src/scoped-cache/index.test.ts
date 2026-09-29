@@ -61,7 +61,12 @@ import {
 	startScopedCachePurgeRecovery,
 } from './index.js';
 import { printableScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
-import { redisConfigAvailable, useRedis } from '../redis/index.js';
+import {
+	flushCacheRedisDatabase,
+	redisConfigAvailable,
+	useCacheRedis,
+	useRedis,
+} from '../redis/index.js';
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
 import { useLogger } from '../logger/index.js';
@@ -155,7 +160,9 @@ beforeEach(() => {
 	env['CACHE_STORE'] = 'redis';
 	env['CACHE_NAMESPACE'] = 'ns';
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(flushCacheRedisDatabase).mockResolvedValue('not-flushed');
 	vi.mocked(useRedis).mockReturnValue({ pipeline: () => pipeline } as any);
+	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());
 	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
 	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 });

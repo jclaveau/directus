@@ -258,6 +258,12 @@ CACHE_ENABLED=false
 # memory | redis
 CACHE_STORE=memory
 
+# Keep the response cache and the scoped-cache index in their own Redis database,
+# so a flush is one FLUSHDB instead of a scan of every key Redis holds. Must differ
+# from the database REDIS selects: locks, synchronization clocks and cache stats
+# stay there. [unset]
+# CACHE_REDIS_DB=1
+
 # Opt-in: track cache hit/miss telemetry in Redis (needs CACHE_STORE=redis) to power the admin cache page. [false]
 # CACHE_STATS_ENABLED=true
 

@@ -2,6 +2,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import type { ScopedCacheDeclaredFingerprint } from '@directus/types';
 import type Keyv from 'keyv';
+import type { CacheDatabaseFlush } from './redis/index.js';
 import {
 	afterEach,
 	beforeEach,
@@ -108,6 +109,16 @@ vi.mock('./permissions/cache.js', () => ({ clearCache: clearPermissionCache }));
 // trace on redis or the cache to assert against.
 const queueCachePurge = vi.hoisted(() => vi.fn());
 
+const cacheRedisDatabase = vi.hoisted(() => {
+	return vi.fn((): number | undefined => undefined);
+});
+
+const flushCacheRedisDatabase = vi.hoisted(() => {
+	return vi.fn(async (
+		_queueAfterFlush?: (transaction: any) => void,
+	): Promise<CacheDatabaseFlush> => 'not-flushed');
+});
+
 vi.mock('./cache-events.js', async (importOriginal) => {
 	return {
 		...(await importOriginal() as object),
@@ -117,7 +128,10 @@ vi.mock('./cache-events.js', async (importOriginal) => {
 
 vi.mock('./redis/index.js', () => {
 	return {
+		cacheRedisDatabase,
+		flushCacheRedisDatabase,
 		redisConfigAvailable: () => true,
+		useCacheRedis: () => redis,
 		useRedis: () => redis,
 	};
 });
@@ -159,6 +173,8 @@ afterEach(() => {
 	// rejecting for every case after it.
 	redis.scan.mockImplementation(async () => ['0', []] as [string, string[]]);
 	redis.get.mockImplementation(async () => '1');
+	cacheRedisDatabase.mockReturnValue(undefined);
+	flushCacheRedisDatabase.mockResolvedValue('not-flushed');
 });
 
 // `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
@@ -233,6 +249,20 @@ describe('getRedisConnection', () => {
 		expect(getRedisConnection()).toEqual({
 			url: 'redis://localhost:6379/2',
 			socket: { keepAlive: false },
+		});
+	});
+
+	test('writes the cache database into the REDIS URL', () => {
+		setEnv({ REDIS: 'redis://localhost:6379/0' });
+		expect(getRedisConnection(1)).toBe('redis://localhost:6379/1');
+	});
+
+	test('the cache database overrides REDIS_DB in the host/port form', () => {
+		setEnv({ REDIS_HOST: 'h', REDIS_PORT: '6379', REDIS_DB: '0' });
+
+		expect(getRedisConnection(1)).toEqual({
+			socket: { host: 'h', port: 6379 },
+			database: 1,
 		});
 	});
 
@@ -1382,6 +1412,35 @@ describe('flushCaches', () => {
 	});
 
 	test(oneLine`
+		empties the cache's own database with one FLUSHDB instead of clearing the
+		response tier key by key, and says which database it emptied
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		const { cache } = getCache();
+		await cache!.set('response-key', 'r');
+
+		cacheRedisDatabase.mockReturnValue(1);
+		flushCacheRedisDatabase.mockResolvedValueOnce('flushed');
+
+		await flushCaches(true);
+
+		// Still there: the FLUSHDB stood in for `cache.clear()`, and the stand-in
+		// flushed nothing.
+		expect(await cache!.get('response-key')).toBe('r');
+
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1, dropped 0 scoped-cache index keys$/,
+			),
+		);
+	});
+
+	test(oneLine`
 		survives a permission cache that cannot clear — it is a multi cache over
 		ioredis, so it rejects where the Keyv tiers swallow, and the schema apply that
 		called this has already committed: failing it reports a change that landed as
@@ -1811,6 +1870,52 @@ describe('the wholesale counter moves before the response clear', () => {
 		expect(calls).toEqual([
 			'bump scalabus:scoped-cache-epoch:*',
 			'clear',
+			'scan',
+			'bump scalabus:scoped-cache-epoch:*',
+		]);
+	});
+
+	test('and again inside the FLUSHDB that takes it', async () => {
+		const calls = recordFlushOrder();
+
+		flushCacheRedisDatabase.mockImplementationOnce(async (queueAfterFlush) => {
+			calls.push('FLUSHDB');
+
+			queueAfterFlush!({
+				eval: (_script: string, _keyCount: number, epochKey: string) => {
+					calls.push(`bump ${epochKey} in the FLUSHDB's MULTI`);
+				},
+			});
+
+			return 'flushed';
+		});
+
+		await flushCaches(true);
+
+		expect(calls).toEqual([
+			'bump scalabus:scoped-cache-epoch:*',
+			'FLUSHDB',
+			"bump scalabus:scoped-cache-epoch:* in the FLUSHDB's MULTI",
+			'scan',
+			'bump scalabus:scoped-cache-epoch:*',
+		]);
+	});
+
+	test('and once more when Redis refused the move inside the MULTI', async () => {
+		const calls = recordFlushOrder();
+
+		flushCacheRedisDatabase.mockImplementationOnce(async () => {
+			calls.push('FLUSHDB, the move in its MULTI refused');
+
+			return 'flushed-queued-command-failed';
+		});
+
+		await flushCaches(true);
+
+		expect(calls).toEqual([
+			'bump scalabus:scoped-cache-epoch:*',
+			'FLUSHDB, the move in its MULTI refused',
+			'bump scalabus:scoped-cache-epoch:*',
 			'scan',
 			'bump scalabus:scoped-cache-epoch:*',
 		]);

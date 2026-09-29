@@ -34,7 +34,7 @@ const redisState = { status: 'connecting' };
 
 vi.mock('../redis/index.js', () => {
 	return {
-		useRedis: () => {
+		useCacheRedis: () => {
 			return {
 				defineCommand,
 				scopedCacheEpochBump,

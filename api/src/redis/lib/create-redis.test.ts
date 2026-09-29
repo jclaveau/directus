@@ -4,7 +4,7 @@ import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { useLogger } from '../../logger/index.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
-import { createRedis } from './create-redis.js';
+import { createRedis, withRedisDatabase } from './create-redis.js';
 
 vi.mock('ioredis');
 vi.mock('../../utils/get-config-from-env.js');
@@ -105,6 +105,29 @@ describe('createRedis', () => {
 		expect(redis).toBe(mockRedis);
 	});
 
+	test('Selects the given database through the URL', () => {
+		vi.mocked(useEnv).mockReturnValue({ REDIS: 'redis://h:6379/0' });
+
+		createRedis(1);
+
+		expect(Redis).toHaveBeenCalledWith('redis://h:6379/1', {
+			retryStrategy: expect.any(Function),
+		});
+	});
+
+	test('Selects the given database over REDIS_DB in the object form', () => {
+		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: 'h', REDIS_DB: '0' });
+		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: '0' });
+
+		createRedis(1);
+
+		expect(Redis).toHaveBeenCalledWith({
+			host: 'h',
+			db: 1,
+			retryStrategy: expect.any(Function),
+		});
+	});
+
 	describe('retryStrategy', () => {
 		test('Defaults to ioredis backoff, capped, never null', () => {
 			const retry = retryStrategyFor({ REDIS: 'x' });
@@ -144,5 +167,16 @@ describe('createRedis', () => {
 			expect(retry(1)).toBe(50); // unparseable base => default 50
 			expect(retry(1e9)).toBe(2000); // negative attempts rejected => never null
 		});
+	});
+});
+
+describe('withRedisDatabase', () => {
+	test('adds a database to an address that names none', () => {
+		expect(withRedisDatabase('redis://h:6379', 1)).toBe('redis://h:6379/1');
+	});
+
+	test('replaces the database an address names, keeping its credentials', () => {
+		expect(withRedisDatabase('rediss://u:p@h:6380/0', 2))
+			.toBe('rediss://u:p@h:6380/2');
 	});
 });

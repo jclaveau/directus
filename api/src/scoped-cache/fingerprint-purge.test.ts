@@ -3,7 +3,11 @@ import type { Keyv } from 'keyv';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { purgeScopedCache } from './purge.js';
 import { scopedCacheFingerprintOf } from './fingerprint.js';
-import { redisConfigAvailable, useRedis } from '../redis/index.js';
+import {
+	redisConfigAvailable,
+	useCacheRedis,
+	useRedis,
+} from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
 import {
 	listPendingScopedCachePurges,
@@ -93,6 +97,7 @@ beforeEach(() => {
 	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
 	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());
 
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,

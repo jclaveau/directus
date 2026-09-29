@@ -69,7 +69,7 @@ jobs:
           --health-cmd "pg_isready -U directus"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: valkey/valkey:9.1.2-alpine
         ports:
           - 6379:6379
         options: >-
@@ -529,7 +529,7 @@ jobs:
           # stays alive, so its stdout keeps flowing in the Actions UI).
           tail -F /tmp/directus.log 2>/dev/null | sed 's/^/[directus] /' &
 
-          REDIS=$(docker ps --filter ancestor=redis:7-alpine -q | head -1)
+          REDIS=$(docker ps --filter ancestor=valkey/valkey:9.1.2-alpine -q | head -1)
           if [ -n "$REDIS" ]; then
             ( docker exec "$REDIS" redis-cli monitor 2>&1 | sed 's/^/[redis] /' ) &
           fi

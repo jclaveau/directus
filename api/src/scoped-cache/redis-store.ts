@@ -19,7 +19,7 @@ import {
 	useLogger,
 } from '../logger/index.js';
 import {
-	useRedis,
+	useCacheRedis,
 } from '../redis/index.js';
 import type { ChainableCommander, Redis } from 'ioredis';
 import {
@@ -224,7 +224,7 @@ const clientsCarryingScripts = new WeakSet<Redis>();
  * command each time, so the set keeps it to the first call per connection.
  */
 function useScriptedRedis(): ScopedCacheScriptedRedis {
-	const redis = useRedis();
+	const redis = useCacheRedis();
 
 	if (! clientsCarryingScripts.has(redis)) {
 		redis.defineCommand('scopedCacheIndexExpiry', {
@@ -317,7 +317,7 @@ async function unlinkScopedCacheKeys(
 		return { dropped: 0, refused: 0 };
 	}
 
-	const pipeline = useRedis().pipeline();
+	const pipeline = useCacheRedis().pipeline();
 
 	for (let at = 0; at < keys.length; at += SCOPED_CACHE_UNLINK_CHUNK) {
 		// Array form, never a spread: this list is a whole-keyspace scan, so it is
@@ -453,7 +453,7 @@ async function collectSweptIndexKeys(
 	let scanCursor = '0';
 
 	do {
-		const [next, members] = await useRedis().sscan(
+		const [next, members] = await useCacheRedis().sscan(
 			sweptKey,
 			scanCursor,
 			'COUNT',
@@ -665,7 +665,7 @@ async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
 	globPatterns: readonly string[] | null,
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
-	const redis = useRedis();
+	const redis = useCacheRedis();
 
 	for (const indexKey of indexKeys) {
 		const scannedMembers = new Set<string>();
@@ -730,7 +730,7 @@ async function* scanScopedCacheIndexKeys(
 async function* scanScopedCacheKeys(
 	globPattern: string,
 ): AsyncGenerator<string[]> {
-	const redis = useRedis();
+	const redis = useCacheRedis();
 	let cursor = '0';
 
 	do {
@@ -799,12 +799,12 @@ const redisStore: ScopedCacheStore = {
 	/**
 	 * Scoped purging drives SCAN + multi-key DEL over a single node, so it only
 	 * works on a standalone client. A cluster client would silently under-purge —
-	 * keys on other nodes are never scanned — and leave stale entries. `useRedis()`
-	 * always builds a standalone `Redis` in core, so this only bites a custom
-	 * override.
+	 * keys on other nodes are never scanned — and leave stale entries.
+	 * `useCacheRedis()` always builds a standalone `Redis` in core, so this only
+	 * bites a custom override.
 	 */
 	assertStoreSupported(): void {
-		if (useRedis().isCluster) {
+		if (useCacheRedis().isCluster) {
 			throw new Error(
 				'CACHE_AUTO_PURGE_MODE=scoped is not implemented for Redis cluster '
 				+ 'clients (SCAN and multi-key DEL are single-node). Use a standalone '
@@ -949,7 +949,7 @@ const redisStore: ScopedCacheStore = {
 			return;
 		}
 
-		const redisPipeline = useRedis().pipeline();
+		const redisPipeline = useCacheRedis().pipeline();
 
 		for (const [indexKey, members] of membersByIndexKey) {
 			for (
@@ -985,7 +985,7 @@ const redisStore: ScopedCacheStore = {
 	async* takeCollectionIndexedKeys(
 		collection: string,
 	): AsyncGenerator<ScopedCacheIndexTake> {
-		const redis = useRedis();
+		const redis = useCacheRedis();
 
 		// First, what an earlier sweep moved aside and never released: its entries
 		// may still be cached, and no write's own sets name them any more. Before
@@ -1055,7 +1055,7 @@ const redisStore: ScopedCacheStore = {
 				// SSCAN still returns every member that stays in the set for the
 				// whole scan, so removing the ones it already returned skips none.
 				do {
-					const [next, members] = await useRedis().sscan(
+					const [next, members] = await useCacheRedis().sscan(
 						indexKey,
 						scanCursor,
 						'COUNT',
@@ -1106,7 +1106,7 @@ const redisStore: ScopedCacheStore = {
 	async readPurgeEpochs(
 		epochKeys: readonly string[],
 	): Promise<(string | null)[] | null> {
-		return useRedis()
+		return useCacheRedis()
 			.mget([...epochKeys])
 			.catch((): null => null);
 	},
@@ -1125,7 +1125,7 @@ const redisStore: ScopedCacheStore = {
 	},
 
 	onStoreReady(listener: () => void): void {
-		const redis = useRedis();
+		const redis = useCacheRedis();
 
 		// The boot talks to Redis before the recovery registers, so the first
 		// connection's `ready` has usually fired already and would never reach it.
