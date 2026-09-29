@@ -123,12 +123,12 @@ Feature: A collection-wide purge reaches every set through the index-key set
       | ada  | name,label |
     When every read of index_keys_move is purged
     Then the purge wrote these index sets, in order:
-      | command | keys                                                                       |
-      | rename  | fingerprint:index_keys_move:name=ada swept:index_keys_move:<sweep>:1       |
-      | sadd    | swept-index-keys swept:index_keys_move:<sweep>:1                           |
-      | srem    | collection-index-keys:index_keys_move fingerprint:index_keys_move:name=ada |
-      | unlink  | swept:index_keys_move:<sweep>:1                                            |
-      | srem    | swept-index-keys swept:index_keys_move:<sweep>:1                           |
+      | command | arguments                                                                                |
+      | RENAME  | <index>fingerprint:index_keys_move:name=ada <index>swept:index_keys_move:<sweep>:1       |
+      | SADD    | <index>swept-index-keys <index>swept:index_keys_move:<sweep>:1                           |
+      | SREM    | <index>collection-index-keys:index_keys_move <index>fingerprint:index_keys_move:name=ada |
+      | unlink  | <index>swept:index_keys_move:<sweep>:1                                                   |
+      | srem    | <index>swept-index-keys <index>swept:index_keys_move:<sweep>:1                           |
     And these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |
@@ -143,10 +143,10 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And the index-key sets are marked complete
     When every read of index_keys_marked is purged
     Then the purge read these index sets, in order:
-      | command | keys                                       |
-      | sscan   | swept-index-keys swept:index_keys_marked:* |
-      | sscan   | collection-index-keys:index_keys_marked    |
-      | sscan   | swept:index_keys_marked:<sweep>:1          |
+      | command | arguments                                                                   |
+      | sscan   | <index>swept-index-keys 0 MATCH <index>swept:index_keys_marked:* COUNT 1000 |
+      | sscan   | <index>collection-index-keys:index_keys_marked 0 COUNT 1000                 |
+      | sscan   | <index>swept:index_keys_marked:<sweep>:1 0 COUNT 1000                       |
     And these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |
@@ -162,10 +162,10 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And the index-key set of index_keys_unmarked no longer names the set of ada
     When every read of index_keys_unmarked is purged
     Then the purge read these index sets, in order:
-      | command | keys                                         |
-      | sscan   | swept-index-keys swept:index_keys_unmarked:* |
-      | scan    | fingerprint:index_keys_unmarked:*            |
-      | sscan   | swept:index_keys_unmarked:<sweep>:1          |
+      | command | arguments                                                                     |
+      | sscan   | <index>swept-index-keys 0 MATCH <index>swept:index_keys_unmarked:* COUNT 1000 |
+      | scan    | 0 MATCH <index>fingerprint:index_keys_unmarked:* COUNT 1000                   |
+      | sscan   | <index>swept:index_keys_unmarked:<sweep>:1 0 COUNT 1000                       |
     And these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |
@@ -188,10 +188,10 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And the marker is written back as it was kept
     When every read of index_keys_flushed is purged
     Then the purge read these index sets, in order:
-      | command | keys                                        |
-      | sscan   | swept-index-keys swept:index_keys_flushed:* |
-      | scan    | fingerprint:index_keys_flushed:*            |
-      | sscan   | swept:index_keys_flushed:<sweep>:1          |
+      | command | arguments                                                                    |
+      | sscan   | <index>swept-index-keys 0 MATCH <index>swept:index_keys_flushed:* COUNT 1000 |
+      | scan    | 0 MATCH <index>fingerprint:index_keys_flushed:* COUNT 1000                   |
+      | sscan   | <index>swept:index_keys_flushed:<sweep>:1 0 COUNT 1000                       |
     And these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |
