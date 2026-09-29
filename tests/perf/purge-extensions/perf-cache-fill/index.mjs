@@ -30,8 +30,7 @@ const [
 	{ writeCacheTombstone },
 	{ default: emitter },
 	{ indexScopedCacheEntry },
-	{ reapScopedCacheIndex },
-	{ scopedCacheEpochKey },
+	{ requestScopedCacheIndexReap },
 	{ getCacheKey },
 	{ getMilliseconds },
 	{ readMeta },
@@ -43,8 +42,7 @@ const [
 	importFromApi('cache-events.js'),
 	importFromApi('emitter.js'),
 	importFromApi('scoped-cache/index.js'),
-	importFromApi('scoped-cache/purge.js'),
-	importFromApi('scoped-cache/redis-store.js'),
+	importFromApi('scoped-cache/reap-requests.js'),
 	importFromApi('utils/get-cache-key.js'),
 	importFromApi('utils/get-milliseconds.js'),
 	importFromApi('utils/read-meta.js'),
@@ -140,9 +138,10 @@ function rawEntryKeys(redisKey) {
  */
 export default function registerEndpoint(router, { services, getSchema, env }) {
 	/**
-	 * `POST /perf-cache-fill/reap` runs one reap of the index, the job the bench
-	 * turns off, and names in Redis the key marking the index-key sets complete
-	 * and the wholesale counter it has to hold.
+	 * `POST /perf-cache-fill/reap` joins the reap a flush asks for, or asks for
+	 * one, and answers once it has run: the bench turns the scheduled one off. It
+	 * names in Redis the key marking the index-key sets complete and the
+	 * generation it has to hold.
 	 */
 	router.post('/reap', async (request, response) => {
 		if (!request.accountability?.admin) {
@@ -152,13 +151,13 @@ export default function registerEndpoint(router, { services, getSchema, env }) {
 		}
 
 		try {
-			const reaped = await reapScopedCacheIndex();
+			await requestScopedCacheIndexReap();
 
 			return response.json({
-				reaped,
 				markerKey: `${env['CACHE_NAMESPACE']}:scoped-cache-index:`
 					+ 'collection-index-keys-complete',
-				counterKey: scopedCacheEpochKey('*'),
+				generationKey:
+					`${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`,
 			});
 		}
 		catch (error) {

@@ -833,9 +833,10 @@ function flushedFigureOf(
 	})).median;
 
 	return `- ${size} entries: reaped registry ${reapedCommands.toFixed(1)} vs`
-		+ ` flushed, no reap ${flushedCommands.toFixed(1)} Redis commands`
+		+ ` flushed, requested reap ${flushedCommands.toFixed(1)} Redis commands`
 		+ ` (${ratioOf(flushedCommands, reapedCommands)}); reaped registry`
-		+ ` ${reapedMs.toFixed(2)} ms vs flushed, no reap ${flushedMs.toFixed(2)} ms`
+		+ ` ${reapedMs.toFixed(2)} ms vs flushed, requested reap`
+		+ ` ${flushedMs.toFixed(2)} ms`
 		+ ` Redis time (${ratioOf(flushedMs, reapedMs)}); \`scan\` calls, flushed:`
 		+ ` rep 1 ${flushedPurges[0]!.byCommand['scan'] ?? 0}, last`
 		+ ` ${flushedPurges.at(-1)!.byCommand['scan'] ?? 0}`;
@@ -957,9 +958,10 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 
 			declaredPurgesBySize.set(size, [declaredPurge]);
 
-			// No reap between the flush and the saves: whichever way the purge then
-			// finds the collection's sets is what a flush leaves until the next one.
+			// The reap the flush asks for lands before the refill, as it does within
+			// a second of a flush: the saves then find the sets it named.
 			await clearResponseCache();
+			await markIndexKeySetsComplete();
 
 			const refilled = await fillEntries(phase, 0, size);
 
@@ -969,8 +971,6 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 			const flushedPurges = await timeCollectionPurges(idleRate);
 
 			flushedPurgesBySize.set(size, flushedPurges);
-
-			await markIndexKeySetsComplete();
 
 			collectionReport = '; last collection purge:'
 				+ ` ${commandBreakdown(collectionPurges.at(-1)!)}; declared purge:`
@@ -1031,8 +1031,9 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 			...FIGURE_HEADER,
 			...figureRowsOf(collectionPurgesBySize),
 			'',
-			'The same version saves right after a flush, no reap run since: reaped'
-			+ ' registry vs flushed, no reap. Medians; reported, gated on nothing.',
+			'The same version saves after a flush and the reap it asks for: reaped'
+			+ ' registry vs flushed, requested reap. Medians; reported, gated on'
+			+ ' nothing.',
 			'',
 			...cacheSizes.map((size) => {
 				return flushedFigureOf(
@@ -1329,18 +1330,18 @@ async function clearResponseCache(): Promise<void> {
 }
 
 /**
- * Runs the reap the instance has turned off. A flush voids the mark saying the
- * index-key sets name every set, and until a reap writes it again every
- * collection purge scans the keyspace instead: the purges measured would be
- * that scan's.
+ * Waits out the reap a flush asks for, the scheduled one being off. A flush
+ * voids the mark saying the index-key sets name every set, and until that reap
+ * writes it again every collection purge scans the keyspace instead: the purges
+ * measured would be that scan's, and the reap's own commands would land in them.
  */
 async function markIndexKeySetsComplete(): Promise<void> {
-	const { markerKey, counterKey } = await api('/perf-cache-fill/reap', {
+	const { markerKey, generationKey } = await api('/perf-cache-fill/reap', {
 		method: 'POST',
 	});
 
 	expect(await redis.get(markerKey), 'the index-key sets marked complete')
-		.toBe(await redis.get(counterKey) ?? '');
+		.toBe(await redis.get(generationKey));
 }
 
 // What the filler fidelity check found, carried into the report the purge
@@ -1352,7 +1353,9 @@ test('the filler files what a GET files', async () => {
 	const pkRowCount = phaseRowIds.get(PK_PHASE.phaseName)!.length;
 	const entries = Math.min(FIDELITY_ENTRIES, pkRowCount * SLICE_ENTRIES);
 
+	// The reap each flush asks for, waited out, so it lands in neither shape.
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const warmStatuses = await warmEntries(PK_PHASE, 0, entries);
 
@@ -1362,6 +1365,7 @@ test('the filler files what a GET files', async () => {
 	const http = await readKeyspaceShape();
 
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const filled = await fillEntries(PK_PHASE, 0, entries);
 
