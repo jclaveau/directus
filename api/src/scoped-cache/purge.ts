@@ -61,6 +61,7 @@ import {
 	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
 import { scopedCacheIndexPath } from './index-path.js';
+import { scopedCacheEpochBumpScript } from './redis-store.js';
 
 const env = useEnv();
 
@@ -637,14 +638,26 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
  *
  * The entries only, so a flush that reports the index drop apart from the clear
  * can; `flushResponseCache` is the two together. With `CACHE_REDIS_DB` set, the
- * one FLUSHDB takes the index and the counters too, and the counters come back
- * from the server's clock, never at a value a read in flight took. Answers
- * whether it was that FLUSHDB.
+ * one FLUSHDB takes the index and the counters too, the wholesale one it just
+ * moved included: a read that took none would compare equal after its fill. So
+ * the same MULTI moves it again, from the server's clock, and no fill can recheck
+ * in between. Answers whether it was that FLUSHDB.
  */
 export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
 	await bumpScopedCacheEpochs(['*']);
 
-	if (await flushCacheRedisDatabase()) {
+	const flushedDatabase = await flushCacheRedisDatabase((flushTransaction) => {
+		if (scopedCachePurgeEnabled()) {
+			flushTransaction.eval(
+				scopedCacheEpochBumpScript,
+				1,
+				scopedCacheEpochKey('*'),
+				scopedCacheEpochTtlSeconds(),
+			);
+		}
+	});
+
+	if (flushedDatabase) {
 		return true;
 	}
 

@@ -202,9 +202,17 @@ describe('useCacheRedis', () => {
 });
 
 describe('flushCacheRedisDatabase', () => {
-	test('empties the cache database with FLUSHDB ASYNC', async () => {
-		const flushdb = vi.fn().mockResolvedValue('OK');
-		vi.mocked(createRedis).mockReturnValue({ flushdb } as any);
+	test(oneLine`
+		empties the cache database with FLUSHDB ASYNC, and queues the caller's
+		commands in the same MULTI
+	`, async () => {
+		const flushTransaction = {
+			flushdb: vi.fn(() => flushTransaction),
+			set: vi.fn(),
+			exec: vi.fn(async () => [[null, 'OK'], [null, 'OK']]),
+		};
+
+		vi.mocked(createRedis).mockReturnValue({ multi: () => flushTransaction } as any);
 
 		vi.mocked(useEnv).mockReturnValue({
 			REDIS: 'redis://h:6379',
@@ -212,15 +220,21 @@ describe('flushCacheRedisDatabase', () => {
 			CACHE_REDIS_DB: 1,
 		});
 
-		expect(await flushCacheRedisDatabase()).toBe(true);
-		expect(flushdb).toHaveBeenCalledWith('ASYNC');
+		const flushed = await flushCacheRedisDatabase((flushTransaction) => {
+			flushTransaction.set('kept', '1');
+		});
+
+		expect(flushed).toBe(true);
+		expect(flushTransaction.flushdb).toHaveBeenCalledWith('ASYNC');
+		expect(flushTransaction.set).toHaveBeenCalledWith('kept', '1');
+		expect(warn).not.toHaveBeenCalled();
 	});
 
 	test(oneLine`
 		leaves the shared database alone when the cache has none of its own
 	`, async () => {
-		const flushdb = vi.fn();
-		vi.mocked(useRedis).mockReturnValue({ flushdb } as any);
+		const multi = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ multi } as any);
 
 		vi.mocked(useEnv).mockReturnValue({
 			REDIS: 'redis://h:6379',
@@ -228,12 +242,12 @@ describe('flushCacheRedisDatabase', () => {
 		});
 
 		expect(await flushCacheRedisDatabase()).toBe(false);
-		expect(flushdb).not.toHaveBeenCalled();
+		expect(multi).not.toHaveBeenCalled();
 	});
 
 	test('flushes nothing under the memory store', async () => {
-		const flushdb = vi.fn();
-		vi.mocked(createRedis).mockReturnValue({ flushdb } as any);
+		const multi = vi.fn();
+		vi.mocked(createRedis).mockReturnValue({ multi } as any);
 
 		vi.mocked(useEnv).mockReturnValue({
 			REDIS: 'redis://h:6379',
@@ -242,16 +256,23 @@ describe('flushCacheRedisDatabase', () => {
 		});
 
 		expect(await flushCacheRedisDatabase()).toBe(false);
-		expect(flushdb).not.toHaveBeenCalled();
+		expect(multi).not.toHaveBeenCalled();
 	});
 
 	test(oneLine`
 		answers false on a Redis that refuses FLUSHDB, so the caller clears key by
 		key
 	`, async () => {
-		const refusal = new Error("ERR unknown command 'flushdb'");
-		const flushdb = vi.fn().mockRejectedValue(refusal);
-		vi.mocked(createRedis).mockReturnValue({ flushdb } as any);
+		const refusal = new Error(
+			'EXECABORT Transaction discarded because of previous errors.',
+		);
+
+		const flushTransaction = {
+			flushdb: vi.fn(() => flushTransaction),
+			exec: vi.fn().mockRejectedValue(refusal),
+		};
+
+		vi.mocked(createRedis).mockReturnValue({ multi: () => flushTransaction } as any);
 
 		vi.mocked(useEnv).mockReturnValue({
 			REDIS: 'redis://h:6379',
@@ -264,7 +285,35 @@ describe('flushCacheRedisDatabase', () => {
 		expect(warn).toHaveBeenCalledWith(
 			refusal,
 			'[cache] FLUSHDB refused, clearing the cache key by key: '
-			+ "Error: ERR unknown command 'flushdb'",
+			+ 'Error: EXECABORT Transaction discarded because of previous errors.',
+		);
+	});
+
+	test(oneLine`
+		answers true and warns when the FLUSHDB ran and a command queued after it
+		failed
+	`, async () => {
+		const refusal = new Error('OOM command not allowed');
+
+		const flushTransaction = {
+			flushdb: vi.fn(() => flushTransaction),
+			exec: vi.fn(async () => [[null, 'OK'], [refusal, null]]),
+		};
+
+		vi.mocked(createRedis).mockReturnValue({ multi: () => flushTransaction } as any);
+
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'redis://h:6379',
+			CACHE_STORE: 'redis',
+			CACHE_REDIS_DB: 1,
+		});
+
+		expect(await flushCacheRedisDatabase()).toBe(true);
+
+		expect(warn).toHaveBeenCalledWith(
+			refusal,
+			'[cache] FLUSHDB ran, a command queued after it failed: '
+			+ 'Error: OOM command not allowed',
 		);
 	});
 });

@@ -112,7 +112,9 @@ const cacheRedisDatabase = vi.hoisted(() => {
 	return vi.fn((): number | undefined => undefined);
 });
 
-const flushCacheRedisDatabase = vi.hoisted(() => vi.fn(async () => false));
+const flushCacheRedisDatabase = vi.hoisted(() => {
+	return vi.fn(async (_queueAfterFlush?: (transaction: any) => void) => false);
+});
 
 vi.mock('./cache-events.js', async (importOriginal) => {
 	return {
@@ -1865,6 +1867,32 @@ describe('the wholesale counter moves before the response clear', () => {
 		expect(calls).toEqual([
 			'bump scalabus:scoped-cache-epoch:*',
 			'clear',
+			'scan',
+			'bump scalabus:scoped-cache-epoch:*',
+		]);
+	});
+
+	test('and again inside the FLUSHDB that takes it', async () => {
+		const calls = recordFlushOrder();
+
+		flushCacheRedisDatabase.mockImplementationOnce(async (queueAfterFlush) => {
+			calls.push('FLUSHDB');
+
+			queueAfterFlush!({
+				eval: (_script: string, _keyCount: number, epochKey: string) => {
+					calls.push(`bump ${epochKey} in the FLUSHDB's MULTI`);
+				},
+			});
+
+			return true;
+		});
+
+		await flushCaches(true);
+
+		expect(calls).toEqual([
+			'bump scalabus:scoped-cache-epoch:*',
+			'FLUSHDB',
+			"bump scalabus:scoped-cache-epoch:* in the FLUSHDB's MULTI",
 			'scan',
 			'bump scalabus:scoped-cache-epoch:*',
 		]);

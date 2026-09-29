@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { Redis } from 'ioredis';
+import { type ChainableCommander, Redis } from 'ioredis';
 import { useLogger } from '../../logger/index.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 import { createRedis } from './create-redis.js';
@@ -127,15 +127,27 @@ export const useCacheRedis = (): Redis => {
  * memory store, or a Redis that refused — a managed one may rename FLUSHDB away.
  * `ASYNC` so the memory is reclaimed off Redis's main thread: the keys are gone
  * for every client the moment the command returns.
+ *
+ * `queueAfterFlush` adds commands to the FLUSHDB's own MULTI, so no other client
+ * runs between the two. A refused FLUSHDB discards them with it.
  */
-export async function flushCacheRedisDatabase(): Promise<boolean> {
+export async function flushCacheRedisDatabase(
+	queueAfterFlush?: (flushTransaction: ChainableCommander) => void,
+): Promise<boolean> {
 	if (useEnv()['CACHE_STORE'] !== 'redis' || cacheRedisDatabase() === undefined) {
 		return false;
 	}
 
+	const flushTransaction = useCacheRedis()
+		.multi()
+		.flushdb('ASYNC');
+
+	queueAfterFlush?.(flushTransaction);
+
+	let transactionReplies: [Error | null, unknown][] | null;
+
 	try {
-		await useCacheRedis().flushdb('ASYNC');
-		return true;
+		transactionReplies = await flushTransaction.exec();
 	}
 	catch (error: any) {
 		useLogger().warn(
@@ -145,4 +157,15 @@ export async function flushCacheRedisDatabase(): Promise<boolean> {
 
 		return false;
 	}
+
+	for (const [error] of transactionReplies?.slice(1) ?? []) {
+		if (error) {
+			useLogger().warn(
+				error,
+				`[cache] FLUSHDB ran, a command queued after it failed: ${error}`,
+			);
+		}
+	}
+
+	return true;
 }
