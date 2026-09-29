@@ -101,6 +101,12 @@ const maxCommandScaling =
 const maxRedisTimeScaling =
 	Number(process.env['PERF_PURGE_MAX_REDIS_TIME_SCALING'] ?? 2);
 
+// A dead index-key name costs one EXISTS and one SREM when a collection purge
+// first walks it; the slack covers the purge's own commands moving a little.
+const maxCommandsPerDeadIndexKeyName = Number(
+	process.env['PERF_PURGE_MAX_COMMANDS_PER_DEAD_INDEX_KEY_NAME'] ?? 2.5,
+);
+
 const targetWallScaling = 1.5;
 
 for (const [name, value] of [
@@ -1418,6 +1424,7 @@ test('a scoped purge costs the same however much has expired', async () => {
 	const collectionPurgesBySize = new Map<number, WriteSample[]>();
 	const slicePurgesBySize = new Map<number, WriteSample[]>();
 	const countsBySize = new Map<number, IndexCount>();
+	const countsBeforeSlicePurgeBySize = new Map<number, IndexCount>();
 	const report: string[] = [];
 	let filed = smallestSize;
 
@@ -1495,6 +1502,11 @@ test('a scoped purge costs the same however much has expired', async () => {
 		const afterRowWrites = await countIndexMembers(phase.collection);
 
 		collectionPurgesBySize.set(size, await timeCollectionPurges(idleRate));
+
+		countsBeforeSlicePurgeBySize.set(
+			size,
+			await countIndexMembers(phase.collection),
+		);
 
 		const slicePurges: WriteSample[] = [];
 		let afterFirstSlicePurge = afterRowWrites;
@@ -1600,6 +1612,43 @@ test('a scoped purge costs the same however much has expired', async () => {
 			+ ` | ${measured.toFixed(2)} | ${ceiling} | ${verdict} |`;
 	});
 
+	// What the first collection purge pays above the steady one, shared out
+	// over the dead index-key names it found. A layout with no index-key set
+	// has none, and nothing to share out.
+	const deadNamesAtLargest = countsBeforeSlicePurgeBySize.get(largestSize)!
+		.deadIndexKeyNames;
+
+	const largestSlicePurges = slicePurgesBySize.get(largestSize)!;
+
+	const steadySlicePurgeCommands = seriesOf(
+		slicePurgesBySize,
+		largestSize,
+		(sample) => sample.commands,
+	).median;
+
+	const perDeadName = deadNamesAtLargest > 0
+		? (largestSlicePurges[0]!.commands - steadySlicePurgeCommands)
+			/ deadNamesAtLargest
+		: null;
+
+	let perDeadNameVerdict = 'n/a';
+
+	if (perDeadName !== null) {
+		perDeadNameVerdict = perDeadName <= maxCommandsPerDeadIndexKeyName
+			? 'ok'
+			: 'OVER';
+	}
+
+	const perDeadNameMeasured = perDeadName === null
+		? '—'
+		: perDeadName.toFixed(2);
+
+	verdicts.push(
+		'| expired: Redis commands per dead index-key name, first collection purge'
+		+ ` | ${perDeadNameMeasured} | ${maxCommandsPerDeadIndexKeyName}`
+		+ ` | ${perDeadNameVerdict} |`,
+	);
+
 	const tableHeader = [
 		'| entries filed | expired | index members | index-key set names'
 		+ ' | dead index-key names | Redis commands | Redis time | wall | wall p95'
@@ -1633,7 +1682,8 @@ test('a scoped purge costs the same however much has expired', async () => {
 		`One version save per rep on ${phase.collection} itself, ${writeReps} reps`
 		+ ` per size, each purging its ${smallestSize} live entries and walking`
 		+ ' whatever its index still names of the expired ones, the live entries'
-		+ ' refilled between reps. Reported, gates nothing.',
+		+ ' refilled between reps. Only rep 1 above the median, per dead'
+		+ ' index-key name counted before it, is gated.',
 		'',
 		...tableHeader,
 		...expiredFigureRowsOf(slicePurgesBySize),
@@ -1659,6 +1709,10 @@ test('a scoped purge costs the same however much has expired', async () => {
 			liveEntries: smallestSize,
 			expiringTtlMs: EXPIRING_TTL_MS,
 			indexCounts: Object.fromEntries(countsBySize),
+			indexCountsBeforeSlicePurge: Object.fromEntries(
+				countsBeforeSlicePurgeBySize,
+			),
+			commandsPerDeadIndexKeyName: perDeadName,
 			samples: Object.fromEntries(bySize),
 			collectionPurgeSamples: Object.fromEntries(collectionPurgesBySize),
 			slicePurgeSamples: Object.fromEntries(slicePurgesBySize),
@@ -1679,7 +1733,9 @@ test('a scoped purge costs the same however much has expired', async () => {
 		+ ` ${commandScaling.toFixed(2)}x redis cmds,`
 		+ ` ${redisTimeScaling.toFixed(2)}x redis time,`
 		+ ` rep 1 ${firstRepScaling.toFixed(2)}x redis cmds,`
-		+ ` ${phase.collection} save rep 1 ${firstSlicePurgeScaling.toFixed(2)}x\n`,
+		+ ` ${phase.collection} save rep 1 ${firstSlicePurgeScaling.toFixed(2)}x,`
+		+ ` ${perDeadNameMeasured} cmds per dead index-key name`
+		+ ` (${deadNamesAtLargest} dead)\n`,
 	);
 
 	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
