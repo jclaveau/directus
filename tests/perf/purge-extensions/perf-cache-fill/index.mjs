@@ -30,6 +30,8 @@ const [
 	{ writeCacheTombstone },
 	{ default: emitter },
 	{ indexScopedCacheEntry },
+	{ reapScopedCacheIndex },
+	{ scopedCacheEpochKey },
 	{ getCacheKey },
 	{ getMilliseconds },
 	{ readMeta },
@@ -41,6 +43,8 @@ const [
 	importFromApi('cache-events.js'),
 	importFromApi('emitter.js'),
 	importFromApi('scoped-cache/index.js'),
+	importFromApi('scoped-cache/purge.js'),
+	importFromApi('scoped-cache/redis-store.js'),
 	importFromApi('utils/get-cache-key.js'),
 	importFromApi('utils/get-milliseconds.js'),
 	importFromApi('utils/read-meta.js'),
@@ -134,7 +138,28 @@ function rawEntryKeys(redisKey) {
  * cache's, and the answer also names in Redis the call's first entry and its
  * sibling, for the caller to watch expire.
  */
-export default function registerEndpoint(router, { services, getSchema }) {
+export default function registerEndpoint(router, { services, getSchema, env }) {
+	/**
+	 * `POST /perf-cache-fill/reap` runs one reap of the index, the job the bench
+	 * turns off, and names in Redis the key marking the index-key sets complete
+	 * and the wholesale counter it has to hold.
+	 */
+	router.post('/reap', async (_request, response, next) => {
+		try {
+			const reaped = await reapScopedCacheIndex();
+
+			response.json({
+				reaped,
+				markerKey: `${env['CACHE_NAMESPACE']}:scoped-cache-index:`
+					+ 'collection-index-keys-complete',
+				counterKey: scopedCacheEpochKey('*'),
+			});
+		}
+		catch (error) {
+			next(error);
+		}
+	});
+
 	router.post('/', async (request, response, next) => {
 		try {
 			const {

@@ -682,7 +682,7 @@ async function timeSliceWrites(
 		);
 
 		expect([...refill], `the slice ${phase.phaseName} write ${rep} purged`)
-			.toContain('MISS');
+			.toEqual(['MISS']);
 	}
 
 	return samples;
@@ -696,7 +696,7 @@ async function timeCollectionPurges(idleRate: number): Promise<WriteSample[]> {
 		const versionedWarm = await warmVersionedEntries();
 
 		expect([...versionedWarm], `the versioned reads before save ${rep}`)
-			.toContain('MISS');
+			.toEqual(['MISS']);
 
 		collectionPurges.push(await timeCollectionPurge(idleRate));
 	}
@@ -761,6 +761,7 @@ const phaseResults: PhaseResult[] = [];
 
 async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const idleRate = await measureIdleCommands();
 	const bySize = new Map<number, WriteSample[]>();
@@ -780,7 +781,7 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 
 			// A warm that never filled measured an empty cache at every size.
 			expect([...warmStatuses], `${phase.phaseName} warming to ${size}`)
-				.toContain('MISS');
+				.toEqual(['MISS']);
 		}
 
 		const filled = await fillEntries(phase, readEnd, size);
@@ -1153,6 +1154,21 @@ async function clearResponseCache(): Promise<void> {
 		.then((response) => response.text());
 }
 
+/**
+ * Runs the reap the instance has turned off. A flush voids the mark saying the
+ * index-key sets name every set, and until a reap writes it again every
+ * collection purge scans the keyspace instead: the purges measured would be
+ * that scan's.
+ */
+async function markIndexKeySetsComplete(): Promise<void> {
+	const { markerKey, counterKey } = await api('/perf-cache-fill/reap', {
+		method: 'POST',
+	});
+
+	expect(await redis.get(markerKey), 'the index-key sets marked complete')
+		.toBe(await redis.get(counterKey) ?? '');
+}
+
 // What the filler fidelity check found, carried into the report the purge
 // test writes.
 let fidelityReport: string[] = [];
@@ -1409,6 +1425,7 @@ test('a scoped purge costs the same however much has expired', async () => {
 	});
 
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const idleRate = await measureIdleCommands();
 	const writtenEntries = writeReps * SLICE_ENTRIES;
@@ -1486,12 +1503,13 @@ test('a scoped purge costs the same however much has expired', async () => {
 			.toBeGreaterThanOrEqual(smallestSize);
 
 		// An index-key set names every set still standing, dead names or not.
-		if (lingering.indexKeyNames > 0) {
-			expect(
-				lingering.indexKeyNames - lingering.deadIndexKeyNames,
-				`live index-key names once ${size} entries are filed`,
-			).toBeGreaterThanOrEqual(lingering.indexSets);
-		}
+		expect(lingering.indexKeyNames, `index-key names once ${size} are filed`)
+			.toBeGreaterThan(0);
+
+		expect(
+			lingering.indexKeyNames - lingering.deadIndexKeyNames,
+			`live index-key names once ${size} entries are filed`,
+		).toBeGreaterThanOrEqual(lingering.indexSets);
 
 		countsBySize.set(size, lingering);
 
