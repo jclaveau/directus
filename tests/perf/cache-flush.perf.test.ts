@@ -27,8 +27,9 @@ import { summarise, summaryRow, type Summary } from './measure.js';
  * index key, under the arm's namespace, in whichever database the real ones
  * landed in.
  *
- * The gate is the SCAN count: a namespaced clear walks COUNT 1000 keys a call,
- * so it is exact, machine-independent and visible at 20k keys. The duration only
+ * The gate is the SCAN count: exact, machine-independent, and visible at 20k
+ * keys, since the permission cache's clear walks its database 10 keys a SCAN
+ * (ioredis's scanStream default) and Keyv's 1000. The duration only
  * rises above noise near prod's size (270k keys, 2026-08-26), so it is reported,
  * not gated. Nothing but the flush runs while it is counted: the instance that
  * filled the cache is stopped first, so no scheduled job lands a SCAN in the
@@ -94,8 +95,8 @@ if (!Number.isFinite(maxScansAddedByGrowth) || maxScansAddedByGrowth < 0) {
 }
 
 // Below this the shared arm's SCANs never met the grown cache, and the `own-db`
-// figures would pass for a reason that has nothing to do with its database: a
-// MATCH SCAN walks COUNT 1000 keys per call, so 18k keys are ~18 calls a pass.
+// figures would pass for a reason that has nothing to do with its database. The
+// bound assumes the widest walk, COUNT 1000: 18k keys are at least 18 calls.
 const minSharedScansAddedByGrowth = grownRange / 1000 / 2;
 
 const NOTE = 'perf_flush_note';
