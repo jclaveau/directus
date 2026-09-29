@@ -46,6 +46,12 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['LOG_LEVEL'] = 'info';
 
 	const witnessKey = `redis-db-flush-witness-${vendor}`;
+	const flushNamespace = `directus-redis-db-flush-${vendor}-cli`;
+
+	// The shape `@keyv/redis` files a Keyv entry under: the store prefixes the key
+	// Keyv already prefixed, both with the tier's namespace.
+	const systemEntryKey
+		= `${flushNamespace}_system::${flushNamespace}_system:flush-witness`;
 
 	const redisByDatabase = {
 		shared: new Redis({ host: 'localhost', port: 6108 }),
@@ -55,6 +61,7 @@ describe.each(vendors)('%s', (vendor) => {
 	const adminAuth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess | undefined;
 	let instanceLog: string[] = [];
+	let flushRun: { code: number | null; output: string } | undefined;
 	let namespace: string;
 	let noteId: number;
 
@@ -87,7 +94,8 @@ describe.each(vendors)('%s', (vendor) => {
 
 		instance = undefined;
 		instanceLog = [];
-		await redisByDatabase.shared.del(witnessKey);
+		flushRun = undefined;
+		await redisByDatabase.shared.del(witnessKey, systemEntryKey);
 		await redisByDatabase.cache.del(witnessKey);
 	});
 
@@ -134,6 +142,53 @@ describe.each(vendors)('%s', (vendor) => {
 				await redisByDatabase.cache.set(witnessKey, 'before-boot');
 			},
 		);
+
+		given.optional('the system cache holds an entry', async () => {
+			await redisByDatabase.shared.set(systemEntryKey, 'before-flush');
+		});
+
+		// Its own process, as a deploy step runs it: the stores it builds are
+		// dialed in the same tick the flush clears them.
+		when.optional(
+			/^`directus cache flush` runs with its cache in database (\d+)$/,
+			async (database: string) => {
+				const flushEnv = cloneDeep(env);
+				flushEnv[vendor]['CACHE_NAMESPACE'] = flushNamespace;
+				flushEnv[vendor]['CACHE_REDIS_DB'] = database;
+
+				const cli = spawn('node', [paths.cli, 'cache', 'flush'], {
+					cwd: paths.cwd,
+					env: flushEnv[vendor],
+				});
+
+				let output = '';
+
+				cli.stdout.on('data', (chunk) => (output += String(chunk)));
+				cli.stderr.on('data', (chunk) => (output += String(chunk)));
+
+				const code = await new Promise<number | null>((resolve) => {
+					cli.on('exit', resolve);
+				});
+
+				flushRun = { code, output };
+			},
+		);
+
+		then.optional('it exits 0', () => {
+			expect(flushRun!.code, flushRun!.output).toBe(0);
+		});
+
+		and.optional('the system cache no longer holds that entry', async () => {
+			expect(await redisByDatabase.shared.exists(systemEntryKey)).toBe(0);
+		});
+
+		and.optional(/^the flush logs "(.*)"$/, (line: string) => {
+			expect(flushRun!.output).toContain(line);
+		});
+
+		and.optional(/^the flush logs nothing saying "(.*)"$/, (line: string) => {
+			expect(flushRun!.output).not.toContain(line);
+		});
 
 		when.optional(
 			/^an instance keeping its cache in database (\d+) boots on a new build$/,
@@ -246,6 +301,12 @@ describe.each(vendors)('%s', (vendor) => {
 	defineFeature(feature, (scenario) => {
 		scenario(
 			'a boot on a new build empties the cache database',
+			defineScenarioSteps,
+			60_000,
+		);
+
+		scenario(
+			'the flush command empties the system cache and the cache database',
 			defineScenarioSteps,
 			60_000,
 		);

@@ -11,6 +11,10 @@ Feature: A response cache kept in its own Redis database is flushed with one FLU
     only a FLUSHDB takes it.
   - Every instance boots on a build no instance booted on before, so its boot
     flushes the cache.
+  - `directus cache flush` runs in a process of its own, the way a deploy step
+    runs it, and builds its Redis stores in the tick it clears them in: a clear
+    sent before a store's client is ready is refused, and used to be refused
+    silently.
 
   Scenario: a boot on a new build empties the cache database
     Given the cache database holds a key outside every namespace
@@ -19,6 +23,16 @@ Feature: A response cache kept in its own Redis database is flushed with one FLU
     And the instance logs "FLUSHDB on redis db 7"
     And the shared database holds the build fingerprint
     And the cache database holds no lock
+
+  Scenario: the flush command empties the system cache and the cache database
+    Given the system cache holds an entry
+    And the cache database holds a key outside every namespace
+    When `directus cache flush` runs with its cache in database 7
+    Then it exits 0
+    And the system cache no longer holds that entry
+    And the cache database no longer holds that key
+    And the flush logs "FLUSHDB on redis db 7, the scoped-cache index with it"
+    And the flush logs nothing saying "The client is offline"
 
   Scenario: a cached read and its index are filed in the cache database
     Given an instance keeping its cache in database 7
