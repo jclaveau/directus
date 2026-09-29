@@ -83,3 +83,11 @@ Feature: The members naming an expired entry are reaped from the index
     And a sweep of an older build moved the set of ada aside without naming it
     Then the reap drops the read of ada before it expires
     And the moved set is gone, and nothing names it
+
+  A purge trusts the index-key sets only once a reap has walked the whole index:
+  each full walk marks them complete with the wholesale purge counter as it read
+  before the walk, so a flush moving that counter voids the mark until the next.
+
+  Scenario: a reap marks the index-key sets complete with the wholesale counter
+    Given the cache is flushed
+    Then the next reap marks the index-key sets complete with the counter it read

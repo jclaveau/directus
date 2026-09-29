@@ -24,6 +24,7 @@ const feature = loadFeature(
 describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-collection-index-keys-${vendor}`;
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
+	const markerKey = `${indexPrefix}collection-index-keys-complete`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';
 	env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
@@ -47,6 +48,9 @@ describe.each(vendors)('%s', (vendor) => {
 		'index_keys_long',
 		'index_keys_unbounded',
 		'index_keys_move',
+		'index_keys_marked',
+		'index_keys_unmarked',
+		'index_keys_flushed',
 	];
 
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
@@ -101,10 +105,17 @@ describe.each(vendors)('%s', (vendor) => {
 			'a set with no expiry leaves the index-key set with none',
 			'a purge moves each set aside, names it, and releases both once its '
 				+ 'reads are gone',
+			'a purge reads the index-key set once the index-key sets are marked '
+				+ 'complete',
+			'a set nothing names is purged while the index-key sets are not marked '
+				+ 'complete',
+			'a marker written before a flush vouches for nothing after it',
 		]) {
 			scenario(scenarioTitle, ({ given, and, when, then }) => {
 				let collection = '';
+				let keptMarker: string | null = null;
 				const purgeWrites: Record<string, string>[] = [];
+				const purgeReads: Record<string, string>[] = [];
 
 				function readByName(row: Record<string, string>) {
 					return request(getUrl(vendor, env))
@@ -141,6 +152,35 @@ describe.each(vendors)('%s', (vendor) => {
 
 				and('these reads are cached:', cacheReads);
 
+				// What a reap's full pass writes: the wholesale counter as it read
+				// before the pass.
+				and.optional('the index-key sets are marked complete', async () => {
+					expect(await redisClient.set(
+						markerKey,
+						await redisClient.get(`${namespace}:scoped-cache-epoch:*`) ?? '',
+					)).toBe('OK');
+				});
+
+				and.optional('the index-key sets are not marked complete', async () => {
+					await redisClient.del(markerKey);
+					expect(await redisClient.exists(markerKey)).toBe(0);
+				});
+
+				and.optional('the marker is kept as it reads now', async () => {
+					keptMarker = await redisClient.get(markerKey);
+					expect(keptMarker).not.toBeNull();
+				});
+
+				when.optional('the cache is flushed', async () => {
+					const flushed = await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+
+					expect(flushed.statusCode).toBe(200);
+				});
+
+				and.optional('these reads are cached again:', cacheReads);
+
 				// What a flush dropping the index-key set after the set was filed
 				// leaves, for this one name.
 				and.optional(
@@ -152,6 +192,11 @@ describe.each(vendors)('%s', (vendor) => {
 						)).toBe(1);
 					},
 				);
+
+				// What a reap that read the counter before the flush writes after it.
+				and.optional('the marker is written back as it was kept', async () => {
+					expect(await redisClient.set(markerKey, keptMarker!)).toBe('OK');
+				});
 
 				and.optional(/^the index-key set of \w+ is gone$/, async () => {
 					expect(await redisClient.del(
@@ -246,8 +291,31 @@ describe.each(vendors)('%s', (vendor) => {
 							const command = commandArgs[0]!.toLowerCase();
 							const keys = commandArgs.slice(1);
 
+							const indexKeys = keys.filter((key) => {
+								return key.startsWith(indexPrefix);
+							});
+
+							const indexRead = {
+								command,
+								keys: indexKeys.map((key) => {
+									return key.slice(indexPrefix.length)
+										.replace(/[0-9a-f-]{36}/, '<sweep>');
+								}).join(' '),
+							};
+
 							if (commandArgs[1] === endSentinel) {
 								resolveEnd();
+							}
+							// Once per key read: a scan of the keyspace takes several pages.
+							else if (
+								['scan', 'sscan'].includes(command)
+								&& indexKeys.some((key) => key.includes(collection))
+								&& !purgeReads.some((purgeRead) => {
+									return purgeRead['command'] === command
+										&& purgeRead['keys'] === indexRead.keys;
+								})
+							) {
+								purgeReads.push(indexRead);
 							}
 							else if (
 								['rename', 'sadd', 'srem', 'unlink'].includes(command)
@@ -279,6 +347,13 @@ describe.each(vendors)('%s', (vendor) => {
 					'the purge wrote these index sets, in order:',
 					(table: Record<string, string>[]) => {
 						expect(purgeWrites).toEqual(table);
+					},
+				);
+
+				then.optional(
+					'the purge read these index sets, in order:',
+					(table: Record<string, string>[]) => {
+						expect(purgeReads).toEqual(table);
 					},
 				);
 

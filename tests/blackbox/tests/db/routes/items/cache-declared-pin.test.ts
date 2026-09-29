@@ -562,6 +562,17 @@ describe.each(vendors)('%s', (vendor) => {
 				}
 			},
 		);
+
+		// What a reap's full pass writes: the wholesale counter as it reads now.
+		// Without it a declaration scans the keyspace for the home pins' sets.
+		and.optional('the index-key sets are marked complete', async () => {
+			const namespace = env[vendor]['CACHE_NAMESPACE'];
+
+			expect(await redis.set(
+				`${namespace}:scoped-cache-index:collection-index-keys-complete`,
+				await redis.get(`${namespace}:scoped-cache-epoch:*`) ?? '',
+			)).toBe('OK');
+		});
 	}
 
 	// The `query` cell names the slots the signal rewrites and the note each gets,

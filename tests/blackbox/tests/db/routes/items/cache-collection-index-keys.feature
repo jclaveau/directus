@@ -11,6 +11,12 @@ Feature: A collection-wide purge reaches every set through the index-key set
   set is kept at least as long as every set it names, or none at all while one
   of them has no expiry: expiring first, it would lose them all at once.
 
+  A purge trusts the index-key sets only once a reap has walked the whole index
+  and marked them complete, with the wholesale purge counter as it read before
+  its walk. Until then, and once a flush has moved that counter, it scans the
+  keyspace for the collection's sets as before the index-key sets existed. Here
+  the marking is done by hand, the reap being set to once a year.
+
   Scenario: a set created after the index-key set exists is purged with the collection
     Given these rows of index_keys_new:
       | name | label |
@@ -20,6 +26,7 @@ Feature: A collection-wide purge reaches every set through the index-key set
       | name | fields     |
       | ada  | name,label |
       | bob  | name,label |
+    And the index-key sets are marked complete
     When every read of index_keys_new is purged
     Then these reads answer:
       | name | fields     | cache |
@@ -33,6 +40,7 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And these reads are cached:
       | name | fields     |
       | ada  | name,label |
+    And the index-key sets are marked complete
     And the index-key set of index_keys_unnamed no longer names the set of ada
     And these reads fill the same set:
       | name | fields |
@@ -50,6 +58,7 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And these reads are cached:
       | name | fields     |
       | ada  | name,label |
+    And the index-key sets are marked complete
     And the index-key set of index_keys_gone is gone
     And these reads fill the same set:
       | name | fields |
@@ -119,6 +128,68 @@ Feature: A collection-wide purge reaches every set through the index-key set
       | srem    | collection-index-keys:index_keys_move fingerprint:index_keys_move:name=ada |
       | unlink  | swept:index_keys_move:<sweep>:1                                            |
       | srem    | swept-index-keys swept:index_keys_move:<sweep>:1                           |
+    And these reads answer:
+      | name | fields     | cache |
+      | ada  | name,label | MISS  |
+
+  Scenario: a purge reads the index-key set once the index-key sets are marked complete
+    Given these rows of index_keys_marked:
+      | name | label |
+      | ada  | old   |
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |
+    And the index-key sets are marked complete
+    When every read of index_keys_marked is purged
+    Then the purge read these index sets, in order:
+      | command | keys                                       |
+      | sscan   | swept-index-keys swept:index_keys_marked:* |
+      | sscan   | collection-index-keys:index_keys_marked    |
+      | sscan   | swept:index_keys_marked:<sweep>:1          |
+    And these reads answer:
+      | name | fields     | cache |
+      | ada  | name,label | MISS  |
+
+  Scenario: a set nothing names is purged while the index-key sets are not marked complete
+    Given these rows of index_keys_unmarked:
+      | name | label |
+      | ada  | old   |
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |
+    And the index-key sets are not marked complete
+    And the index-key set of index_keys_unmarked no longer names the set of ada
+    When every read of index_keys_unmarked is purged
+    Then the purge read these index sets, in order:
+      | command | keys                                         |
+      | sscan   | swept-index-keys swept:index_keys_unmarked:* |
+      | scan    | fingerprint:index_keys_unmarked:*            |
+      | sscan   | swept:index_keys_unmarked:<sweep>:1          |
+    And these reads answer:
+      | name | fields     | cache |
+      | ada  | name,label | MISS  |
+
+  Scenario: a marker written before a flush vouches for nothing after it
+    Given these rows of index_keys_flushed:
+      | name | label |
+      | ada  | old   |
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |
+    And the index-key sets are marked complete
+    And the marker is kept as it reads now
+    When the cache is flushed
+    And these reads are cached again:
+      | name | fields     |
+      | ada  | name,label |
+    And the index-key set of index_keys_flushed no longer names the set of ada
+    And the marker is written back as it was kept
+    When every read of index_keys_flushed is purged
+    Then the purge read these index sets, in order:
+      | command | keys                                        |
+      | sscan   | swept-index-keys swept:index_keys_flushed:* |
+      | scan    | fingerprint:index_keys_flushed:*            |
+      | sscan   | swept:index_keys_flushed:<sweep>:1          |
     And these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |

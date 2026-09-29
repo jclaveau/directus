@@ -506,5 +506,38 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 			60_000,
 		);
+
+		scenario(
+			'a reap marks the index-key sets complete with the wholesale counter',
+			({ given, then }) => {
+				given('the cache is flushed', async () => {
+					const flushed = await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+
+					expect(flushed.statusCode).toBe(200);
+				});
+
+				// Polled: a reap already walking when the flush landed writes the
+				// counter it read before it, and the next one the moved counter.
+				then(
+					'the next reap marks the index-key sets complete with the counter it read',
+					async () => {
+						const counter = await redisClient.get(
+							`${namespace}:scoped-cache-epoch:*`,
+						);
+
+						expect(counter).not.toBeNull();
+
+						await expect.poll(async () => {
+							return redisClient.get(
+								`${indexPrefix}collection-index-keys-complete`,
+							);
+						}, { timeout: 5_000 }).toBe(counter);
+					},
+				);
+			},
+			60_000,
+		);
 	});
 });
