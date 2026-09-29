@@ -1306,15 +1306,27 @@ const redisStore: ScopedCacheStore = {
 	 * deploy. Each set it reads is named in its collection's index-key set
 	 * again, and each index-key set it meets loses the names of the sets that
 	 * are gone.
+	 *
+	 * A moved set it meets is named in the swept index-key set, which the
+	 * recovery reads instead of the keyspace: a node on that older build moves
+	 * its sets aside without naming them, and one dying mid-sweep strands them
+	 * where no recovery looks. A set a live sweep released between the SCAN and
+	 * the SADD leaves a name without a set, which the recovery reads as empty.
 	 */
 	async reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
 		epochKeyOf: (collection: string) => string,
 		epochTtlSeconds: number,
 	): Promise<ScopedCacheReapTally> {
-		const tally: ScopedCacheReapTally = { indexKeys: 0, reaped: 0 };
+		const tally: ScopedCacheReapTally = {
+			indexKeys: 0,
+			reaped: 0,
+			strandedSweptKeys: 0,
+		};
+
 		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
 		const indexKeyPrefix = `${scopedCacheIndexPrefix()}fingerprint:`;
+		const sweptKeyPrefix = `${scopedCacheIndexPrefix()}swept:`;
 
 		// The whole prefix rather than `fingerprint:*` alone, so the index-key
 		// sets come back from the same pass: MATCH filters after the walk, so the
@@ -1337,6 +1349,19 @@ const redisStore: ScopedCacheStore = {
 				) {
 					continue;
 				}
+			}
+
+			const sweptKeys = foundKeys.filter((foundKey) => {
+				return foundKey.startsWith(sweptKeyPrefix);
+			});
+
+			// SADD counts only the names it added: the ones a sweep of this build
+			// named already are not stranded.
+			if (sweptKeys.length > 0) {
+				tally.strandedSweptKeys += await useCacheRedis().sadd(
+					scopedCacheSweptIndexKeysKey(),
+					sweptKeys,
+				);
 			}
 
 			tally.indexKeys += indexKeys.length;

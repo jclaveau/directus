@@ -1662,6 +1662,9 @@ describe('retryPendingScopedCachePurges', () => {
 			});
 		}),
 		del: vi.fn(),
+		// Answers how many of the names were new, which the reap reads as how many
+		// moved sets nothing named.
+		sadd: vi.fn(),
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
 		pipeline: () => {
@@ -1695,6 +1698,7 @@ describe('retryPendingScopedCachePurges', () => {
 		// clearAllMocks keeps the Once queue: a case failing before its queued
 		// answers are used would hand them to the cases after it.
 		cache.delete.mockReset().mockResolvedValue(true);
+		redis.sadd.mockReset().mockResolvedValue(0);
 
 		// The shape a deployment with CACHE_STATS off returns for every entry, so a
 		// case has to opt IN to being able to name what it recovered.
@@ -1906,6 +1910,63 @@ describe('retryPendingScopedCachePurges', () => {
 
 		expect(indexedMembers).toEqual({
 			'ns:scoped-cache-index:swept:articles:dead:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		});
+	});
+
+	it(oneLine`
+		releases the moved sets the reap names for the recovery, which a node of an
+		older build strands without naming them
+	`, async () => {
+		indexedMembers = {
+			'ns:scoped-cache-index:swept:articles:old:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
+		vi.mocked(getCache).mockReturnValue({
+			cache: {
+				...cache,
+				store: {
+					getClient: async () => ({}),
+					createKeyPrefix: (key: string) => key,
+				},
+			},
+		} as any);
+
+		redis.sadd.mockResolvedValueOnce(1);
+
+		expect(await reapScopedCacheIndex()).toBe(0);
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(indexedMembers).toEqual({});
+	});
+
+	it(oneLine`
+		releases nothing after a reap whose moved sets were all named already: a
+		live sweep releases its own
+	`, async () => {
+		indexedMembers = {
+			'ns:scoped-cache-index:swept:articles:live:1': [
+				'articles:&id=,1,&|ns:entry-a',
+			],
+		};
+
+		vi.mocked(getCache).mockReturnValue({
+			cache: {
+				...cache,
+				store: {
+					getClient: async () => ({}),
+					createKeyPrefix: (key: string) => key,
+				},
+			},
+		} as any);
+
+		expect(await reapScopedCacheIndex()).toBe(0);
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-a');
+
+		expect(indexedMembers).toEqual({
+			'ns:scoped-cache-index:swept:articles:live:1': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		});

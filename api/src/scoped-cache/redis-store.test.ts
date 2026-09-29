@@ -53,6 +53,7 @@ vi.mock('../redis/index.js', () => {
 				pttl,
 				scan,
 				sscan,
+				sadd,
 				eval: evalScript,
 				on: onEvent,
 				status: redisState.status,
@@ -874,6 +875,7 @@ describe('reapIndexedEntries', () => {
 			scopedCacheCollectionIndexKeysRegister,
 			scopedCacheCollectionIndexKeysPrune,
 			pttl,
+			sadd,
 		]) {
 			command.mockReset();
 		}
@@ -907,7 +909,7 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 2, reaped: 1 });
+		expect(tally).toEqual({ indexKeys: 2, reaped: 1, strandedSweptKeys: 0 });
 
 		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheIndexReap',
@@ -1004,7 +1006,7 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 1, reaped: 0 });
+		expect(tally).toEqual({ indexKeys: 1, reaped: 0, strandedSweptKeys: 0 });
 		expect(scopedCacheIndexReap).not.toHaveBeenCalled();
 	});
 
@@ -1069,16 +1071,11 @@ describe('reapIndexedEntries', () => {
 	});
 
 	it(oneLine`
-		prunes the index-key sets it meets instead of reaping them as index sets,
-		and leaves the swept sets to the recovery
+		prunes the index-key sets it meets instead of reaping them as index sets
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			[
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'scalabus:scoped-cache-index:swept:slot:4f1c:',
-				'scalabus:scoped-cache-index:swept-index-keys',
-			],
+			['scalabus:scoped-cache-index:collection-index-keys:slot'],
 		]);
 
 		sscan.mockResolvedValueOnce([
@@ -1094,7 +1091,7 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 0, reaped: 0 });
+		expect(tally).toEqual({ indexKeys: 0, reaped: 0, strandedSweptKeys: 0 });
 
 		// The pattern the index-key sets have to match for Redis to return them.
 		expect(scan.mock.calls).toEqual([[
@@ -1118,6 +1115,42 @@ describe('reapIndexedEntries', () => {
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 		]]);
 
+		expect(scopedCacheIndexReap).not.toHaveBeenCalled();
+		expect(sadd).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		names the moved sets it meets in the swept index-key set, counting only the
+		names that were missing, and reads none of them
+	`, async () => {
+		scan.mockResolvedValueOnce([
+			'0',
+			[
+				'scalabus:scoped-cache-index:swept:slot:4f1c:1',
+				'scalabus:scoped-cache-index:swept:slot:4f1c:2',
+				'scalabus:scoped-cache-index:swept-index-keys',
+			],
+		]);
+
+		sadd.mockResolvedValueOnce(1);
+
+		const tally = await redisScopedCacheStore().reapIndexedEntries(
+			(key) => key,
+			(collection) => collection,
+			86400,
+		);
+
+		expect(tally).toEqual({ indexKeys: 0, reaped: 0, strandedSweptKeys: 1 });
+
+		expect(sadd.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:swept-index-keys',
+			[
+				'scalabus:scoped-cache-index:swept:slot:4f1c:1',
+				'scalabus:scoped-cache-index:swept:slot:4f1c:2',
+			],
+		]]);
+
+		expect(sscan).not.toHaveBeenCalled();
 		expect(scopedCacheIndexReap).not.toHaveBeenCalled();
 	});
 

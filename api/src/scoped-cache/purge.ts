@@ -1005,11 +1005,19 @@ export async function reapScopedCacheIndex(): Promise<number> {
 		return 0;
 	}
 
-	const { reaped } = await useScopedCacheStore().reapIndexedEntries(
-		rawKeyOf,
-		scopedCacheEpochKey,
-		scopedCacheEpochTtlSeconds(),
-	);
+	const { reaped, strandedSweptKeys } = await useScopedCacheStore()
+		.reapIndexedEntries(
+			rawKeyOf,
+			scopedCacheEpochKey,
+			scopedCacheEpochTtlSeconds(),
+		);
+
+	// The recovery runs on `ready` only, and a set a node of an older build
+	// stranded is named for it only now: until released, its entries stay cached
+	// with their old value.
+	if (strandedSweptKeys > 0) {
+		await releaseStrandedScopedCacheSweeps();
+	}
 
 	return reaped;
 }
@@ -1223,9 +1231,9 @@ export function startScopedCachePurgeRecovery(): void {
 			});
 	};
 
-	// On `ready` only, never on the timer below: finding a stranded sweep scans
-	// the whole keyspace, and it only strands when a process dies mid-sweep, which
-	// its restart's own `ready` answers.
+	// On `ready` rather than on the timer below: a sweep strands its sets when its
+	// process dies mid-sweep, which the restart's own `ready` answers. The sets a
+	// node of an older build strands, the reap names and releases.
 	useScopedCacheStore().onStoreReady(() => {
 		releaseStrandedScopedCacheSweeps()
 			.then((evicted) => {
