@@ -1,7 +1,7 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import { describe, expect, it } from 'vitest';
-import { scopedCacheIndexPath } from './index-path.js';
+import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
 
 // `slot` owns through `zone`, which owns through `region`, so its index path is
 // two hops deep and the walk has a longest path to prefer. `note` scopes on a flat
@@ -84,5 +84,20 @@ describe('scopedCacheIndexPath', () => {
 		];
 
 		expect(scopedCacheIndexPath(composedSchema, 'slot')).toBe('owner');
+	});
+});
+
+describe('scopedCacheHomePinFields', () => {
+	it('ranks the primary key, then the scope fields in declared order', () => {
+		expect(scopedCacheHomePinFields(schema, 'note'))
+			.toEqual(['id', 'method', 'author']);
+	});
+
+	it('ranks the primary key alone for a collection declaring no scope field', () => {
+		expect(scopedCacheHomePinFields(schema, 'loose')).toEqual(['id']);
+	});
+
+	it('answers nothing for a collection the schema does not know', () => {
+		expect(scopedCacheHomePinFields(schema, 'missing')).toEqual([]);
 	});
 });

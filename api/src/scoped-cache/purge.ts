@@ -60,7 +60,7 @@ import {
 	scopedCacheEpochKey,
 	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
-import { scopedCacheIndexPath } from './index-path.js';
+import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
 import { scopedCacheEpochBumpScript } from './redis-store.js';
 
 const env = useEnv();
@@ -182,7 +182,7 @@ export async function indexScopedCacheEntry(
 			// fingerprint names: derived from the schema, never from the read, so a
 			// fill and the write that has to find it hand the store the same one.
 			indexPath: scopedCacheIndexPath(schema, fingerprint.collection),
-			primaryKeyField: schema.collections[fingerprint.collection]?.primary ?? null,
+			homePinFields: scopedCacheHomePinFields(schema, fingerprint.collection),
 		};
 	});
 

@@ -532,13 +532,19 @@ function scopedCacheHomePinIndexKey(
  *
  * Any one of its pins would do: a row drops the entry only by carrying one of its
  * values on EVERY field it pins, so on this one too, and a write reads the set of
- * each value its rows carry. So the choice is about set SIZE alone. The primary
- * key comes first when the read pins it: one row's value, so its set holds that
- * row's reads and no other's, where a field every row shares (`enabled=true`)
- * would gather the whole collection's reads into one set a one-row write then
- * reads whole. Otherwise the field with the fewest values costs the fewest
- * filings, ties going to the lowest pin key so the choice never depends on the
- * order the pins came in. Values are counted distinct: the serialiser drops a
+ * each value its rows carry. So the choice is about set SIZE alone.
+ * `homePinFields` ranks it: the first of them the read pins is the home. It is the
+ * primary key, then the collection's `scoped_cache_fields` in their declared
+ * order, so an admin controls the home by that order: a field every row shares
+ * (`enabled=true`) listed first gathers the collection's reads into one set a
+ * one-row write then reads whole, one per tenant listed first does not. The key
+ * leads because it holds one row's value, so its set holds that row's reads and
+ * no other's. A field declared unique would rank next to it, which the schema
+ * does not expose yet (#579).
+ *
+ * A read pinning none of them keeps the field with the fewest values, costing the
+ * fewest filings, ties going to the lowest pin key so the choice never depends on
+ * the order the pins came in. Values are counted distinct: the serialiser drops a
  * repeated one.
  *
  * A field pinned to no value is never chosen, since its entry would be filed
@@ -546,17 +552,18 @@ function scopedCacheHomePinIndexKey(
  */
 export function scopedCacheHomePin(
 	fingerprint: ScopedCacheFingerprint,
-	primaryKeyField: string | null,
+	homePinFields: readonly string[],
 ): { field: string; pinnedValues: string[] } | null {
 	const pinnedScope = fingerprint.pinnedScope ?? {};
 
-	const primaryKeyValues = primaryKeyField !== null
-		&& Object.hasOwn(pinnedScope, primaryKeyField)
-		? [...new Set(pinnedScope[primaryKeyField])]
-		: [];
+	for (const field of homePinFields) {
+		const pinnedValues = Object.hasOwn(pinnedScope, field)
+			? [...new Set(pinnedScope[field])]
+			: [];
 
-	if (primaryKeyValues.length > 0) {
-		return { field: primaryKeyField!, pinnedValues: primaryKeyValues };
+		if (pinnedValues.length > 0) {
+			return { field, pinnedValues };
+		}
 	}
 
 	let homePin: { field: string; pinKey: string; pinnedValues: string[] } | null
@@ -598,7 +605,7 @@ export function scopedCacheHomePin(
 export function scopedCacheFingerprintIndexKeys(
 	fingerprint: ScopedCacheFingerprint,
 	indexPath: string | null,
-	primaryKeyField: string | null,
+	homePinFields: readonly string[],
 ): string[] {
 	const { collection } = fingerprint;
 
@@ -615,7 +622,7 @@ export function scopedCacheFingerprintIndexKeys(
 		});
 	}
 
-	const homePin = scopedCacheHomePin(fingerprint, primaryKeyField);
+	const homePin = scopedCacheHomePin(fingerprint, homePinFields);
 
 	if (homePin === null) {
 		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
@@ -698,10 +705,11 @@ export function scopedCacheRowHomePinKeys(
  * and value it pins, else the bare set.
  *
  * What a prune names rather than the filing's own keys, because the home pin is
- * ranked off the schema (the primary key first) and a prune is handed none of it:
- * a member read back cannot say which of its fields was chosen, and one filed by
- * a build that ranked them another way was filed elsewhere. A set that never held
- * the member costs an `SREM` of nothing.
+ * ranked off the schema (the primary key, then the declared scope fields) and a
+ * prune is handed none of it: a member read back cannot say which of its fields
+ * was chosen, and one filed by a build or a field order that ranked them another
+ * way was filed elsewhere. A set that never held the member costs an `SREM` of
+ * nothing.
  */
 export function scopedCacheFingerprintPrunedIndexKeys(
 	fingerprint: ScopedCacheFingerprint,
@@ -712,7 +720,7 @@ export function scopedCacheFingerprintPrunedIndexKeys(
 		: fingerprint.pinnedScope?.[indexPath];
 
 	if (indexValues !== undefined && indexValues.length > 0) {
-		return scopedCacheFingerprintIndexKeys(fingerprint, indexPath, null);
+		return scopedCacheFingerprintIndexKeys(fingerprint, indexPath, []);
 	}
 
 	const homePinKeys = scopedCacheRowHomePinKeys(
@@ -946,7 +954,7 @@ const redisStore: ScopedCacheStore = {
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
 
-		for (const { fingerprint, keys, indexPath, primaryKeyField } of filings) {
+		for (const { fingerprint, keys, indexPath, homePinFields } of filings) {
 			const members = keys.map((key) => {
 				return renderScopedCacheIndexMember(fingerprint, key);
 			});
@@ -954,7 +962,7 @@ const redisStore: ScopedCacheStore = {
 			for (const indexKey of scopedCacheFingerprintIndexKeys(
 				fingerprint,
 				indexPath,
-				primaryKeyField,
+				homePinFields,
 			)) {
 				if (ttlSeconds > 0) {
 					pipeline.scopedCacheIndexExpiry(indexKey, ttlSeconds, ...members);

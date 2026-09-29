@@ -58,7 +58,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 				'slot:&method=,spaced,&view=,id,&zone.region.owner=,ana,&',
 			),
 			'zone.region.owner',
-			null,
+			[],
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
 		]);
@@ -68,7 +68,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,ana,bo,&'),
 			'zone.region.owner',
-			null,
+			[],
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=bo',
@@ -79,7 +79,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&method=,spaced,&view=,id,&'),
 			'zone.region.owner',
-			null,
+			[],
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:method=spaced',
 		]);
@@ -91,7 +91,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,7,&view=,id,&'),
 			'owner',
-			'id',
+			['id'],
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7']);
 	});
 
@@ -99,7 +99,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('loose:&id=,4,7,&view=,id,&'),
 			null,
-			null,
+			[],
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:loose:pin:id=4',
 			'scalabus:scoped-cache-index:fingerprint:loose:pin:id=7',
@@ -110,7 +110,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('loose:&view=,id,&'),
 			null,
-			null,
+			[],
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:']);
 	});
 
@@ -118,7 +118,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			{ collection: 'note', pinnedScope: { view: ['a,b'] } },
 			null,
-			null,
+			[],
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:note:pin:\\view=a\\,b',
 		]);
@@ -128,7 +128,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,a\\,b,&'),
 			'zone.region.owner',
-			null,
+			[],
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=a\\,b',
 		]);
@@ -140,7 +140,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			{ collection: 'slot' },
 			'constructor',
-			null,
+			[],
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
@@ -148,7 +148,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&constructor=,ana,&'),
 			'constructor',
-			null,
+			[],
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:constructor=ana']);
 	});
 });
@@ -236,14 +236,14 @@ describe('scopedCacheHomePin', () => {
 	`, () => {
 		expect(scopedCacheHomePin(
 			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,7,&'),
-			'id',
+			['id'],
 		)).toEqual({ field: 'id', pinnedValues: ['7'] });
 	});
 
 	it('picks the primary key even where it pins more values', () => {
 		expect(scopedCacheHomePin(
 			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,1,2,3,&'),
-			'id',
+			['id'],
 		)).toEqual({ field: 'id', pinnedValues: ['1', '2', '3'] });
 	});
 
@@ -252,14 +252,42 @@ describe('scopedCacheHomePin', () => {
 	`, () => {
 		expect(scopedCacheHomePin(
 			parseScopedCacheFingerprint('slot:&enabled=,true,&owner=,a,b,&'),
-			'id',
+			['id'],
 		)).toEqual({ field: 'enabled', pinnedValues: ['true'] });
+	});
+
+	it(oneLine`
+		picks the first declared scope field the read pins, over one with fewer
+		values
+	`, () => {
+		expect(scopedCacheHomePin(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&tenant=,a,b,&'),
+			['id', 'tenant', 'enabled'],
+		)).toEqual({ field: 'tenant', pinnedValues: ['a', 'b'] });
+	});
+
+	// The declared order is the admin's lever: listing `enabled` first homes the
+	// same read under the shared boolean.
+	it(oneLine`
+		picks by declared order, so reordering the scope fields moves the home
+	`, () => {
+		expect(scopedCacheHomePin(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&tenant=,a,&'),
+			['id', 'enabled', 'tenant'],
+		)).toEqual({ field: 'enabled', pinnedValues: ['true'] });
+	});
+
+	it('picks the primary key over every declared scope field', () => {
+		expect(scopedCacheHomePin(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,7,&tenant=,a,&'),
+			['id', 'tenant', 'enabled'],
+		)).toEqual({ field: 'id', pinnedValues: ['7'] });
 	});
 
 	it('picks the pinned field with the fewest values', () => {
 		expect(scopedCacheHomePin(
 			parseScopedCacheFingerprint('slot:&id=,1,2,3,&owner=,alpha,beta,&'),
-			null,
+			[],
 		)).toEqual({ field: 'owner', pinnedValues: ['alpha', 'beta'] });
 	});
 
@@ -267,7 +295,7 @@ describe('scopedCacheHomePin', () => {
 		expect(scopedCacheHomePin({
 			collection: 'slot',
 			pinnedScope: { owner: ['alpha'], method: ['spaced'] },
-		}, null)).toEqual({ field: 'method', pinnedValues: ['spaced'] });
+		}, [])).toEqual({ field: 'method', pinnedValues: ['spaced'] });
 	});
 
 	it(oneLine`
@@ -279,14 +307,14 @@ describe('scopedCacheHomePin', () => {
 			pinnedScope: { method: ['spaced', 'spaced', 'spaced'], owner: ['a', 'b'] },
 		};
 
-		expect(scopedCacheHomePin(filed, null)).toEqual({
+		expect(scopedCacheHomePin(filed, [])).toEqual({
 			field: 'method',
 			pinnedValues: ['spaced'],
 		});
 
 		expect(scopedCacheHomePin(parseScopedCacheIndexMember(
 			renderScopedCacheIndexMember(filed, 'ns:abc'),
-		).fingerprint, null)).toEqual({ field: 'method', pinnedValues: ['spaced'] });
+		).fingerprint, [])).toEqual({ field: 'method', pinnedValues: ['spaced'] });
 	});
 
 	it(oneLine`
@@ -295,11 +323,11 @@ describe('scopedCacheHomePin', () => {
 		expect(scopedCacheHomePin({
 			collection: 'slot',
 			pinnedScope: { method: [], owner: ['alpha', 'beta'] },
-		}, null)).toEqual({ field: 'owner', pinnedValues: ['alpha', 'beta'] });
+		}, [])).toEqual({ field: 'owner', pinnedValues: ['alpha', 'beta'] });
 	});
 
 	it('answers null for a read pinning nothing', () => {
-		expect(scopedCacheHomePin({ collection: 'slot', viewFields: ['id'] }, null))
+		expect(scopedCacheHomePin({ collection: 'slot', viewFields: ['id'] }, []))
 			.toBe(null);
 	});
 });
@@ -346,7 +374,7 @@ describe('scopedCacheRowHomePinKeys', () => {
 			const filedIn = scopedCacheFingerprintIndexKeys(
 				parseScopedCacheFingerprint(filed),
 				'owner',
-				null,
+				[],
 			);
 
 			expect(filedIn.some((indexKey) => readSets.has(indexKey))).toBe(true);

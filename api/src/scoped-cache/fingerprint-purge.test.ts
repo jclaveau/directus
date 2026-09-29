@@ -229,6 +229,35 @@ describe('a purge shown the rows it wrote', () => {
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-seven');
 	});
 
+	it(oneLine`
+		drops a read homed under its declared tenant when a write flips the shared
+		boolean it also pins
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:tenant=acme': [
+				'slot:&enabled=,true,&tenant=,acme,&view=,label,&|ns:entry-acme',
+			],
+		};
+
+		// The row before and after the write: `enabled` flipped to false.
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['true'], id: ['7'], tenant: ['acme'] },
+				},
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['false'], id: ['7'], tenant: ['acme'] },
+				},
+			],
+			changed: ['enabled'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-acme');
+	});
+
 	// A build ranking home pins another way filed the same read under the boolean:
 	// the write reads every field and value its rows carry, so it finds it there.
 	it(oneLine`

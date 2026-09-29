@@ -77,3 +77,25 @@ export function scopedCacheIndexPath(
 
 	return walkRelations(collection, '', new Set());
 }
+
+/**
+ * The fields a collection's reads off the index path are homed by, first match
+ * winning: the primary key, then its `scoped_cache_fields` in declared order.
+ *
+ * Read off the schema, never the read, so a fill and the write that has to find
+ * it rank the same way. The declared order is the admin's lever on the home.
+ */
+export function scopedCacheHomePinFields(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+): string[] {
+	const collectionOverview = schema.collections[collection];
+	const primaryKeyField = collectionOverview?.primary;
+
+	const scopeFields = (collectionOverview?.scopedCacheFields ?? [])
+		.filter((field) => field !== primaryKeyField);
+
+	return primaryKeyField === undefined
+		? scopeFields
+		: [primaryKeyField, ...scopeFields];
+}
