@@ -38,19 +38,24 @@ Feature: A collection-wide purge reaches every set through the index-key set
     Given these rows of index_keys_unnamed:
       | name | label |
       | ada  | old   |
+      | bob  | old   |
     And these reads are cached:
       | name | fields     |
       | ada  | name,label |
+      | bob  | name,label |
     And the index-key sets are marked complete
     And the index-key set of index_keys_unnamed no longer names the set of ada
-    And these reads fill the same set:
+    Then the index-key set of index_keys_unnamed still names the set of bob, not the set of ada
+    When these reads fill the same set:
       | name | fields |
       | ada  | name   |
+    Then the index-key set of index_keys_unnamed names the set of ada again
     When every read of index_keys_unnamed is purged
     Then these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |
       | ada  | name       | MISS  |
+      | bob  | name,label | MISS  |
 
   Scenario: an index-key set that is gone is rebuilt by the next fill, with an expiry
     Given these rows of index_keys_gone:

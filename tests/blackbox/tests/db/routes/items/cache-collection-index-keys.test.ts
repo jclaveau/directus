@@ -262,6 +262,24 @@ describe.each(vendors)('%s', (vendor) => {
 			)).toBe(1);
 		});
 
+		// The index-key set was never dropped, so only the fill's own SADD can
+		// name the set of ada again.
+		then.optional(
+			/^the index-key set of \w+ still names the set of bob, not the set of ada$/,
+			async () => {
+				expect([
+					await redisClient.sismember(
+						`${indexPrefix}collection-index-keys:${collection}`,
+						`${indexPrefix}fingerprint:${collection}:name=bob`,
+					),
+					await redisClient.sismember(
+						`${indexPrefix}collection-index-keys:${collection}`,
+						`${indexPrefix}fingerprint:${collection}:name=ada`,
+					),
+				]).toEqual([1, 0]);
+			},
+		);
+
 		and.optional(
 			'these reads fill the same set:',
 			async (table: Record<string, string>[]) => {
@@ -285,6 +303,16 @@ describe.each(vendors)('%s', (vendor) => {
 						return reread.headers[cacheStatusHeader];
 					}, { timeout: 5_000 }).toBe('HIT');
 				}
+			},
+		);
+
+		then.optional(
+			/^the index-key set of \w+ names the set of ada again$/,
+			async () => {
+				expect(await redisClient.sismember(
+					`${indexPrefix}collection-index-keys:${collection}`,
+					`${indexPrefix}fingerprint:${collection}:name=ada`,
+				)).toBe(1);
 			},
 		);
 
