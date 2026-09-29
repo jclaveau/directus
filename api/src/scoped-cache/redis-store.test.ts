@@ -1156,6 +1156,9 @@ describe('scopedCacheIndexFileScript', () => {
 			'\tif count > 0 then\n'
 			+ "\t\tredis.call('SADD', KEYS[i], unpack(ARGV, at + 1, at + count))\n"
 			+ '\tend\n'
+			+ '\tif i == #KEYS and #passed > 0 then\n'
+			+ "\t\tredis.call('SADD', KEYS[i], unpack(passed))\n"
+			+ '\tend\n'
 			+ '\tat = at + count + 1\n'
 			+ '\tif want <= 0 then\n'
 			+ '\t\tif lefts[i] >= 0 then\n'

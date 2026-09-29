@@ -1157,12 +1157,10 @@ describe('indexScopedCacheEntry', () => {
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 			'ns:scoped-cache-index:fingerprint:articles:',
 			3600,
-			2,
+			-2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-			2,
-			'articles:&author=,7,&|entry',
-			'articles:&author=,7,&|entry__expires_at',
+			0,
 		]]);
 	});
 
@@ -1199,12 +1197,10 @@ describe('indexScopedCacheEntry', () => {
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 			'ns:scoped-cache-index:fingerprint:articles:',
 			0,
-			2,
+			-2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-			2,
-			'articles:&author=,7,&|entry',
-			'articles:&author=,7,&|entry__expires_at',
+			0,
 		]]);
 	});
 });
