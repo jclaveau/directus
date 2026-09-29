@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import {
 	useLogger,
 } from '../logger/index.js';
+import { _cache } from '../metrics/lib/instance.js';
 import {
 	useCacheRedis,
 } from '../redis/index.js';
@@ -978,6 +979,23 @@ async function collectionIndexKeysComplete(): Promise<boolean> {
 }
 
 /**
+ * Say which way a collection-wide read found its sets. Read off the metrics
+ * this process holds rather than asked for, so a process with none never
+ * loads what creating them costs.
+ */
+function countIndexRead(collection: string, indexKeysComplete: boolean): void {
+	const readMode = indexKeysComplete
+		? 'registry'
+		: 'scan';
+
+	useLogger().debug(`[scoped-cache] ${collection} index sets read by ${readMode}`);
+
+	_cache.metrics
+		?.getScopedCacheIndexReadMetric()
+		?.inc({ mode: readMode });
+}
+
+/**
  * The sets one collection's fingerprints are filed in, a page at a time: the
  * names its index-key set holds while `collectionIndexKeysComplete` vouches for
  * them, a keyspace SCAN otherwise. `nameGlob` narrows either to the sets whose
@@ -988,7 +1006,11 @@ async function* scanCollectionIndexKeyNames(
 	collection: string,
 	nameGlob: string | null = null,
 ): AsyncGenerator<string[]> {
-	if (await collectionIndexKeysComplete()) {
+	const indexKeysComplete = await collectionIndexKeysComplete();
+
+	countIndexRead(collection, indexKeysComplete);
+
+	if (indexKeysComplete) {
 		yield* scanCollectionIndexKeys(
 			scopedCacheCollectionIndexKeysKey(collection),
 			nameGlob,
@@ -1960,7 +1982,11 @@ const redisStore: ScopedCacheStore = {
 		// every name or key that stays for the whole read, so the ones this moves
 		// out as it goes skip none. One added meanwhile is a fill that started after
 		// the purge counters moved, which its own guard evicts.
-		const indexKeyPages = await collectionIndexKeysComplete()
+		const indexKeysComplete = await collectionIndexKeysComplete();
+
+		countIndexRead(collection, indexKeysComplete);
+
+		const indexKeyPages = indexKeysComplete
 			? scanScopedCacheSetMembers(collectionIndexKeysKey)
 			: scanScopedCacheKeys(scopedCacheCollectionIndexGlob(collection));
 

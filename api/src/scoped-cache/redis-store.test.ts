@@ -22,6 +22,7 @@ import {
 	scopedCacheSweepMoveScript,
 } from './redis-store.js';
 import { parseScopedCacheFingerprint } from './fingerprint.js';
+import { _cache } from '../metrics/lib/instance.js';
 
 const env = vi.hoisted((): Record<string, string> => {
 	return { CACHE_NAMESPACE: 'scalabus' };
@@ -1516,6 +1517,10 @@ describe('takeCollectionIndexedKeys', () => {
 		}
 	});
 
+	afterEach(() => {
+		_cache.metrics = undefined;
+	});
+
 	it(oneLine`
 		moves the sets a keyspace scan finds while no reap vouches for the
 		index-key set
@@ -1759,6 +1764,54 @@ describe('takeCollectionIndexedKeys', () => {
 				sweptKeys: ['scalabus:scoped-cache-index:swept:slot:a1:1'],
 			},
 		]);
+	});
+
+	it(oneLine`
+		counts a read by keyspace scan: one holding up after a flush is a reap
+		that never wrote the marker back
+	`, async () => {
+		const inc = vi.fn();
+		_cache.metrics = { getScopedCacheIndexReadMetric: () => ({ inc }) } as any;
+		mget.mockResolvedValueOnce([null, '7']);
+		sscan.mockResolvedValueOnce(['0', []]);
+		scan.mockResolvedValueOnce(['0', []]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+		]);
+
+		expect(inc).toHaveBeenCalledExactlyOnceWith({ mode: 'scan' });
+	});
+
+	it('counts a read by the index-key set a reap vouched for', async () => {
+		const inc = vi.fn();
+		_cache.metrics = { getScopedCacheIndexReadMetric: () => ({ inc }) } as any;
+		mget.mockResolvedValueOnce(['7', '7']);
+		sscan.mockResolvedValue(['0', []]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+		]);
+
+		expect(inc).toHaveBeenCalledExactlyOnceWith({ mode: 'registry' });
 	});
 
 	it('gives a moved set no expiry of its own: it keeps the one it had', () => {
