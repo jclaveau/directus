@@ -58,6 +58,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 				'slot:&method=,spaced,&view=,id,&zone.region.owner=,ana,&',
 			),
 			'zone.region.owner',
+			null,
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
 		]);
@@ -67,6 +68,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,ana,bo,&'),
 			'zone.region.owner',
+			null,
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=ana',
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=bo',
@@ -77,14 +79,26 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&method=,spaced,&view=,id,&'),
 			'zone.region.owner',
+			null,
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:method=spaced',
 		]);
 	});
 
+	it(oneLine`
+		files a read pinning the primary key and a shared boolean under the key
+	`, () => {
+		expect(scopedCacheFingerprintIndexKeys(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,7,&view=,id,&'),
+			'owner',
+			'id',
+		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7']);
+	});
+
 	it('files a read of a collection with no index path under its home pin', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('loose:&id=,4,7,&view=,id,&'),
+			null,
 			null,
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:loose:pin:id=4',
@@ -96,12 +110,14 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('loose:&view=,id,&'),
 			null,
+			null,
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:loose:']);
 	});
 
 	it('files a home pin by its escaped key and value', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			{ collection: 'note', pinnedScope: { view: ['a,b'] } },
+			null,
 			null,
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:note:pin:\\view=a\\,b',
@@ -112,6 +128,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&zone.region.owner=,a\\,b,&'),
 			'zone.region.owner',
+			null,
 		)).toEqual([
 			'scalabus:scoped-cache-index:fingerprint:slot:zone.region.owner=a\\,b',
 		]);
@@ -123,6 +140,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			{ collection: 'slot' },
 			'constructor',
+			null,
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:']);
 	});
 
@@ -130,6 +148,7 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 		expect(scopedCacheFingerprintIndexKeys(
 			parseScopedCacheFingerprint('slot:&constructor=,ana,&'),
 			'constructor',
+			null,
 		)).toEqual(['scalabus:scoped-cache-index:fingerprint:slot:constructor=ana']);
 	});
 });
@@ -212,9 +231,35 @@ describe('scopedCacheRowIndexKeys', () => {
 });
 
 describe('scopedCacheHomePin', () => {
+	it(oneLine`
+		picks the primary key when the read pins it, over a field every row shares
+	`, () => {
+		expect(scopedCacheHomePin(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,7,&'),
+			'id',
+		)).toEqual({ field: 'id', pinnedValues: ['7'] });
+	});
+
+	it('picks the primary key even where it pins more values', () => {
+		expect(scopedCacheHomePin(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&id=,1,2,3,&'),
+			'id',
+		)).toEqual({ field: 'id', pinnedValues: ['1', '2', '3'] });
+	});
+
+	it(oneLine`
+		picks the fewest values when the read leaves the primary key unpinned
+	`, () => {
+		expect(scopedCacheHomePin(
+			parseScopedCacheFingerprint('slot:&enabled=,true,&owner=,a,b,&'),
+			'id',
+		)).toEqual({ field: 'enabled', pinnedValues: ['true'] });
+	});
+
 	it('picks the pinned field with the fewest values', () => {
 		expect(scopedCacheHomePin(
 			parseScopedCacheFingerprint('slot:&id=,1,2,3,&owner=,alpha,beta,&'),
+			null,
 		)).toEqual({ field: 'owner', pinnedValues: ['alpha', 'beta'] });
 	});
 
@@ -222,7 +267,7 @@ describe('scopedCacheHomePin', () => {
 		expect(scopedCacheHomePin({
 			collection: 'slot',
 			pinnedScope: { owner: ['alpha'], method: ['spaced'] },
-		})).toEqual({ field: 'method', pinnedValues: ['spaced'] });
+		}, null)).toEqual({ field: 'method', pinnedValues: ['spaced'] });
 	});
 
 	it(oneLine`
@@ -234,14 +279,14 @@ describe('scopedCacheHomePin', () => {
 			pinnedScope: { method: ['spaced', 'spaced', 'spaced'], owner: ['a', 'b'] },
 		};
 
-		expect(scopedCacheHomePin(filed)).toEqual({
+		expect(scopedCacheHomePin(filed, null)).toEqual({
 			field: 'method',
 			pinnedValues: ['spaced'],
 		});
 
 		expect(scopedCacheHomePin(parseScopedCacheIndexMember(
 			renderScopedCacheIndexMember(filed, 'ns:abc'),
-		).fingerprint)).toEqual({ field: 'method', pinnedValues: ['spaced'] });
+		).fingerprint, null)).toEqual({ field: 'method', pinnedValues: ['spaced'] });
 	});
 
 	it(oneLine`
@@ -250,11 +295,11 @@ describe('scopedCacheHomePin', () => {
 		expect(scopedCacheHomePin({
 			collection: 'slot',
 			pinnedScope: { method: [], owner: ['alpha', 'beta'] },
-		})).toEqual({ field: 'owner', pinnedValues: ['alpha', 'beta'] });
+		}, null)).toEqual({ field: 'owner', pinnedValues: ['alpha', 'beta'] });
 	});
 
 	it('answers null for a read pinning nothing', () => {
-		expect(scopedCacheHomePin({ collection: 'slot', viewFields: ['id'] }))
+		expect(scopedCacheHomePin({ collection: 'slot', viewFields: ['id'] }, null))
 			.toBe(null);
 	});
 });
@@ -301,6 +346,7 @@ describe('scopedCacheRowHomePinKeys', () => {
 			const filedIn = scopedCacheFingerprintIndexKeys(
 				parseScopedCacheFingerprint(filed),
 				'owner',
+				null,
 			);
 
 			expect(filedIn.some((indexKey) => readSets.has(indexKey))).toBe(true);
@@ -433,6 +479,30 @@ describe('removeIndexedEntries', () => {
 			['scalabus:scoped-cache-index:fingerprint:slot:', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=4', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7', member],
+		]);
+	});
+
+	it(oneLine`
+		prunes a read off the index path from the set of every field it pins, so
+		the one a build ranking them another way filed it in too
+	`, async () => {
+		const member = 'slot:&enabled=,true,&id=,7,&view=,id,&|cache-key';
+
+		await redisScopedCacheStore().removeIndexedEntries(
+			[{
+				fingerprint: parseScopedCacheFingerprint(member.split('|')[0]!),
+				key: 'cache-key',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+					member,
+				},
+			}],
+			'owner',
+		);
+
+		expect(srem.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7', member],
+			['scalabus:scoped-cache-index:fingerprint:slot:pin:enabled=true', member],
 		]);
 	});
 

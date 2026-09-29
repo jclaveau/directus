@@ -201,6 +201,58 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
+		drops a read pinning a row's key and a shared boolean, filed under the key,
+		when a write flips that boolean on the row
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=7': [
+				'slot:&enabled=,true,&id=,7,&view=,label,&|ns:entry-seven',
+			],
+		};
+
+		// The row before and after the write: `enabled` flipped to false.
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['true'], id: ['7'], owner: ['alpha'] },
+				},
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['false'], id: ['7'], owner: ['alpha'] },
+				},
+			],
+			changed: ['enabled'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-seven');
+	});
+
+	// A build ranking home pins another way filed the same read under the boolean:
+	// the write reads every field and value its rows carry, so it finds it there.
+	it(oneLine`
+		drops the same read filed under the shared boolean instead of the key
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:enabled=true': [
+				'slot:&enabled=,true,&id=,7,&view=,label,&|ns:entry-seven',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { enabled: ['true'], id: ['7'], owner: ['alpha'] },
+			}],
+			changed: ['enabled'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-seven');
+	});
+
+	it(oneLine`
 		keeps an entry bound to fields the update never rewrote: its response cannot
 		have changed, whichever slice the row sits in
 	`, async () => {

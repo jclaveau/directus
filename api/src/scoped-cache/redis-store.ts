@@ -532,21 +532,37 @@ function scopedCacheHomePinIndexKey(
  *
  * Any one of its pins would do: a row drops the entry only by carrying one of its
  * values on EVERY field it pins, so on this one too, and a write reads the set of
- * each value its rows carry. The field with the fewest values costs the fewest
- * filings; ties go to the lowest pin key, so a member parsed back picks the same
- * field its filing did. Values are counted distinct for the same reason: the
- * serialiser drops a repeated one.
+ * each value its rows carry. So the choice is about set SIZE alone. The primary
+ * key comes first when the read pins it: one row's value, so its set holds that
+ * row's reads and no other's, where a field every row shares (`enabled=true`)
+ * would gather the whole collection's reads into one set a one-row write then
+ * reads whole. Otherwise the field with the fewest values costs the fewest
+ * filings, ties going to the lowest pin key so the choice never depends on the
+ * order the pins came in. Values are counted distinct: the serialiser drops a
+ * repeated one.
  *
  * A field pinned to no value is never chosen, since its entry would be filed
  * nowhere.
  */
 export function scopedCacheHomePin(
 	fingerprint: ScopedCacheFingerprint,
+	primaryKeyField: string | null,
 ): { field: string; pinnedValues: string[] } | null {
+	const pinnedScope = fingerprint.pinnedScope ?? {};
+
+	const primaryKeyValues = primaryKeyField !== null
+		&& Object.hasOwn(pinnedScope, primaryKeyField)
+		? [...new Set(pinnedScope[primaryKeyField])]
+		: [];
+
+	if (primaryKeyValues.length > 0) {
+		return { field: primaryKeyField!, pinnedValues: primaryKeyValues };
+	}
+
 	let homePin: { field: string; pinKey: string; pinnedValues: string[] } | null
 		= null;
 
-	for (const [field, values] of Object.entries(fingerprint.pinnedScope ?? {})) {
+	for (const [field, values] of Object.entries(pinnedScope)) {
 		const pinnedValues = [...new Set(values)];
 		const pinKey = escapeScopedCacheFingerprintPinKey(field);
 
@@ -582,6 +598,7 @@ export function scopedCacheHomePin(
 export function scopedCacheFingerprintIndexKeys(
 	fingerprint: ScopedCacheFingerprint,
 	indexPath: string | null,
+	primaryKeyField: string | null,
 ): string[] {
 	const { collection } = fingerprint;
 
@@ -598,7 +615,7 @@ export function scopedCacheFingerprintIndexKeys(
 		});
 	}
 
-	const homePin = scopedCacheHomePin(fingerprint);
+	const homePin = scopedCacheHomePin(fingerprint, primaryKeyField);
 
 	if (homePin === null) {
 		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
@@ -673,6 +690,39 @@ export function scopedCacheRowHomePinKeys(
 	}
 
 	return [...homePinKeys];
+}
+
+/**
+ * The keys of every set a fingerprint can have been filed in, whichever home pin
+ * its filing chose: one per value it pins the index path to, else one per field
+ * and value it pins, else the bare set.
+ *
+ * What a prune names rather than the filing's own keys, because the home pin is
+ * ranked off the schema (the primary key first) and a prune is handed none of it:
+ * a member read back cannot say which of its fields was chosen, and one filed by
+ * a build that ranked them another way was filed elsewhere. A set that never held
+ * the member costs an `SREM` of nothing.
+ */
+export function scopedCacheFingerprintPrunedIndexKeys(
+	fingerprint: ScopedCacheFingerprint,
+	indexPath: string | null,
+): string[] {
+	const indexValues = indexPath === null
+		? undefined
+		: fingerprint.pinnedScope?.[indexPath];
+
+	if (indexValues !== undefined && indexValues.length > 0) {
+		return scopedCacheFingerprintIndexKeys(fingerprint, indexPath, null);
+	}
+
+	const homePinKeys = scopedCacheRowHomePinKeys(
+		fingerprint.collection,
+		[fingerprint],
+	);
+
+	return homePinKeys.length > 0
+		? homePinKeys
+		: [scopedCacheIndexKey(fingerprint.collection, SCOPED_CACHE_BARE_PIN)];
 }
 
 /**
@@ -896,7 +946,7 @@ const redisStore: ScopedCacheStore = {
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
 
-		for (const { fingerprint, keys, indexPath } of filings) {
+		for (const { fingerprint, keys, indexPath, primaryKeyField } of filings) {
 			const members = keys.map((key) => {
 				return renderScopedCacheIndexMember(fingerprint, key);
 			});
@@ -904,6 +954,7 @@ const redisStore: ScopedCacheStore = {
 			for (const indexKey of scopedCacheFingerprintIndexKeys(
 				fingerprint,
 				indexPath,
+				primaryKeyField,
 			)) {
 				if (ttlSeconds > 0) {
 					pipeline.scopedCacheIndexExpiry(indexKey, ttlSeconds, ...members);
@@ -1000,10 +1051,10 @@ const redisStore: ScopedCacheStore = {
 		for (const { fingerprint, location } of entries) {
 			const { indexKey: foundIn, member } = location as ScopedCacheMemberLocation;
 
-			// Every set `fileIndexedEntries` put this member in, not the one it was
-			// read from: a read bounded to a list of values is filed under each of
-			// them — at the index path or at its home pin — and a write carrying one
-			// of those values reads that value's set alone. Pruning only there leaves
+			// Every set `fileIndexedEntries` can have put this member in, not the one
+			// it was read from: a read bounded to a list of values is filed under each
+			// of them — at the index path or at its home pin — and a write carrying
+			// one of those values reads that value's set alone. Pruning only there leaves
 			// the member in the others, naming a key this purge has just dropped, and
 			// no later write to those values can remove it — it is tested again on
 			// each of them until its set expires.
@@ -1015,7 +1066,7 @@ const redisStore: ScopedCacheStore = {
 			// an `SREM` of nothing.
 			const indexKeys = new Set([
 				foundIn,
-				...scopedCacheFingerprintIndexKeys(fingerprint, indexPath),
+				...scopedCacheFingerprintPrunedIndexKeys(fingerprint, indexPath),
 			]);
 
 			for (const indexKey of indexKeys) {

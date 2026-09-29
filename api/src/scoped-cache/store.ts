@@ -30,11 +30,15 @@ import type { ScopedCacheFingerprint } from './fingerprint.js';
  * together, so they are filed together. `indexPath` is the path that collection's
  * reads are indexed by (`scopedCacheIndexPath`), or `null` when it has none: what
  * a store MAY split its index by, never something a caller reads back.
+ * `primaryKeyField` is that collection's primary key, or `null` when the schema
+ * does not name one: what a store may rank the split of a read off the index path
+ * by, since a read pinning it belongs to one row.
  */
 export interface ScopedCacheIndexFiling {
 	fingerprint: ScopedCacheFingerprint;
 	keys: readonly string[];
 	indexPath: string | null;
+	primaryKeyField: string | null;
 }
 
 /**
