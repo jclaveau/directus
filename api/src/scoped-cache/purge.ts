@@ -13,6 +13,7 @@ import {
 	queueCachePurge,
 } from '../cache-events.js';
 import { cacheStoreDropsEntries } from '../cache-store-probe.js';
+import { flushCacheRedisDatabase } from '../redis/index.js';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -635,11 +636,21 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
  * is for.
  *
  * The entries only, so a flush that reports the index drop apart from the clear
- * can; `flushResponseCache` is the two together.
+ * can; `flushResponseCache` is the two together. With `CACHE_REDIS_DB` set, the
+ * one FLUSHDB takes the index and the counters too, and the counters come back
+ * from the server's clock, never at a value a read in flight took. Answers
+ * whether it was that FLUSHDB.
  */
-export async function clearResponseCache(cache: Keyv | null): Promise<void> {
+export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
 	await bumpScopedCacheEpochs(['*']);
+
+	if (await flushCacheRedisDatabase()) {
+		return true;
+	}
+
 	await cache?.clear();
+
+	return false;
 }
 
 /**

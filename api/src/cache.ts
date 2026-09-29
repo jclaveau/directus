@@ -9,7 +9,8 @@ import {
 } from './cache-envelope.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
-import { redisConfigAvailable } from './redis/index.js';
+import { cacheRedisDatabase, redisConfigAvailable } from './redis/index.js';
+import { withRedisDatabase } from './redis/lib/create-redis.js';
 import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
@@ -136,6 +137,7 @@ export function getCache(): {
 			store,
 			getMilliseconds(env['CACHE_TTL']),
 			'_response',
+			cacheRedisDatabase(),
 		);
 
 		warnOnCacheFailure(cache, 'response-cache');
@@ -207,8 +209,10 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// Caught like the rest. Left to throw, it reaches the migration runner that
 	// calls this uncaught, and it keeps the one tier the flush command exists for
 	// out of the report that command reads its exit code from.
+	let flushedDatabase = false;
+
 	try {
-		await clearResponseCache(cache);
+		flushedDatabase = await clearResponseCache(cache);
 	}
 	catch (error: any) {
 		failures.push('response cache');
@@ -270,7 +274,11 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// than at each caller: one line, and the number that explains it.
 	const durationMs = Date.now() - startedAt;
 
-	const flushed = `[cache] flushed in ${durationMs}ms, `
+	const responseCleared = flushedDatabase
+		? `FLUSHDB on redis db ${cacheRedisDatabase()}, `
+		: '';
+
+	const flushed = `[cache] flushed in ${durationMs}ms, ${responseCleared}`
 		+ `dropped ${droppedIndexKeys} scoped-cache index keys`;
 
 	// Under the warns naming the tiers that did not go, an info line reading
@@ -452,17 +460,23 @@ function getKeyvInstance(
 	store: Store,
 	ttl: number | undefined,
 	namespaceSuffix?: string,
+	database?: number,
 ): Keyv {
 	switch (store) {
 		case 'redis':
-			return new Keyv(getConfig('redis', ttl, namespaceSuffix));
+			return new Keyv(getConfig('redis', ttl, namespaceSuffix, database));
 		case 'memory':
 		default:
 			return new Keyv(getConfig('memory', ttl, namespaceSuffix));
 	}
 }
 
-function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSuffix = ''): KeyvOptions {
+function getConfig(
+	store: Store = 'memory',
+	ttl: number | undefined,
+	namespaceSuffix = '',
+	database?: number,
+): KeyvOptions {
 	const config: KeyvOptions = {
 		namespace: `${env['CACHE_NAMESPACE']}${namespaceSuffix}`,
 		serialize: serializeCacheEnvelope,
@@ -472,7 +486,7 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 
 	if (store === 'redis') {
 		const { default: KeyvRedis } = require('@keyv/redis');
-		const connection = getRedisConnection();
+		const connection = getRedisConnection(database);
 
 		// node-redis gives a command issued while it is reconnecting no deadline at all:
 		// `sendCommand` rejects only when the client is closed or when this flag is set,
@@ -517,8 +531,14 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 // otherwise translate the REDIS_* (ioredis-shaped) config into node-redis options so a host/port
 // setup actually connects (a flat { host, port } silently falls back to localhost:6379 under v5).
 // Advanced setups (sentinel/cluster, cert-based TLS) should use the REDIS connection URL.
-export function getRedisConnection(): string | Record<string, unknown> {
-	const url = env['REDIS'];
+export function getRedisConnection(
+	database?: number,
+): string | Record<string, unknown> {
+	const configuredUrl = env['REDIS'] as string | undefined;
+
+	const url = configuredUrl && database !== undefined
+		? withRedisDatabase(configuredUrl, database)
+		: configuredUrl;
 
 	// node-redis defaults its socket `keepAlive` to 5000ms → a TCP keepalive probe every 5s on the
 	// persistent cache connection. That outbound traffic blocks Railway App-Sleeping on an otherwise-idle
@@ -528,7 +548,7 @@ export function getRedisConnection(): string | Record<string, unknown> {
 
 	if (url) {
 		if (keepAlive === undefined) {
-			return url as string;
+			return url;
 		}
 
 		return { url, socket: { keepAlive } };
@@ -546,5 +566,6 @@ export function getRedisConnection(): string | Record<string, unknown> {
 		...(username !== undefined && { username }),
 		...(password !== undefined && { password }),
 		...(db !== undefined && { database: Number(db) }),
+		...(database !== undefined && { database }),
 	};
 }

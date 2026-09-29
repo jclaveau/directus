@@ -16,7 +16,13 @@ const env = vi.hoisted(() => {
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
-vi.mock('./redis/index.js', () => ({ redisConfigAvailable: () => false }));
+
+vi.mock('./redis/index.js', () => {
+	return {
+		cacheRedisDatabase: () => undefined,
+		redisConfigAvailable: () => false,
+	};
+});
 
 // Answers with a tally rather than with nothing: `clearCacheTargets` reads
 // `refused` off it to decide whether the clear it was asked for actually happened.

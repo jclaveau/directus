@@ -108,6 +108,12 @@ vi.mock('./permissions/cache.js', () => ({ clearCache: clearPermissionCache }));
 // trace on redis or the cache to assert against.
 const queueCachePurge = vi.hoisted(() => vi.fn());
 
+const cacheRedisDatabase = vi.hoisted(() => {
+	return vi.fn((): number | undefined => undefined);
+});
+
+const flushCacheRedisDatabase = vi.hoisted(() => vi.fn(async () => false));
+
 vi.mock('./cache-events.js', async (importOriginal) => {
 	return {
 		...(await importOriginal() as object),
@@ -117,7 +123,10 @@ vi.mock('./cache-events.js', async (importOriginal) => {
 
 vi.mock('./redis/index.js', () => {
 	return {
+		cacheRedisDatabase,
+		flushCacheRedisDatabase,
 		redisConfigAvailable: () => true,
+		useCacheRedis: () => redis,
 		useRedis: () => redis,
 	};
 });
@@ -159,6 +168,8 @@ afterEach(() => {
 	// rejecting for every case after it.
 	redis.scan.mockImplementation(async () => ['0', []] as [string, string[]]);
 	redis.get.mockImplementation(async () => '1');
+	cacheRedisDatabase.mockReturnValue(undefined);
+	flushCacheRedisDatabase.mockResolvedValue(false);
 });
 
 // `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
@@ -233,6 +244,20 @@ describe('getRedisConnection', () => {
 		expect(getRedisConnection()).toEqual({
 			url: 'redis://localhost:6379/2',
 			socket: { keepAlive: false },
+		});
+	});
+
+	test('writes the cache database into the REDIS URL', () => {
+		setEnv({ REDIS: 'redis://localhost:6379/0' });
+		expect(getRedisConnection(1)).toBe('redis://localhost:6379/1');
+	});
+
+	test('the cache database overrides REDIS_DB in the host/port form', () => {
+		setEnv({ REDIS_HOST: 'h', REDIS_PORT: '6379', REDIS_DB: '0' });
+
+		expect(getRedisConnection(1)).toEqual({
+			socket: { host: 'h', port: 6379 },
+			database: 1,
 		});
 	});
 
@@ -1377,6 +1402,35 @@ describe('flushCaches', () => {
 		expect(logger.info).toHaveBeenCalledWith(
 			expect.stringMatching(
 				/^\[cache\] flushed in \d+ms, dropped 2 scoped-cache index keys$/,
+			),
+		);
+	});
+
+	test(oneLine`
+		empties the cache's own database with one FLUSHDB instead of clearing the
+		response tier key by key, and says which database it emptied
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		const { cache } = getCache();
+		await cache!.set('response-key', 'r');
+
+		cacheRedisDatabase.mockReturnValue(1);
+		flushCacheRedisDatabase.mockResolvedValueOnce(true);
+
+		await flushCaches(true);
+
+		// Still there: the FLUSHDB stood in for `cache.clear()`, and the stand-in
+		// flushed nothing.
+		expect(await cache!.get('response-key')).toBe('r');
+
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1, dropped 0 scoped-cache index keys$/,
 			),
 		);
 	});
