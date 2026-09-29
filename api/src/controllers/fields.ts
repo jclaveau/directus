@@ -27,7 +27,10 @@ router.get(
 		const fields = await service.readAll();
 
 		res.locals['payload'] = { data: fields || null };
-		res.locals['scopedCacheTags'] = readMeta(fields)?.scopedCacheTags;
+
+		res.locals['scopedCacheFingerprints'] =
+			readMeta(fields)?.scopedCacheFingerprints;
+
 		return next();
 	}),
 	respond,
@@ -45,7 +48,9 @@ router.get(
 		const fields = await service.readAll(req.params['collection']);
 
 		res.locals['payload'] = { data: fields || null };
-		res.locals['scopedCacheTags'] = readMeta(fields)?.scopedCacheTags;
+
+		res.locals['scopedCacheFingerprints'] =
+			readMeta(fields)?.scopedCacheFingerprints;
 
 		return next();
 	}),
@@ -64,7 +69,10 @@ router.get(
 		const field = await service.readOne(req.params['collection']!, req.params['field']!);
 
 		res.locals['payload'] = { data: field || null };
-		res.locals['scopedCacheTags'] = readMeta(field)?.scopedCacheTags;
+
+		res.locals['scopedCacheFingerprints'] =
+			readMeta(field)?.scopedCacheFingerprints;
+
 		return next();
 	}),
 	respond,

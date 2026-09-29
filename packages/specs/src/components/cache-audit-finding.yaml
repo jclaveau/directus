@@ -5,7 +5,7 @@ properties:
     type: string
     enum:
       - stale
-      - tag_drift
+      - pin_drift
       - raced
       - time_varying
       - expired
@@ -41,15 +41,15 @@ properties:
     type: integer
   ageMs:
     type: integer
-  tags:
+  pins:
     type: array
-    description: The tags it was filled under.
+    description: The pins it was filled under.
     items:
       type: string
-  replayTags:
+  replayPins:
     type: array
     nullable: true
-    description: The tags the replay pinned, where one answered.
+    description: The pins the replay pinned, where one answered.
     items:
       type: string
   diff:
@@ -63,6 +63,6 @@ properties:
     nullable: true
     description: >
       For a stale entry: the purges that covered it since its fill. Empty means
-      its tags never named the write that changed it.
+      its pins never named the write that changed it.
     items:
       type: object

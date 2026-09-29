@@ -21,7 +21,7 @@ import {
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
-import { scopedCachePurgeEnabled } from '../scoped-cache.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';

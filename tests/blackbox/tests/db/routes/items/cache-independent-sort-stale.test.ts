@@ -17,16 +17,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // RED until fixed. An enforced-FK M2O keyed by pk is `independent`; add a
 // scoped_cache_field to it and a sort across it is kept out of `beyond`
-// (read-tags.ts: sorted && !hasCoveringSlice is false), then `independent` +
-// !nested + !beyond is skipped in readTags (item-scoped-cache-service.ts) — so
-// it gets NO tag and no covering pin, and a reorder serves a stale HIT.
+// (read-pins.ts: sorted && !hasCoveringSlice is false), then `independent` +
+// !nested + !beyond is skipped in readPins (item-scoped-cache-service.ts) — so
+// it gets no pin at all, not even a covering one, and a reorder serves a stale HIT.
 const ROOT = 'indep_sort_root';
 const CHILD = 'indep_sort_child';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
 describe(oneLine`
-	an independent + sorted M2O with a scoped field gets no tag, so a reorder
+	an independent + sorted M2O with a scoped field gets no pin, so a reorder
 	serves a stale HIT
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
@@ -153,7 +153,7 @@ describe(oneLine`
 
 			const reread = await readRootsSortedByChildName();
 
-			// The hard RED: with no tag on the child the reorder is not caught, so
+			// The hard RED: with no pin on the child the reorder is not caught, so
 			// the read stays a stale HIT and returns the OLD order.
 			expect(
 				reread.body.data.map((row: { id: number }) => row.id),
@@ -161,14 +161,14 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			carries a tag for the sorted child so a reorder is catchable
+			carries a pin for the sorted child so a reorder is catchable
 		`, async () => {
-			const tags =
+			const pins =
 				(await readRootsSortedByChildName()).headers[cacheTagsHeader];
 
 			// A bare `CHILD` or any `CHILD:field=value` slice makes the reorder
 			// catchable; today the path emits neither, so this is RED too.
-			expect(tags).toMatch(new RegExp(`(^|, )${CHILD}(:|,|$)`));
+			expect(pins).toMatch(new RegExp(`(^|, )${CHILD}(:|,|$)`));
 		});
 	});
 });

@@ -24,10 +24,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // reconnect or a restart.
 //
 // The failure here is a WRONGTYPE, which is the one that needs no outage to
-// reproduce: the collection's bare tag key is overwritten with a string, so the
-// sweep's SUNION over it is refused while every other command keeps working. The
-// entry stays indexed under its intact value slice, which is what lets the retry
-// finish the job once the bad key is gone.
+// reproduce: the bare bucket of the collection's fingerprint index is overwritten
+// with a string, so the purge's SSCAN over it is refused while every other command
+// keeps working. The entry stays indexed under its intact value slice, which is
+// what lets the retry finish the job once the bad key is gone.
 
 const NOTE = 'retry_timer_note';
 const PENDING = 'directus_scoped_cache_pending_purges';
@@ -41,7 +41,8 @@ describe(oneLine`
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
 		const namespace = `directus-retry-timer-${vendor}`;
-		const noteTagKey = `${namespace}:scoped-cache-index:tag:${NOTE}`;
+		// The bucket every write to the collection reads, whichever row it wrote.
+		const noteIndexKey = `${namespace}:scoped-cache-index:fingerprint:${NOTE}:`;
 		env[vendor]['CACHE_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
 		env[vendor]['CACHE_AUTO_PURGE'] = 'true';
@@ -88,7 +89,7 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
-			await redisCommand(REDIS_PORT, ['DEL', noteTagKey])
+			await redisCommand(REDIS_PORT, ['DEL', noteIndexKey])
 				.catch(() => '');
 
 			await ownRows().delete();
@@ -101,11 +102,11 @@ describe(oneLine`
 		// it wholesale: a sibling's in-flight record deleted from under it drains
 		// nothing and still lets that spec's "the purge ran" MISS pass. Both shapes a
 		// failure over this collection records name it — `collection` mode in the
-		// column, tags mode in the label — and no other spec writes either.
+		// column, slices mode in the label — and no other spec writes either.
 		function ownRows() {
 			return db(PENDING)
 				.where({ collection: NOTE })
-				.orWhere('scoped_cache_tag', 'like', `${NOTE}%`);
+				.orWhere('scoped_cache_fingerprint', 'like', `${NOTE}%`);
 		}
 
 		function readSlotA() {
@@ -133,11 +134,11 @@ describe(oneLine`
 			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
 			expect(cached.body.data[0].label).toBe('v1');
 
-			// The refusal: a SET over the collection's bare tag leaves a string where
+			// The refusal: a SET over the collection's bare pin leaves a string where
 			// the sweep expects a set. Every other command still works, and the
 			// connection is never dropped — so nothing will emit `ready`.
 			expect(
-				await redisCommand(REDIS_PORT, ['SET', noteTagKey, 'x']),
+				await redisCommand(REDIS_PORT, ['SET', noteIndexKey, 'x']),
 			).toBe('+OK');
 
 			const write = await request(url)
@@ -149,7 +150,7 @@ describe(oneLine`
 			expect(write.status).toBe(200);
 
 			const recorded = await ownRows()
-				.select('mode', 'collection', 'scoped_cache_tag');
+				.select('mode', 'collection', 'scoped_cache_fingerprint');
 
 			expect(recorded.length).toBeGreaterThan(0);
 
@@ -159,7 +160,7 @@ describe(oneLine`
 			expect(stale.headers[cacheStatusHeader]).toBe('HIT');
 			expect(stale.body.data[0].label).toBe('v1');
 
-			expect(await redisCommand(REDIS_PORT, ['DEL', noteTagKey]))
+			expect(await redisCommand(REDIS_PORT, ['DEL', noteIndexKey]))
 				.toBe(':1');
 
 			// The timer is the only thing that can fire now: the link never dropped,

@@ -16,7 +16,7 @@ import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
 import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';

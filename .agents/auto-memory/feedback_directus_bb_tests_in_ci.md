@@ -17,12 +17,12 @@ run also mutates jean's own `blackbox-*` docker stack (it bootstraps and re-seed
 shared postgres), so it has a side effect on his environment that CI does not.
 
 **How to apply:**
-- Write the test, prove the red/green claim at the **unit** level locally if the fix has a
-  unit seam (that part is cheap and expected — see [[feedback_local_vitest_env_constrained]]).
+- Write the test and prove the red/green claim at the **unit** level where the fix has a
+  unit seam — but prove it on CI, not locally: [[feedback_directus_ci_only_test_runs]].
 - For the blackbox layer: commit, push, open the PR, add the `Run Blackbox` label, and read
   results from the run — mechanics in [[project_directus_blackbox_run_and_logs]].
 - "Ensure red then make it green" over blackbox = two CI runs on the branch (one with the
   fix reverted, one with it applied), not two local runs. Use `ScheduleWakeup` / a monitor
   to loop on the run rather than polling — see [[feedback_wakeup_for_long_ci]].
-- A local `pnpm build` + targeted `vitest` on `api/src/**.test.ts` is still fine; the rule
-  is about the blackbox suite specifically.
+- SUPERSEDED 2026-09-23: the exception for a local targeted `vitest` is withdrawn — every
+  layer now runs in CI, see [[feedback_directus_ci_only_test_runs]].

@@ -1,6 +1,7 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache } from './cache.js';
-import { dropScopedCacheIndex } from './scoped-cache.js';
+import { dropScopedCacheIndex } from './scoped-cache/index.js';
 
 // hoisted: cache.ts reads `const env = useEnv()` at module load, before a plain
 // `const env` below would be initialised (temporal dead zone).
@@ -19,7 +20,7 @@ vi.mock('./redis/index.js', () => ({ redisConfigAvailable: () => false }));
 
 // Answers with a tally rather than with nothing: `clearCacheTargets` reads
 // `refused` off it to decide whether the clear it was asked for actually happened.
-vi.mock('./scoped-cache.js', () => {
+vi.mock('./scoped-cache/index.js', () => {
 	return {
 		clearResponseCache: vi.fn(async (cache) => cache?.clear()),
 		dropScopedCacheIndex: vi.fn(async () => ({ dropped: 0, refused: 0 })),
@@ -55,7 +56,9 @@ afterEach(() => {
 });
 
 describe('clearCacheTargets', () => {
-	it('response: drops response cache + tag index, spares the rest', async () => {
+	it(oneLine`
+		response: drops response cache + fingerprint index, spares the rest
+	`, async () => {
 		const { cache, systemCache, lockCache } = await seedAllTiers();
 
 		await clearCacheTargets(['response']);

@@ -522,7 +522,7 @@ describe('Integration Tests', () => {
 		describe('registerUser', () => {
 			it('should reject when public registration is disabled (users.ts L464)', async () => {
 				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce(
-					withMeta({ public_registration: false }, { scopedCacheTags: [] }),
+					withMeta({ public_registration: false }, { scopedCacheFingerprints: [] }),
 				);
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
@@ -538,7 +538,7 @@ describe('Integration Tests', () => {
 						public_registration_email_filter: {
 							email: { _ends_with: '@allowed.com' },
 						},
-					}, { scopedCacheTags: [] }),
+					}, { scopedCacheFingerprints: [] }),
 				);
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });

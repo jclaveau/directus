@@ -2,7 +2,7 @@ import { InvalidPayloadError } from '@directus/errors';
 import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';

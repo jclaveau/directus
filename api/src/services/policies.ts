@@ -3,7 +3,7 @@ import type { AbstractServiceOptions, MutationOptions, Policy, PrimaryKey } from
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { getMatch } from 'ip-matching';
 import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { ItemsService } from './items.js';
 

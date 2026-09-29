@@ -115,10 +115,10 @@ const readHandler = asyncHandler(async (req, res, next) => {
 	};
 
 	const resultMeta = readMeta(result);
-	res.locals['scopedCacheTags'] = resultMeta?.scopedCacheTags;
+	res.locals['scopedCacheFingerprints'] = resultMeta?.scopedCacheFingerprints;
 
-	res.locals['scopedCacheUnautopurgeableTags'] =
-		resultMeta?.scopedCacheUnautopurgeableTags;
+	res.locals['scopedCacheUnautopurgeableFingerprints'] =
+		resultMeta?.scopedCacheUnautopurgeableFingerprints;
 
 	res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 
@@ -150,13 +150,14 @@ router.get(
 		};
 
 		// Forward the read's pins, same as `readHandler`: without them respond.ts falls
-		// back to the bare collection tag, so the key slice this read pinned would never
-		// reach the tag index and any write to the collection would drop the entry.
+		// back to the bare collection pin, so the key slice this read pinned would never
+		// reach the fingerprint index and any write to the collection would drop the
+		// entry.
 		const resultMeta = readMeta(result);
-		res.locals['scopedCacheTags'] = resultMeta?.scopedCacheTags;
+		res.locals['scopedCacheFingerprints'] = resultMeta?.scopedCacheFingerprints;
 
-		res.locals['scopedCacheUnautopurgeableTags'] =
-			resultMeta?.scopedCacheUnautopurgeableTags;
+		res.locals['scopedCacheUnautopurgeableFingerprints'] =
+			resultMeta?.scopedCacheUnautopurgeableFingerprints;
 
 		res.locals['scopedCacheEpochs'] = resultMeta?.scopedCacheEpochs;
 

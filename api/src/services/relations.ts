@@ -19,6 +19,7 @@ import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
 import { withMeta } from '../utils/read-meta.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getSchemaInspector } from '../database/index.js';
@@ -28,6 +29,7 @@ import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { getDefaultIndexName } from '../utils/get-default-index-name.js';
 import { getSchema } from '../utils/get-schema.js';
+import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 
@@ -39,6 +41,7 @@ export class RelationsService {
 	accountability: Accountability | null;
 	schema: SchemaOverview;
 	relationsItemService: ItemsService<RelationMeta>;
+	cache: Keyv<any> | null;
 	systemCache: Keyv<any>;
 	schemaCache: Keyv<any>;
 	helpers: Helpers;
@@ -58,6 +61,7 @@ export class RelationsService {
 		});
 
 		const cache = getCache();
+		this.cache = cache.cache;
 		this.systemCache = cache.systemCache;
 		this.schemaCache = cache.localSchemaCache;
 		this.helpers = getHelpers(this.knex);
@@ -134,7 +138,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(allowed, {
-			scopedCacheTags: [{ collection: 'directus_relations' }],
+			scopedCacheFingerprints: [{ collection: 'directus_relations' }],
 		});
 	}
 
@@ -196,7 +200,7 @@ export class RelationsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(results[0]!, {
-			scopedCacheTags: [{ collection: 'directus_relations' }],
+			scopedCacheFingerprints: [{ collection: 'directus_relations' }],
 		});
 	}
 
@@ -303,6 +307,15 @@ export class RelationsService {
 						opts?.bypassEmitAction ? opts.bypassEmitAction(params) : nestedActionEvents.push(params),
 				});
 			});
+
+			// The scoped index is split by a path walked through relations, so a
+			// relation change can move it, and a purge would then read buckets no fill
+			// was filed in. The nested `directus_relations` write only purges its own.
+			// After the transaction rather than in the `finally`: a change that rolled
+			// back moved nothing.
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
+			}
 		} finally {
 			if (runPostColumnChange) {
 				await this.helpers.schema.postColumnChange();
@@ -432,6 +445,10 @@ export class RelationsService {
 					}
 				}
 			});
+
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
+			}
 		} finally {
 			if (runPostColumnChange) {
 				await this.helpers.schema.postColumnChange();
@@ -520,6 +537,10 @@ export class RelationsService {
 					nestedActionEvents.push(actionEvent);
 				}
 			});
+
+			if (shouldClearCache(this.cache, opts)) {
+				await flushResponseCache(this.cache);
+			}
 		} finally {
 			if (runPostColumnChange) {
 				await this.helpers.schema.postColumnChange();

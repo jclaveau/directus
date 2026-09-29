@@ -15,8 +15,8 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// RED until fixed. `readTags` bares the root when it appears at more than one
-// field-map path, then reaches it again with an empty `rootScopedCacheTags`, falls
+// RED until fixed. `readPins` bares the root when it appears at more than one
+// field-map path, then reaches it again with an empty `rootScopedCachePins`, falls
 // through to `pushAncestorSliceOrBare` and takes the slice of an ancestor the
 // filter keyed — undoing the guard it just applied. The ancestor has to be KEYED
 // rather than answered by the near row's own fk column, so the filter reaches ORG
@@ -182,7 +182,7 @@ describe(oneLine`
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
 			expect(warm.body.data[0].parent.label).toBe('parent-v1');
 
-			// PRIMARY (RED until fixed): the root carries its bare tag, never the
+			// PRIMARY (RED until fixed): the root carries its bare pin, never the
 			// `owner.org=<read org>` slice its nested parent sits outside of.
 			expect(warm.headers[cacheTagsHeader]).toEqual(
 				`${NODE}, ${OWNER}:org=${readOrgId}`,

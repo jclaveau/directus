@@ -78,7 +78,10 @@ export const DEFAULTS = {
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+	CACHE_SCOPED_MAX_QUERY_CASES: 16,
 	CACHE_SCOPED_PURGE_RETRY_INTERVAL: '1m',
+	CACHE_SCOPED_EPOCH_TTL: '24h',
+	CACHE_SCOPED_INDEX_REAP_SCHEDULE: '0 * * * *',
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
 	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in
@@ -109,8 +112,8 @@ export const DEFAULTS = {
 	// `!== false`. No single type-map entry fits, so it stays on per-value guessType.
 	CACHE_VALUE_MAX_SIZE: false,
 	// Node's fetch refuses a response past 16kb of headers in total, a batch write
-	// pins one tag per row and answers with both tag headers. `0` or an unparseable
-	// size emits every tag.
+	// carries one pin per row and answers with both tag headers. `0` or an
+	// unparseable size emits every pin.
 	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly

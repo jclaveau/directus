@@ -20,7 +20,7 @@ export const CACHE_AUDIT_REPLAY_HEADER = 'x-cache-audit-replay';
  * through the cache stack from one that did not (a worker with another SECRET,
  * a proxy answering in between).
  */
-export const CACHE_AUDIT_TAGS_HEADER = 'x-cache-audit-tags';
+export const CACHE_AUDIT_PINS_HEADER = 'x-cache-audit-pins';
 
 export function cacheAuditReplayToken(): string {
 	return createHmac('sha256', getSecret())

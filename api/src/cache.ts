@@ -14,7 +14,7 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache.js';
+import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache/index.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -215,12 +215,13 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 		logger.warn(error, `[cache] could not clear the response cache: ${error}`);
 	}
 
-	// Same reason as the `response` target in `clearCacheTargets`: the scoped-tag
+	// Same reason as the `response` target in `clearCacheTargets`: the fingerprint
 	// index sits in raw Redis outside the Keyv namespace, so the clear above misses
 	// it. Both callers here — the migration runner and the build-identity self-heal
-	// — mean "the response cache is gone", and leaving the index behind strands tag
-	// SETs pointing at keys that no longer exist until their `ttl*2` self-expiry,
-	// or forever when `CACHE_TTL` is unset and they are deliberately unbounded.
+	// — mean "the response cache is gone", and leaving the index behind strands
+	// index SETs pointing at keys that no longer exist until their `ttl*2`
+	// self-expiry, or forever when `CACHE_TTL` is unset and they are deliberately
+	// unbounded.
 	//
 	// Never fatal, unlike the `clearCacheTargets` call: `database/migrations/run.ts`
 	// calls this right after recording the version it just applied and does not catch,
@@ -245,7 +246,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	}
 	catch (error: any) {
 		failures.push('scoped-cache index');
-		logger.warn(error, `[cache] could not drop the scoped-tag index: ${error}`);
+		logger.warn(error, `[cache] could not drop the fingerprint index: ${error}`);
 	}
 
 	// A peer on a memory store holds its own response and system tiers, and
@@ -336,8 +337,8 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 
 	if (targets.includes('response')) {
 		await clearResponseCache(cache);
-		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
-		// clear above misses it — drop it too so no orphan tag pointers linger.
+		// The fingerprint index lives in raw Redis outside the Keyv namespace, so the
+		// clear above misses it — drop it too so no orphan index members linger.
 		refusedIndexKeys = (await dropScopedCacheIndex()).refused;
 	}
 

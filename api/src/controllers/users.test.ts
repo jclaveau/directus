@@ -22,7 +22,7 @@ vi.mock('../middleware/rate-limiter-registration.js', () => {
 
 const scopedCachePurgeEnabled = vi.fn();
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 
@@ -53,7 +53,7 @@ describe('users controller /me/track/page', () => {
 
 	test(oneLine`
 		lets the scoped purge hear the write, so /users/me follows — the user's own
-		slices only, the bare tag any session could drain at the limiter's rate stays
+		slices only, the bare pin any session could drain at the limiter's rate stays
 	`, async () => {
 		scopedCachePurgeEnabled.mockReturnValue(true);
 
@@ -62,7 +62,7 @@ describe('users controller /me/track/page', () => {
 		expect(updateOne).toHaveBeenCalledWith(
 			'u-1',
 			{ last_page: '/content/articles' },
-			{ autoPurgeCache: true, purgeCollectionTag: false },
+			{ autoPurgeCache: true, purgeBareFingerprint: false },
 		);
 
 		expect(next).toHaveBeenCalledWith();
@@ -78,7 +78,7 @@ describe('users controller /me/track/page', () => {
 		expect(updateOne).toHaveBeenCalledWith(
 			'u-1',
 			{ last_page: '/content/articles' },
-			{ autoPurgeCache: false, purgeCollectionTag: false },
+			{ autoPurgeCache: false, purgeBareFingerprint: false },
 		);
 
 		expect(next).toHaveBeenCalledWith();

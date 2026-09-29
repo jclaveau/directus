@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 
 test('Returns filter context for current user', async () => {
-	const user = withMeta({}, { scopedCacheTags: [] });
+	const user = withMeta({}, { scopedCacheFingerprints: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(['email']),
@@ -53,7 +53,7 @@ test('Returns filter context for current user', async () => {
 });
 
 test('Returns filter context for current role', async () => {
-	const role = withMeta({}, { scopedCacheTags: [] });
+	const role = withMeta({}, { scopedCacheFingerprints: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),
@@ -78,7 +78,7 @@ test('Returns filter context for current role', async () => {
 });
 
 test('Returns filter context for current policies', async () => {
-	const policies = withMeta([] as any[], { scopedCacheTags: [] });
+	const policies = withMeta([] as any[], { scopedCacheFingerprints: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),

@@ -12,7 +12,7 @@ import checkRateLimit from '../middleware/rate-limiter-registration.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { validateBatch } from '../middleware/validate-batch.js';
-import { scopedCachePurgeEnabled } from '../scoped-cache.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import { AuthenticationService } from '../services/authentication.js';
 import { MetaService } from '../services/meta.js';
 import { TFAService } from '../services/tfa.js';
@@ -177,13 +177,13 @@ router.patch(
 
 		// Full mode would flush the whole cache on every navigation (upstream's
 		// reason for the silence); scoped mode drops only the user's own slices.
-		// The bare tag stays warm: any session can call this at the limiter's
+		// The bare pin stays warm: any session can call this at the limiter's
 		// rate, and the reads it names (listings, user hops) never decide on
 		// `last_page`.
 		await service.updateOne(
 			req.accountability.user,
 			{ last_page: req.body.last_page },
-			{ autoPurgeCache: scopedCachePurgeEnabled(), purgeCollectionTag: false },
+			{ autoPurgeCache: scopedCachePurgeEnabled(), purgeBareFingerprint: false },
 		);
 
 		return next();

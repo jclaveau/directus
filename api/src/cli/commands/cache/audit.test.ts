@@ -56,7 +56,7 @@ function report(overrides: Partial<CacheAuditRunReport> = {}): CacheAuditRunRepo
 		counts: {
 			fresh: 0,
 			stale: 0,
-			tag_drift: 0,
+			pin_drift: 0,
 			raced: 0,
 			time_varying: 0,
 			expired: 0,
@@ -83,8 +83,8 @@ function finding(overrides: Partial<CacheAuditFinding> = {}): CacheAuditFinding 
 		collection: 'articles',
 		filledAt: 1_000,
 		ageMs: 90_000,
-		tags: ['articles:owner=acme'],
-		replayTags: ['articles:owner=acme'],
+		pins: ['articles:owner=acme'],
+		replayPins: ['articles:owner=acme'],
 		diff: ['/data/0/title'],
 		purgesSinceFilled: [],
 		...overrides,
@@ -279,7 +279,7 @@ describe('the exit code', () => {
 	test.each([
 		[{}, false, 0],
 		[{ stale: 1 }, false, 1],
-		[{ tag_drift: 1 }, false, 1],
+		[{ pin_drift: 1 }, false, 1],
 		[{ unreplayable: 1 }, false, 0],
 		[{ unreplayable: 1 }, true, 2],
 		[{ stale: 1, unreplayable: 1 }, true, 1],
@@ -303,7 +303,7 @@ describe('the rendered report', () => {
 			'4 entries audited in 12ms, 1 evicted',
 			'  fresh         3',
 			'  stale         1',
-			'  tag_drift     0',
+			'  pin_drift     0',
 			'  raced         0',
 			'  time_varying  0',
 			'  expired       0',
@@ -319,7 +319,7 @@ describe('the rendered report', () => {
 					time: Date.UTC(2026, 8, 16, 10, 0, 0),
 					mode: 'slices',
 					collection: 'articles',
-					scopedCacheTag: 'articles:owner=acme',
+					scopedCachePin: 'articles:owner=acme',
 					evicted: 0,
 				}],
 			})],
@@ -329,8 +329,8 @@ describe('the rendered report', () => {
 			'stale  GET /items/articles?fields[]=id',
 			'  key rk',
 			'  user user-1  collection articles  age 90s',
-			'  tags articles:owner=acme',
-			'  replay tags articles:owner=acme',
+			'  pins articles:owner=acme',
+			'  replay pins articles:owner=acme',
 			'  diff /data/0/title',
 			'  purged since the fill and still held:',
 			'    2026-09-16T10:00:00.000Z slices articles:owner=acme',
@@ -349,7 +349,7 @@ describe('the rendered report', () => {
 		const given = report({ findings: [finding({ purgesSinceFilled: [] })] });
 
 		expect(renderReport(given)).toContain(
-			'  no purge covered it since the fill: its tags never named the write',
+			'  no purge covered it since the fill: its pins never named the write',
 		);
 	});
 
@@ -361,14 +361,14 @@ describe('the rendered report', () => {
 						time: 0,
 						mode: 'collection',
 						collection: 'articles',
-						scopedCacheTag: null,
+						scopedCachePin: null,
 						evicted: 0,
 					},
 					{
 						time: 0,
 						mode: 'namespace',
 						collection: null,
-						scopedCacheTag: null,
+						scopedCachePin: null,
 						evicted: 0,
 					},
 				],
@@ -386,7 +386,7 @@ describe('the rendered report', () => {
 			findings: [finding({
 				url: '/graphql',
 				query: '{"query":"{ articles { id } }"}',
-				replayTags: null,
+				replayPins: null,
 				diff: ['/'],
 			})],
 		});

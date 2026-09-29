@@ -155,18 +155,21 @@ describe(oneLine`
 			}
 		});
 
-		const ownerPath = [
-			'range', 'slots', 'part', 'course', 'unit', 'discipline', 'student', 'owner',
-		];
-
 		function readConfig() {
-			const ownerKey = `filter[${ownerPath.join('][')}][_eq]`;
-
 			return request(getUrl(vendor, env))
 				.get(`/items/${CONFIG}`)
 				.query({
-					fields: '*,range.slots.part.course.unit.discipline.student.name',
-					[ownerKey]: String(ownedOwnerId),
+					// The unit's own name is read too: a purge drops an entry only for a
+					// write touching a field it is bound to, so a read showing no column
+					// of the ancestor would not be evicted by a rename of it.
+					fields: oneLine`
+						*,
+						range.slots.part.course.unit.name,
+						range.slots.part.course.unit.discipline.student.name
+					`,
+					[oneLine`
+						filter[range][slots][part][course][unit][discipline][student][owner][_eq]
+					`]: String(ownedOwnerId),
 				})
 				.set('Authorization', auth);
 		}
@@ -185,13 +188,13 @@ describe(oneLine`
 		}
 
 		it('slices a beyond ancestor by its ownership chain', async () => {
-			const tags = (await readConfig()).headers[cacheTagsHeader];
+			const pins = (await readConfig()).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(
+			expect(pins).toMatch(new RegExp(
 				`(^|, )${UNIT}:discipline.student.owner=${ownedOwnerId}(,|$)`,
 			));
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
+			expect(pins).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
 		});
 
 		it('a write to an ancestor in the owner slice evicts the read', async () => {

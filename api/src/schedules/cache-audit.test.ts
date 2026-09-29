@@ -55,7 +55,7 @@ function report(
 		counts: {
 			fresh: 5,
 			stale: 0,
-			tag_drift: 0,
+			pin_drift: 0,
 			raced: 0,
 			time_varying: 0,
 			expired: 0,
@@ -275,7 +275,7 @@ describe('cache-audit schedule', () => {
 
 	it.each([
 		[{ stale: 2 }, '2 stale, 0 drifted, 0 unreplayable'],
-		[{ tag_drift: 1, unreplayable: 3 }, '0 stale, 1 drifted, 3 unreplayable'],
+		[{ pin_drift: 1, unreplayable: 3 }, '0 stale, 1 drifted, 3 unreplayable'],
 	])('warns on a run finding %o', async (counts, summary) => {
 		vi.mocked(runCacheAudit).mockResolvedValue(report(counts));
 

@@ -87,7 +87,7 @@ function run(overrides: Partial<CacheAuditRun> = {}): CacheAuditRun {
 		counts: {
 			fresh: 10,
 			stale: 1,
-			tag_drift: 1,
+			pin_drift: 1,
 			raced: 0,
 			time_varying: 0,
 			expired: 0,
@@ -153,13 +153,13 @@ function answer(
 								collection: 'articles',
 								filledAt: found.startedAt - 60_000,
 								ageMs: 60_000,
-								tags: ['articles'],
-								replayTags: ['articles'],
+								pins: ['articles'],
+								replayPins: ['articles'],
 								diff: ['/data/0/title'],
 								purgesSinceFilled: [],
 							},
 							{
-								verdict: 'tag_drift',
+								verdict: 'pin_drift',
 								reason: null,
 								redisKey: 'scalabus_response::scalabus_response:def',
 								cacheKey: 'def',
@@ -170,8 +170,8 @@ function answer(
 								collection: 'articles',
 								filledAt: found.startedAt - 60_000,
 								ageMs: 60_000,
-								tags: ['articles'],
-								replayTags: ['articles', 'authors'],
+								pins: ['articles'],
+								replayPins: ['articles', 'authors'],
 								diff: null,
 								purgesSinceFilled: null,
 							},
@@ -385,7 +385,7 @@ describe('the runs', () => {
 			run({
 				id: 6,
 				trigger: 'rest',
-				counts: { ...run().counts, stale: 0, tag_drift: 0 },
+				counts: { ...run().counts, stale: 0, pin_drift: 0 },
 				options: { limit: 20, user: null, collection: 'articles', purge: true },
 			}),
 			run({ id: 5, finishedAt: null, durationMs: null, scanned: 0 }),
@@ -752,7 +752,7 @@ describe('the runs', () => {
 		expect(findings[0]!.textContent).toContain('GET /items/articles?fields=title');
 		expect(findings[0]!.textContent).toContain('Differs at: /data/0/title');
 		expect(findings[0]!.textContent).toContain('No purge covered it since the fill');
-		expect(findings[1]!.textContent).toContain('Tags: +authors');
+		expect(findings[1]!.textContent).toContain('Pins: +authors');
 		expect(findings[1]!.textContent).toContain('User: u-1');
 		// Every finding the run stored is on the page: nothing more to say.
 		expect(document.body.textContent).not.toContain('the rest page through');

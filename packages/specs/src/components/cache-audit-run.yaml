@@ -43,7 +43,7 @@ properties:
         type: integer
       stale:
         type: integer
-      tag_drift:
+      pin_drift:
         type: integer
       raced:
         type: integer

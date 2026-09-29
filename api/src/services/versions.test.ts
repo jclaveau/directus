@@ -37,7 +37,7 @@ describe('Services / Versions', () => {
 
 			const readOne = vi
 				.spyOn(ItemsService.prototype, 'readOne')
-				.mockResolvedValue(withMeta(version, { scopedCacheTags: [] }));
+				.mockResolvedValue(withMeta(version, { scopedCacheFingerprints: [] }));
 
 			const service = new VersionsService({ knex: db, schema });
 

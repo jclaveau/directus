@@ -61,13 +61,13 @@ describe('Services / Shares', () => {
 			const readOne = vi.spyOn(ItemsService.prototype, 'readOne');
 
 			readOne.mockResolvedValueOnce(
-				withMeta({ collection: 'articles' }, { scopedCacheTags: [] }),
+				withMeta({ collection: 'articles' }, { scopedCacheFingerprints: [] }),
 			);
 
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ first_name: 'Ada', last_name: 'Lovelace' },
-					{ scopedCacheTags: [] },
+					{ scopedCacheFingerprints: [] },
 				),
 			);
 

@@ -12,13 +12,46 @@ import { describe, test } from 'vitest';
 setJestCucumberConfiguration({ runner: { describe, test } });
 
 export type ParsedFeature = ReturnType<typeof loadFeatureFromLibrary>;
-export type StepFunctions = Parameters<StepDefinitions>[0];
 export type StepMatcher = string | RegExp;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type StepCallback = (...args: any[]) => any;
-export type StepFunction = StepFunctions['given'] & {
-	optional: StepFunctions['given'];
+
+const STEP_KEYWORDS = [
+	'defineStep',
+	'given',
+	'when',
+	'then',
+	'and',
+	'but',
+] as const;
+
+type LibraryStepFunctions = Parameters<StepDefinitions>[0];
+type StepKeyword = (typeof STEP_KEYWORDS)[number];
+
+export type StepFunction = LibraryStepFunctions['given'] & {
+	optional: LibraryStepFunctions['given'];
 };
+
+/**
+ * The library's step functions, every keyword carrying `.optional`, which is what
+ * `defineFeature` below hands a scenario.
+ */
+export type StepFunctions = Omit<LibraryStepFunctions, StepKeyword>
+	& Record<StepKeyword, StepFunction>;
+
+type LibraryDefineScenario = Parameters<
+	Parameters<typeof defineFeatureFromLibrary>[1]
+>[0];
+
+/**
+ * `defineScenario`, handing its steps callback the step functions `defineFeature`
+ * really passes it rather than the library's own.
+ */
+export type DefineScenario = (
+	scenarioTitle: Parameters<LibraryDefineScenario>[0],
+	stepsCallback: (steps: StepFunctions) => void,
+	timeout?: number,
+) => void;
 
 /**
  * A feature file, read relative to the blackbox root (vitest's working directory).
@@ -68,13 +101,13 @@ export function loadFeature(path: string, options?: Options): ParsedFeature {
  */
 export function defineFeature(
 	feature: ParsedFeature,
-	defineScenarios: Parameters<typeof defineFeatureFromLibrary>[1],
+	defineScenarios: (defineScenario: DefineScenario) => void,
 ): void {
 	return defineFeatureFromLibrary(feature, (defineScenario) => {
-		const defineScenarioWithOptionalSteps = (
-			scenarioTitle: Parameters<typeof defineScenario>[0],
-			stepsCallback: Parameters<typeof defineScenario>[1],
-			timeout?: number,
+		const defineScenarioWithOptionalSteps: DefineScenario = (
+			scenarioTitle,
+			stepsCallback,
+			timeout,
 		) => {
 			return defineScenario(
 				scenarioTitle,
@@ -89,25 +122,14 @@ export function defineFeature(
 			);
 		};
 
-		return defineScenarios(
-			defineScenarioWithOptionalSteps as typeof defineScenario,
-		);
+		return defineScenarios(defineScenarioWithOptionalSteps);
 	});
 }
-
-const STEP_KEYWORDS = [
-	'defineStep',
-	'given',
-	'when',
-	'then',
-	'and',
-	'but',
-] as const;
 
 function withOptionalSteps(
 	feature: ParsedFeature,
 	scenarioTitle: string,
-	stepFunctions: StepFunctions,
+	stepFunctions: LibraryStepFunctions,
 ): StepFunctions {
 	const withOptional = { ...stepFunctions } as Record<string, unknown>;
 

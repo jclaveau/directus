@@ -30,7 +30,7 @@ async function purgeSpaceSlice(service, space, context) {
 		{ emitEvents: false },
 	);
 
-	context.scopedCache?.purgeBy(affected.getMeta?.()?.scopedCacheTags ?? []);
+	context.scopedCache?.purgeBy(affected.getMeta?.()?.scopedCacheFingerprints ?? []);
 }
 
 export default function registerHooks({ filter }, { services }) {

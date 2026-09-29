@@ -551,8 +551,8 @@ describe('System MCP Tests', () => {
 
 			expect(missing.body.result.isError).toBeUndefined();
 			expect(entry.exists).toBe(false);
-			expect(entry.tags).toBeNull();
-			expect(entry.tagCounts).toEqual({});
+			expect(entry.pins).toBeNull();
+			expect(entry.pinCounts).toEqual({});
 			expect(entry.expiry).toBeNull();
 			expect(entry.sizes).toBeNull();
 			expect(entry.tombstone).toBeNull();

@@ -11,7 +11,7 @@ import type {
 	WithMeta,
 } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
@@ -40,8 +40,8 @@ export class PermissionsService extends ItemsService {
 	): Promise<WithMeta<Partial<Item>[]>> {
 		const result = await super.readByQuery(query, opts);
 
-		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
-		// tag rider across.
+		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped
+		// cache fingerprint rider across.
 		return withMeta(
 			withAppMinimalPermissions(
 				this.accountability,

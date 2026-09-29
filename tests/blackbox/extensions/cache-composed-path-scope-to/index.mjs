@@ -21,7 +21,10 @@ export default function registerHooks({ filter }, { services }) {
 		);
 
 		context.scopedCache?.scopeTo(
-			{ collection: COURSE, field: 'unit.owner', value: courses[0]?.unit?.owner },
+			{
+				collection: COURSE,
+				pinnedScope: { 'unit.owner': [courses[0]?.unit?.owner] },
+			},
 			{ epochs: courses.getMeta?.()?.scopedCacheEpochs },
 		);
 

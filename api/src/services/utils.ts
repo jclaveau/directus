@@ -20,8 +20,8 @@ import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	cacheExpiresAtKey,
-	cacheTagsKey,
-	storedScopedCacheTagLabels,
+	cachePinsKey,
+	storedScopedCachePinLabels,
 } from '../cache-sidecars.js';
 import type { CacheAuditOptions } from '../cache-audit.js';
 import {
@@ -105,7 +105,10 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCacheTagMembers, flushResponseCache } from '../scoped-cache.js';
+import {
+	countScopedCachePinMembers,
+	flushResponseCache,
+} from '../scoped-cache/index.js';
 import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -435,7 +438,7 @@ export class UtilsService {
 	}
 
 	// The live Redis state for a single key — the cached response plus its
-	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
+	// sidecars (scoped-cache pins, expiry metadata) — none of which the Postgres
 	// descriptor holds. All may be gone: the descriptor outlives the value.
 	/**
 	 * Takes the REDIS key — the same string `evictCacheEntry` takes, and what the
@@ -446,8 +449,8 @@ export class UtilsService {
 	async readCacheEntry(redisKey: string): Promise<{
 		exists: boolean;
 		value: unknown;
-		tags: string[] | null;
-		tagCounts: Record<string, number>;
+		pins: string[] | null;
+		pinCounts: Record<string, number>;
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
@@ -482,8 +485,8 @@ export class UtilsService {
 			return {
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,
@@ -499,11 +502,11 @@ export class UtilsService {
 		const expiry =
 			(await getCacheValue(cache, cacheExpiresAtKey(redisKey))) ?? null;
 
-		const tagged = await getCacheValue(cache, cacheTagsKey(redisKey));
+		const storedPins = await getCacheValue(cache, cachePinsKey(redisKey));
 
-		// `__tags` lists the scoped-cache tag labels (only when the dev-only
+		// `__pins` lists the scoped-cache pin labels (only when the dev-only
 		// CACHE_TAGS_HEADER is on, which is what writes this sidecar).
-		const tags = storedScopedCacheTagLabels(tagged);
+		const pinLabels = storedScopedCachePinLabels(storedPins);
 
 		// Re-compress the payload to size its Redis footprint against the raw response.
 		let sizes: { uncompressed: number; compressed: number } | null = null;
@@ -522,10 +525,10 @@ export class UtilsService {
 		return {
 			exists: value !== undefined,
 			value: value ?? null,
-			tags,
-			// Blast radius: how many entries each tag would purge.
-			tagCounts: tags
-				? await countScopedCacheTagMembers(tags)
+			pins: pinLabels,
+			// Blast radius: how many entries each pin would purge.
+			pinCounts: pinLabels
+				? await countScopedCachePinMembers(pinLabels)
 				: {},
 			expiry,
 			sizes,
