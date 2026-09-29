@@ -310,16 +310,19 @@ jobs:
             base=$(git rev-parse "$HEAD_SHA~1")
           fi
 
-          # Every source file with `cache` in its path or a folder's, and the
-          # response writer that fills it. Not their tests: a trunk over a
-          # ceiling would otherwise block a change that only adds a test.
+          # Every source file with `cache` in its path or a folder's, the
+          # response writer that fills it and the Redis clients a flush goes
+          # through. Not their tests: a trunk over a ceiling would otherwise
+          # block a change that only adds a test.
           touched=$(git diff --name-only "$base" "$HEAD_SHA" -- \
             ':(glob)api/src/**/*cache*' \
             ':(glob)api/src/**/*cache*/**' \
+            ':(glob)api/src/redis/**' \
             ':(exclude,glob)api/src/**/*.test.ts' \
             'api/src/middleware/respond.ts' \
             'api/src/utils/compress.ts' \
             'tests/perf/cache.perf.test.ts' \
+            'tests/perf/cache-flush.perf.test.ts' \
             'tests/perf/measure.ts' \
             '.github/workflows/bench.yml')
 
@@ -420,18 +423,30 @@ jobs:
           PERF_BENCH_SHA: ${{ steps.commits.outputs.bench }}
           PERF_REDIS: redis://127.0.0.1:6108
 
+      # After the cache bench, not beside it: both boot instances on the one
+      # Redis, and a flush would empty the other's cache mid-measurement.
+      - name: Measure the flush
+        id: measure_flush
+        if: '!cancelled()'
+        run: pnpm --filter tests-perf bench:cache-flush
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_REDIS: redis://127.0.0.1:6108
+
       - name: Write the summary
         if: always()
         run: |
-          if [ -f tests/perf/results/cache.md ]; then
-            cat tests/perf/results/cache.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "### Cache — no result"
-              echo ""
-              echo "The measurement did not finish. See the job log."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          for suite in cache cache-flush; do
+            if [ -f "tests/perf/results/$suite.md" ]; then
+              cat "tests/perf/results/$suite.md" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "### $suite — no result"
+                echo ""
+                echo "The measurement did not finish. See the job log."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       # The status file is written before the gates are judged, so that a breach
       # still reports its figures — the verdict comes from the step, not the file.
@@ -439,43 +454,53 @@ jobs:
         if: '!cancelled()'
         env:
           GH_TOKEN: ${{ github.token }}
-          MEASURED: ${{ steps.measure.outcome }}
+          CACHE_MEASURED: ${{ steps.measure.outcome }}
+          FLUSH_MEASURED: ${{ steps.measure_flush.outcome }}
           BLOCKING: ${{ steps.scope.outputs.blocking }}
         run: |
-          if [ -f tests/perf/results/cache.status.txt ]; then
-            description=$(cat tests/perf/results/cache.status.txt)
-          else
-            description='the measurement did not finish'
-          fi
+          report() {
+            suite=$1 measured=$2 context=$3
+            status_file="tests/perf/results/$suite.status.txt"
 
-          # Only a breach is advisory outside the cache paths: a measurement that
-          # never wrote its figures fails wherever it ran.
-          if [ "$MEASURED" = success ]; then
-            state=success
-          elif [ "$BLOCKING" = true ] || [ ! -f tests/perf/results/cache.status.txt ]; then
-            state=failure
-          else
-            state=success
-            description="advisory, no cache path touched: $description"
-          fi
+            if [ -f "$status_file" ]; then
+              description=$(cat "$status_file")
+            else
+              description='the measurement did not finish'
+            fi
 
-          # Another branch's bench judged this commit, by gates that are not its
-          # own: posting that as its check would let a dispatch overwrite the
-          # verdict of the bench the commit carries. The summary has the figures.
-          if [ "${{ steps.commits.outputs.head }}" != "${{ steps.commits.outputs.bench }}" ]; then
-            echo "Not posted on the commit, judged by the bench of" \
-              "${{ steps.commits.outputs.bench_short }}: $state, $description"
-            exit 0
-          fi
+            # Only a breach is advisory outside the cache paths: a measurement
+            # that never wrote its figures fails wherever it ran.
+            if [ "$measured" = success ]; then
+              state=success
+            elif [ "$BLOCKING" = true ] || [ ! -f "$status_file" ]; then
+              state=failure
+            else
+              state=success
+              description="advisory, no cache path touched: $description"
+            fi
 
-          # A commit status description is capped at 140 characters.
-          description=${description:0:140}
+            # Another branch's bench judged this commit, by gates that are not
+            # its own: posting that as its check would let a dispatch overwrite
+            # the verdict of the bench the commit carries. The summary has the
+            # figures.
+            if [ "${{ steps.commits.outputs.head }}" != "${{ steps.commits.outputs.bench }}" ]; then
+              echo "$context not posted on the commit, judged by the bench of" \
+                "${{ steps.commits.outputs.bench_short }}: $state, $description"
+              return
+            fi
 
-          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
-            -f state="$state" \
-            -f context='Bench / cache' \
-            -f description="$description" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            # A commit status description is capped at 140 characters.
+            description=${description:0:140}
+
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+              -f state="$state" \
+              -f context="$context" \
+              -f description="$description" \
+              -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+
+          report cache "$CACHE_MEASURED" 'Bench / cache'
+          report cache-flush "$FLUSH_MEASURED" 'Bench / cache flush'
 
       - name: Upload the results
         if: always()

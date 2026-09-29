@@ -6,6 +6,7 @@
 	"scripts": {
 		"bench": "vitest --watch=false startup.perf resident.perf",
 		"bench:cache": "vitest --watch=false cache.perf",
+		"bench:cache-flush": "vitest --watch=false cache-flush.perf",
 		"bench:devserver": "vitest --watch=false devserver.perf"
 	},
 	"devDependencies": {
