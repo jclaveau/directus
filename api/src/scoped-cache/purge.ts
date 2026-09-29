@@ -684,7 +684,8 @@ export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
  * Keyv already swallows the clear's own failure, so a scan Redis refuses must not
  * be the one thing that turns a committed change into a failed request. The
  * counter moved and the entries went, or will when Redis is back; sets left
- * behind name keys that are gone and expire on their own.
+ * behind name keys that are gone, until the reap drops those members or the
+ * set's expiry runs out — never, for a set filed while `CACHE_TTL` was unset.
  */
 export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 	await clearResponseCache(cache);

@@ -602,19 +602,19 @@ async function* takeSweptIndexKeys(
 	sweptGlob: string | null,
 ): AsyncGenerator<ScopedCacheIndexTake> {
 	const redis = useCacheRedis();
-	const collectionIndexKeysKey = scopedCacheSweptIndexKeysKey();
+	const sweptIndexKeysKey = scopedCacheSweptIndexKeysKey();
 	let scanCursor = '0';
 
 	do {
 		const [next, sweptKeys] = sweptGlob === null
 			? await redis.sscan(
-				collectionIndexKeysKey,
+				sweptIndexKeysKey,
 				scanCursor,
 				'COUNT',
 				SCOPED_CACHE_INDEX_SCAN_COUNT,
 			)
 			: await redis.sscan(
-				collectionIndexKeysKey,
+				sweptIndexKeysKey,
 				scanCursor,
 				'MATCH',
 				sweptGlob,
