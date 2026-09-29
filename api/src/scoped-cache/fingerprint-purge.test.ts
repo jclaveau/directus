@@ -119,8 +119,15 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
-		// A reap has marked the index-key sets complete since the last flush.
-		mget: async () => ['1', '1'],
+		// A reap has marked the index-key sets complete since the last flush, and
+		// adopted no collection's legacy bare set.
+		mget: async (keys: string[]) => {
+			return keys.map((key) => {
+				return key.includes(':legacy-bare-adopted:')
+					? null
+					: '1';
+			});
+		},
 		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
@@ -614,7 +621,13 @@ describe('a purge shown the rows it wrote', () => {
 				throw new Error('redis is down');
 			}),
 			scan,
-			mget: async () => ['1', '1'],
+			mget: async (keys: string[]) => {
+				return keys.map((key) => {
+					return key.includes(':legacy-bare-adopted:')
+						? null
+						: '1';
+				});
+			},
 			eval: evalScript,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),

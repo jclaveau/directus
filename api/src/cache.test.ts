@@ -665,7 +665,9 @@ describe('scoped cache purging', () => {
 			always purges the collection-level pin (global readers) alongside slices
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:': ['slots:&|global-key'],
+				'scalabus:scoped-cache-index:fingerprint:slots:bare': [
+					'slots:&|global-key',
+				],
 				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 					'slots:&student=,A,&|key-a__expires_at',
@@ -686,7 +688,7 @@ describe('scoped cache purging', () => {
 			// the pin this purge names, so dropping one would take every entry filed
 			// under that value whatever it is bound to.
 			expect(redis._pipeline.srem).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:bare',
 				'slots:&|global-key',
 			);
 
