@@ -65,7 +65,18 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		await awaitDirectusConnection(Number(env[vendor].PORT));
-	}, 60_000);
+
+		// Waited for once, so the pass the boot asked for cannot write the marker
+		// back over one a scenario dropped.
+		await expect.poll(async () => {
+			const [marker, generation] = await redisClient.mget(
+				markerKey,
+				generationKey,
+			);
+
+			return marker !== null && marker === generation;
+		}, { timeout: 15_000 }).toBe(true);
+	}, 75_000);
 
 	afterAll(async () => {
 		instance.kill();
@@ -117,19 +128,6 @@ describe.each(vendors)('%s', (vendor) => {
 						.query({ 'filter[name][_eq]': row['name'], fields: row['fields'] })
 						.set('Authorization', auth);
 				}
-
-				// Waited for, so the pass the boot asked for cannot write the marker
-				// back over one a scenario dropped.
-				given("the boot's reap marked the index-key sets complete", async () => {
-					await expect.poll(async () => {
-						const [marker, generation] = await redisClient.mget(
-							markerKey,
-							generationKey,
-						);
-
-						return marker !== null && marker === generation;
-					}, { timeout: 15_000 }).toBe(true);
-				});
 
 				given(
 					/^these rows of (\w+):$/,

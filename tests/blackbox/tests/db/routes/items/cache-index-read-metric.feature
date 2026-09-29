@@ -7,9 +7,6 @@ Feature: The metrics count which way a collection-wide purge found its sets
   never wrote the marker back. Here the reap is scheduled once a year, and the
   marker is dropped and written by hand once the boot's own pass wrote it.
 
-  Background:
-    Given the boot's reap marked the index-key sets complete
-
   Scenario: a purge while the index-key sets are not marked complete counts a scan
     Given these rows of index_read_metric_scan:
       | name | label |
