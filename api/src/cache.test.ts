@@ -1788,6 +1788,10 @@ describe('a flush over redis tiers still connecting', () => {
 			failures: ['system cache', 'response cache'],
 		});
 
+		expect(logger.warn).toHaveBeenCalledWith(
+			'[cache] redis stores not ready after 5000ms, flushing anyway',
+		);
+
 		expect([...stores.system.entries])
 			.toEqual([['scalabus_system:schema', 's']]);
 	});
