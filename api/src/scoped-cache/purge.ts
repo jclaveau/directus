@@ -57,6 +57,7 @@ import {
 } from './fingerprint.js';
 import {
 	bumpScopedCacheEpochs,
+	bumpScopedCacheEpochsInEveryMode,
 	scopedCacheEpochKey,
 	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
@@ -621,8 +622,8 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	}
 	finally {
 		// On a failed drop too: whatever part of the index did go took the filings
-		// of the fills in flight with it.
-		await bumpScopedCacheEpochs(['*']);
+		// of the fills in flight with it. And in every mode, as the drop is.
+		await bumpScopedCacheEpochsInEveryMode(['*']);
 	}
 }
 

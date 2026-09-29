@@ -104,6 +104,17 @@ export async function bumpScopedCacheEpochs(
 		return;
 	}
 
+	await bumpScopedCacheEpochsInEveryMode(collections);
+}
+
+/**
+ * `bumpScopedCacheEpochs` whatever the purge mode, for a drop of the index: the
+ * flush command drops it in every mode, and a node still purging scoped — the
+ * mode is per process — keeps filing into the index it is cutting.
+ */
+export async function bumpScopedCacheEpochsInEveryMode(
+	collections: Iterable<string>,
+): Promise<void> {
 	const names = [...new Set(collections)];
 
 	if (names.length === 0) {

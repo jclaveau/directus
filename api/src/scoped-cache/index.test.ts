@@ -1296,6 +1296,25 @@ describe('dropScopedCacheIndex', () => {
 	});
 
 	it(oneLine`
+		moves the wholesale counter out of scoped mode too — the flush command drops
+		the index in every mode, and a node still purging scoped files into it
+	`, async () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'full';
+
+		const { scopedCacheEpochBump } = mockScan(
+			['0', ['ns:scoped-cache-index:fingerprint:articles']],
+		);
+
+		await dropScopedCacheIndex();
+
+		expect(scopedCacheEpochBump).toHaveBeenCalledExactlyOnceWith(
+			1,
+			'ns:scoped-cache-epoch:*',
+			86400,
+		);
+	});
+
+	it(oneLine`
 		sweeps a long list of index sets in bounded batches — the whole page is spread
 		into the script call, and a spread long enough throws RangeError before Redis
 		is reached (#397), taking a purge that can then never complete on retry
