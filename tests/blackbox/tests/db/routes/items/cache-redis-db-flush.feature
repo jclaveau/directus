@@ -34,6 +34,15 @@ Feature: A response cache kept in its own Redis database is flushed with one FLU
     And the flush logs "FLUSHDB on redis db 7, the scoped-cache index with it"
     And the flush logs nothing saying "The client is offline"
 
+  Scenario: the flush command empties a response cache sharing its database
+    Given the system cache holds an entry
+    And the response cache holds an entry
+    When `directus cache flush` runs with its cache in the shared database
+    Then it exits 0
+    And the system cache no longer holds that entry
+    And the response cache no longer holds that entry
+    And the flush logs nothing saying "The client is offline"
+
   Scenario: a cached read and its index are filed in the cache database
     Given an instance keeping its cache in database 7
     When a note read is cached

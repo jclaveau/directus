@@ -53,6 +53,9 @@ describe.each(vendors)('%s', (vendor) => {
 	const systemEntryKey
 		= `${flushNamespace}_system::${flushNamespace}_system:flush-witness`;
 
+	const responseEntryKey
+		= `${flushNamespace}_response::${flushNamespace}_response:flush-witness`;
+
 	const redisByDatabase = {
 		shared: new Redis({ host: 'localhost', port: 6108 }),
 		cache: new Redis({ host: 'localhost', port: 6108, db: CACHE_DATABASE }),
@@ -95,7 +98,13 @@ describe.each(vendors)('%s', (vendor) => {
 		instance = undefined;
 		instanceLog = [];
 		flushRun = undefined;
-		await redisByDatabase.shared.del(witnessKey, systemEntryKey);
+
+		await redisByDatabase.shared.del(
+			witnessKey,
+			systemEntryKey,
+			responseEntryKey,
+		);
+
 		await redisByDatabase.cache.del(witnessKey);
 	});
 
@@ -149,44 +158,58 @@ describe.each(vendors)('%s', (vendor) => {
 
 		// Its own process, as a deploy step runs it: the stores it builds are
 		// dialed in the same tick the flush clears them.
+		async function runCacheFlush(database?: string) {
+			const flushEnv = cloneDeep(env);
+			flushEnv[vendor]['CACHE_NAMESPACE'] = flushNamespace;
+
+			if (database !== undefined) {
+				flushEnv[vendor]['CACHE_REDIS_DB'] = database;
+			}
+
+			const cli = spawn('node', [paths.cli, 'cache', 'flush'], {
+				cwd: paths.cwd,
+				env: flushEnv[vendor],
+			});
+
+			let output = '';
+
+			cli.stdout.on('data', (chunk) => (output += String(chunk)));
+			cli.stderr.on('data', (chunk) => (output += String(chunk)));
+
+			// `close` waits for the output streams to drain, where `exit` can
+			// land before the last log line does.
+			const code = await new Promise<number | null>((resolve, reject) => {
+				const killTimer = setTimeout(() => {
+					cli.kill();
+					reject(new Error(`directus cache flush hung:\n${output}`));
+				}, 30_000);
+
+				cli.on('error', (spawnError) => {
+					clearTimeout(killTimer);
+					reject(spawnError);
+				});
+
+				cli.on('close', (exitCode) => {
+					clearTimeout(killTimer);
+					resolve(exitCode);
+				});
+			});
+
+			flushRun = { code, output };
+		}
+
+		given.optional('the response cache holds an entry', async () => {
+			await redisByDatabase.shared.set(responseEntryKey, 'before-flush');
+		});
+
 		when.optional(
 			/^`directus cache flush` runs with its cache in database (\d+)$/,
-			async (database: string) => {
-				const flushEnv = cloneDeep(env);
-				flushEnv[vendor]['CACHE_NAMESPACE'] = flushNamespace;
-				flushEnv[vendor]['CACHE_REDIS_DB'] = database;
+			runCacheFlush,
+		);
 
-				const cli = spawn('node', [paths.cli, 'cache', 'flush'], {
-					cwd: paths.cwd,
-					env: flushEnv[vendor],
-				});
-
-				let output = '';
-
-				cli.stdout.on('data', (chunk) => (output += String(chunk)));
-				cli.stderr.on('data', (chunk) => (output += String(chunk)));
-
-				// `close` waits for the output streams to drain, where `exit` can
-				// land before the last log line does.
-				const code = await new Promise<number | null>((resolve, reject) => {
-					const killTimer = setTimeout(() => {
-						cli.kill();
-						reject(new Error(`directus cache flush hung:\n${output}`));
-					}, 30_000);
-
-					cli.on('error', (spawnError) => {
-						clearTimeout(killTimer);
-						reject(spawnError);
-					});
-
-					cli.on('close', (exitCode) => {
-						clearTimeout(killTimer);
-						resolve(exitCode);
-					});
-				});
-
-				flushRun = { code, output };
-			},
+		when.optional(
+			'`directus cache flush` runs with its cache in the shared database',
+			() => runCacheFlush(),
 		);
 
 		then.optional('it exits 0', () => {
@@ -195,6 +218,10 @@ describe.each(vendors)('%s', (vendor) => {
 
 		and.optional('the system cache no longer holds that entry', async () => {
 			expect(await redisByDatabase.shared.exists(systemEntryKey)).toBe(0);
+		});
+
+		and.optional('the response cache no longer holds that entry', async () => {
+			expect(await redisByDatabase.shared.exists(responseEntryKey)).toBe(0);
 		});
 
 		and.optional(/^the flush logs "(.*)"$/, (line: string) => {
@@ -322,6 +349,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			'the flush command empties the system cache and the cache database',
+			defineScenarioSteps,
+			60_000,
+		);
+
+		scenario(
+			'the flush command empties a response cache sharing its database',
 			defineScenarioSteps,
 			60_000,
 		);
