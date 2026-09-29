@@ -68,24 +68,35 @@ let members: Record<string, string[]>;
 const srem = vi.fn();
 const swept: string[][] = [];
 
+// A purge holding no rows reads the collection's sets off its registry, so the
+// registry answers with the sets the case declared under that collection.
 const sscan = vi.fn(async (key: string, _cursor: string) => {
+	const registryPrefix = 'ns:scoped-cache-index:fingerprint-registry:';
+
+	if (key.startsWith(registryPrefix)) {
+		const collection = key.slice(registryPrefix.length);
+		const setPrefix = `ns:scoped-cache-index:fingerprint:${collection}:`;
+
+		return ['0', Object.keys(members).filter((set) => set.startsWith(setPrefix))];
+	}
+
 	return ['0', members[key] ?? []];
 });
 
-// A purge holding no rows reads the collection's sets off the keyspace, so the
-// scan answers with the sets the case declared under that collection.
-const scan = vi.fn(async (_cursor: string, _match: string, pattern: string) => {
-	const prefix = pattern.slice(0, -1);
+const scan = vi.fn(async () => ['0', []]);
 
-	return ['0', Object.keys(members).filter((key) => key.startsWith(prefix))];
-});
+const scopedCacheRegistryPrune = vi.fn(async (
+	_keyCount: number,
+	_registryKey: string,
+	...indexKeys: string[]
+) => indexKeys);
 
 const evalScript = vi.fn(async (
 	_script: string,
 	numKeys: number,
 	...args: string[]
 ) => {
-	swept.push(args.slice(0, numKeys));
+	swept.push(args.slice(2, numKeys));
 	return [];
 });
 
@@ -102,6 +113,7 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
+		scopedCacheRegistryPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),

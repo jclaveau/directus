@@ -26,6 +26,7 @@ const redis = vi.hoisted(() => {
 		eval: vi.fn(),
 		srem: vi.fn(),
 		scopedCacheIndexExpiry: vi.fn(),
+		scopedCacheIndexRegister: vi.fn(),
 		sunion: vi.fn(),
 		unlink: vi.fn(),
 		exec: vi.fn(),
@@ -35,6 +36,12 @@ const redis = vi.hoisted(() => {
 		isCluster: false,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
+		// Every name a registry holds still has its set here.
+		scopedCacheRegistryPrune: async (
+			_keyCount: number,
+			_registryKey: string,
+			...indexKeys: string[]
+		) => indexKeys,
 		smembers: vi.fn(),
 		sscan: vi.fn(
 			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
@@ -531,31 +538,34 @@ describe('scoped cache purging', () => {
 			indexedMembers = {};
 			swept.length = 0;
 
+			// A registry names every set of its collection held here, which is
+			// what the registry's own invariant promises; the swept registry names
+			// nothing, since no case leaves a sweep unreleased.
 			redis.sscan.mockImplementation(async (indexKey: string) => {
-				return ['0', indexedMembers[indexKey] ?? []] as [string, string[]];
-			});
+				const registryPrefix = 'scalabus:scoped-cache-index:fingerprint-registry:';
 
-			redis.scan.mockImplementation(async (
-				_cursor: string,
-				_match: string,
-				pattern: string,
-			) => {
-				const scanned = pattern.slice(0, -1);
+				if (! indexKey.startsWith(registryPrefix)) {
+					return ['0', indexedMembers[indexKey] ?? []] as [string, string[]];
+				}
 
-				return ['0', Object.keys(indexedMembers).filter((indexKey) => {
-					return indexKey.startsWith(scanned);
+				const collection = indexKey.slice(registryPrefix.length);
+				const setPrefix = `scalabus:scoped-cache-index:fingerprint:${collection}:`;
+
+				return ['0', Object.keys(indexedMembers).filter((setKey) => {
+					return setKey.startsWith(setPrefix);
 				})] as [string, string[]];
 			});
 
 			// The double runs what the script runs: move every set it was handed that
 			// exists to `<prefix><position>`, and answer with where it moved them, so
-			// the `SSCAN` after it reads the moved set.
+			// the `SSCAN` after it reads the moved set. The two registries lead the
+			// key list.
 			redis.eval.mockImplementation(async (
 				_script: string,
 				numKeys: number,
 				...args: string[]
 			) => {
-				const sweptKeys = args.slice(0, numKeys);
+				const sweptKeys = args.slice(2, numKeys);
 				const movedPrefix = args[numKeys];
 				swept.push(sweptKeys);
 
@@ -944,15 +954,16 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			// The glob ends on the separator, which is what keeps a prefix sibling
-			// (`articles_archive`) out of a purge of `articles`.
-			expect(redis.scan).toHaveBeenCalledWith(
+			// The collection's own registry, never a keyspace SCAN: the registry of
+			// `articles_archive` is another key.
+			expect(redis.sscan).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:fingerprint-registry:articles',
 				'0',
-				'MATCH',
-				'scalabus:scoped-cache-index:fingerprint:articles:*',
 				'COUNT',
 				expect.any(Number),
 			);
+
+			expect(redis.scan).not.toHaveBeenCalled();
 
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
@@ -1005,7 +1016,15 @@ describe('scoped cache purging', () => {
 			// The sets go inside the script, so nothing prunes them afterwards: a
 			// member re-added while the sweep ran cannot be SREMed after the fact,
 			// and a set left naming keys it just dropped would grow without bound.
-			expect(redis._pipeline.srem).not.toHaveBeenCalled();
+			// The one SREM is the swept registry releasing the sets' names.
+			expect(redis._pipeline.srem).toHaveBeenCalledExactlyOnceWith(
+				'scalabus:scoped-cache-index:swept-registry',
+				[
+					expect.stringMatching(/:swept:articles:[0-9a-f-]{36}:1$/),
+					expect.stringMatching(/:swept:articles:[0-9a-f-]{36}:2$/),
+					expect.stringMatching(/:swept:articles:[0-9a-f-]{36}:3$/),
+				],
+			);
 		});
 
 		test('full mode flushes the whole cache and never touches redis', async () => {
