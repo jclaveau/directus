@@ -311,9 +311,10 @@ return live
  *
  * The bare set is named in the index-key set, and both keep an expiry at
  * least the legacy bare set's, or none while it has none. The last call of a
- * pass writes the adopted marker, only while nothing dropped the index since
- * the reap read it (`scopedCacheIndexCompleteMarkScript`): a drop cutting the
- * bare set would otherwise leave a marker vouching for what it cut.
+ * pass writes the adopted marker, holding the generation the reap read, and
+ * only while nothing dropped the index since it read it
+ * (`scopedCacheIndexCompleteMarkScript`): a drop cutting the bare set would
+ * otherwise leave a marker vouching for what it cut.
  *
  * KEYS are the bare set, the legacy bare set, the index-key set, the adopted
  * marker, the index generation and the wholesale counter. ARGV[1] is `1` on the
@@ -367,7 +368,7 @@ end
 if ARGV[1] == '1'
 	and redis.call('GET', KEYS[5]) == ARGV[2]
 	and (redis.call('GET', KEYS[6]) or '') == ARGV[3] then
-	redis.call('SET', KEYS[4], '1')
+	redis.call('SET', KEYS[4], ARGV[2])
 end
 
 return #adopted
@@ -877,6 +878,10 @@ function scopedCacheCollectionIndexKeysCompleteKey(): string {
  * to its end and filed in the bare set every entry only it held. Until then a
  * write reads the legacy bare set whole too. No expiry, and inside the prefix,
  * outside every family a glob or the reap reads: a flush drops it with the sets.
+ *
+ * It holds the index generation the reap read, and vouches only while that
+ * still reads the same: a changed build moves the generation, since a build
+ * before home pins, rolled back to, filed in the legacy bare set alone.
  */
 function scopedCacheLegacyBareAdoptedKey(collection: string): string {
 	return `${scopedCacheIndexPrefix()}legacy-bare-adopted:${collection}`;
@@ -901,11 +906,14 @@ async function scopedCacheLegacyBareReadKeys(
 		scopedCacheLegacyBareIndexKey(collection),
 	];
 
-	const adoptedKey = scopedCacheLegacyBareAdoptedKey(collection);
-
 	// A refused answer reads the set, as the builds before this one did.
 	try {
-		if (await useCacheRedis().exists(adoptedKey) !== 1) {
+		const [adoptedGeneration, generation] = await useCacheRedis().mget([
+			scopedCacheLegacyBareAdoptedKey(collection),
+			scopedCacheIndexGenerationKey(),
+		]);
+
+		if (adoptedGeneration === null || adoptedGeneration !== generation) {
 			return legacyBareKeys;
 		}
 	}

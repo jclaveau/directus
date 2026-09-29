@@ -8,7 +8,8 @@ Feature: An older build's write still reaches the reads a newer build filed
   drops it. A newer build's row write takes out of the legacy bare set every
   entry it drops, so the set names no dead entry. And it reads that set until a
   reap has adopted the collection, since an entry an older build filed is named
-  nowhere else. The reap is set to once a year here, so none adopts.
+  nowhere else. The reap is set to once a year here, and the pass the boot asks
+  for ends before any read is filed, so none adopts.
 
   The collections are scoped on name, the index path, and every read here is
   filtered on the primary key: filed under its home pin, off the index path.

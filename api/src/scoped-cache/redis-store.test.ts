@@ -49,7 +49,6 @@ const scopedCacheIndexBuildRecord = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
-const exists = vi.fn();
 const scopedCacheLegacyBareAdopt = vi.fn();
 
 // The marker and the index generation agreeing: a reap has vouched for the
@@ -78,7 +77,6 @@ vi.mock('../redis/index.js', () => {
 				scan,
 				sscan,
 				sadd,
-				exists,
 				scopedCacheLegacyBareAdopt,
 				mget,
 				get,
@@ -1283,7 +1281,6 @@ describe('scanDeclaredIndexedEntries', () => {
 			sscan,
 			scopedCacheCollectionIndexKeysPrune,
 			mget,
-			exists,
 		]) {
 			command.mockReset();
 		}
@@ -1293,7 +1290,9 @@ describe('scanDeclaredIndexedEntries', () => {
 		reads the home pins' sets off the index-key set while a reap vouches for
 		it
 	`, async () => {
-		mget.mockResolvedValueOnce(['7', '7']);
+		mget
+			.mockResolvedValueOnce([null, '7'])
+			.mockResolvedValueOnce(['7', '7']);
 
 		sscan
 			.mockResolvedValueOnce(['0', []])
@@ -1360,7 +1359,9 @@ describe('scanDeclaredIndexedEntries', () => {
 		scans the keyspace for the home pins' sets while no reap vouches for the
 		index-key set
 	`, async () => {
-		mget.mockResolvedValueOnce([null, '7']);
+		mget
+			.mockResolvedValueOnce([null, '7'])
+			.mockResolvedValueOnce([null, '7']);
 
 		sscan
 			.mockResolvedValueOnce(['0', []])
@@ -1406,7 +1407,7 @@ describe('scanDeclaredIndexedEntries', () => {
 
 describe('scanRowIndexedEntries', () => {
 	beforeEach(() => {
-		for (const command of [sscan, exists]) {
+		for (const command of [sscan, mget]) {
 			command.mockReset();
 		}
 	});
@@ -1415,7 +1416,7 @@ describe('scanRowIndexedEntries', () => {
 		reads the legacy bare set after the write's own sets until a reap has
 		adopted the collection
 	`, async () => {
-		exists.mockResolvedValueOnce(0);
+		mget.mockResolvedValueOnce([null, '41']);
 
 		sscan
 			.mockResolvedValueOnce(['0', ['slot:&|key-a']])
@@ -1450,9 +1451,10 @@ describe('scanRowIndexedEntries', () => {
 			}],
 		]);
 
-		expect(exists.mock.calls).toEqual([
-			['scalabus:scoped-cache-index:legacy-bare-adopted:slot'],
-		]);
+		expect(mget.mock.calls).toEqual([[[
+			'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
+			'scalabus:scoped-cache-index-generation',
+		]]]);
 
 		expect(sscan.mock.calls).toEqual([
 			['scalabus:scoped-cache-index:fingerprint:slot:bare', '0', 'COUNT', 1000],
@@ -1461,7 +1463,7 @@ describe('scanRowIndexedEntries', () => {
 	});
 
 	it('reads the legacy bare set when Redis cannot say it was adopted', async () => {
-		exists.mockRejectedValueOnce(new Error('LOADING'));
+		mget.mockRejectedValueOnce(new Error('LOADING'));
 		sscan.mockResolvedValue(['0', []]);
 
 		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
@@ -1482,7 +1484,7 @@ describe('scanRowIndexedEntries', () => {
 		stops reading the legacy bare set once a reap adopted the collection, and
 		stops asking
 	`, async () => {
-		exists.mockResolvedValueOnce(1);
+		mget.mockResolvedValueOnce(['41', '41']);
 		sscan.mockResolvedValue(['0', []]);
 
 		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
@@ -1501,11 +1503,32 @@ describe('scanRowIndexedEntries', () => {
 			continue;
 		}
 
-		expect(exists).toHaveBeenCalledTimes(1);
+		expect(mget).toHaveBeenCalledTimes(1);
 
 		expect(sscan.mock.calls).toEqual([
 			['scalabus:scoped-cache-index:fingerprint:note:bare', '0', 'COUNT', 1000],
 			['scalabus:scoped-cache-index:fingerprint:note:bare', '0', 'COUNT', 1000],
+		]);
+	});
+
+	it(oneLine`
+		reads the legacy bare set when its adoption names a generation that moved
+		since
+	`, async () => {
+		mget.mockResolvedValueOnce(['40', '41']);
+		sscan.mockResolvedValue(['0', []]);
+
+		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
+			'room',
+			[],
+			null,
+		)) {
+			continue;
+		}
+
+		expect(sscan.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:fingerprint:room:bare', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:fingerprint:room:', '0', 'COUNT', 1000],
 		]);
 	});
 });
@@ -2693,7 +2716,7 @@ describe('scopedCacheLegacyBareAdoptScript', () => {
 			"if ARGV[1] == '1'\n"
 			+ "\tand redis.call('GET', KEYS[5]) == ARGV[2]\n"
 			+ "\tand (redis.call('GET', KEYS[6]) or '') == ARGV[3] then\n"
-			+ "\tredis.call('SET', KEYS[4], '1')",
+			+ "\tredis.call('SET', KEYS[4], ARGV[2])",
 		);
 	});
 

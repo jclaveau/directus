@@ -32,8 +32,11 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['CACHE_TTL'] = '1h';
 
 	// Once a year: a reap adopting a collection stops its writes reading the
-	// legacy bare set, which the last scenario needs them to.
+	// legacy bare set, which the last scenario needs them to. The pass the boot
+	// asks for ends before any scenario files a read.
 	env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '0 0 1 1 *';
+	const markerKey = `${indexPrefix}collection-index-keys-complete`;
+	const generationKey = `${namespace}:scoped-cache-index-generation`;
 
 	const collections = [
 		'legacy_bare_named',
@@ -68,6 +71,15 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		await awaitDirectusConnection(Number(env[vendor].PORT));
+
+		await expect.poll(async () => {
+			const [marker, generation] = await redisClient.mget(
+				markerKey,
+				generationKey,
+			);
+
+			return marker !== null && marker === generation;
+		}, { timeout: 15_000 }).toBe(true);
 	}, 60_000);
 
 	afterAll(async () => {
