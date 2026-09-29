@@ -25,8 +25,8 @@ Feature: A response cache kept in its own Redis database is flushed with one FLU
     And the cache database holds no lock
 
   Scenario: the flush command empties the system cache and the cache database
-    Given the system cache holds an entry
-    And the cache database holds a key outside every namespace
+    Given the cache database holds a key outside every namespace
+    And the system cache holds an entry
     When `directus cache flush` runs with its cache in database 7
     Then it exits 0
     And the system cache no longer holds that entry

@@ -224,14 +224,6 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(await redisByDatabase.shared.exists(responseEntryKey)).toBe(0);
 		});
 
-		and.optional(/^the flush logs "(.*)"$/, (line: string) => {
-			expect(flushRun!.output).toContain(line);
-		});
-
-		and.optional(/^the flush logs nothing saying "(.*)"$/, (line: string) => {
-			expect(flushRun!.output).not.toContain(line);
-		});
-
 		when.optional(
 			/^an instance keeping its cache in database (\d+) boots on a new build$/,
 			bootInstance,
@@ -292,6 +284,14 @@ describe.each(vendors)('%s', (vendor) => {
 
 		and.optional(/^the instance logs "(.*)"$/, (line: string) => {
 			expect(instanceLog.join('')).toContain(line);
+		});
+
+		and.optional(/^the flush logs "(.*)"$/, (line: string) => {
+			expect(flushRun!.output).toContain(line);
+		});
+
+		and.optional(/^the flush logs nothing saying "(.*)"$/, (line: string) => {
+			expect(flushRun!.output).not.toContain(line);
 		});
 
 		and.optional(
