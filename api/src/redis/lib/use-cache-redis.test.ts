@@ -96,6 +96,49 @@ describe('cacheRedisDatabase', () => {
 		expect(cacheRedisDatabase()).toBe(1);
 	});
 
+	test('reads the database a db query parameter selects, as ioredis does', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'redis://h:6379?db=3',
+			CACHE_REDIS_DB: 3,
+		});
+
+		expect(cacheRedisDatabase()).toBeUndefined();
+	});
+
+	test('reads the path before a db query parameter, as ioredis does', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'redis://h:6379/2?db=3',
+			CACHE_REDIS_DB: 3,
+		});
+
+		expect(cacheRedisDatabase()).toBe(3);
+	});
+
+	test('ignores it when the REDIS path is not a database number', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'redis://h:6379/abc',
+			CACHE_REDIS_DB: 1,
+		});
+
+		expect(cacheRedisDatabase()).toBeUndefined();
+	});
+
+	test('ignores it when REDIS is a host and port with no scheme', () => {
+		vi.mocked(useEnv).mockReturnValue({
+			REDIS: 'h:6379',
+			CACHE_REDIS_DB: 0,
+		});
+
+		expect(cacheRedisDatabase()).toBeUndefined();
+	});
+
+	test('ignores it when REDIS_DB is not a database number', () => {
+		vi.mocked(useEnv).mockReturnValue({ REDIS_HOST: 'h', CACHE_REDIS_DB: 1 });
+		vi.mocked(getConfigFromEnv).mockReturnValue({ host: 'h', db: 'x' });
+
+		expect(cacheRedisDatabase()).toBeUndefined();
+	});
+
 	test('ignores it when REDIS is an address whose database cannot be read', () => {
 		vi.mocked(useEnv).mockReturnValue({
 			REDIS: '/var/run/redis.sock',

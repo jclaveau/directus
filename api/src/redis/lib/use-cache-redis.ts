@@ -18,31 +18,49 @@ export const _cache: {
 	database: undefined,
 };
 
+function databaseNumber(raw: unknown): number | undefined {
+	const database = Number(raw);
+
+	return Number.isInteger(database) && database >= 0
+		? database
+		: undefined;
+}
+
 /**
- * The database `REDIS` itself selects, or `undefined` when its address is not a
- * URL this can read — a unix socket path, say.
+ * The database `REDIS` itself selects, read the way ioredis reads it: the URL's
+ * path, else its `db` query parameter, else 0. `undefined` for an address this
+ * cannot read — a unix socket path, a `host:port` with no scheme.
  */
 function sharedRedisDatabase(): number | undefined {
 	const url = useEnv()['REDIS'];
 
-	if (url) {
-		try {
-			const path = new URL(url as string).pathname.slice(1);
+	if (!url) {
+		const { db } = getConfigFromEnv('REDIS');
 
-			return path === ''
-				? 0
-				: Number(path);
-		}
-		catch {
-			return undefined;
-		}
+		return databaseNumber(db ?? 0);
 	}
 
-	const { db } = getConfigFromEnv('REDIS');
+	let redisAddress: URL;
 
-	return db === undefined
-		? 0
-		: Number(db);
+	try {
+		redisAddress = new URL(url as string);
+	}
+	catch {
+		return undefined;
+	}
+
+	if (
+		redisAddress.protocol !== 'redis:'
+		&& redisAddress.protocol !== 'rediss:'
+	) {
+		return undefined;
+	}
+
+	return databaseNumber(
+		redisAddress.pathname.slice(1)
+		|| redisAddress.searchParams.get('db')
+		|| 0,
+	);
 }
 
 function readCacheRedisDatabase(): number | undefined {
@@ -52,10 +70,10 @@ function readCacheRedisDatabase(): number | undefined {
 		return undefined;
 	}
 
-	const database = Number(raw);
+	const database = databaseNumber(raw);
 	const logger = useLogger();
 
-	if (!Number.isInteger(database) || database < 0) {
+	if (database === undefined) {
 		logger.warn(`[cache] CACHE_REDIS_DB=${raw} is not a database number, ignored`);
 		return undefined;
 	}
