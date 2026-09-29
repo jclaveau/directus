@@ -310,16 +310,19 @@ return live
  *
  * The bare set is named in the index-key set, and both keep an expiry at
  * least the legacy bare set's, or none while it has none. The last call of a
- * pass writes the adopted marker.
+ * pass writes the adopted marker, only while nothing dropped the index since
+ * the reap read it (`scopedCacheIndexCompleteMarkScript`): a drop cutting the
+ * bare set would otherwise leave a marker vouching for what it cut.
  *
- * KEYS are the bare set, the legacy bare set, the index-key set and the
- * adopted marker. ARGV[1] is `1` on the call that ends the pass, then each
- * member followed by how many other sets can hold it and their keys. Answers
- * with how many members it filed.
+ * KEYS are the bare set, the legacy bare set, the index-key set, the adopted
+ * marker, the index generation and the wholesale counter. ARGV[1] is `1` on the
+ * call that ends the pass, ARGV[2] and ARGV[3] the generation and the counter as
+ * the reap read them, then each member followed by how many other sets can hold
+ * it and their keys. Answers with how many members it filed.
  */
 export const scopedCacheLegacyBareAdoptScript = `
 local adopted = {}
-local at = 2
+local at = 4
 while at <= #ARGV do
 	local count = tonumber(ARGV[at + 1])
 	local skipped = redis.call('SISMEMBER', KEYS[2], ARGV[at]) == 0
@@ -360,7 +363,9 @@ if #adopted > 0 and legacyLeft ~= -2 then
 	end
 end
 
-if ARGV[1] == '1' then
+if ARGV[1] == '1'
+	and redis.call('GET', KEYS[5]) == ARGV[2]
+	and (redis.call('GET', KEYS[6]) or '') == ARGV[3] then
 	redis.call('SET', KEYS[4], '1')
 end
 
@@ -373,9 +378,77 @@ type ScopedCacheLegacyBareAdoptCommand = {
 		legacyBareKey: string,
 		collectionIndexKeysKey: string,
 		adoptedKey: string,
-		...passEndThenMembers: Array<string | number>
+		generationKey: string,
+		flushEpochKey: string,
+		...passEndThenReadsThenMembers: Array<string | number>
 	): Promise<number>;
 };
+
+/**
+ * Take back what the completeness marker vouches for before a drop unlinks
+ * anything: the marker goes, and the index generation moves, so a reap that read
+ * the generation before this cannot write the marker back
+ * (`scopedCacheIndexCompleteMarkScript`).
+ *
+ * The generation is seeded from `TIME` the way the purge counters are, so one
+ * recreated after a FLUSHDB never repeats a value a marker was written with. No
+ * expiry: a marker is good for as long as the generation it names stands, and
+ * only a drop or a changed build moves it.
+ *
+ * KEYS are the marker and the generation.
+ */
+export const scopedCacheIndexInvalidateScript = `
+redis.call('DEL', KEYS[1])
+
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+redis.call('SET', KEYS[2], seed, 'NX')
+
+return redis.call('INCR', KEYS[2])
+`;
+
+/**
+ * The index generation and the wholesale counter as a reap reads them before its
+ * SCAN, seeding the generation when a FLUSHDB took it: a reap with no generation
+ * to name could never mark anything complete.
+ *
+ * KEYS are the generation and the wholesale counter. Answers with both, the
+ * counter as `''` when there is none.
+ */
+export const scopedCacheIndexGenerationReadScript = `
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+redis.call('SET', KEYS[1], seed, 'NX')
+
+return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
+`;
+
+/**
+ * Write the completeness marker, only while nothing dropped the index since the
+ * reap read it: the generation still reads what it read, which a drop of this
+ * build moves before it unlinks, and so does the wholesale counter, which a drop
+ * of a build older than the generation moves after. A separate check and `SET`
+ * let a drop start in between, and the marker then vouches for an index that
+ * drop is cutting.
+ *
+ * KEYS are the marker, the generation and the wholesale counter; ARGV the
+ * generation and the counter as the reap read them. Answers 1 when it wrote.
+ */
+export const scopedCacheIndexCompleteMarkScript = `
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then
+	return 0
+end
+
+if (redis.call('GET', KEYS[3]) or '') ~= ARGV[2] then
+	return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[1])
+
+return 1
+`;
 
 type ScopedCacheIndexFileCommand = {
 	scopedCacheIndexFile(
@@ -424,13 +497,40 @@ type ScopedCacheIndexReapCommand = {
 	): Promise<number>;
 };
 
+type ScopedCacheIndexInvalidateCommand = {
+	scopedCacheIndexInvalidate(
+		markerKey: string,
+		generationKey: string,
+	): Promise<number>;
+};
+
+type ScopedCacheIndexGenerationReadCommand = {
+	scopedCacheIndexGenerationRead(
+		generationKey: string,
+		flushEpochKey: string,
+	): Promise<[string, string]>;
+};
+
+type ScopedCacheIndexCompleteMarkCommand = {
+	scopedCacheIndexCompleteMark(
+		markerKey: string,
+		generationKey: string,
+		flushEpochKey: string,
+		generationRead: string,
+		flushEpochRead: string,
+	): Promise<number>;
+};
+
 type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexFileCommand
 	& ScopedCacheEpochBumpCommand
 	& ScopedCacheIndexReapCommand
 	& ScopedCacheCollectionIndexKeysPruneCommand
 	& ScopedCacheLegacyBareAdoptCommand
-	& ScopedCacheCollectionIndexKeysRegisterCommand<Promise<number>>;
+	& ScopedCacheCollectionIndexKeysRegisterCommand<Promise<number>>
+	& ScopedCacheIndexInvalidateCommand
+	& ScopedCacheIndexGenerationReadCommand
+	& ScopedCacheIndexCompleteMarkCommand;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
@@ -472,8 +572,23 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 		});
 
 		redis.defineCommand('scopedCacheLegacyBareAdopt', {
-			numberOfKeys: 4,
+			numberOfKeys: 6,
 			lua: scopedCacheLegacyBareAdoptScript,
+		});
+
+		redis.defineCommand('scopedCacheIndexInvalidate', {
+			numberOfKeys: 2,
+			lua: scopedCacheIndexInvalidateScript,
+		});
+
+		redis.defineCommand('scopedCacheIndexGenerationRead', {
+			numberOfKeys: 2,
+			lua: scopedCacheIndexGenerationReadScript,
+		});
+
+		redis.defineCommand('scopedCacheIndexCompleteMark', {
+			numberOfKeys: 3,
+			lua: scopedCacheIndexCompleteMarkScript,
 		});
 
 		clientsCarryingScripts.add(redis);
@@ -706,10 +821,10 @@ export function scopedCacheEpochKey(collection: string): string {
 
 /**
  * The key saying the index-key sets name every set the index holds. It holds the
- * wholesale counter as the reap read it before its SCAN, and vouches for them
- * only while that counter still reads the same (`collectionIndexKeysComplete`).
- * No expiry: a flush is what ends it, by moving the counter, and inside the
- * prefix so the flush's own drop takes it too.
+ * index generation a reap read before its SCAN, and vouches for them only while
+ * the generation still reads the same (`collectionIndexKeysComplete`). No
+ * expiry: a drop is what ends it, deleting it before it unlinks anything, and
+ * inside the prefix so a drop of an older build takes it too.
  */
 function scopedCacheCollectionIndexKeysCompleteKey(): string {
 	return `${scopedCacheIndexPrefix()}collection-index-keys-complete`;
@@ -762,6 +877,16 @@ async function scopedCacheLegacyBareReadKeys(
 }
 
 /**
+ * The counter a drop of the index moves, and the completeness marker names.
+ * Outside the prefix, so the drop that moves it does not unlink it, and apart
+ * from the purge counters: the wholesale one expires, and a marker naming it
+ * went back to a SCAN every day nothing flushed.
+ */
+function scopedCacheIndexGenerationKey(): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`;
+}
+
+/**
  * The glob matching every set one collection's fingerprints are filed in — the
  * bare one, every split the index path produced and every home pin's. What a
  * collection-wide read SCANs the keyspace for while the index-key sets are not
@@ -787,23 +912,23 @@ function scopedCacheCollectionIndexGlob(collection: string): string {
  * naming them: by the build before the index-key sets, or before a flush that
  * dropped an index-key set and failed to drop a set it named. Only the reap
  * names those, so the marker is written by a reap that walked the whole index,
- * and holds the wholesale counter as it was BEFORE that walk. A flush moves the
- * counter, so one landing during the walk, whose drop the walk may have read
- * half of, leaves a marker that already vouches for nothing. A counter that
- * expired reads as none and a counter the store recreates never repeats a value,
- * so neither can match a marker written before it.
+ * and holds the index generation as it was BEFORE that walk. A drop moves the
+ * generation before it unlinks anything, so one landing during the walk leaves
+ * the marker unwritten, and one landing after it leaves a marker naming a
+ * generation that is gone. A generation a FLUSHDB took reads as none and is
+ * recreated at a value it never held, so neither can match an earlier marker.
  *
  * Accepted: a node still running a build older than the index-key sets, during
  * a rolling deploy, files sets nothing names after the marker was written. The
  * next reap names them; until then a collection-wide purge misses their entries.
  */
 async function collectionIndexKeysComplete(): Promise<boolean> {
-	const [marker, flushEpoch] = await useCacheRedis().mget([
+	const [marker, generation] = await useCacheRedis().mget([
 		scopedCacheCollectionIndexKeysCompleteKey(),
-		scopedCacheEpochKey('*'),
+		scopedCacheIndexGenerationKey(),
 	]);
 
-	return marker !== null && marker === (flushEpoch ?? '');
+	return marker !== null && marker === generation;
 }
 
 /**
@@ -1468,12 +1593,14 @@ async function reapIndexMembers(
  * (`scopedCacheLegacyBareAdoptScript`), a chunk per call. Each member is checked
  * against the bare set and every home pin's set it can have been filed in, the
  * same ones a prune names. `passEnds` marks the page that ends the pass, whose
- * last call writes the adopted marker even when the page is empty.
+ * last call writes the adopted marker even when the page is empty, unless the
+ * index moved past `indexRead`, what the reap read before its SCAN.
  */
 async function adoptLegacyBareMembers(
 	collection: string,
 	members: readonly string[],
 	passEnds: boolean,
+	indexRead: readonly [string, string],
 ): Promise<void> {
 	const bareKey = scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN);
 
@@ -1482,6 +1609,8 @@ async function adoptLegacyBareMembers(
 		scopedCacheLegacyBareIndexKey(collection),
 		scopedCacheCollectionIndexKeysKey(collection),
 		scopedCacheLegacyBareAdoptedKey(collection),
+		scopedCacheIndexGenerationKey(),
+		scopedCacheEpochKey('*'),
 	] as const;
 
 	let at = 0;
@@ -1501,6 +1630,7 @@ async function adoptLegacyBareMembers(
 		await useScriptedRedis().scopedCacheLegacyBareAdopt(
 			...adoptKeys,
 			Number(passEnds && at >= members.length),
+			...indexRead,
 			...memberArguments,
 		);
 	}
@@ -1869,8 +1999,9 @@ const redisStore: ScopedCacheStore = {
  *
  * A pass that reaches its end has named every set the index held when it
 	 * began, so it writes the marker `collectionIndexKeysComplete` trusts, holding
-	 * the wholesale counter read before the SCAN. A pass that throws writes
-	 * nothing and leaves the marker as it was.
+	 * the index generation read before the SCAN — unless a drop moved it since
+	 * (`scopedCacheIndexCompleteMarkScript`). A pass that throws writes nothing
+	 * and leaves the marker as it was.
 	 */
 	async reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
@@ -1881,15 +2012,20 @@ const redisStore: ScopedCacheStore = {
 			indexKeys: 0,
 			reaped: 0,
 			strandedSweptKeys: 0,
+			markedComplete: false,
 		};
 
 		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
 		const indexKeyPrefix = `${scopedCacheIndexPrefix()}fingerprint:`;
 		const sweptKeyPrefix = `${scopedCacheIndexPrefix()}swept:`;
 
-		// Before the SCAN: a flush landing during it moves the counter past what
+		// Before the SCAN: a drop landing during it moves the generation past what
 		// the marker will hold.
-		const flushEpoch = await useCacheRedis().get(scopedCacheEpochKey('*'));
+		const [generationRead, flushEpochRead] = await useScriptedRedis()
+			.scopedCacheIndexGenerationRead(
+				scopedCacheIndexGenerationKey(),
+				scopedCacheEpochKey('*'),
+			);
 
 		// The whole prefix rather than `fingerprint:*` alone, so the index-key
 		// sets come back from the same pass: MATCH filters after the walk, so the
@@ -1968,6 +2104,7 @@ const redisStore: ScopedCacheStore = {
 							setCollection,
 							members,
 							scanCursor === '0',
+							[generationRead, flushEpochRead],
 						);
 					}
 				}
@@ -1979,9 +2116,21 @@ const redisStore: ScopedCacheStore = {
 			}
 		}
 
-		await useCacheRedis().set(
-			scopedCacheCollectionIndexKeysCompleteKey(),
-			flushEpoch ?? '',
+		tally.markedComplete = await useScriptedRedis()
+			.scopedCacheIndexCompleteMark(
+				scopedCacheCollectionIndexKeysCompleteKey(),
+				scopedCacheIndexGenerationKey(),
+				scopedCacheEpochKey('*'),
+				generationRead,
+				flushEpochRead,
+			) === 1;
+
+		useLogger().info(
+			tally.markedComplete
+				? `[scoped-cache] index-key sets marked complete at generation `
+				+ `${generationRead}`
+				: `[scoped-cache] index-key sets not marked complete: the index was `
+				+ `dropped since generation ${generationRead}`,
 		);
 
 		return tally;
@@ -1995,9 +2144,19 @@ const redisStore: ScopedCacheStore = {
 	 *
 	 * The keys the pre-scoped-cache-index layout left behind are not swept here:
 	 * they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
+	 *
+	 * The marker goes first, and the generation moves with it, before anything
+	 * is unlinked: a drop cut short leaves index-key sets naming less than the
+	 * index holds, which only a SCAN still reaches. Refused, it throws before the
+	 * unlink, so no drop ever leaves a marker vouching for what it cut.
 	 */
 	async dropIndex(): Promise<ScopedCacheUnlinkTally> {
 		const tally = { dropped: 0, refused: 0 };
+
+		await useScriptedRedis().scopedCacheIndexInvalidate(
+			scopedCacheCollectionIndexKeysCompleteKey(),
+			scopedCacheIndexGenerationKey(),
+		);
 
 		for await (const batch of scanScopedCacheKeys(
 			`${scopedCacheIndexGlobPrefix()}*`,

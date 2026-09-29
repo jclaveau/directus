@@ -1211,6 +1211,7 @@ describe('dropScopedCacheIndex', () => {
 			scan,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump,
+			scopedCacheIndexInvalidate: vi.fn(),
 			pipeline: () => pipeline,
 		};
 
@@ -1463,6 +1464,9 @@ describe('flushResponseCache', () => {
 			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
 				calls.push(`bump ${epochKey}`);
 			},
+			scopedCacheIndexInvalidate: async () => {
+				calls.push('invalidate');
+			},
 			pipeline: () => pipeline,
 		} as any);
 
@@ -1487,6 +1491,7 @@ describe('flushResponseCache', () => {
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:*',
 			'clear',
+			'invalidate',
 			'scan',
 			'unlink',
 			'exec',
@@ -1504,6 +1509,7 @@ describe('flushResponseCache', () => {
 
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:*',
+			'invalidate',
 			'scan',
 			'unlink',
 			'exec',
@@ -1542,6 +1548,7 @@ describe('flushResponseCache', () => {
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:*',
 			'clear',
+			'invalidate',
 			'bump ns:scoped-cache-epoch:*',
 		]);
 
@@ -1628,6 +1635,8 @@ describe('retryPendingScopedCachePurges', () => {
 		mget: vi.fn(async () => ['1', '1']),
 		get: vi.fn(async () => '1'),
 		set: vi.fn(),
+		scopedCacheIndexGenerationRead: vi.fn(async () => ['1', '1']),
+		scopedCacheIndexCompleteMark: vi.fn(async () => 1),
 		scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
 			const scanned = pattern.slice(0, -1);
 

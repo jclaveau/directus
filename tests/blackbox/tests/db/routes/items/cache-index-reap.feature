@@ -22,8 +22,8 @@ Feature: The members naming an expired entry are reaped from the index
   again, and drops the reads the second names.
 
   A purge trusts the index-key sets only once a reap has walked the whole index:
-  each full walk marks them complete with the wholesale purge counter as it read
-  before the walk, so a flush moving that counter voids the mark until the next.
+  each full walk marks them complete with the index generation as it read before
+  the walk, so a flush moving that generation voids the mark until the next.
 
   Scenario: a read that expired leaves the index, a read still cached stays
     Given these rows of index_reap:
@@ -88,6 +88,6 @@ Feature: The members naming an expired entry are reaped from the index
     Then the reap drops the read of ada before it expires
     And the moved set is gone, and nothing names it
 
-  Scenario: a reap marks the index-key sets complete with the wholesale counter
+  Scenario: a reap marks the index-key sets complete with the index generation
     Given the cache is flushed
-    Then the next reap marks the index-key sets complete with the counter it read
+    Then the next reap marks the index-key sets complete with the generation

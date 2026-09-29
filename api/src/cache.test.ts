@@ -35,6 +35,7 @@ const redis = vi.hoisted(() => {
 		isCluster: false,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
+		scopedCacheIndexInvalidate: vi.fn(),
 		// Every name an index-key set holds still has its set here.
 		scopedCacheCollectionIndexKeysPrune: async (
 			_keyCount: number,

@@ -12,8 +12,8 @@ Feature: A collection-wide purge reaches every set through the index-key set
   of them has no expiry: expiring first, it would lose them all at once.
 
   A purge trusts the index-key sets only once a reap has walked the whole index
-  and marked them complete, with the wholesale purge counter as it read before
-  its walk. Until then, and once a flush has moved that counter, it scans the
+  and marked them complete, with the index generation as it read before its
+  walk. Until then, and once a flush has moved that generation, it scans the
   keyspace for the collection's sets as before the index-key sets existed. Here
   the marking is done by hand, the reap being set to once a year.
 

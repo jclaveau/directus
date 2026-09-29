@@ -25,6 +25,7 @@ describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-collection-index-keys-${vendor}`;
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
 	const markerKey = `${indexPrefix}collection-index-keys-complete`;
+	const generationKey = `${namespace}:scoped-cache-index-generation`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';
 	env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
@@ -152,12 +153,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 				and('these reads are cached:', cacheReads);
 
-				// What a reap's full pass writes: the wholesale counter as it read
+				// What a reap's full pass writes: the index generation as it read
 				// before the pass.
 				and.optional('the index-key sets are marked complete', async () => {
 					expect(await redisClient.set(
 						markerKey,
-						await redisClient.get(`${namespace}:scoped-cache-epoch:*`) ?? '',
+						(await redisClient.get(generationKey))!,
 					)).toBe('OK');
 				});
 
@@ -193,7 +194,8 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				// What a reap that read the counter before the flush writes after it.
+				// What a reap that read the generation before the flush writes after
+				// it.
 				and.optional('the marker is written back as it was kept', async () => {
 					expect(await redisClient.set(markerKey, keptMarker!)).toBe('OK');
 				});

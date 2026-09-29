@@ -508,7 +508,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			'a reap marks the index-key sets complete with the wholesale counter',
+			'a reap marks the index-key sets complete with the index generation',
 			({ given, then }) => {
 				given('the cache is flushed', async () => {
 					const flushed = await request(getUrl(vendor, env))
@@ -518,22 +518,22 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(flushed.statusCode).toBe(200);
 				});
 
-				// Polled: a reap already walking when the flush landed writes the
-				// counter it read before it, and the next one the moved counter.
+				// Polled: the flush takes the marker back, and the next reap writes
+				// the generation that flush moved.
 				then(
-					'the next reap marks the index-key sets complete with the counter it read',
+					'the next reap marks the index-key sets complete with the generation',
 					async () => {
-						const counter = await redisClient.get(
-							`${namespace}:scoped-cache-epoch:*`,
+						const generation = await redisClient.get(
+							`${namespace}:scoped-cache-index-generation`,
 						);
 
-						expect(counter).not.toBeNull();
+						expect(generation).not.toBeNull();
 
 						await expect.poll(async () => {
 							return redisClient.get(
 								`${indexPrefix}collection-index-keys-complete`,
 							);
-						}, { timeout: 5_000 }).toBe(counter);
+						}, { timeout: 5_000 }).toBe(generation);
 					},
 				);
 			},

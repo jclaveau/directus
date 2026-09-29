@@ -8,7 +8,10 @@ import {
 	scopedCacheFingerprintFiledIndexKeys,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
+	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
+	scopedCacheIndexGenerationReadScript,
+	scopedCacheIndexInvalidateScript,
 	scopedCacheIndexReapScript,
 	scopedCacheLegacyBareAdoptScript,
 	scopedCacheCollectionIndexKeysRegisterScript,
@@ -37,14 +40,17 @@ const pttl = vi.fn();
 const defineCommand = vi.fn();
 const scopedCacheEpochBump = vi.fn();
 const scopedCacheIndexReap = vi.fn();
+const scopedCacheIndexInvalidate = vi.fn();
+const scopedCacheIndexGenerationRead = vi.fn();
+const scopedCacheIndexCompleteMark = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
 const exists = vi.fn();
 const scopedCacheLegacyBareAdopt = vi.fn();
 
-// The marker and the wholesale counter agreeing: a reap has vouched for the
-// index-key sets since the last flush.
+// The marker and the index generation agreeing: a reap has vouched for the
+// index-key sets since the last drop.
 const mget = vi.fn(async (): Promise<(string | null)[]> => ['7', '7']);
 const get = vi.fn();
 const set = vi.fn();
@@ -59,6 +65,9 @@ vi.mock('../redis/index.js', () => {
 				defineCommand,
 				scopedCacheEpochBump,
 				scopedCacheIndexReap,
+				scopedCacheIndexInvalidate,
+				scopedCacheIndexGenerationRead,
+				scopedCacheIndexCompleteMark,
 				scopedCacheCollectionIndexKeysRegister,
 				scopedCacheCollectionIndexKeysPrune,
 				pttl,
@@ -1186,7 +1195,7 @@ describe('scanCollectionIndexedEntries', () => {
 
 		expect(mget.mock.calls).toEqual([[[
 			'scalabus:scoped-cache-index:collection-index-keys-complete',
-			'scalabus:scoped-cache-epoch:*',
+			'scalabus:scoped-cache-index-generation',
 		]]]);
 
 		expect(scan).not.toHaveBeenCalled();
@@ -1197,12 +1206,13 @@ describe('scanCollectionIndexedEntries', () => {
 	// until a reap names it.
 	it.each([
 		['no reap has written the marker', null, '7'],
-		['a flush moved the counter past the marker', '7', '8'],
-		['the counter expired after the marker was written', '7', null],
+		['a drop moved the generation past the marker', '7', '8'],
+		['a FLUSHDB took the generation', '7', null],
+		['an empty marker is left with no generation', '', null],
 	])(oneLine`
 		scans the keyspace for the collection's sets when %s
-	`, async (_case, marker, flushEpoch) => {
-		mget.mockResolvedValueOnce([marker, flushEpoch]);
+	`, async (_case, marker, generation) => {
+		mget.mockResolvedValueOnce([marker, generation]);
 
 		scan.mockResolvedValueOnce([
 			'0',
@@ -1244,31 +1254,6 @@ describe('scanCollectionIndexedEntries', () => {
 		]]);
 
 		expect(scopedCacheCollectionIndexKeysPrune).not.toHaveBeenCalled();
-	});
-
-	// A reap finding no counter writes an empty marker, which stays good until a
-	// flush creates one.
-	it(oneLine`
-		trusts the index-key set when the reap found no counter and there is still
-		none
-	`, async () => {
-		mget.mockResolvedValueOnce(['', null]);
-		sscan.mockResolvedValueOnce(['0', []]);
-
-		for await (
-			const _page of redisScopedCacheStore().scanCollectionIndexedEntries('slot')
-		) {
-			continue;
-		}
-
-		expect(sscan.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			'0',
-			'COUNT',
-			1000,
-		]]);
-
-		expect(scan).not.toHaveBeenCalled();
 	});
 
 	// Checked and removed in two steps, a fill recreating the set in between is
@@ -1870,6 +1855,57 @@ describe('takeStrandedSweptIndexKeys', () => {
 	});
 });
 
+describe('dropIndex', () => {
+	beforeEach(() => {
+		for (const command of [scan, unlink, scopedCacheIndexInvalidate]) {
+			command.mockReset();
+		}
+	});
+
+	it('takes the marker back before it reads anything to unlink', async () => {
+		scan.mockResolvedValueOnce([
+			'0',
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
+		]);
+
+		await redisScopedCacheStore().dropIndex();
+
+		expect(scopedCacheIndexInvalidate.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'scalabus:scoped-cache-index-generation',
+		]]);
+
+		expect(scopedCacheIndexInvalidate.mock.invocationCallOrder[0])
+			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
+
+		expect(unlink.mock.calls).toEqual([[
+			['scalabus:scoped-cache-index:fingerprint:slot:'],
+		]]);
+	});
+
+	it('unlinks nothing when the store refuses to take the marker back', async () => {
+		scopedCacheIndexInvalidate.mockRejectedValueOnce(new Error('OOM'));
+
+		await expect(redisScopedCacheStore().dropIndex()).rejects.toThrow('OOM');
+
+		expect(scan).not.toHaveBeenCalled();
+		expect(unlink).not.toHaveBeenCalled();
+	});
+
+	it('deletes the marker and moves the generation in one script', () => {
+		expect(scopedCacheIndexInvalidateScript).toBe(`
+redis.call('DEL', KEYS[1])
+
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+redis.call('SET', KEYS[2], seed, 'NX')
+
+return redis.call('INCR', KEYS[2])
+`);
+	});
+});
+
 describe('reapIndexedEntries', () => {
 	beforeEach(() => {
 		for (const command of [
@@ -1884,64 +1920,116 @@ describe('reapIndexedEntries', () => {
 			sadd,
 			get,
 			set,
+			scopedCacheIndexGenerationRead,
+			scopedCacheIndexCompleteMark,
 		]) {
 			command.mockReset();
 		}
 
 		pttl.mockResolvedValue(-2);
+		scopedCacheIndexGenerationRead.mockResolvedValue(['41', '9']);
+		scopedCacheIndexCompleteMark.mockResolvedValue(1);
 	});
 
 	it(oneLine`
-		marks the index-key sets complete with the wholesale counter it read before
-		its scan, once the pass ends
+		marks the index-key sets complete with the generation and the wholesale
+		counter it read before its scan, once the pass ends
 	`, async () => {
-		get.mockResolvedValueOnce('41');
-
 		scan
 			.mockResolvedValueOnce(['3', []])
 			.mockResolvedValueOnce(['0', []]);
 
-		await redisScopedCacheStore().reapIndexedEntries(
+		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
 			(collection) => collection,
 			86400,
 		);
 
-		expect(get.mock.calls).toEqual([['scalabus:scoped-cache-epoch:*']]);
+		expect(tally).toEqual({
+			indexKeys: 0,
+			reaped: 0,
+			strandedSweptKeys: 0,
+			markedComplete: true,
+		});
 
-		expect(set.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:collection-index-keys-complete',
-			'41',
+		expect(scopedCacheIndexGenerationRead.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index-generation',
+			'scalabus:scoped-cache-epoch:*',
 		]]);
 
-		expect(get.mock.invocationCallOrder[0])
+		expect(scopedCacheIndexCompleteMark.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'scalabus:scoped-cache-index-generation',
+			'scalabus:scoped-cache-epoch:*',
+			'41',
+			'9',
+		]]);
+
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheIndexCompleteMark',
+			{ numberOfKeys: 3, lua: scopedCacheIndexCompleteMarkScript },
+		);
+
+		expect(scopedCacheIndexGenerationRead.mock.invocationCallOrder[0])
 			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
 
-		expect(set.mock.invocationCallOrder[0])
+		expect(scopedCacheIndexCompleteMark.mock.invocationCallOrder[0])
 			.toBeGreaterThan(scan.mock.invocationCallOrder[1]!);
+
+		expect(set).not.toHaveBeenCalled();
 	});
 
-	it('marks them complete with an empty value when no counter exists', async () => {
-		get.mockResolvedValueOnce(null);
+	it(oneLine`
+		reports the index-key sets unmarked when a drop moved the generation during
+		the pass
+	`, async () => {
 		scan.mockResolvedValueOnce(['0', []]);
+		scopedCacheIndexCompleteMark.mockResolvedValueOnce(0);
 
-		await redisScopedCacheStore().reapIndexedEntries(
+		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
 			(collection) => collection,
 			86400,
 		);
 
-		expect(set.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:collection-index-keys-complete',
-			'',
-		]]);
+		expect(tally).toEqual({
+			indexKeys: 0,
+			reaped: 0,
+			strandedSweptKeys: 0,
+			markedComplete: false,
+		});
+	});
+
+	it('writes the marker only in the script that rereads what the reap read', () => {
+		expect(scopedCacheIndexCompleteMarkScript).toBe(`
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then
+	return 0
+end
+
+if (redis.call('GET', KEYS[3]) or '') ~= ARGV[2] then
+	return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[1])
+
+return 1
+`);
+	});
+
+	it('seeds a missing generation from the clock before reading it', () => {
+		expect(scopedCacheIndexGenerationReadScript).toBe(`
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+redis.call('SET', KEYS[1], seed, 'NX')
+
+return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
+`);
 	});
 
 	// A pass cut short may have left a set unnamed: marking it complete would
 	// let a collection-wide purge miss that set's reads.
 	it('leaves the marker as it was when the pass throws', async () => {
-		get.mockResolvedValueOnce('41');
-
 		scan
 			.mockResolvedValueOnce([
 				'3',
@@ -1957,7 +2045,7 @@ describe('reapIndexedEntries', () => {
 			86400,
 		)).rejects.toThrow('LOADING');
 
-		expect(set).not.toHaveBeenCalled();
+		expect(scopedCacheIndexCompleteMark).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
@@ -1986,7 +2074,12 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 2, reaped: 1, strandedSweptKeys: 0 });
+		expect(tally).toEqual({
+			indexKeys: 2,
+			reaped: 1,
+			strandedSweptKeys: 0,
+			markedComplete: true,
+		});
 
 		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheIndexReap',
@@ -2083,7 +2176,13 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 1, reaped: 0, strandedSweptKeys: 0 });
+		expect(tally).toEqual({
+			indexKeys: 1,
+			reaped: 0,
+			strandedSweptKeys: 0,
+			markedComplete: true,
+		});
+
 		expect(scopedCacheIndexReap).not.toHaveBeenCalled();
 	});
 
@@ -2194,7 +2293,12 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 0, reaped: 0, strandedSweptKeys: 0 });
+		expect(tally).toEqual({
+			indexKeys: 0,
+			reaped: 0,
+			strandedSweptKeys: 0,
+			markedComplete: true,
+		});
 
 		// The pattern the index-key sets have to match for Redis to return them.
 		expect(scan.mock.calls).toEqual([[
@@ -2243,7 +2347,12 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(tally).toEqual({ indexKeys: 0, reaped: 0, strandedSweptKeys: 1 });
+		expect(tally).toEqual({
+			indexKeys: 0,
+			reaped: 0,
+			strandedSweptKeys: 1,
+			markedComplete: true,
+		});
 
 		expect(sadd.mock.calls).toEqual([[
 			'scalabus:scoped-cache-index:swept-index-keys',
@@ -2295,7 +2404,7 @@ describe('reapIndexedEntries', () => {
 
 		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheLegacyBareAdopt',
-			{ numberOfKeys: 4, lua: scopedCacheLegacyBareAdoptScript },
+			{ numberOfKeys: 6, lua: scopedCacheLegacyBareAdoptScript },
 		);
 
 		expect(scopedCacheLegacyBareAdopt.mock.calls).toEqual([
@@ -2304,7 +2413,11 @@ describe('reapIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
+				'scalabus:scoped-cache-index-generation',
+				'scalabus:scoped-cache-epoch:*',
 				0,
+				'41',
+				'9',
 				'slot:&id=,7,&|key-a',
 				2,
 				'scalabus:scoped-cache-index:fingerprint:slot:bare',
@@ -2315,7 +2428,11 @@ describe('reapIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
+				'scalabus:scoped-cache-index-generation',
+				'scalabus:scoped-cache-epoch:*',
 				1,
+				'41',
+				'9',
 				'slot:&|key-b',
 				1,
 				'scalabus:scoped-cache-index:fingerprint:slot:bare',
@@ -2350,7 +2467,11 @@ describe('reapIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
+				'scalabus:scoped-cache-index-generation',
+				'scalabus:scoped-cache-epoch:*',
 				0,
+				'41',
+				'9',
 				'slot:&|key-a',
 				1,
 				'scalabus:scoped-cache-index:fingerprint:slot:bare',
@@ -2360,7 +2481,11 @@ describe('reapIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'scalabus:scoped-cache-index:legacy-bare-adopted:slot',
+				'scalabus:scoped-cache-index-generation',
+				'scalabus:scoped-cache-epoch:*',
 				1,
+				'41',
+				'9',
 			],
 		]);
 	});
@@ -2415,10 +2540,22 @@ describe('scopedCacheLegacyBareAdoptScript', () => {
 		);
 	});
 
-	it('writes the adopted marker only on the call that ends the pass', () => {
+	it(oneLine`
+		writes the adopted marker only on the call that ends the pass, and only
+		while the generation and the wholesale counter read as the reap read them
+	`, () => {
 		expect(scopedCacheLegacyBareAdoptScript).toContain(
-			"if ARGV[1] == '1' then\n"
+			"if ARGV[1] == '1'\n"
+			+ "\tand redis.call('GET', KEYS[5]) == ARGV[2]\n"
+			+ "\tand (redis.call('GET', KEYS[6]) or '') == ARGV[3] then\n"
 			+ "\tredis.call('SET', KEYS[4], '1')",
+		);
+	});
+
+	it('reads the first member after the pass end and the two reads', () => {
+		expect(scopedCacheLegacyBareAdoptScript).toContain(
+			'local adopted = {}\n'
+			+ 'local at = 4\n',
 		);
 	});
 });
