@@ -483,17 +483,13 @@ describe.each(vendors)('%s', (vendor) => {
 			150_000,
 		);
 
-		// After the one above, whose pause they must not start inside: a max of 0
-		// joins a pause still running.
-		for (const scenarioTitle of [
+		// After the one above, whose pause it must not start inside.
+		scenario(
 			'a restart on another build still answers what was cached before it',
-			'a restart on another build with a max of 0 fills at once while the '
-				+ 'build before answers',
-		]) {
-			scenario(scenarioTitle, ({ given, and, when, then }) => {
+			({ given, and, when, then }) => {
 				let collection = '';
 
-				given.optional(
+				given(
 					/^these rows of (\w+):$/,
 					async (rowsOf: string, table: Record<string, string>[]) => {
 						collection = rowsOf;
@@ -507,25 +503,25 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				and.optional(
+				and(
 					'these reads are cached:',
 					(table: Record<string, string>[]) => {
 						return expectCached(collection, table);
 					},
 				);
 
-				and.optional(
+				and(
 					/^a second instance runs on ([\w-]+)$/,
 					startSecondInstance,
 				);
 
-				when.optional(
+				when(
 					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
 					restartOnBuild,
 				);
 
 				// Served by the cache: the pause gates the fill, not the read.
-				then.optional(
+				then(
 					'these reads answer:',
 					async (table: Record<string, string>[]) => {
 						for (const row of table) {
@@ -535,24 +531,63 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				and.optional(
+				and(
 					'these reads are not cached:',
 					(table: Record<string, string>[]) => {
 						return expectNotCached(collection, table);
 					},
 				);
 
-				then.optional('no fill pause runs', async () => {
-					expect(await redisClient.exists(fillPauseKey)).toBe(0);
-				});
+				when('the second instance stops', stopSecondInstance);
 
-				when.optional('the second instance stops', stopSecondInstance);
-
-				then.optional(
+				then(
 					'the fill pause ends long before its ceiling',
 					expectFillPauseEndsEarly,
 				);
-			}, 150_000);
-		}
+			},
+			150_000,
+		);
+
+		// After the one above, whose pause it must not start inside: a max of 0
+		// joins a pause still running.
+		scenario(
+			'a restart on another build with a max of 0 fills at once while the '
+				+ 'build before answers',
+			({ given, and, when, then }) => {
+				let collection = '';
+
+				given(
+					/^these rows of (\w+):$/,
+					async (rowsOf: string, table: Record<string, string>[]) => {
+						collection = rowsOf;
+
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${collection}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				and(/^a second instance runs on ([\w-]+)$/, startSecondInstance);
+
+				when(
+					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
+					restartOnBuild,
+				);
+
+				then('no fill pause runs', async () => {
+					expect(await redisClient.exists(fillPauseKey)).toBe(0);
+				});
+
+				and('these reads are cached:', (table: Record<string, string>[]) => {
+					return expectCached(collection, table);
+				});
+
+				when('the second instance stops', stopSecondInstance);
+			},
+			150_000,
+		);
 	});
 });

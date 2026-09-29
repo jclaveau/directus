@@ -9,7 +9,7 @@ import getPort from 'get-port';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect } from 'vitest';
+import { afterAll, beforeAll, describe, expect, vi } from 'vitest';
 
 const cacheStatusHeader = 'x-cache-status';
 
@@ -68,14 +68,16 @@ describe.each(vendors)('%s', (vendor) => {
 
 		// Waited for once, so the pass the boot asked for cannot write the marker
 		// back over one a scenario dropped.
-		await expect.poll(async () => {
+		// Outside a test, where expect.poll refuses to run.
+		await vi.waitFor(async () => {
 			const [marker, generation] = await redisClient.mget(
 				markerKey,
 				generationKey,
 			);
 
-			return marker !== null && marker === generation;
-		}, { timeout: 15_000 }).toBe(true);
+			expect(marker).not.toBeNull();
+			expect(marker).toBe(generation);
+		}, { timeout: 15_000, interval: 250 });
 	}, 75_000);
 
 	afterAll(async () => {
