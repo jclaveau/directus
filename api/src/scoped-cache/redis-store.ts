@@ -1535,7 +1535,7 @@ async function* scanScopedCacheIndexKeys(
 	const scannedKeys = [...indexKeys];
 	let pendingLaterKeys = laterIndexKeys;
 
-	for (let at = 0; ; at += SCOPED_CACHE_INDEX_SCAN_SETS) {
+	for (let at = 0; ; ) {
 		if (at >= scannedKeys.length && pendingLaterKeys !== null) {
 			scannedKeys.push(...await pendingLaterKeys);
 			pendingLaterKeys = null;
@@ -1545,11 +1545,15 @@ async function* scanScopedCacheIndexKeys(
 			return;
 		}
 
-		let pendingScans = scannedKeys
-			.slice(at, at + SCOPED_CACHE_INDEX_SCAN_SETS)
-			.map((indexKey) => {
-				return { indexKey, scanCursor: '0' };
-			});
+		// Past what this round read, not a whole round on: a short round moving
+		// the cursor that far would skip the later keys pushed after it.
+		const roundKeys = scannedKeys.slice(at, at + SCOPED_CACHE_INDEX_SCAN_SETS);
+
+		at += roundKeys.length;
+
+		let pendingScans = roundKeys.map((indexKey) => {
+			return { indexKey, scanCursor: '0' };
+		});
 
 		while (pendingScans.length > 0) {
 			const scanReplies = await Promise.all(
