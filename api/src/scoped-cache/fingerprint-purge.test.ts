@@ -68,24 +68,39 @@ let members: Record<string, string[]>;
 const srem = vi.fn();
 const swept: string[][] = [];
 
-const sscan = vi.fn(async (key: string, _cursor: string) => {
+// A purge holding no rows reads the collection's sets off its registry, so the
+// registry answers with the sets the case declared under that collection, those
+// a trailing-star MATCH names when one is sent.
+const sscan = vi.fn(async (key: string, _cursor: string, ...options: unknown[]) => {
+	const registryPrefix = 'ns:scoped-cache-index:fingerprint-registry:';
+
+	if (key.startsWith(registryPrefix)) {
+		const collection = key.slice(registryPrefix.length);
+
+		const setPrefix = options[0] === 'MATCH'
+			? String(options[1]).slice(0, -1)
+			: `ns:scoped-cache-index:fingerprint:${collection}:`;
+
+		return ['0', Object.keys(members).filter((set) => set.startsWith(setPrefix))];
+	}
+
 	return ['0', members[key] ?? []];
 });
 
-// A purge holding no rows reads the collection's sets off the keyspace, so the
-// scan answers with the sets the case declared under that collection.
-const scan = vi.fn(async (_cursor: string, _match: string, pattern: string) => {
-	const prefix = pattern.slice(0, -1);
+const scan = vi.fn(async () => ['0', []]);
 
-	return ['0', Object.keys(members).filter((key) => key.startsWith(prefix))];
-});
+const scopedCacheRegistryPrune = vi.fn(async (
+	_keyCount: number,
+	_registryKey: string,
+	...indexKeys: string[]
+) => indexKeys);
 
 const evalScript = vi.fn(async (
 	_script: string,
 	numKeys: number,
 	...args: string[]
 ) => {
-	swept.push(args.slice(0, numKeys));
+	swept.push(args.slice(2, numKeys));
 	return [];
 });
 
@@ -102,6 +117,7 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
+		scopedCacheRegistryPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
@@ -445,11 +461,15 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads a hook's pin on another collection off that collection's own index
-		bucket and its home pin sets, rather than scanning every set it owns
+		bucket and the home pin sets its registry names, rather than scanning the
+		keyspace
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:other:x=y': [
 				'other:&x=,y,&|ns:entry-x',
+			],
+			'ns:scoped-cache-index:fingerprint:other:pin:id=3': [
+				'other:&id=,3,&|ns:entry-home',
 			],
 		};
 
@@ -476,9 +496,16 @@ describe('a purge shown the rows it wrote', () => {
 			},
 		);
 
-		expect(scan.mock.calls.map(([, , pattern]) => pattern)).toEqual([
+		expect(sscan).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint-registry:other',
+			'0',
+			'MATCH',
 			'ns:scoped-cache-index:fingerprint:other:pin:*',
-		]);
+			'COUNT',
+			1000,
+		);
+
+		expect(scan).not.toHaveBeenCalled();
 
 		expect(sscan).toHaveBeenCalledWith(
 			'ns:scoped-cache-index:fingerprint:other:x=y',
@@ -488,6 +515,7 @@ describe('a purge shown the rows it wrote', () => {
 		);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-x');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-home');
 	});
 
 	it(oneLine`
