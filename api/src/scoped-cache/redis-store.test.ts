@@ -862,18 +862,18 @@ describe('fileIndexedEntries', () => {
 
 		expect(indexFile.mock.calls).toHaveLength(2);
 		expect(indexFile.mock.calls[0]).toHaveLength(1003);
-		expect(indexFile.mock.calls[0][0]).toBe(501);
+		expect(indexFile.mock.calls[0]![0]).toBe(501);
 
-		expect(indexFile.mock.calls[0][2]).toBe(
+		expect(indexFile.mock.calls[0]![2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=v0',
 		);
 
-		expect(indexFile.mock.calls[0][501]).toBe(
+		expect(indexFile.mock.calls[0]![501]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=v499',
 		);
 
-		expect(indexFile.mock.calls[0][502]).toBe(60);
-		expect(indexFile.mock.calls[0][1002]).toBe(0);
+		expect(indexFile.mock.calls[0]![502]).toBe(60);
+		expect(indexFile.mock.calls[0]![1002]).toBe(0);
 
 		expect(indexFile.mock.calls[1]).toEqual([
 			2,
@@ -901,23 +901,23 @@ describe('fileIndexedEntries', () => {
 
 		expect(indexFile.mock.calls).toHaveLength(2);
 		expect(indexFile.mock.calls[0]).toHaveLength(605);
-		expect(indexFile.mock.calls[0][0]).toBe(2);
+		expect(indexFile.mock.calls[0]![0]).toBe(2);
 
-		expect(indexFile.mock.calls[0][2]).toBe(
+		expect(indexFile.mock.calls[0]![2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
 		);
 
-		expect(indexFile.mock.calls[0][4]).toBe(600);
-		expect(indexFile.mock.calls[0][5]).toBe('slot:&owner=,ada,&|key-0');
-		expect(indexFile.mock.calls[0][604]).toBe('slot:&owner=,ada,&|key-599');
+		expect(indexFile.mock.calls[0]![4]).toBe(600);
+		expect(indexFile.mock.calls[0]![5]).toBe('slot:&owner=,ada,&|key-0');
+		expect(indexFile.mock.calls[0]![604]).toBe('slot:&owner=,ada,&|key-599');
 		expect(indexFile.mock.calls[1]).toHaveLength(605);
 
-		expect(indexFile.mock.calls[1][2]).toBe(
+		expect(indexFile.mock.calls[1]![2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',
 		);
 
-		expect(indexFile.mock.calls[1][5]).toBe('slot:&owner=,bob,&|key-0');
-		expect(indexFile.mock.calls[1][604]).toBe('slot:&owner=,bob,&|key-599');
+		expect(indexFile.mock.calls[1]![5]).toBe('slot:&owner=,bob,&|key-0');
+		expect(indexFile.mock.calls[1]![604]).toBe('slot:&owner=,bob,&|key-599');
 	});
 
 	it(oneLine`
