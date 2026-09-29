@@ -177,6 +177,7 @@ afterEach(() => {
 	redis.get.mockImplementation(async () => '1');
 	cacheRedisDatabase.mockReturnValue(undefined);
 	flushCacheRedisDatabase.mockResolvedValue('not-flushed');
+	busPublish.mockResolvedValue(undefined);
 });
 
 // `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
@@ -1441,7 +1442,7 @@ describe('flushCaches', () => {
 
 		expect(logger.info).toHaveBeenCalledWith(
 			expect.stringMatching(
-				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1, the scoped-cache index with it$/,
+				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1$/,
 			),
 		);
 	});
@@ -1988,6 +1989,16 @@ describe('a FLUSHDB takes the scoped-cache index with it', () => {
 		await flushResponseCache(getCache().cache);
 
 		expect(redis.scan).not.toHaveBeenCalled();
+	});
+
+	test('and the flush says so', async () => {
+		await flushCaches(true);
+
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1, the scoped-cache index with it$/,
+			),
+		);
 	});
 });
 

@@ -15,7 +15,11 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache/index.js';
+import {
+	clearResponseCache,
+	dropScopedCacheIndex,
+	scopedCachePurgeEnabled,
+} from './scoped-cache/index.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -181,6 +185,9 @@ interface StoreClientState {
  * clears them in the same tick, so every one of its clears went out in that gap.
  * Waits at most `storeReadyTimeoutMs`, then lets the commands fail and be
  * reported, since a Redis that never answers is a failed flush, not a hung one.
+ * A server's tiers are ready long before, so there it waits only through an
+ * outage: a schema apply or a migration then takes those 5s more to fail.
+ * A cluster client has no `isReady` and is not waited for.
  */
 async function awaitStoresReady(tiers: (Keyv | null)[]): Promise<void> {
 	const pendingClients = tiers
@@ -228,7 +235,10 @@ async function awaitStoresReady(tiers: (Keyv | null)[]): Promise<void> {
  * The errors the tiers raised while `flushStep` ran. Keyv answers a refused
  * command with an `error` event and a resolved promise, and `@keyv/redis`
  * swallows a failed `clear()` whatever `throwOnErrors` says, so listening while
- * the step runs is the only way to learn a tier did not clear.
+ * the step runs is the only way to learn a tier did not clear. In a server, a
+ * request's refused command on the same tier lands here too and counts against
+ * the clear: a false alarm needs Redis to refuse that command and take the
+ * clear sent beside it.
  */
 async function storeErrorsDuring(
 	tiers: (Keyv | null)[],
@@ -390,9 +400,13 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// than at each caller: one line, and the number that explains it.
 	const durationMs = Date.now() - startedAt;
 
+	// Out of scoped purging there is no index for the FLUSHDB to have taken.
+	const indexFlushedNote = scopedCachePurgeEnabled()
+		? ', the scoped-cache index with it'
+		: '';
+
 	const indexCleared = flushedDatabase
-		? `FLUSHDB on redis db ${cacheRedisDatabase()}, `
-			+ 'the scoped-cache index with it'
+		? `FLUSHDB on redis db ${cacheRedisDatabase()}${indexFlushedNote}`
 		: `dropped ${droppedIndexKeys} scoped-cache index keys`;
 
 	const flushed = `[cache] flushed in ${durationMs}ms, ${indexCleared}`;
