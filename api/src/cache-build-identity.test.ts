@@ -1,9 +1,13 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	clearIndexMarkerIfBuildChanged,
 	computeBuildIdentity,
 	flushCachesIfBuildChanged,
 } from './cache-build-identity.js';
 import { flushCaches, getCache } from './cache.js';
+import { scopedCacheIndexStoreAvailable } from './scoped-cache/config.js';
+import { useScopedCacheStore } from './scoped-cache/store.js';
 
 const env = vi.hoisted(() => ({}) as Record<string, any>);
 const version = vi.hoisted(() => ({ value: '1.0.0' }));
@@ -18,9 +22,15 @@ vi.mock('directus/version', () => {
 	};
 });
 
-vi.mock('./logger/index.js', () => {
-	return { useLogger: () => ({ info: vi.fn(), warn: vi.fn() }) };
+const logger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn() }));
+
+vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));
+
+vi.mock('./scoped-cache/config.js', () => {
+	return { scopedCacheIndexStoreAvailable: vi.fn(() => true) };
 });
+
+vi.mock('./scoped-cache/store.js', () => ({ useScopedCacheStore: vi.fn() }));
 
 vi.mock('./cache.js', () => ({ flushCaches: vi.fn(), getCache: vi.fn() }));
 
@@ -379,5 +389,64 @@ describe('flushCachesIfBuildChanged', () => {
 
 		expect(lockCache.store.has('build-identity')).toBe(false);
 		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
+	});
+});
+
+describe('clearIndexMarkerIfBuildChanged', () => {
+	it(oneLine`
+		records the core build with auto-flush off — a build rolled back to may
+		have filed sets the index-key sets do not name
+	`, async () => {
+		env['CACHE_AUTO_FLUSH_ON_DEPLOY'] = false;
+		env['CACHE_BUILD_ID'] = 'build-b';
+		const recordBuildIdentity = vi.fn(async () => true);
+
+		vi.mocked(useScopedCacheStore)
+			.mockReturnValue({ recordBuildIdentity } as any);
+
+		await clearIndexMarkerIfBuildChanged();
+
+		expect(recordBuildIdentity).toHaveBeenCalledExactlyOnceWith('build-b');
+
+		expect(logger.info).toHaveBeenCalledExactlyOnceWith(
+			'[scoped-cache] build build-b differs from the last boot\'s: '
+			+ 'index-key sets untrusted until the next reap',
+		);
+	});
+
+	it('logs nothing for the build already recorded', async () => {
+		env['CACHE_BUILD_ID'] = 'build-b';
+
+		vi.mocked(useScopedCacheStore)
+			.mockReturnValue({ recordBuildIdentity: async () => false } as any);
+
+		await clearIndexMarkerIfBuildChanged();
+
+		expect(logger.info).not.toHaveBeenCalled();
+	});
+
+	it('logs a store that refuses rather than failing the boot', async () => {
+		env['CACHE_BUILD_ID'] = 'build-b';
+
+		vi.mocked(useScopedCacheStore).mockReturnValue({
+			recordBuildIdentity: async () => {
+				throw new Error('OOM');
+			},
+		} as any);
+
+		await clearIndexMarkerIfBuildChanged();
+
+		expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+			new Error('OOM'),
+			'[scoped-cache] recording the build for the index failed: Error: OOM',
+		);
+	});
+
+	it('records nothing with no Redis to hold the index', async () => {
+		vi.mocked(scopedCacheIndexStoreAvailable).mockReturnValueOnce(false);
+
+		await clearIndexMarkerIfBuildChanged();
+
+		expect(useScopedCacheStore).not.toHaveBeenCalled();
 	});
 });

@@ -8,6 +8,7 @@ import {
 	scopedCacheFingerprintFiledIndexKeys,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
+	scopedCacheIndexBuildRecordScript,
 	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
 	scopedCacheIndexGenerationReadScript,
@@ -43,6 +44,7 @@ const scopedCacheIndexReap = vi.fn();
 const scopedCacheIndexInvalidate = vi.fn();
 const scopedCacheIndexGenerationRead = vi.fn();
 const scopedCacheIndexCompleteMark = vi.fn();
+const scopedCacheIndexBuildRecord = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
@@ -68,6 +70,7 @@ vi.mock('../redis/index.js', () => {
 				scopedCacheIndexInvalidate,
 				scopedCacheIndexGenerationRead,
 				scopedCacheIndexCompleteMark,
+				scopedCacheIndexBuildRecord,
 				scopedCacheCollectionIndexKeysRegister,
 				scopedCacheCollectionIndexKeysPrune,
 				pttl,
@@ -1935,6 +1938,62 @@ local seed = now[1] .. string.format('%06d', tonumber(now[2]))
 redis.call('SET', KEYS[2], seed, 'NX')
 
 return redis.call('INCR', KEYS[2])
+`);
+	});
+});
+
+describe('recordBuildIdentity', () => {
+	beforeEach(() => {
+		scopedCacheIndexBuildRecord.mockReset();
+	});
+
+	it(oneLine`
+		records the build beside the marker and the generation it takes back
+	`, async () => {
+		scopedCacheIndexBuildRecord.mockResolvedValueOnce(1);
+
+		expect(await redisScopedCacheStore().recordBuildIdentity('build-b'))
+		.toBe(true);
+
+		expect(scopedCacheIndexBuildRecord.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index-build',
+			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'scalabus:scoped-cache-index-generation',
+			'build-b',
+		]]);
+
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheIndexBuildRecord',
+			{ numberOfKeys: 3, lua: scopedCacheIndexBuildRecordScript },
+		);
+	});
+
+	it('answers false for the build already recorded', async () => {
+		scopedCacheIndexBuildRecord.mockResolvedValueOnce(0);
+
+		expect(await redisScopedCacheStore().recordBuildIdentity('build-b'))
+		.toBe(false);
+	});
+
+	it(oneLine`
+		takes the marker back and moves the generation only for a build not
+		recorded, in one script
+	`, () => {
+		expect(scopedCacheIndexBuildRecordScript).toBe(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('DEL', KEYS[2])
+
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+redis.call('SET', KEYS[3], seed, 'NX')
+redis.call('INCR', KEYS[3])
+
+return 1
 `);
 	});
 });

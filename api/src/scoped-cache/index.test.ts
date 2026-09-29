@@ -70,6 +70,7 @@ import {
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
+import { clearIndexMarkerIfBuildChanged } from '../cache-build-identity.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
 import {
@@ -114,6 +115,10 @@ vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
 
 vi.mock('./reap-requests.js', () => {
 	return { requestScopedCacheIndexReap: vi.fn() };
+});
+
+vi.mock('../cache-build-identity.js', () => {
+	return { clearIndexMarkerIfBuildChanged: vi.fn() };
 });
 
 vi.mock('../cache-events.js', () => {
@@ -2555,9 +2560,9 @@ describe('startScopedCachePurgeRecovery', () => {
 	});
 
 	it(oneLine`
-		asks for a reap at boot and on every reconnect — a flush during the outage
-		left the marker gone, and the schedule may be hours away or off
-	`, () => {
+		asks for a reap at boot and on every reconnect, once a changed build took
+		the marker back — the schedule may be hours away or off
+	`, async () => {
 		const on = vi.fn();
 		vi.mocked(useRedis).mockReturnValue({ on } as any);
 
@@ -2565,7 +2570,17 @@ describe('startScopedCachePurgeRecovery', () => {
 
 		on.mock.calls[0]![1]();
 
-		expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
+		await vi.waitFor(() => {
+			expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
+		});
+
+		expect(clearIndexMarkerIfBuildChanged).toHaveBeenCalledOnce();
+
+		expect(
+			vi.mocked(clearIndexMarkerIfBuildChanged).mock.invocationCallOrder[0],
+		).toBeLessThan(
+			vi.mocked(requestScopedCacheIndexReap).mock.invocationCallOrder[0]!,
+		);
 	});
 
 	it('registers no listener when there is no Redis config', () => {

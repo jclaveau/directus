@@ -450,6 +450,32 @@ redis.call('SET', KEYS[1], ARGV[1])
 return 1
 `;
 
+/**
+ * Record the build this process runs, and when it is not the one recorded, take
+ * the completeness marker back the way a drop does. A build older than the
+ * index-key sets, rolled back to and forward from, filed sets nothing names while
+ * the marker a later build wrote still vouched for them.
+ *
+ * KEYS are the recorded build, the marker and the generation; ARGV the build.
+ * Answers 1 when the build changed.
+ */
+export const scopedCacheIndexBuildRecordScript = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('DEL', KEYS[2])
+
+local now = redis.call('TIME')
+local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+redis.call('SET', KEYS[3], seed, 'NX')
+redis.call('INCR', KEYS[3])
+
+return 1
+`;
+
 type ScopedCacheIndexFileCommand = {
 	scopedCacheIndexFile(
 		keyCount: number,
@@ -521,6 +547,15 @@ type ScopedCacheIndexCompleteMarkCommand = {
 	): Promise<number>;
 };
 
+type ScopedCacheIndexBuildRecordCommand = {
+	scopedCacheIndexBuildRecord(
+		buildKey: string,
+		markerKey: string,
+		generationKey: string,
+		buildIdentity: string,
+	): Promise<number>;
+};
+
 type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexFileCommand
 	& ScopedCacheEpochBumpCommand
@@ -530,7 +565,8 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheCollectionIndexKeysRegisterCommand<Promise<number>>
 	& ScopedCacheIndexInvalidateCommand
 	& ScopedCacheIndexGenerationReadCommand
-	& ScopedCacheIndexCompleteMarkCommand;
+	& ScopedCacheIndexCompleteMarkCommand
+	& ScopedCacheIndexBuildRecordCommand;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
@@ -589,6 +625,11 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 		redis.defineCommand('scopedCacheIndexCompleteMark', {
 			numberOfKeys: 3,
 			lua: scopedCacheIndexCompleteMarkScript,
+		});
+
+		redis.defineCommand('scopedCacheIndexBuildRecord', {
+			numberOfKeys: 3,
+			lua: scopedCacheIndexBuildRecordScript,
 		});
 
 		clientsCarryingScripts.add(redis);
@@ -884,6 +925,11 @@ async function scopedCacheLegacyBareReadKeys(
  */
 function scopedCacheIndexGenerationKey(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`;
+}
+
+/** The build the last process to boot ran. Outside the prefix, as the generation. */
+function scopedCacheIndexBuildKey(): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-index-build`;
 }
 
 /**
@@ -2201,6 +2247,15 @@ const redisStore: ScopedCacheStore = {
 
 	indexKeysComplete(): Promise<boolean> {
 		return collectionIndexKeysComplete();
+	},
+
+	async recordBuildIdentity(buildIdentity: string): Promise<boolean> {
+		return await useScriptedRedis().scopedCacheIndexBuildRecord(
+			scopedCacheIndexBuildKey(),
+			scopedCacheCollectionIndexKeysCompleteKey(),
+			scopedCacheIndexGenerationKey(),
+			buildIdentity,
+		) === 1;
 	},
 
 	onStoreReady(listener: () => void): void {

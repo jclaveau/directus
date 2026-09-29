@@ -10,6 +10,8 @@ import { flushCaches, getCache } from './cache.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
+import { scopedCacheIndexStoreAvailable } from './scoped-cache/config.js';
+import { useScopedCacheStore } from './scoped-cache/store.js';
 
 // The response cache lives in an external redis and survives a container swap, so
 // a code-only deploy — a hook/extension or a core (fork) reshaping change shipped
@@ -31,7 +33,7 @@ declare const __DIRECTUS_BUILD_COMMIT__: string | undefined;
 // order: an explicit override, the commit baked into the dist at build time (travels
 // with the build on any platform), the commit the platform injects at deploy time,
 // then the version string so a plain upstream version bump still moves the id.
-function resolveCoreBuildId(): string {
+export function resolveCoreBuildId(): string {
 	// TODO(reviewer): CACHE_BUILD_ID is probably overkill now the commit is baked —
 	// baked → railway → version already self-heals. Kept as a manual force/suppress
 	// escape hatch (bump to flush, pin to freeze); drop if we never reach for it.
@@ -246,5 +248,40 @@ export async function flushCachesIfBuildChanged(
 	}
 	catch (err) {
 		logger.warn(err, '[cache] build-identity self-heal failed');
+	}
+}
+
+/**
+ * Stop trusting the index-key sets when this build is not the one the last boot
+ * ran, whatever `CACHE_AUTO_FLUSH_ON_DEPLOY` says: a build older than them, rolled
+ * back to, filed sets they do not name, and nothing else of it is left to notice.
+ *
+ * The core build alone, not the extension hash: an extension cannot change how
+ * the index is filed, and reading every bundle is what a boot cannot afford twice.
+ * Never throws: a boot must not fail on it, and a marker left standing costs no
+ * more than before this ran.
+ */
+export async function clearIndexMarkerIfBuildChanged(): Promise<void> {
+	if (!scopedCacheIndexStoreAvailable()) {
+		return;
+	}
+
+	const logger = useLogger();
+
+	try {
+		const buildIdentity = resolveCoreBuildId();
+
+		if (await useScopedCacheStore().recordBuildIdentity(buildIdentity)) {
+			logger.info(
+				`[scoped-cache] build ${buildIdentity} differs from the last boot's: `
+				+ 'index-key sets untrusted until the next reap',
+			);
+		}
+	}
+	catch (error) {
+		logger.warn(
+			error,
+			`[scoped-cache] recording the build for the index failed: ${error}`,
+		);
 	}
 }

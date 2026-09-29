@@ -1236,6 +1236,17 @@ async function drainPendingScopedCachePurges(): Promise<number> {
  * Not awaited by the caller — recovery is bounded by how much failed, and a boot
  * that blocked on it would be held up by the same Redis that is still down.
  */
+// Before the request, which skips on a marker the build change is to clear.
+// Lazily: `cache-build-identity.ts` imports `cache.js`, which imports this.
+async function clearIndexMarkerThenRequestReap(): Promise<void> {
+	const { clearIndexMarkerIfBuildChanged } = await import(
+		'../cache-build-identity.js'
+	);
+
+	await clearIndexMarkerIfBuildChanged();
+	await requestScopedCacheIndexReap();
+}
+
 export function startScopedCachePurgeRecovery(): void {
 	if (!scopedCacheIndexStoreAvailable()) {
 		return;
@@ -1278,7 +1289,9 @@ export function startScopedCachePurgeRecovery(): void {
 
 		// A boot, or a reconnect after an outage a flush may have landed in:
 		// nothing reaps until the schedule's next tick, if it has one.
-		void requestScopedCacheIndexReap();
+		clearIndexMarkerThenRequestReap().catch((error: any) => {
+			logger.warn(error, `[scoped-cache] boot index reap failed: ${error}`);
+		});
 	});
 
 	// A purge can also fail with the link UP — `OOM command not allowed` under

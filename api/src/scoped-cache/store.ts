@@ -230,6 +230,14 @@ export interface ScopedCacheStore {
 	indexKeysComplete(): Promise<boolean>;
 
 	/**
+	 * Record the build this process runs. When it is not the one recorded, the
+	 * collection-wide reads stop trusting the index-key sets until a reap: a build
+	 * older than them may have run in between, filing sets they do not name.
+	 * Answers whether the build changed.
+	 */
+	recordBuildIdentity(buildIdentity: string): Promise<boolean>;
+
+	/**
 	 * Drop the whole index, reporting what it cost. The collection-wide reads stop
 	 * trusting the index-key sets BEFORE anything is dropped, and THROWS when the
 	 * store refuses that: a drop cut short leaves sets those no longer name.
