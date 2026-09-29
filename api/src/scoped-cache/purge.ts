@@ -32,7 +32,7 @@ import type {
 	ScopedCacheDeclaredFingerprint,
 } from '@directus/types';
 import type { Keyv } from 'keyv';
-import { cacheEntryRawKeyOf, dropCacheEntries } from '../cache-drop.js';
+import { dropCacheEntries } from '../cache-drop.js';
 import {
 	scopedCachePurgeEnabled,
 	scopedCacheIndexStoreAvailable,
@@ -54,11 +54,7 @@ import {
 	scopedCacheFingerprintPurgedBy,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
-import {
-	bumpScopedCacheEpochs,
-	scopedCacheEpochKey,
-	scopedCacheEpochTtlSeconds,
-} from './fill-guard.js';
+import { bumpScopedCacheEpochs } from './fill-guard.js';
 import { scopedCacheIndexPath } from './index-path.js';
 
 const env = useEnv();
@@ -135,11 +131,48 @@ export function scopedCacheCollectionsChangedByOnDelete(
 /**
  * How much longer the index lives than the entries it indexes. Every write that
  * files a key into it moves that expiry out, so at 1 it would already outlive its
- * newest filing; the doubling is slack, not arithmetic — for an entry orphaned by
- * a crash between the write and its purge, and for siblings written outside this
- * pipeline. The index holds keys, not payloads, so the slack is nearly free.
+ * newest filing; the doubling is slack — for an entry orphaned by a crash between
+ * the write and its purge, and for siblings written outside this pipeline. The
+ * index holds keys, not payloads, so the slack is nearly free.
+ *
+ * And one load-bearing part: a filing's own expiry is taken when it is filed,
+ * BEFORE its value is written, and a scan leaves it out once that expiry passes.
+ * The second TTL is the time a fill has between the two
+ * (`scopedCacheFillOutlivedIndex`).
  */
 const SCOPED_CACHE_INDEX_TTL_FACTOR = 2;
+
+/**
+ * The collection of a fill that took longer between its filing and its value than
+ * its index allows, or `undefined` when it kept to it.
+ *
+ * A filing is scored `SCOPED_CACHE_INDEX_TTL_FACTOR` TTLs past the moment it is
+ * filed, and a purge leaves it out once that passes. The value is written later
+ * and lives one TTL from then, so a fill whose value landed more than the rest
+ * of that slack after its filing leaves an entry cached past the score naming
+ * it — reachable by no purge for the difference. `elapsedMs` is measured from
+ * before the filing to after the value, which bounds the gap Redis saw. Such a
+ * fill evicts what it wrote, the way one a purge swept does.
+ *
+ * Nothing on an unbounded cache: its filings are scored `+inf`.
+ */
+export function scopedCacheFillOutlivedIndex(
+	fingerprints: readonly ScopedCacheFingerprint[],
+	elapsedMs: number,
+	cacheTtl: unknown,
+): string | undefined {
+	const ttlMs = getMilliseconds(cacheTtl, 0);
+
+	if (!scopedCachePurgeEnabled() || ttlMs <= 0) {
+		return undefined;
+	}
+
+	if (elapsedMs <= ttlMs * (SCOPED_CACHE_INDEX_TTL_FACTOR - 1)) {
+		return undefined;
+	}
+
+	return fingerprints[0]?.collection;
+}
 
 /**
  * Index a freshly-cached response key under the query case it was read with, so a
@@ -945,43 +978,6 @@ async function dropStrandedScopedCacheSweeps(): Promise<number> {
 	}
 
 	return evicted;
-}
-
-/**
- * Remove the index members naming entries the cache no longer holds. Returns how
- * many it removed.
- *
- * An entry expires and its members stay: every read filed into a set pushes the
- * set's expiry out, so the set of a collection read all day never expires, and
- * each write to that collection tests every read ever cached in it.
- *
- * Only on a Redis-backed cache: whether an entry is still there is asked of Redis
- * directly, one `EXISTS` per member, since asking the cache would read every
- * entry's value to learn it exists.
- */
-export async function reapScopedCacheIndex(): Promise<number> {
-	if (!scopedCacheIndexStoreAvailable()) {
-		return 0;
-	}
-
-	const { getCache } = await import('../cache.js');
-	const { cache } = getCache();
-
-	const rawKeyOf = cache
-		? cacheEntryRawKeyOf(cache)
-		: null;
-
-	if (rawKeyOf === null) {
-		return 0;
-	}
-
-	const { reaped } = await useScopedCacheStore().reapIndexedEntries(
-		rawKeyOf,
-		scopedCacheEpochKey,
-		scopedCacheEpochTtlSeconds(),
-	);
-
-	return reaped;
 }
 
 /**

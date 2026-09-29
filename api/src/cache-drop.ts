@@ -50,22 +50,6 @@ function rawCacheKey(
 }
 
 /**
- * How to name a cache entry to Redis directly, or null for a store that is not
- * Redis: the memory one holds its entries where no Redis command reaches.
- */
-export function cacheEntryRawKeyOf(
-	cache: Keyv,
-): ((key: string) => string) | null {
-	const store = redisBackedCacheStore(cache);
-
-	if (store === null) {
-		return null;
-	}
-
-	return (key) => rawCacheKey(cache, store, key);
-}
-
-/**
  * Delete cache entries and report how many of them were actually there.
  *
  * A scoped purge over a slice with 200 entries used to send 200 deletes, one per

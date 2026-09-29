@@ -32,7 +32,7 @@ describe(oneLine`
 		const namespace = `directus-index-expiry-${vendor}`;
 
 		const slotIndexKey
-			= `${namespace}:scoped-cache-index:fingerprint:${NOTE}:slot=a`;
+			= `${namespace}:scoped-cache-index:fingerprint-expiry:${NOTE}:slot=a`;
 
 		const noteEpochKey = `${namespace}:scoped-cache-epoch:${NOTE}`;
 

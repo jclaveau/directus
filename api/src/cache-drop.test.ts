@@ -1,7 +1,7 @@
 import type { Keyv } from 'keyv';
 import { oneLine } from '@directus/utils';
 import { describe, expect, test, vi } from 'vitest';
-import { cacheEntryRawKeyOf, dropCacheEntries } from './cache-drop.js';
+import { dropCacheEntries } from './cache-drop.js';
 
 function redisBackedCache(unlink: ReturnType<typeof vi.fn>) {
 	return {
@@ -124,20 +124,5 @@ describe('dropCacheEntries', () => {
 
 		expect(await dropCacheEntries(cache, ['key-a'])).toBe(1);
 		expect(cache.delete).toHaveBeenCalledWith('key-a');
-	});
-});
-
-describe('cacheEntryRawKeyOf', () => {
-	test('names an entry by both namespaces, as the store writes it', () => {
-		const rawKeyOf = cacheEntryRawKeyOf(redisBackedCache(vi.fn()));
-
-		expect(rawKeyOf?.('key-a'))
-			.toBe('scalabus_response::scalabus_response:key-a');
-	});
-
-	test('answers null for a store that is not Redis', () => {
-		const cache = { namespace: 'scalabus_response', store: new Map() };
-
-		expect(cacheEntryRawKeyOf(cache as unknown as Keyv)).toBe(null);
 	});
 });

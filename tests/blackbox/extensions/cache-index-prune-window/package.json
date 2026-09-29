@@ -1,5 +1,5 @@
 {
-	"name": "cache-index-reap-window",
+	"name": "cache-index-prune-window",
 	"version": "0.0.0",
 	"private": true,
 	"directus:extension": {

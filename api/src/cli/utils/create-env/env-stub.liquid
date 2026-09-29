@@ -214,13 +214,6 @@ CACHE_ENABLED=false
 # expires under a read still between its two readings. [24h]
 # CACHE_SCOPED_EPOCH_TTL=24h
 
-# When the scoped cache's index drops the members naming entries that expired. An
-# index set outlives its entries, and every read filed into it pushes its expiry
-# out, so the set of a collection read all day never expires: without this it
-# keeps a member for every entry ever cached, and every write to the collection
-# tests them all again. Cron syntax, run on one node per tick. [0 * * * *]
-# CACHE_SCOPED_INDEX_REAP_SCHEDULE="0 * * * *"
-
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,
 # normalized primary tag) is ALWAYS keyed — no config needed.

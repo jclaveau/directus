@@ -12,16 +12,25 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
-const INDEX_REAP = 'index_reap';
-const INDEX_REAP_PINNED = 'index_reap_pinned';
-const INDEX_REAP_WINDOW = 'index_reap_window';
+const INDEX_PRUNE = 'index_prune';
+const INDEX_PRUNE_PINNED = 'index_prune_pinned';
+const INDEX_PRUNE_WINDOW = 'index_prune_window';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTtlSeconds = 8;
 
-const feature = loadFeature('./tests/db/routes/items/cache-index-reap.feature');
+// A member is filed to expire twice CACHE_TTL out, and its set with it.
+const indexExpiryMs = cacheTtlSeconds * 2 * 1000 + 500;
+
+const feature = loadFeature('./tests/db/routes/items/cache-index-prune.feature');
+
+function waitIndexExpiry() {
+	return new Promise((resolve) => {
+		setTimeout(resolve, indexExpiryMs);
+	});
+}
 
 describe.each(vendors)('%s', (vendor) => {
-	const namespace = `directus-index-reap-${vendor}`;
+	const namespace = `directus-index-prune-${vendor}`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';
 	env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
@@ -32,15 +41,14 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['REDIS_PORT'] = '6108';
 	env[vendor]['CACHE_NAMESPACE'] = namespace;
 	env[vendor]['CACHE_TTL'] = `${cacheTtlSeconds}s`;
-	env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '* * * * * *';
 
-	// No scope fields, so every read of the collection is filed in its bare set:
-	// the one every fill keeps from expiring.
+	// Scoped on label, read by primary key: every read is filed in the bare set
+	// and pinned to its row, so a write to another row leaves it cached.
 	const bareIndexKey =
-		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP}:`;
+		`${namespace}:scoped-cache-index:fingerprint-expiry:${INDEX_PRUNE}:`;
 
-	const pinnedIndexKey =
-		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP_PINNED}:name=`;
+	const pinnedIndexKey = `${namespace}:scoped-cache-index:`
+		+ `fingerprint-expiry:${INDEX_PRUNE_PINNED}:name=`;
 
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -50,14 +58,15 @@ describe.each(vendors)('%s', (vendor) => {
 		await CreateCollections(vendor, {
 			collections: [
 				{
-					collection: INDEX_REAP,
+					collection: INDEX_PRUNE,
+					meta: { scoped_cache_fields: ['label'] },
 					fields: [
 						{ field: 'name', type: 'string', meta: {} },
 						{ field: 'label', type: 'string', meta: {} },
 					],
 				},
 				{
-					collection: INDEX_REAP_PINNED,
+					collection: INDEX_PRUNE_PINNED,
 					meta: { scoped_cache_fields: ['name'] },
 					fields: [
 						{ field: 'name', type: 'string', meta: {} },
@@ -65,8 +74,8 @@ describe.each(vendors)('%s', (vendor) => {
 					],
 				},
 				{
-					// Held by the cache-index-reap-window hook.
-					collection: INDEX_REAP_WINDOW,
+					// Held by the cache-index-prune-window hook.
+					collection: INDEX_PRUNE_WINDOW,
 					fields: [
 						{ field: 'name', type: 'string', meta: {} },
 						{ field: 'label', type: 'string', meta: {} },
@@ -94,9 +103,9 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await redisClient.quit();
 
-		await DeleteCollection(vendor, { collection: INDEX_REAP });
-		await DeleteCollection(vendor, { collection: INDEX_REAP_PINNED });
-		await DeleteCollection(vendor, { collection: INDEX_REAP_WINDOW });
+		await DeleteCollection(vendor, { collection: INDEX_PRUNE });
+		await DeleteCollection(vendor, { collection: INDEX_PRUNE_PINNED });
+		await DeleteCollection(vendor, { collection: INDEX_PRUNE_WINDOW });
 	});
 
 	defineFeature(feature, (scenario) => {
@@ -109,16 +118,26 @@ describe.each(vendors)('%s', (vendor) => {
 
 				function readByName(name: string) {
 					return request(getUrl(vendor, env))
-						.get(`/items/${INDEX_REAP}`)
-						.query({ 'filter[name][_eq]': name, fields: 'name,label' })
+						.get(`/items/${INDEX_PRUNE}`)
+						.query({
+							'filter[id][_eq]': rowIds.get(name),
+							fields: 'name,label',
+						})
+						.set('Authorization', auth);
+				}
+
+				function writeLabel(name: string, payload: Record<string, string>) {
+					return request(getUrl(vendor, env))
+						.patch(`/items/${INDEX_PRUNE}/${rowIds.get(name)}`)
+						.send(payload)
 						.set('Authorization', auth);
 				}
 
 				given(
-					`these rows of ${INDEX_REAP}:`,
+					`these rows of ${INDEX_PRUNE}:`,
 					async (table: Record<string, string>[]) => {
 						const created = await request(getUrl(vendor, env))
-							.post(`/items/${INDEX_REAP}`)
+							.post(`/items/${INDEX_PRUNE}`)
 							.send(table)
 							.set('Authorization', auth);
 
@@ -130,47 +149,56 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				and('the read of ada is cached, then expires', async () => {
-					expect((await readByName('ada')).headers[cacheStatusHeader])
-						.toBe('MISS');
+				and(
+					'the read of ada is cached, then its index members expire',
+					async () => {
+						expect((await readByName('ada')).headers[cacheStatusHeader])
+							.toBe('MISS');
 
-					adaMembers = await redisClient.smembers(bareIndexKey);
+						adaMembers = await redisClient.zrange(bareIndexKey, 0, -1);
 
-					expect(adaMembers).not.toEqual([]);
+						expect(adaMembers).not.toEqual([]);
 
-					await new Promise((resolve) => {
-						setTimeout(resolve, cacheTtlSeconds * 1000 + 500);
-					});
-				});
+						await waitIndexExpiry();
+					},
+				);
 
 				and('the read of bob is cached', async () => {
-					// Polled: a reap removing ada's members as bob fills moves the
-					// counter under that fill, which then evicts its entry.
-					await expect.poll(async () => {
-						return (await readByName('bob')).headers[cacheStatusHeader];
-					}, { timeout: 5_000 }).toBe('HIT');
+					expect((await readByName('bob')).headers[cacheStatusHeader])
+						.toBe('MISS');
 
-					bobMembers = (await redisClient.smembers(bareIndexKey))
+					bobMembers = (await redisClient.zrange(bareIndexKey, 0, -1))
 						.filter((member) => !adaMembers.includes(member));
 
 					expect(bobMembers).not.toEqual([]);
 				});
 
-				then(`the index of ${INDEX_REAP} names only the read of bob`, async () => {
-					await expect.poll(async () => {
-						return (await redisClient.smembers(bareIndexKey)).sort();
-					}, { timeout: 5_000 }).toEqual([...bobMembers].sort());
+				when(
+					'the label of cy is written:',
+					async (table: Record<string, string>[]) => {
+						expect((await writeLabel('cy', table[0]!)).statusCode).toBe(200);
+					},
+				);
+
+				then(`the index of ${INDEX_PRUNE} names only the read of bob`, async () => {
+					expect((await redisClient.zrange(bareIndexKey, 0, -1)).sort())
+						.toEqual([...bobMembers].sort());
 				});
+
+				and(
+					'the read of bob answers:',
+					async (table: Record<string, string>[]) => {
+						const cached = await readByName('bob');
+
+						expect(cached.headers[cacheStatusHeader]).toBe(table[0]!.cache);
+						expect(cached.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
 
 				when(
 					'the label of bob is written:',
 					async (table: Record<string, string>[]) => {
-						const updated = await request(getUrl(vendor, env))
-							.patch(`/items/${INDEX_REAP}/${rowIds.get('bob')}`)
-							.send(table[0])
-							.set('Authorization', auth);
-
-						expect(updated.statusCode).toBe(200);
+						expect((await writeLabel('bob', table[0]!)).statusCode).toBe(200);
 					},
 				);
 
@@ -194,16 +222,16 @@ describe.each(vendors)('%s', (vendor) => {
 
 				function readByName(name: string) {
 					return request(getUrl(vendor, env))
-						.get(`/items/${INDEX_REAP_PINNED}`)
+						.get(`/items/${INDEX_PRUNE_PINNED}`)
 						.query({ 'filter[name][_eq]': name, fields: 'name,label' })
 						.set('Authorization', auth);
 				}
 
 				given(
-					`these rows of ${INDEX_REAP_PINNED}:`,
+					`these rows of ${INDEX_PRUNE_PINNED}:`,
 					async (table: Record<string, string>[]) => {
 						const created = await request(getUrl(vendor, env))
-							.post(`/items/${INDEX_REAP_PINNED}`)
+							.post(`/items/${INDEX_PRUNE_PINNED}`)
 							.send(table)
 							.set('Authorization', auth);
 
@@ -211,73 +239,66 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				and('the read of ada is cached, then expires', async () => {
-					expect((await readByName('ada')).headers[cacheStatusHeader])
-						.toBe('MISS');
+				and(
+					'the read of ada is cached, then its index members expire',
+					async () => {
+						expect((await readByName('ada')).headers[cacheStatusHeader])
+							.toBe('MISS');
 
-					expect(await redisClient.exists(`${pinnedIndexKey}ada`)).toBe(1);
+						expect(await redisClient.exists(`${pinnedIndexKey}ada`)).toBe(1);
 
-					await new Promise((resolve) => {
-						setTimeout(resolve, cacheTtlSeconds * 1000 + 500);
-					});
-				});
+						await waitIndexExpiry();
+					},
+				);
 
 				and('the read of bob is cached', async () => {
-					await expect.poll(async () => {
-						return (await readByName('bob')).headers[cacheStatusHeader];
-					}, { timeout: 5_000 }).toBe('HIT');
+					expect((await readByName('bob')).headers[cacheStatusHeader])
+						.toBe('MISS');
 
-					bobMembers = await redisClient.smembers(`${pinnedIndexKey}bob`);
+					bobMembers = await redisClient
+						.zrange(`${pinnedIndexKey}bob`, 0, -1);
 
 					expect(bobMembers).not.toEqual([]);
 				});
 
-				// Before the set's own TTL, twice CACHE_TTL, could have dropped it.
 				then('the index set of ada is gone', async () => {
-					await expect.poll(async () => {
-						return redisClient.exists(`${pinnedIndexKey}ada`);
-					}, { timeout: 5_000 }).toBe(0);
+					expect(await redisClient.exists(`${pinnedIndexKey}ada`)).toBe(0);
 				});
 
 				and('the index set of bob still names the read of bob', async () => {
-					expect((await redisClient.smembers(`${pinnedIndexKey}bob`)).sort())
-						.toEqual([...bobMembers].sort());
+					expect(await redisClient.zrange(`${pinnedIndexKey}bob`, 0, -1))
+						.toEqual(bobMembers);
 				});
 			},
 			60_000,
 		);
 
 		scenario(
-			'a reap between a fill\'s index and its value evicts the entry',
-			({ given, when, then }) => {
-				const rowIds = new Map<string, number>();
+			'a fill held past its index\'s expiry evicts the entry',
+			({ given, when, then, and }) => {
 				let heldRead: request.Response;
 
 				function readByName(name: string) {
 					return request(getUrl(vendor, env))
-						.get(`/items/${INDEX_REAP_WINDOW}`)
+						.get(`/items/${INDEX_PRUNE_WINDOW}`)
 						.query({ 'filter[name][_eq]': name, fields: 'name,label' })
 						.set('Authorization', auth);
 				}
 
 				given(
-					`these rows of ${INDEX_REAP_WINDOW}:`,
+					`these rows of ${INDEX_PRUNE_WINDOW}:`,
 					async (table: Record<string, string>[]) => {
 						const created = await request(getUrl(vendor, env))
-							.post(`/items/${INDEX_REAP_WINDOW}`)
+							.post(`/items/${INDEX_PRUNE_WINDOW}`)
 							.send(table)
 							.set('Authorization', auth);
 
 						expect(created.statusCode).toBe(200);
-
-						for (const row of created.body.data) {
-							rowIds.set(row.name, row.id);
-						}
 					},
 				);
 
 				when(
-					'the read of bob is held between its index and its value, until a reap',
+					'the read of bob is held between its index and its value, past one TTL',
 					async () => {
 						heldRead = await readByName('bob');
 					},
@@ -291,19 +312,8 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				when(
-					'the label of bob is written:',
-					async (table: Record<string, string>[]) => {
-						const updated = await request(getUrl(vendor, env))
-							.patch(`/items/${INDEX_REAP_WINDOW}/${rowIds.get('bob')}`)
-							.send(table[0])
-							.set('Authorization', auth);
-
-						expect(updated.statusCode).toBe(200);
-					},
-				);
-
-				then(
+				// Written just now, the entry would still be live: a MISS is the eviction.
+				and(
 					'the read of bob is filled again:',
 					async (table: Record<string, string>[]) => {
 						const refilled = await readByName('bob');

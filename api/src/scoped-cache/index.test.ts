@@ -42,13 +42,13 @@ import {
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	readScopedCacheEpochs,
-	reapScopedCacheIndex,
 	resolveScopedCacheM2oJoinChainFromPath,
 	releaseStrandedScopedCacheSweeps,
 	retryPendingScopedCachePurges,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFillOutlivedIndex,
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheFingerprintOf,
 	scopedCacheMaxPinsPerCollection,
@@ -426,9 +426,14 @@ describe('countScopedCachePinMembers', () => {
 		countedMembers = {};
 
 		vi.mocked(useRedis).mockReturnValue({
-			sscan: vi.fn(async (indexKey: string) => {
-				return ['0', countedMembers[indexKey] ?? []];
+			zscan: vi.fn(async (indexKey: string) => {
+				return [
+					'0',
+					(countedMembers[indexKey] ?? []).flatMap((member) => [member, 'inf']),
+				];
 			}),
+			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
 				const scanned = pattern.slice(0, -1);
 
@@ -447,7 +452,7 @@ describe('countScopedCachePinMembers', () => {
 		narrows, a pinned one those reads and the entries bound to that value
 	`, async () => {
 		countedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&|ns:entry-bare',
 				'articles:&id=,5,&|ns:entry-five',
 				'articles:&id=,9,&|ns:entry-nine',
@@ -463,10 +468,10 @@ describe('countScopedCachePinMembers', () => {
 		index files it under
 	`, async () => {
 		countedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:author=1': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:author=1': [
 				'articles:&author=,1,2,&|ns:entry-both',
 			],
-			'ns:scoped-cache-index:fingerprint:articles:author=2': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:author=2': [
 				'articles:&author=,1,2,&|ns:entry-both',
 			],
 		};
@@ -479,7 +484,7 @@ describe('countScopedCachePinMembers', () => {
 	// each one's `__expires_at` and `__pins` siblings too would claim three.
 	it('leaves an entry\'s sidecars out of its own blast radius', async () => {
 		countedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,5,&|ns:entry-five',
 				'articles:&id=,5,&|ns:entry-five__expires_at',
 				'articles:&id=,5,&|ns:entry-five__pins',
@@ -492,7 +497,7 @@ describe('countScopedCachePinMembers', () => {
 
 	it('reads a null scope slice by the legacy pin\'s own byte', async () => {
 		countedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&author=,\u0000null,&|ns:entry-unassigned',
 			],
 		};
@@ -965,9 +970,10 @@ describe('a collection-wide purge', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers,
 			scan,
-			srem: vi.fn(),
+			zrem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
@@ -976,7 +982,7 @@ describe('a collection-wide purge', () => {
 		expect(scan).toHaveBeenCalledWith(
 			'0',
 			'MATCH',
-			'ns:scoped-cache-index:fingerprint:articles:*',
+			'ns:scoped-cache-index:fingerprint-expiry:articles:*',
 			'COUNT',
 			1000,
 		);
@@ -996,19 +1002,20 @@ describe('a collection-wide purge', () => {
 				calls.push(`scan ${pattern}`);
 
 				// The pass over what earlier sweeps left moved aside finds nothing.
-				if (pattern.includes(':swept:')) {
+				if (pattern.includes(':swept-expiry:')) {
 					return ['0', []];
 				}
 
-				return ['0', ['ns:scoped-cache-index:fingerprint:articles:']];
+				return ['0', ['ns:scoped-cache-index:fingerprint-expiry:articles:']];
 			},
 			del: vi.fn(),
-			srem: vi.fn(),
+			zrem: vi.fn(),
 			eval: async () => {
 				calls.push('eval');
 				return [];
 			},
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
 				calls.push(`bump ${epochKey}`);
 			},
@@ -1018,8 +1025,8 @@ describe('a collection-wide purge', () => {
 
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:articles',
-			'scan ns:scoped-cache-index:swept:articles:*',
-			'scan ns:scoped-cache-index:fingerprint:articles:*',
+			'scan ns:scoped-cache-index:swept-expiry:articles:*',
+			'scan ns:scoped-cache-index:fingerprint-expiry:articles:*',
 			'eval',
 		]);
 	});
@@ -1049,6 +1056,38 @@ function redisSweepDouble() {
 	};
 }
 
+// A fill files its index members scored two TTLs out, then writes its entry for
+// one: past one TTL between the two, the entry would outlive its members.
+describe('scopedCacheFillOutlivedIndex', () => {
+	beforeEach(() => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	});
+
+	it('keeps a fill that wrote its entry within one TTL of its index', () => {
+		expect(scopedCacheFillOutlivedIndex(
+			[{ collection: 'articles' }],
+			3_600_000,
+			'1h',
+		)).toBeUndefined();
+	});
+
+	it('names the collection of a fill that took longer than one TTL', () => {
+		expect(scopedCacheFillOutlivedIndex(
+			[{ collection: 'articles' }, { collection: 'authors' }],
+			3_600_001,
+			'1h',
+		)).toBe('articles');
+	});
+
+	it('keeps any fill under a TTL of 0, whose members never expire', () => {
+		expect(scopedCacheFillOutlivedIndex(
+			[{ collection: 'articles' }],
+			86_400_000,
+			'0',
+		)).toBeUndefined();
+	});
+});
+
 describe('indexScopedCacheEntry', () => {
 	it(oneLine`
 		throws the command error a pipeline REPLIED with, so its caller can skip
@@ -1060,12 +1099,10 @@ describe('indexScopedCacheEntry', () => {
 
 		vi.mocked(useRedis).mockReturnValue({
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			pipeline: () => {
 				return {
-					sadd: vi.fn().mockReturnThis(),
 					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
-					expire: vi.fn().mockReturnThis(),
-					persist: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
 					// REJECTS on a connection-level failure, so an ignored reply
 					// reads as success.
@@ -1089,9 +1126,9 @@ describe('indexScopedCacheEntry', () => {
 
 		vi.mocked(useRedis).mockReturnValue({
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			pipeline: () => {
 				return {
-					sadd: vi.fn().mockReturnThis(),
 					expire,
 					scopedCacheIndexExpiry: indexExpiry,
 					exec: vi.fn().mockResolvedValue([]),
@@ -1115,7 +1152,7 @@ describe('indexScopedCacheEntry', () => {
 		expect(expire).not.toHaveBeenCalled();
 
 		expect(indexExpiry).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:fingerprint-expiry:articles:',
 			3600,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
@@ -1126,16 +1163,14 @@ describe('indexScopedCacheEntry', () => {
 		clears an index set's expiry under a TTL of 0, since the entries it names
 		then never expire
 	`, async () => {
-		const sadd = vi.fn().mockReturnThis();
-		const persist = vi.fn().mockReturnThis();
+		const indexExpiry = vi.fn().mockReturnThis();
 
 		vi.mocked(useRedis).mockReturnValue({
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			pipeline: () => {
 				return {
-					sadd,
-					persist,
-					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
+					scopedCacheIndexExpiry: indexExpiry,
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1149,16 +1184,14 @@ describe('indexScopedCacheEntry', () => {
 			'0',
 		);
 
-		// A set filed while a TTL was in force keeps that expiry through a plain
-		// SADD, and expires under entries that no purge can reach any more.
-		expect(sadd).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:',
+		// Through the script, which scores the members +inf and persists the set:
+		// one filed while a TTL was in force would otherwise expire under entries
+		// no purge can reach any more.
+		expect(indexExpiry).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint-expiry:articles:',
+			0,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
-		);
-
-		expect(persist).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:',
 		);
 	});
 });
@@ -1177,6 +1210,7 @@ describe('dropScopedCacheIndex', () => {
 		const redis = {
 			scan,
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump,
 			pipeline: () => pipeline,
 		};
@@ -1191,12 +1225,12 @@ describe('dropScopedCacheIndex', () => {
 	`, async () => {
 		const { scan, unlink } = mockScan(
 			['4', [
-				'ns:scoped-cache-index:fingerprint:articles',
+				'ns:scoped-cache-index:fingerprint-expiry:articles',
 				'ns:scoped-cache-index:slices:articles',
 			]],
 			['0', [
-				'ns:scoped-cache-index:fingerprint:articles:id=1',
-				'ns:scoped-cache-index:fingerprint:authors',
+				'ns:scoped-cache-index:fingerprint-expiry:articles:id=1',
+				'ns:scoped-cache-index:fingerprint-expiry:authors',
 			]],
 		);
 
@@ -1230,13 +1264,13 @@ describe('dropScopedCacheIndex', () => {
 		// One call per scan page, not one for the lot: collecting first would put
 		// the whole index in this process's heap to delete it from Redis.
 		expect(unlink).toHaveBeenNthCalledWith(1, [
-			'ns:scoped-cache-index:fingerprint:articles',
+			'ns:scoped-cache-index:fingerprint-expiry:articles',
 			'ns:scoped-cache-index:slices:articles',
 		]);
 
 		expect(unlink).toHaveBeenNthCalledWith(2, [
-			'ns:scoped-cache-index:fingerprint:articles:id=1',
-			'ns:scoped-cache-index:fingerprint:authors',
+			'ns:scoped-cache-index:fingerprint-expiry:articles:id=1',
+			'ns:scoped-cache-index:fingerprint-expiry:authors',
 		]);
 
 		expect(dropped).toEqual({ dropped: 4, refused: 0 });
@@ -1247,7 +1281,7 @@ describe('dropScopedCacheIndex', () => {
 		before the drop and wrote its entry after it is indexed by nothing
 	`, async () => {
 		const { scan, scopedCacheEpochBump } = mockScan(
-			['0', ['ns:scoped-cache-index:fingerprint:articles']],
+			['0', ['ns:scoped-cache-index:fingerprint-expiry:articles']],
 		);
 
 		await dropScopedCacheIndex();
@@ -1271,7 +1305,7 @@ describe('dropScopedCacheIndex', () => {
 		// One set per index value, which is what a per-user-scoped collection
 		// accumulates.
 		const indexKeys = Array.from({ length: 1_201 }, (_unused, index) => {
-			return `ns:scoped-cache-index:fingerprint:articles:owner=${index}`;
+			return `ns:scoped-cache-index:fingerprint-expiry:articles:owner=${index}`;
 		});
 
 		vi.mocked(useRedis).mockReturnValue({
@@ -1280,9 +1314,10 @@ describe('dropScopedCacheIndex', () => {
 				.mockResolvedValueOnce(['0', []])
 				.mockResolvedValue(['0', indexKeys]),
 			del: vi.fn(),
-			srem: vi.fn(),
+			zrem: vi.fn(),
 			eval: sweep.eval,
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
@@ -1308,9 +1343,10 @@ describe('dropScopedCacheIndex', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
 			del: vi.fn(),
-			srem: vi.fn(),
+			zrem: vi.fn(),
 			eval: vi.fn().mockRejectedValue(new Error('Connection is closed.')),
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump,
 		} as any);
 
@@ -1334,8 +1370,8 @@ describe('dropScopedCacheIndex', () => {
 	it('counts what Redis removed, not what it was handed', async () => {
 		const { unlink } = mockScan(
 			['0', [
-				'ns:scoped-cache-index:fingerprint:a',
-				'ns:scoped-cache-index:fingerprint:b',
+				'ns:scoped-cache-index:fingerprint-expiry:a',
+				'ns:scoped-cache-index:fingerprint-expiry:b',
 			]],
 		);
 
@@ -1357,7 +1393,7 @@ describe('dropScopedCacheIndex', () => {
 	it('splits the drop into chunked commands', async () => {
 		const keys = Array.from(
 			{ length: 2500 },
-			(_, at) => `ns:scoped-cache-index:fingerprint:c:id=${at}`,
+			(_, at) => `ns:scoped-cache-index:fingerprint-expiry:c:id=${at}`,
 		);
 
 		const { unlink } = mockScan(['0', keys]);
@@ -1394,7 +1430,10 @@ describe('dropScopedCacheIndex', () => {
 	// The keys the pre-scoped-cache-index layout wrote go once, in
 	// `20260911A-drop-the-pre-scoped-cache-index-layout`, not on every flush.
 	it('walks the index prefix and nothing else', async () => {
-		const { scan } = mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
+		const { scan } = mockScan([
+			'0',
+			['ns:scoped-cache-index:fingerprint-expiry:articles'],
+		]);
 
 		await dropScopedCacheIndex();
 
@@ -1423,9 +1462,10 @@ describe('flushResponseCache', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: async () => {
 				calls.push('scan');
-				return ['0', ['ns:scoped-cache-index:fingerprint:articles']];
+				return ['0', ['ns:scoped-cache-index:fingerprint-expiry:articles']];
 			},
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
 				calls.push(`bump ${epochKey}`);
 			},
@@ -1546,15 +1586,18 @@ describe('retryPendingScopedCachePurges', () => {
 
 	// The index prune rides a pipeline, so a member the drain dropped reads off this
 	// rather than off the client.
-	const srem = vi.fn();
+	const zrem = vi.fn();
 
 	// A collection-mode record drops whole sets through the sweep script, which does
 	// its work inside Redis and leaves no command of its own to spy on.
 	const swept: string[][] = [];
 
 	const redis = {
-		sscan: vi.fn(async (indexKey: string, _cursor: string) => {
-			return ['0', indexedMembers[indexKey] ?? []];
+		zscan: vi.fn(async (indexKey: string, _cursor: string) => {
+			return [
+				'0',
+				(indexedMembers[indexKey] ?? []).flatMap((member) => [member, 'inf']),
+			];
 		}),
 		scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
 			const scanned = pattern.slice(0, -1);
@@ -1567,7 +1610,7 @@ describe('retryPendingScopedCachePurges', () => {
 			];
 		}),
 		// Moves every set it was handed that exists to `<prefix><position>` and
-		// answers with where, as the script does, so the `SSCAN` after it reads the
+		// answers with where, as the script does, so the `ZSCAN` after it reads the
 		// moved set.
 		eval: vi.fn(async (_script: string, numKeys: number, ...args: string[]) => {
 			const sweptKeys = args.slice(0, numKeys);
@@ -1590,11 +1633,12 @@ describe('retryPendingScopedCachePurges', () => {
 		}),
 		del: vi.fn(),
 		defineCommand: vi.fn(),
+		scopedCacheIndexPrune: vi.fn(async () => 0),
 		scopedCacheEpochBump: vi.fn(),
 		pipeline: () => {
 			const chain: any = {
-				srem: (...args: string[]) => {
-					srem(...args);
+				zrem: (...args: string[]) => {
+					zrem(...args);
 					return chain;
 				},
 				// The purge releases the sets its sweep moved aside once their entries
@@ -1643,7 +1687,7 @@ describe('retryPendingScopedCachePurges', () => {
 		env['CACHE_NAMESPACE'] = 'other';
 
 		indexedMembers = {
-			'other:scoped-cache-index:fingerprint:articles:': [
+			'other:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -1653,13 +1697,13 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(redis.scan).toHaveBeenCalledWith(
 			'0',
 			'MATCH',
-			'other:scoped-cache-index:fingerprint:articles:*',
+			'other:scoped-cache-index:fingerprint-expiry:articles:*',
 			'COUNT',
 			expect.any(Number),
 		);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
-		expect(srem).toHaveBeenCalled();
+		expect(zrem).toHaveBeenCalled();
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
 
@@ -1683,7 +1727,7 @@ describe('retryPendingScopedCachePurges', () => {
 		]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -1722,7 +1766,9 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:swept:articles:a1:1': ['articles:&|ns:entry-left'],
+			'ns:scoped-cache-index:swept-expiry:articles:a1:1': [
+				'articles:&|ns:entry-left',
+			],
 		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
@@ -1736,7 +1782,9 @@ describe('retryPendingScopedCachePurges', () => {
 		can still reach the entries they name
 	`, async () => {
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': ['articles:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
+				'articles:&|ns:entry-bare',
+			],
 		};
 
 		cache.delete.mockRejectedValueOnce(new Error('Connection is closed.'));
@@ -1746,7 +1794,7 @@ describe('retryPendingScopedCachePurges', () => {
 
 		expect(Object.entries(indexedMembers)).toEqual([[
 			expect.stringMatching(
-				/^ns:scoped-cache-index:swept:articles:[0-9a-f-]{36}:1$/,
+				/^ns:scoped-cache-index:swept-expiry:articles:[0-9a-f-]{36}:1$/,
 			),
 			['articles:&|ns:entry-bare'],
 		]]);
@@ -1764,10 +1812,10 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&|ns:entry-bare',
 			],
-			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:owner=alpha': [
 				'articles:&owner=,alpha,&|ns:entry-alpha',
 			],
 		};
@@ -1775,8 +1823,8 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(swept).toEqual([[
-			'ns:scoped-cache-index:fingerprint:articles:',
-			'ns:scoped-cache-index:fingerprint:articles:owner=alpha',
+			'ns:scoped-cache-index:fingerprint-expiry:articles:',
+			'ns:scoped-cache-index:fingerprint-expiry:articles:owner=alpha',
 		]]);
 
 		expect(cache.clear).not.toHaveBeenCalled();
@@ -1793,10 +1841,10 @@ describe('retryPendingScopedCachePurges', () => {
 		with nothing recorded, the only thing still naming them is the moved set
 	`, async () => {
 		indexedMembers = {
-			'ns:scoped-cache-index:swept:articles:dead:1': [
+			'ns:scoped-cache-index:swept-expiry:articles:dead:1': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,2,&|ns:entry-b',
 			],
 		};
@@ -1807,7 +1855,7 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-b');
 
 		expect(indexedMembers).toEqual({
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,2,&|ns:entry-b',
 			],
 		});
@@ -1818,7 +1866,7 @@ describe('retryPendingScopedCachePurges', () => {
 		connection still finds them
 	`, async () => {
 		indexedMembers = {
-			'ns:scoped-cache-index:swept:articles:dead:1': [
+			'ns:scoped-cache-index:swept-expiry:articles:dead:1': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -1833,26 +1881,7 @@ describe('retryPendingScopedCachePurges', () => {
 		);
 
 		expect(indexedMembers).toEqual({
-			'ns:scoped-cache-index:swept:articles:dead:1': [
-				'articles:&id=,1,&|ns:entry-a',
-			],
-		});
-	});
-
-	it(oneLine`
-		reaps nothing on a cache that is not Redis, which no EXISTS can ask
-		whether an entry is still there
-	`, async () => {
-		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
-				'articles:&id=,1,&|ns:entry-a',
-			],
-		};
-
-		expect(await reapScopedCacheIndex()).toBe(0);
-
-		expect(indexedMembers).toEqual({
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:swept-expiry:articles:dead:1': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		});
@@ -1870,7 +1899,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -1883,7 +1912,7 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(await retryPendingScopedCachePurges()).toBe(0);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
-		expect(srem).not.toHaveBeenCalled();
+		expect(zrem).not.toHaveBeenCalled();
 		expect(clearPendingScopedCachePurges).not.toHaveBeenCalled();
 	});
 
@@ -1900,7 +1929,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:owner=alpha': [
 				'articles:&owner=,alpha,&|ns:entry-alpha',
 			],
 		};
@@ -1908,7 +1937,7 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(swept)
-			.toEqual([['ns:scoped-cache-index:fingerprint:articles:owner=alpha']]);
+			.toEqual([['ns:scoped-cache-index:fingerprint-expiry:articles:owner=alpha']]);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
 
@@ -1935,7 +1964,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:owner=alpha': [
 				'articles:&title=,q,&|ns:entry-alpha',
 			],
 		};
@@ -2041,7 +2070,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -2109,7 +2138,7 @@ describe('retryPendingScopedCachePurges', () => {
 		});
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -2165,7 +2194,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -2223,7 +2252,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 				'articles:&id=,1,&|ns:entry-a__expires_at',
 				'articles:&id=,1,&|ns:entry-a__pins',
@@ -2268,7 +2297,7 @@ describe('retryPendingScopedCachePurges', () => {
 		// One entry both targets reach: it is bound to the row one names and to the
 		// author the other does.
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&author=,3,&id=,1,&|ns:entry-a',
 			],
 		};
@@ -2293,7 +2322,7 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:': [
+			'ns:scoped-cache-index:fingerprint-expiry:articles:': [
 				'articles:&id=,1,&|ns:entry-a',
 			],
 		};
@@ -2431,9 +2460,10 @@ describe('a purge that fails after its mutation committed', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
 			scan: vi.fn().mockResolvedValue(['0', []]),
-			srem: vi.fn(),
+			zrem: vi.fn(),
 			eval: vi.fn().mockResolvedValue([]),
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
@@ -2446,9 +2476,10 @@ describe('a purge that fails after its mutation committed', () => {
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: vi.fn().mockRejectedValue(closed),
-			sscan: vi.fn().mockRejectedValue(closed),
+			zscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
@@ -2482,9 +2513,10 @@ describe('a purge that fails after its mutation committed', () => {
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
 			scan: vi.fn().mockRejectedValue(closed),
-			sscan: vi.fn().mockRejectedValue(closed),
+			zscan: vi.fn().mockRejectedValue(closed),
 			eval: vi.fn().mockRejectedValue(closed),
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: vi.fn(),
 		} as any);
 
@@ -4716,6 +4748,7 @@ describe('reading and bumping the purge counters', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			mget,
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump,
 		} as any);
 	});

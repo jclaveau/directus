@@ -1,4 +1,4 @@
-// A slice purge reads its index sets in pages (SSCAN) and SREMs only the members it
+// A slice purge reads its index sets in pages (ZSCAN) and ZREMs only the members it
 // matched, so a read filing its own member into one of those sets while the pass is
 // under way is either scanned and purged, or missed and left indexed — never left
 // indexed by nothing. That is the invariant this rig pins: the sweep it replaced

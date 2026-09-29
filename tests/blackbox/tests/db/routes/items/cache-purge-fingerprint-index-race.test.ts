@@ -15,8 +15,8 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// A slice purge reads the index sets its rows name in pages (SSCAN), tests every
-// member's fingerprint, and SREMs the ones it matched — it never deletes a set. So a
+// A slice purge reads the index sets its rows name in pages (ZSCAN), tests every
+// member's fingerprint, and ZREMs the ones it matched — it never deletes a set. So a
 // read filing its own member into one of those sets mid-pass is either scanned and
 // purged, or missed and left indexed; it cannot come out of the pass holding data no
 // later purge can reach. The sweep this replaced could: it SUNIONed the index sets,
@@ -97,8 +97,8 @@ describe(oneLine`
 
 		// The set the held reads are filed in: the collection's index is split by its
 		// one scope field, so every read pinning this slot shares this one.
-		const heldIndexKey =
-			`${namespace}:scoped-cache-index:fingerprint:${COLLECTION}:slot=${HELD_SLOT}`;
+		const heldIndexKey = `${namespace}:scoped-cache-index:`
+			+ `fingerprint-expiry:${COLLECTION}:slot=${HELD_SLOT}`;
 
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
@@ -179,13 +179,17 @@ describe(oneLine`
 
 		async function plantDecoys() {
 			for (let sent = 0; sent < decoyMemberCount; sent += decoyChunkSize) {
-				await redisCommand(REDIS_PORT, ['SADD', heldIndexKey, ...Array.from(
+				// Scored +inf: a decoy the purge's prune dropped would shorten its pass.
+				await redisCommand(REDIS_PORT, ['ZADD', heldIndexKey, ...Array.from(
 					{ length: Math.min(decoyChunkSize, decoyMemberCount - sent) },
 					(_unused, index) => {
-						return `${COLLECTION}:&slot=,decoy-${sent + index},&`
-							+ `|fingerprint-index-race-decoy:${sent + index}`;
+						return [
+							'+inf',
+							`${COLLECTION}:&slot=,decoy-${sent + index},&`
+							+ `|fingerprint-index-race-decoy:${sent + index}`,
+						];
 					},
-				)]);
+				).flat()]);
 			}
 
 			mark(`decoys planted (${decoyMemberCount})`);
@@ -370,7 +374,7 @@ describe(oneLine`
 				'EVAL',
 				"return #redis.call('KEYS', ARGV[1])",
 				'0',
-				`${namespace}:scoped-cache-index:swept:*`,
+				`${namespace}:scoped-cache-index:swept-expiry:*`,
 			])).toBe(':0');
 		}, 120_000);
 	});

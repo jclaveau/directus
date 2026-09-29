@@ -25,7 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //
 // The failure here is a WRONGTYPE, which is the one that needs no outage to
 // reproduce: the bare bucket of the collection's fingerprint index is overwritten
-// with a string, so the purge's SSCAN over it is refused while every other command
+// with a string, so the purge's ZSCAN over it is refused while every other command
 // keeps working. The entry stays indexed under its intact value slice, which is
 // what lets the retry finish the job once the bad key is gone.
 
@@ -41,8 +41,11 @@ describe(oneLine`
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
 		const namespace = `directus-retry-timer-${vendor}`;
+
 		// The bucket every write to the collection reads, whichever row it wrote.
-		const noteIndexKey = `${namespace}:scoped-cache-index:fingerprint:${NOTE}:`;
+		const noteIndexKey =
+			`${namespace}:scoped-cache-index:fingerprint-expiry:${NOTE}:`;
+
 		env[vendor]['CACHE_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
 		env[vendor]['CACHE_AUTO_PURGE'] = 'true';

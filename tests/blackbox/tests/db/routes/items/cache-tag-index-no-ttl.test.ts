@@ -17,8 +17,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // With a TTL set, a tag set and its slice-index entry are written through the
 // expiry script, which is what every other cache spec exercises. With `CACHE_TTL`
-// unset the entries never expire either, so both are written as a plain `SADD`
-// and left unbounded to match — a different pair of Redis calls, on the path that
+// unset the entries never expire either, so both are scored `+inf` and the set
+// left unbounded to match — a different pair of Redis calls, on the path that
 // makes a purge able to find an entry at all.
 //
 // Asserted by effect rather than by reading TTLs back: a tag set that was never

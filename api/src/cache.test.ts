@@ -19,11 +19,9 @@ const env = mockEnv.current;
 
 const redis = vi.hoisted(() => {
 	const pipeline = {
-		sadd: vi.fn(),
-		persist: vi.fn(),
 		expire: vi.fn(),
 		eval: vi.fn(),
-		srem: vi.fn(),
+		zrem: vi.fn(),
 		scopedCacheIndexExpiry: vi.fn(),
 		sunion: vi.fn(),
 		unlink: vi.fn(),
@@ -35,10 +33,11 @@ const redis = vi.hoisted(() => {
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
 		smembers: vi.fn(),
-		sscan: vi.fn(
+		zscan: vi.fn(
 			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
 		),
-		srem: vi.fn(),
+		zrem: vi.fn(),
+		scopedCacheIndexPrune: vi.fn(async (): Promise<number> => 0),
 		eval: vi.fn(),
 		// What the sweep double drops through, standing in for the script's UNLINK.
 		unlink: vi.fn(),
@@ -170,7 +169,7 @@ afterEach(() => {
 // case arms, which is what the command does — so a case still says which index sets
 // hold what, and still sees the purge ask for them.
 beforeEach(() => {
-	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
+	redis.scopedCacheIndexPrune.mockResolvedValue(0);
 	redis._pipeline.expire.mockReturnValue(redis._pipeline);
 
 	// Answers a flush's unlinks with what was queued since the last exec — a real
@@ -312,14 +311,14 @@ describe('scoped cache purging', () => {
 			// The members ride the script, which files them and moves the set's
 			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:articles:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:',
 				600,
 				'articles:&|resp-key',
 				'articles:&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:directus_users:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:directus_users:',
 				600,
 				'directus_users:&|resp-key',
 				'directus_users:&|resp-key__expires_at',
@@ -340,7 +339,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:',
 				600,
 				'slots:&student=,7,A,&|resp-key',
 				'slots:&student=,7,A,&|resp-key__expires_at',
@@ -357,7 +356,7 @@ describe('scoped cache purging', () => {
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:',
 				600,
 				'slots:&student=,\x00null,&|resp-key',
 				'slots:&student=,\x00null,&|resp-key__expires_at',
@@ -389,7 +388,7 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledOnce();
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:student=7',
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=7',
 				600,
 				'slots:&student=,7,&|resp-key',
 				'slots:&student=,7,&|resp-key__expires_at',
@@ -422,14 +421,14 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A',
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A',
 				600,
 				'slots:&student=,A,B,&|resp-key',
 				'slots:&student=,A,B,&|resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:student=B',
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=B',
 				600,
 				'slots:&student=,A,B,&|resp-key',
 				'slots:&student=,A,B,&|resp-key__expires_at',
@@ -444,11 +443,11 @@ describe('scoped cache purging', () => {
 
 			// Keyed off the array position rather than the rendered form, so the same
 			// bucket is sent once per duplicate — redundant but harmless, since a
-			// SADD of the same members twice leaves the set exactly as it was.
+			// ZADD GT of the same members twice leaves the set exactly as it was.
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:',
 				600,
 				'slots:&student=,A,&|resp-key',
 				'slots:&student=,A,&|resp-key__expires_at',
@@ -478,7 +477,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:articles:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:',
 				600,
 				'articles:&|resp-key',
 				'articles:&|resp-key__expires_at',
@@ -501,8 +500,12 @@ describe('scoped cache purging', () => {
 			indexedMembers = {};
 			swept.length = 0;
 
-			redis.sscan.mockImplementation(async (indexKey: string) => {
-				return ['0', indexedMembers[indexKey] ?? []] as [string, string[]];
+			// Member then score, as `ZSCAN` answers: every member here is live.
+			redis.zscan.mockImplementation(async (indexKey: string) => {
+				const scoredMembers = (indexedMembers[indexKey] ?? [])
+					.flatMap((member) => [member, 'inf']);
+
+				return ['0', scoredMembers] as [string, string[]];
 			});
 
 			redis.scan.mockImplementation(async (
@@ -519,7 +522,7 @@ describe('scoped cache purging', () => {
 
 			// The double runs what the script runs: move every set it was handed that
 			// exists to `<prefix><position>`, and answer with where it moved them, so
-			// the `SSCAN` after it reads the moved set.
+			// the `ZSCAN` after it reads the moved set.
 			redis.eval.mockImplementation(async (
 				_script: string,
 				numKeys: number,
@@ -549,8 +552,10 @@ describe('scoped cache purging', () => {
 			always purges the collection-level pin (global readers) alongside slices
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:': ['slots:&|global-key'],
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:': [
+					'slots:&|global-key',
+				],
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 					'slots:&student=,A,&|key-a__expires_at',
 				],
@@ -569,8 +574,8 @@ describe('scoped cache purging', () => {
 			// The members go, not the sets: a set is split by an index value, not by
 			// the pin this purge names, so dropping one would take every entry filed
 			// under that value whatever it is bound to.
-			expect(redis._pipeline.srem).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+			expect(redis._pipeline.zrem).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:',
 				'slots:&|global-key',
 			);
 
@@ -582,7 +587,7 @@ describe('scoped cache purging', () => {
 			failing a mutation whose write already committed
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 				],
 			};
@@ -607,11 +612,11 @@ describe('scoped cache purging', () => {
 
 		test('records the purge, how wide it reached and what it took', async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:': [
 					'slots:&|global-key',
 					'slots:&|global-key__expires_at',
 				],
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 					'slots:&student=,A,&|key-a__expires_at',
 					'slots:&student=,A,&|key-a__pins',
@@ -668,12 +673,13 @@ describe('scoped cache purging', () => {
 		});
 
 		test('counts only the entries that were still there to delete', async () => {
-			// Nothing SREMs a member until a purge matches it, so a key that expired
-			// by TTL is still named by its set. Counting memberships would report it
-			// as evicted — and on the per-user keys this fork exists for, with a TTL
-			// shorter than the gap between mutations, that is most of a set.
+			// Nothing ZREMs a member until a purge matches it or its score passes,
+			// so a key evicted before its TTL is still named by its set. Counting
+			// memberships would report it as evicted — and on the per-user keys this
+			// fork exists for, with a TTL shorter than the gap between mutations, that
+			// is most of a set.
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|live-key',
 					'slots:&student=,A,&|live-key__expires_at',
 					'slots:&student=,A,&|stale-key',
@@ -709,7 +715,7 @@ describe('scoped cache purging', () => {
 			replied rather than one delete per key
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 					'slots:&student=,A,&|key-a__expires_at',
 					'slots:&student=,A,&|key-b',
@@ -762,14 +768,14 @@ describe('scoped cache purging', () => {
 
 		test('records the coarse fallback as the wider thing it is', async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:articles:': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:': [
 					'articles:&|global-key',
 					'articles:&|global-key__expires_at',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1': [
 					'articles:&author=,1,&|slice-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=2': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=2': [
 					'articles:&author=,2,&|slice-key',
 				],
 			};
@@ -801,9 +807,9 @@ describe('scoped cache purging', () => {
 			// purge operation, so a bucket count of purges stays a count of purges
 			// rather than tracking how wide each one happened to reach.
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:articles:': [],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=2': [],
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:': [],
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1': [],
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=2': [],
 			};
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
@@ -852,10 +858,10 @@ describe('scoped cache purging', () => {
 			purging student=A, though both sit in the same collection
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|key-a',
 				],
-				'scalabus:scoped-cache-index:fingerprint:slots:student=B': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=B': [
 					'slots:&student=,B,&|key-b',
 				],
 			};
@@ -872,12 +878,12 @@ describe('scoped cache purging', () => {
 
 		test('no scoped cache pins purges only the collection-level pin', async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:articles:': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:': [
 					'articles:&|key-a',
 					'articles:&|key-a__expires_at',
 					'articles:&|key-b',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1': [
 					'articles:&author=,1,&|sliced-key',
 				],
 			};
@@ -899,13 +905,13 @@ describe('scoped cache purging', () => {
 			collection owns), sparing other collections
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:articles:': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:': [
 					'articles:&|global-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1': [
 					'articles:&author=,1,&|slice-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles_archive:': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles_archive:': [
 					'articles_archive:&|archive-key',
 				],
 			};
@@ -919,7 +925,7 @@ describe('scoped cache purging', () => {
 			expect(redis.scan).toHaveBeenCalledWith(
 				'0',
 				'MATCH',
-				'scalabus:scoped-cache-index:fingerprint:articles:*',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:*',
 				'COUNT',
 				expect.any(Number),
 			);
@@ -935,8 +941,8 @@ describe('scoped cache purging', () => {
 			expect(redis.eval).toHaveBeenCalledOnce();
 
 			expect(swept).toEqual([[
-				'scalabus:scoped-cache-index:fingerprint:articles:',
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1',
 			]]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -947,13 +953,13 @@ describe('scoped cache purging', () => {
 			whole rather than member by member
 		`, async () => {
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:articles:': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:': [
 					'articles:&|global-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1': [
 					'articles:&author=,1,&|first-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:articles:author=2': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=2': [
 					'articles:&author=,2,&|second-key',
 				],
 			};
@@ -963,9 +969,9 @@ describe('scoped cache purging', () => {
 			await purgeScopedCache(cache, 'articles', null);
 
 			expect(swept).toEqual([[
-				'scalabus:scoped-cache-index:fingerprint:articles:',
-				'scalabus:scoped-cache-index:fingerprint:articles:author=1',
-				'scalabus:scoped-cache-index:fingerprint:articles:author=2',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=1',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:author=2',
 			]]);
 
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
@@ -973,9 +979,9 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('second-key');
 
 			// The sets go inside the script, so nothing prunes them afterwards: a
-			// member re-added while the sweep ran cannot be SREMed after the fact,
+			// member re-added while the sweep ran cannot be ZREMed after the fact,
 			// and a set left naming keys it just dropped would grow without bound.
-			expect(redis._pipeline.srem).not.toHaveBeenCalled();
+			expect(redis._pipeline.zrem).not.toHaveBeenCalled();
 		});
 
 		test('full mode flushes the whole cache and never touches redis', async () => {
@@ -988,7 +994,7 @@ describe('scoped cache purging', () => {
 
 			expect(cache.clear).toHaveBeenCalledTimes(1);
 			expect(cache.delete).not.toHaveBeenCalled();
-			expect(redis.sscan).not.toHaveBeenCalled();
+			expect(redis.zscan).not.toHaveBeenCalled();
 			expect(redis.scan).not.toHaveBeenCalled();
 		});
 
@@ -999,10 +1005,10 @@ describe('scoped cache purging', () => {
 			// value as numeric 7 from the row. The purge must hit the string-pinned
 			// entry, not a separate `student=7` (number).
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:student=7': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=7': [
 					'slots:&student=,7,&|read-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:slots:student=A': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:student=A': [
 					'slots:&student=,A,&|other-key',
 				],
 			};
@@ -1032,7 +1038,7 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', pinnedScope: { student: ['A'] } },
 			]);
 
-			expect(redis.sscan).not.toHaveBeenCalled();
+			expect(redis.zscan).not.toHaveBeenCalled();
 			expect(redis.scan).not.toHaveBeenCalled();
 			expect(cache.delete).not.toHaveBeenCalled();
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -1052,10 +1058,10 @@ describe('scoped cache purging', () => {
 			});
 
 			indexedMembers = {
-				'scalabus:scoped-cache-index:fingerprint:slots:owner=B': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:owner=B': [
 					'slots:&owner=,B,&|owned-key',
 				],
-				'scalabus:scoped-cache-index:fingerprint:slots:owner=C': [
+				'scalabus:scoped-cache-index:fingerprint-expiry:slots:owner=C': [
 					'slots:&owner=,C,&|unowned-key',
 				],
 			};
@@ -1334,7 +1340,7 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:fingerprint:articles:id=1']],
+			['0', ['scalabus:scoped-cache-index:fingerprint-expiry:articles:id=1']],
 		);
 
 		await flushCaches(true);
@@ -1353,7 +1359,7 @@ describe('flushCaches', () => {
 
 		expect(redis._pipeline.unlink)
 			.toHaveBeenCalledWith([
-				'scalabus:scoped-cache-index:fingerprint:articles:id=1',
+				'scalabus:scoped-cache-index:fingerprint-expiry:articles:id=1',
 			]);
 	});
 
@@ -1368,8 +1374,8 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(['0', [
-			'scalabus:scoped-cache-index:fingerprint:articles',
-			'scalabus:scoped-cache-index:fingerprint:articles:id=1',
+			'scalabus:scoped-cache-index:fingerprint-expiry:articles',
+			'scalabus:scoped-cache-index:fingerprint-expiry:articles:id=1',
 		]]);
 
 		await flushCaches(true);
@@ -1509,7 +1515,7 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:fingerprint:articles']],
+			['0', ['scalabus:scoped-cache-index:fingerprint-expiry:articles']],
 		);
 
 		redis._pipeline.exec.mockResolvedValueOnce([
@@ -1559,11 +1565,11 @@ describe('flushCaches', () => {
 		redis.scan
 		.mockResolvedValueOnce([
 			'42',
-			['scalabus:scoped-cache-index:fingerprint:articles'],
+			['scalabus:scoped-cache-index:fingerprint-expiry:articles'],
 		])
 		.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:fingerprint:authors'],
+			['scalabus:scoped-cache-index:fingerprint-expiry:authors'],
 		]);
 
 		await flushCaches(true);
@@ -1718,7 +1724,7 @@ describe('clearCacheTargets', () => {
 
 	function refuseTheIndexUnlink() {
 		redis.scan.mockResolvedValueOnce(
-			['0', ['scalabus:scoped-cache-index:fingerprint:articles']],
+			['0', ['scalabus:scoped-cache-index:fingerprint-expiry:articles']],
 		);
 
 		redis._pipeline.exec.mockResolvedValueOnce([

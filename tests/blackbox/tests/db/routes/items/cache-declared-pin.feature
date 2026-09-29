@@ -241,8 +241,8 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |                       |                |     - owner         |
     And the declaration read only the index sets its value names:
       | command | index set                     |
-      | sscan   | declared_pin_slot:            |
-      | sscan   | declared_pin_slot:owner=alpha |
+      | zscan   | declared_pin_slot:            |
+      | zscan   | declared_pin_slot:owner=alpha |
     Then the read is purged, its own set among the two read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+

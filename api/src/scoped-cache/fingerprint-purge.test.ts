@@ -60,12 +60,13 @@ const cache = { delete: vi.fn(), namespace: 'ns' } as unknown as Keyv;
 let members: Record<string, string[]>;
 
 // The index prune rides the same pipeline as the counter bumps, so a case reads
-// what it dropped off the pipeline's `srem` rather than off the client's.
-const srem = vi.fn();
+// what it dropped off the pipeline's `zrem` rather than off the client's.
+const zrem = vi.fn();
 const swept: string[][] = [];
 
-const sscan = vi.fn(async (key: string, _cursor: string) => {
-	return ['0', members[key] ?? []];
+// Member then score, as `ZSCAN` answers: every member here is live.
+const zscan = vi.fn(async (key: string, _cursor: string) => {
+	return ['0', (members[key] ?? []).flatMap((member) => [member, 'inf'])];
 });
 
 // A purge holding no rows reads the collection's sets off the keyspace, so the
@@ -95,15 +96,16 @@ beforeEach(() => {
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 
 	vi.mocked(useRedis).mockReturnValue({
-		sscan,
+		zscan,
 		scan,
 		eval: evalScript,
 		defineCommand: vi.fn(),
+		scopedCacheIndexPrune: vi.fn(async () => 0),
 		scopedCacheEpochBump: vi.fn(),
 		pipeline: () => {
 			const chain: any = {
-				srem: (...args: string[]) => {
-					srem(...args);
+				zrem: (...args: string[]) => {
+					zrem(...args);
 					return chain;
 				},
 				exec: async () => [],
@@ -120,8 +122,8 @@ describe('a purge shown the rows it wrote', () => {
 		bound to another value of a field the row also carries
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
 			],
@@ -152,9 +154,9 @@ describe('a purge shown the rows it wrote', () => {
 			indexPath: 'owner',
 		});
 
-		expect([...new Set(sscan.mock.calls.map(([key]) => key))]).toEqual([
-			'ns:scoped-cache-index:fingerprint:slot:',
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
+		expect([...new Set(zscan.mock.calls.map(([key]) => key))]).toEqual([
+			'ns:scoped-cache-index:fingerprint-expiry:slot:',
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha',
 		]);
 	});
 
@@ -163,7 +165,7 @@ describe('a purge shown the rows it wrote', () => {
 		have changed, whichever slice the row sits in
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&owner=,alpha,&view=,title,&|ns:entry-title',
 			],
 		};
@@ -185,7 +187,7 @@ describe('a purge shown the rows it wrote', () => {
 		left the result set whichever columns it carries
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&owner=,alpha,&view=,title,&|ns:entry-title',
 			],
 		};
@@ -207,7 +209,7 @@ describe('a purge shown the rows it wrote', () => {
 		the same index value does not test a key that is already gone
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
 			],
@@ -222,21 +224,21 @@ describe('a purge shown the rows it wrote', () => {
 			indexPath: 'owner',
 		});
 
-		expect(srem).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
+		expect(zrem).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha',
 			'slot:&owner=,alpha,&|ns:entry-alpha',
 		);
 
-		expect(srem).toHaveBeenCalledTimes(1);
+		expect(zrem).toHaveBeenCalledTimes(1);
 	});
 
 	it('reads a set larger than one page to its end', async () => {
-		sscan.mockImplementationOnce(async () => {
-			return ['7', ['slot:&|ns:entry-first']];
+		zscan.mockImplementationOnce(async () => {
+			return ['7', ['slot:&|ns:entry-first', 'inf']];
 		});
 
-		sscan.mockImplementationOnce(async () => {
-			return ['0', ['slot:&|ns:entry-second']];
+		zscan.mockImplementationOnce(async () => {
+			return ['0', ['slot:&|ns:entry-second', 'inf']];
 		});
 
 		await purgeScopedCache(cache, 'slot', [], null, {
@@ -250,7 +252,7 @@ describe('a purge shown the rows it wrote', () => {
 
 		// One pass per pattern the rows can drop something under — the two bare ones
 		// plus one per pin of the row — and the first of them takes a second page.
-		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
+		expect(zscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
 			'0',
 			'7',
 			'0',
@@ -268,8 +270,8 @@ describe('a purge shown the rows it wrote', () => {
 		pin warm: that entry is what the pin covers
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 			],
 		};
@@ -293,7 +295,9 @@ describe('a purge shown the rows it wrote', () => {
 		wrote, and nothing read back can resolve it
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:other:': ['other:&x=,y,&|ns:entry-x'],
+			'ns:scoped-cache-index:fingerprint-expiry:other:': [
+				'other:&x=,y,&|ns:entry-x',
+			],
 		};
 
 		await purgeScopedCache(
@@ -325,7 +329,7 @@ describe('a purge shown the rows it wrote', () => {
 		bucket, rather than scanning every set it owns
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:other:x=y': [
+			'ns:scoped-cache-index:fingerprint-expiry:other:x=y': [
 				'other:&x=,y,&|ns:entry-x',
 			],
 		};
@@ -355,8 +359,8 @@ describe('a purge shown the rows it wrote', () => {
 
 		expect(scan).not.toHaveBeenCalled();
 
-		expect(sscan).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:other:x=y',
+		expect(zscan).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint-expiry:other:x=y',
 			'0',
 			'COUNT',
 			1000,
@@ -370,7 +374,7 @@ describe('a purge shown the rows it wrote', () => {
 		carrying that pin is in it
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:other:': [
+			'ns:scoped-cache-index:fingerprint-expiry:other:': [
 				'other:&x=,z,&|ns:entry-z',
 			],
 		};
@@ -401,8 +405,8 @@ describe('a purge shown the rows it wrote', () => {
 		that knows none can do: the declared pin, and the bare pin's own reach
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&id=,1,&owner=,alpha,&|ns:entry-one',
 				'slot:&id=,2,&owner=,alpha,&|ns:entry-two',
 			],
@@ -428,8 +432,8 @@ describe('a purge shown the rows it wrote', () => {
 		a read no value narrows holds that slice's rows too
 	`, async () => {
 		members = {
-			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
-			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+			'ns:scoped-cache-index:fingerprint-expiry:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint-expiry:slot:owner=alpha': [
 				'slot:&owner=,alpha,&|ns:entry-alpha',
 			],
 		};
@@ -451,16 +455,17 @@ describe('a purge shown the rows it wrote', () => {
 		record by pin still reaches the reads no value narrows
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
-			sscan: vi.fn(async () => {
+			zscan: vi.fn(async () => {
 				throw new Error('redis is down');
 			}),
 			scan,
 			eval: evalScript,
 			defineCommand: vi.fn(),
+			scopedCacheIndexPrune: vi.fn(async () => 0),
 			scopedCacheEpochBump: vi.fn(),
 			pipeline: () => {
 				const chain: any = {
-					srem: () => chain,
+					zrem: () => chain,
 					exec: async () => [],
 				};
 

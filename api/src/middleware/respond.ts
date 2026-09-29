@@ -20,6 +20,7 @@ import {
 	mergedScopedCacheEpochs,
 	renderScopedCacheFingerprint,
 	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFillOutlivedIndex,
 	scopedCacheFingerprintIsBare,
 	scopedCachePurgeEnabled,
 	scopedCachePinKeys,
@@ -269,7 +270,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			);
 
 			// Awaited: a hook holding it opens the window between the index and the
-			// value, where a reap finds the entry's members naming nothing.
+			// value, which `scopedCacheFillOutlivedIndex` bounds.
 			await emitter.emitAction('cache.indexed', {
 				redisKey,
 				fingerprints: scopedCacheFingerprints,
@@ -300,50 +301,56 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// serialization before it is most of it.
 			const filledAt = Date.now();
 
-			let sweptDuringFill: string | undefined;
+			// A fill slower than its index allows is evicted like one a purge swept:
+			// its entry would outlive the expiry its index members were filed with.
+			let sweptDuringFill = scopedCacheFillOutlivedIndex(
+				scopedCacheFingerprints,
+				filledAt - now,
+				cacheTtl,
+			);
 
-			if (epochsBeforeQuery) {
+			if (sweptDuringFill === undefined && epochsBeforeQuery) {
 				sweptDuringFill = await scopedCacheSweptDuringFill(epochsBeforeQuery);
+			}
 
-				if (sweptDuringFill !== undefined) {
-					// This is the one purge that knows precisely which key is stale, and
-					// everywhere else a purge that could not run is recorded for a retry.
-					// A store that swallowed the delete answers `undefined` rather than
-					// throwing, so without reading the eviction back the entry would serve
-					// rows a purge already superseded for its whole TTL — the failure the
-					// guard exists to prevent, one step later.
-					if (await evictCacheEntry(cache, redisKey) === false) {
-						const error = new Error(
-							`in-flight purge of ${sweptDuringFill} left ${redisKey} cached`,
-						);
+			if (sweptDuringFill !== undefined) {
+				// This is the one purge that knows precisely which key is stale, and
+				// everywhere else a purge that could not run is recorded for a retry.
+				// A store that swallowed the delete answers `undefined` rather than
+				// throwing, so without reading the eviction back the entry would serve
+				// rows a purge already superseded for its whole TTL — the failure the
+				// guard exists to prevent, one step later.
+				if (await evictCacheEntry(cache, redisKey) === false) {
+					const error = new Error(
+						`in-flight purge of ${sweptDuringFill} left ${redisKey} cached`,
+					);
 
-						// Logged like a failed mutation purge is (`purgeOrRecord`): the
-						// recorded rows are gone once drained, so this line is the only
-						// trace of what the drain will purge, and why.
-						logger.warn(
-							error,
-							`[scoped-cache] eviction failed and was recorded for retry: `
-							+ `${error}`,
-						);
+					// Logged like a failed mutation purge is (`purgeOrRecord`): the
+					// recorded rows are gone once drained, so this line is the only
+					// trace of what the drain will purge, and why.
+					logger.warn(
+						error,
+						`[scoped-cache] eviction failed and was recorded for retry: `
+						+ `${error}`,
+					);
 
-						await recordPendingScopedCachePurge(
-							{
-								mode: 'slices',
-								collection: req.collection ?? null,
-								scopedCacheFingerprints: scopedCacheFingerprints
-									.map(renderScopedCacheFingerprint),
-							},
-							error,
-						);
-					}
+					await recordPendingScopedCachePurge(
+						{
+							mode: 'slices',
+							collection: req.collection ?? null,
+							scopedCacheFingerprints: scopedCacheFingerprints
+								.map(renderScopedCacheFingerprint),
+						},
+						error,
+					);
+				}
 
-					if (cacheStatsActive()) {
-						void reportCacheAnomaly(
-							req,
-							'inflight_purge',
-							sweptDuringFill,
-						).catch(() => {});
-					}
+				if (cacheStatsActive()) {
+					void reportCacheAnomaly(
+						req,
+						'inflight_purge',
+						sweptDuringFill,
+					).catch(() => {});
 				}
 			}
 

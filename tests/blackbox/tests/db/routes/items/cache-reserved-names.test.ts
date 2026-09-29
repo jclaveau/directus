@@ -198,12 +198,12 @@ describe.each(vendors)('%s', (vendor) => {
 		const members = new Set<string>();
 
 		const indexKeys = await redis.keys(
-			`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint:`
+			`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint-expiry:`
 			+ `${collection}:*`,
 		);
 
 		for (const indexKey of indexKeys) {
-			for (const member of await redis.smembers(indexKey)) {
+			for (const member of await redis.zrange(indexKey, 0, -1)) {
 				members.add(member);
 			}
 		}

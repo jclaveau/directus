@@ -36,7 +36,6 @@ import type {
 	ScopedCacheIndexedEntry,
 	ScopedCacheIndexFiling,
 	ScopedCacheIndexTake,
-	ScopedCacheReapTally,
 	ScopedCacheStore,
 	ScopedCacheUnlinkTally,
 } from './store.js';
@@ -46,7 +45,7 @@ const env = useEnv();
 /**
  * How many members one command carries.
  *
- * `SADD`/`SREM` take their members as arguments, and both ioredis and Lua's
+ * `ZADD`/`ZREM` take their members as arguments, and both ioredis and Lua's
  * `unpack` have a stack ceiling well below the number of index sets one read can be
  * filed under. The expiry the call carries is the same value for every chunk, so
  * splitting changes nothing but how many calls it takes.
@@ -54,12 +53,19 @@ const env = useEnv();
 const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
 
 /**
- * How many members one `SSCAN` of an index set is asked to look at per round trip.
+ * How many members one `ZSCAN` of an index set is asked to look at per round trip.
  *
  * The set is read in pages rather than whole: a collection's bare set holds every
  * cached read that pinned no index value, and `SMEMBERS` on it would put the
  * whole thing in this process's memory — and hold Redis for the length of the
  * reply — to keep the handful the write actually matched.
+ *
+ * `ZSCAN` rather than `ZRANGEBYSCORE … LIMIT`: an offset page shifts under a
+ * member another purge removes meanwhile and skips the one behind it, and a set
+ * of unbounded entries scores them all `+inf`, so no score can serve as the
+ * cursor instead. `ZSCAN` returns every member present for the whole scan, and
+ * keeps the `MATCH` globs a row scan is narrowed by. Only live members are read
+ * because the set is pruned first.
  */
 const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
 
@@ -75,8 +81,14 @@ const SCOPED_CACHE_SCAN_COUNT = 1000;
 const SCOPED_CACHE_UNLINK_CHUNK = 1000;
 
 /**
- * File members into a fingerprint index set and give that set an expiry that only
- * ever moves OUT.
+ * File members into a fingerprint index set, each scored by when the entry it
+ * names can be expired by, and give that set an expiry that only ever moves OUT.
+ *
+ * A score is Redis's clock in milliseconds plus the index TTL, or `+inf` for an
+ * index left unbounded. `GT`, so a member filed again never moves back in: two
+ * fills of one key under two TTLs leave the later expiry, whichever filed last.
+ * Scored at Redis's clock, the one every prune compares against, so a skewed API
+ * node cannot file a member that looks expired already.
  *
  * A bare `EXPIRE` overwrites, and an index set is SHARED by every entry filed into
  * it: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
@@ -84,24 +96,49 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * purge for the rest of its life. Redis 7 has `EXPIRE … GT`, but GT reads a key
  * carrying no TTL as infinite: it refuses the very first expiry a fresh index set
  * needs, and cannot tell that set from one deliberately left unbounded. So the
- * comparison runs as a script — atomic, one pipeline slot, and `EXISTS` telling
- * those two apart.
+ * comparison runs as a script — atomic, one pipeline slot, and the `TTL` read
+ * before the `ZADD` telling those two apart: -2 for a set that did not exist.
  *
  * A set that already carries NO expiry outlives every entry by construction, so it
- * keeps none — only a freshly created set takes one unconditionally.
+ * keeps none — only a freshly created set takes one unconditionally. A TTL of 0
+ * clears the expiry: the entries it names never expire now, and one filed while a
+ * TTL was in force would otherwise drop out from under them.
+ *
+ * KEYS[1] is the set, ARGV[1] the TTL in seconds, then the members.
  */
 export const scopedCacheIndexExpiryScript = `
-local existed = redis.call('EXISTS', KEYS[1])
-redis.call('SADD', KEYS[1], unpack(ARGV, 2))
+local held = redis.call('TTL', KEYS[1])
 local want = tonumber(ARGV[1])
-if existed == 0 then
+local score = '+inf'
+
+if want > 0 then
+	local now = redis.call('TIME')
+	score = now[1] * 1000 + math.floor(now[2] / 1000) + want * 1000
+end
+
+local scored = {}
+
+for i = 2, #ARGV do
+	scored[#scored + 1] = score
+	scored[#scored + 1] = ARGV[i]
+end
+
+redis.call('ZADD', KEYS[1], 'GT', unpack(scored))
+
+if want <= 0 then
+	redis.call('PERSIST', KEYS[1])
+	return 0
+end
+
+if held == -2 then
 	redis.call('EXPIRE', KEYS[1], want)
 	return 1
 end
-local ttl = redis.call('TTL', KEYS[1])
-if ttl >= 0 and ttl < want then
+
+if held >= 0 and held < want then
 	redis.call('EXPIRE', KEYS[1], want)
 end
+
 return 0
 `;
 
@@ -136,45 +173,29 @@ return #KEYS
 `;
 
 /**
- * Remove the members of one index set whose entry Redis no longer holds, and bump
- * the purge counter of the collection the set belongs to when it removes any.
+ * Remove from each index set the members whose score has passed, at Redis's
+ * clock — the one they were scored at.
  *
- * One script, because the check and the removal must not be split by a fill: a
- * fill files its members BEFORE it writes its entry, so one caught between the
- * two looks expired here. With the bump in the same step, that fill either took
- * its counter before this ran — and finds it moved after its write, so it evicts
- * the entry this just unnamed — or took it after, and files its members after
- * this removed them.
+ * What stands in for a reap. A member's score is never earlier than the expiry of
+ * the entry it names: it is scored at filing time plus the index TTL, twice the
+ * entry's, and a fill that takes longer than one entry TTL between its filing and
+ * its value evicts what it wrote (`scopedCacheFillOutlivedIndex`). So a member
+ * removed here names an entry the cache can no longer hold, and no fill racing
+ * this needs a counter bumped: one caught between its index and its value holds a
+ * member scored a whole TTL past anything its value can reach.
  *
- * The counter is seeded the way `scopedCacheEpochBumpScript` seeds it, for the
- * same reason. `SREM` never creates a set, so one a sweep moved away meanwhile
- * stays gone.
- *
- * KEYS are the set and the counter, ARGV[1] how many seconds the counter is
- * held, then each member followed by the raw key of the entry it names.
+ * KEYS are the sets. Answers with how many members it removed.
  */
-export const scopedCacheIndexReapScript = `
-local gone = {}
-
-for i = 2, #ARGV, 2 do
-	if redis.call('EXISTS', ARGV[i + 1]) == 0 then
-		gone[#gone + 1] = ARGV[i]
-	end
-end
-
-if #gone == 0 then
-	return 0
-end
-
+export const scopedCacheIndexPruneScript = `
 local now = redis.call('TIME')
-local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+local expiredBy = '(' .. (now[1] * 1000 + math.floor(now[2] / 1000))
+local pruned = 0
 
-redis.call('SET', KEYS[2], seed, 'NX')
-redis.call('INCR', KEYS[2])
-redis.call('EXPIRE', KEYS[2], ARGV[1])
-redis.call('SREM', KEYS[1], unpack(gone))
+for i = 1, #KEYS do
+	pruned = pruned + redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', expiredBy)
+end
 
-return #gone
+return pruned
 `;
 
 type ScopedCacheIndexExpiryCommand = {
@@ -194,28 +215,26 @@ type ScopedCacheEpochBumpCommand = {
 	): Promise<number>;
 };
 
-type ScopedCacheIndexReapCommand = {
-	scopedCacheIndexReap(
-		indexKey: string,
-		epochKey: string,
-		epochTtlSeconds: number,
-		...membersAndRawKeys: string[]
+type ScopedCacheIndexPruneCommand = {
+	scopedCacheIndexPrune(
+		indexKeyCount: number,
+		...indexKeys: string[]
 	): Promise<number>;
 };
 
 type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexExpiryCommand
 	& ScopedCacheEpochBumpCommand
-	& ScopedCacheIndexReapCommand;
+	& ScopedCacheIndexPruneCommand;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
 /**
- * The shared client, with the index-expiry and counter-bump scripts registered as
- * commands on it.
+ * The shared client, with the index-expiry, counter-bump and prune scripts
+ * registered as commands on it.
  *
  * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
- * `NOSCRIPT` — so the 316-byte index-expiry script crosses the wire once per server
+ * `NOSCRIPT` — so the index-expiry script crosses the wire once per server
  * rather than once per index set. A read filed under 200 index sets sends 402 in
  * one pipeline, and as `EVAL` that is 124 KB of Lua per fill against 193 KB sent
  * in total.
@@ -236,9 +255,8 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 			lua: scopedCacheEpochBumpScript,
 		});
 
-		redis.defineCommand('scopedCacheIndexReap', {
-			numberOfKeys: 2,
-			lua: scopedCacheIndexReapScript,
+		redis.defineCommand('scopedCacheIndexPrune', {
+			lua: scopedCacheIndexPruneScript,
 		});
 
 		clientsCarryingScripts.add(redis);
@@ -381,6 +399,11 @@ function scopedCacheIndexGlobPrefix(): string {
 /**
  * The key of the set a fingerprint is filed in, and of the set a write reads back.
  *
+ * A sorted set, scored by expiry (`scopedCacheIndexExpiryScript`), under
+ * `fingerprint-expiry:` rather than the `fingerprint:` the plain sets held: a
+ * key that changed type would answer `WRONGTYPE` to the process still reading it
+ * the old way.
+ *
  * One set per collection would work and is what correctness asks for: every
  * fingerprint of that collection is tested against every row written to it. It is
  * the SIZE that does not work — a collection holding a million cached reads is a
@@ -397,17 +420,17 @@ function scopedCacheIndexGlobPrefix(): string {
  * has to test, not for the sets holding them.
  */
 function scopedCacheIndexKey(collection: string, indexPin: string): string {
-	return `${scopedCacheIndexPrefix()}fingerprint:${collection}:${indexPin}`;
+	return `${scopedCacheIndexPrefix()}fingerprint-expiry:${collection}:${indexPin}`;
 }
 
 /**
- * Where one sweep moves the sets it takes: outside `fingerprint:`, so no fill
+ * Where one sweep moves the sets it takes: outside `fingerprint-expiry:`, so no fill
  * reaches them, and inside the prefix, so a full flush still drops one a failed
  * sweep left behind. One per sweep call, so two sweeps of the same collection
  * never move onto each other's keys.
  */
 function scopedCacheSweptIndexKeyPrefix(collection: string): string {
-	return `${scopedCacheIndexPrefix()}swept:${collection}:${randomUUID()}:`;
+	return `${scopedCacheIndexPrefix()}swept-expiry:${collection}:${randomUUID()}:`;
 }
 
 /**
@@ -437,7 +460,7 @@ async function* takeSweptIndexKeys(
 export function scopedCacheSweptIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
 
-	return `${scopedCacheIndexGlobPrefix()}swept:${matched}:*`;
+	return `${scopedCacheIndexGlobPrefix()}swept-expiry:${matched}:*`;
 }
 
 /**
@@ -453,7 +476,7 @@ async function collectSweptIndexKeys(
 	let scanCursor = '0';
 
 	do {
-		const [next, members] = await useRedis().sscan(
+		const [next, scoredMembers] = await useRedis().zscan(
 			sweptKey,
 			scanCursor,
 			'COUNT',
@@ -463,9 +486,10 @@ async function collectSweptIndexKeys(
 		scanCursor = next;
 
 		// The fingerprint half is read past rather than parsed: this purge drops
-		// the key whichever query case filed it.
-		for (const member of members) {
-			keys.push(parseScopedCacheIndexMember(member).key);
+		// the key whichever query case filed it. Every member, expired or not: the
+		// set is released whole, and a key already gone costs one miss on the drop.
+		for (let at = 0; at < scoredMembers.length; at += 2) {
+			keys.push(parseScopedCacheIndexMember(scoredMembers[at]!).key);
 		}
 	}
 	while (scanCursor !== '0');
@@ -479,7 +503,8 @@ async function collectSweptIndexKeys(
  * sets a collection owns: a registry would be a second write on every fill, which
  * is the cost the split exists to avoid.
  *
- * The trailing colon bounds it. The key is `fingerprint:<collection>:<indexPin>`,
+ * The trailing colon bounds it. The key is
+ * `fingerprint-expiry:<collection>:<indexPin>`,
  * so a pattern ending at that one reaches a longer name only through a colon the
  * longer name carries — `a` reaches `a:b` — which reads and purges wider, never
  * narrower.
@@ -487,7 +512,7 @@ async function collectSweptIndexKeys(
 export function scopedCacheCollectionIndexGlob(collection: string): string {
 	const matched = escapeScopedCacheFingerprintGlob(collection);
 
-	return `${scopedCacheIndexGlobPrefix()}fingerprint:${matched}:*`;
+	return `${scopedCacheIndexGlobPrefix()}fingerprint-expiry:${matched}:*`;
 }
 
 /**
@@ -656,9 +681,28 @@ interface ScopedCacheMemberLocation {
 }
 
 /**
+ * Drop the expired members of the sets a purge is about to read.
+ *
+ * Best effort, and silent: a set left unpruned is read whole, expired members
+ * and all, which costs the purge a compare per member and never a stale hit. A
+ * store that refuses this refuses the scan behind it too, and that one throws.
+ */
+async function pruneScopedCacheIndexKeys(
+	indexKeys: readonly string[],
+): Promise<void> {
+	for (let at = 0; at < indexKeys.length; at += SCOPED_CACHE_SWEEP_CHUNK_KEYS) {
+		const chunk = indexKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
+
+		await useScriptedRedis()
+			.scopedCacheIndexPrune(chunk.length, ...chunk)
+			.catch((): number => 0);
+	}
+}
+
+/**
  * Read a list of sets, member by member, and answer with the entries they hold.
  *
- * `globPatterns` is a list of passes, since `SSCAN` takes one pattern: a member
+ * `globPatterns` is a list of passes, since `ZSCAN` takes one pattern: a member
  * matching several is yielded once, so the caller tests and drops it once.
  */
 async function* scanScopedCacheIndexKeys(
@@ -667,6 +711,8 @@ async function* scanScopedCacheIndexKeys(
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useRedis();
 
+	await pruneScopedCacheIndexKeys(indexKeys);
+
 	for (const indexKey of indexKeys) {
 		const scannedMembers = new Set<string>();
 
@@ -674,14 +720,14 @@ async function* scanScopedCacheIndexKeys(
 			let scanCursor = '0';
 
 			do {
-				const [next, members] = globPattern === null
-					? await redis.sscan(
+				const [next, scoredMembers] = globPattern === null
+					? await redis.zscan(
 						indexKey,
 						scanCursor,
 						'COUNT',
 						SCOPED_CACHE_INDEX_SCAN_COUNT,
 					)
-					: await redis.sscan(
+					: await redis.zscan(
 						indexKey,
 						scanCursor,
 						'MATCH',
@@ -693,7 +739,11 @@ async function* scanScopedCacheIndexKeys(
 				scanCursor = next;
 				const entries: ScopedCacheIndexedEntry[] = [];
 
-				for (const member of members) {
+				// Member then score, pair by pair. The score is read past: a member
+				// whose entry expired during the scan is tested all the same.
+				for (let at = 0; at < scoredMembers.length; at += 2) {
+					const member = scoredMembers[at]!;
+
 					if (scannedMembers.has(member)) {
 						continue;
 					}
@@ -748,53 +798,6 @@ async function* scanScopedCacheKeys(
 	while (cursor !== '0');
 }
 
-/**
- * Reap one page of an index set, a chunk per call so no script holds Redis for
- * a whole page. Grouped by collection because each group bumps its own counter;
- * every member of a set is filed under the set's collection, so one set is one
- * group in practice.
- */
-async function reapIndexMembers(
-	indexKey: string,
-	members: readonly string[],
-	rawKeyOf: (key: string) => string,
-	epochKeyOf: (collection: string) => string,
-	epochTtlSeconds: number,
-): Promise<number> {
-	const argumentsByCollection = new Map<string, string[]>();
-
-	for (const member of members) {
-		const { fingerprint, key } = parseScopedCacheIndexMember(member);
-
-		// A member naming no key names nothing to check.
-		if (key === '') {
-			continue;
-		}
-
-		const memberArguments =
-			argumentsByCollection.get(fingerprint.collection) ?? [];
-
-		memberArguments.push(member, rawKeyOf(key));
-		argumentsByCollection.set(fingerprint.collection, memberArguments);
-	}
-
-	const chunkArguments = SCOPED_CACHE_INDEX_CHUNK_MEMBERS * 2;
-	let reapedMembers = 0;
-
-	for (const [collection, memberArguments] of argumentsByCollection) {
-		for (let at = 0; at < memberArguments.length; at += chunkArguments) {
-			reapedMembers += await useScriptedRedis().scopedCacheIndexReap(
-				indexKey,
-				epochKeyOf(collection),
-				epochTtlSeconds,
-				...memberArguments.slice(at, at + chunkArguments),
-			);
-		}
-	}
-
-	return reapedMembers;
-}
-
 const redisStore: ScopedCacheStore = {
 	/**
 	 * Scoped purging drives SCAN + multi-key DEL over a single node, so it only
@@ -832,22 +835,12 @@ const redisStore: ScopedCacheStore = {
 				fingerprint,
 				indexPath,
 			)) {
-				if (ttlSeconds > 0) {
-					pipeline.scopedCacheIndexExpiry(indexKey, ttlSeconds, ...members);
-				}
-				else {
-					pipeline.sadd(indexKey, ...members);
-
-					// The entries it names never expire now, so neither may the set: one
-					// filed while a TTL was in force keeps that expiry otherwise, and
-					// drops out from under them.
-					pipeline.persist(indexKey);
-				}
+				pipeline.scopedCacheIndexExpiry(indexKey, ttlSeconds, ...members);
 			}
 		}
 
 		// ioredis resolves `[[err, result], …]` and only REJECTS on a connection-level
-		// failure: a per-command refusal (maxmemory/noeviction on the `sadd`, a
+		// failure: a per-command refusal (maxmemory/noeviction on the `zadd`, a
 		// WRONGTYPE) resolves as an entry error. Swallowing it would leave the entry
 		// its caller is about to write indexed under nothing, so no purge could ever
 		// reach it — surface it and let the caller skip the write.
@@ -957,7 +950,7 @@ const redisStore: ScopedCacheStore = {
 				memberAt < members.length;
 				memberAt += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
 			) {
-				redisPipeline.srem(
+				redisPipeline.zrem(
 					indexKey,
 					...members.slice(
 						memberAt,
@@ -1023,60 +1016,13 @@ const redisStore: ScopedCacheStore = {
 	},
 
 	takeStrandedSweptIndexKeys(): AsyncGenerator<ScopedCacheIndexTake> {
-		return takeSweptIndexKeys(`${scopedCacheIndexGlobPrefix()}swept:*`);
+		return takeSweptIndexKeys(`${scopedCacheIndexGlobPrefix()}swept-expiry:*`);
 	},
 
 	releaseSweptIndexKeys(
 		sweptKeys: string[],
 	): Promise<ScopedCacheUnlinkTally> {
 		return unlinkScopedCacheKeys(sweptKeys);
-	},
-
-	/**
-	 * Only the sets under `fingerprint:`: a moved set is read whole by the sweep
-	 * or the recovery that releases it, and pruning it first would hide from them
-	 * what they are about to drop.
-	 */
-	async reapIndexedEntries(
-		rawKeyOf: (key: string) => string,
-		epochKeyOf: (collection: string) => string,
-		epochTtlSeconds: number,
-	): Promise<ScopedCacheReapTally> {
-		const tally: ScopedCacheReapTally = { indexKeys: 0, reaped: 0 };
-
-		for await (const indexKeys of scanScopedCacheKeys(
-			`${scopedCacheIndexGlobPrefix()}fingerprint:*`,
-		)) {
-			tally.indexKeys += indexKeys.length;
-
-			for (const indexKey of indexKeys) {
-				let scanCursor = '0';
-
-				// SSCAN still returns every member that stays in the set for the
-				// whole scan, so removing the ones it already returned skips none.
-				do {
-					const [next, members] = await useRedis().sscan(
-						indexKey,
-						scanCursor,
-						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
-					);
-
-					scanCursor = next;
-
-					tally.reaped += await reapIndexMembers(
-						indexKey,
-						members,
-						rawKeyOf,
-						epochKeyOf,
-						epochTtlSeconds,
-					);
-				}
-				while (scanCursor !== '0');
-			}
-		}
-
-		return tally;
 	},
 
 	/**

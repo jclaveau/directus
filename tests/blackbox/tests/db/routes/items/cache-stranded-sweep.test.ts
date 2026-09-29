@@ -121,10 +121,10 @@ describe.each(vendors)('%s', (vendor) => {
 				and(
 					'a sweep moved the index set of this name aside, then died:',
 					async (table: Record<string, string>[]) => {
-						const indexKey = `${namespace}:scoped-cache-index:fingerprint:`
+						const indexKey = `${namespace}:scoped-cache-index:fingerprint-expiry:`
 							+ `${STRANDED}:name=${table[0]!.name}`;
 
-						const sweptKey = `${namespace}:scoped-cache-index:swept:`
+						const sweptKey = `${namespace}:scoped-cache-index:swept-expiry:`
 							+ `${STRANDED}:${randomUUID()}:1`;
 
 						expect(await redisClient.rename(indexKey, sweptKey)).toBe('OK');

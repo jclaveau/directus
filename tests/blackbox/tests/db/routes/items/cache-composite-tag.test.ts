@@ -369,12 +369,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 		for (const collection of [SLOT, PATH_SLOT, PATH_PART, PATH_RANGE]) {
 			const indexKeys = await redis.keys(
-				`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint:`
+				`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint-expiry:`
 				+ `${collection}:*`,
 			);
 
 			for (const indexKey of indexKeys) {
-				for (const member of await redis.smembers(indexKey)) {
+				for (const member of await redis.zrange(indexKey, 0, -1)) {
 					members.add(member);
 				}
 			}

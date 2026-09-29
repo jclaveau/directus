@@ -73,12 +73,6 @@ export interface ScopedCacheUnlinkTally {
 	refused: number;
 }
 
-/** What a reap read, and how many members it removed from it. */
-export interface ScopedCacheReapTally {
-	indexKeys: number;
-	reaped: number;
-}
-
 export interface ScopedCacheStore {
 	/**
 	 * Refuse scoped mode at startup on a store that cannot answer for the whole
@@ -92,6 +86,12 @@ export interface ScopedCacheStore {
 	 * holds a filing is shared by every entry filed beside it and the shortest-lived
 	 * of them must not cut it short. A `ttlSeconds` of 0 leaves the index unbounded,
 	 * as the entries then are — clearing an expiry an earlier filing gave it.
+	 *
+	 * Each filing also carries its own expiry, `ttlSeconds` from now and never
+	 * moved back in, past which a scan may leave it out. That is what drops the
+	 * entries that expired from the index, with no job walking it for them: a
+	 * scan may skip only a filing whose expiry has passed, and a filing's expiry
+	 * is never earlier than its entry's (`scopedCacheFillOutlivedIndex`).
 	 *
 	 * THROWS when the store refuses any of it: the caller is about to write the
 	 * entries these filings name, and an entry indexed by nothing is reachable to no
@@ -108,8 +108,8 @@ export interface ScopedCacheStore {
 	 * Every entry whose fingerprint COULD hold on one of `rowFingerprints` is
 	 * answered with; which of them it does hold on is the caller's test. A store is
 	 * free to skip what none of the rows can reach — that is what `indexPath` is
-	 * for — and never free to skip an entry pinning nothing, which every row
-	 * reaches.
+	 * for — and a filing whose expiry has passed, and never free to skip an entry
+	 * pinning nothing, which every row reaches.
 	 *
 	 * Paged rather than whole: a collection nothing is pinned by holds every cached
 	 * read of it, and putting all of that in this process to keep the handful a
@@ -187,24 +187,6 @@ export interface ScopedCacheStore {
 	 * entry drop fails, and the retry of that purge cannot find it.
 	 */
 	releaseSweptIndexKeys(sweptKeys: string[]): Promise<ScopedCacheUnlinkTally>;
-
-	/**
-	 * Remove every member naming an entry the cache no longer holds, from every set
-	 * a fill files into. An entry expires on its own, and its members do not: a
-	 * set outlives what it names, so without this it grows with every read ever
-	 * cached.
-	 *
-	 * `rawKeyOf` names an entry the way the cache store holds it. `epochKeyOf` is
-	 * the purge counter of a collection, bumped in the same step as a removal from
-	 * that collection's sets: a fill files its members before it writes its entry,
-	 * and one caught in between looks expired. Bumped, it compares its counter
-	 * after the write and evicts the entry its members no longer name.
-	 */
-	reapIndexedEntries(
-		rawKeyOf: (key: string) => string,
-		epochKeyOf: (collection: string) => string,
-		epochTtlSeconds: number,
-	): Promise<ScopedCacheReapTally>;
 
 	/** Drop the whole index, reporting what it cost. */
 	dropIndex(): Promise<ScopedCacheUnlinkTally>;

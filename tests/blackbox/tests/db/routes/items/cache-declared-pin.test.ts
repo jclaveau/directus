@@ -213,12 +213,12 @@ describe.each(vendors)('%s', (vendor) => {
 		const members = new Set<string>();
 
 		const indexKeys = await redis.keys(
-			`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint:`
+			`${env[vendor]['CACHE_NAMESPACE']}:scoped-cache-index:fingerprint-expiry:`
 			+ `${SLOT}:*`,
 		);
 
 		for (const indexKey of indexKeys) {
-			for (const member of await redis.smembers(indexKey)) {
+			for (const member of await redis.zrange(indexKey, 0, -1)) {
 				members.add(member);
 			}
 		}
@@ -350,14 +350,14 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
-	// Every SCAN and SSCAN of the slot's index `signalsSent` caused, as the set it
+	// Every SCAN and ZSCAN of the slot's index `signalsSent` caused, as the set it
 	// read past `fingerprint:`. MONITOR streams commands in the order Redis ran
 	// them, so the two sentinel GETs bracket what the signals sent.
 	async function recordIndexReads(
 		signalsSent: () => Promise<void>,
 	): Promise<Record<string, string>[]> {
 		const fingerprintPrefix = `${env[vendor]['CACHE_NAMESPACE']}`
-			+ ':scoped-cache-index:fingerprint:';
+			+ ':scoped-cache-index:fingerprint-expiry:';
 
 		const slotPrefix = `${fingerprintPrefix}${SLOT}:`;
 		const monitor = redis.duplicate({ monitor: true, lazyConnect: false });
@@ -384,7 +384,7 @@ describe.each(vendors)('%s', (vendor) => {
 				: commandArgs[1];
 
 			if (
-				(command === 'scan' || command === 'sscan')
+				(command === 'scan' || command === 'zscan')
 				&& readSet?.startsWith(slotPrefix)
 			) {
 				const indexSet = readSet.slice(fingerprintPrefix.length);

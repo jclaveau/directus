@@ -86,7 +86,6 @@ import cacheAuditSchedule from './schedules/cache-audit.js';
 import cacheStatsSchedule from './schedules/cache-stats.js';
 import metricsSchedule from './schedules/metrics.js';
 import retentionSchedule from './schedules/retention.js';
-import scopedCacheReapSchedule from './schedules/scoped-cache-reap.js';
 import telemetrySchedule from './schedules/telemetry.js';
 import tusSchedule from './schedules/tus.js';
 import {
@@ -413,7 +412,6 @@ export default async function createApp(): Promise<express.Application> {
 	await metricsSchedule();
 	await cacheStatsSchedule();
 	await cacheAuditSchedule();
-	await scopedCacheReapSchedule();
 	await initCacheConfig();
 	await initSharedSettings();
 	initPoolHealthMirror();

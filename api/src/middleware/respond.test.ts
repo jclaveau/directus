@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 		scopedCacheSweptDuringFill: vi.fn().mockResolvedValue(undefined),
+		scopedCacheFillOutlivedIndex: vi.fn((): string | undefined => undefined),
 		evictCacheEntry: vi.fn(async (cache: any, redisKey: string) => {
 			await cache.delete(redisKey);
 			await cache.delete(`${redisKey}__expires_at`);
@@ -69,6 +70,7 @@ vi.mock('../scoped-cache/index.js', async (importOriginal) => {
 		indexScopedCacheEntry: mocks.indexScopedCacheEntry,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
+		scopedCacheFillOutlivedIndex: mocks.scopedCacheFillOutlivedIndex,
 		// Real, so the unguarded cases below assert the predicate rather than a
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
@@ -824,6 +826,40 @@ describe('respond middleware', () => {
 		);
 
 		expect(res.json).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		evicts a fill that outlived its index members, without reading the counters
+		a purge would have moved
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheFillOutlivedIndex.mockReturnValueOnce('articles');
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.scopedCacheFillOutlivedIndex).toHaveBeenCalledWith(
+			[{ collection: 'articles' }],
+			expect.any(Number),
+			'5m',
+		);
+
+		expect(mocks.evictCacheEntry)
+			.toHaveBeenCalledWith(expect.anything(), 'cache-key');
+
+		expect(mocks.scopedCacheSweptDuringFill).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.anything(),
+			'inflight_purge',
+			'articles',
+		);
 	});
 
 	test(oneLine`
