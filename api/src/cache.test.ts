@@ -369,8 +369,19 @@ describe('scoped cache purging', () => {
 				},
 			]);
 
+			// Filed under its home pin, once per value, so a write of either value
+			// reads the entry without reading the collection's bare set.
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledTimes(2);
+
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:pin:student=7',
+				600,
+				'slots:&student=,7,A,&|resp-key',
+				'slots:&student=,7,A,&|resp-key__expires_at',
+			);
+
+			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
+				'scalabus:scoped-cache-index:fingerprint:slots:pin:student=A',
 				600,
 				'slots:&student=,7,A,&|resp-key',
 				'slots:&student=,7,A,&|resp-key__expires_at',
@@ -387,7 +398,7 @@ describe('scoped cache purging', () => {
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:pin:student=\x00null',
 				600,
 				'slots:&student=,\x00null,&|resp-key',
 				'slots:&student=,\x00null,&|resp-key__expires_at',
@@ -478,7 +489,7 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.scopedCacheIndexExpiry).toHaveBeenCalledWith(
-				'scalabus:scoped-cache-index:fingerprint:slots:',
+				'scalabus:scoped-cache-index:fingerprint:slots:pin:student=A',
 				600,
 				'slots:&student=,A,&|resp-key',
 				'slots:&student=,A,&|resp-key__expires_at',

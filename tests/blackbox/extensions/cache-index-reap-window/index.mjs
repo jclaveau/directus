@@ -12,10 +12,10 @@ let alreadyHeld = false;
 
 export default function registerHooks({ action }) {
 	action('cache.indexed', async ({ redisKey, fingerprints }) => {
-		const namesWindow = fingerprints
-			.some((fingerprint) => fingerprint.collection === INDEX_REAP_WINDOW);
+		const windowRead = fingerprints
+			.find((fingerprint) => fingerprint.collection === INDEX_REAP_WINDOW);
 
-		if (alreadyHeld || !namesWindow) {
+		if (alreadyHeld || !windowRead) {
 			return;
 		}
 
@@ -26,14 +26,22 @@ export default function registerHooks({ action }) {
 			port: Number(process.env['REDIS_PORT']),
 		});
 
-		const indexKey = `${process.env['CACHE_NAMESPACE']}:scoped-cache-index:`
+		const bareIndexKey = `${process.env['CACHE_NAMESPACE']}:scoped-cache-index:`
 			+ `fingerprint:${INDEX_REAP_WINDOW}:`;
+
+		// A read pinning a name is filed under that name's home pin set.
+		const pinnedNames = windowRead.pinnedScope?.name ?? [];
+
+		const indexKeys = [
+			bareIndexKey,
+			...pinnedNames.map((name) => `${bareIndexKey}pin:name=${name}`),
+		];
 
 		const deadline = Date.now() + reapWaitMs;
 
 		try {
 			while (Date.now() < deadline) {
-				const indexMembers = await redisClient.smembers(indexKey);
+				const indexMembers = await redisClient.sunion(...indexKeys);
 
 				if (!indexMembers.some((member) => member.includes(`|${redisKey}`))) {
 					return;

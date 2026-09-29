@@ -147,7 +147,10 @@ describe('a purge shown the rows it wrote', () => {
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-alpha-slow');
 	});
 
-	it('reads the bare set and the one its row owns, and no other', async () => {
+	it(oneLine`
+		reads the bare set, the one its row owns, and the home pin set of each value
+		it carries, and no other
+	`, async () => {
 		await purgeScopedCache(cache, 'slot', [], null, {
 			rowFingerprints: [{
 				collection: 'slot',
@@ -160,7 +163,41 @@ describe('a purge shown the rows it wrote', () => {
 		expect([...new Set(sscan.mock.calls.map(([key]) => key))]).toEqual([
 			'ns:scoped-cache-index:fingerprint:slot:',
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1',
+			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced',
+			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha',
 		]);
+	});
+
+	it(oneLine`
+		drops an entry pinned off the index path from its home pin set, and leaves
+		the one pinned to another value there
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [
+				'slot:&id=,1,&view=,method,&|ns:entry-one',
+			],
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=2': [
+				'slot:&id=,2,&view=,method,&|ns:entry-two',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-two');
+
+		expect(srem).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1',
+			'slot:&id=,1,&view=,method,&|ns:entry-one',
+		);
 	});
 
 	it(oneLine`
@@ -253,15 +290,15 @@ describe('a purge shown the rows it wrote', () => {
 			indexPath: null,
 		});
 
-		// One pass per pattern the rows can drop something under — the two bare ones
-		// plus one per pin of the row — and the first of them takes a second page.
-		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
-			'0',
-			'7',
-			'0',
-			'0',
-			'0',
-			'0',
+		// One pass per set the row can drop something in — the bare one plus one per
+		// value it carries — sent together, and the first of them takes a second
+		// page once the round is back.
+		expect(sscan.mock.calls.map(([key, cursor]) => [key, cursor])).toEqual([
+			['ns:scoped-cache-index:fingerprint:slot:', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:pin:id=1', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:pin:method=spaced', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:', '7'],
 		]);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-first');
@@ -327,7 +364,7 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads a hook's pin on another collection off that collection's own index
-		bucket, rather than scanning every set it owns
+		bucket and its home pin sets, rather than scanning every set it owns
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:other:x=y': [
@@ -358,7 +395,9 @@ describe('a purge shown the rows it wrote', () => {
 			},
 		);
 
-		expect(scan).not.toHaveBeenCalled();
+		expect(scan.mock.calls.map(([, , pattern]) => pattern)).toEqual([
+			'ns:scoped-cache-index:fingerprint:other:pin:*',
+		]);
 
 		expect(sscan).toHaveBeenCalledWith(
 			'ns:scoped-cache-index:fingerprint:other:x=y',

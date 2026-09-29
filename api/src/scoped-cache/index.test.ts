@@ -1122,7 +1122,7 @@ describe('indexScopedCacheEntry', () => {
 		expect(expire).not.toHaveBeenCalled();
 
 		expect(indexExpiry).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 			3600,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
@@ -1159,13 +1159,13 @@ describe('indexScopedCacheEntry', () => {
 		// A set filed while a TTL was in force keeps that expiry through a plain
 		// SADD, and expires under entries that no purge can reach any more.
 		expect(sadd).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
 		);
 
 		expect(persist).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 		);
 	});
 });

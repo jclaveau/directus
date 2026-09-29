@@ -2,9 +2,9 @@
  * The scoped cache's index, held in Redis.
  *
  * Everything Redis-shaped about the index lives here: how a set is named and what
- * segment it sits under, how a member is framed, the globs a scan is narrowed by,
- * the Lua the atomic steps run as, the cursor loops a scan is made of, the
- * chunk sizes a command list is cut to, and the per-command error a pipeline
+ * segment it sits under, how a member is framed, the globs a keyspace scan is
+ * narrowed by, the Lua the atomic steps run as, the cursor loops a scan is made
+ * of, the chunk sizes a command list is cut to, and the per-command error a pipeline
  * answers with instead of rejecting. All of it is written to fit what Redis can
  * filter on — a key is a key, a member is a string, and both are selected by glob
  * — so none of it is a shape another store would inherit.
@@ -29,7 +29,6 @@ import {
 	indexOfUnescaped,
 	parseScopedCacheFingerprint,
 	renderScopedCacheFingerprint,
-	SCOPED_CACHE_FINGERPRINT_VIEW,
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import type {
@@ -57,11 +56,22 @@ const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
  * How many members one `SSCAN` of an index set is asked to look at per round trip.
  *
  * The set is read in pages rather than whole: a collection's bare set holds every
- * cached read that pinned no index value, and `SMEMBERS` on it would put the
- * whole thing in this process's memory — and hold Redis for the length of the
- * reply — to keep the handful the write actually matched.
+ * cached read that pinned nothing, and one home pin's set every read filed under
+ * that value, and `SMEMBERS` on either would put the whole thing in this process's
+ * memory — and hold Redis for the length of the reply — to keep the handful the
+ * write actually matched.
  */
 const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
+
+/**
+ * How many sets one round of a row scan reads at once.
+ *
+ * A write reads one set per value its rows carry, so a batch of rows is hundreds of
+ * sets, most of them missing or small. They are sent together rather than one after
+ * another, and the bound keeps the replies in flight — up to a page of each — from
+ * growing with the batch.
+ */
+const SCOPED_CACHE_INDEX_SCAN_SETS = 100;
 
 // How many keys a SCAN is asked to look at per round trip. `@keyv/redis` uses 1000
 // for the namespace clears that run beside these, and the 250 this replaced bought
@@ -341,18 +351,16 @@ async function unlinkScopedCacheKeys(
 }
 
 /**
- * How many globs one scan is narrowed by before it reads the set whole.
- *
- * Every pattern is a pass over the set, so past a point narrowing costs more
- * round trips than the members it saves sending. A write touching more values
- * than this reads the sets whole and tests every member here instead.
- */
-const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
-
-/**
  * The pin naming nothing, whose set every write to the collection reads.
  */
 const SCOPED_CACHE_BARE_PIN = '';
+
+/**
+ * The segment a home pin's sets sit under, beside the index path's. An index path
+ * is a field path, which never carries a colon, so no index value's set is spelled
+ * like a home pin's.
+ */
+const SCOPED_CACHE_HOME_PIN = 'pin:';
 
 /**
  * The segment every key the scoped cache writes sits under, so the full-flush scan
@@ -390,11 +398,13 @@ function scopedCacheIndexGlobPrefix(): string {
  * and never sees a fingerprint filed under somebody else's value.
  *
  * The split is an optimisation, never a bound: a fingerprint pinning nothing at
- * that path goes bare, and the bare set is read by every write to the collection.
+ * that path is filed under its home pin (`scopedCacheHomePin`), and one pinning
+ * nothing at all goes bare, which every write to the collection reads.
  *
- * `indexPin` is what the split is keyed by — `<path>=<value>`, or empty for the
- * bare set. It never leaves this file: a caller asks the store for the entries it
- * has to test, not for the sets holding them.
+ * `indexPin` is what the split is keyed by — `<path>=<value>`,
+ * `pin:<pinKey>=<value>` for a home pin, or empty for the bare set. It never
+ * leaves this file: a caller asks the store for the entries it has to test, not
+ * for the sets holding them.
  */
 function scopedCacheIndexKey(collection: string, indexPin: string): string {
 	return `${scopedCacheIndexPrefix()}fingerprint:${collection}:${indexPin}`;
@@ -473,7 +483,7 @@ async function collectSweptIndexKeys(
 
 /**
  * The glob matching every set one collection's fingerprints are filed in — the
- * bare one and every split the index path produced.
+ * bare one, every split the index path produced and every home pin's.
  *
  * What a collection-wide read asks for, and the reason it needs no registry of the
  * sets a collection owns: a registry would be a second write on every fill, which
@@ -491,8 +501,79 @@ export function scopedCacheCollectionIndexGlob(collection: string): string {
 }
 
 /**
+ * The glob matching every home pin's set of one collection: what a declared pin
+ * has to read beside the index path's, since an entry filed under a home pin can
+ * hold a row of any index value.
+ */
+export function scopedCacheHomePinIndexGlob(collection: string): string {
+	const matched = escapeScopedCacheFingerprintGlob(collection);
+
+	return `${scopedCacheIndexGlobPrefix()}fingerprint:${matched}:`
+		+ `${SCOPED_CACHE_HOME_PIN}*`;
+}
+
+function scopedCacheHomePinIndexKey(
+	collection: string,
+	field: string,
+	pinnedValue: string,
+): string {
+	const pinKey = escapeScopedCacheFingerprintPinKey(field);
+	const valueToken = escapeScopedCacheFingerprintToken(pinnedValue);
+
+	return scopedCacheIndexKey(
+		collection,
+		`${SCOPED_CACHE_HOME_PIN}${pinKey}=${valueToken}`,
+	);
+}
+
+/**
+ * The one pinned field a fingerprint off the index path is filed under, with the
+ * values it pins there, or `null` when it pins nothing.
+ *
+ * Any one of its pins would do: a row drops the entry only by carrying one of its
+ * values on EVERY field it pins, so on this one too, and a write reads the set of
+ * each value its rows carry. The field with the fewest values costs the fewest
+ * filings; ties go to the lowest pin key, so a member parsed back picks the same
+ * field its filing did. Values are counted distinct for the same reason: the
+ * serialiser drops a repeated one.
+ *
+ * A field pinned to no value is never chosen, since its entry would be filed
+ * nowhere.
+ */
+export function scopedCacheHomePin(
+	fingerprint: ScopedCacheFingerprint,
+): { field: string; pinnedValues: string[] } | null {
+	let homePin: { field: string; pinKey: string; pinnedValues: string[] } | null
+		= null;
+
+	for (const [field, values] of Object.entries(fingerprint.pinnedScope ?? {})) {
+		const pinnedValues = [...new Set(values)];
+		const pinKey = escapeScopedCacheFingerprintPinKey(field);
+
+		if (pinnedValues.length === 0) {
+			continue;
+		}
+
+		const fewerValues = homePin === null
+			|| pinnedValues.length < homePin.pinnedValues.length;
+
+		const lowerKey = homePin !== null
+			&& pinnedValues.length === homePin.pinnedValues.length
+			&& pinKey < homePin.pinKey;
+
+		if (fewerValues || lowerKey) {
+			homePin = { field, pinKey, pinnedValues };
+		}
+	}
+
+	return homePin === null
+		? null
+		: { field: homePin.field, pinnedValues: homePin.pinnedValues };
+}
+
+/**
  * The keys of the sets one fingerprint is filed in: one per value it pins the
- * index path to.
+ * index path to, else one per value of its home pin, else the bare set.
  *
  * A read bounded to a list of values depends on each of them and is dropped by a
  * write to any one, so it is filed under each — the same OR an `_in` already
@@ -504,27 +585,33 @@ export function scopedCacheFingerprintIndexKeys(
 ): string[] {
 	const { collection } = fingerprint;
 
-	if (indexPath === null) {
+	const indexValues = indexPath === null
+		? undefined
+		: fingerprint.pinnedScope?.[indexPath];
+
+	if (indexPath !== null && indexValues !== undefined && indexValues.length > 0) {
+		return indexValues.map((pinnedValue) => {
+			return scopedCacheIndexKey(
+				collection,
+				`${indexPath}=${escapeScopedCacheFingerprintToken(pinnedValue)}`,
+			);
+		});
+	}
+
+	const homePin = scopedCacheHomePin(fingerprint);
+
+	if (homePin === null) {
 		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
 	}
 
-	const pinnedValues = fingerprint.pinnedScope?.[indexPath];
-
-	if (pinnedValues === undefined || pinnedValues.length === 0) {
-		return [scopedCacheIndexKey(collection, SCOPED_CACHE_BARE_PIN)];
-	}
-
-	return pinnedValues.map((pinnedValue) => {
-		return scopedCacheIndexKey(
-			collection,
-			`${indexPath}=${escapeScopedCacheFingerprintToken(pinnedValue)}`,
-		);
+	return homePin.pinnedValues.map((pinnedValue) => {
+		return scopedCacheHomePinIndexKey(collection, homePin.field, pinnedValue);
 	});
 }
 
 /**
- * The keys of the sets a write reads back: the bare one, and the one each of its
- * rows' values at the index path names.
+ * The keys of the sets a write reads back for the index path: the bare one, and
+ * the one each of its rows' values at the index path names.
  *
  * The row is read as a fingerprint of its own, so the value it pins there is
  * looked up the same way a cached read's is. Every snapshotted row pins the index
@@ -561,56 +648,31 @@ export function scopedCacheRowIndexKeys(
 }
 
 /**
- * The patterns the rows can drop something under, or `null` to read the sets
- * whole.
+ * The keys of the home pins' sets a write reads back: one per field and value its
+ * rows carry.
  *
- * `SSCAN … MATCH` filters server-side, so a member matching none of these never
- * crosses the wire — and the caller's own test still decides, since a glob over a
- * serialised fingerprint can say a pin is absent but not that the whole query
- * case holds.
+ * Whichever field an entry's home pin is, a row dropping it carries one of that
+ * field's values, so its set is among these. The index path's own values are
+ * named too: no entry is filed under them while the path stands, and one filed
+ * before the collection had that path still is.
  */
-export function scopedCacheRowIndexGlobs(
+export function scopedCacheRowHomePinKeys(
 	collection: string,
 	rowFingerprints: readonly ScopedCacheFingerprint[],
-): string[] | null {
-	const renderedCollection = escapeScopedCacheFingerprintToken(collection);
-
-	// A member filed before the collection was escaped spells it raw, and no
-	// pattern names both spellings: the sets are read whole instead.
-	if (renderedCollection !== collection) {
-		return null;
-	}
-
-	const collectionToken = escapeScopedCacheFingerprintGlob(renderedCollection);
-
-	const globPatterns = new Set<string>([
-		// Pins nothing at all, and pins nothing but its fields — the two ways a
-		// fingerprint every row matches comes out of the serialiser.
-		`${collectionToken}:&|*`,
-		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,*`,
-	]);
+): string[] {
+	const homePinKeys = new Set<string>();
 
 	for (const { pinnedScope = {} } of rowFingerprints) {
 		for (const [field, values] of Object.entries(pinnedScope)) {
-			const pinKey = escapeScopedCacheFingerprintGlob(
-				escapeScopedCacheFingerprintPinKey(field),
-			);
-
-			for (const value of values) {
-				const valueToken = escapeScopedCacheFingerprintGlob(
-					escapeScopedCacheFingerprintToken(value),
+			for (const pinnedValue of values) {
+				homePinKeys.add(
+					scopedCacheHomePinIndexKey(collection, field, pinnedValue),
 				);
-
-				globPatterns.add(`${collectionToken}:*&${pinKey}=*,${valueToken},*`);
-			}
-
-			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {
-				return null;
 			}
 		}
 	}
 
-	return [...globPatterns];
+	return [...homePinKeys];
 }
 
 /**
@@ -656,42 +718,53 @@ interface ScopedCacheMemberLocation {
 }
 
 /**
- * Read a list of sets, member by member, and answer with the entries they hold.
+ * Read a list of sets whole, a page of each at a time, and answer with the entries
+ * they hold.
  *
- * `globPatterns` is a list of passes, since `SSCAN` takes one pattern: a member
- * matching several is yielded once, so the caller tests and drops it once.
+ * No `MATCH`: a pattern filters after the page is walked, so it shrinks the reply
+ * and not the work, and each pattern is one more pass over the set. The sets a
+ * write reads are already the ones its values name, and the caller's own test
+ * decides.
+ *
+ * A round's sets are sent together: ioredis writes each command as it is issued,
+ * so the round costs one round trip, and a refused one rejects the round the way
+ * a single `SSCAN` did. A member met twice — a set rehashed under the cursor, or
+ * one entry filed under two of the sets read — is answered once.
  */
 async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
-	globPatterns: readonly string[] | null,
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useCacheRedis();
+	const scannedMembers = new Set<string>();
 
-	for (const indexKey of indexKeys) {
-		const scannedMembers = new Set<string>();
+	for (let at = 0; at < indexKeys.length; at += SCOPED_CACHE_INDEX_SCAN_SETS) {
+		let pendingScans = indexKeys
+			.slice(at, at + SCOPED_CACHE_INDEX_SCAN_SETS)
+			.map((indexKey) => {
+				return { indexKey, scanCursor: '0' };
+			});
 
-		for (const globPattern of globPatterns ?? [null]) {
-			let scanCursor = '0';
-
-			do {
-				const [next, members] = globPattern === null
-					? await redis.sscan(
+		while (pendingScans.length > 0) {
+			const scanReplies = await Promise.all(
+				pendingScans.map(({ indexKey, scanCursor }) => {
+					return redis.sscan(
 						indexKey,
 						scanCursor,
-						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
-					)
-					: await redis.sscan(
-						indexKey,
-						scanCursor,
-						'MATCH',
-						globPattern,
 						'COUNT',
 						SCOPED_CACHE_INDEX_SCAN_COUNT,
 					);
+				}),
+			);
 
-				scanCursor = next;
-				const entries: ScopedCacheIndexedEntry[] = [];
+			const entries: ScopedCacheIndexedEntry[] = [];
+			const unfinishedScans: typeof pendingScans = [];
+
+			for (const [replyAt, [next, members]] of scanReplies.entries()) {
+				const { indexKey } = pendingScans[replyAt]!;
+
+				if (next !== '0') {
+					unfinishedScans.push({ indexKey, scanCursor: next });
+				}
 
 				for (const member of members) {
 					if (scannedMembers.has(member)) {
@@ -708,10 +781,10 @@ async function* scanScopedCacheIndexKeys(
 						location: { indexKey, member } satisfies ScopedCacheMemberLocation,
 					});
 				}
-
-				yield entries;
 			}
-			while (scanCursor !== '0');
+
+			yield entries;
+			pendingScans = unfinishedScans;
 		}
 	}
 }
@@ -865,10 +938,13 @@ const redisStore: ScopedCacheStore = {
 		rowFingerprints: readonly ScopedCacheFingerprint[],
 		indexPath: string | null,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
-		return scanScopedCacheIndexKeys(
-			scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
-			scopedCacheRowIndexGlobs(collection, rowFingerprints),
-		);
+		// Every set an entry some row can drop is filed in: its index value's, its
+		// home pin's, or the bare one. The bare set also still holds what the
+		// layout before home pins filed there, read whole now.
+		return scanScopedCacheIndexKeys([
+			...scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
+			...scopedCacheRowHomePinKeys(collection, rowFingerprints),
+		]);
 	},
 
 	async* scanDeclaredIndexedEntries(
@@ -877,11 +953,13 @@ const redisStore: ScopedCacheStore = {
 		indexPath: string | null,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 		// The declared pins' own sets when the pin IS what the index is split by —
-		// the same two a write of those values would read — and every set the
-		// collection owns otherwise, since a pin off the index path says nothing
-		// about which split holds it. No glob narrowing either way: a declared pin
-		// matches entries by what they do NOT pin as much as by what they do, and a
-		// pattern can only select on what is written.
+		// the same two a write of those values would read — plus every home pin's,
+		// whose entries never pinned the index path and so leave room for any value
+		// of it. Every set the collection owns otherwise, since a pin off the index
+		// path says nothing about which split holds it. No glob narrowing of the
+		// members either way: a declared pin matches entries by what they do NOT pin
+		// as much as by what they do, and a pattern can only select on what is
+		// written.
 		const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {
 			return fingerprint.pinnedScope?.[indexPath] !== undefined;
 		});
@@ -889,8 +967,13 @@ const redisStore: ScopedCacheStore = {
 		if (pinsIndexPath) {
 			yield* scanScopedCacheIndexKeys(
 				scopedCacheRowIndexKeys(collection, declared, indexPath),
-				null,
 			);
+
+			for await (const homePinKeys of scanScopedCacheKeys(
+				scopedCacheHomePinIndexGlob(collection),
+			)) {
+				yield* scanScopedCacheIndexKeys(homePinKeys);
+			}
 
 			return;
 		}
@@ -904,7 +987,7 @@ const redisStore: ScopedCacheStore = {
 		for await (const indexKeys of scanScopedCacheKeys(
 			scopedCacheCollectionIndexGlob(collection),
 		)) {
-			yield* scanScopedCacheIndexKeys(indexKeys, null);
+			yield* scanScopedCacheIndexKeys(indexKeys);
 		}
 	},
 
@@ -919,23 +1002,21 @@ const redisStore: ScopedCacheStore = {
 
 			// Every set `fileIndexedEntries` put this member in, not the one it was
 			// read from: a read bounded to a list of values is filed under each of
-			// them, and a write carrying one of those values reads that value's split
-			// alone. Pruning only there leaves the member in the others, naming a key
-			// this purge has just dropped, and no later write to those values can
-			// remove it — it is tested again on each of them until its set expires.
+			// them — at the index path or at its home pin — and a write carrying one
+			// of those values reads that value's set alone. Pruning only there leaves
+			// the member in the others, naming a key this purge has just dropped, and
+			// no later write to those values can remove it — it is tested again on
+			// each of them until its set expires.
 			//
 			// The set it WAS read from stands beside them, because the two agree only
 			// while the collection's index path is what it was when the entry was
 			// filed: a path since changed would otherwise leave the member exactly
-			// where it was found. With no path to name them by there is nothing to
-			// add — `scopedCacheFingerprintIndexKeys` answers bare for every
-			// fingerprint then, which says the caller does not know the split, not
-			// that the member is in the bare set.
-			const indexKeys = new Set(
-				indexPath === null
-					? [foundIn]
-					: [foundIn, ...scopedCacheFingerprintIndexKeys(fingerprint, indexPath)],
-			);
+			// where it was found. A set named here that never held the member costs
+			// an `SREM` of nothing.
+			const indexKeys = new Set([
+				foundIn,
+				...scopedCacheFingerprintIndexKeys(fingerprint, indexPath),
+			]);
 
 			for (const indexKey of indexKeys) {
 				const members = membersByIndexKey.get(indexKey) ?? [];

@@ -23,8 +23,9 @@ Feature: A purge a hook declares reaches every read its slice could answer
   as a fingerprint pinning nothing, it would purge only the reads that do.
 
   A declaration on another collection reads that collection's index the way its
-  fills were filed there: the bare set and the set its value names, never every
-  set the collection owns. Which sets were read is taken off Redis `MONITOR`.
+  fills were filed there: the bare set, the set its value names, and the home pin
+  sets a read pinning something else was filed under, never the sets of another
+  index value. Which sets were read is taken off Redis `MONITOR`.
 
   A read and a write are stated the way `cache-composite-tag.feature` states
   them: the `query` a read sends, the `response` it answers and the
@@ -241,6 +242,7 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |                       |                |     - owner         |
     And the declaration read only the index sets its value names:
       | command | index set                     |
+      | scan    | declared_pin_slot:pin:*       |
       | sscan   | declared_pin_slot:            |
       | sscan   | declared_pin_slot:owner=alpha |
     Then the read is purged, its own set among the two read:

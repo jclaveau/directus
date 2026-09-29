@@ -34,10 +34,10 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['CACHE_TTL'] = `${cacheTtlSeconds}s`;
 	env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '* * * * * *';
 
-	// No scope fields, so every read of the collection is filed in its bare set:
-	// the one every fill keeps from expiring.
-	const bareIndexKey =
-		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP}:`;
+	// No scope fields, so a read of the collection is filed under the name it
+	// pins: the set every fill of that name keeps from expiring.
+	const homePinIndexKey =
+		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP}:pin:name=`;
 
 	const pinnedIndexKey =
 		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP_PINNED}:name=`;
@@ -134,7 +134,7 @@ describe.each(vendors)('%s', (vendor) => {
 					expect((await readByName('ada')).headers[cacheStatusHeader])
 						.toBe('MISS');
 
-					adaMembers = await redisClient.smembers(bareIndexKey);
+					adaMembers = await redisClient.smembers(`${homePinIndexKey}ada`);
 
 					expect(adaMembers).not.toEqual([]);
 
@@ -150,15 +150,19 @@ describe.each(vendors)('%s', (vendor) => {
 						return (await readByName('bob')).headers[cacheStatusHeader];
 					}, { timeout: 5_000 }).toBe('HIT');
 
-					bobMembers = (await redisClient.smembers(bareIndexKey))
-						.filter((member) => !adaMembers.includes(member));
+					bobMembers = await redisClient.smembers(`${homePinIndexKey}bob`);
 
 					expect(bobMembers).not.toEqual([]);
 				});
 
 				then(`the index of ${INDEX_REAP} names only the read of bob`, async () => {
 					await expect.poll(async () => {
-						return (await redisClient.smembers(bareIndexKey)).sort();
+						const indexMembers = await redisClient.sunion(
+							`${homePinIndexKey}ada`,
+							`${homePinIndexKey}bob`,
+						);
+
+						return indexMembers.sort();
 					}, { timeout: 5_000 }).toEqual([...bobMembers].sort());
 				});
 
