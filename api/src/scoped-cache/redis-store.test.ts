@@ -8,8 +8,8 @@ import {
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
 	scopedCacheIndexReapScript,
-	scopedCacheIndexRegisterScript,
-	scopedCacheRegistryPruneScript,
+	scopedCacheCollectionIndexKeysRegisterScript,
+	scopedCacheCollectionIndexKeysPruneScript,
 	scopedCacheRowHomePinKeys,
 	scopedCacheRowIndexKeys,
 	scopedCacheSweepMoveScript,
@@ -29,9 +29,9 @@ const unlink = vi.fn();
 const sadd = vi.fn();
 const persist = vi.fn();
 const indexExpiry = vi.fn();
-const pipelinedRegister = vi.fn();
-const scopedCacheIndexRegister = vi.fn();
-const scopedCacheRegistryPrune = vi.fn();
+const pipelinedCollectionIndexKeysRegister = vi.fn();
+const scopedCacheCollectionIndexKeysRegister = vi.fn();
+const scopedCacheCollectionIndexKeysPrune = vi.fn();
 const pttl = vi.fn();
 const defineCommand = vi.fn();
 const scopedCacheEpochBump = vi.fn();
@@ -49,8 +49,8 @@ vi.mock('../redis/index.js', () => {
 				defineCommand,
 				scopedCacheEpochBump,
 				scopedCacheIndexReap,
-				scopedCacheIndexRegister,
-				scopedCacheRegistryPrune,
+				scopedCacheCollectionIndexKeysRegister,
+				scopedCacheCollectionIndexKeysPrune,
 				pttl,
 				scan,
 				sscan,
@@ -64,7 +64,8 @@ vi.mock('../redis/index.js', () => {
 						sadd,
 						persist,
 						scopedCacheIndexExpiry: indexExpiry,
-						scopedCacheIndexRegister: pipelinedRegister,
+						scopedCacheCollectionIndexKeysRegister:
+							pipelinedCollectionIndexKeysRegister,
 						exec: async () => [],
 					};
 				},
@@ -643,14 +644,14 @@ describe('fileIndexedEntries', () => {
 			sadd,
 			persist,
 			indexExpiry,
-			pipelinedRegister,
+			pipelinedCollectionIndexKeysRegister,
 		]) {
 			command.mockReset();
 		}
 	});
 
 	it(oneLine`
-		names every set it files in the collection's registry, once, after the
+		names every set it files in the collection's index-key set, once, after the
 		last of them, with the expiry in milliseconds
 	`, async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
@@ -671,8 +672,8 @@ describe('fileIndexedEntries', () => {
 			3600,
 		);
 
-		expect(pipelinedRegister.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
+		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			3600000,
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=bo',
@@ -683,11 +684,13 @@ describe('fileIndexedEntries', () => {
 		expect(indexExpiry).toHaveBeenCalledTimes(3);
 
 		expect(indexExpiry.mock.invocationCallOrder[2])
-			.toBeLessThan(pipelinedRegister.mock.invocationCallOrder[0]!);
+			.toBeLessThan(
+				pipelinedCollectionIndexKeysRegister.mock.invocationCallOrder[0]!,
+			);
 	});
 
 	it(oneLine`
-		names a home pin's sets in the collection's registry, beside the index
+		names a home pin's sets in the collection's index-key set, beside the index
 		path's, so a collection-wide purge reaches the reads filed there
 	`, async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
@@ -708,8 +711,8 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(pipelinedRegister.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
+		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			60000,
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=8',
@@ -717,7 +720,7 @@ describe('fileIndexedEntries', () => {
 		]]);
 	});
 
-	it('keeps one registry per collection', async () => {
+	it('keeps one index-key set per collection', async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
 			[
 				{
@@ -736,21 +739,21 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(pipelinedRegister.mock.calls).toEqual([
+		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([
 			[
-				'scalabus:scoped-cache-index:fingerprint-registry:slot',
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				60000,
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 			],
 			[
-				'scalabus:scoped-cache-index:fingerprint-registry:note',
+				'scalabus:scoped-cache-index:collection-index-keys:note',
 				60000,
 				'scalabus:scoped-cache-index:fingerprint:note:',
 			],
 		]);
 	});
 
-	it('leaves the registry of a never-expiring set with no expiry', async () => {
+	it('leaves the index-key set of a never-expiring set with no expiry', async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
 			[{
 				fingerprint: { collection: 'slot' },
@@ -765,46 +768,46 @@ describe('fileIndexedEntries', () => {
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 		);
 
-		expect(pipelinedRegister.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
+		expect(pipelinedCollectionIndexKeysRegister.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			-1,
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 		]]);
 	});
 
 	it(oneLine`
-		registers the fingerprint registry script, which only ever moves the
+		registers the collection index-key set script, which only ever moves the
 		expiry out and compares it in milliseconds
 	`, () => {
-		expect(scopedCacheIndexRegisterScript).toContain(
+		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
 			"local existed = redis.call('EXISTS', KEYS[1])\n"
 			+ "redis.call('SADD', KEYS[1], unpack(ARGV, 2))",
 		);
 
-		expect(scopedCacheIndexRegisterScript).toContain(
+		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
 			"redis.call('PERSIST', KEYS[1])",
 		);
 
-		expect(scopedCacheIndexRegisterScript).toContain(
+		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
 			"local ttl = redis.call('PTTL', KEYS[1])\n"
 			+ 'if existed == 0 or (ttl >= 0 and ttl < want) then\n'
 			+ "\tredis.call('PEXPIRE', KEYS[1], want)",
 		);
 
-		expect(scopedCacheIndexRegisterScript).not.toContain("'EXPIRE'");
-		expect(scopedCacheIndexRegisterScript).not.toContain("'TTL'");
+		expect(scopedCacheCollectionIndexKeysRegisterScript).not.toContain("'EXPIRE'");
+		expect(scopedCacheCollectionIndexKeysRegisterScript).not.toContain("'TTL'");
 	});
 });
 
 describe('scanCollectionIndexedEntries', () => {
 	beforeEach(() => {
-		for (const command of [scan, sscan, scopedCacheRegistryPrune]) {
+		for (const command of [scan, sscan, scopedCacheCollectionIndexKeysPrune]) {
 			command.mockReset();
 		}
 	});
 
 	it(oneLine`
-		reads the sets the collection's registry names that still exist, and never
+		reads the sets the collection's index-key set names that still exist, and never
 		scans the keyspace
 	`, async () => {
 		sscan
@@ -817,7 +820,7 @@ describe('scanCollectionIndexedEntries', () => {
 			])
 			.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
 
-		scopedCacheRegistryPrune.mockResolvedValueOnce([
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 		]);
 
@@ -838,16 +841,16 @@ describe('scanCollectionIndexedEntries', () => {
 			},
 		}]]);
 
-		expect(scopedCacheRegistryPrune.mock.calls).toEqual([[
+		expect(scopedCacheCollectionIndexKeysPrune.mock.calls).toEqual([[
 			3,
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 		]]);
 
 		expect(sscan.mock.calls).toEqual([
 			[
-				'scalabus:scoped-cache-index:fingerprint-registry:slot',
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'0',
 				'COUNT',
 				1000,
@@ -859,16 +862,16 @@ describe('scanCollectionIndexedEntries', () => {
 	});
 
 	// Checked and removed in two steps, a fill recreating the set in between is
-	// left holding members no registry names.
+	// left holding members no index-key set names.
 	it('drops a name only in the script that finds its set missing', () => {
-		expect(scopedCacheRegistryPruneScript).toContain(
+		expect(scopedCacheCollectionIndexKeysPruneScript).toContain(
 			"if redis.call('EXISTS', KEYS[i]) == 1 then\n"
 			+ '\t\tlive[#live + 1] = KEYS[i]\n'
 			+ '\telse\n'
 			+ '\t\tgone[#gone + 1] = KEYS[i]',
 		);
 
-		expect(scopedCacheRegistryPruneScript).toContain(
+		expect(scopedCacheCollectionIndexKeysPruneScript).toContain(
 			"redis.call('SREM', KEYS[1], unpack(gone))",
 		);
 	});
@@ -918,8 +921,8 @@ describe('takeCollectionIndexedKeys', () => {
 		expect(evalScript).toHaveBeenCalledWith(
 			scopedCacheSweepMoveScript,
 			3,
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
-			'scalabus:scoped-cache-index:swept-registry',
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'scalabus:scoped-cache-index:swept-index-keys',
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 			expect.stringMatching(
 				/^scalabus:scoped-cache-index:swept:slot:[0-9a-f-]{36}:$/,
@@ -928,7 +931,7 @@ describe('takeCollectionIndexedKeys', () => {
 
 		expect(sscan.mock.calls).toEqual([
 			[
-				'scalabus:scoped-cache-index:swept-registry',
+				'scalabus:scoped-cache-index:swept-index-keys',
 				'0',
 				'MATCH',
 				'scalabus:scoped-cache-index:swept:slot:*',
@@ -936,7 +939,7 @@ describe('takeCollectionIndexedKeys', () => {
 				1000,
 			],
 			[
-				'scalabus:scoped-cache-index:fingerprint-registry:slot',
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				'0',
 				'COUNT',
 				1000,
@@ -984,7 +987,7 @@ describe('takeCollectionIndexedKeys', () => {
 
 	it(oneLine`
 		takes the keys of a read filed only under a home pin, off the set the
-		registry names, without a keyspace scan
+		index-key set names, without a keyspace scan
 	`, async () => {
 		evalScript.mockResolvedValue(['scalabus:scoped-cache-index:swept:slot:a1:1']);
 
@@ -1016,8 +1019,8 @@ describe('takeCollectionIndexedKeys', () => {
 		expect(evalScript).toHaveBeenCalledWith(
 			scopedCacheSweepMoveScript,
 			3,
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
-			'scalabus:scoped-cache-index:swept-registry',
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'scalabus:scoped-cache-index:swept-index-keys',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 			expect.stringMatching(
 				/^scalabus:scoped-cache-index:swept:slot:[0-9a-f-]{36}:$/,
@@ -1032,10 +1035,10 @@ describe('takeCollectionIndexedKeys', () => {
 	});
 
 	// Split into separate steps, a sweep dying between them leaves a set holding
-	// members that neither registry names, so no purge or recovery reaches it.
+	// members that neither index-key set names, so no purge or recovery reaches it.
 	it(oneLine`
-		moves a set, names it in the swept registry and drops its name from the
-		collection's registry in one script
+		moves a set, names it in the swept index-key set and drops its name from the
+		collection's index-key set in one script
 	`, () => {
 		expect(scopedCacheSweepMoveScript).toContain(
 			"\t\tredis.call('RENAME', KEYS[i], sweptKey)\n"
@@ -1070,7 +1073,7 @@ describe('takeStrandedSweptIndexKeys', () => {
 			.next();
 
 		expect(sscan.mock.calls).toEqual([[
-			'tenant-[a]*:scoped-cache-index:swept-registry',
+			'tenant-[a]*:scoped-cache-index:swept-index-keys',
 			'0',
 			'MATCH',
 			'tenant-\\[a\\]\\*:scoped-cache-index:swept:slot:*',
@@ -1112,7 +1115,7 @@ describe('takeStrandedSweptIndexKeys', () => {
 		}]);
 
 		expect(sscan.mock.calls[0]).toEqual([
-			'scalabus:scoped-cache-index:swept-registry',
+			'scalabus:scoped-cache-index:swept-index-keys',
 			'0',
 			'COUNT',
 			1000,
@@ -1131,8 +1134,8 @@ describe('reapIndexedEntries', () => {
 			sscan,
 			defineCommand,
 			scopedCacheIndexReap,
-			scopedCacheIndexRegister,
-			scopedCacheRegistryPrune,
+			scopedCacheCollectionIndexKeysRegister,
+			scopedCacheCollectionIndexKeysPrune,
 			pttl,
 		]) {
 			command.mockReset();
@@ -1269,8 +1272,8 @@ describe('reapIndexedEntries', () => {
 	});
 
 	it(oneLine`
-		names each set it reads in its collection's registry with the set's own
-		expiry, so a set filed by a node without the registry is found again
+		names each set it reads in its collection's index-key set with the set's own
+		expiry, so a set filed by a node without the index-key set is found again
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
@@ -1296,14 +1299,14 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(scopedCacheIndexRegister.mock.calls).toEqual([
+		expect(scopedCacheCollectionIndexKeysRegister.mock.calls).toEqual([
 			[
-				'scalabus:scoped-cache-index:fingerprint-registry:slot',
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
 				5000,
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 			],
 			[
-				'scalabus:scoped-cache-index:fingerprint-registry:note',
+				'scalabus:scoped-cache-index:collection-index-keys:note',
 				-1,
 				'scalabus:scoped-cache-index:fingerprint:note:',
 			],
@@ -1311,8 +1314,8 @@ describe('reapIndexedEntries', () => {
 	});
 
 	it(oneLine`
-		names a home pin's set filed by a node without the registry in the
-		collection's registry
+		names a home pin's set filed by a node without the index-key set in the
+		collection's index-key set
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
@@ -1329,8 +1332,8 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(scopedCacheIndexRegister.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
+		expect(scopedCacheCollectionIndexKeysRegister.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			5000,
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 		]]);
@@ -1351,15 +1354,15 @@ describe('reapIndexedEntries', () => {
 			86400,
 		);
 
-		expect(scopedCacheIndexRegister).not.toHaveBeenCalled();
+		expect(scopedCacheCollectionIndexKeysRegister).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
-		prunes the registries it meets instead of reaping them as index sets
+		prunes the index-key sets it meets instead of reaping them as index sets
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:fingerprint-registry:slot'],
+			['scalabus:scoped-cache-index:collection-index-keys:slot'],
 		]);
 
 		sscan.mockResolvedValueOnce([
@@ -1367,7 +1370,7 @@ describe('reapIndexedEntries', () => {
 			['scalabus:scoped-cache-index:fingerprint:slot:owner=gone'],
 		]);
 
-		scopedCacheRegistryPrune.mockResolvedValueOnce([]);
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([]);
 
 		const tally = await redisScopedCacheStore().reapIndexedEntries(
 			(key) => key,
@@ -1377,9 +1380,9 @@ describe('reapIndexedEntries', () => {
 
 		expect(tally).toEqual({ indexKeys: 0, reaped: 0 });
 
-		expect(scopedCacheRegistryPrune.mock.calls).toEqual([[
+		expect(scopedCacheCollectionIndexKeysPrune.mock.calls).toEqual([[
 			2,
-			'scalabus:scoped-cache-index:fingerprint-registry:slot',
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 		]]);
 
@@ -1410,7 +1413,7 @@ describe('releaseSweptIndexKeys', () => {
 
 	it(oneLine`
 		drops the sets a take moved aside, then their names from the swept
-		registry
+		index-key set
 	`, async () => {
 		await redisScopedCacheStore().releaseSweptIndexKeys([
 			'scalabus:scoped-cache-index:swept:slot:a1:1',
@@ -1421,7 +1424,7 @@ describe('releaseSweptIndexKeys', () => {
 		]);
 
 		expect(srem.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:swept-registry',
+			'scalabus:scoped-cache-index:swept-index-keys',
 			['scalabus:scoped-cache-index:swept:slot:a1:1'],
 		]]);
 

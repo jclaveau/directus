@@ -43,7 +43,7 @@ import { summarise, type Summary } from './measure.js';
  * A last phase holds the live cache at the smallest size and grows what has
  * expired instead: entries filled under a short TTL, measured once Redis has
  * dropped them, while what named them may stay: index members on a layout
- * whose sets outlive them, registry names on one whose sets expire with them.
+ * whose sets outlive them, index-key names on one whose sets expire with them.
  * Production's index is mostly those, between two reaps. A layout that forgets
  * them on the purge pays for it on the first write, so that write is reported
  * on its own beside the medians. A version save on the same collection reports
@@ -1283,19 +1283,19 @@ test.each([PK_PHASE, BOOLEAN_PHASE])(
 	60 * 60 * 1000,
 );
 
-// What the index of one collection still files, and what its registry names.
+// What the index of one collection still files, and what its index-key set names.
 type IndexCount = {
 	members: number;
 	indexSets: number;
-	registryNames: number;
-	deadRegistryNames: number;
+	indexKeyNames: number;
+	deadIndexKeyNames: number;
 };
 
 /**
  * How many members the index sets of `collection` hold and how many sets hold
  * them, whatever the layout names them or stores them as, and how many sets
- * its registry names, of which how many Redis no longer holds. A layout
- * without a registry names none.
+ * its index-key set names, of which how many Redis no longer holds. A layout
+ * without an index-key set names none.
  */
 async function countIndexMembers(collection: string): Promise<IndexCount> {
 	let members = 0;
@@ -1327,42 +1327,42 @@ async function countIndexMembers(collection: string): Promise<IndexCount> {
 		}
 	} while (cursor !== '0');
 
-	const registryKeys = await redis.keys(
-		`*:scoped-cache-index:fingerprint-registry:${collection}`,
+	const collectionIndexKeysKeyList = await redis.keys(
+		`*:scoped-cache-index:collection-index-keys:${collection}`,
 	);
 
-	let registryNames = 0;
-	let deadRegistryNames = 0;
+	let indexKeyNames = 0;
+	let deadIndexKeyNames = 0;
 
-	for (const registryKey of registryKeys) {
-		let registryCursor = '0';
+	for (const collectionIndexKeysKey of collectionIndexKeysKeyList) {
+		let indexKeysCursor = '0';
 
 		do {
 			const [nextCursor, names] = await redis.sscan(
-				registryKey,
-				registryCursor,
+				collectionIndexKeysKey,
+				indexKeysCursor,
 				'COUNT',
 				1000,
 			);
 
-			registryCursor = nextCursor;
-			registryNames += names.length;
+			indexKeysCursor = nextCursor;
+			indexKeyNames += names.length;
 
 			const existing = await Promise.all(names.map((name) => {
 				return redis.exists(name);
 			}));
 
-			deadRegistryNames += existing.filter((held) => held === 0).length;
-		} while (registryCursor !== '0');
+			deadIndexKeyNames += existing.filter((held) => held === 0).length;
+		} while (indexKeysCursor !== '0');
 	}
 
-	return { members, indexSets, registryNames, deadRegistryNames };
+	return { members, indexSets, indexKeyNames, deadIndexKeyNames };
 }
 
 function describeIndexCount(count: IndexCount): string {
 	return `${count.members} members in ${count.indexSets} sets,`
-		+ ` ${count.registryNames} registry names`
-		+ ` (${count.deadRegistryNames} dead)`;
+		+ ` ${count.indexKeyNames} index-key names`
+		+ ` (${count.deadIndexKeyNames} dead)`;
 }
 
 /** Seconds until Redis holds none of `rawKeys`. */
@@ -1478,11 +1478,11 @@ test('a scoped purge costs the same however much has expired', async () => {
 		expect(lingering.members, `index members once ${size} entries are filed`)
 			.toBeGreaterThanOrEqual(smallestSize);
 
-		// A registry names every set still standing, dead names or not.
-		if (lingering.registryNames > 0) {
+		// An index-key set names every set still standing, dead names or not.
+		if (lingering.indexKeyNames > 0) {
 			expect(
-				lingering.registryNames - lingering.deadRegistryNames,
-				`live registry names once ${size} entries are filed`,
+				lingering.indexKeyNames - lingering.deadIndexKeyNames,
+				`live index-key names once ${size} entries are filed`,
 			).toBeGreaterThanOrEqual(lingering.indexSets);
 		}
 
@@ -1556,7 +1556,7 @@ test('a scoped purge costs the same however much has expired', async () => {
 			const counted = countsBySize.get(size)!;
 
 			return `| ${size} | ${size - smallestSize} | ${counted.members}`
-				+ ` | ${counted.registryNames} | ${counted.deadRegistryNames}`
+				+ ` | ${counted.indexKeyNames} | ${counted.deadIndexKeyNames}`
 				+ ` | ${commands.median.toFixed(1)} | ${redisMs.median.toFixed(2)} ms`
 				+ ` | ${wallMs.median.toFixed(1)} ms | ${wallMs.p95.toFixed(1)} ms`
 				+ ` | ${firstRep.commands.toFixed(1)}`
@@ -1601,8 +1601,8 @@ test('a scoped purge costs the same however much has expired', async () => {
 	});
 
 	const tableHeader = [
-		'| entries filed | expired | index members | registry names'
-		+ ' | dead registry names | Redis commands | Redis time | wall | wall p95'
+		'| entries filed | expired | index members | index-key set names'
+		+ ' | dead index-key names | Redis commands | Redis time | wall | wall p95'
 		+ ' | rep 1 commands | rep 1 Redis time | rep 1 wall |',
 		'| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
 		+ ' ---: | ---: |',

@@ -68,14 +68,14 @@ let members: Record<string, string[]>;
 const srem = vi.fn();
 const swept: string[][] = [];
 
-// A purge holding no rows reads the collection's sets off its registry, so the
-// registry answers with the sets the case declared under that collection, those
+// A purge holding no rows reads the collection's sets off its index-key set, so the
+// index-key set answers with the sets the case declared under that collection, those
 // a trailing-star MATCH names when one is sent.
 const sscan = vi.fn(async (key: string, _cursor: string, ...options: unknown[]) => {
-	const registryPrefix = 'ns:scoped-cache-index:fingerprint-registry:';
+	const collectionIndexKeysPrefix = 'ns:scoped-cache-index:collection-index-keys:';
 
-	if (key.startsWith(registryPrefix)) {
-		const collection = key.slice(registryPrefix.length);
+	if (key.startsWith(collectionIndexKeysPrefix)) {
+		const collection = key.slice(collectionIndexKeysPrefix.length);
 
 		const setPrefix = options[0] === 'MATCH'
 			? String(options[1]).slice(0, -1)
@@ -89,9 +89,9 @@ const sscan = vi.fn(async (key: string, _cursor: string, ...options: unknown[]) 
 
 const scan = vi.fn(async () => ['0', []]);
 
-const scopedCacheRegistryPrune = vi.fn(async (
+const scopedCacheCollectionIndexKeysPrune = vi.fn(async (
 	_keyCount: number,
-	_registryKey: string,
+	_collectionIndexKeysKey: string,
 	...indexKeys: string[]
 ) => indexKeys);
 
@@ -117,7 +117,7 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
-		scopedCacheRegistryPrune,
+		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
@@ -461,7 +461,7 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads a hook's pin on another collection off that collection's own index
-		bucket and the home pin sets its registry names, rather than scanning the
+		bucket and the home pin sets its index-key set names, rather than scanning the
 		keyspace
 	`, async () => {
 		members = {
@@ -497,7 +497,7 @@ describe('a purge shown the rows it wrote', () => {
 		);
 
 		expect(sscan).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint-registry:other',
+			'ns:scoped-cache-index:collection-index-keys:other',
 			'0',
 			'MATCH',
 			'ns:scoped-cache-index:fingerprint:other:pin:*',
