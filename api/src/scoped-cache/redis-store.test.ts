@@ -1853,6 +1853,39 @@ describe('takeStrandedSweptIndexKeys', () => {
 		expect(evalScript).not.toHaveBeenCalled();
 		expect(unlink).not.toHaveBeenCalled();
 	});
+
+	it(oneLine`
+		counts only the sets still there — a name whose set is gone reads as
+		empty, and counting it reports more sets purged than were
+	`, async () => {
+		sscan
+			.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:scoped-cache-index:swept:slot:dead:1',
+					'scalabus:scoped-cache-index:swept:slot:gone:1',
+				],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&|key-slot']])
+			.mockResolvedValueOnce(['0', []]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeStrandedSweptIndexKeys()
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([{
+			indexKeys: 1,
+			keys: ['key-slot'],
+			sweptKeys: [
+				'scalabus:scoped-cache-index:swept:slot:dead:1',
+				'scalabus:scoped-cache-index:swept:slot:gone:1',
+			],
+		}]);
+	});
 });
 
 describe('dropIndex', () => {

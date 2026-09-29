@@ -981,7 +981,7 @@ async function* scanScopedCacheSetMembers(
  * them, with the entry keys each names. Nothing is moved here: these sets were
  * taken by a sweep before, and only need their entries dropped and then
  * releasing. A name whose set is gone reads as empty and is released like the
- * others.
+ * others, but is not counted as a set taken.
  */
 async function* takeSweptIndexKeys(
 	sweptGlob: string | null,
@@ -1009,12 +1009,16 @@ async function* takeSweptIndexKeys(
 
 		scanCursor = next;
 		const keys: string[] = [];
+		let existingSets = 0;
 
 		for (const sweptKey of sweptKeys) {
-			await collectSweptIndexKeys(sweptKey, keys);
+			// Redis holds no empty set: a set that names nothing is gone.
+			if (await collectSweptIndexKeys(sweptKey, keys) > 0) {
+				existingSets += 1;
+			}
 		}
 
-		yield { indexKeys: sweptKeys.length, keys, sweptKeys };
+		yield { indexKeys: existingSets, keys, sweptKeys };
 	}
 	while (scanCursor !== '0');
 }
@@ -1082,12 +1086,14 @@ export function scopedCacheSweptIndexGlob(collection: string): string {
  * Append every entry key a moved set names to `keys`, read in pages rather than
  * whole. Appended one at a time rather than returned for a spread: one set can
  * name more keys than a spread survives
- * (https://github.com/jclaveau/directus/issues/397).
+ * (https://github.com/jclaveau/directus/issues/397). Answers how many it
+ * appended.
  */
 async function collectSweptIndexKeys(
 	sweptKey: string,
 	keys: string[],
-): Promise<void> {
+): Promise<number> {
+	const keysBefore = keys.length;
 	let scanCursor = '0';
 
 	do {
@@ -1107,6 +1113,8 @@ async function collectSweptIndexKeys(
 		}
 	}
 	while (scanCursor !== '0');
+
+	return keys.length - keysBefore;
 }
 
 /**
