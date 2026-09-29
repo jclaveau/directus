@@ -39,7 +39,9 @@ import { summarise, type Summary } from './measure.js';
  * wrote itself would measure the bench's idea of the index, and the point is to
  * compare layouts. What a write purges and refills goes over HTTP; the rest of
  * the cache is filled in-process by `purge-extensions/perf-cache-fill`, which
- * runs the same read and the same filing without a request per entry.
+ * runs the same read and the same filing without a request per entry. Before
+ * any size is measured, a thousand entries are cached both ways on the branch
+ * under test and the two keyspaces have to match, member shapes included.
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -69,6 +71,9 @@ const SLICE_ENTRIES = 50;
 // Entries per call to the filler, and how many calls are in flight.
 const FILL_BATCH_ENTRIES = 1000;
 const FILL_CONCURRENCY = 4;
+
+// How many entries the filler is checked against a GET on, before any size.
+const FIDELITY_ENTRIES = 1000;
 
 const maxCommandScaling =
 	Number(process.env['PERF_PURGE_MAX_COMMAND_SCALING'] ?? 1.5);
@@ -508,9 +513,263 @@ afterAll(async () => {
 	await redis?.quit().catch(() => undefined);
 });
 
-test('a scoped purge costs the same however much the cache holds', async () => {
+type KeyspaceShape = {
+	// `<type> <ttl> <key>`, digests and numbers blanked, to how many keys have it
+	// and how many members they hold between them.
+	keys: Record<string, { keys: number; members: number }>;
+	// `<key shape> <- <member shape>`: every member, not a sample, so the list is
+	// the same whatever order a scan returns them in.
+	members: string[];
+};
+
+// Taken and released by whatever the instance runs, not by the fill, so a
+// snapshot catches one or not depending on timing alone.
+function isUnrelatedKey(key: string): boolean {
+	return /^[^:]*_lock:/.test(key);
+}
+
+function blankIdentities(text: string): string {
+	return text
+		.replace(/[0-9a-f]{16,}/g, '<h>')
+		.replace(/\d+/g, '<n>');
+}
+
+async function scanMembers(
+	key: string,
+	type: string,
+): Promise<string[]> {
+	if (type === 'list') {
+		return (await redis.lrange(key, 0, -1)).map(blankIdentities);
+	}
+
+	const members: string[] = [];
+	let cursor = '0';
+
+	do {
+		let page: string[];
+
+		if (type === 'set') {
+			[cursor, page] = await redis.sscan(key, cursor, 'COUNT', 1000);
+			members.push(...page.map(blankIdentities));
+		}
+		else if (type === 'zset') {
+			[cursor, page] = await redis.zscan(key, cursor, 'COUNT', 1000);
+
+			for (let at = 0; at < page.length; at += 2) {
+				members.push(
+					`${blankIdentities(page[at]!)} @ ${blankIdentities(page[at + 1]!)}`,
+				);
+			}
+		}
+		else if (type === 'hash') {
+			[cursor, page] = await redis.hscan(key, cursor, 'COUNT', 1000);
+
+			for (let at = 0; at < page.length; at += 2) {
+				members.push(blankIdentities(page[at]!));
+			}
+		}
+		else {
+			return [];
+		}
+	} while (cursor !== '0');
+
+	return members;
+}
+
+async function readKeyspaceShape(): Promise<{
+	shape: KeyspaceShape;
+	unrelated: string[];
+}> {
+	const keys: KeyspaceShape['keys'] = {};
+	const members = new Set<string>();
+	const unrelated: string[] = [];
+	let cursor = '0';
+
+	do {
+		const [nextCursor, page] = await redis.scan(cursor, 'COUNT', 1000);
+		cursor = nextCursor;
+
+		const related = page.filter((key) => {
+			if (isUnrelatedKey(key)) {
+				unrelated.push(key);
+
+				return false;
+			}
+
+			return true;
+		});
+
+		const pipeline = redis.pipeline();
+
+		for (const key of related) {
+			pipeline.type(key).pttl(key);
+		}
+
+		const answers = (await pipeline.exec()) ?? [];
+
+		for (const [index, key] of related.entries()) {
+			const type = String(answers[index * 2]![1]);
+			const pttl = Number(answers[index * 2 + 1]![1]);
+			const keyShape = blankIdentities(key);
+
+			const lifetime = pttl === -1
+				? 'persistent'
+				: 'expiring';
+
+			const keyMembers = await scanMembers(key, type);
+
+			for (const member of keyMembers) {
+				members.add(`${keyShape} <- ${member}`);
+			}
+
+			const name = `${type} ${lifetime} ${keyShape}`;
+			const entry = keys[name] ?? { keys: 0, members: 0 };
+
+			entry.keys += 1;
+
+			entry.members += type === 'string'
+				? 1
+				: keyMembers.length;
+
+			keys[name] = entry;
+		}
+	} while (cursor !== '0');
+
+	return {
+		// Sorted, so two shapes holding the same keys serialize the same.
+		shape: {
+			keys: Object.fromEntries(Object.entries(keys).sort()),
+			members: [...members].sort(),
+		},
+		unrelated: unrelated.sort(),
+	};
+}
+
+async function clearResponseCache(): Promise<void> {
 	await fetch(`${base}/utils/cache/clear`, { method: 'POST', headers: authHeaders })
 		.then((response) => response.text());
+}
+
+// What the filler fidelity check found, carried into the report the purge
+// test writes.
+let fidelityReport: string[] = [];
+let fidelityHeld: boolean | undefined;
+
+test('the filler files what a GET files', async () => {
+	const entries = Math.min(FIDELITY_ENTRIES, rowIds.length * SLICE_ENTRIES);
+
+	await clearResponseCache();
+
+	const warmStatuses = await warmEntries(0, entries);
+
+	expect([...warmStatuses], 'the HTTP warm').toContain('MISS');
+
+	const httpKeys = await redis.dbsize();
+	const http = await readKeyspaceShape();
+
+	await clearResponseCache();
+
+	const filled = await fillEntries(0, entries);
+
+	expect(filled, 'entries filled').toBe(entries);
+
+	const fillKeys = await redis.dbsize();
+	const fill = await readKeyspaceShape();
+
+	fidelityHeld = JSON.stringify(fill.shape) === JSON.stringify(http.shape);
+
+	const names = [...new Set([
+		...Object.keys(http.shape.keys),
+		...Object.keys(fill.shape.keys),
+	])].sort();
+
+	const shapeRows = names.map((name) => {
+		const byHttp = http.shape.keys[name];
+		const byFill = fill.shape.keys[name];
+
+		return `| \`${name}\` | ${byHttp?.keys ?? 0} | ${byHttp?.members ?? 0}`
+			+ ` | ${byFill?.keys ?? 0} | ${byFill?.members ?? 0} |`;
+	});
+
+	const httpMembers = new Set(http.shape.members);
+	const fillMembers = new Set(fill.shape.members);
+
+	const memberRows = [
+		...http.shape.members
+			.filter((member) => !fillMembers.has(member))
+			.map((member) => `- http only: \`${member}\``),
+		...fill.shape.members
+			.filter((member) => !httpMembers.has(member))
+			.map((member) => `- filler only: \`${member}\``),
+	];
+
+	const unrelatedLine = `left out as unrelated: http ${http.unrelated.length},`
+		+ ` filler ${fill.unrelated.length}`;
+
+	fidelityReport = fidelityHeld
+		? [
+			`filler fidelity: ok (${entries} entries, ${httpKeys} Redis keys,`
+			+ ` ${names.length} key shapes, ${http.shape.members.length}`
+			+ ` member shapes; ${unrelatedLine})`,
+			'',
+		]
+		: [
+			'### Filler fidelity FAILED',
+			'',
+			`${entries} entries warmed over HTTP: ${httpKeys} Redis keys; filled`
+			+ ` in-process: ${fillKeys}; ${unrelatedLine}.`,
+			'',
+			'| key shape | http keys | http members | filler keys | filler members |',
+			'| --- | ---: | ---: | ---: | ---: |',
+			...shapeRows,
+			'',
+			...(memberRows.length > 0
+				? ['Member shapes on one side only:', '', ...memberRows, '']
+				: ['Every member shape is on both sides.', '']),
+		];
+
+	await mkdir(outputDir, { recursive: true });
+
+	// The whole comparison, held or not, for reading beside the summary.
+	await writeFile(join(outputDir, 'purge-scaling-fidelity.md'), [
+		`${entries} entries; Redis keys: http ${httpKeys}, filler ${fillKeys}`,
+		'',
+		'| key shape | http keys | http members | filler keys | filler members |',
+		'| --- | ---: | ---: | ---: | ---: |',
+		...shapeRows,
+		'',
+		...memberRows,
+		'',
+		`Unrelated, http: ${http.unrelated.join(', ') || 'none'}`,
+		'',
+		`Unrelated, filler: ${fill.unrelated.join(', ') || 'none'}`,
+		'',
+	].join('\n'));
+
+	await writeFile(
+		join(outputDir, 'purge-scaling.md'),
+		`${fidelityReport.join('\n')}\n`,
+	);
+
+	expect(fill.shape).toEqual(http.shape);
+
+	// Same shape, and the entries a GET names are the ones filled.
+	const sampleStatuses = new Set<string>();
+
+	for (let entryIndex = 0; entryIndex < entries; entryIndex += 97) {
+		const sampled = await fetch(`${base}${slicePath(entryIndex)}`, {
+			headers: authHeaders,
+		});
+
+		await sampled.text();
+		sampleStatuses.add(sampled.headers.get(STATUS_HEADER) ?? 'none');
+	}
+
+	expect([...sampleStatuses], 're-reading filled entries').toEqual(['HIT']);
+}, 10 * 60 * 1000);
+
+test('a scoped purge costs the same however much the cache holds', async () => {
+	await clearResponseCache();
 
 	const idleRate = await measureIdleCommands();
 	const bySize = new Map<number, WriteSample[]>();
@@ -688,6 +947,7 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 		: 'over';
 
 	const markdown = [
+		...fidelityReport,
 		'### Purge scaling',
 		'',
 		`One scoped PATCH per rep, ${writeReps} reps per size, each purging a slice`
@@ -749,9 +1009,13 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 
 	const over = verdicts.filter((line) => line.endsWith('OVER |'));
 
+	const unfaithful = fidelityHeld === true
+		? ''
+		: 'filler fidelity FAILED — ';
+
 	const breached = over.length > 0
-		? `${over.length} gate(s) OVER — `
-		: '';
+		? `${unfaithful}${over.length} gate(s) OVER — `
+		: unfaithful;
 
 	const largestWall = seriesAt(largestSize, (sample) => sample.wallMs).median;
 	const smallestWall = seriesAt(smallestSize, (sample) => sample.wallMs).median;
