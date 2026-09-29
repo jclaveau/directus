@@ -999,7 +999,7 @@ describe('scopedCacheIndexFileScript', () => {
 		);
 
 		expect(scopedCacheIndexFileScript).toContain(
-			'\telseif left == -1 then\n'
+			'\tif left == -1 then\n'
 			+ '\t\tunbounded = true',
 		);
 
