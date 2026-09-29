@@ -30,6 +30,11 @@ import { summarise, type Summary } from './measure.js';
  * and the time Redis spent executing them is what every other client queued
  * behind. The wall time is reported beside them and gates nothing.
  *
+ * A second phase measures the purge that drops a whole collection: a version save
+ * purges the collection it versions whatever its delta holds. The versioned
+ * collection is small and stays the same size at every step, so what grows with
+ * the cache is the purge finding that collection's index among everyone else's.
+ *
  * Seeded through the api rather than written into Redis: a layout the bench
  * wrote itself would measure the bench's idea of the index, and the point is to
  * compare layouts.
@@ -97,6 +102,12 @@ const STATUS_HEADER = 'x-cache-status';
 const SLICE = 'perf_slice';
 const TENANTS = 8;
 
+// The collection a version save purges whole, and how many reads of it are cached
+// before each save: `VERSIONED_ENTRIES` per row, one per `limit`.
+const VERSIONED = 'perf_versioned';
+const VERSIONED_ROWS = 4;
+const VERSIONED_ENTRIES = 5;
+
 const rowCount = Math.ceil(Math.max(...cacheSizes) / SLICE_ENTRIES);
 
 const authHeaders = {
@@ -107,6 +118,8 @@ const authHeaders = {
 let instance: ChildProcess | undefined;
 let redis: Redis;
 let rowIds: number[] = [];
+let versionedIds: number[] = [];
+let versionId = '';
 
 const base = `http://127.0.0.1:${instancePort}`;
 
@@ -235,6 +248,54 @@ async function seedFixture(): Promise<void> {
 
 		rowIds = [...rowIds, ...created.data.map((row: any) => row.id)];
 	}
+
+	const droppedVersioned = await fetch(`${base}/collections/${VERSIONED}`, {
+		method: 'DELETE',
+		headers: authHeaders,
+	});
+
+	await droppedVersioned.text();
+
+	await api('/collections', {
+		method: 'POST',
+		body: JSON.stringify({
+			collection: VERSIONED,
+			meta: { versioning: true },
+			schema: {},
+			fields: [
+				{
+					field: 'id',
+					type: 'integer',
+					meta: { hidden: true },
+					schema: { is_primary_key: true, has_auto_increment: true },
+				},
+				{ field: 'label', type: 'string', meta: {}, schema: {} },
+			],
+		}),
+	});
+
+	const versionedRows = Array.from({ length: VERSIONED_ROWS }, (_, index) => {
+		return { label: `versioned ${index}` };
+	});
+
+	const createdVersioned = await api(`/items/${VERSIONED}?fields=id`, {
+		method: 'POST',
+		body: JSON.stringify(versionedRows),
+	});
+
+	versionedIds = createdVersioned.data.map((row: any) => row.id);
+
+	const version = await api('/versions?fields=id', {
+		method: 'POST',
+		body: JSON.stringify({
+			key: 'bench',
+			name: 'bench',
+			collection: VERSIONED,
+			item: String(versionedIds[0]),
+		}),
+	});
+
+	versionId = version.data.id;
 }
 
 // Pinned on the primary key, and selecting the column a write changes, so the
@@ -270,6 +331,31 @@ async function warmEntries(from: number, to: number): Promise<Set<string>> {
 	}
 
 	await Promise.all(Array.from({ length: warmConcurrency }, () => drain()));
+
+	return statuses;
+}
+
+/** Cache every read of the versioned collection a version save purges. */
+async function warmVersionedEntries(): Promise<Set<string>> {
+	const statuses = new Set<string>();
+
+	for (const rowId of versionedIds) {
+		for (let limit = 1; limit <= VERSIONED_ENTRIES; limit++) {
+			const path = `/items/${VERSIONED}?filter[id][_eq]=${rowId}`
+				+ `&limit=${limit}&fields=id,label`;
+
+			const response = await fetch(`${base}${path}`, { headers: authHeaders });
+			const body = await response.text();
+
+			if (!response.ok) {
+				throw new Error(
+					`GET ${path} answered ${response.status}: ${body.slice(0, 200)}`,
+				);
+			}
+
+			statuses.add(response.headers.get(STATUS_HEADER) ?? 'none');
+		}
+	}
 
 	return statuses;
 }
@@ -321,14 +407,14 @@ type WriteSample = {
 	byCommand: Record<string, number>;
 };
 
-async function timeWrite(rowIndex: number, idleRate: number): Promise<WriteSample> {
+async function timeRedisCost(
+	sendRequest: () => Promise<unknown>,
+	idleRate: number,
+): Promise<WriteSample> {
 	await redis.config('RESETSTAT');
 	const startedAt = performance.now();
 
-	await api(`/items/${SLICE}/${rowIds[rowIndex]}`, {
-		method: 'PATCH',
-		body: JSON.stringify({ label: `touched ${Date.now()}` }),
-	});
+	await sendRequest();
 
 	const wallMs = performance.now() - startedAt;
 	const counted = await readCommandStats();
@@ -340,6 +426,25 @@ async function timeWrite(rowIndex: number, idleRate: number): Promise<WriteSampl
 		wallMs,
 		byCommand: counted.byCommand,
 	};
+}
+
+function timeWrite(rowIndex: number, idleRate: number): Promise<WriteSample> {
+	return timeRedisCost(() => {
+		return api(`/items/${SLICE}/${rowIds[rowIndex]}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ label: `touched ${Date.now()}` }),
+		});
+	}, idleRate);
+}
+
+// A version save purges its collection whole: `purgeScopedCache(…, null)`.
+function timeCollectionPurge(idleRate: number): Promise<WriteSample> {
+	return timeRedisCost(() => {
+		return api(`/versions/${versionId}/save`, {
+			method: 'POST',
+			body: JSON.stringify({ label: `saved ${Date.now()}` }),
+		});
+	}, idleRate);
 }
 
 beforeAll(async () => {
@@ -362,6 +467,7 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 
 	const idleRate = await measureIdleCommands();
 	const bySize = new Map<number, WriteSample[]>();
+	const collectionPurgesBySize = new Map<number, WriteSample[]>();
 	const report: string[] = [];
 	let warmed = 0;
 
@@ -396,6 +502,24 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 
 		bySize.set(size, samples);
 
+		const collectionPurges: WriteSample[] = [];
+
+		for (let rep = 0; rep < writeReps; rep++) {
+			const versionedWarm = await warmVersionedEntries();
+
+			expect([...versionedWarm], `the versioned reads before save ${rep}`)
+				.toContain('MISS');
+
+			collectionPurges.push(await timeCollectionPurge(idleRate));
+		}
+
+		collectionPurgesBySize.set(size, collectionPurges);
+
+		const collectionBreakdown = Object.entries(collectionPurges.at(-1)!.byCommand)
+			.sort(([, a], [, b]) => b - a)
+			.map(([name, calls]) => `${name} ${calls}`)
+			.join(', ');
+
 		const lastBreakdown = Object.entries(samples.at(-1)!.byCommand)
 			.sort(([, a], [, b]) => b - a)
 			.map(([name, calls]) => `${name} ${calls}`)
@@ -403,40 +527,81 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 
 		report.push(
 			`- ${size} entries: ${keyspace} Redis keys, warmed in`
-			+ ` ${warmSeconds.toFixed(0)} s; last write: ${lastBreakdown}`,
+			+ ` ${warmSeconds.toFixed(0)} s; last write: ${lastBreakdown};`
+			+ ` last collection purge: ${collectionBreakdown}`,
 		);
 	}
 
-	const seriesAt = (size: number, pick: (sample: WriteSample) => number) => {
-		return summarise(`${size}`, bySize.get(size)!.map(pick));
+	const seriesOf = (
+		samplesBySize: Map<number, WriteSample[]>,
+		size: number,
+		pick: (sample: WriteSample) => number,
+	) => {
+		return summarise(`${size}`, samplesBySize.get(size)!.map(pick));
 	};
 
-	const figureRows = cacheSizes.map((size) => {
-		const commands = seriesAt(size, (sample) => sample.commands);
-		const redisMs = seriesAt(size, (sample) => sample.redisMs);
-		const wallMs = seriesAt(size, (sample) => sample.wallMs);
+	const seriesAt = (size: number, pick: (sample: WriteSample) => number) => {
+		return seriesOf(bySize, size, pick);
+	};
 
-		return `| ${size} | ${commands.median.toFixed(1)}`
-			+ ` | ${redisMs.median.toFixed(2)} ms | ${wallMs.median.toFixed(1)} ms`
-			+ ` | ${wallMs.p95.toFixed(1)} ms |`;
-	});
+	const figureRowsOf = (samplesBySize: Map<number, WriteSample[]>) => {
+		return cacheSizes.map((size) => {
+			const commands = seriesOf(samplesBySize, size, (sample) => sample.commands);
+			const redisMs = seriesOf(samplesBySize, size, (sample) => sample.redisMs);
+			const wallMs = seriesOf(samplesBySize, size, (sample) => sample.wallMs);
+
+			return `| ${size} | ${commands.median.toFixed(1)}`
+				+ ` | ${redisMs.median.toFixed(2)} ms | ${wallMs.median.toFixed(1)} ms`
+				+ ` | ${wallMs.p95.toFixed(1)} ms |`;
+		});
+	};
+
+	const figureRows = figureRowsOf(bySize);
+	const collectionFigureRows = figureRowsOf(collectionPurgesBySize);
 
 	const largestSize = Math.max(...cacheSizes);
 
-	const scalingOf = (pick: (sample: WriteSample) => number) => {
-		const largest: Summary = seriesAt(largestSize, pick);
-		const smallest: Summary = seriesAt(smallestSize, pick);
+	const scalingIn = (
+		samplesBySize: Map<number, WriteSample[]>,
+		pick: (sample: WriteSample) => number,
+	) => {
+		const largest: Summary = seriesOf(samplesBySize, largestSize, pick);
+		const smallest: Summary = seriesOf(samplesBySize, smallestSize, pick);
 
 		return largest.median / Math.max(smallest.median, Number.EPSILON);
+	};
+
+	const scalingOf = (pick: (sample: WriteSample) => number) => {
+		return scalingIn(bySize, pick);
 	};
 
 	const commandScaling = scalingOf((sample) => sample.commands);
 	const redisTimeScaling = scalingOf((sample) => sample.redisMs);
 	const wallScaling = scalingOf((sample) => sample.wallMs);
 
+	const collectionCommandScaling = scalingIn(
+		collectionPurgesBySize,
+		(sample) => sample.commands,
+	);
+
+	const collectionRedisTimeScaling = scalingIn(
+		collectionPurgesBySize,
+		(sample) => sample.redisMs,
+	);
+
 	const gates = [
 		['Redis commands per write', commandScaling, maxCommandScaling],
 		['Redis time per write', redisTimeScaling, maxRedisTimeScaling],
+		[
+			'Redis commands per collection purge',
+			collectionCommandScaling,
+			maxCommandScaling,
+		],
+		[
+			'Redis time per collection purge',
+			collectionRedisTimeScaling,
+			maxRedisTimeScaling,
+		],
 	] as const;
 
 	const verdicts = gates.map(([label, measured, ceiling]) => {
@@ -462,6 +627,14 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 		'| cache entries | Redis commands | Redis time | wall | wall p95 |',
 		'| ---: | ---: | ---: | ---: | ---: |',
 		...figureRows,
+		'',
+		`One version save per rep, ${writeReps} reps per size, each purging the whole`
+		+ ` ${VERSIONED} collection: ${VERSIONED_ROWS * VERSIONED_ENTRIES} entries`
+		+ ' at every size. Medians.',
+		'',
+		'| cache entries | Redis commands | Redis time | wall | wall p95 |',
+		'| ---: | ---: | ---: | ---: | ---: |',
+		...collectionFigureRows,
 		'',
 		...report,
 		'',
@@ -491,10 +664,13 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 			writeReps,
 			idleCommandsPerSecond: idleRate,
 			samples: Object.fromEntries(bySize),
+			collectionPurgeSamples: Object.fromEntries(collectionPurgesBySize),
 			scaling: {
 				commands: commandScaling,
 				redisTime: redisTimeScaling,
 				wall: wallScaling,
+				collectionPurgeCommands: collectionCommandScaling,
+				collectionPurgeRedisTime: collectionRedisTimeScaling,
 			},
 		}, null, 2)}\n`,
 	);
@@ -515,7 +691,9 @@ test('a scoped purge costs the same however much the cache holds', async () => {
 		`${breached}purge at ${largestSize} vs ${smallestSize} entries:`
 		+ ` ${commandScaling.toFixed(2)}x redis cmds,`
 		+ ` ${redisTimeScaling.toFixed(2)}x redis time,`
-		+ ` ${largestWall.toFixed(1)} vs ${smallestWall.toFixed(1)} ms\n`,
+		+ ` ${largestWall.toFixed(1)} vs ${smallestWall.toFixed(1)} ms;`
+		+ ` collection purge ${collectionCommandScaling.toFixed(2)}x redis cmds,`
+		+ ` ${collectionRedisTimeScaling.toFixed(2)}x redis time\n`,
 	);
 
 	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
