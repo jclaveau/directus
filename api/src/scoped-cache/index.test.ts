@@ -173,7 +173,10 @@ beforeEach(() => {
 	vi.mocked(flushCacheRedisDatabase).mockResolvedValue('not-flushed');
 	vi.mocked(useRedis).mockReturnValue({ pipeline: () => pipeline } as any);
 	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());
-	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
+
+	vi.mocked(useLogger)
+		.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as any);
+
 	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 });
 
@@ -1577,7 +1580,9 @@ describe('flushResponseCache', () => {
 	`, async () => {
 		const { calls, cache } = recordFlush();
 		const warn = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn } as any);
 
 		vi.mocked(useRedis)().scan = async () => {
 			throw new Error('ECONNREFUSED');
@@ -1896,7 +1901,10 @@ describe('retryPendingScopedCachePurges', () => {
 		are gone, and logs it
 	`, async () => {
 		const warn = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn } as any);
+
 		const closed = new Error('Connection is closed.');
 
 		indexedMembers = {
@@ -2598,7 +2606,10 @@ describe('startScopedCachePurgeRecovery', () => {
 		awaits this, so an unhandled one would take the process down
 	`, async () => {
 		const warn = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn } as any);
+
 		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
 
 		vi.mocked(listPendingScopedCachePurges)
@@ -2614,7 +2625,10 @@ describe('startScopedCachePurgeRecovery', () => {
 		be reached to watch its own client
 	`, async () => {
 		const warn = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn } as any);
+
 		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
 
 		// `getCache` builds the store on its first call, so it throws here on a boot
@@ -2638,7 +2652,10 @@ describe('startScopedCachePurgeRecovery', () => {
 
 	it('reports the count once there was something to finish', async () => {
 		const info = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info, warn: vi.fn() } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info, warn: vi.fn() } as any);
+
 		const onRedisEvent = vi.fn();
 		vi.mocked(useRedis).mockReturnValue({ on: onRedisEvent } as any);
 
@@ -5054,7 +5071,9 @@ describe('reading and bumping the purge counters', () => {
 	// silent: the fills racing this purge are unguarded.
 	it('warns when a counter bump was refused rather than dropped', async () => {
 		const warn = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn } as any);
 
 		scopedCacheEpochBump
 			.mockRejectedValue(new Error('OOM command not allowed'));
@@ -5066,7 +5085,9 @@ describe('reading and bumping the purge counters', () => {
 
 	it('says nothing when every bump landed', async () => {
 		const warn = vi.fn();
-		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useLogger)
+			.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn } as any);
 
 		await bumpScopedCacheEpochs(['articles']);
 

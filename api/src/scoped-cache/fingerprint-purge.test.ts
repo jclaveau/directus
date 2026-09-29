@@ -109,7 +109,9 @@ beforeEach(() => {
 	members = {};
 	swept.length = 0;
 
-	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
+	vi.mocked(useLogger)
+		.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as any);
+
 	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());

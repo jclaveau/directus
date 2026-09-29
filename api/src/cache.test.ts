@@ -99,7 +99,7 @@ vi.mock('./bus/index.js', () => {
 });
 
 const logger = vi.hoisted(() => {
-	return { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
+	return { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() };
 });
 
 vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));

@@ -94,6 +94,7 @@ describe('requestScopedCacheIndexReap', () => {
 
 		const requested = requestScopedCacheIndexReap();
 
+		await vi.advanceTimersByTimeAsync(1_000);
 		await vi.waitFor(() => expect(indexKeysComplete).toHaveBeenCalled());
 		await requested;
 
@@ -109,13 +110,13 @@ describe('requestScopedCacheIndexReap', () => {
 
 		const requested = requestScopedCacheIndexReap();
 
+		await vi.advanceTimersByTimeAsync(1_000);
 		await vi.waitFor(() => expect(lockCache.get).toHaveBeenCalled());
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
 
-		await vi.waitFor(() => {
-			expect(lockCache.delete).toHaveBeenCalled();
-		}, { timeout: 5_000 });
+		await vi.advanceTimersByTimeAsync(5_000);
+		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
 
 		await requested;
 
@@ -132,6 +133,7 @@ describe('requestScopedCacheIndexReap', () => {
 
 		const requested = requestScopedCacheIndexReap();
 
+		await vi.advanceTimersByTimeAsync(1_000);
 		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
 		await expect(requested).resolves.toBeUndefined();
 
