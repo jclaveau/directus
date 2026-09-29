@@ -434,7 +434,7 @@ describe('countScopedCachePinMembers', () => {
 
 		vi.mocked(useRedis).mockReturnValue({
 			sscan: vi.fn(async (setKey: string) => {
-				const registered = 'ns:scoped-cache-index:fingerprint-registry:';
+				const registered = 'ns:scoped-cache-index:collection-index-keys:';
 
 				if (setKey.startsWith(registered)) {
 					const collection = setKey.slice(registered.length);
@@ -451,9 +451,9 @@ describe('countScopedCachePinMembers', () => {
 				return ['0', countedMembers[setKey] ?? []];
 			}),
 			defineCommand: vi.fn(),
-			scopedCacheRegistryPrune: vi.fn(async (
+			scopedCacheCollectionIndexKeysPrune: vi.fn(async (
 				_keyCount: number,
-				_registryKey: string,
+				_collectionIndexKeysKey: string,
 				...indexKeys: string[]
 			) => {
 				return indexKeys;
@@ -977,7 +977,7 @@ describe('createScopedCacheHookDeclarations', () => {
 });
 
 describe('a collection-wide purge', () => {
-	it('reads a collection purge off the collection\'s registry', async () => {
+	it('reads a collection purge off the collection\'s index-key set', async () => {
 		const scan = vi.fn();
 		const sscan = vi.fn().mockResolvedValue(['0', []]);
 		const smembers = vi.fn();
@@ -995,7 +995,7 @@ describe('a collection-wide purge', () => {
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
 		expect(sscan).toHaveBeenCalledWith(
-			'ns:scoped-cache-index:fingerprint-registry:articles',
+			'ns:scoped-cache-index:collection-index-keys:articles',
 			'0',
 			'COUNT',
 			1000,
@@ -1006,7 +1006,7 @@ describe('a collection-wide purge', () => {
 	});
 
 	it(oneLine`
-		bumps the counter BEFORE reading the collection's registry — a read filing a
+		bumps the counter BEFORE reading the collection's index-key set — a read filing a
 		new fingerprint between that read and the sweep is missed by this purge, and
 		the bump is what makes it decline instead of surviving under a set nothing
 		swept
@@ -1018,7 +1018,7 @@ describe('a collection-wide purge', () => {
 				calls.push(`sscan ${setKey}`);
 
 				// The pass over what earlier sweeps left moved aside finds nothing.
-				if (setKey.endsWith(':swept-registry')) {
+				if (setKey.endsWith(':swept-index-keys')) {
 					return ['0', []];
 				}
 
@@ -1040,8 +1040,8 @@ describe('a collection-wide purge', () => {
 
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:articles',
-			'sscan ns:scoped-cache-index:swept-registry',
-			'sscan ns:scoped-cache-index:fingerprint-registry:articles',
+			'sscan ns:scoped-cache-index:swept-index-keys',
+			'sscan ns:scoped-cache-index:collection-index-keys:articles',
 			'eval',
 		]);
 	});
@@ -1064,7 +1064,7 @@ function redisSweepDouble() {
 			numKeys: number,
 			...args: string[]
 		): Promise<string[]> => {
-			// The first two keys are the registries the script updates.
+			// The first two keys are the index-key sets the script updates.
 			swept.push(args.slice(2, numKeys));
 
 			return [];
@@ -1087,7 +1087,7 @@ describe('indexScopedCacheEntry', () => {
 				return {
 					sadd: vi.fn().mockReturnThis(),
 					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
-					scopedCacheIndexRegister: vi.fn().mockReturnThis(),
+					scopedCacheCollectionIndexKeysRegister: vi.fn().mockReturnThis(),
 					expire: vi.fn().mockReturnThis(),
 					persist: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
@@ -1118,7 +1118,7 @@ describe('indexScopedCacheEntry', () => {
 					sadd: vi.fn().mockReturnThis(),
 					expire,
 					scopedCacheIndexExpiry: indexExpiry,
-					scopedCacheIndexRegister: vi.fn().mockReturnThis(),
+					scopedCacheCollectionIndexKeysRegister: vi.fn().mockReturnThis(),
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1161,7 +1161,7 @@ describe('indexScopedCacheEntry', () => {
 					sadd,
 					persist,
 					scopedCacheIndexExpiry: vi.fn().mockReturnThis(),
-					scopedCacheIndexRegister: vi.fn().mockReturnThis(),
+					scopedCacheCollectionIndexKeysRegister: vi.fn().mockReturnThis(),
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -1567,7 +1567,7 @@ describe('retryPendingScopedCachePurges', () => {
 	// What the fingerprint sets hold, keyed by the set a case expects the drain to
 	// read. A record names a pin, never the set holding it — the schema it was
 	// written under is gone by now — so the drain finds the sets through the
-	// collection's registry, and a case declares them here.
+	// collection's index-key set, and a case declares them here.
 	let indexedMembers: Record<string, string[]>;
 
 	// The index prune rides a pipeline, so a member the drain dropped reads off this
@@ -1579,13 +1579,14 @@ describe('retryPendingScopedCachePurges', () => {
 	const swept: string[][] = [];
 
 	const redis = {
-		// A registry answers with the sets under its collection's prefix, the swept
-		// one with the moved sets its `MATCH` names; any other key is an index set.
+		// An index-key set answers with the sets under its collection's prefix,
+		// the swept one with the moved sets its `MATCH` names; any other key is
+		// an index set.
 		sscan: vi.fn(async (setKey: string, _cursor: string, ...options: string[]) => {
-			const registryMark = ':fingerprint-registry:';
+			const collectionIndexKeysMark = ':collection-index-keys:';
 
-			if (setKey.includes(registryMark)) {
-				const [namespace, collection] = setKey.split(registryMark);
+			if (setKey.includes(collectionIndexKeysMark)) {
+				const [namespace, collection] = setKey.split(collectionIndexKeysMark);
 				const indexPrefix = `${namespace}:fingerprint:${collection}:`;
 
 				return [
@@ -1596,7 +1597,7 @@ describe('retryPendingScopedCachePurges', () => {
 				];
 			}
 
-			if (setKey.endsWith(':swept-registry')) {
+			if (setKey.endsWith(':swept-index-keys')) {
 				const matchAt = options.indexOf('MATCH');
 
 				const sweptPrefix = matchAt === -1
@@ -1630,17 +1631,17 @@ describe('retryPendingScopedCachePurges', () => {
 				? -1
 				: -2;
 		}),
-		scopedCacheIndexRegister: vi.fn(),
-		scopedCacheRegistryPrune: vi.fn(async (
+		scopedCacheCollectionIndexKeysRegister: vi.fn(),
+		scopedCacheCollectionIndexKeysPrune: vi.fn(async (
 			_keyCount: number,
-			_registryKey: string,
+			_collectionIndexKeysKey: string,
 			...indexKeys: string[]
 		) => {
 			return indexKeys.filter((indexKey) => indexKey in indexedMembers);
 		}),
 		// Moves every set it was handed that exists to `<prefix><position>` and
 		// answers with where, as the script does, so the `SSCAN` after it reads the
-		// moved set. The first two keys are the registries the script updates.
+		// moved set. The first two keys are the index-key sets the script updates.
 		eval: vi.fn(async (_script: string, numKeys: number, ...args: string[]) => {
 			const sweptKeys = args.slice(2, numKeys);
 			const movedPrefix = args[numKeys];
@@ -1723,7 +1724,7 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(redis.sscan).toHaveBeenCalledWith(
-			'other:scoped-cache-index:fingerprint-registry:articles',
+			'other:scoped-cache-index:collection-index-keys:articles',
 			'0',
 			'COUNT',
 			expect.any(Number),

@@ -68,13 +68,13 @@ let members: Record<string, string[]>;
 const srem = vi.fn();
 const swept: string[][] = [];
 
-// A purge holding no rows reads the collection's sets off its registry, so the
-// registry answers with the sets the case declared under that collection.
+// A purge holding no rows reads the collection's sets off its index-key set, so the
+// index-key set answers with the sets the case declared under that collection.
 const sscan = vi.fn(async (key: string, _cursor: string) => {
-	const registryPrefix = 'ns:scoped-cache-index:fingerprint-registry:';
+	const collectionIndexKeysPrefix = 'ns:scoped-cache-index:collection-index-keys:';
 
-	if (key.startsWith(registryPrefix)) {
-		const collection = key.slice(registryPrefix.length);
+	if (key.startsWith(collectionIndexKeysPrefix)) {
+		const collection = key.slice(collectionIndexKeysPrefix.length);
 		const setPrefix = `ns:scoped-cache-index:fingerprint:${collection}:`;
 
 		return ['0', Object.keys(members).filter((set) => set.startsWith(setPrefix))];
@@ -85,9 +85,9 @@ const sscan = vi.fn(async (key: string, _cursor: string) => {
 
 const scan = vi.fn(async () => ['0', []]);
 
-const scopedCacheRegistryPrune = vi.fn(async (
+const scopedCacheCollectionIndexKeysPrune = vi.fn(async (
 	_keyCount: number,
-	_registryKey: string,
+	_collectionIndexKeysKey: string,
 	...indexKeys: string[]
 ) => indexKeys);
 
@@ -113,7 +113,7 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
-		scopedCacheRegistryPrune,
+		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),

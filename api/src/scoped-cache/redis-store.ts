@@ -178,19 +178,20 @@ return #gone
 `;
 
 /**
- * Name index sets in their collection's registry, and give the registry an expiry
- * that only ever moves out, past `ARGV[1]` milliseconds — or none, for `-1`.
+ * Name index sets in their collection's index-key set, and give that set an
+ * expiry that only ever moves out, past `ARGV[1]` milliseconds — or none, for
+ * `-1`.
  *
- * The registry is how a collection-wide purge finds a collection's sets without a
- * keyspace SCAN, so it must outlive every set it names: a set the registry lost
- * holds entries no collection-wide purge reaches. Milliseconds rather than the
- * index script's seconds, because `TTL` rounds: a registry 0.4 s short of the
- * wanted expiry reads as not short, and would expire that long before a set
- * filed beside it.
+ * The index-key set is how a collection-wide purge finds a collection's sets
+ * without a keyspace SCAN, so it must outlive every set it names: a set it
+ * lost holds entries no collection-wide purge reaches. Milliseconds rather
+ * than the index script's seconds, because `TTL` rounds: an index-key set
+ * 0.4 s short of the wanted expiry reads as not short, and would expire that
+ * long before a set filed beside it.
  *
- * KEYS[1] is the registry, ARGV[1] the expiry and the rest the set names.
+ * KEYS[1] is the index-key set, ARGV[1] the expiry and the rest the set names.
  */
-export const scopedCacheIndexRegisterScript = `
+export const scopedCacheCollectionIndexKeysRegisterScript = `
 local existed = redis.call('EXISTS', KEYS[1])
 redis.call('SADD', KEYS[1], unpack(ARGV, 2))
 local want = tonumber(ARGV[1])
@@ -206,18 +207,19 @@ return existed
 `;
 
 /**
- * Drop from a registry the names whose set Redis no longer holds, and answer with
- * the ones it still does.
+ * Drop from an index-key set the names whose set Redis no longer holds, and
+ * answer with the ones it still does.
  *
- * One script, because a name may only leave the registry while its set is
- * missing: a check and a separate `SREM` let a fill recreate the set in between,
- * and the removal then leaves a set holding members that no registry names. Inside
- * one script, a fill either lands first — the set exists, the name stays — or
- * after, and names its set again itself, since it registers after it files.
+ * One script, because a name may only leave the index-key set while its set
+ * is missing: a check and a separate `SREM` let a fill recreate the set in
+ * between, and the removal then leaves a set holding members that no
+ * index-key set names. Inside one script, a fill either lands first — the set
+ * exists, the name stays — or after, and names its set again itself, since it
+ * registers after it files.
  *
- * KEYS[1] is the registry and the rest the names to check.
+ * KEYS[1] is the index-key set and the rest the names to check.
  */
-export const scopedCacheRegistryPruneScript = `
+export const scopedCacheCollectionIndexKeysPruneScript = `
 local live = {}
 local gone = {}
 
@@ -244,9 +246,9 @@ type ScopedCacheIndexExpiryCommand = {
 	): ChainableCommander;
 };
 
-type ScopedCacheIndexRegisterCommand<Answer> = {
-	scopedCacheIndexRegister(
-		registryKey: string,
+type ScopedCacheCollectionIndexKeysRegisterCommand<Answer> = {
+	scopedCacheCollectionIndexKeysRegister(
+		collectionIndexKeysKey: string,
 		expiryMilliseconds: number,
 		...indexKeys: string[]
 	): Answer;
@@ -254,12 +256,12 @@ type ScopedCacheIndexRegisterCommand<Answer> = {
 
 type ScopedCacheIndexPipeline = ChainableCommander
 	& ScopedCacheIndexExpiryCommand
-	& ScopedCacheIndexRegisterCommand<ChainableCommander>;
+	& ScopedCacheCollectionIndexKeysRegisterCommand<ChainableCommander>;
 
-type ScopedCacheRegistryPruneCommand = {
-	scopedCacheRegistryPrune(
+type ScopedCacheCollectionIndexKeysPruneCommand = {
+	scopedCacheCollectionIndexKeysPrune(
 		keyCount: number,
-		registryKey: string,
+		collectionIndexKeysKey: string,
 		...indexKeys: string[]
 	): Promise<string[]>;
 };
@@ -284,8 +286,8 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexExpiryCommand
 	& ScopedCacheEpochBumpCommand
 	& ScopedCacheIndexReapCommand
-	& ScopedCacheRegistryPruneCommand
-	& ScopedCacheIndexRegisterCommand<Promise<number>>;
+	& ScopedCacheCollectionIndexKeysPruneCommand
+	& ScopedCacheCollectionIndexKeysRegisterCommand<Promise<number>>;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
@@ -320,13 +322,13 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 			lua: scopedCacheIndexReapScript,
 		});
 
-		redis.defineCommand('scopedCacheIndexRegister', {
+		redis.defineCommand('scopedCacheCollectionIndexKeysRegister', {
 			numberOfKeys: 1,
-			lua: scopedCacheIndexRegisterScript,
+			lua: scopedCacheCollectionIndexKeysRegisterScript,
 		});
 
-		redis.defineCommand('scopedCacheRegistryPrune', {
-			lua: scopedCacheRegistryPruneScript,
+		redis.defineCommand('scopedCacheCollectionIndexKeysPrune', {
+			lua: scopedCacheCollectionIndexKeysPruneScript,
 		});
 
 		clientsCarryingScripts.add(redis);
@@ -348,15 +350,16 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
  * every read of it that pinned no index value. The moved sets are read afterwards
  * in pages, outside any script.
  *
- * The name leaves the collection's registry in the same step, and the moved set is
- * named in the swept registry, so no moment exists where a set holding members is
- * named by neither: the recovery of a sweep that dies here reads the swept
- * registry, and a fill recreating the set afterwards names it again itself.
+ * The name leaves the collection's index-key set in the same step, and the
+ * moved set is named in the swept index-key set, so no moment exists where a
+ * set holding members is named by neither: the recovery of a sweep that dies
+ * here reads the swept index-key set, and a fill recreating the set afterwards
+ * names it again itself.
  *
- * KEYS are the collection's registry, the swept registry, then the index sets;
- * ARGV[1] is the prefix each is moved under. Answers with the keys it moved to: a
- * set that expired since the registry named it has nothing to move, and `RENAME`
- * refuses a missing key.
+ * KEYS are the collection's index-key set, the swept index-key set, then the
+ * index sets; ARGV[1] is the prefix each is moved under. Answers with the keys
+ * it moved to: a set that expired since the index-key set named it has
+ * nothing to move, and `RENAME` refuses a missing key.
  *
  * No expiry of its own: `RENAME` carries the set's, and a set's expiry only ever
  * moves out past every entry filed in it. So a set a failed sweep leaves behind
@@ -515,8 +518,8 @@ function scopedCacheSweptIndexKeyPrefix(collection: string): string {
  * enters it only after its set was filed and leaves it only while its set is
  * missing or being moved aside, and its expiry is never shorter than a named set's.
  */
-function scopedCacheRegistryKey(collection: string): string {
-	return `${scopedCacheIndexPrefix()}fingerprint-registry:${collection}`;
+function scopedCacheCollectionIndexKeysKey(collection: string): string {
+	return `${scopedCacheIndexPrefix()}collection-index-keys:${collection}`;
 }
 
 /**
@@ -524,33 +527,34 @@ function scopedCacheRegistryKey(collection: string): string {
  * expiry: it holds only what a sweep is between moving and releasing, or what a
  * dead one left for the recovery to release.
  */
-function scopedCacheSweptRegistryKey(): string {
-	return `${scopedCacheIndexPrefix()}swept-registry`;
+function scopedCacheSweptIndexKeysKey(): string {
+	return `${scopedCacheIndexPrefix()}swept-index-keys`;
 }
 
 /**
- * Every moved set the swept registry names under `sweptGlob`, or all of them, with
- * the entry keys each names. Nothing is moved here: these sets were taken by a
- * sweep before, and only need their entries dropped and then releasing. A name
- * whose set is gone reads as empty and is released like the others.
+ * Every moved set the swept index-key set names under `sweptGlob`, or all of
+ * them, with the entry keys each names. Nothing is moved here: these sets were
+ * taken by a sweep before, and only need their entries dropped and then
+ * releasing. A name whose set is gone reads as empty and is released like the
+ * others.
  */
 async function* takeSweptIndexKeys(
 	sweptGlob: string | null,
 ): AsyncGenerator<ScopedCacheIndexTake> {
 	const redis = useCacheRedis();
-	const registryKey = scopedCacheSweptRegistryKey();
+	const collectionIndexKeysKey = scopedCacheSweptIndexKeysKey();
 	let scanCursor = '0';
 
 	do {
 		const [next, sweptKeys] = sweptGlob === null
 			? await redis.sscan(
-				registryKey,
+				collectionIndexKeysKey,
 				scanCursor,
 				'COUNT',
 				SCOPED_CACHE_INDEX_SCAN_COUNT,
 			)
 			: await redis.sscan(
-				registryKey,
+				collectionIndexKeysKey,
 				scanCursor,
 				'MATCH',
 				sweptGlob,
@@ -571,18 +575,18 @@ async function* takeSweptIndexKeys(
 }
 
 /**
- * The sets one collection's registry names that still exist, a page at a time,
+ * The sets one collection's index-key set names that still exist, a page at a time,
  * dropping from it the names of those that are gone.
  */
-async function* scanRegisteredIndexKeys(
-	registryKey: string,
+async function* scanCollectionIndexKeys(
+	collectionIndexKeysKey: string,
 ): AsyncGenerator<string[]> {
 	const redis = useScriptedRedis();
 	let scanCursor = '0';
 
 	do {
 		const [next, indexKeys] = await redis.sscan(
-			registryKey,
+			collectionIndexKeysKey,
 			scanCursor,
 			'COUNT',
 			SCOPED_CACHE_INDEX_SCAN_COUNT,
@@ -597,9 +601,9 @@ async function* scanRegisteredIndexKeys(
 		) {
 			const chunk = indexKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
 
-			yield await redis.scopedCacheRegistryPrune(
+			yield await redis.scopedCacheCollectionIndexKeysPrune(
 				chunk.length + 1,
-				registryKey,
+				collectionIndexKeysKey,
 				...chunk,
 			);
 		}
@@ -955,11 +959,12 @@ async function reapIndexMembers(
 }
 
 /**
- * Name one set in its collection's registry with the set's own expiry, which the
- * registry then keeps at least. Not one script with the read: a fill moving the
- * set's expiry out in between registers the set itself, with the longer one.
+ * Name one set in its collection's index-key set with the set's own expiry,
+ * which the index-key set then keeps at least. Not one script with the read: a
+ * fill moving the set's expiry out in between registers the set itself, with
+ * the longer one.
  */
-async function registerScopedCacheIndexKey(
+async function registerCollectionIndexKeys(
 	collection: string,
 	indexKey: string,
 ): Promise<void> {
@@ -971,8 +976,8 @@ async function registerScopedCacheIndexKey(
 		return;
 	}
 
-	await redis.scopedCacheIndexRegister(
-		scopedCacheRegistryKey(collection),
+	await redis.scopedCacheCollectionIndexKeysRegister(
+		scopedCacheCollectionIndexKeysKey(collection),
 		indexExpiry,
 		indexKey,
 	);
@@ -1005,19 +1010,21 @@ const redisStore: ScopedCacheStore = {
 		}
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
-		const indexKeysByRegistry = new Map<string, Set<string>>();
+		const indexKeysByCollectionKey = new Map<string, Set<string>>();
 
 		for (const { fingerprint, keys, indexPath } of filings) {
 			const members = keys.map((key) => {
 				return renderScopedCacheIndexMember(fingerprint, key);
 			});
 
-			const registryKey = scopedCacheRegistryKey(fingerprint.collection);
+			const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(
+				fingerprint.collection,
+			);
 
-			const registered = indexKeysByRegistry.get(registryKey)
+			const registered = indexKeysByCollectionKey.get(collectionIndexKeysKey)
 				?? new Set<string>();
 
-			indexKeysByRegistry.set(registryKey, registered);
+			indexKeysByCollectionKey.set(collectionIndexKeysKey, registered);
 
 			for (const indexKey of scopedCacheFingerprintIndexKeys(
 				fingerprint,
@@ -1039,14 +1046,14 @@ const redisStore: ScopedCacheStore = {
 			}
 		}
 
-		// After every set it names: a pipeline runs in order, so the registry never
+		// After every set it names: a pipeline runs in order, so the index-key set never
 		// names a set before it holds the members, and a prune in between cannot
 		// drop a name the fill is about to need.
-		const registryExpiry = ttlSeconds > 0
+		const collectionIndexKeysExpiry = ttlSeconds > 0
 			? ttlSeconds * 1000
 			: -1;
 
-		for (const [registryKey, registered] of indexKeysByRegistry) {
+		for (const [collectionIndexKeysKey, registered] of indexKeysByCollectionKey) {
 			const indexKeys = [...registered];
 
 			for (
@@ -1054,9 +1061,9 @@ const redisStore: ScopedCacheStore = {
 				at < indexKeys.length;
 				at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
 			) {
-				pipeline.scopedCacheIndexRegister(
-					registryKey,
-					registryExpiry,
+				pipeline.scopedCacheCollectionIndexKeysRegister(
+					collectionIndexKeysKey,
+					collectionIndexKeysExpiry,
 					...indexKeys.slice(at, at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS),
 				);
 			}
@@ -1117,8 +1124,8 @@ const redisStore: ScopedCacheStore = {
 	async* scanCollectionIndexedEntries(
 		collection: string,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
-		for await (const indexKeys of scanRegisteredIndexKeys(
-			scopedCacheRegistryKey(collection),
+		for await (const indexKeys of scanCollectionIndexKeys(
+			scopedCacheCollectionIndexKeysKey(collection),
 		)) {
 			yield* scanScopedCacheIndexKeys(indexKeys, null);
 		}
@@ -1208,16 +1215,16 @@ const redisStore: ScopedCacheStore = {
 		// this sweep's own move, so it does not read its sets twice.
 		yield* takeSweptIndexKeys(scopedCacheSweptIndexGlob(collection));
 
-		const registryKey = scopedCacheRegistryKey(collection);
+		const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(collection);
 		let scanCursor = '0';
 
-		// SSCAN returns every name that stays in the registry for the whole read, so
-		// the ones this moves out as it goes skip none. A name added meanwhile is a
-		// fill that started after the purge counters moved, which its own guard
-		// evicts — the same bound the keyspace SCAN this replaced gave.
+		// SSCAN returns every name that stays in the index-key set for the whole
+		// read, so the ones this moves out as it goes skip none. A name added
+		// meanwhile is a fill that started after the purge counters moved, which
+		// its own guard evicts — the same bound the keyspace SCAN this replaced gave.
 		do {
 			const [next, indexKeys] = await redis.sscan(
-				registryKey,
+				collectionIndexKeysKey,
 				scanCursor,
 				'COUNT',
 				SCOPED_CACHE_INDEX_SCAN_COUNT,
@@ -1237,8 +1244,8 @@ const redisStore: ScopedCacheStore = {
 				const sweptKeys = await redis.eval(
 					scopedCacheSweepMoveScript,
 					chunk.length + 2,
-					registryKey,
-					scopedCacheSweptRegistryKey(),
+					collectionIndexKeysKey,
+					scopedCacheSweptIndexKeysKey(),
 					...chunk,
 					scopedCacheSweptIndexKeyPrefix(collection),
 				) as string[];
@@ -1276,7 +1283,7 @@ const redisStore: ScopedCacheStore = {
 
 		for (let at = 0; at < sweptKeys.length; at += SCOPED_CACHE_UNLINK_CHUNK) {
 			pipeline.srem(
-				scopedCacheSweptRegistryKey(),
+				scopedCacheSweptIndexKeysKey(),
 				sweptKeys.slice(at, at + SCOPED_CACHE_UNLINK_CHUNK),
 			);
 		}
@@ -1294,10 +1301,11 @@ const redisStore: ScopedCacheStore = {
 	 * what they are about to drop.
 	 *
 	 * The one keyspace SCAN left on a schedule rather than a purge, and so the one
-	 * place that can find a set no registry names — one filed by a node still
-	 * running the build before the registry, during a rolling deploy. Each set it
-	 * reads is named in its collection's registry again, and each registry it
-	 * meets loses the names of the sets that are gone.
+	 * place that can find a set no index-key set names — one filed by a node
+	 * still running the build before the index-key set, during a rolling
+	 * deploy. Each set it reads is named in its collection's index-key set
+	 * again, and each index-key set it meets loses the names of the sets that
+	 * are gone.
 	 */
 	async reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
@@ -1305,22 +1313,24 @@ const redisStore: ScopedCacheStore = {
 		epochTtlSeconds: number,
 	): Promise<ScopedCacheReapTally> {
 		const tally: ScopedCacheReapTally = { indexKeys: 0, reaped: 0 };
-		const registryPrefix = scopedCacheRegistryKey('');
+		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
 
 		for await (const foundKeys of scanScopedCacheKeys(
 			`${scopedCacheIndexGlobPrefix()}fingerprint*`,
 		)) {
 			const indexKeys = foundKeys.filter((foundKey) => {
-				return ! foundKey.startsWith(registryPrefix);
+				return ! foundKey.startsWith(collectionIndexKeysPrefix);
 			});
 
-			for (const registryKey of foundKeys) {
-				if (! registryKey.startsWith(registryPrefix)) {
+			for (const collectionIndexKeysKey of foundKeys) {
+				if (! collectionIndexKeysKey.startsWith(collectionIndexKeysPrefix)) {
 					continue;
 				}
 
 				// Draining the pages is the prune: each drops the gone names it read.
-				for await (const _livePage of scanRegisteredIndexKeys(registryKey)) {
+				for await (
+					const _livePage of scanCollectionIndexKeys(collectionIndexKeysKey)
+				) {
 					continue;
 				}
 			}
@@ -1360,7 +1370,7 @@ const redisStore: ScopedCacheStore = {
 				while (scanCursor !== '0');
 
 				if (setCollection !== null) {
-					await registerScopedCacheIndexKey(setCollection, indexKey);
+					await registerCollectionIndexKeys(setCollection, indexKey);
 				}
 			}
 		}
