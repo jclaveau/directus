@@ -32,7 +32,7 @@ let lookRunning = false;
  * the last one recorded booted, and a process of the build before still
  * answers, so it may still be filing sets this build's purges reach only by a
  * SCAN, while its purges never reach what this build files. At most
- * `CACHE_SCOPED_DEPLOY_FILL_PAUSE`.
+ * `CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX`.
  *
  * Also while the boot has not yet recorded the build: a Redis down at boot keeps
  * it paused until the reconnect records it, which costs no fills that Redis could

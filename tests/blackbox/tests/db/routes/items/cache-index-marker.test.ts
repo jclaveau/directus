@@ -374,7 +374,7 @@ describe.each(vendors)('%s', (vendor) => {
 							...env[vendor],
 							PORT: String(await getPort()),
 							CACHE_BUILD_ID: buildId,
-							CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
+							CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 						});
 					},
 				);
@@ -383,7 +383,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
 					async (buildId: string, fillPause: string) => {
 						env[vendor]['CACHE_BUILD_ID'] = buildId;
-						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE'] = fillPause;
+						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPause;
 						await restartInstance();
 					},
 				);

@@ -260,7 +260,7 @@ async function startInstance(): Promise<ChildProcess> {
 			CACHE_SCOPED_INDEX_REAP_SCHEDULE: 'off',
 			// A namespace no build recorded yet: a deploy's fill pause would warm
 			// nothing.
-			CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
+			CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 		},
 	});
 

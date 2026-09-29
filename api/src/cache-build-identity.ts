@@ -278,7 +278,7 @@ export async function recordScopedCacheBuild(): Promise<void> {
 		const { buildChanged, fillPauseLeftMs } = await useScopedCacheStore()
 			.recordBuildIdentity(
 				buildIdentity,
-				getMilliseconds(useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE'], 0),
+				getMilliseconds(useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'], 0),
 			);
 
 		pauseScopedCacheFills(fillPauseLeftMs, buildIdentity);

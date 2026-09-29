@@ -405,7 +405,7 @@ describe('recordScopedCacheBuild', () => {
 	`, async () => {
 		env['CACHE_AUTO_FLUSH_ON_DEPLOY'] = false;
 		env['CACHE_BUILD_ID'] = 'build-b';
-		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE'] = '10m';
+		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = '10m';
 
 		const recordBuildIdentity = vi.fn(async () => {
 			return { buildChanged: true, fillPauseLeftMs: 600_000 };

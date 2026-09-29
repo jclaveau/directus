@@ -229,7 +229,7 @@ const cachedArmEnv = {
 	CACHE_STATUS_HEADER: STATUS_HEADER,
 	// Every arm boots a build its namespace has not recorded, and a deploy's fill
 	// pause would serve its warm series cold.
-	CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 };
 
 const arms: Arm[] = [

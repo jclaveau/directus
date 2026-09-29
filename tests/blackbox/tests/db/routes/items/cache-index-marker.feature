@@ -10,7 +10,7 @@ Feature: The index-key sets are trusted again without waiting for the schedule
   generation, whatever CACHE_AUTO_FLUSH_ON_DEPLOY says, here off: a build rolled
   back to may have filed sets the index-key sets do not name.
 
-  It also opens a fill pause of at most CACHE_SCOPED_DEPLOY_FILL_PAUSE, off
+  It also opens a fill pause of at most CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX, off
   everywhere but on the restarts that name one: through a rolling deploy the
   nodes of the build before go on filling, and neither build's purges reach
   every set the other files. It ends once no process of another build answers
