@@ -68,6 +68,10 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-audit.test.ts',
 			'/tests/db/app/cache-audit-cli.test.ts',
 			'/tests/db/app/cache-audit-mcp.test.ts',
+			// Writes `cache_ttl` into the settings singleton, and every instance
+			// booting meanwhile takes it for its TTL whatever its namespace:
+			// `cache-index-set-expiry` read a 3h override where it set 1m.
+			'/tests/db/app/cache-config-broadcast.test.ts',
 			'/tests/db/websocket/auth-public-connects.test.ts',
 			'/tests/db/websocket/auth-public-pings.test.ts',
 			'/tests/db/websocket/auth-handshake-connects.test.ts',
