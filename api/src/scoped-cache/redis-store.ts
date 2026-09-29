@@ -117,8 +117,10 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * KEYS[1] is the index-key set and the rest the index sets. ARGV[1] is the
  * expiry in seconds, `0` for none — the entries then never expire, so neither
  * may a set filed while a TTL was in force — then for each index set in order
- * how many members it takes followed by them. Answers with how many names it
- * added.
+ * how many members it takes followed by them. A negative count takes as many,
+ * and files them in the last set too: the legacy bare set, filed once per call
+ * from members already sent rather than sent again. Answers with how many names
+ * it added.
  */
 export const scopedCacheIndexFileScript = `
 local want = tonumber(ARGV[1])
@@ -147,10 +149,20 @@ elseif held == -2 or (held >= 0 and held < longest) then
 end
 
 local at = 2
+local passed = {}
 for i = 2, #KEYS do
 	local count = tonumber(ARGV[at])
+	if count < 0 then
+		count = -count
+		for m = at + 1, at + count do
+			passed[#passed + 1] = ARGV[m]
+		end
+	end
 	if count > 0 then
 		redis.call('SADD', KEYS[i], unpack(ARGV, at + 1, at + count))
+	end
+	if i == #KEYS and #passed > 0 then
+		redis.call('SADD', KEYS[i], unpack(passed))
 	end
 	at = at + count + 1
 	if want <= 0 then
@@ -499,6 +511,7 @@ type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexFileCommand
 type ScopedCacheIndexFileCall = {
 	indexKeys: string[];
 	filingArguments: Array<string | number>;
+	legacyBareFiled: boolean;
 };
 
 type ScopedCacheCollectionIndexKeysPruneCommand = {
@@ -1331,33 +1344,19 @@ export function scopedCacheFingerprintIndexKeys(
 }
 
 /**
- * The keys of the sets a fill files one fingerprint in: its own
- * (`scopedCacheFingerprintIndexKeys`), and the legacy bare set beside any off the
- * index path, which is all a write of an older build reads for it.
+ * Whether a fill files one fingerprint in the legacy bare set beside its own
+ * sets: any off the index path, which is all a write of an older build reads
+ * for it.
  */
-export function scopedCacheFingerprintFiledIndexKeys(
+export function scopedCacheFingerprintFilesLegacyBare(
 	fingerprint: ScopedCacheFingerprint,
 	indexPath: string | null,
-	homePinFields: readonly string[],
-): string[] {
-	const indexKeys = scopedCacheFingerprintIndexKeys(
-		fingerprint,
-		indexPath,
-		homePinFields,
-	);
-
+): boolean {
 	const indexValues = indexPath === null
 		? undefined
 		: fingerprint.pinnedScope?.[indexPath];
 
-	if (indexValues !== undefined && indexValues.length > 0) {
-		return indexKeys;
-	}
-
-	return [
-		...indexKeys,
-		scopedCacheLegacyBareIndexKey(fingerprint.collection),
-	];
+	return indexValues === undefined || indexValues.length === 0;
 }
 
 /**
@@ -1780,23 +1779,24 @@ const redisStore: ScopedCacheStore = {
 		}
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
-		const callsByCollectionKey = new Map<string, ScopedCacheIndexFileCall[]>();
+		const callsByCollection = new Map<string, ScopedCacheIndexFileCall[]>();
 
 		for (const { fingerprint, keys, indexPath, homePinFields } of filings) {
 			const members = keys.map((key) => {
 				return renderScopedCacheIndexMember(fingerprint, key);
 			});
 
-			const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(
-				fingerprint.collection,
-			);
-
-			const collectionCalls = callsByCollectionKey.get(collectionIndexKeysKey)
+			const collectionCalls = callsByCollection.get(fingerprint.collection)
 				?? [];
 
-			callsByCollectionKey.set(collectionIndexKeysKey, collectionCalls);
+			callsByCollection.set(fingerprint.collection, collectionCalls);
 
-			for (const indexKey of scopedCacheFingerprintFiledIndexKeys(
+			let legacyBarePending = scopedCacheFingerprintFilesLegacyBare(
+				fingerprint,
+				indexPath,
+			);
+
+			for (const indexKey of scopedCacheFingerprintIndexKeys(
 				fingerprint,
 				indexPath,
 				homePinFields,
@@ -1810,22 +1810,42 @@ const redisStore: ScopedCacheStore = {
 				);
 
 				if (fileCall === undefined || callIsFull) {
-					fileCall = { indexKeys: [], filingArguments: [] };
+					fileCall = {
+						indexKeys: [],
+						filingArguments: [],
+						legacyBareFiled: false,
+					};
+
 					collectionCalls.push(fileCall);
 				}
 
+				// A negative count passes the members on to the legacy bare set,
+				// which the call files last: once per fingerprint, not once per set.
+				const memberCount = legacyBarePending
+					? -members.length
+					: members.length;
+
 				fileCall.indexKeys.push(indexKey);
-				fileCall.filingArguments.push(members.length, ...members);
+				fileCall.filingArguments.push(memberCount, ...members);
+				fileCall.legacyBareFiled ||= legacyBarePending;
+				legacyBarePending = false;
 			}
 		}
 
 		// One call per collection files its sets and names them, so a set's name
 		// crosses the wire once per fill, as the set's own key.
-		for (const [collectionIndexKeysKey, collectionCalls] of callsByCollectionKey) {
-			for (const { indexKeys, filingArguments } of collectionCalls) {
+		for (const [collection, collectionCalls] of callsByCollection) {
+			for (const fileCall of collectionCalls) {
+				const { indexKeys, filingArguments, legacyBareFiled } = fileCall;
+
+				if (legacyBareFiled) {
+					indexKeys.push(scopedCacheLegacyBareIndexKey(collection));
+					filingArguments.push(0);
+				}
+
 				pipeline.scopedCacheIndexFile(
 					indexKeys.length + 1,
-					collectionIndexKeysKey,
+					scopedCacheCollectionIndexKeysKey(collection),
 					...indexKeys,
 					ttlSeconds,
 					...filingArguments,

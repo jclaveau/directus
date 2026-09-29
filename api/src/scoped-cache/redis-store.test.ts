@@ -5,7 +5,7 @@ import {
 	redisScopedCacheStore,
 	renderScopedCacheIndexMember,
 	scopedCacheEpochBumpScript,
-	scopedCacheFingerprintFiledIndexKeys,
+	scopedCacheFingerprintFilesLegacyBare,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheHomePin,
 	scopedCacheIndexBuildRecordScript,
@@ -208,40 +208,29 @@ describe('scopedCacheFingerprintIndexKeys', () => {
 	});
 });
 
-describe('scopedCacheFingerprintFiledIndexKeys', () => {
+describe('scopedCacheFingerprintFilesLegacyBare', () => {
 	it('files a read pinning the index path under its value alone', () => {
-		expect(scopedCacheFingerprintFiledIndexKeys(
+		expect(scopedCacheFingerprintFilesLegacyBare(
 			parseScopedCacheFingerprint('slot:&id=,7,&owner=,ana,&'),
 			'owner',
-			['id'],
-		)).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
-		]);
+		)).toBe(false);
 	});
 
 	it(oneLine`
 		files a home-pinned read in the legacy bare set too, the one set an older
 		build's write reads for it
 	`, () => {
-		expect(scopedCacheFingerprintFiledIndexKeys(
+		expect(scopedCacheFingerprintFilesLegacyBare(
 			parseScopedCacheFingerprint('slot:&id=,7,&'),
 			'owner',
-			['id'],
-		)).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
-			'scalabus:scoped-cache-index:fingerprint:slot:',
-		]);
+		)).toBe(true);
 	});
 
-	it('files a bare read in the bare set and the legacy bare set', () => {
-		expect(scopedCacheFingerprintFiledIndexKeys(
+	it('files a bare read in the legacy bare set too', () => {
+		expect(scopedCacheFingerprintFilesLegacyBare(
 			{ collection: 'loose' },
 			null,
-			[],
-		)).toEqual([
-			'scalabus:scoped-cache-index:fingerprint:loose:bare',
-			'scalabus:scoped-cache-index:fingerprint:loose:',
-		]);
+		)).toBe(true);
 	});
 });
 
@@ -847,17 +836,16 @@ describe('fileIndexedEntries', () => {
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=8',
-			'scalabus:scoped-cache-index:fingerprint:slot:',
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
 			60,
-			1,
-			'slot:&id=,7,8,&|key-a',
-			1,
+			-1,
 			'slot:&id=,7,8,&|key-a',
 			1,
 			'slot:&id=,7,8,&|key-a',
 			1,
 			'slot:&owner=,ana,&|key-b',
+			0,
 		]]);
 	});
 
@@ -887,10 +875,9 @@ describe('fileIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:slot:bare',
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				60,
-				1,
+				-1,
 				'slot:&|key-a',
-				1,
-				'slot:&|key-a',
+				0,
 			],
 			[
 				3,
@@ -898,12 +885,47 @@ describe('fileIndexedEntries', () => {
 				'scalabus:scoped-cache-index:fingerprint:note:bare',
 				'scalabus:scoped-cache-index:fingerprint:note:',
 				60,
-				1,
+				-1,
 				'note:&|key-b',
-				1,
-				'note:&|key-b',
+				0,
 			],
 		]);
+	});
+
+	it(oneLine`
+		files the legacy bare set once per call, off members already sent
+	`, async () => {
+		await redisScopedCacheStore().fileIndexedEntries(
+			[
+				{
+					fingerprint: parseScopedCacheFingerprint('slot:&id=,7,&'),
+					keys: ['key-a'],
+					indexPath: 'owner',
+					homePinFields: ['id'],
+				},
+				{
+					fingerprint: { collection: 'slot' },
+					keys: ['key-b'],
+					indexPath: 'owner',
+					homePinFields: ['id'],
+				},
+			],
+			60,
+		);
+
+		expect(indexFile.mock.calls).toEqual([[
+			4,
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+			'scalabus:scoped-cache-index:fingerprint:slot:bare',
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			60,
+			-1,
+			'slot:&id=,7,&|key-a',
+			-1,
+			'slot:&|key-b',
+			0,
+		]]);
 	});
 
 	it('passes a never-expiring fill its ttl of 0 for the script', async () => {
@@ -923,12 +945,10 @@ describe('fileIndexedEntries', () => {
 			'scalabus:scoped-cache-index:fingerprint:slot:bare',
 			'scalabus:scoped-cache-index:fingerprint:slot:',
 			0,
-			2,
+			-2,
 			'slot:&|key-a',
 			'slot:&|key-a__expires_at',
-			2,
-			'slot:&|key-a',
-			'slot:&|key-a__expires_at',
+			0,
 		]]);
 	});
 
@@ -1060,6 +1080,23 @@ describe('scopedCacheIndexFileScript', () => {
 			"local held = redis.call('PTTL', KEYS[1])\n"
 			+ "local named = redis.call('SADD', KEYS[1], unpack(KEYS, 2))\n"
 			+ 'if unbounded then',
+		);
+	});
+
+	it(oneLine`
+		files the members a negative count passes on in the last set, the legacy
+		bare set
+	`, () => {
+		expect(scopedCacheIndexFileScript).toContain(
+			'\tif count < 0 then\n'
+			+ '\t\tcount = -count\n'
+			+ '\t\tfor m = at + 1, at + count do\n'
+			+ '\t\t\tpassed[#passed + 1] = ARGV[m]',
+		);
+
+		expect(scopedCacheIndexFileScript).toContain(
+			'\tif i == #KEYS and #passed > 0 then\n'
+			+ "\t\tredis.call('SADD', KEYS[i], unpack(passed))",
 		);
 	});
 
