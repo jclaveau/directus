@@ -30,10 +30,15 @@ import { summarise, type Summary } from './measure.js';
  * and the time Redis spent executing them is what every other client queued
  * behind. The wall time is reported beside them and gates nothing.
  *
- * A second phase measures the purge that drops a whole collection: a version save
- * purges the collection it versions whatever its delta holds. The versioned
- * collection is small and stays the same size at every step, so what grows with
- * the cache is the purge finding that collection's index among everyone else's.
+ * The primary-key phase also measures the purge that drops a whole collection: a
+ * version save purges the collection it versions whatever its delta holds. The
+ * versioned collection is small and stays the same size at every step, so what
+ * grows with the cache is the purge finding that collection's index among
+ * everyone else's.
+ *
+ * A boolean phase pins a boolean beside the primary key, true on every row: a
+ * field whose one value every cached read shares, the way production's reads
+ * pin `enabled` or `status` beside a narrower field.
  *
  * Seeded through the api rather than written into Redis: a layout the bench
  * wrote itself would measure the bench's idea of the index, and the point is to
@@ -100,6 +105,7 @@ if (cacheSizes.length < 2) {
 }
 
 const smallestSize = Math.min(...cacheSizes);
+const largestSize = Math.max(...cacheSizes);
 
 // Every write lands on a row the smallest size has warmed.
 if (writeReps > smallestSize / SLICE_ENTRIES) {
@@ -110,7 +116,6 @@ if (writeReps > smallestSize / SLICE_ENTRIES) {
 }
 
 const STATUS_HEADER = 'x-cache-status';
-const SLICE = 'perf_slice';
 const TENANTS = 8;
 
 // The collection a version save purges whole, and how many reads of it are cached
@@ -119,7 +124,57 @@ const VERSIONED = 'perf_versioned';
 const VERSIONED_ROWS = 4;
 const VERSIONED_ENTRIES = 5;
 
-const rowCount = Math.ceil(Math.max(...cacheSizes) / SLICE_ENTRIES);
+const rowCount = Math.ceil(largestSize / SLICE_ENTRIES);
+
+type PurgePhase = {
+	phaseName: string;
+	collection: string;
+	readsPin: string;
+	scopeFields: string[];
+	extraFields: Record<string, unknown>[];
+	extraValues: Record<string, unknown>;
+	extraFilter: string;
+	fillFilter: Record<string, unknown>;
+	timesCollectionPurge: boolean;
+};
+
+const PK_PHASE: PurgePhase = {
+	phaseName: 'pk',
+	collection: 'perf_slice',
+	readsPin: 'Reads pin the primary key, not the index path.',
+	scopeFields: ['tenant'],
+	extraFields: [],
+	extraValues: {},
+	extraFilter: '',
+	fillFilter: {},
+	timesCollectionPurge: true,
+};
+
+// Declared, or a read could not pin it: only scope fields and the primary key
+// are. Second, so `tenant` stays the index path. `enabled` sorts before `id`, so
+// a read pinning both, one value each, ties on every count and falls to
+// whichever pin key sorts first: a layout that breaks the tie by that key files
+// every read under the one set all rows share, the worst case measured here.
+const BOOLEAN_PHASE: PurgePhase = {
+	phaseName: 'boolean',
+	collection: 'perf_flag_slice',
+	readsPin: 'Reads pin the primary key and `enabled`, true on every row, not the'
+		+ ' index path.',
+	scopeFields: ['tenant', 'enabled'],
+	extraFields: [
+		{
+			field: 'enabled',
+			type: 'boolean',
+			meta: {},
+			schema: { default_value: true },
+		},
+	],
+	extraValues: { enabled: true },
+	extraFilter: '&filter[enabled][_eq]=true',
+	// As a GET's query string hands it over, before sanitizing.
+	fillFilter: { enabled: { _eq: 'true' } },
+	timesCollectionPurge: false,
+};
 
 const authHeaders = {
 	'Authorization': `Bearer ${adminToken}`,
@@ -128,7 +183,7 @@ const authHeaders = {
 
 let instance: ChildProcess | undefined;
 let redis: Redis;
-let rowIds: number[] = [];
+const phaseRowIds = new Map<string, number[]>();
 let versionedIds: number[] = [];
 let versionId = '';
 
@@ -218,8 +273,8 @@ async function startInstance(): Promise<ChildProcess> {
 	}
 }
 
-async function seedFixture(): Promise<void> {
-	const dropped = await fetch(`${base}/collections/${SLICE}`, {
+async function seedPhase(phase: PurgePhase): Promise<void> {
+	const dropped = await fetch(`${base}/collections/${phase.collection}`, {
 		method: 'DELETE',
 		headers: authHeaders,
 	});
@@ -229,10 +284,10 @@ async function seedFixture(): Promise<void> {
 	await api('/collections', {
 		method: 'POST',
 		body: JSON.stringify({
-			collection: SLICE,
-			// The index path. No read below pins it, so every one of them is filed
-			// where a read pinning anything else is.
-			meta: { scoped_cache_fields: ['tenant'] },
+			collection: phase.collection,
+			// The index path first. No read below pins it, so every one of them is
+			// filed where a read pinning anything else is.
+			meta: { scoped_cache_fields: phase.scopeFields },
 			schema: {},
 			fields: [
 				{
@@ -243,23 +298,34 @@ async function seedFixture(): Promise<void> {
 				},
 				{ field: 'tenant', type: 'string', meta: {}, schema: {} },
 				{ field: 'label', type: 'string', meta: {}, schema: {} },
+				...phase.extraFields,
 			],
 		}),
 	});
 
 	const rows = Array.from({ length: rowCount }, (_, index) => {
-		return { tenant: `t${index % TENANTS}`, label: `row ${index}` };
+		return {
+			tenant: `t${index % TENANTS}`,
+			label: `row ${index}`,
+			...phase.extraValues,
+		};
 	});
 
+	let seededIds: number[] = [];
+
 	for (let at = 0; at < rows.length; at += 500) {
-		const created = await api(`/items/${SLICE}?fields=id`, {
+		const created = await api(`/items/${phase.collection}?fields=id`, {
 			method: 'POST',
 			body: JSON.stringify(rows.slice(at, at + 500)),
 		});
 
-		rowIds = [...rowIds, ...created.data.map((row: any) => row.id)];
+		seededIds = [...seededIds, ...created.data.map((row: any) => row.id)];
 	}
 
+	phaseRowIds.set(phase.phaseName, seededIds);
+}
+
+async function seedVersioned(): Promise<void> {
 	const droppedVersioned = await fetch(`${base}/collections/${VERSIONED}`, {
 		method: 'DELETE',
 		headers: authHeaders,
@@ -311,23 +377,28 @@ async function seedFixture(): Promise<void> {
 
 // Pinned on the primary key, and selecting the column a write changes, so the
 // write reaches every entry of its row's slice.
-function slicePath(entryIndex: number): string {
+function slicePath(phase: PurgePhase, entryIndex: number): string {
+	const rowIds = phaseRowIds.get(phase.phaseName)!;
 	const rowId = rowIds[Math.floor(entryIndex / SLICE_ENTRIES)]!;
 	const limit = 1 + (entryIndex % SLICE_ENTRIES);
 
-	return `/items/${SLICE}?filter[id][_eq]=${rowId}&limit=${limit}`
-		+ '&fields=id,label';
+	return `/items/${phase.collection}?filter[id][_eq]=${rowId}`
+		+ `${phase.extraFilter}&limit=${limit}&fields=id,label`;
 }
 
 /** Read every entry in `[from, to)`, `warmConcurrency` at a time. */
-async function warmEntries(from: number, to: number): Promise<Set<string>> {
+async function warmEntries(
+	phase: PurgePhase,
+	from: number,
+	to: number,
+): Promise<Set<string>> {
 	const statuses = new Set<string>();
 	let next = from;
 
 	async function drain(): Promise<void> {
 		while (next < to) {
 			const entryIndex = next++;
-			const path = slicePath(entryIndex);
+			const path = slicePath(phase, entryIndex);
 			const response = await fetch(`${base}${path}`, { headers: authHeaders });
 			const body = await response.text();
 
@@ -350,7 +421,12 @@ async function warmEntries(from: number, to: number): Promise<Set<string>> {
  * Cache every entry in `[from, to)` in-process, `FILL_BATCH_ENTRIES` a call:
  * the reads `slicePath` names, under the keys and pins a GET of them files.
  */
-async function fillEntries(from: number, to: number): Promise<number> {
+async function fillEntries(
+	phase: PurgePhase,
+	from: number,
+	to: number,
+): Promise<number> {
+	const rowIds = phaseRowIds.get(phase.phaseName)!;
 	const batches: { id: number; limits: number[] }[][] = [];
 
 	for (let at = from; at < to; at += FILL_BATCH_ENTRIES) {
@@ -377,7 +453,12 @@ async function fillEntries(from: number, to: number): Promise<number> {
 
 			const answer = await api('/perf-cache-fill', {
 				method: 'POST',
-				body: JSON.stringify({ collection: SLICE, fields: 'id,label', rows }),
+				body: JSON.stringify({
+					collection: phase.collection,
+					fields: 'id,label',
+					filter: phase.fillFilter,
+					rows,
+				}),
 			});
 
 			filled += answer.filled;
@@ -454,6 +535,46 @@ async function measureIdleCommands(): Promise<number> {
 	return (await readCommandStats()).commands / 3;
 }
 
+/**
+ * The phase's largest index sets by member count, whatever the layout names
+ * them: where its reads were actually filed.
+ */
+async function largestIndexSets(phase: PurgePhase): Promise<string> {
+	const setSizes: [string, number][] = [];
+	let cursor = '0';
+
+	do {
+		const [nextCursor, keys] = await redis.scan(
+			cursor,
+			'MATCH',
+			`*fingerprint:${phase.collection}:*`,
+			'COUNT',
+			1000,
+		);
+
+		cursor = nextCursor;
+
+		for (const key of keys) {
+			const keyType = await redis.type(key);
+
+			if (keyType === 'set') {
+				setSizes.push([key, await redis.scard(key)]);
+			}
+			else if (keyType === 'zset') {
+				setSizes.push([key, await redis.zcard(key)]);
+			}
+		}
+	} while (cursor !== '0');
+
+	const largestSets = setSizes
+		.sort(([, a], [, b]) => b - a)
+		.slice(0, 3)
+		.map(([key, members]) => `\`${JSON.stringify(key)}\` ${members}`)
+		.join(', ');
+
+	return `${setSizes.length} index sets, largest: ${largestSets}`;
+}
+
 type WriteSample = {
 	commands: number;
 	redisMs: number;
@@ -482,9 +603,15 @@ async function timeRedisCost(
 	};
 }
 
-function timeWrite(rowIndex: number, idleRate: number): Promise<WriteSample> {
+function timeWrite(
+	phase: PurgePhase,
+	rowIndex: number,
+	idleRate: number,
+): Promise<WriteSample> {
+	const rowIds = phaseRowIds.get(phase.phaseName)!;
+
 	return timeRedisCost(() => {
-		return api(`/items/${SLICE}/${rowIds[rowIndex]}`, {
+		return api(`/items/${phase.collection}/${rowIds[rowIndex]}`, {
 			method: 'PATCH',
 			body: JSON.stringify({ label: `touched ${Date.now()}` }),
 		});
@@ -501,11 +628,334 @@ function timeCollectionPurge(idleRate: number): Promise<WriteSample> {
 	}, idleRate);
 }
 
+function commandBreakdown(sample: WriteSample): string {
+	return Object.entries(sample.byCommand)
+		.sort(([, a], [, b]) => b - a)
+		.map(([name, calls]) => `${name} ${calls}`)
+		.join(', ');
+}
+
+function seriesOf(
+	samplesBySize: Map<number, WriteSample[]>,
+	size: number,
+	pick: (sample: WriteSample) => number,
+): Summary {
+	return summarise(`${size}`, samplesBySize.get(size)!.map(pick));
+}
+
+function figureRowsOf(samplesBySize: Map<number, WriteSample[]>): string[] {
+	return cacheSizes.map((size) => {
+		const commands = seriesOf(samplesBySize, size, (sample) => sample.commands);
+		const redisMs = seriesOf(samplesBySize, size, (sample) => sample.redisMs);
+		const wallMs = seriesOf(samplesBySize, size, (sample) => sample.wallMs);
+
+		return `| ${size} | ${commands.median.toFixed(1)}`
+			+ ` | ${redisMs.median.toFixed(2)} ms | ${wallMs.median.toFixed(1)} ms`
+			+ ` | ${wallMs.p95.toFixed(1)} ms |`;
+	});
+}
+
+function scalingIn(
+	samplesBySize: Map<number, WriteSample[]>,
+	pick: (sample: WriteSample) => number,
+): number {
+	const largest = seriesOf(samplesBySize, largestSize, pick);
+	const smallest = seriesOf(samplesBySize, smallestSize, pick);
+
+	return largest.median / Math.max(smallest.median, Number.EPSILON);
+}
+
+const FIGURE_HEADER = [
+	'| cache entries | Redis commands | Redis time | wall | wall p95 |',
+	'| ---: | ---: | ---: | ---: | ---: |',
+];
+
+type PhaseResult = {
+	phase: PurgePhase;
+	idleRate: number;
+	bySize: Map<number, WriteSample[]>;
+	collectionPurgesBySize: Map<number, WriteSample[]>;
+	markdown: string[];
+	verdicts: string[];
+	scaling: Record<string, number>;
+	statusFigure: string;
+};
+
+const phaseResults: PhaseResult[] = [];
+
+async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
+	await clearResponseCache();
+
+	const idleRate = await measureIdleCommands();
+	const bySize = new Map<number, WriteSample[]>();
+	const collectionPurgesBySize = new Map<number, WriteSample[]>();
+	const report: string[] = [];
+	let warmed = 0;
+
+	// The slices the writes purge, read over HTTP like their refills are.
+	const writtenEntries = writeReps * SLICE_ENTRIES;
+
+	for (const size of [...cacheSizes].sort((a, b) => a - b)) {
+		const warmStartedAt = performance.now();
+		const readEnd = Math.min(Math.max(warmed, writtenEntries), size);
+
+		if (warmed < readEnd) {
+			const warmStatuses = await warmEntries(phase, warmed, readEnd);
+
+			// A warm that never filled measured an empty cache at every size.
+			expect([...warmStatuses], `${phase.phaseName} warming to ${size}`)
+				.toContain('MISS');
+		}
+
+		const filled = await fillEntries(phase, readEnd, size);
+
+		expect(filled, `${phase.phaseName} entries filled to ${size}`)
+			.toBe(size - readEnd);
+
+		const warmSeconds = (performance.now() - warmStartedAt) / 1000;
+
+		warmed = size;
+
+		// A filled entry a GET does not find was filed under a key or a layout no
+		// read of it uses.
+		const filledRead = await fetch(`${base}${slicePath(phase, size - 1)}`, {
+			headers: authHeaders,
+		});
+
+		await filledRead.text();
+
+		expect(
+			filledRead.headers.get(STATUS_HEADER),
+			`the last ${phase.phaseName} entry of ${size}`,
+		).toBe('HIT');
+
+		const keyspace = await redis.dbsize();
+
+		expect(keyspace, `Redis keys once ${phase.phaseName} warmed to ${size}`)
+			.toBeGreaterThanOrEqual(size);
+
+		const filedUnder = await largestIndexSets(phase);
+		const samples: WriteSample[] = [];
+
+		for (let rep = 0; rep < writeReps; rep++) {
+			samples.push(await timeWrite(phase, rep, idleRate));
+
+			// Put the purged slice back, so the next write finds the same cache.
+			const refill = await warmEntries(
+				phase,
+				rep * SLICE_ENTRIES,
+				(rep + 1) * SLICE_ENTRIES,
+			);
+
+			expect([...refill], `the slice ${phase.phaseName} write ${rep} purged`)
+				.toContain('MISS');
+		}
+
+		bySize.set(size, samples);
+
+		let collectionReport = '';
+
+		if (phase.timesCollectionPurge) {
+			const collectionPurges: WriteSample[] = [];
+
+			for (let rep = 0; rep < writeReps; rep++) {
+				const versionedWarm = await warmVersionedEntries();
+
+				expect([...versionedWarm], `the versioned reads before save ${rep}`)
+					.toContain('MISS');
+
+				collectionPurges.push(await timeCollectionPurge(idleRate));
+			}
+
+			collectionPurgesBySize.set(size, collectionPurges);
+
+			collectionReport = '; last collection purge:'
+				+ ` ${commandBreakdown(collectionPurges.at(-1)!)}`;
+		}
+
+		report.push(
+			`- ${size} entries: ${keyspace} Redis keys, warmed in`
+			+ ` ${warmSeconds.toFixed(0)} s; last write:`
+			+ ` ${commandBreakdown(samples.at(-1)!)}${collectionReport};`
+			+ ` ${filedUnder}`,
+		);
+	}
+
+	const scaling: Record<string, number> = {
+		commands: scalingIn(bySize, (sample) => sample.commands),
+		redisTime: scalingIn(bySize, (sample) => sample.redisMs),
+		wall: scalingIn(bySize, (sample) => sample.wallMs),
+	};
+
+	const gates: [string, number, number][] = [
+		['Redis commands per write', scaling['commands']!, maxCommandScaling],
+		['Redis time per write', scaling['redisTime']!, maxRedisTimeScaling],
+	];
+
+	const collectionMarkdown: string[] = [];
+
+	if (phase.timesCollectionPurge) {
+		scaling['collectionPurgeCommands'] = scalingIn(
+			collectionPurgesBySize,
+			(sample) => sample.commands,
+		);
+
+		scaling['collectionPurgeRedisTime'] = scalingIn(
+			collectionPurgesBySize,
+			(sample) => sample.redisMs,
+		);
+
+		gates.push(
+			[
+				'Redis commands per collection purge',
+				scaling['collectionPurgeCommands'],
+				maxCommandScaling,
+			],
+			[
+				'Redis time per collection purge',
+				scaling['collectionPurgeRedisTime'],
+				maxRedisTimeScaling,
+			],
+		);
+
+		collectionMarkdown.push(
+			`One version save per rep, ${writeReps} reps per size, each purging the`
+			+ ` whole ${VERSIONED} collection:`
+			+ ` ${VERSIONED_ROWS * VERSIONED_ENTRIES} entries at every size. Medians.`,
+			'',
+			...FIGURE_HEADER,
+			...figureRowsOf(collectionPurgesBySize),
+			'',
+		);
+	}
+
+	const verdicts = gates.map(([label, measured, ceiling]) => {
+		const verdict = measured <= ceiling
+			? 'ok'
+			: 'OVER';
+
+		return `| ${phase.phaseName}: ${label}, ${largestSize} entries against`
+			+ ` ${smallestSize} | ${measured.toFixed(2)} | ${ceiling} | ${verdict} |`;
+	});
+
+	const wallScaling = scaling['wall']!;
+
+	const wallVerdict = wallScaling <= targetWallScaling
+		? 'ok'
+		: 'over';
+
+	const markdown = [
+		`#### Phase: ${phase.phaseName}`,
+		'',
+		`One scoped PATCH per rep, ${writeReps} reps per size, each purging a slice`
+		+ ` of ${SLICE_ENTRIES} entries. ${phase.readsPin} Medians.`,
+		'',
+		...FIGURE_HEADER,
+		...figureRowsOf(bySize),
+		'',
+		...collectionMarkdown,
+		...report,
+		'',
+		'| ratio | measured | ceiling | |',
+		'| --- | ---: | ---: | --- |',
+		...verdicts,
+		`| ${phase.phaseName}: wall time per write (headroom, gates nothing)`
+		+ ` | ${wallScaling.toFixed(2)} | ${targetWallScaling} | ${wallVerdict} |`,
+		'',
+	];
+
+	const largestWall = seriesOf(bySize, largestSize, (sample) => sample.wallMs);
+	const smallestWall = seriesOf(bySize, smallestSize, (sample) => sample.wallMs);
+
+	const collectionFigure = phase.timesCollectionPurge
+		? `, collection ${scaling['collectionPurgeCommands']!.toFixed(2)}x/`
+		+ `${scaling['collectionPurgeRedisTime']!.toFixed(2)}x`
+		: '';
+
+	const statusFigure = `${phase.phaseName}`
+		+ ` ${scaling['commands']!.toFixed(2)}x cmds`
+		+ ` ${scaling['redisTime']!.toFixed(2)}x redis`
+		+ ` ${largestWall.median.toFixed(1)}/${smallestWall.median.toFixed(1)} ms`
+		+ `${collectionFigure}`;
+
+	return {
+		phase,
+		idleRate,
+		bySize,
+		collectionPurgesBySize,
+		markdown,
+		verdicts,
+		scaling,
+		statusFigure,
+	};
+}
+
+// Rewritten after every phase, and before its gates are judged: a breach still
+// reports its figures, and a phase that never finished leaves the others'.
+async function writeResults(): Promise<string[]> {
+	const overVerdicts = phaseResults
+		.flatMap((result) => result.verdicts)
+		.filter((line) => line.endsWith('OVER |'));
+
+	await mkdir(outputDir, { recursive: true });
+
+	await writeFile(
+		join(outputDir, 'purge-scaling.json'),
+		`${JSON.stringify({
+			commit: process.env['PERF_HEAD_SHA'] ?? 'local',
+			measuredAt: new Date().toISOString(),
+			sliceEntries: SLICE_ENTRIES,
+			writeReps,
+			phases: Object.fromEntries(phaseResults.map((result) => {
+				return [
+					result.phase.phaseName,
+					{
+						idleCommandsPerSecond: result.idleRate,
+						samples: Object.fromEntries(result.bySize),
+						collectionPurgeSamples:
+							Object.fromEntries(result.collectionPurgesBySize),
+						scaling: result.scaling,
+					},
+				];
+			})),
+		}, null, 2)}\n`,
+	);
+
+	const markdown = [
+		...fidelityReport,
+		'### Purge scaling',
+		'',
+		...phaseResults.flatMap((result) => result.markdown),
+	];
+
+	await writeFile(join(outputDir, 'purge-scaling.md'), `${markdown.join('\n')}\n`);
+
+	const unfaithful = fidelityHeld === true
+		? ''
+		: 'filler fidelity FAILED — ';
+
+	const breached = overVerdicts.length > 0
+		? `${unfaithful}${overVerdicts.length} gate(s) OVER — `
+		: unfaithful;
+
+	const phaseFigures = phaseResults.map((result) => result.statusFigure);
+
+	await writeFile(
+		join(outputDir, 'purge-scaling.status.txt'),
+		`${breached}purge at ${largestSize} vs ${smallestSize} entries:`
+		+ ` ${phaseFigures.join('; ')}\n`,
+	);
+
+	return overVerdicts;
+}
+
 beforeAll(async () => {
 	redis = new Redis(redisUrl);
 	instance = await startInstance();
 
-	await seedFixture();
+	await seedPhase(PK_PHASE);
+	await seedPhase(BOOLEAN_PHASE);
+	await seedVersioned();
 });
 
 afterAll(async () => {
@@ -656,11 +1106,12 @@ let fidelityReport: string[] = [];
 let fidelityHeld: boolean | undefined;
 
 test('the filler files what a GET files', async () => {
-	const entries = Math.min(FIDELITY_ENTRIES, rowIds.length * SLICE_ENTRIES);
+	const pkRowCount = phaseRowIds.get(PK_PHASE.phaseName)!.length;
+	const entries = Math.min(FIDELITY_ENTRIES, pkRowCount * SLICE_ENTRIES);
 
 	await clearResponseCache();
 
-	const warmStatuses = await warmEntries(0, entries);
+	const warmStatuses = await warmEntries(PK_PHASE, 0, entries);
 
 	expect([...warmStatuses], 'the HTTP warm').toContain('MISS');
 
@@ -669,7 +1120,7 @@ test('the filler files what a GET files', async () => {
 
 	await clearResponseCache();
 
-	const filled = await fillEntries(0, entries);
+	const filled = await fillEntries(PK_PHASE, 0, entries);
 
 	expect(filled, 'entries filled').toBe(entries);
 
@@ -757,7 +1208,7 @@ test('the filler files what a GET files', async () => {
 	const sampleStatuses = new Set<string>();
 
 	for (let entryIndex = 0; entryIndex < entries; entryIndex += 97) {
-		const sampled = await fetch(`${base}${slicePath(entryIndex)}`, {
+		const sampled = await fetch(`${base}${slicePath(PK_PHASE, entryIndex)}`, {
 			headers: authHeaders,
 		});
 
@@ -768,267 +1219,19 @@ test('the filler files what a GET files', async () => {
 	expect([...sampleStatuses], 're-reading filled entries').toEqual(['HIT']);
 }, 10 * 60 * 1000);
 
-test('a scoped purge costs the same however much the cache holds', async () => {
-	await clearResponseCache();
+test.each([PK_PHASE, BOOLEAN_PHASE])(
+	'a scoped purge costs the same however much the cache holds: $phaseName',
+	async (phase) => {
+		const result = await measurePhase(phase);
 
-	const idleRate = await measureIdleCommands();
-	const bySize = new Map<number, WriteSample[]>();
-	const collectionPurgesBySize = new Map<number, WriteSample[]>();
-	const report: string[] = [];
-	let warmed = 0;
+		phaseResults.push(result);
 
-	// The slices the writes purge, read over HTTP like their refills are.
-	const writtenEntries = writeReps * SLICE_ENTRIES;
+		const overVerdicts = await writeResults();
 
-	for (const size of [...cacheSizes].sort((a, b) => a - b)) {
-		const warmStartedAt = performance.now();
-		const readEnd = Math.min(Math.max(warmed, writtenEntries), size);
+		const phaseOver = result.verdicts.filter((line) => line.endsWith('OVER |'));
 
-		if (warmed < readEnd) {
-			const warmStatuses = await warmEntries(warmed, readEnd);
-
-			// A warm that never filled measured an empty cache at every size.
-			expect([...warmStatuses], `warming to ${size}`).toContain('MISS');
-		}
-
-		const filled = await fillEntries(readEnd, size);
-
-		expect(filled, `entries filled to ${size}`).toBe(size - readEnd);
-
-		const warmSeconds = (performance.now() - warmStartedAt) / 1000;
-
-		warmed = size;
-
-		// A filled entry a GET does not find was filed under a key or a layout no
-		// read of it uses.
-		const filledRead = await fetch(`${base}${slicePath(size - 1)}`, {
-			headers: authHeaders,
-		});
-
-		await filledRead.text();
-
-		expect(filledRead.headers.get(STATUS_HEADER), `the last entry of ${size}`)
-			.toBe('HIT');
-
-		const keyspace = await redis.dbsize();
-
-		expect(keyspace, `Redis keys once warmed to ${size}`)
-			.toBeGreaterThanOrEqual(size);
-
-		const samples: WriteSample[] = [];
-
-		for (let rep = 0; rep < writeReps; rep++) {
-			samples.push(await timeWrite(rep, idleRate));
-
-			// Put the purged slice back, so the next write finds the same cache.
-			const refill = await warmEntries(
-				rep * SLICE_ENTRIES,
-				(rep + 1) * SLICE_ENTRIES,
-			);
-
-			expect([...refill], `the slice write ${rep} purged`).toContain('MISS');
-		}
-
-		bySize.set(size, samples);
-
-		const collectionPurges: WriteSample[] = [];
-
-		for (let rep = 0; rep < writeReps; rep++) {
-			const versionedWarm = await warmVersionedEntries();
-
-			expect([...versionedWarm], `the versioned reads before save ${rep}`)
-				.toContain('MISS');
-
-			collectionPurges.push(await timeCollectionPurge(idleRate));
-		}
-
-		collectionPurgesBySize.set(size, collectionPurges);
-
-		const collectionBreakdown = Object.entries(collectionPurges.at(-1)!.byCommand)
-			.sort(([, a], [, b]) => b - a)
-			.map(([name, calls]) => `${name} ${calls}`)
-			.join(', ');
-
-		const lastBreakdown = Object.entries(samples.at(-1)!.byCommand)
-			.sort(([, a], [, b]) => b - a)
-			.map(([name, calls]) => `${name} ${calls}`)
-			.join(', ');
-
-		report.push(
-			`- ${size} entries: ${keyspace} Redis keys, warmed in`
-			+ ` ${warmSeconds.toFixed(0)} s; last write: ${lastBreakdown};`
-			+ ` last collection purge: ${collectionBreakdown}`,
-		);
-	}
-
-	const seriesOf = (
-		samplesBySize: Map<number, WriteSample[]>,
-		size: number,
-		pick: (sample: WriteSample) => number,
-	) => {
-		return summarise(`${size}`, samplesBySize.get(size)!.map(pick));
-	};
-
-	const seriesAt = (size: number, pick: (sample: WriteSample) => number) => {
-		return seriesOf(bySize, size, pick);
-	};
-
-	const figureRowsOf = (samplesBySize: Map<number, WriteSample[]>) => {
-		return cacheSizes.map((size) => {
-			const commands = seriesOf(samplesBySize, size, (sample) => sample.commands);
-			const redisMs = seriesOf(samplesBySize, size, (sample) => sample.redisMs);
-			const wallMs = seriesOf(samplesBySize, size, (sample) => sample.wallMs);
-
-			return `| ${size} | ${commands.median.toFixed(1)}`
-				+ ` | ${redisMs.median.toFixed(2)} ms | ${wallMs.median.toFixed(1)} ms`
-				+ ` | ${wallMs.p95.toFixed(1)} ms |`;
-		});
-	};
-
-	const figureRows = figureRowsOf(bySize);
-	const collectionFigureRows = figureRowsOf(collectionPurgesBySize);
-
-	const largestSize = Math.max(...cacheSizes);
-
-	const scalingIn = (
-		samplesBySize: Map<number, WriteSample[]>,
-		pick: (sample: WriteSample) => number,
-	) => {
-		const largest: Summary = seriesOf(samplesBySize, largestSize, pick);
-		const smallest: Summary = seriesOf(samplesBySize, smallestSize, pick);
-
-		return largest.median / Math.max(smallest.median, Number.EPSILON);
-	};
-
-	const scalingOf = (pick: (sample: WriteSample) => number) => {
-		return scalingIn(bySize, pick);
-	};
-
-	const commandScaling = scalingOf((sample) => sample.commands);
-	const redisTimeScaling = scalingOf((sample) => sample.redisMs);
-	const wallScaling = scalingOf((sample) => sample.wallMs);
-
-	const collectionCommandScaling = scalingIn(
-		collectionPurgesBySize,
-		(sample) => sample.commands,
-	);
-
-	const collectionRedisTimeScaling = scalingIn(
-		collectionPurgesBySize,
-		(sample) => sample.redisMs,
-	);
-
-	const gates = [
-		['Redis commands per write', commandScaling, maxCommandScaling],
-		['Redis time per write', redisTimeScaling, maxRedisTimeScaling],
-		[
-			'Redis commands per collection purge',
-			collectionCommandScaling,
-			maxCommandScaling,
-		],
-		[
-			'Redis time per collection purge',
-			collectionRedisTimeScaling,
-			maxRedisTimeScaling,
-		],
-	] as const;
-
-	const verdicts = gates.map(([label, measured, ceiling]) => {
-		const verdict = measured <= ceiling
-			? 'ok'
-			: 'OVER';
-
-		return `| ${label}, ${largestSize} entries against ${smallestSize}`
-			+ ` | ${measured.toFixed(2)} | ${ceiling} | ${verdict} |`;
-	});
-
-	const wallVerdict = wallScaling <= targetWallScaling
-		? 'ok'
-		: 'over';
-
-	const markdown = [
-		...fidelityReport,
-		'### Purge scaling',
-		'',
-		`One scoped PATCH per rep, ${writeReps} reps per size, each purging a slice`
-		+ ` of ${SLICE_ENTRIES} entries. Reads pin the primary key, not the index`
-		+ ' path. Medians.',
-		'',
-		'| cache entries | Redis commands | Redis time | wall | wall p95 |',
-		'| ---: | ---: | ---: | ---: | ---: |',
-		...figureRows,
-		'',
-		`One version save per rep, ${writeReps} reps per size, each purging the whole`
-		+ ` ${VERSIONED} collection: ${VERSIONED_ROWS * VERSIONED_ENTRIES} entries`
-		+ ' at every size. Medians.',
-		'',
-		'| cache entries | Redis commands | Redis time | wall | wall p95 |',
-		'| ---: | ---: | ---: | ---: | ---: |',
-		...collectionFigureRows,
-		'',
-		...report,
-		'',
-		'#### Gates',
-		'',
-		'| ratio | measured | ceiling | |',
-		'| --- | ---: | ---: | --- |',
-		...verdicts,
-		'',
-		'#### Headroom',
-		'',
-		'| ratio | measured | target | |',
-		'| --- | ---: | ---: | --- |',
-		`| wall time per write, ${largestSize} entries against ${smallestSize}`
-		+ ` | ${wallScaling.toFixed(2)} | ${targetWallScaling} | ${wallVerdict} |`,
-		'',
-	];
-
-	await mkdir(outputDir, { recursive: true });
-
-	await writeFile(
-		join(outputDir, 'purge-scaling.json'),
-		`${JSON.stringify({
-			commit: process.env['PERF_HEAD_SHA'] ?? 'local',
-			measuredAt: new Date().toISOString(),
-			sliceEntries: SLICE_ENTRIES,
-			writeReps,
-			idleCommandsPerSecond: idleRate,
-			samples: Object.fromEntries(bySize),
-			collectionPurgeSamples: Object.fromEntries(collectionPurgesBySize),
-			scaling: {
-				commands: commandScaling,
-				redisTime: redisTimeScaling,
-				wall: wallScaling,
-				collectionPurgeCommands: collectionCommandScaling,
-				collectionPurgeRedisTime: collectionRedisTimeScaling,
-			},
-		}, null, 2)}\n`,
-	);
-
-	await writeFile(join(outputDir, 'purge-scaling.md'), `${markdown.join('\n')}\n`);
-
-	const over = verdicts.filter((line) => line.endsWith('OVER |'));
-
-	const unfaithful = fidelityHeld === true
-		? ''
-		: 'filler fidelity FAILED — ';
-
-	const breached = over.length > 0
-		? `${unfaithful}${over.length} gate(s) OVER — `
-		: unfaithful;
-
-	const largestWall = seriesAt(largestSize, (sample) => sample.wallMs).median;
-	const smallestWall = seriesAt(smallestSize, (sample) => sample.wallMs).median;
-
-	await writeFile(
-		join(outputDir, 'purge-scaling.status.txt'),
-		`${breached}purge at ${largestSize} vs ${smallestSize} entries:`
-		+ ` ${commandScaling.toFixed(2)}x redis cmds,`
-		+ ` ${redisTimeScaling.toFixed(2)}x redis time,`
-		+ ` ${largestWall.toFixed(1)} vs ${smallestWall.toFixed(1)} ms;`
-		+ ` collection purge ${collectionCommandScaling.toFixed(2)}x redis cmds,`
-		+ ` ${collectionRedisTimeScaling.toFixed(2)}x redis time\n`,
-	);
-
-	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
-}, 60 * 60 * 1000);
+		expect(phaseOver, `gates exceeded:\n${overVerdicts.join('\n')}`)
+			.toEqual([]);
+	},
+	60 * 60 * 1000,
+);

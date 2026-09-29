@@ -47,11 +47,15 @@ const [
 	importFromApi('utils/sanitize-query.js'),
 ]);
 
-/** The query `GET` receives for `?filter[pk][_eq]=…&limit=…&fields=…`. */
-function rawReadQuery(primaryKeyField, rowId, limit, fields) {
+/**
+ * The query `GET` receives for `?filter[pk][_eq]=…<sharedFilter>&limit=…
+ * &fields=…`, the shared filter's fields after the key as the bench's path
+ * lists them.
+ */
+function rawReadQuery(primaryKeyField, rowId, limit, fields, sharedFilter) {
 	return {
 		fields,
-		filter: { [primaryKeyField]: { _eq: String(rowId) } },
+		filter: { [primaryKeyField]: { _eq: String(rowId) }, ...sharedFilter },
 		limit: String(limit),
 	};
 }
@@ -104,14 +108,15 @@ async function fillEntry(request, fill) {
 }
 
 /**
- * `POST /perf-cache-fill` with `{ collection, fields, rows: [{ id, limits }] }`
- * caches `GET /items/<collection>?filter[<pk>][_eq]=<id>&limit=<limit>
- * &fields=<fields>` for every limit of every row, as the admin calling it.
+ * `POST /perf-cache-fill` with `{ collection, fields, filter, rows: [{ id,
+ * limits }] }` caches `GET /items/<collection>?filter[<pk>][_eq]=<id><filter>
+ * &limit=<limit>&fields=<fields>` for every limit of every row, as the admin
+ * calling it. `filter` is optional, raw as a query string hands it over.
  */
 export default function registerEndpoint(router, { services, getSchema }) {
 	router.post('/', async (request, response, next) => {
 		try {
-			const { collection, fields, rows } = request.body;
+			const { collection, fields, rows, filter: sharedFilter = {} } = request.body;
 			const schema = request.schema ?? await getSchema();
 			const accountability = request.accountability;
 			const primaryKeyField = schema.collections[collection].primary;
@@ -122,7 +127,7 @@ export default function registerEndpoint(router, { services, getSchema }) {
 				// limit, so every limit reads the same data under the same pins. The
 				// key is still built from each entry's own query.
 				const firstQuery = await sanitizeQuery(
-					rawReadQuery(primaryKeyField, id, limits[0], fields),
+					rawReadQuery(primaryKeyField, id, limits[0], fields, sharedFilter),
 					schema,
 					accountability,
 				);
@@ -148,7 +153,13 @@ export default function registerEndpoint(router, { services, getSchema }) {
 
 				return limits.map((limit) => {
 					return {
-						rawQuery: rawReadQuery(primaryKeyField, id, limit, fields),
+						rawQuery: rawReadQuery(
+							primaryKeyField,
+							id,
+							limit,
+							fields,
+							sharedFilter,
+						),
 						path,
 						schema,
 						accountability,
