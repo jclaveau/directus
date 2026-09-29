@@ -85,8 +85,9 @@ const SCOPED_CACHE_SCAN_COUNT = 1000;
 const SCOPED_CACHE_UNLINK_CHUNK = 1000;
 
 /**
- * File members into a fingerprint index set and give that set an expiry that only
- * ever moves OUT.
+ * File members into one collection's fingerprint index sets, give each set an
+ * expiry that only ever moves OUT, and name in the collection's index-key set
+ * the sets this call creates.
  *
  * A bare `EXPIRE` overwrites, and an index set is SHARED by every entry filed into
  * it: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
@@ -94,25 +95,80 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * purge for the rest of its life. Redis 7 has `EXPIRE … GT`, but GT reads a key
  * carrying no TTL as infinite: it refuses the very first expiry a fresh index set
  * needs, and cannot tell that set from one deliberately left unbounded. So the
- * comparison runs as a script — atomic, one pipeline slot, and `EXISTS` telling
- * those two apart.
+ * comparison runs here, with `TTL` telling those two apart. A set that already
+ * carries NO expiry outlives every entry by construction, so it keeps none.
  *
- * A set that already carries NO expiry outlives every entry by construction, so it
- * keeps none — only a freshly created set takes one unconditionally.
+ * Only a set this call creates is named: every set is named from the moment it
+ * exists, and a name leaves the index-key set only while its set is missing or
+ * being moved aside, both of which the next fill sees as a set to create. Two
+ * fills creating one set are two scripts, so the second finds it and the first
+ * named it. An index-key set Redis does not hold at all names every set of the
+ * call, which adopts the sets a build before it filed without waiting for the
+ * reap.
+ *
+ * Named before any set is filed, and the index-key set's expiry moved before
+ * any set's: a script that fails partway then leaves a name ahead of its set,
+ * which a prune drops, never a set nothing names. The index-key set outlives
+ * every set it names: its expiry moves out to this call's, and past each set
+ * kept longer, or it keeps none while one of them does. `TTL` rounds to the
+ * second, so a set kept at least this call's expiry counts one second more.
+ *
+ * KEYS[1] is the index-key set and the rest the index sets. ARGV[1] is the
+ * expiry in seconds, `0` for none — the entries then never expire, so neither
+ * may a set filed while a TTL was in force — then for each index set in order
+ * how many members it takes followed by them. Answers with how many sets it
+ * created.
  */
-export const scopedCacheIndexExpiryScript = `
-local existed = redis.call('EXISTS', KEYS[1])
-redis.call('SADD', KEYS[1], unpack(ARGV, 2))
+export const scopedCacheIndexFileScript = `
 local want = tonumber(ARGV[1])
-if existed == 0 then
-	redis.call('EXPIRE', KEYS[1], want)
-	return 1
+local unbounded = want <= 0
+local longest = want * 1000
+local lefts = {}
+local created = {}
+
+for i = 2, #KEYS do
+	local left = redis.call('TTL', KEYS[i])
+	lefts[i] = left
+	if left == -2 then
+		created[#created + 1] = KEYS[i]
+	elseif left == -1 then
+		unbounded = true
+	elseif left >= want then
+		longest = math.max(longest, (left + 1) * 1000)
+	end
 end
-local ttl = redis.call('TTL', KEYS[1])
-if ttl >= 0 and ttl < want then
-	redis.call('EXPIRE', KEYS[1], want)
+
+local held = redis.call('PTTL', KEYS[1])
+if held == -2 then
+	redis.call('SADD', KEYS[1], unpack(KEYS, 2))
+elseif #created > 0 then
+	redis.call('SADD', KEYS[1], unpack(created))
 end
-return 0
+if unbounded then
+	if held >= 0 then
+		redis.call('PERSIST', KEYS[1])
+	end
+elseif held == -2 or (held >= 0 and held < longest) then
+	redis.call('PEXPIRE', KEYS[1], longest)
+end
+
+local at = 2
+for i = 2, #KEYS do
+	local count = tonumber(ARGV[at])
+	if count > 0 then
+		redis.call('SADD', KEYS[i], unpack(ARGV, at + 1, at + count))
+	end
+	at = at + count + 1
+	if want <= 0 then
+		if lefts[i] >= 0 then
+			redis.call('PERSIST', KEYS[i])
+		end
+	elseif lefts[i] == -2 or (lefts[i] >= 0 and lefts[i] < want) then
+		redis.call('EXPIRE', KEYS[i], want)
+	end
+end
+
+return #created
 `;
 
 /**
@@ -225,7 +281,7 @@ return existed
  * between, and the removal then leaves a set holding members that no
  * index-key set names. Inside one script, a fill either lands first — the set
  * exists, the name stays — or after, and names its set again itself, since it
- * registers after it files.
+ * finds the set missing and names every set it creates.
  *
  * KEYS[1] is the index-key set and the rest the names to check.
  */
@@ -248,11 +304,10 @@ end
 return live
 `;
 
-type ScopedCacheIndexExpiryCommand = {
-	scopedCacheIndexExpiry(
-		indexKey: string,
-		ttlSeconds: number,
-		...members: string[]
+type ScopedCacheIndexFileCommand = {
+	scopedCacheIndexFile(
+		keyCount: number,
+		...keysThenFilings: Array<string | number>
 	): ChainableCommander;
 };
 
@@ -264,9 +319,13 @@ type ScopedCacheCollectionIndexKeysRegisterCommand<Answer> = {
 	): Answer;
 };
 
-type ScopedCacheIndexPipeline = ChainableCommander
-	& ScopedCacheIndexExpiryCommand
-	& ScopedCacheCollectionIndexKeysRegisterCommand<ChainableCommander>;
+type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexFileCommand;
+
+/** The index sets one `scopedCacheIndexFile` call files, with their members. */
+type ScopedCacheIndexFileCall = {
+	indexKeys: string[];
+	filingArguments: Array<string | number>;
+};
 
 type ScopedCacheCollectionIndexKeysPruneCommand = {
 	scopedCacheCollectionIndexKeysPrune(
@@ -293,7 +352,7 @@ type ScopedCacheIndexReapCommand = {
 };
 
 type ScopedCacheScriptedRedis = Redis
-	& ScopedCacheIndexExpiryCommand
+	& ScopedCacheIndexFileCommand
 	& ScopedCacheEpochBumpCommand
 	& ScopedCacheIndexReapCommand
 	& ScopedCacheCollectionIndexKeysPruneCommand
@@ -302,14 +361,12 @@ type ScopedCacheScriptedRedis = Redis
 const clientsCarryingScripts = new WeakSet<Redis>();
 
 /**
- * The shared client, with the index-expiry and counter-bump scripts registered as
+ * The shared client, with the index-filing and counter-bump scripts registered as
  * commands on it.
  *
  * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
- * `NOSCRIPT` — so the 316-byte index-expiry script crosses the wire once per server
- * rather than once per index set. A read filed under 200 index sets sends 402 in
- * one pipeline, and as `EVAL` that is 124 KB of Lua per fill against 193 KB sent
- * in total.
+ * `NOSCRIPT` — so the index-filing script crosses the wire once per server rather
+ * than once per fill.
  *
  * Registration is per client and idempotent, but `defineCommand` rebuilds the
  * command each time, so the set keeps it to the first call per connection.
@@ -318,9 +375,8 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 	const redis = useCacheRedis();
 
 	if (! clientsCarryingScripts.has(redis)) {
-		redis.defineCommand('scopedCacheIndexExpiry', {
-			numberOfKeys: 1,
-			lua: scopedCacheIndexExpiryScript,
+		redis.defineCommand('scopedCacheIndexFile', {
+			lua: scopedCacheIndexFileScript,
 		});
 
 		redis.defineCommand('scopedCacheEpochBump', {
@@ -525,7 +581,7 @@ function scopedCacheSweptIndexKeyPrefix(collection: string): string {
  *
  * Outside `fingerprint:` and `swept:` so neither family's glob reaches it, and
  * inside the prefix so a full flush drops it with the sets it names. A name
- * enters it only after its set was filed and leaves it only while its set is
+ * enters it in the script creating its set and leaves it only while its set is
  * missing or being moved aside, and its expiry is never shorter than a named set's.
  */
 function scopedCacheCollectionIndexKeysKey(collection: string): string {
@@ -1104,8 +1160,8 @@ async function reapIndexMembers(
 /**
  * Name one set in its collection's index-key set with the set's own expiry,
  * which the index-key set then keeps at least. Not one script with the read: a
- * fill moving the set's expiry out in between registers the set itself, with
- * the longer one.
+ * fill moving the set's expiry out in between moves the index-key set's past
+ * it too.
  */
 async function registerCollectionIndexKeys(
 	collection: string,
@@ -1153,7 +1209,7 @@ const redisStore: ScopedCacheStore = {
 		}
 
 		const pipeline = useScriptedRedis().pipeline() as ScopedCacheIndexPipeline;
-		const indexKeysByCollectionKey = new Map<string, Set<string>>();
+		const callsByCollectionKey = new Map<string, ScopedCacheIndexFileCall[]>();
 
 		for (const { fingerprint, keys, indexPath, homePinFields } of filings) {
 			const members = keys.map((key) => {
@@ -1164,51 +1220,44 @@ const redisStore: ScopedCacheStore = {
 				fingerprint.collection,
 			);
 
-			const registered = indexKeysByCollectionKey.get(collectionIndexKeysKey)
-				?? new Set<string>();
+			const collectionCalls = callsByCollectionKey.get(collectionIndexKeysKey)
+				?? [];
 
-			indexKeysByCollectionKey.set(collectionIndexKeysKey, registered);
+			callsByCollectionKey.set(collectionIndexKeysKey, collectionCalls);
 
 			for (const indexKey of scopedCacheFingerprintIndexKeys(
 				fingerprint,
 				indexPath,
 				homePinFields,
 			)) {
-				registered.add(indexKey);
+				let fileCall = collectionCalls.at(-1);
 
-				if (ttlSeconds > 0) {
-					pipeline.scopedCacheIndexExpiry(indexKey, ttlSeconds, ...members);
-				}
-				else {
-					pipeline.sadd(indexKey, ...members);
+				const callIsFull = fileCall !== undefined && (
+					fileCall.indexKeys.length >= SCOPED_CACHE_INDEX_CHUNK_MEMBERS
+					|| fileCall.filingArguments.length + members.length
+					> SCOPED_CACHE_INDEX_CHUNK_MEMBERS * 2
+				);
 
-					// The entries it names never expire now, so neither may the set: one
-					// filed while a TTL was in force keeps that expiry otherwise, and
-					// drops out from under them.
-					pipeline.persist(indexKey);
+				if (fileCall === undefined || callIsFull) {
+					fileCall = { indexKeys: [], filingArguments: [] };
+					collectionCalls.push(fileCall);
 				}
+
+				fileCall.indexKeys.push(indexKey);
+				fileCall.filingArguments.push(members.length, ...members);
 			}
 		}
 
-		// After every set it names: a pipeline runs in order, so the index-key set never
-		// names a set before it holds the members, and a prune in between cannot
-		// drop a name the fill is about to need.
-		const collectionIndexKeysExpiry = ttlSeconds > 0
-			? ttlSeconds * 1000
-			: -1;
-
-		for (const [collectionIndexKeysKey, registered] of indexKeysByCollectionKey) {
-			const indexKeys = [...registered];
-
-			for (
-				let at = 0;
-				at < indexKeys.length;
-				at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
-			) {
-				pipeline.scopedCacheCollectionIndexKeysRegister(
+		// One call per collection files its sets and names the ones it creates, so
+		// a set's name crosses the wire once per fill, as the set's own key.
+		for (const [collectionIndexKeysKey, collectionCalls] of callsByCollectionKey) {
+			for (const { indexKeys, filingArguments } of collectionCalls) {
+				pipeline.scopedCacheIndexFile(
+					indexKeys.length + 1,
 					collectionIndexKeysKey,
-					collectionIndexKeysExpiry,
-					...indexKeys.slice(at, at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS),
+					...indexKeys,
+					ttlSeconds,
+					...filingArguments,
 				);
 			}
 		}
