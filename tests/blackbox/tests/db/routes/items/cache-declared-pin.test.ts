@@ -13,6 +13,7 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -523,6 +524,11 @@ describe.each(vendors)('%s', (vendor) => {
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
+			await awaitRequestedReap(
+				Number(env[vendor]['REDIS_PORT']),
+				env[vendor]['CACHE_NAMESPACE']!,
+			);
+
 			const filedBefore = await indexedMembers();
 
 			// The MISS then HIT proves there is an entry to purge at all.
@@ -564,14 +570,14 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
-		// What a reap's full pass writes: the wholesale counter as it reads now.
+		// What a reap's full pass writes: the index generation as it reads now.
 		// Without it a declaration scans the keyspace for the home pins' sets.
 		and.optional('the index-key sets are marked complete', async () => {
 			const namespace = env[vendor]['CACHE_NAMESPACE'];
 
 			expect(await redis.set(
 				`${namespace}:scoped-cache-index:collection-index-keys-complete`,
-				await redis.get(`${namespace}:scoped-cache-epoch:*`) ?? '',
+				await redis.get(`${namespace}:scoped-cache-index-generation`) ?? '',
 			)).toBe('OK');
 		});
 	}

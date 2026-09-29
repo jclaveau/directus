@@ -7,6 +7,7 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
@@ -263,6 +264,9 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
+			// Its pass would reap the decoys, and move the counter the held reads check.
+			await awaitRequestedReap(REDIS_PORT, namespace);
+
 			const limits = await survivorsOf(await fillDuringPurge('v2'));
 
 			mark(`${limits.length} entries survived the purge and are cached`);
@@ -291,6 +295,9 @@ describe(oneLine`
 			await request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
+
+			// Its pass would reap the decoys, and move the counter the held reads check.
+			await awaitRequestedReap(REDIS_PORT, namespace);
 
 			const limits = await survivorsOf(await fillDuringPurge('v4'));
 

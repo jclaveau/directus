@@ -4,6 +4,7 @@ import { CreateCollections, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import Redis from 'ioredis';
@@ -35,8 +36,6 @@ describe.each(vendors)('%s', (vendor) => {
 	// legacy bare set, which the last scenario needs them to. The pass the boot
 	// asks for ends before any scenario files a read.
 	env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '0 0 1 1 *';
-	const markerKey = `${indexPrefix}collection-index-keys-complete`;
-	const generationKey = `${namespace}:scoped-cache-index-generation`;
 
 	const collections = [
 		'legacy_bare_named',
@@ -72,14 +71,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await awaitDirectusConnection(Number(env[vendor].PORT));
 
-		await expect.poll(async () => {
-			const [marker, generation] = await redisClient.mget(
-				markerKey,
-				generationKey,
-			);
-
-			return marker !== null && marker === generation;
-		}, { timeout: 15_000 }).toBe(true);
+		await awaitRequestedReap(6108, namespace);
 	}, 60_000);
 
 	afterAll(async () => {
