@@ -33,6 +33,7 @@ import {
 	type ScopedCacheFingerprint,
 } from './fingerprint.js';
 import type {
+	ScopedCacheBuildRecord,
 	ScopedCacheIndexedEntry,
 	ScopedCacheIndexFiling,
 	ScopedCacheIndexTake,
@@ -347,11 +348,19 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
  * let a drop start in between, and the marker then vouches for an index that
  * drop is cutting.
  *
- * KEYS are the marker, the generation and the wholesale counter; ARGV the
- * generation and the counter as the reap read them. Answers 1 when it wrote.
+ * Nor while a changed build's fill pause runs: the nodes of the build before
+ * are still filing sets nothing names (`scopedCacheIndexBuildRecordScript`).
+ *
+ * KEYS are the marker, the generation, the wholesale counter and the fill
+ * pause; ARGV the generation and the counter as the reap read them. Answers 1
+ * when it wrote.
  */
 export const scopedCacheIndexCompleteMarkScript = `
 if redis.call('GET', KEYS[2]) ~= ARGV[1] then
+	return 0
+end
+
+if redis.call('EXISTS', KEYS[4]) == 1 then
 	return 0
 end
 
@@ -370,24 +379,43 @@ return 1
  * index-key sets, rolled back to and forward from, filed sets nothing names while
  * the marker a later build wrote still vouched for them.
  *
- * KEYS are the recorded build, the marker and the generation; ARGV the build.
- * Answers 1 when the build changed.
+ * A change also opens the fill pause, for as long as ARGV[2] says: the nodes
+ * of the build before go on filling through a rolling deploy, and neither
+ * build's purges reach every set the other files. Held in Redis rather than per
+ * process, so a replica booting on the recorded build joins the window already
+ * running instead of filling through it.
+ *
+ * KEYS are the recorded build, the marker, the generation and the fill pause;
+ * ARGV the build and the pause in ms, 0 for none. Answers whether the build
+ * changed, 1 or 0, and the ms left of the pause, 0 when none runs.
  */
 export const scopedCacheIndexBuildRecordScript = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-	return 0
+local changed = 0
+
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+	changed = 1
+
+	redis.call('SET', KEYS[1], ARGV[1])
+	redis.call('DEL', KEYS[2])
+
+	local now = redis.call('TIME')
+	local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+	redis.call('SET', KEYS[3], seed, 'NX')
+	redis.call('INCR', KEYS[3])
+
+	if tonumber(ARGV[2]) > 0 then
+		redis.call('SET', KEYS[4], ARGV[1], 'PX', ARGV[2])
+	end
 end
 
-redis.call('SET', KEYS[1], ARGV[1])
-redis.call('DEL', KEYS[2])
+local pauseLeft = redis.call('PTTL', KEYS[4])
 
-local now = redis.call('TIME')
-local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+if pauseLeft < 0 then
+	pauseLeft = 0
+end
 
-redis.call('SET', KEYS[3], seed, 'NX')
-redis.call('INCR', KEYS[3])
-
-return 1
+return { changed, pauseLeft }
 `;
 
 type ScopedCacheIndexFileCommand = {
@@ -456,6 +484,7 @@ type ScopedCacheIndexCompleteMarkCommand = {
 		markerKey: string,
 		generationKey: string,
 		flushEpochKey: string,
+		fillPauseKey: string,
 		generationRead: string,
 		flushEpochRead: string,
 	): Promise<number>;
@@ -466,8 +495,10 @@ type ScopedCacheIndexBuildRecordCommand = {
 		buildKey: string,
 		markerKey: string,
 		generationKey: string,
+		fillPauseKey: string,
 		buildIdentity: string,
-	): Promise<number>;
+		fillPauseMs: number,
+	): Promise<[number, number]>;
 };
 
 type ScopedCacheScriptedRedis = Redis
@@ -531,12 +562,12 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 		});
 
 		redis.defineCommand('scopedCacheIndexCompleteMark', {
-			numberOfKeys: 3,
+			numberOfKeys: 4,
 			lua: scopedCacheIndexCompleteMarkScript,
 		});
 
 		redis.defineCommand('scopedCacheIndexBuildRecord', {
-			numberOfKeys: 3,
+			numberOfKeys: 4,
 			lua: scopedCacheIndexBuildRecordScript,
 		});
 
@@ -779,6 +810,14 @@ function scopedCacheIndexBuildKey(): string {
 }
 
 /**
+ * Set while a changed build holds its fills (`scopedCacheIndexBuildRecordScript`).
+ * Outside the prefix, as the generation: a drop of the index must not end it.
+ */
+function scopedCacheFillPauseKey(): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause`;
+}
+
+/**
  * The glob matching every set one collection's fingerprints are filed in — the
  * bare one, every split the index path produced and every home pin's. What a
  * collection-wide read SCANs the keyspace for while the index-key sets are not
@@ -812,9 +851,11 @@ function scopedCacheCollectionIndexGlob(collection: string): string {
  *
  * A boot of a build other than the last one recorded takes the marker back
  * (`recordBuildIdentity`), so a build rolled back to and forward again leaves
- * none standing over the sets it filed. Accepted: a node still running a build
- * older than the index-key sets, during a rolling deploy, files sets nothing
- * names after the marker was written. The next reap names them; until then a
+ * none standing over the sets it filed. The nodes of an older build go on
+ * filing through a rolling deploy, so that boot also opens a fill pause during
+ * which no marker is written, and the reap at its close names what they filed.
+ * Accepted: a node of the older build outliving the pause files sets nothing
+ * names after that marker. The next reap names them; until then a
  * collection-wide purge misses their entries.
  */
 async function collectionIndexKeysComplete(): Promise<boolean> {
@@ -1928,6 +1969,7 @@ const redisStore: ScopedCacheStore = {
 				scopedCacheCollectionIndexKeysCompleteKey(),
 				scopedCacheIndexGenerationKey(),
 				scopedCacheEpochKey('*'),
+				scopedCacheFillPauseKey(),
 				generationRead,
 				flushEpochRead,
 			) === 1;
@@ -2002,13 +2044,21 @@ const redisStore: ScopedCacheStore = {
 		return collectionIndexKeysComplete();
 	},
 
-	async recordBuildIdentity(buildIdentity: string): Promise<boolean> {
-		return await useScriptedRedis().scopedCacheIndexBuildRecord(
-			scopedCacheIndexBuildKey(),
-			scopedCacheCollectionIndexKeysCompleteKey(),
-			scopedCacheIndexGenerationKey(),
-			buildIdentity,
-		) === 1;
+	async recordBuildIdentity(
+		buildIdentity: string,
+		fillPauseMs: number,
+	): Promise<ScopedCacheBuildRecord> {
+		const [changed, fillPauseLeftMs] = await useScriptedRedis()
+			.scopedCacheIndexBuildRecord(
+				scopedCacheIndexBuildKey(),
+				scopedCacheCollectionIndexKeysCompleteKey(),
+				scopedCacheIndexGenerationKey(),
+				scopedCacheFillPauseKey(),
+				buildIdentity,
+				fillPauseMs,
+			);
+
+		return { buildChanged: changed === 1, fillPauseLeftMs };
 	},
 
 	onStoreReady(listener: () => void): void {

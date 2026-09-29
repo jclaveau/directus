@@ -90,6 +90,13 @@ export interface ScopedCacheReapTally {
 	markedComplete: boolean;
 }
 
+/** What recording the build found (`ScopedCacheStore.recordBuildIdentity`). */
+export interface ScopedCacheBuildRecord {
+	buildChanged: boolean;
+	/** What is left of the fill pause, whichever boot opened it; 0 when none runs. */
+	fillPauseLeftMs: number;
+}
+
 export interface ScopedCacheStore {
 	/**
 	 * Refuse scoped mode at startup on a store that cannot answer for the whole
@@ -233,9 +240,13 @@ export interface ScopedCacheStore {
 	 * Record the build this process runs. When it is not the one recorded, the
 	 * collection-wide reads stop trusting the index-key sets until a reap: a build
 	 * older than them may have run in between, filing sets they do not name.
-	 * Answers whether the build changed.
+	 * A change also opens a fill pause of `fillPauseMs`, which every node reads
+	 * back here, the node that opened it and a replica booting into it alike.
 	 */
-	recordBuildIdentity(buildIdentity: string): Promise<boolean>;
+	recordBuildIdentity(
+		buildIdentity: string,
+		fillPauseMs: number,
+	): Promise<ScopedCacheBuildRecord>;
 
 	/**
 	 * Drop the whole index, reporting what it cost. The collection-wide reads stop

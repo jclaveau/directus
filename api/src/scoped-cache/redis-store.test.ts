@@ -1807,52 +1807,72 @@ describe('recordBuildIdentity', () => {
 	});
 
 	it(oneLine`
-		records the build beside the marker and the generation it takes back
+		records the build beside the marker and the generation it takes back, and
+		the fill pause it opens
 	`, async () => {
-		scopedCacheIndexBuildRecord.mockResolvedValueOnce(1);
+		scopedCacheIndexBuildRecord.mockResolvedValueOnce([1, 600_000]);
 
-		expect(await redisScopedCacheStore().recordBuildIdentity('build-b'))
-		.toBe(true);
+		expect(
+			await redisScopedCacheStore().recordBuildIdentity('build-b', 600_000),
+		).toEqual({ buildChanged: true, fillPauseLeftMs: 600_000 });
 
 		expect(scopedCacheIndexBuildRecord.mock.calls).toEqual([[
 			'scalabus:scoped-cache-index-build',
 			'scalabus:scoped-cache-index:collection-index-keys-complete',
 			'scalabus:scoped-cache-index-generation',
+			'scalabus:scoped-cache-fill-pause',
 			'build-b',
+			600_000,
 		]]);
 
 		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheIndexBuildRecord',
-			{ numberOfKeys: 3, lua: scopedCacheIndexBuildRecordScript },
+			{ numberOfKeys: 4, lua: scopedCacheIndexBuildRecordScript },
 		);
 	});
 
-	it('answers false for the build already recorded', async () => {
-		scopedCacheIndexBuildRecord.mockResolvedValueOnce(0);
+	it(oneLine`
+		answers the build already recorded unchanged, with what is left of the
+		pause another boot opened
+	`, async () => {
+		scopedCacheIndexBuildRecord.mockResolvedValueOnce([0, 4_000]);
 
-		expect(await redisScopedCacheStore().recordBuildIdentity('build-b'))
-		.toBe(false);
+		expect(
+			await redisScopedCacheStore().recordBuildIdentity('build-b', 600_000),
+		).toEqual({ buildChanged: false, fillPauseLeftMs: 4_000 });
 	});
 
 	it(oneLine`
-		takes the marker back and moves the generation only for a build not
-		recorded, in one script
+		takes the marker back, moves the generation and opens the pause only for a
+		build not recorded, in one script, and reads the pause back for any
 	`, () => {
 		expect(scopedCacheIndexBuildRecordScript).toBe(`
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-	return 0
+local changed = 0
+
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+	changed = 1
+
+	redis.call('SET', KEYS[1], ARGV[1])
+	redis.call('DEL', KEYS[2])
+
+	local now = redis.call('TIME')
+	local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+
+	redis.call('SET', KEYS[3], seed, 'NX')
+	redis.call('INCR', KEYS[3])
+
+	if tonumber(ARGV[2]) > 0 then
+		redis.call('SET', KEYS[4], ARGV[1], 'PX', ARGV[2])
+	end
 end
 
-redis.call('SET', KEYS[1], ARGV[1])
-redis.call('DEL', KEYS[2])
+local pauseLeft = redis.call('PTTL', KEYS[4])
 
-local now = redis.call('TIME')
-local seed = now[1] .. string.format('%06d', tonumber(now[2]))
+if pauseLeft < 0 then
+	pauseLeft = 0
+end
 
-redis.call('SET', KEYS[3], seed, 'NX')
-redis.call('INCR', KEYS[3])
-
-return 1
+return { changed, pauseLeft }
 `);
 	});
 });
@@ -1911,13 +1931,14 @@ describe('reapIndexedEntries', () => {
 			'scalabus:scoped-cache-index:collection-index-keys-complete',
 			'scalabus:scoped-cache-index-generation',
 			'scalabus:scoped-cache-epoch:*',
+			'scalabus:scoped-cache-fill-pause',
 			'41',
 			'9',
 		]]);
 
 		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheIndexCompleteMark',
-			{ numberOfKeys: 3, lua: scopedCacheIndexCompleteMarkScript },
+			{ numberOfKeys: 4, lua: scopedCacheIndexCompleteMarkScript },
 		);
 
 		expect(scopedCacheIndexGenerationRead.mock.invocationCallOrder[0])
@@ -1950,9 +1971,16 @@ describe('reapIndexedEntries', () => {
 		});
 	});
 
-	it('writes the marker only in the script that rereads what the reap read', () => {
+	it(oneLine`
+		writes the marker only in the script that rereads what the reap read, and
+		never during a deploy's fill pause
+	`, () => {
 		expect(scopedCacheIndexCompleteMarkScript).toBe(`
 if redis.call('GET', KEYS[2]) ~= ARGV[1] then
+	return 0
+end
+
+if redis.call('EXISTS', KEYS[4]) == 1 then
 	return 0
 end
 

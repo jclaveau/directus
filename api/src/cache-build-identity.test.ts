@@ -1,12 +1,13 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	clearIndexMarkerIfBuildChanged,
 	computeBuildIdentity,
 	flushCachesIfBuildChanged,
+	recordScopedCacheBuild,
 } from './cache-build-identity.js';
 import { flushCaches, getCache } from './cache.js';
 import { scopedCacheIndexStoreAvailable } from './scoped-cache/config.js';
+import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
 import { useScopedCacheStore } from './scoped-cache/store.js';
 
 const env = vi.hoisted(() => ({}) as Record<string, any>);
@@ -31,6 +32,10 @@ vi.mock('./scoped-cache/config.js', () => {
 });
 
 vi.mock('./scoped-cache/store.js', () => ({ useScopedCacheStore: vi.fn() }));
+
+vi.mock('./scoped-cache/fill-pause.js', () => {
+	return { pauseScopedCacheFills: vi.fn() };
+});
 
 vi.mock('./cache.js', () => ({ flushCaches: vi.fn(), getCache: vi.fn() }));
 
@@ -392,40 +397,79 @@ describe('flushCachesIfBuildChanged', () => {
 	});
 });
 
-describe('clearIndexMarkerIfBuildChanged', () => {
+describe('recordScopedCacheBuild', () => {
 	it(oneLine`
-		records the core build with auto-flush off — a build rolled back to may
-		have filed sets the index-key sets do not name
+		records the core build with auto-flush off and pauses fills for what is
+		left of the window — a build rolled back to may have filed sets the
+		index-key sets do not name
 	`, async () => {
 		env['CACHE_AUTO_FLUSH_ON_DEPLOY'] = false;
 		env['CACHE_BUILD_ID'] = 'build-b';
-		const recordBuildIdentity = vi.fn(async () => true);
+		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE'] = '10m';
+
+		const recordBuildIdentity = vi.fn(async () => {
+			return { buildChanged: true, fillPauseLeftMs: 600_000 };
+		});
 
 		vi.mocked(useScopedCacheStore)
 			.mockReturnValue({ recordBuildIdentity } as any);
 
-		await clearIndexMarkerIfBuildChanged();
+		await recordScopedCacheBuild();
 
-		expect(recordBuildIdentity).toHaveBeenCalledExactlyOnceWith('build-b');
+		expect(recordBuildIdentity)
+			.toHaveBeenCalledExactlyOnceWith('build-b', 600_000);
+
+		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(600_000);
+
+		expect(logger.info.mock.calls).toEqual([
+			[
+				'[scoped-cache] build build-b differs from the last boot\'s: '
+				+ 'index-key sets untrusted until the next reap',
+			],
+			['[scoped-cache] fills paused for 600000 ms after a deploy'],
+		]);
+	});
+
+	it(oneLine`
+		joins a pause another boot opened, on the build already recorded — a
+		replica of the same build
+	`, async () => {
+		env['CACHE_BUILD_ID'] = 'build-b';
+
+		vi.mocked(useScopedCacheStore).mockReturnValue({
+			recordBuildIdentity: async () => {
+				return { buildChanged: false, fillPauseLeftMs: 4_000 };
+			},
+		} as any);
+
+		await recordScopedCacheBuild();
+
+		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(4_000);
 
 		expect(logger.info).toHaveBeenCalledExactlyOnceWith(
-			'[scoped-cache] build build-b differs from the last boot\'s: '
-			+ 'index-key sets untrusted until the next reap',
+			'[scoped-cache] fills paused for 4000 ms after a deploy',
 		);
 	});
 
-	it('logs nothing for the build already recorded', async () => {
+	it('ends the pause and logs nothing with no window running', async () => {
 		env['CACHE_BUILD_ID'] = 'build-b';
 
-		vi.mocked(useScopedCacheStore)
-			.mockReturnValue({ recordBuildIdentity: async () => false } as any);
+		vi.mocked(useScopedCacheStore).mockReturnValue({
+			recordBuildIdentity: async () => {
+				return { buildChanged: false, fillPauseLeftMs: 0 };
+			},
+		} as any);
 
-		await clearIndexMarkerIfBuildChanged();
+		await recordScopedCacheBuild();
 
+		expect(pauseScopedCacheFills).toHaveBeenCalledExactlyOnceWith(0);
 		expect(logger.info).not.toHaveBeenCalled();
 	});
 
-	it('logs a store that refuses rather than failing the boot', async () => {
+	it(oneLine`
+		logs a store that refuses rather than failing the boot, and leaves the
+		fills paused
+	`, async () => {
 		env['CACHE_BUILD_ID'] = 'build-b';
 
 		vi.mocked(useScopedCacheStore).mockReturnValue({
@@ -434,7 +478,9 @@ describe('clearIndexMarkerIfBuildChanged', () => {
 			},
 		} as any);
 
-		await clearIndexMarkerIfBuildChanged();
+		await recordScopedCacheBuild();
+
+		expect(pauseScopedCacheFills).not.toHaveBeenCalled();
 
 		expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
 			new Error('OOM'),
@@ -445,7 +491,7 @@ describe('clearIndexMarkerIfBuildChanged', () => {
 	it('records nothing with no Redis to hold the index', async () => {
 		vi.mocked(scopedCacheIndexStoreAvailable).mockReturnValueOnce(false);
 
-		await clearIndexMarkerIfBuildChanged();
+		await recordScopedCacheBuild();
 
 		expect(useScopedCacheStore).not.toHaveBeenCalled();
 	});

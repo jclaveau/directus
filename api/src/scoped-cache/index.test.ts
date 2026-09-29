@@ -70,7 +70,7 @@ import {
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
-import { clearIndexMarkerIfBuildChanged } from '../cache-build-identity.js';
+import { recordScopedCacheBuild } from '../cache-build-identity.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
 import {
@@ -118,7 +118,7 @@ vi.mock('./reap-requests.js', () => {
 });
 
 vi.mock('../cache-build-identity.js', () => {
-	return { clearIndexMarkerIfBuildChanged: vi.fn() };
+	return { recordScopedCacheBuild: vi.fn() };
 });
 
 vi.mock('../cache-events.js', () => {
@@ -2574,10 +2574,10 @@ describe('startScopedCachePurgeRecovery', () => {
 			expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
 		});
 
-		expect(clearIndexMarkerIfBuildChanged).toHaveBeenCalledOnce();
+		expect(recordScopedCacheBuild).toHaveBeenCalledOnce();
 
 		expect(
-			vi.mocked(clearIndexMarkerIfBuildChanged).mock.invocationCallOrder[0],
+			vi.mocked(recordScopedCacheBuild).mock.invocationCallOrder[0],
 		).toBeLessThan(
 			vi.mocked(requestScopedCacheIndexReap).mock.invocationCallOrder[0]!,
 		);

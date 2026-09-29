@@ -227,6 +227,9 @@ const cachedArmEnv = {
 	// `setHeader` per response, where the tag headers would add a Redis write per
 	// fill and a read per hit — so those stay off.
 	CACHE_STATUS_HEADER: STATUS_HEADER,
+	// Every arm boots a build its namespace has not recorded, and a deploy's fill
+	// pause would serve its warm series cold.
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
 };
 
 const arms: Arm[] = [

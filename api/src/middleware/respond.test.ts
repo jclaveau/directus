@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
 		mockCache: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
 		indexScopedCacheEntry: vi.fn(),
 		scopedCachePurgeEnabled: vi.fn(() => false),
+		scopedCacheFillPaused: vi.fn(() => false),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		queryCachable: vi.fn(() => true),
@@ -68,6 +69,7 @@ vi.mock('../scoped-cache/index.js', async (importOriginal) => {
 	return {
 		indexScopedCacheEntry: mocks.indexScopedCacheEntry,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
+		scopedCacheFillPaused: mocks.scopedCacheFillPaused,
 		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
 		// Real, so the unguarded cases below assert the predicate rather than a
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
@@ -211,6 +213,7 @@ beforeEach(() => {
 	permissionsCachable.mockResolvedValue(true);
 	mocks.queryCachable.mockReturnValue(true);
 	mocks.scopedCachePurgeEnabled.mockReturnValue(false);
+	mocks.scopedCacheFillPaused.mockReturnValue(false);
 	mocks.resolvedCacheTtl.mockImplementation(() => env['CACHE_TTL']);
 });
 
@@ -923,6 +926,27 @@ describe('respond middleware', () => {
 		await respond(makeReq(), res, next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		serves a read uncached and indexes nothing while a deploy's fill pause runs
+		— the build before still files sets this build's entries would escape
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheFillPaused.mockReturnValue(true);
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheFingerprints: [{
+				collection: 'articles',
+			}],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(mocks.indexScopedCacheEntry).not.toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalledWith({ data: [] });
 	});
 
 	test(oneLine`

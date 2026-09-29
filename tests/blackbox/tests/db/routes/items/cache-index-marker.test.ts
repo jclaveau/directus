@@ -25,6 +25,7 @@ describe.each(vendors)('%s', (vendor) => {
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
 	const markerKey = `${indexPrefix}collection-index-keys-complete`;
 	const generationKey = `${namespace}:scoped-cache-index-generation`;
+	const fillPauseKey = `${namespace}:scoped-cache-fill-pause`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';
 	env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
@@ -39,7 +40,12 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['CACHE_AUTO_FLUSH_ON_DEPLOY'] = 'false';
 	env[vendor]['CACHE_BUILD_ID'] = 'marker-build-a';
 
-	const collections = ['index_marker_flush', 'index_marker_counter'];
+	const collections = [
+		'index_marker_flush',
+		'index_marker_counter',
+		'index_marker_pause',
+	];
+
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess;
@@ -298,5 +304,129 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 			}, 60_000);
 		}
+
+		// Its own steps: jest-cucumber binds definitions to steps in order, and
+		// this one restarts and reads twice.
+		scenario(
+			'a restart on another build serves every read uncached until its fill '
+			+ 'pause ends',
+			({ given, when, then, and }) => {
+				const collection = 'index_marker_pause';
+				let keptPauseLeftMs = 0;
+
+				function readByName(row: Record<string, string>) {
+					return request(getUrl(vendor, env))
+						.get(`/items/${collection}`)
+						.query({ 'filter[name][_eq]': row['name'], fields: row['fields'] })
+						.set('Authorization', auth);
+				}
+
+				async function restartInstance() {
+					instance.kill();
+					await once(instance, 'exit');
+					await startInstance();
+				}
+
+				// A fill lands within milliseconds of its response, and the reads
+				// cached below show one within five seconds: two seconds of nothing
+				// filed is none coming.
+				async function expectNotCached(table: Record<string, string>[]) {
+					for (const row of table) {
+						expect((await readByName(row)).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+						expect((await readByName(row)).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						expect(await redisClient.keys(
+							`${indexPrefix}fingerprint:${collection}:*`,
+						)).toEqual([]);
+					}
+				}
+
+				given(
+					/^these rows of (\w+):$/,
+					async (_rowsOf: string, table: Record<string, string>[]) => {
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${collection}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				when(
+					/^the instance restarts on ([\w-]+) pausing fills for (\w+)$/,
+					async (buildId: string, fillPause: string) => {
+						env[vendor]['CACHE_BUILD_ID'] = buildId;
+						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE'] = fillPause;
+						await restartInstance();
+					},
+				);
+
+				then('these reads are not cached:', expectNotCached);
+
+				and('the fill pause left is kept as it reads now', async () => {
+					keptPauseLeftMs = await redisClient.pttl(fillPauseKey);
+					expect(keptPauseLeftMs).toBeGreaterThan(0);
+				});
+
+				// The replica boots with the same pause configured: one that opened a
+				// window of its own would read the whole of it again.
+				when(
+					/^the instance restarts on ([\w-]+) again$/,
+					restartInstance,
+				);
+
+				then('the fill pause left is no longer than the kept one', async () => {
+					expect(await redisClient.pttl(fillPauseKey))
+						.toBeLessThan(keptPauseLeftMs);
+				});
+
+				and('these reads are not cached:', expectNotCached);
+
+				// Both boots asked for a reap, and neither may mark while the build
+				// before could still be filing.
+				and('the index-key sets are not marked complete', async () => {
+					expect(await redisClient.get(markerKey)).toBeNull();
+				});
+
+				when('the fill pause ends', async () => {
+					await expect.poll(() => redisClient.exists(fillPauseKey), {
+						timeout: 40_000,
+					}).toBe(0);
+				});
+
+				// By the reap the pause asked for as it closed.
+				then('the index-key sets are marked complete', async () => {
+					await expect.poll(async () => {
+						const [marker, generation] = await redisClient.mget(
+							markerKey,
+							generationKey,
+						);
+
+						return marker !== null && marker === generation;
+					}, { timeout: 15_000 }).toBe(true);
+				});
+
+				and(
+					'these reads are cached:',
+					async (table: Record<string, string>[]) => {
+						for (const row of table) {
+							expect((await readByName(row)).headers[cacheStatusHeader])
+								.toBe('MISS');
+
+							await expect.poll(async () => {
+								return (await readByName(row)).headers[cacheStatusHeader];
+							}, { timeout: 5_000 }).toBe('HIT');
+						}
+					},
+				);
+			},
+			150_000,
+		);
 	});
 });

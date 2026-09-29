@@ -114,6 +114,9 @@ const cachedArmEnv = {
 	CACHE_AUTO_PURGE: 'true',
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_STATUS_HEADER: 'x-cache-status',
+	// Every arm boots a build its namespace has not recorded, and a deploy's fill
+	// pause would serve its warm series cold.
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
 	REDIS: redisUrl,
 };
 

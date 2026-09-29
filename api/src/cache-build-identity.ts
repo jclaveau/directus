@@ -11,6 +11,7 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
 import { scopedCacheIndexStoreAvailable } from './scoped-cache/config.js';
+import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
 import { useScopedCacheStore } from './scoped-cache/store.js';
 
 // The response cache lives in an external redis and survives a container swap, so
@@ -255,13 +256,16 @@ export async function flushCachesIfBuildChanged(
  * Stop trusting the index-key sets when this build is not the one the last boot
  * ran, whatever `CACHE_AUTO_FLUSH_ON_DEPLOY` says: a build older than them, rolled
  * back to, filed sets they do not name, and nothing else of it is left to notice.
+ * And hold this process's fills while the pause that change opened runs
+ * (`scopedCacheFillPaused`), which a replica booting on the recorded build joins.
  *
  * The core build alone, not the extension hash: an extension cannot change how
  * the index is filed, and reading every bundle is what a boot cannot afford twice.
- * Never throws: a boot must not fail on it, and a marker left standing costs no
- * more than before this ran.
+ * A replica of one build reads the same identity, so only a deploy opens a pause.
+ * Never throws: a boot must not fail on it. Fills stay paused when it fails, until
+ * the reconnect that runs it again.
  */
-export async function clearIndexMarkerIfBuildChanged(): Promise<void> {
+export async function recordScopedCacheBuild(): Promise<void> {
 	if (!scopedCacheIndexStoreAvailable()) {
 		return;
 	}
@@ -271,10 +275,24 @@ export async function clearIndexMarkerIfBuildChanged(): Promise<void> {
 	try {
 		const buildIdentity = resolveCoreBuildId();
 
-		if (await useScopedCacheStore().recordBuildIdentity(buildIdentity)) {
+		const { buildChanged, fillPauseLeftMs } = await useScopedCacheStore()
+			.recordBuildIdentity(
+				buildIdentity,
+				getMilliseconds(useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE'], 0),
+			);
+
+		pauseScopedCacheFills(fillPauseLeftMs);
+
+		if (buildChanged) {
 			logger.info(
 				`[scoped-cache] build ${buildIdentity} differs from the last boot's: `
 				+ 'index-key sets untrusted until the next reap',
+			);
+		}
+
+		if (fillPauseLeftMs > 0) {
+			logger.info(
+				`[scoped-cache] fills paused for ${fillPauseLeftMs} ms after a deploy`,
 			);
 		}
 	}

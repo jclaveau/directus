@@ -1230,12 +1230,12 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 // Before the request, which skips on a marker the build change is to clear.
 // Lazily: `cache-build-identity.ts` imports `cache.js`, which imports this.
-async function clearIndexMarkerThenRequestReap(): Promise<void> {
-	const { clearIndexMarkerIfBuildChanged } = await import(
+async function recordBuildThenRequestReap(): Promise<void> {
+	const { recordScopedCacheBuild } = await import(
 		'../cache-build-identity.js'
 	);
 
-	await clearIndexMarkerIfBuildChanged();
+	await recordScopedCacheBuild();
 	await requestScopedCacheIndexReap();
 }
 
@@ -1292,7 +1292,7 @@ export function startScopedCachePurgeRecovery(): void {
 
 		// A boot, or a reconnect after an outage a flush may have landed in,
 		// whose own reap request may have found Redis down.
-		clearIndexMarkerThenRequestReap().catch((error: any) => {
+		recordBuildThenRequestReap().catch((error: any) => {
 			logger.warn(error, `[scoped-cache] boot index reap failed: ${error}`);
 		});
 	});

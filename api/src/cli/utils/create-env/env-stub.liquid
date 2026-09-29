@@ -225,6 +225,17 @@ CACHE_ENABLED=false
 # reap. Cron syntax, run on one node per tick. [0 * * * *]
 # CACHE_SCOPED_INDEX_REAP_SCHEDULE="0 * * * *"
 
+# How long a boot of a build other than the last one recorded holds every node of
+# it from filling the scoped cache. The nodes of the build before keep serving and
+# filling through a rolling deploy, and file their entries where this build's
+# purges find them only by scanning the keyspace; entries this build filed where
+# theirs cannot reach would be served stale after their purges. So until the
+# window closes this build serves every read uncached and writes no completeness
+# marker, and at its close asks for a reap, which names what the old build filed
+# and writes it. Make it outlast the old build's last node. A replica booting on
+# the recorded build joins the window already running. 0 turns it off. [10m]
+# CACHE_SCOPED_DEPLOY_FILL_PAUSE=10m
+
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,
 # normalized primary tag) is ALWAYS keyed — no config needed.

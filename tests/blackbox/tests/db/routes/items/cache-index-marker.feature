@@ -10,6 +10,11 @@ Feature: The index-key sets are trusted again without waiting for the schedule
   generation, whatever CACHE_AUTO_FLUSH_ON_DEPLOY says, here off: a build rolled
   back to may have filed sets the index-key sets do not name.
 
+  It also opens a fill pause of CACHE_SCOPED_DEPLOY_FILL_PAUSE, off everywhere
+  but on the restarts that name one: through a rolling deploy the nodes of the
+  build before go on filling, and neither build's purges reach every set the
+  other files. A replica booting on the recorded build joins the pause running.
+
   Scenario: a flush with no reap scheduled has the index-key sets marked complete again
     Given these rows of index_marker_flush:
       | name | label |
@@ -59,3 +64,24 @@ Feature: The index-key sets are trusted again without waiting for the schedule
     And the marker is kept as it reads now
     When the instance restarts on the build marker-build-b
     Then the kept marker no longer names the index generation
+
+  Scenario: a restart on another build serves every read uncached until its fill pause ends
+    Given these rows of index_marker_pause:
+      | name | label |
+      | ada  | old   |
+    When the instance restarts on marker-build-c pausing fills for 30s
+    Then these reads are not cached:
+      | name | fields     |
+      | ada  | name,label |
+    And the fill pause left is kept as it reads now
+    When the instance restarts on marker-build-c again
+    Then the fill pause left is no longer than the kept one
+    And these reads are not cached:
+      | name | fields     |
+      | ada  | name,label |
+    And the index-key sets are not marked complete
+    When the fill pause ends
+    Then the index-key sets are marked complete
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |

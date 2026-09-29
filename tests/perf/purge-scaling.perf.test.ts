@@ -258,6 +258,9 @@ async function startInstance(): Promise<ChildProcess> {
 			// measured, and no reap runs in the middle of a write.
 			CACHE_TTL: '6h',
 			CACHE_SCOPED_INDEX_REAP_SCHEDULE: 'off',
+			// A namespace no build recorded yet: a deploy's fill pause would warm
+			// nothing.
+			CACHE_SCOPED_DEPLOY_FILL_PAUSE: '0',
 		},
 	});
 
