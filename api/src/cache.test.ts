@@ -135,6 +135,10 @@ vi.mock('./cache-events.js', async (importOriginal) => {
 	};
 });
 
+vi.mock('./scoped-cache/reap-requests.js', () => {
+	return { requestScopedCacheIndexReap: vi.fn() };
+});
+
 vi.mock('./redis/index.js', () => {
 	return {
 		cacheRedisDatabase,

@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/config.js';
-import { reapScopedCacheIndex } from '../scoped-cache/purge.js';
+import { runScopedCacheIndexReap } from '../scoped-cache/reap-requests.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 
 /**
@@ -30,8 +30,10 @@ export default async function schedule(): Promise<boolean> {
 	scheduleSynchronizedJob('scoped-cache-index-reap', reapSchedule, async () => {
 		// A failed reap leaves members naming nothing, which a purge tests and finds
 		// nothing for: a compare, never a stale hit, so the next tick retries it.
+		// Skipped while a pass a flush or a boot asked for holds the lock: the
+		// next tick walks what this one would have.
 		try {
-			await reapScopedCacheIndex();
+			await runScopedCacheIndexReap();
 		}
 		catch (error) {
 			logger.warn(

@@ -62,6 +62,7 @@ import {
 	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
 import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
+import { requestScopedCacheIndexReap } from './reap-requests.js';
 import { scopedCacheEpochBumpScript } from './redis-store.js';
 
 const env = useEnv();
@@ -624,6 +625,10 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 		// On a failed drop too: whatever part of the index did go took the filings
 		// of the fills in flight with it. And in every mode, as the drop is.
 		await bumpScopedCacheEpochsInEveryMode(['*']);
+
+		// The drop took the completeness marker, and every collection-wide purge
+		// SCANs until a reap writes it back.
+		void requestScopedCacheIndexReap();
 	}
 }
 
@@ -1270,6 +1275,10 @@ export function startScopedCachePurgeRecovery(): void {
 			});
 
 		recover();
+
+		// A boot, or a reconnect after an outage a flush may have landed in:
+		// nothing reaps until the schedule's next tick, if it has one.
+		void requestScopedCacheIndexReap();
 	});
 
 	// A purge can also fail with the link UP — `OOM command not allowed` under

@@ -2199,6 +2199,10 @@ const redisStore: ScopedCacheStore = {
 		);
 	},
 
+	indexKeysComplete(): Promise<boolean> {
+		return collectionIndexKeysComplete();
+	},
+
 	onStoreReady(listener: () => void): void {
 		const redis = useCacheRedis();
 

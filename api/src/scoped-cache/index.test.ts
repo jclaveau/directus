@@ -69,6 +69,7 @@ import {
 } from '../redis/index.js';
 import emitter from '../emitter.js';
 import { getCache } from '../cache.js';
+import { requestScopedCacheIndexReap } from './reap-requests.js';
 import { useLogger } from '../logger/index.js';
 import { withMeta } from '../utils/read-meta.js';
 import {
@@ -110,6 +111,10 @@ vi.mock('../emitter.js', () => {
 
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
 vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
+
+vi.mock('./reap-requests.js', () => {
+	return { requestScopedCacheIndexReap: vi.fn() };
+});
 
 vi.mock('../cache-events.js', () => {
 	return {
@@ -1312,6 +1317,17 @@ describe('dropScopedCacheIndex', () => {
 			'ns:scoped-cache-epoch:*',
 			86400,
 		);
+	});
+
+	it(oneLine`
+		asks for a reap once the index is gone — the drop took the completeness
+		marker, and every collection-wide purge SCANs until a reap writes it back
+	`, async () => {
+		mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
+
+		await dropScopedCacheIndex();
+
+		expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
 	});
 
 	it(oneLine`
@@ -2536,6 +2552,20 @@ describe('startScopedCachePurgeRecovery', () => {
 		await vi.waitFor(() => {
 			expect(listPendingScopedCachePurges).toHaveBeenCalledTimes(2);
 		});
+	});
+
+	it(oneLine`
+		asks for a reap at boot and on every reconnect — a flush during the outage
+		left the marker gone, and the schedule may be hours away or off
+	`, () => {
+		const on = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ on } as any);
+
+		startScopedCachePurgeRecovery();
+
+		on.mock.calls[0]![1]();
+
+		expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
 	});
 
 	it('registers no listener when there is no Redis config', () => {

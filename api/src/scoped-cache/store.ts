@@ -224,6 +224,12 @@ export interface ScopedCacheStore {
 	): Promise<ScopedCacheReapTally>;
 
 	/**
+	 * Whether the collection-wide reads trust the index-key sets right now: a
+	 * reap marked them complete, and no drop started since.
+	 */
+	indexKeysComplete(): Promise<boolean>;
+
+	/**
 	 * Drop the whole index, reporting what it cost. The collection-wide reads stop
 	 * trusting the index-key sets BEFORE anything is dropped, and THROWS when the
 	 * store refuses that: a drop cut short leaves sets those no longer name.

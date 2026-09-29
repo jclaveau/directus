@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { scopedCachePurgeEnabled } from '../scoped-cache/config.js';
-import { reapScopedCacheIndex } from '../scoped-cache/purge.js';
+import { runScopedCacheIndexReap } from '../scoped-cache/reap-requests.js';
 import { scheduleSynchronizedJob } from '../utils/schedule.js';
 import scopedCacheReapSchedule from './scoped-cache-reap.js';
 
@@ -17,8 +17,8 @@ vi.mock('../scoped-cache/config.js', () => {
 	return { scopedCachePurgeEnabled: vi.fn(() => true) };
 });
 
-vi.mock('../scoped-cache/purge.js', () => {
-	return { reapScopedCacheIndex: vi.fn() };
+vi.mock('../scoped-cache/reap-requests.js', () => {
+	return { runScopedCacheIndexReap: vi.fn() };
 });
 
 vi.mock('../utils/schedule.js', async (importOriginal) => {
@@ -48,11 +48,11 @@ describe('scoped-cache-reap', () => {
 
 		await vi.mocked(scheduleSynchronizedJob).mock.calls[0]![2](new Date());
 
-		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+		expect(runScopedCacheIndexReap).toHaveBeenCalledOnce();
 	});
 
 	test('logs a failed reap rather than throwing it out of the tick', async () => {
-		vi.mocked(reapScopedCacheIndex)
+		vi.mocked(runScopedCacheIndexReap)
 			.mockRejectedValueOnce(new Error('Connection is closed.'));
 
 		await scopedCacheReapSchedule();
