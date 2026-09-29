@@ -1182,7 +1182,7 @@ test('the filler files what a GET files', async () => {
 
 	const warmStatuses = await warmEntries(PK_PHASE, 0, entries);
 
-	expect([...warmStatuses], 'the HTTP warm').toContain('MISS');
+	expect([...warmStatuses], 'the HTTP warm').toEqual(['MISS']);
 
 	const httpKeys = await redis.dbsize();
 	const http = await readKeyspaceShape();
@@ -1431,7 +1431,7 @@ test('a scoped purge costs the same however much has expired', async () => {
 	const writtenEntries = writeReps * SLICE_ENTRIES;
 	const liveWarm = await warmEntries(phase, 0, writtenEntries);
 
-	expect([...liveWarm], 'the live warm').toContain('MISS');
+	expect([...liveWarm], 'the live warm').toEqual(['MISS']);
 
 	const liveFilled = await fillEntries(phase, writtenEntries, smallestSize);
 
