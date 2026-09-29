@@ -494,14 +494,18 @@ describe.each(vendors)('%s', (vendor) => {
 					}, { timeout: 4_000 }).toBe('MISS');
 				});
 
+				// Polled: the release unlinks the set, then drops its name in a later
+				// round trip.
 				and('the moved set is gone, and nothing names it', async () => {
-					expect([
-						await redisClient.exists(sweptKey),
-						await redisClient.sismember(
-							`${indexPrefix}swept-index-keys`,
-							sweptKey,
-						),
-					]).toEqual([0, 0]);
+					await expect.poll(async () => {
+						return [
+							await redisClient.exists(sweptKey),
+							await redisClient.sismember(
+								`${indexPrefix}swept-index-keys`,
+								sweptKey,
+							),
+						];
+					}, { timeout: 4_000 }).toEqual([0, 0]);
 				});
 			},
 			60_000,
