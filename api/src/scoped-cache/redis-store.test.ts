@@ -823,6 +823,8 @@ describe('fileIndexedEntries', () => {
 		]]);
 	});
 
+	// Sets that carry no member, so the argument count stays under its own cap
+	// and only the set count can start the second call.
 	it('starts a new call past 500 sets of one collection', async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
 			Array.from({ length: 501 }, (_, index) => {
@@ -830,7 +832,7 @@ describe('fileIndexedEntries', () => {
 					fingerprint: parseScopedCacheFingerprint(
 						`slot:&owner=,v${index},&`,
 					),
-					keys: [`key-${index}`],
+					keys: [],
 					indexPath: 'owner',
 					homePinFields: [],
 				};
@@ -838,16 +840,62 @@ describe('fileIndexedEntries', () => {
 			60,
 		);
 
-		expect(indexFile).toHaveBeenCalledTimes(2);
-		expect(indexFile.mock.calls[0]![0]).toBe(501);
+		expect(indexFile.mock.calls).toEqual([
+			[
+				501,
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				...Array.from({ length: 500 }, (_, index) => {
+					return `scalabus:scoped-cache-index:fingerprint:slot:owner=v${index}`;
+				}),
+				60,
+				...Array.from({ length: 500 }, () => 0),
+			],
+			[
+				2,
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=v500',
+				60,
+				0,
+			],
+		]);
+	});
 
-		expect(indexFile.mock.calls[1]).toEqual([
-			2,
-			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			'scalabus:scoped-cache-index:fingerprint:slot:owner=v500',
+	// Two sets, far under the set cap, whose members together pass 1000
+	// arguments: only the member count can start the second call.
+	it('starts a new call past 1000 members of one collection', async () => {
+		await redisScopedCacheStore().fileIndexedEntries(
+			['ada', 'bob'].map((owner) => {
+				return {
+					fingerprint: parseScopedCacheFingerprint(`slot:&owner=,${owner},&`),
+					keys: Array.from({ length: 600 }, (_, index) => `key-${index}`),
+					indexPath: 'owner',
+					homePinFields: [],
+				};
+			}),
 			60,
-			1,
-			'slot:&owner=,v500,&|key-500',
+		);
+
+		expect(indexFile.mock.calls).toEqual([
+			[
+				2,
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
+				60,
+				600,
+				...Array.from({ length: 600 }, (_, index) => {
+					return `slot:&owner=,ada,&|key-${index}`;
+				}),
+			],
+			[
+				2,
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',
+				60,
+				600,
+				...Array.from({ length: 600 }, (_, index) => {
+					return `slot:&owner=,bob,&|key-${index}`;
+				}),
+			],
 		]);
 	});
 
@@ -1691,6 +1739,22 @@ describe('releaseSweptIndexKeys', () => {
 		// Named no more while still held, the set's entries are reached by nothing.
 		expect(unlink.mock.invocationCallOrder[0])
 			.toBeLessThan(srem.mock.invocationCallOrder[0]!);
+	});
+
+	// A set still held once its name is gone holds entries nothing reaches again,
+	// so a refused delete keeps every name for the recovery.
+	it(oneLine`
+		keeps every name in the swept index-key set when a delete is refused
+	`, async () => {
+		pipelineExec.mockResolvedValueOnce([
+			[new Error('OOM command not allowed'), null],
+		]);
+
+		expect(await redisScopedCacheStore().releaseSweptIndexKeys([
+			'scalabus:scoped-cache-index:swept:slot:a1:1',
+		])).toEqual({ dropped: 0, refused: 1 });
+
+		expect(srem).not.toHaveBeenCalled();
 	});
 });
 
