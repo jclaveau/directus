@@ -7,7 +7,7 @@ import {
 	scopedCacheEpochBumpScript,
 	scopedCacheFingerprintIndexKeys,
 	scopedCacheIndexReapScript,
-	scopedCacheRowIndexGlobs,
+	scopedCacheRowIndexPatterns,
 	scopedCacheRowIndexKeys,
 	scopedCacheSweepMoveScript,
 } from './redis-store.js';
@@ -259,84 +259,219 @@ describe('renderScopedCacheIndexMember', () => {
 	});
 });
 
-describe('scopedCacheRowIndexGlobs', () => {
+describe('scopedCacheRowIndexPatterns', () => {
 	it('names one pattern per pin the row carries, and the two that pin none', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
+		expect(scopedCacheRowIndexPatterns('slot', [
 			parseScopedCacheFingerprint('slot:&id=,1,&owner=,alpha,&'),
 		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&id=*,1,*',
-			'slot:*&owner=*,alpha,*',
+			{ memberPrefix: 'slot:&|', memberFragments: [] },
+			{ memberPrefix: 'slot:&view=,', memberFragments: [] },
+			{ memberPrefix: 'slot:', memberFragments: ['&id=', ',1,'] },
+			{ memberPrefix: 'slot:', memberFragments: ['&owner=', ',alpha,'] },
 		]);
 	});
 
 	it('names each value of a multi-valued pin, once across the batch', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
+		expect(scopedCacheRowIndexPatterns('slot', [
 			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
 			parseScopedCacheFingerprint('slot:&owner=,beta,&'),
 			parseScopedCacheFingerprint('slot:&owner=,alpha,&'),
 		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&owner=*,alpha,*',
-			'slot:*&owner=*,beta,*',
+			{ memberPrefix: 'slot:&|', memberFragments: [] },
+			{ memberPrefix: 'slot:&view=,', memberFragments: [] },
+			{ memberPrefix: 'slot:', memberFragments: ['&owner=', ',alpha,'] },
+			{ memberPrefix: 'slot:', memberFragments: ['&owner=', ',beta,'] },
 		]);
 	});
 
 	it('names a field called view by its escaped key, not the view\'s', () => {
-		expect(scopedCacheRowIndexGlobs('note', [
+		expect(scopedCacheRowIndexPatterns('note', [
 			{ collection: 'note', pinnedScope: { view: ['7'] } },
 		])).toEqual([
-			'note:&|*',
-			'note:&view=,*',
-			'note:*&\\\\view=*,7,*',
+			{ memberPrefix: 'note:&|', memberFragments: [] },
+			{ memberPrefix: 'note:&view=,', memberFragments: [] },
+			{ memberPrefix: 'note:', memberFragments: ['&\\view=', ',7,'] },
 		]);
 	});
 
-	// The value is stored escaped (`a\*b`), and a glob eats a backslash rather than
-	// matching one, so the pattern doubles what the serialiser wrote.
-	it('escapes a value carrying a glob metacharacter', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
+	// Tested as text rather than as a glob, so the value carries the serialiser's
+	// own escape and nothing on top of it.
+	it('spells a value carrying a glob metacharacter as it is stored', () => {
+		expect(scopedCacheRowIndexPatterns('slot', [
 			{ collection: 'slot', pinnedScope: { owner: ['a*b'] } },
 		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&owner=*,a\\\\\\*b,*',
+			{ memberPrefix: 'slot:&|', memberFragments: [] },
+			{ memberPrefix: 'slot:&view=,', memberFragments: [] },
+			{ memberPrefix: 'slot:', memberFragments: ['&owner=', ',a\\*b,'] },
 		]);
 	});
 
-	it('escapes a value carrying a separator', () => {
-		expect(scopedCacheRowIndexGlobs('slot', [
+	it('spells a value carrying a separator as it is stored', () => {
+		expect(scopedCacheRowIndexPatterns('slot', [
 			{ collection: 'slot', pinnedScope: { owner: ['a,b'] } },
 		])).toEqual([
-			'slot:&|*',
-			'slot:&view=,*',
-			'slot:*&owner=*,a\\\\,b,*',
+			{ memberPrefix: 'slot:&|', memberFragments: [] },
+			{ memberPrefix: 'slot:&view=,', memberFragments: [] },
+			{ memberPrefix: 'slot:', memberFragments: ['&owner=', ',a\\,b,'] },
 		]);
 	});
 
 	it(oneLine`
-		reads the sets whole for a collection its escapes respell, so a member
+		answers with every member for a collection its escapes respell, so a member
 		filed under the raw name is still tested
 	`, () => {
-		expect(scopedCacheRowIndexGlobs('a*b', [
+		expect(scopedCacheRowIndexPatterns('a*b', [
 			{ collection: 'a*b', pinnedScope: { owner: ['alpha'] } },
 		])).toBe(null);
 	});
 
 	it(oneLine`
-		gives up on filtering past the bound, so a wide batch reads its sets whole
-		instead of walking them once per slice
+		gives up on filtering past the bound, where testing every pattern costs
+		what the caller's own test does
 	`, () => {
 		const rowFingerprints = Array.from({ length: 65 }, (_value, at) => {
 			return { collection: 'slot', pinnedScope: { id: [`${at}`] } };
 		});
 
-		expect(scopedCacheRowIndexGlobs('slot', rowFingerprints)).toBe(null);
+		expect(scopedCacheRowIndexPatterns('slot', rowFingerprints)).toBe(null);
 	});
 });
 
+describe('scanRowIndexedEntries', () => {
+	beforeEach(() => {
+		sscan.mockReset();
+	});
+
+	it(oneLine`
+		reads each set in one pass with no MATCH, however many values the rows
+		pin
+	`, async () => {
+		sscan.mockResolvedValue(['0', []]);
+
+		const scannedEntries = redisScopedCacheStore().scanRowIndexedEntries(
+			'slot',
+			[
+				{ collection: 'slot', pinnedScope: { id: ['1'], owner: ['alpha'] } },
+				{ collection: 'slot', pinnedScope: { id: ['2'], owner: ['alpha'] } },
+			],
+			'owner',
+		);
+
+		for await (const _scannedPage of scannedEntries) {
+			continue;
+		}
+
+		expect(sscan.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=alpha',
+				'0',
+				'COUNT',
+				1000,
+			],
+		]);
+	});
+
+	it(oneLine`
+		answers with every member a MATCH pass of the patterns it replaced found,
+		and leaves out one pinned to another value
+	`, async () => {
+		sscan.mockResolvedValueOnce(['0', [
+			'slot:&|key-bare',
+			'slot:&view=,id,&|key-view',
+			'slot:&id=,1,&view=,id,&|key-id',
+			'slot:&owner=,alpha,beta,&|key-alpha',
+			'slot:&owner=,beta,&|key-beta',
+		]]);
+
+		const scannedPages = [];
+
+		const scannedEntries = redisScopedCacheStore().scanRowIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: { id: ['1'], owner: ['alpha'] } }],
+			null,
+		);
+
+		for await (const scannedPage of scannedEntries) {
+			scannedPages.push(scannedPage);
+		}
+
+		expect(scannedPages).toEqual([[
+			expect.objectContaining({ key: 'key-bare' }),
+			expect.objectContaining({ key: 'key-view' }),
+			expect.objectContaining({ key: 'key-id' }),
+			expect.objectContaining({ key: 'key-alpha' }),
+		]]);
+	});
+
+	// `slot:*&owner=*,1,*` needs the value after the pin, and this member has the
+	// value only before it. Answering it anyway is the caller's test to settle.
+	it('answers wider than the glob it replaced, never narrower', async () => {
+		sscan.mockResolvedValueOnce(['0', ['slot:&id=,1,&owner=,2,&|key-wide']]);
+
+		const scannedPages = [];
+
+		const scannedEntries = redisScopedCacheStore().scanRowIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: { owner: ['1'] } }],
+			null,
+		);
+
+		for await (const scannedPage of scannedEntries) {
+			scannedPages.push(scannedPage);
+		}
+
+		expect(scannedPages).toEqual([[
+			expect.objectContaining({ key: 'key-wide' }),
+		]]);
+	});
+
+	it('answers a member two pages both return once', async () => {
+		sscan
+			.mockResolvedValueOnce(['3', ['slot:&|key-first']])
+			.mockResolvedValueOnce(['0', ['slot:&|key-first', 'slot:&|key-second']]);
+
+		const scannedPages = [];
+
+		const scannedEntries = redisScopedCacheStore().scanRowIndexedEntries(
+			'slot',
+			[],
+			null,
+		);
+
+		for await (const scannedPage of scannedEntries) {
+			scannedPages.push(scannedPage);
+		}
+
+		expect(scannedPages).toEqual([
+			[expect.objectContaining({ key: 'key-first' })],
+			[expect.objectContaining({ key: 'key-second' })],
+		]);
+	});
+
+	it(oneLine`
+		answers with every member where no pattern holds, a member pinned to
+		another value included
+	`, async () => {
+		sscan.mockResolvedValueOnce(['0', ['a\\*b:&owner=,beta,&|key-beta']]);
+
+		const scannedPages = [];
+
+		const scannedEntries = redisScopedCacheStore().scanRowIndexedEntries(
+			'a*b',
+			[{ collection: 'a*b', pinnedScope: { owner: ['alpha'] } }],
+			null,
+		);
+
+		for await (const scannedPage of scannedEntries) {
+			scannedPages.push(scannedPage);
+		}
+
+		expect(scannedPages).toEqual([[
+			expect.objectContaining({ key: 'key-beta' }),
+		]]);
+	});
+});
 
 describe('removeIndexedEntries', () => {
 	beforeEach(() => srem.mockClear());

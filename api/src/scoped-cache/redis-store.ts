@@ -60,6 +60,10 @@ const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
  * cached read that pinned no index value, and `SMEMBERS` on it would put the
  * whole thing in this process's memory — and hold Redis for the length of the
  * reply — to keep the handful the write actually matched.
+ *
+ * With no `MATCH`, every page crosses the wire whole: about 120 kB at the perf
+ * bench's member size. The pass costs the whole set whatever the COUNT, so a
+ * larger one only trades round trips for a longer hold of Redis per step.
  */
 const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
 
@@ -341,13 +345,15 @@ async function unlinkScopedCacheKeys(
 }
 
 /**
- * How many globs one scan is narrowed by before it reads the set whole.
+ * How many patterns a row scan tests a member against before it answers with
+ * every member instead.
  *
- * Every pattern is a pass over the set, so past a point narrowing costs more
- * round trips than the members it saves sending. A write touching more values
- * than this reads the sets whole and tests every member here instead.
+ * Every pattern is a test per member, and past a point they cost what the
+ * caller's own test does: measured on 160k members like the perf bench's, 4
+ * patterns took 0.11 s and 65 took 1.6 s, where parsing and testing every member
+ * took 1.3 s.
  */
-const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
+const SCOPED_CACHE_MAX_INDEX_PATTERNS = 64;
 
 /**
  * The pin naming nothing, whose set every write to the collection reads.
@@ -561,56 +567,82 @@ export function scopedCacheRowIndexKeys(
 }
 
 /**
- * The patterns the rows can drop something under, or `null` to read the sets
- * whole.
- *
- * `SSCAN … MATCH` filters server-side, so a member matching none of these never
- * crosses the wire — and the caller's own test still decides, since a glob over a
- * serialised fingerprint can say a pin is absent but not that the whole query
- * case holds.
+ * What a member has to open with, and carry somewhere past that, for a write of
+ * the rows to be able to drop it.
  */
-export function scopedCacheRowIndexGlobs(
+export interface ScopedCacheMemberPattern {
+	memberPrefix: string;
+	memberFragments: readonly string[];
+}
+
+/**
+ * The patterns the rows can drop something under, or `null` to answer with every
+ * member.
+ *
+ * Tested here rather than by `SSCAN … MATCH`, since `SSCAN` takes one pattern
+ * and a pass walks the whole set whatever it matches: one per pattern was up to
+ * 64 walks of the same set per purge. These are the literal runs those globs
+ * were made of, tested for presence and not for order, so a member any of them
+ * matched is answered here too — and the caller's own test still decides, since
+ * a pattern over a serialised fingerprint can say a pin is absent but not that
+ * the whole query case holds.
+ */
+export function scopedCacheRowIndexPatterns(
 	collection: string,
 	rowFingerprints: readonly ScopedCacheFingerprint[],
-): string[] | null {
+): ScopedCacheMemberPattern[] | null {
 	const renderedCollection = escapeScopedCacheFingerprintToken(collection);
 
 	// A member filed before the collection was escaped spells it raw, and no
-	// pattern names both spellings: the sets are read whole instead.
+	// pattern names both spellings: every member is answered instead.
 	if (renderedCollection !== collection) {
 		return null;
 	}
 
-	const collectionToken = escapeScopedCacheFingerprintGlob(renderedCollection);
+	// Keyed by rendering, so a value two rows share is tested once.
+	const memberPatterns = new Map<string, ScopedCacheMemberPattern>();
 
-	const globPatterns = new Set<string>([
-		// Pins nothing at all, and pins nothing but its fields — the two ways a
-		// fingerprint every row matches comes out of the serialiser.
-		`${collectionToken}:&|*`,
-		`${collectionToken}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,*`,
-	]);
+	// Pins nothing at all, and pins nothing but its fields — the two ways a
+	// fingerprint every row matches comes out of the serialiser.
+	for (const memberPrefix of [
+		`${renderedCollection}:&|`,
+		`${renderedCollection}:&${SCOPED_CACHE_FINGERPRINT_VIEW}=,`,
+	]) {
+		memberPatterns.set(memberPrefix, { memberPrefix, memberFragments: [] });
+	}
 
 	for (const { pinnedScope = {} } of rowFingerprints) {
 		for (const [field, values] of Object.entries(pinnedScope)) {
-			const pinKey = escapeScopedCacheFingerprintGlob(
-				escapeScopedCacheFingerprintPinKey(field),
-			);
+			const pinFragment = `&${escapeScopedCacheFingerprintPinKey(field)}=`;
 
 			for (const value of values) {
-				const valueToken = escapeScopedCacheFingerprintGlob(
-					escapeScopedCacheFingerprintToken(value),
-				);
+				const valueFragment = `,${escapeScopedCacheFingerprintToken(value)},`;
 
-				globPatterns.add(`${collectionToken}:*&${pinKey}=*,${valueToken},*`);
+				memberPatterns.set(`${pinFragment}${valueFragment}`, {
+					memberPrefix: `${renderedCollection}:`,
+					memberFragments: [pinFragment, valueFragment],
+				});
 			}
 
-			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {
+			if (memberPatterns.size > SCOPED_CACHE_MAX_INDEX_PATTERNS) {
 				return null;
 			}
 		}
 	}
 
-	return [...globPatterns];
+	return [...memberPatterns.values()];
+}
+
+function memberMatchesPatterns(
+	member: string,
+	memberPatterns: readonly ScopedCacheMemberPattern[],
+): boolean {
+	return memberPatterns.some(({ memberPrefix, memberFragments }) => {
+		return member.startsWith(memberPrefix)
+			&& memberFragments.every((memberFragment) => {
+				return member.includes(memberFragment);
+			});
+	});
 }
 
 /**
@@ -656,63 +688,60 @@ interface ScopedCacheMemberLocation {
 }
 
 /**
- * Read a list of sets, member by member, and answer with the entries they hold.
+ * Read a list of sets, member by member, and answer with the entries they hold
+ * that `memberPatterns` can match, or every entry when it is `null`.
  *
- * `globPatterns` is a list of passes, since `SSCAN` takes one pattern: a member
- * matching several is yielded once, so the caller tests and drops it once.
+ * One unfiltered pass per set: a `MATCH` walks the whole set however little it
+ * matches, so narrowing server-side costs one walk per pattern. A member yielded
+ * twice — `SSCAN` may, when the set is resized mid-scan — is answered once, so
+ * the caller tests and drops it once.
  */
 async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
-	globPatterns: readonly string[] | null,
+	memberPatterns: readonly ScopedCacheMemberPattern[] | null,
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useRedis();
 
 	for (const indexKey of indexKeys) {
 		const scannedMembers = new Set<string>();
+		let scanCursor = '0';
 
-		for (const globPattern of globPatterns ?? [null]) {
-			let scanCursor = '0';
+		do {
+			const [next, members] = await redis.sscan(
+				indexKey,
+				scanCursor,
+				'COUNT',
+				SCOPED_CACHE_INDEX_SCAN_COUNT,
+			);
 
-			do {
-				const [next, members] = globPattern === null
-					? await redis.sscan(
-						indexKey,
-						scanCursor,
-						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
+			scanCursor = next;
+			const entries: ScopedCacheIndexedEntry[] = [];
+
+			for (const member of members) {
+				if (
+					scannedMembers.has(member)
+					|| (
+						memberPatterns !== null
+						&& memberMatchesPatterns(member, memberPatterns) === false
 					)
-					: await redis.sscan(
-						indexKey,
-						scanCursor,
-						'MATCH',
-						globPattern,
-						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
-					);
-
-				scanCursor = next;
-				const entries: ScopedCacheIndexedEntry[] = [];
-
-				for (const member of members) {
-					if (scannedMembers.has(member)) {
-						continue;
-					}
-
-					scannedMembers.add(member);
-
-					const { fingerprint, key } = parseScopedCacheIndexMember(member);
-
-					entries.push({
-						fingerprint,
-						key,
-						location: { indexKey, member } satisfies ScopedCacheMemberLocation,
-					});
+				) {
+					continue;
 				}
 
-				yield entries;
+				scannedMembers.add(member);
+
+				const { fingerprint, key } = parseScopedCacheIndexMember(member);
+
+				entries.push({
+					fingerprint,
+					key,
+					location: { indexKey, member } satisfies ScopedCacheMemberLocation,
+				});
 			}
-			while (scanCursor !== '0');
+
+			yield entries;
 		}
+		while (scanCursor !== '0');
 	}
 }
 
@@ -867,7 +896,7 @@ const redisStore: ScopedCacheStore = {
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 		return scanScopedCacheIndexKeys(
 			scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
-			scopedCacheRowIndexGlobs(collection, rowFingerprints),
+			scopedCacheRowIndexPatterns(collection, rowFingerprints),
 		);
 	},
 
@@ -879,7 +908,7 @@ const redisStore: ScopedCacheStore = {
 		// The declared pins' own sets when the pin IS what the index is split by —
 		// the same two a write of those values would read — and every set the
 		// collection owns otherwise, since a pin off the index path says nothing
-		// about which split holds it. No glob narrowing either way: a declared pin
+		// about which split holds it. No pattern narrowing either way: a declared pin
 		// matches entries by what they do NOT pin as much as by what they do, and a
 		// pattern can only select on what is written.
 		const pinsIndexPath = indexPath !== null && declared.every((fingerprint) => {

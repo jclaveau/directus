@@ -248,16 +248,9 @@ describe('a purge shown the rows it wrote', () => {
 			indexPath: null,
 		});
 
-		// One pass per pattern the rows can drop something under — the two bare ones
-		// plus one per pin of the row — and the first of them takes a second page.
-		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
-			'0',
-			'7',
-			'0',
-			'0',
-			'0',
-			'0',
-		]);
+		// One pass over the bare set, however many values the row pins, and it
+		// takes a second page.
+		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual(['0', '7']);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-first');
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-second');
