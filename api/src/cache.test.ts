@@ -1737,7 +1737,11 @@ describe('a flush over redis tiers still connecting', () => {
 		systemCache.store = stores.system;
 		lockCache.store = stores.lock;
 
-		return { flushCaches: reloaded.flushCaches, stores };
+		return {
+			flushCaches: reloaded.flushCaches,
+			clearCacheTargets: reloaded.clearCacheTargets,
+			stores,
+		};
 	}
 
 	test('waits for every tier to be ready before it clears one', async () => {
@@ -1785,6 +1789,20 @@ describe('a flush over redis tiers still connecting', () => {
 
 		expect([...stores.system.entries])
 			.toEqual([['scalabus_system:schema', 's']]);
+	});
+
+	test(oneLine`
+		fails an admin clear whose tiers redis refused, where Keyv alone would
+		have answered 200 over a cache still full
+	`, async () => {
+		const { clearCacheTargets, stores } = await reloadWithConnectingStores();
+
+		await expect(clearCacheTargets(['system', 'response', 'locks']))
+			.rejects
+			.toThrowError(/redis refused the system, response, locks clear/);
+
+		expect([...stores.response.entries])
+			.toEqual([['scalabus_response:read', 'r']]);
 	});
 });
 

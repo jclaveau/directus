@@ -450,24 +450,51 @@ export async function clearSystemCache(opts?: {
  * holds the build-identity fingerprint whose loss forces a full re-flush next boot.
  */
 export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<void> {
-	const { cache, lockCache } = getCache();
+	const { cache, systemCache, lockCache } = getCache();
+	const refusedTargets: CacheFlushTarget[] = [];
 	let refusedIndexKeys = 0;
 
 	if (targets.includes('system')) {
 		// forced so it runs even while a lock is held; its `schemaChanged` publish
 		// fans the system + schema + permissions clear out to every node.
-		await clearSystemCache({ forced: true });
+		const systemErrors = await storeErrorsDuring(
+			[systemCache, lockCache],
+			() => clearSystemCache({ forced: true }),
+		);
+
+		if (systemErrors.length > 0) {
+			refusedTargets.push('system');
+		}
 	}
 
-	// The fingerprint index lives in raw Redis outside the Keyv namespace, so a
-	// key-by-key clear misses it — drop it too so no orphan index members linger.
-	// A FLUSHDB took it with the entries.
-	if (targets.includes('response') && !(await clearResponseCache(cache))) {
-		refusedIndexKeys = (await dropScopedCacheIndex()).refused;
+	if (targets.includes('response')) {
+		let flushedDatabase = false;
+
+		const responseErrors = await storeErrorsDuring([cache], async () => {
+			flushedDatabase = await clearResponseCache(cache);
+		});
+
+		if (!flushedDatabase && responseErrors.length > 0) {
+			refusedTargets.push('response');
+		}
+
+		// The fingerprint index lives in raw Redis outside the Keyv namespace, so
+		// a key-by-key clear misses it — drop it too so no orphan index members
+		// linger. A FLUSHDB took it with the entries.
+		if (!flushedDatabase) {
+			refusedIndexKeys = (await dropScopedCacheIndex()).refused;
+		}
 	}
 
 	if (targets.includes('locks')) {
-		await lockCache.clear();
+		const lockErrors = await storeErrorsDuring(
+			[lockCache],
+			() => lockCache.clear(),
+		);
+
+		if (lockErrors.length > 0) {
+			refusedTargets.push('locks');
+		}
 	}
 
 	// Same reasoning as the `schemaChanged` publish above: the tiers this cleared
@@ -481,9 +508,17 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	}
 
 	// Raised only once the peers have been told, and raised at all because unlike
-	// `flushCaches` this one has somebody waiting on the answer: a pipeline answers
-	// per command, so a chunk redis refused is a chunk still indexed, and an admin
-	// told the clear succeeded has no other way to learn it did not.
+	// `flushCaches` this one has somebody waiting on the answer. Keyv answers a
+	// refused clear with an `error` event and a resolved promise, and a pipeline
+	// answers per command, so a chunk redis refused is a chunk still indexed: an
+	// admin told the clear succeeded has no other way to learn it did not.
+	if (refusedTargets.length > 0) {
+		throw new ServiceUnavailableError({
+			service: 'cache',
+			reason: `redis refused the ${refusedTargets.join(', ')} clear`,
+		});
+	}
+
 	if (refusedIndexKeys > 0) {
 		throw new ServiceUnavailableError({
 			service: 'scoped-cache index',
