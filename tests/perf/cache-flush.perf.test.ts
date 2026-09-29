@@ -182,7 +182,9 @@ async function startInstance(
 			throw new Error(`The ${name} instance exited during boot:\n${output}`);
 		}
 
+		// Left running, it would hold its port and keep writing to Redis.
 		if (Date.now() > deadline) {
+			instance.kill('SIGKILL');
 			throw new Error(`The ${name} instance never listened:\n${output}`);
 		}
 
@@ -602,14 +604,16 @@ test('a flush in its own database does not pay for the cache size', async () => 
 
 	await mkdir(outputDir, { recursive: true });
 	await writeFile(join(outputDir, 'cache-flush.md'), `${lines.join('\n')}\n`);
-	await writeFile(join(outputDir, 'cache-flush.status.txt'), status);
 
 	// An invalid probe, not a breach: without it the gates below pass for any
-	// flush, including one that never met the grown cache.
+	// flush, including one that never met the grown cache. It writes no status,
+	// so the report fails it wherever it ran.
 	expect(
 		addedScans(shared),
 		'the shared flush never walked the grown cache',
 	).toBeGreaterThanOrEqual(minSharedScansAddedByGrowth);
+
+	await writeFile(join(outputDir, 'cache-flush.status.txt'), status);
 
 	expect(
 		over.map((gate) => `${gate.name}: ${gate.value.toFixed(2)} > ${gate.ceiling}`),
