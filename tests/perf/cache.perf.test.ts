@@ -556,6 +556,35 @@ function clearResponseCache(arm: Arm): Promise<unknown> {
 	}).then((response) => response.text());
 }
 
+/**
+ * Wait for the reap a clear requests on a scoped arm to mark its index complete.
+ * The pass runs a second after the clear, off the request path, and would land in
+ * whatever is measured next.
+ */
+async function awaitRequestedReap(arm: Arm): Promise<void> {
+	if (arm.env['CACHE_AUTO_PURGE_MODE'] !== 'scoped') {
+		return;
+	}
+
+	const namespace = `perf-cache-${arms.indexOf(arm)}`;
+	const deadline = performance.now() + 30_000;
+
+	while (performance.now() < deadline) {
+		const [marker, generation] = await redis.mget(
+			`${namespace}:scoped-cache-index:collection-index-keys-complete`,
+			`${namespace}:scoped-cache-index-generation`,
+		);
+
+		if (marker !== null && marker === generation) {
+			return;
+		}
+
+		await new Promise((wake) => setTimeout(wake, 100));
+	}
+
+	throw new Error(`no reap marked the ${arm.name} index complete in 30 s`);
+}
+
 type ReadSeries = { msPerRequest: number; statuses: Set<string> };
 
 /**
@@ -598,6 +627,10 @@ async function timeReads(
 		}
 
 		statuses.add(response.headers.get(STATUS_HEADER) ?? 'none');
+	}
+
+	if (cold) {
+		await awaitRequestedReap(arm);
 	}
 
 	return { msPerRequest: total / batch, statuses };
@@ -912,6 +945,7 @@ async function sampleCpu(
 	idleNsPerSecond: number,
 ): Promise<number> {
 	await clearResponseCache(arm);
+	await awaitRequestedReap(arm);
 
 	if (phase === 'hit') {
 		await api(arm.base, cpuPhasePath(phase, tenant, 0));
@@ -1069,6 +1103,7 @@ test('the cache costs less than what it replaces', async () => {
 	// running at once would each read the other's commands as their own.
 	for (const arm of arms) {
 		await clearResponseCache(arm);
+		await awaitRequestedReap(arm);
 
 		// A distinct key per request rather than a clear between them: clearing is
 		// itself a scan and a delete over the namespace, and it would be counted.
@@ -1290,6 +1325,7 @@ test('the cache costs less than what it replaces', async () => {
 		const tracePath = `/items/${NOTE}?filter[tenant][_eq]=t5&limit=25`;
 
 		await clearResponseCache(arm);
+		await awaitRequestedReap(arm);
 
 		traces.push(...await traceRedisCommands(`${armName}, one fill`, async () => {
 			await api(arm.base, tracePath);
