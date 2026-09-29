@@ -180,10 +180,15 @@ describe.each(vendors)('%s', (vendor) => {
 						);
 
 						expect(scanCursor).toBe('0');
-						expect(legacyMembers).toHaveLength(1);
+						// The entry's key and its `__expires_at` sibling's.
+						expect(legacyMembers).toHaveLength(2);
 
-						const entryKey = legacyMembers[0]!
-							.slice(legacyMembers[0]!.indexOf('|') + 1);
+						// Sorted, the entry's key leads the sibling it prefixes, and
+						// names both raw keys.
+						const [entryMember] = legacyMembers.sort();
+
+						const entryKey = entryMember!
+							.slice(entryMember!.indexOf('|') + 1);
 
 						const namedKeys = (await redisClient.keys(`${namespace}_*`))
 							.filter((cachedKey) => cachedKey.includes(entryKey));
@@ -211,10 +216,13 @@ describe.each(vendors)('%s', (vendor) => {
 							await homePinKey(),
 						);
 
-						expect(homePinMembers).toHaveLength(1);
+						// The entry's key and its `__expires_at` sibling's.
+						expect(homePinMembers).toHaveLength(2);
 
-						expect(await redisClient.smembers(legacyBareKey()))
-							.toEqual(homePinMembers);
+						const legacyMembers = await redisClient.smembers(legacyBareKey());
+
+						expect(legacyMembers).toHaveLength(2);
+						expect(legacyMembers).toEqual(expect.arrayContaining(homePinMembers));
 					},
 				);
 
