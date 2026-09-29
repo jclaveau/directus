@@ -44,6 +44,8 @@ describe.each(vendors)('%s', (vendor) => {
 		'index_marker_flush',
 		'index_marker_counter',
 		'index_marker_pause',
+		'index_marker_pause_served',
+		'index_marker_unpaused',
 	];
 
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
@@ -65,6 +67,105 @@ describe.each(vendors)('%s', (vendor) => {
 	async function startInstance() {
 		env[vendor].PORT = String(await getPort());
 		instance = await spawnInstance(env[vendor]);
+	}
+
+	async function restartInstance() {
+		instance.kill();
+		await once(instance, 'exit');
+		await startInstance();
+	}
+
+	function readByName(collection: string, row: Record<string, string>) {
+		return request(getUrl(vendor, env))
+			.get(`/items/${collection}`)
+			.query({ 'filter[name][_eq]': row['name'], fields: row['fields'] })
+			.set('Authorization', auth);
+	}
+
+	// Every member the collection's index sets hold: a fill files its read here
+	// before it writes the value.
+	async function indexMembersOf(collection: string) {
+		const members: string[] = [];
+
+		for (const setKey of await redisClient.keys(
+			`${indexPrefix}fingerprint:${collection}:*`,
+		)) {
+			members.push(...await redisClient.smembers(setKey));
+		}
+
+		return members.sort();
+	}
+
+	// A fill lands within milliseconds of its response, and the reads cached
+	// below show one within five seconds: two seconds of nothing filed is none
+	// coming.
+	async function expectNotCached(
+		collection: string,
+		table: Record<string, string>[],
+	) {
+		for (const row of table) {
+			const membersBefore = await indexMembersOf(collection);
+
+			expect((await readByName(collection, row)).headers[cacheStatusHeader])
+				.toBe('MISS');
+
+			await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+			expect((await readByName(collection, row)).headers[cacheStatusHeader])
+				.toBe('MISS');
+
+			expect(await indexMembersOf(collection)).toEqual(membersBefore);
+		}
+	}
+
+	async function expectCached(
+		collection: string,
+		table: Record<string, string>[],
+	) {
+		for (const row of table) {
+			expect((await readByName(collection, row)).headers[cacheStatusHeader])
+				.toBe('MISS');
+
+			// The fill lands after the response.
+			await expect.poll(async () => {
+				return (await readByName(collection, row)).headers[cacheStatusHeader];
+			}, { timeout: 5_000 }).toBe('HIT');
+		}
+	}
+
+	// Beside the instance, on the bus and the Redis it shares, as a node of the
+	// build before goes on running through a rolling deploy.
+	async function startSecondInstance(buildId: string) {
+		secondInstance = await spawnInstance({
+			...env[vendor],
+			PORT: String(await getPort()),
+			CACHE_BUILD_ID: buildId,
+			CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
+		});
+	}
+
+	async function stopSecondInstance() {
+		secondInstance!.kill();
+		await once(secondInstance!, 'exit');
+		secondInstance = null;
+	}
+
+	async function restartOnBuild(buildId: string, fillPause: string) {
+		env[vendor]['CACHE_BUILD_ID'] = buildId;
+		env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPause;
+		await restartInstance();
+	}
+
+	// Three quiet looks 5s apart, after a watch a restarted instance's
+	// predecessor may have held for 15s: well inside a 2m ceiling.
+	async function expectFillPauseEndsEarly() {
+		const pauseLeftMs = await redisClient.pttl(fillPauseKey);
+
+		await expect.poll(() => redisClient.exists(fillPauseKey), {
+			timeout: 45_000,
+		}).toBe(0);
+
+		expect(pauseLeftMs).toBeGreaterThan(50_000);
 	}
 
 	beforeAll(async () => {
@@ -113,13 +214,6 @@ describe.each(vendors)('%s', (vendor) => {
 				let keptMarker: string | null = null;
 				const purgeReads: Record<string, string>[] = [];
 
-				function readByName(row: Record<string, string>) {
-					return request(getUrl(vendor, env))
-						.get(`/items/${collection}`)
-						.query({ 'filter[name][_eq]': row['name'], fields: row['fields'] })
-						.set('Authorization', auth);
-				}
-
 				given.optional(
 					/^these rows of (\w+):$/,
 					async (rowsOf: string, table: Record<string, string>[]) => {
@@ -163,16 +257,8 @@ describe.each(vendors)('%s', (vendor) => {
 
 				and.optional(
 					'these reads are cached:',
-					async (table: Record<string, string>[]) => {
-						for (const row of table) {
-							expect((await readByName(row)).headers[cacheStatusHeader])
-								.toBe('MISS');
-
-							// The fill lands after the response.
-							await expect.poll(async () => {
-								return (await readByName(row)).headers[cacheStatusHeader];
-							}, { timeout: 5_000 }).toBe('HIT');
-						}
+					(table: Record<string, string>[]) => {
+						return expectCached(collection, table);
 					},
 				);
 
@@ -304,7 +390,7 @@ describe.each(vendors)('%s', (vendor) => {
 					'these reads answer:',
 					async (table: Record<string, string>[]) => {
 						for (const row of table) {
-							expect((await readByName(row)).headers[cacheStatusHeader])
+							expect((await readByName(collection, row)).headers[cacheStatusHeader])
 								.toBe(row['cache']);
 						}
 					},
@@ -315,43 +401,11 @@ describe.each(vendors)('%s', (vendor) => {
 		// Its own steps: jest-cucumber binds definitions to steps in order, and
 		// this one restarts and reads twice.
 		scenario(
-			'a restart on another build serves every read uncached while the build '
-			+ 'before answers',
+			'a restart on another build fills no read while the build before '
+			+ 'answers',
 			({ given, when, then, and }) => {
 				const collection = 'index_marker_pause';
 				let keptPauseLeftMs = 0;
-
-				function readByName(row: Record<string, string>) {
-					return request(getUrl(vendor, env))
-						.get(`/items/${collection}`)
-						.query({ 'filter[name][_eq]': row['name'], fields: row['fields'] })
-						.set('Authorization', auth);
-				}
-
-				async function restartInstance() {
-					instance.kill();
-					await once(instance, 'exit');
-					await startInstance();
-				}
-
-				// A fill lands within milliseconds of its response, and the reads
-				// cached below show one within five seconds: two seconds of nothing
-				// filed is none coming.
-				async function expectNotCached(table: Record<string, string>[]) {
-					for (const row of table) {
-						expect((await readByName(row)).headers[cacheStatusHeader])
-							.toBe('MISS');
-
-						await new Promise((resolve) => setTimeout(resolve, 2_000));
-
-						expect((await readByName(row)).headers[cacheStatusHeader])
-							.toBe('MISS');
-
-						expect(await redisClient.keys(
-							`${indexPrefix}fingerprint:${collection}:*`,
-						)).toEqual([]);
-					}
-				}
 
 				given(
 					/^these rows of (\w+):$/,
@@ -365,30 +419,16 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				// Beside the instance, on the bus and the Redis it shares, as a node
-				// of the build before goes on running through a rolling deploy.
-				and(
-					/^a second instance runs on ([\w-]+)$/,
-					async (buildId: string) => {
-						secondInstance = await spawnInstance({
-							...env[vendor],
-							PORT: String(await getPort()),
-							CACHE_BUILD_ID: buildId,
-							CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
-						});
-					},
-				);
+				and(/^a second instance runs on ([\w-]+)$/, startSecondInstance);
 
 				when(
 					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
-					async (buildId: string, fillPause: string) => {
-						env[vendor]['CACHE_BUILD_ID'] = buildId;
-						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPause;
-						await restartInstance();
-					},
+					restartOnBuild,
 				);
 
-				then('these reads are not cached:', expectNotCached);
+				then('these reads are not cached:', (table: Record<string, string>[]) => {
+					return expectNotCached(collection, table);
+				});
 
 				and('the fill pause left is kept as it reads now', async () => {
 					keptPauseLeftMs = await redisClient.pttl(fillPauseKey);
@@ -407,7 +447,9 @@ describe.each(vendors)('%s', (vendor) => {
 						.toBeLessThan(keptPauseLeftMs);
 				});
 
-				and('these reads are not cached:', expectNotCached);
+				and('these reads are not cached:', (table: Record<string, string>[]) => {
+					return expectNotCached(collection, table);
+				});
 
 				// Both boots asked for a reap, and neither may mark while the build
 				// before could still be filing.
@@ -415,23 +457,12 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(await redisClient.get(markerKey)).toBeNull();
 				});
 
-				when('the second instance stops', async () => {
-					secondInstance!.kill();
-					await once(secondInstance!, 'exit');
-					secondInstance = null;
-				});
+				when('the second instance stops', stopSecondInstance);
 
-				// Three quiet looks 5s apart, after a watch the restarted instance's
-				// predecessor held for 15s: well inside the 2m ceiling.
-				then('the fill pause ends long before its ceiling', async () => {
-					const pauseLeftMs = await redisClient.pttl(fillPauseKey);
-
-					await expect.poll(() => redisClient.exists(fillPauseKey), {
-						timeout: 45_000,
-					}).toBe(0);
-
-					expect(pauseLeftMs).toBeGreaterThan(50_000);
-				});
+				then(
+					'the fill pause ends long before its ceiling',
+					expectFillPauseEndsEarly,
+				);
 
 				// By the reap the pause asked for as it closed.
 				and('the index-key sets are marked complete', async () => {
@@ -445,21 +476,83 @@ describe.each(vendors)('%s', (vendor) => {
 					}, { timeout: 15_000 }).toBe(true);
 				});
 
-				and(
-					'these reads are cached:',
-					async (table: Record<string, string>[]) => {
-						for (const row of table) {
-							expect((await readByName(row)).headers[cacheStatusHeader])
-								.toBe('MISS');
-
-							await expect.poll(async () => {
-								return (await readByName(row)).headers[cacheStatusHeader];
-							}, { timeout: 5_000 }).toBe('HIT');
-						}
-					},
-				);
+				and('these reads are cached:', (table: Record<string, string>[]) => {
+					return expectCached(collection, table);
+				});
 			},
 			150_000,
 		);
+
+		// After the one above, whose pause they must not start inside: a max of 0
+		// joins a pause still running.
+		for (const scenarioTitle of [
+			'a restart on another build still answers what was cached before it',
+			'a restart on another build with a max of 0 fills at once while the '
+				+ 'build before answers',
+		]) {
+			scenario(scenarioTitle, ({ given, and, when, then }) => {
+				let collection = '';
+
+				given.optional(
+					/^these rows of (\w+):$/,
+					async (rowsOf: string, table: Record<string, string>[]) => {
+						collection = rowsOf;
+
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${collection}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				and.optional(
+					'these reads are cached:',
+					(table: Record<string, string>[]) => {
+						return expectCached(collection, table);
+					},
+				);
+
+				and.optional(
+					/^a second instance runs on ([\w-]+)$/,
+					startSecondInstance,
+				);
+
+				when.optional(
+					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
+					restartOnBuild,
+				);
+
+				// Served by the cache: the pause gates the fill, not the read.
+				then.optional(
+					'these reads answer:',
+					async (table: Record<string, string>[]) => {
+						for (const row of table) {
+							expect((await readByName(collection, row))
+								.headers[cacheStatusHeader]).toBe(row['cache']);
+						}
+					},
+				);
+
+				and.optional(
+					'these reads are not cached:',
+					(table: Record<string, string>[]) => {
+						return expectNotCached(collection, table);
+					},
+				);
+
+				then.optional('no fill pause runs', async () => {
+					expect(await redisClient.exists(fillPauseKey)).toBe(0);
+				});
+
+				when.optional('the second instance stops', stopSecondInstance);
+
+				then.optional(
+					'the fill pause ends long before its ceiling',
+					expectFillPauseEndsEarly,
+				);
+			}, 150_000);
+		}
 	});
 });

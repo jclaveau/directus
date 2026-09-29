@@ -15,7 +15,8 @@ Feature: The index-key sets are trusted again without waiting for the schedule
   nodes of the build before go on filling, and neither build's purges reach
   every set the other files. It ends once no process of another build answers
   the processes query three looks in a row. A replica booting on the recorded
-  build joins the pause running.
+  build joins the pause running. A pause holds back only the fills: a read cached
+  before it still answers from the cache. A max of 0 opens none.
 
   Scenario: a flush with no reap scheduled has the index-key sets marked complete again
     Given these rows of index_marker_flush:
@@ -67,7 +68,7 @@ Feature: The index-key sets are trusted again without waiting for the schedule
     When the instance restarts on the build marker-build-b
     Then the kept marker no longer names the index generation
 
-  Scenario: a restart on another build serves every read uncached while the build before answers
+  Scenario: a restart on another build fills no read while the build before answers
     Given these rows of index_marker_pause:
       | name | label |
       | ada  | old   |
@@ -89,3 +90,34 @@ Feature: The index-key sets are trusted again without waiting for the schedule
     And these reads are cached:
       | name | fields     |
       | ada  | name,label |
+
+  Scenario: a restart on another build still answers what was cached before it
+    Given these rows of index_marker_pause_served:
+      | name | label |
+      | ada  | old   |
+      | bob  | old   |
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |
+    And a second instance runs on marker-build-d
+    When the instance restarts on marker-build-e pausing fills for at most 2m
+    Then these reads answer:
+      | name | fields     | cache |
+      | ada  | name,label | HIT   |
+    And these reads are not cached:
+      | name | fields     |
+      | bob  | name,label |
+    When the second instance stops
+    Then the fill pause ends long before its ceiling
+
+  Scenario: a restart on another build with a max of 0 fills at once while the build before answers
+    Given these rows of index_marker_unpaused:
+      | name | label |
+      | ada  | old   |
+    And a second instance runs on marker-build-f
+    When the instance restarts on marker-build-g pausing fills for at most 0ms
+    Then no fill pause runs
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |
+    When the second instance stops
