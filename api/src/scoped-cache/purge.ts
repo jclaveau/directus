@@ -757,9 +757,25 @@ async function purgeScopedCacheCollectionIndex(
 	const evicted = await dropSweptScopedCacheEntries(cache, keys);
 
 	// After the drop, never before: a drop that throws leaves the moved sets for
-	// the retry's take to find. A refused release costs memory until their expiry,
-	// never a stale hit, so it is logged rather than thrown.
-	const released = await useScopedCacheStore().releaseSweptIndexKeys(sweptKeys);
+	// the retry's take to find. A refused or failed release costs memory until
+	// their expiry, never a stale hit, so it is logged rather than thrown: thrown,
+	// it would record a retry for entries already gone. The swept index-key set
+	// still names the sets, so the collection's next collection-wide purge or a
+	// restart's recovery releases them.
+	let released: ScopedCacheUnlinkTally;
+
+	try {
+		released = await useScopedCacheStore().releaseSweptIndexKeys(sweptKeys);
+	}
+	catch (error) {
+		useLogger().warn(
+			error,
+			`[scoped-cache] releasing the index sets swept for ${collection} failed; `
+			+ `they expire with their entries: ${error}`,
+		);
+
+		return { evicted, indexKeys };
+	}
 
 	if (released.refused > 0) {
 		useLogger().warn(

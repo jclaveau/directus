@@ -1822,6 +1822,44 @@ describe('retryPendingScopedCachePurges', () => {
 		]]);
 	});
 
+	// Thrown, the release would send the purge to purgeOrRecord's catch, which
+	// records a retry for entries already gone and skips the purge's own row.
+	it(oneLine`
+		finishes the purge when releasing the swept sets throws after their entries
+		are gone, and logs it
+	`, async () => {
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+		const closed = new Error('Connection is closed.');
+
+		indexedMembers = {
+			'ns:scoped-cache-index:fingerprint:articles:': ['articles:&|ns:entry-bare'],
+		};
+
+		const pipelineSpy = vi.spyOn(redis, 'pipeline').mockReturnValueOnce({
+			unlink: vi.fn(),
+			exec: vi.fn().mockRejectedValue(closed),
+		});
+
+		await purgeCollectionScopedCache(cache as any, 'articles');
+		pipelineSpy.mockRestore();
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bare');
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: 'articles',
+			mode: 'collection',
+			scopedCachePinCount: 1,
+			evicted: 1,
+		}));
+
+		expect(warn).toHaveBeenCalledWith(
+			closed,
+			'[scoped-cache] releasing the index sets swept for articles failed; '
+			+ 'they expire with their entries: Error: Connection is closed.',
+		);
+	});
+
 	it(oneLine`
 		takes every set the index names for a collection-mode record — it named no
 		fingerprint because which slices changed was unresolvable when it failed
