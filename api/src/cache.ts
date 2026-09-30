@@ -15,7 +15,11 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache/index.js';
+import {
+	clearResponseCache,
+	dropScopedCacheIndex,
+	scopedCachePurgeEnabled,
+} from './scoped-cache/index.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -166,6 +170,100 @@ export function getCache(): {
 	return { cache, systemCache, localSchemaCache, lockCache };
 }
 
+const storeReadyTimeoutMs = 5000;
+
+interface StoreClientState {
+	isReady: boolean;
+	once(event: 'ready', listener: () => void): unknown;
+	off(event: 'ready', listener: () => void): unknown;
+}
+
+/**
+ * Wait until every Redis tier can take a command. The dial `getConfig` starts
+ * leaves the client open but not ready, and `disableOfflineQueue` refuses what
+ * is sent in between: a `directus cache flush` process builds its tiers and
+ * clears them in the same tick, so every one of its clears went out in that gap.
+ * Waits at most `storeReadyTimeoutMs`, then lets the commands fail and be
+ * reported, since a Redis that never answers is a failed flush, not a hung one.
+ * A server's tiers are ready long before, so there it waits only through an
+ * outage: a schema apply or a migration then takes those 5s more to fail.
+ * A cluster client has no `isReady` and is not waited for.
+ */
+async function awaitStoresReady(tiers: (Keyv | null)[]): Promise<void> {
+	const pendingClients = tiers
+		.map((tier) => (tier?.store as { client?: StoreClientState })?.client)
+		.filter((client): client is StoreClientState => {
+			return client !== undefined && client.isReady === false;
+		});
+
+	if (pendingClients.length === 0) {
+		return;
+	}
+
+	let readyTimer: NodeJS.Timeout | undefined;
+	const readyListeners: [StoreClientState, () => void][] = [];
+
+	const allReady = Promise.all(pendingClients.map((client) => {
+		return new Promise<void>((resolve) => {
+			readyListeners.push([client, resolve]);
+			client.once('ready', resolve);
+		});
+	}));
+
+	const timedOut = new Promise<boolean>((resolve) => {
+		readyTimer = setTimeout(() => resolve(true), storeReadyTimeoutMs);
+	});
+
+	try {
+		if (await Promise.race([allReady.then(() => false), timedOut])) {
+			logger.warn(
+				`[cache] redis stores not ready after ${storeReadyTimeoutMs}ms, `
+				+ 'flushing anyway',
+			);
+		}
+	}
+	finally {
+		clearTimeout(readyTimer);
+
+		for (const [client, readyListener] of readyListeners) {
+			client.off('ready', readyListener);
+		}
+	}
+}
+
+/**
+ * The errors the tiers raised while `flushStep` ran. Keyv answers a refused
+ * command with an `error` event and a resolved promise, and `@keyv/redis`
+ * swallows a failed `clear()` whatever `throwOnErrors` says, so listening while
+ * the step runs is the only way to learn a tier did not clear. In a server, a
+ * request's refused command on the same tier lands here too and counts against
+ * the clear: a false alarm needs Redis to refuse that command and take the
+ * clear sent beside it.
+ */
+async function storeErrorsDuring(
+	tiers: (Keyv | null)[],
+	flushStep: () => Promise<unknown>,
+): Promise<unknown[]> {
+	const heardErrors: unknown[] = [];
+	const hearError = (error: unknown) => heardErrors.push(error);
+	const listenedTiers = tiers.filter((tier): tier is Keyv => tier !== null);
+
+	for (const tier of listenedTiers) {
+		tier.on('error', hearError);
+	}
+
+	try {
+		await flushStep();
+	}
+	finally {
+		for (const tier of listenedTiers) {
+			tier.off('error', hearError);
+		}
+	}
+
+	return heardErrors;
+}
+
 /**
  * What a flush managed and what it did not. `flushCaches` stays best-effort — see
  * the comment inside — so the tiers it could not clear are reported rather than
@@ -183,8 +281,10 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// path that build is part of what the caller is waiting through, and that run is
 	// the one where the number was worth reading.
 	const startedAt = Date.now();
-	const { cache } = getCache();
+	const { cache, systemCache, lockCache } = getCache();
 	const failures: string[] = [];
+
+	await awaitStoresReady([cache, systemCache, lockCache]);
 
 	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
 	// for already happened — a migration recorded its version, a schema diff applied,
@@ -196,10 +296,21 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// directly for an operator who asked for a clear, and they deserve to hear it
 	// could not be done.
 	try {
-		// Unlike the Keyv tiers below, the permission cache it clears is a
-		// `@directus/memory` multi cache wired straight to ioredis, so it is the one
-		// call in here that really rejects when Redis is away.
-		await clearSystemCache({ forced });
+		// The Keyv tiers report a refused command as an event, the permission cache
+		// it also clears — a `@directus/memory` multi cache wired straight to
+		// ioredis — by rejecting.
+		const systemErrors = await storeErrorsDuring(
+			[systemCache, lockCache],
+			() => clearSystemCache({ forced }),
+		);
+
+		if (systemErrors.length > 0) {
+			failures.push('system cache');
+
+			logger.warn(
+				`[cache] redis refused the system cache clear: ${systemErrors[0]}`,
+			);
+		}
 	}
 	catch (error: any) {
 		failures.push('system cache');
@@ -212,7 +323,19 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	let flushedDatabase = false;
 
 	try {
-		flushedDatabase = await clearResponseCache(cache);
+		const responseErrors = await storeErrorsDuring([cache], async () => {
+			flushedDatabase = await clearResponseCache(cache);
+		});
+
+		// A FLUSHDB goes through ioredis and leaves the Keyv tier untouched, so what
+		// that tier raised meanwhile is about its connection, not about the clear.
+		if (!flushedDatabase && responseErrors.length > 0) {
+			failures.push('response cache');
+
+			logger.warn(
+				`[cache] redis refused the response cache clear: ${responseErrors[0]}`,
+			);
+		}
 	}
 	catch (error: any) {
 		failures.push('response cache');
@@ -225,7 +348,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// — mean "the response cache is gone", and leaving the index behind strands
 	// index SETs pointing at keys that no longer exist until their `ttl*2`
 	// self-expiry, or forever when `CACHE_TTL` is unset and they are deliberately
-	// unbounded.
+	// unbounded. A FLUSHDB already took it, with the counters the drop would move.
 	//
 	// Never fatal, unlike the `clearCacheTargets` call: `database/migrations/run.ts`
 	// calls this right after recording the version it just applied and does not catch,
@@ -235,7 +358,10 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	let droppedIndexKeys = 0;
 
 	try {
-		const index = await dropScopedCacheIndex();
+		const index = flushedDatabase
+			? { dropped: 0, refused: 0 }
+			: await dropScopedCacheIndex();
+
 		droppedIndexKeys = index.dropped;
 
 		// Redis refuses a pipelined command by answering with the error rather than
@@ -274,12 +400,16 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// than at each caller: one line, and the number that explains it.
 	const durationMs = Date.now() - startedAt;
 
-	const responseCleared = flushedDatabase
-		? `FLUSHDB on redis db ${cacheRedisDatabase()}, `
+	// Out of scoped purging there is no index for the FLUSHDB to have taken.
+	const indexFlushedNote = scopedCachePurgeEnabled()
+		? ', the scoped-cache index with it'
 		: '';
 
-	const flushed = `[cache] flushed in ${durationMs}ms, ${responseCleared}`
-		+ `dropped ${droppedIndexKeys} scoped-cache index keys`;
+	const indexCleared = flushedDatabase
+		? `FLUSHDB on redis db ${cacheRedisDatabase()}${indexFlushedNote}`
+		: `dropped ${droppedIndexKeys} scoped-cache index keys`;
+
+	const flushed = `[cache] flushed in ${durationMs}ms, ${indexCleared}`;
 
 	// Under the warns naming the tiers that did not go, an info line reading
 	// "flushed" answers the question they just answered, with the other answer.
@@ -334,24 +464,51 @@ export async function clearSystemCache(opts?: {
  * holds the build-identity fingerprint whose loss forces a full re-flush next boot.
  */
 export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<void> {
-	const { cache, lockCache } = getCache();
+	const { cache, systemCache, lockCache } = getCache();
+	const refusedTargets: CacheFlushTarget[] = [];
 	let refusedIndexKeys = 0;
 
 	if (targets.includes('system')) {
 		// forced so it runs even while a lock is held; its `schemaChanged` publish
 		// fans the system + schema + permissions clear out to every node.
-		await clearSystemCache({ forced: true });
+		const systemErrors = await storeErrorsDuring(
+			[systemCache, lockCache],
+			() => clearSystemCache({ forced: true }),
+		);
+
+		if (systemErrors.length > 0) {
+			refusedTargets.push('system');
+		}
 	}
 
 	if (targets.includes('response')) {
-		await clearResponseCache(cache);
-		// The fingerprint index lives in raw Redis outside the Keyv namespace, so the
-		// clear above misses it — drop it too so no orphan index members linger.
-		refusedIndexKeys = (await dropScopedCacheIndex()).refused;
+		let flushedDatabase = false;
+
+		const responseErrors = await storeErrorsDuring([cache], async () => {
+			flushedDatabase = await clearResponseCache(cache);
+		});
+
+		if (!flushedDatabase && responseErrors.length > 0) {
+			refusedTargets.push('response');
+		}
+
+		// The fingerprint index lives in raw Redis outside the Keyv namespace, so
+		// a key-by-key clear misses it — drop it too so no orphan index members
+		// linger. A FLUSHDB took it with the entries.
+		if (!flushedDatabase) {
+			refusedIndexKeys = (await dropScopedCacheIndex()).refused;
+		}
 	}
 
 	if (targets.includes('locks')) {
-		await lockCache.clear();
+		const lockErrors = await storeErrorsDuring(
+			[lockCache],
+			() => lockCache.clear(),
+		);
+
+		if (lockErrors.length > 0) {
+			refusedTargets.push('locks');
+		}
 	}
 
 	// Same reasoning as the `schemaChanged` publish above: the tiers this cleared
@@ -365,9 +522,17 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	}
 
 	// Raised only once the peers have been told, and raised at all because unlike
-	// `flushCaches` this one has somebody waiting on the answer: a pipeline answers
-	// per command, so a chunk redis refused is a chunk still indexed, and an admin
-	// told the clear succeeded has no other way to learn it did not.
+	// `flushCaches` this one has somebody waiting on the answer. Keyv answers a
+	// refused clear with an `error` event and a resolved promise, and a pipeline
+	// answers per command, so a chunk redis refused is a chunk still indexed: an
+	// admin told the clear succeeded has no other way to learn it did not.
+	if (refusedTargets.length > 0) {
+		throw new ServiceUnavailableError({
+			service: 'cache',
+			reason: `redis refused the ${refusedTargets.join(', ')} clear`,
+		});
+	}
+
 	if (refusedIndexKeys > 0) {
 		throw new ServiceUnavailableError({
 			service: 'scoped-cache index',

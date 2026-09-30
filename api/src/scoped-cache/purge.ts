@@ -687,13 +687,14 @@ export async function clearResponseCache(cache: Keyv | null): Promise<boolean> {
  * behind name keys that are gone and expire on their own.
  */
 export async function flushResponseCache(cache: Keyv | null): Promise<void> {
-	await clearResponseCache(cache);
+	const flushedDatabase = await clearResponseCache(cache);
 
 	// Gated here, not in the drop: the flush command drops the index whatever the
 	// mode, so a store switched out of scoped purging leaves no sets behind — while
 	// this runs on every permission, field or collection change, and a scan that
 	// walks the whole keyspace for an index that cannot exist is a cost per write.
-	if (!scopedCachePurgeEnabled()) {
+	// A FLUSHDB took the index already.
+	if (flushedDatabase || !scopedCachePurgeEnabled()) {
 		return;
 	}
 
