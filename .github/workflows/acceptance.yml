@@ -60,6 +60,9 @@ jobs:
       REDIS: redis://localhost:6379
       CACHE_AUTO_PURGE: 'true'
       CACHE_AUTO_PURGE_MODE: scoped
+      # A first boot records its build and opens the deploy fill pause, which
+      # refuses every fill the traffic below asks for; no build came before.
+      CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0'
       CACHE_STATS_ENABLED: 'true'
       ADMIN_EMAIL: admin@example.com
       # Throwaway localhost-only instance — a fixed password is fine and lets the
