@@ -602,14 +602,15 @@ describe('System MCP Tests', () => {
 			expect(read.body.result.structuredContent.resolved.scoped_index_scan_count)
 				.toEqual({ value: 500, source: 'settings', fallback: 1000 });
 
-			// The guard behind PATCH /settings refuses it here too.
+			// The guard behind PATCH /settings refuses it here too, before anything
+			// is stored, so it answers as an argument the tool would not take.
 			const refused = await callTool(vendor, 'write_cache_settings', {
 				settings: { scoped_index_ttl_factor: 0.5 },
 			});
 
-			expect(refused.body.result.isError).toBe(true);
+			expect(refused.body.error.code).toBe(-32602);
 
-			expect(refused.body.result.content[0].text).toContain(
+			expect(refused.body.error.message).toContain(
 				"'cache_settings.scoped_index_ttl_factor' has to be a number from 1",
 			);
 
