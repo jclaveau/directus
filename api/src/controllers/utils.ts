@@ -537,13 +537,13 @@ router.post(
 router.get(
 	'/cache/settings',
 	asyncHandler(async (req, res, next) => {
-		const service = new UtilsService({
+		const utilsService = new UtilsService({
 			accountability: req.accountability,
 			schema: req.schema,
 		});
 
 		res.locals['cache'] = false;
-		res.locals['payload'] = { data: await service.readCacheSettings() };
+		res.locals['payload'] = { data: await utilsService.readCacheSettings() };
 
 		return next();
 	}),
@@ -553,25 +553,29 @@ router.get(
 router.patch(
 	'/cache/settings',
 	asyncHandler(async (req, res) => {
-		const service = new UtilsService({
+		const utilsService = new UtilsService({
 			accountability: req.accountability,
 			schema: req.schema,
 		});
 
-		const patch: unknown = req.body;
+		const settingsPatch: unknown = req.body;
 
-		if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+		if (
+			typeof settingsPatch !== 'object'
+			|| settingsPatch === null
+			|| Array.isArray(settingsPatch)
+		) {
 			throw new InvalidPayloadError({
 				reason: 'An object of cache settings is required',
 			});
 		}
 
-		const updated = await service.updateCacheSettings(
-			patch as Record<string, unknown>,
+		const updatedSettings = await utilsService.updateCacheSettings(
+			settingsPatch as Record<string, unknown>,
 			'admin',
 		);
 
-		res.status(200).json({ data: updated });
+		res.status(200).json({ data: updatedSettings });
 		return;
 	}),
 );
@@ -579,12 +583,12 @@ router.patch(
 router.delete(
 	'/cache/settings',
 	asyncHandler(async (req, res) => {
-		const service = new UtilsService({
+		const utilsService = new UtilsService({
 			accountability: req.accountability,
 			schema: req.schema,
 		});
 
-		res.status(200).json({ data: await service.clearCacheSettings() });
+		res.status(200).json({ data: await utilsService.clearCacheSettings() });
 		return;
 	}),
 );

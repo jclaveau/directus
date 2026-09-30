@@ -774,23 +774,23 @@ export class UtilsService {
 				markEnablingFlushed(settingsTrx);
 			}
 
-			const merged = usableCacheSettings(
+			const mergedSettings = usableCacheSettings(
 				await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, settingsTrx),
 			);
 
 			for (const [field, value] of Object.entries(patch)) {
 				if (value === null) {
-					delete merged[field];
+					delete mergedSettings[field];
 				}
 				else {
-					merged[field] = value;
+					mergedSettings[field] = value;
 				}
 			}
 
-			const patchedSettings = Object.keys(merged).length === 0
+			const patchedSettings = Object.keys(mergedSettings).length === 0
 				? null
 				: {
-					...merged,
+					...mergedSettings,
 					setBy: this.accountability?.user ?? null,
 					setAt: new Date().toISOString(),
 					setFrom: surface,

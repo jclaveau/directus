@@ -20,10 +20,10 @@ const emit = defineEmits<{ changed: [] }>();
 
 const { t } = useI18n();
 
-const answer = ref<CacheSettingsAnswer | null>(null);
-const error = ref<string | null>(null);
-const saving = ref(false);
-const drafts = ref<Record<string, string | null>>({});
+const settingsAnswer = ref<CacheSettingsAnswer | null>(null);
+const panelError = ref<string | null>(null);
+const isSaving = ref(false);
+const pendingDrafts = ref<Record<string, string | null>>({});
 
 // A number field holding what the browser cannot read reports it as emptied,
 // which would write a reset, so the fields in that state are kept apart, with
@@ -31,47 +31,47 @@ const drafts = ref<Record<string, string | null>>({});
 const badInputFields = ref(new Map<string, HTMLInputElement>());
 
 // Bumped to give a field a new box: one whose value is null renders '' before
-// and after its unreadable text is discarded, so only a new box drops it.
+// and after its unreadableRows text is discarded, so only a new box drops it.
 const inputGenerations = ref<Record<string, number>>({});
 
-const rows = computed(() => cacheSettingRows(answer.value));
+const settingRows = computed(() => cacheSettingRows(settingsAnswer.value));
 
 /**
- * The stamp as one sentence, worded as the autoscale panel words its own, and
+ * The  as one sentence, worded as the autoscale panel words its own, and
  * assembled here rather than out of template fragments, which drop the spaces
  * between them the moment one of the fragments is conditional.
  */
 const stampLine = computed(() => {
-	const stamp = cacheSettingsStamp(answer.value, Date.now());
+	const settingsStamp = cacheSettingsStamp(settingsAnswer.value, Date.now());
 
-	if (stamp === null) {
+	if (settingsStamp === null) {
 		return null;
 	}
 
-	const parts = [t('cache_settings_set_by', 'Configured')];
+	const stampWords = [t('cache_settings_set_by', 'Configured')];
 
-	if (stamp.setBy !== null) {
-		parts.push(t('cache_settings_by', { writer: stamp.setBy }));
+	if (settingsStamp.setBy !== null) {
+		stampWords.push(t('cache_settings_by', { writer: settingsStamp.setBy }));
 	}
 
-	if (stamp.setFrom === 'admin') {
-		parts.push(t('cache_settings_from_admin'));
+	if (settingsStamp.setFrom === 'admin') {
+		stampWords.push(t('cache_settings_from_admin'));
 	}
 
-	if (stamp.setFrom === 'mcp') {
-		parts.push(t('cache_settings_from_mcp'));
+	if (settingsStamp.setFrom === 'mcp') {
+		stampWords.push(t('cache_settings_from_mcp'));
 	}
 
-	parts.push(t('cache_settings_days_ago', { days: stamp.days }));
+	stampWords.push(t('cache_settings_days_ago', { days: settingsStamp.days }));
 
-	return parts.join(' ');
+	return stampWords.join(' ');
 });
 
-const dirty = computed(() => Object.keys(drafts.value).length > 0);
+const hasDrafts = computed(() => Object.keys(pendingDrafts.value).length > 0);
 
-onMounted(load);
+onMounted(loadSettings);
 
-watch(() => props.refreshKey, load);
+watch(() => props.refreshKey, loadSettings);
 
 /**
  * Bumped by every read and write, so a read answering after a later one, a
@@ -79,64 +79,67 @@ watch(() => props.refreshKey, load);
  */
 let latestRequest = 0;
 
-async function load(): Promise<void> {
+async function loadSettings(): Promise<void> {
 	latestRequest += 1;
 	const thisRequest = latestRequest;
 
 	try {
-		const response = await api.get('/utils/cache/settings');
+		const settingsResponse = await api.get('/utils/cache/settings');
 
 		if (thisRequest !== latestRequest) {
 			return;
 		}
 
-		answer.value = response.data.data;
-		error.value = null;
+		settingsAnswer.value = settingsResponse.data.data;
+		panelError.value = null;
 	}
-	catch (err: any) {
+	catch (requestError: any) {
 		if (thisRequest !== latestRequest) {
 			return;
 		}
 
-		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		panelError.value = requestError?.response?.data?.errors?.[0]?.message
+			?? String(requestError);
 	}
 }
 
 /** Whether the write landed, so a refused one leaves the typing to fix. */
-async function write(
-	request: () => Promise<{ data: { data: CacheSettingsAnswer } }>,
+async function writeSettings(
+	sendRequest: () => Promise<{ data: { data: CacheSettingsAnswer } }>,
 ): Promise<boolean> {
 	latestRequest += 1;
-	saving.value = true;
-	error.value = null;
+	isSaving.value = true;
+	panelError.value = null;
 
 	try {
-		const response = await request();
+		const settingsResponse = await sendRequest();
 
 		// A read sent while the write was in flight may have found the row before
 		// the write committed.
 		latestRequest += 1;
-		answer.value = response.data.data;
+		settingsAnswer.value = settingsResponse.data.data;
 
 		// Switching the cache on can clear it, which the page's figures show.
 		emit('changed');
 		return true;
 	}
-	catch (err: any) {
-		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	catch (requestError: any) {
+		panelError.value = requestError?.response?.data?.errors?.[0]?.message
+			?? String(requestError);
+
 		return false;
 	}
 	finally {
-		saving.value = false;
+		isSaving.value = false;
 	}
 }
 
-function writePatch(patch: Record<string, unknown>): Promise<boolean> {
-	return write(() => api.patch('/utils/cache/settings', patch));
+function writePatch(settingsPatch: Record<string, unknown>): Promise<boolean> {
+	return writeSettings(() => api.patch('/utils/cache/settings', settingsPatch));
 }
 
-function edited(field: string): boolean {
-	return field in drafts.value;
+function isEdited(field: string): boolean {
+	return field in pendingDrafts.value;
 }
 
 /**
@@ -144,13 +147,13 @@ function edited(field: string): boolean {
  * lands in the settings, and one emptied names no layer until it lands.
  */
 function sourceOf(row: CacheSettingRow): CacheSettingSource | null {
-	if (edited(row.field) === false) {
+	if (isEdited(row.field) === false) {
 		return row.source;
 	}
 
-	const draft = drafts.value[row.field];
+	const draftValue = pendingDrafts.value[row.field];
 
-	return draft === null || draft === ''
+	return draftValue === null || draftValue === ''
 		? null
 		: 'settings';
 }
@@ -168,9 +171,9 @@ function sourceLabel(source: CacheSettingSource | null): string {
 }
 
 /** The change being typed, else what the node runs on. */
-function shown(row: CacheSettingRow): string | null {
-	if (edited(row.field)) {
-		return drafts.value[row.field] ?? null;
+function shownValue(row: CacheSettingRow): string | null {
+	if (isEdited(row.field)) {
+		return pendingDrafts.value[row.field] ?? null;
 	}
 
 	return row.value === null
@@ -191,10 +194,10 @@ function trackBadInput(field: string, event: Event): void {
 
 /**
  * Take a value the box reports. A number's arrows step it without an input
- * event, so the box is asked again whether it still holds unreadable text.
+ * event, so the box is asked again whether it still holds unreadableRows text.
  */
 function updateDraft(field: string, value: string | null): void {
-	drafts.value[field] = value;
+	pendingDrafts.value[field] = value;
 
 	if (badInputFields.value.get(field)?.validity.badInput === false) {
 		badInputFields.value.delete(field);
@@ -205,23 +208,25 @@ function inputKey(field: string): string {
 	return `${field}:${inputGenerations.value[field] ?? 0}`;
 }
 
-/** Refuse the write while one of `rows` holds what the browser cannot read. */
-function refusesBadInput(rows: CacheSettingRow[]): boolean {
-	const unreadable = rows.filter((row) => badInputFields.value.has(row.field));
+/** Refuse the write while one of `checkedRows` holds unreadable text. */
+function refusesBadInput(checkedRows: CacheSettingRow[]): boolean {
+	const unreadableRows = checkedRows.filter(
+		(row) => badInputFields.value.has(row.field),
+	);
 
-	if (unreadable.length === 0) {
+	if (unreadableRows.length === 0) {
 		return false;
 	}
 
-	error.value = `${t('not_a_number')}: ${
-		unreadable.map((row) => row.variable).join(', ')
+	panelError.value = `${t('not_a_number')}: ${
+		unreadableRows.map((row) => row.variable).join(', ')
 	}`;
 
 	return true;
 }
 
 function forgetDraft(field: string): void {
-	delete drafts.value[field];
+	delete pendingDrafts.value[field];
 
 	if (badInputFields.value.delete(field)) {
 		inputGenerations.value[field] = (inputGenerations.value[field] ?? 0) + 1;
@@ -229,11 +234,11 @@ function forgetDraft(field: string): void {
 }
 
 async function applyRow(row: CacheSettingRow): Promise<void> {
-	if (edited(row.field) === false || refusesBadInput([row])) {
+	if (isEdited(row.field) === false || refusesBadInput([row])) {
 		return;
 	}
 
-	const value = parseCacheSettingValue(row.kind, drafts.value[row.field]);
+	const value = parseCacheSettingValue(row.kind, pendingDrafts.value[row.field]);
 
 	if (await writePatch({ [row.field]: value })) {
 		forgetDraft(row.field);
@@ -252,52 +257,55 @@ async function resetRow(field: string): Promise<void> {
 
 /** Every pending change in one write, refused or taken whole. */
 async function applyAll(): Promise<void> {
-	const patch: Record<string, unknown> = {};
+	const settingsPatch: Record<string, unknown> = {};
 
-	if (refusesBadInput(rows.value.filter((row) => edited(row.field)))) {
+	if (refusesBadInput(settingRows.value.filter((row) => isEdited(row.field)))) {
 		return;
 	}
 
-	for (const row of rows.value) {
-		if (edited(row.field)) {
-			patch[row.field] = parseCacheSettingValue(row.kind, drafts.value[row.field]);
+	for (const row of settingRows.value) {
+		if (isEdited(row.field)) {
+			settingsPatch[row.field] = parseCacheSettingValue(
+				row.kind,
+				pendingDrafts.value[row.field],
+			);
 		}
 	}
 
-	if (await writePatch(patch) === false) {
+	if (await writePatch(settingsPatch) === false) {
 		return;
 	}
 
-	for (const field of Object.keys(patch)) {
+	for (const field of Object.keys(settingsPatch)) {
 		forgetDraft(field);
 	}
 }
 
 function resetAll(): void {
-	for (const field of Object.keys(drafts.value)) {
+	for (const field of Object.keys(pendingDrafts.value)) {
 		forgetDraft(field);
 	}
 }
 
 async function resetToFallbacks(): Promise<void> {
-	if (await write(() => api.delete('/utils/cache/settings'))) {
+	if (await writeSettings(() => api.delete('/utils/cache/settings'))) {
 		resetAll();
 	}
 }
 
 /** What resetting a field would leave it on, named in the button that does it. */
 function resetsTo(row: CacheSettingRow): string {
-	const back = t('cache_settings_reset_env', 'Reset to the environment:');
+	const resetLabel = t('cache_settings_reset_env', 'Reset to the environment:');
 
 	return row.fallback === null
-		? `${back} —`
-		: `${back} ${String(row.fallback)}`;
+		? `${resetLabel} —`
+		: `${resetLabel} ${String(row.fallback)}`;
 }
 </script>
 
 <template>
 	<div class="cache-settings">
-		<v-notice v-if="error" type="danger">{{ error }}</v-notice>
+		<v-notice v-if="panelError" type="danger">{{ panelError }}</v-notice>
 
 		<table class="fields">
 			<thead>
@@ -307,7 +315,11 @@ function resetsTo(row: CacheSettingRow): string {
 				</tr>
 			</thead>
 			<tbody>
-				<tr v-for="row in rows" :key="row.field" :data-variable="row.variable">
+				<tr
+					v-for="row in settingRows"
+					:key="row.field"
+					:data-variable="row.variable"
+				>
 					<td>
 						<span v-tooltip="row.description">{{ row.variable }}</span>
 					</td>
@@ -319,17 +331,17 @@ function resetsTo(row: CacheSettingRow): string {
 							role="group"
 							:aria-label="row.variable"
 							class="control choice"
-							:class="{ pending: edited(row.field) }"
+							:class="{ pending: isEdited(row.field) }"
 						>
 							<v-select
-								:model-value="shown(row)"
+								:model-value="shownValue(row)"
 								:items="row.options"
 								small
-								:disabled="saving"
+								:disabled="isSaving"
 								@update:model-value="updateDraft(row.field, $event)"
 							>
 								<template #append>
-									<span class="source" :class="{ pending: edited(row.field) }">
+									<span class="source" :class="{ pending: isEdited(row.field) }">
 										{{ sourceLabel(sourceOf(row)) }}
 									</span>
 								</template>
@@ -341,26 +353,26 @@ function resetsTo(row: CacheSettingRow): string {
 							class="control"
 							:class="{
 								numeric: row.kind === 'number',
-								pending: edited(row.field),
+								pending: isEdited(row.field),
 							}"
 						>
 							<v-input
 								:key="inputKey(row.field)"
-								:model-value="shown(row) ?? ''"
+								:model-value="shownValue(row) ?? ''"
 								small
 								full-width
 								:type="row.kind === 'number' ? 'number' : 'text'"
 								:min="row.min"
 								:step="row.step"
 								:suffix="row.unit"
-								:disabled="saving"
+								:disabled="isSaving"
 								:aria-label="row.variable"
 								@update:model-value="updateDraft(row.field, $event)"
 								@input="trackBadInput(row.field, $event)"
 								@keyup.enter="applyRow(row)"
 							>
 								<template #append>
-									<span class="source" :class="{ pending: edited(row.field) }">
+									<span class="source" :class="{ pending: isEdited(row.field) }">
 										{{ sourceLabel(sourceOf(row)) }}
 									</span>
 								</template>
@@ -374,7 +386,7 @@ function resetsTo(row: CacheSettingRow): string {
 							class="cancel"
 							:tooltip="t('cache_settings_cancel', 'Discard this change')"
 							:aria-label="t('cache_settings_cancel', 'Discard this change')"
-							:disabled="saving || !edited(row.field)"
+							:disabled="isSaving || !isEdited(row.field)"
 							@click="cancelRow(row.field)"
 						>
 							<v-icon name="close" x-small />
@@ -386,7 +398,7 @@ function resetsTo(row: CacheSettingRow): string {
 							class="apply"
 							:tooltip="t('cache_settings_apply', 'Apply this change')"
 							:aria-label="t('cache_settings_apply', 'Apply this change')"
-							:disabled="saving || !edited(row.field)"
+							:disabled="isSaving || !isEdited(row.field)"
 							@click="applyRow(row)"
 						>
 							<v-icon name="check" x-small />
@@ -399,7 +411,7 @@ function resetsTo(row: CacheSettingRow): string {
 							class="reset"
 							:tooltip="resetsTo(row)"
 							:aria-label="resetsTo(row)"
-							:disabled="saving || row.sharedSettings === null"
+							:disabled="isSaving || row.sharedSettings === null"
 							@click="resetRow(row.field)"
 						>
 							<v-icon name="settings_backup_restore" x-small />
@@ -410,26 +422,26 @@ function resetsTo(row: CacheSettingRow): string {
 		</table>
 
 		<div class="bulk">
-			<v-button small :disabled="!dirty || saving" @click="applyAll">
+			<v-button small :disabled="!hasDrafts || isSaving" @click="applyAll">
 				{{ t('cache_settings_apply_all', 'Apply all changes') }}
 			</v-button>
 
-			<v-button small secondary :disabled="!dirty || saving" @click="resetAll">
+			<v-button small secondary :disabled="!hasDrafts || isSaving" @click="resetAll">
 				{{ t('cache_settings_reset_all', 'Reset all changes') }}
 			</v-button>
 
 			<v-button
 				small
 				secondary
-				:disabled="!answer?.sharedSettings || saving"
+				:disabled="!settingsAnswer?.sharedSettings || isSaving"
 				@click="resetToFallbacks"
 			>
 				{{ t('cache_settings_reset_fallbacks', 'Reset to the environment') }}
 			</v-button>
 		</div>
 
-		<p v-if="answer" class="key">
-			{{ t('cache_settings_key', 'Stored in') }} {{ answer.key }}
+		<p v-if="settingsAnswer" class="key">
+			{{ t('cache_settings_key', 'Stored in') }} {{ settingsAnswer.key }}
 		</p>
 
 		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>

@@ -963,31 +963,31 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			outputSchema: CACHE_SETTINGS_OUTPUT,
 			annotations: CHANGES_CONFIG,
 			run: async (args, context) => {
-				const service = utils(context);
-				const settings = args['settings'];
+				const utilsService = utils(context);
+				const settingsPatch = args['settings'];
 
 				if (args['clear'] === true) {
-					if (settings !== undefined) {
+					if (settingsPatch !== undefined) {
 						throw new InvalidPayloadError({
 							reason: '`clear` and `settings` cannot be sent together',
 						});
 					}
 
-					return service.clearCacheSettings();
+					return utilsService.clearCacheSettings();
 				}
 
 				if (
-					typeof settings !== 'object'
-					|| settings === null
-					|| Array.isArray(settings)
+					typeof settingsPatch !== 'object'
+					|| settingsPatch === null
+					|| Array.isArray(settingsPatch)
 				) {
 					throw new InvalidPayloadError({
 						reason: '`settings` has to be an object of cache settings',
 					});
 				}
 
-				return service.updateCacheSettings(
-					settings as Record<string, unknown>,
+				return utilsService.updateCacheSettings(
+					settingsPatch as Record<string, unknown>,
 					'mcp',
 				);
 			},

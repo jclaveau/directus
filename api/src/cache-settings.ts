@@ -72,14 +72,14 @@ interface CacheSettingRule<F extends CacheSettingField> {
 
 /** `CACHE_RESPONSE` where it is set, else `CACHE_ENABLED`. */
 export function envResponseCache(): boolean {
-	const env = useEnv();
-	const responseSwitch = env['CACHE_RESPONSE'];
+	const envVars = useEnv();
+	const responseSwitch = envVars['CACHE_RESPONSE'];
 
 	if (typeof responseSwitch === 'boolean') {
 		return responseSwitch;
 	}
 
-	return env['CACHE_ENABLED'] === true;
+	return envVars['CACHE_ENABLED'] === true;
 }
 
 /**
@@ -162,16 +162,16 @@ const CACHE_SETTING_RULES: {
  * An optional variable left unset is not checked.
  */
 export function validateCacheSettingsEnv(): void {
-	for (const rule of Object.values(CACHE_SETTING_RULES)) {
-		const envValue = rule.fallback();
+	for (const cacheRule of Object.values(CACHE_SETTING_RULES)) {
+		const envValue = cacheRule.fallback();
 
-		if (envValue === undefined || rule.accepts(envValue)) {
+		if (envValue === undefined || cacheRule.accepts(envValue)) {
 			continue;
 		}
 
 		useLogger().error(
-			`"${rule.variable}" Environment Variable is ${JSON.stringify(envValue)}, `
-				+ `which is not ${rule.expected.replace(/, or null$/, '')}.`,
+			`"${cacheRule.variable}" Environment Variable is ${JSON.stringify(envValue)}, `
+				+ `which is not ${cacheRule.expected.replace(/, or null$/, '')}.`,
 		);
 
 		process.exit(1);
@@ -214,11 +214,11 @@ export function assertUsableCacheSettings(document: SharedSettings): void {
 			});
 		}
 
-		const rule = CACHE_SETTING_RULES[field];
+		const cacheRule = CACHE_SETTING_RULES[field];
 
-		if (value !== null && rule.accepts(value) === false) {
+		if (value !== null && cacheRule.accepts(value) === false) {
 			throw new InvalidPayloadError({
-				reason: `'cache_settings.${field}' has to be ${rule.expected}`,
+				reason: `'cache_settings.${field}' has to be ${cacheRule.expected}`,
 			});
 		}
 	}
@@ -286,20 +286,22 @@ export interface ResolvedCacheSetting {
 export function resolveCacheSettings(
 	document: SharedSettings | null,
 ): Record<CacheSettingField, ResolvedCacheSetting> {
-	const fields = Object.keys(CACHE_SETTING_RULES) as CacheSettingField[];
+	const settingFields = Object.keys(
+		CACHE_SETTING_RULES,
+	) as CacheSettingField[];
 
-	return Object.fromEntries(fields.map((field) => {
-		const rule = CACHE_SETTING_RULES[field];
-		const stored = document?.[field];
-		const fallback = rule.fallback() ?? null;
+	return Object.fromEntries(settingFields.map((field) => {
+		const cacheRule = CACHE_SETTING_RULES[field];
+		const storedValue = document?.[field];
+		const envFallback = cacheRule.fallback() ?? null;
 
-		const resolved: ResolvedCacheSetting = stored !== undefined
-			&& stored !== null
-			&& rule.accepts(stored)
-			? { value: stored, source: 'settings', fallback }
-			: { value: fallback, source: 'env', fallback };
+		const resolvedSetting: ResolvedCacheSetting = storedValue !== undefined
+			&& storedValue !== null
+			&& cacheRule.accepts(storedValue)
+			? { value: storedValue, source: 'settings', fallback: envFallback }
+			: { value: envFallback, source: 'env', fallback: envFallback };
 
-		return [field, resolved];
+		return [field, resolvedSetting];
 	})) as Record<CacheSettingField, ResolvedCacheSetting>;
 }
 
@@ -353,9 +355,9 @@ export async function seedCacheSettings(): Promise<void> {
 	try {
 		await refreshCacheSettings();
 	}
-	catch (error: unknown) {
+	catch (readError: unknown) {
 		useLogger().warn(
-			error,
+			readError,
 			'[cache] cache_settings is unreadable; the environment alone is read',
 		);
 	}
@@ -401,13 +403,13 @@ export async function flushBeforeEnabling(
 		readSharedSettings,
 	} = await import('./processes/lib/shared-settings.js');
 
-	const column = SHARED_SETTINGS_COLUMNS.cache;
+	const settingsColumn = SHARED_SETTINGS_COLUMNS.cache;
 
-	if (column in payload === false || envResponseCache()) {
+	if (settingsColumn in payload === false || envResponseCache()) {
 		return false;
 	}
 
-	if (asSharedSettings(payload[column])?.['response'] !== true) {
+	if (asSharedSettings(payload[settingsColumn])?.['response'] !== true) {
 		return false;
 	}
 
@@ -431,7 +433,7 @@ export async function flushBeforeEnabling(
 
 	assertUsableSharedSettings(payload);
 
-	const storedSettings = await readSharedSettings(column, context.database);
+	const storedSettings = await readSharedSettings(settingsColumn, context.database);
 
 	if (storedSettings?.['response'] === true) {
 		return false;
@@ -450,7 +452,7 @@ export async function flushBeforeEnabling(
  * the shared-settings floor re-reads it on a node that missed the announcement.
  */
 export async function initCacheSettings(): Promise<void> {
-	const logger = useLogger();
+	const cacheLogger = useLogger();
 
 	const {
 		SHARED_SETTINGS_COLUMNS,
@@ -459,8 +461,11 @@ export async function initCacheSettings(): Promise<void> {
 	} = await import('./processes/lib/shared-settings.js');
 
 	const rereadSetting = () => {
-		refreshCacheSettings().catch((error: unknown) => {
-			logger.warn(error, '[cache] could not re-read cache_settings');
+		refreshCacheSettings().catch((refreshError: unknown) => {
+			cacheLogger.warn(
+				refreshError,
+				'[cache] could not re-read cache_settings',
+			);
 		});
 	};
 

@@ -165,14 +165,14 @@ export function cacheSettingRows(
 	answer: CacheSettingsAnswer | null,
 ): CacheSettingRow[] {
 	return CACHE_SETTING_FIELDS.map((definition) => {
-		const resolved = answer?.resolved[definition.field];
+		const resolvedSetting = answer?.resolved[definition.field];
 
 		return {
 			...definition,
-			value: resolved?.value ?? null,
-			source: resolved?.source ?? null,
+			value: resolvedSetting?.value ?? null,
+			source: resolvedSetting?.source ?? null,
 			sharedSettings: answer?.sharedSettings?.[definition.field] ?? null,
-			fallback: resolved?.fallback ?? null,
+			fallback: resolvedSetting?.fallback ?? null,
 		};
 	});
 }
@@ -187,10 +187,10 @@ export function parseCacheSettingValue(
 	}
 
 	if (kind === 'number') {
-		const parsed = Number(raw);
+		const parsedNumber = Number(raw);
 
-		return Number.isFinite(parsed)
-			? parsed
+		return Number.isFinite(parsedNumber)
+			? parsedNumber
 			: null;
 	}
 
