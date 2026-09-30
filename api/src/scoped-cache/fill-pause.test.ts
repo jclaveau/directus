@@ -120,7 +120,12 @@ describe('pauseScopedCacheFills', () => {
 			['node-1', 15_000],
 		]);
 
-		expect(collectProcessReports.mock.calls).toEqual([[[]], [[]], [[]], [[]]]);
+		expect(collectProcessReports.mock.calls).toEqual([
+			[[], { nodeBuildOnly: true }],
+			[[], { nodeBuildOnly: true }],
+			[[], { nodeBuildOnly: true }],
+			[[], { nodeBuildOnly: true }],
+		]);
 
 		expect(logger.info).toHaveBeenCalledExactlyOnceWith(oneLine`
 			[scoped-cache] fills resumed 20000 ms into the pause after a deploy, once
@@ -184,6 +189,56 @@ describe('pauseScopedCacheFills', () => {
 			.mockResolvedValueOnce([thisBuild])
 			.mockResolvedValueOnce([thisBuild, buildBefore])
 			.mockResolvedValue([thisBuild]);
+
+		const { pauseScopedCacheFills } = await import('./fill-pause.js');
+
+		pauseScopedCacheFills(300_000, 'build-c');
+
+		await vi.advanceTimersByTimeAsync(25_000);
+		expect(endFillPause).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(endFillPause).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		starts the count again on a look that lost the watch — the quiet looks
+		counted before it no longer run in a row
+	`, async () => {
+		watchFillPause
+			.mockResolvedValueOnce({ fillPauseLeftMs: 200_000, watching: true })
+			.mockResolvedValueOnce({ fillPauseLeftMs: 200_000, watching: true })
+			.mockResolvedValueOnce({ fillPauseLeftMs: 200_000, watching: false })
+			.mockResolvedValue({ fillPauseLeftMs: 200_000, watching: true });
+
+		collectProcessReports.mockResolvedValue([
+			{ self: { nodeId: 'node-1', coreBuildId: 'build-c' } },
+		]);
+
+		const { pauseScopedCacheFills } = await import('./fill-pause.js');
+
+		pauseScopedCacheFills(300_000, 'build-c');
+
+		await vi.advanceTimersByTimeAsync(25_000);
+		expect(endFillPause).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(endFillPause).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		starts the count again on a look that failed — the quiet looks counted
+		before it no longer run in a row
+	`, async () => {
+		watchFillPause
+			.mockResolvedValueOnce({ fillPauseLeftMs: 200_000, watching: true })
+			.mockResolvedValueOnce({ fillPauseLeftMs: 200_000, watching: true })
+			.mockRejectedValueOnce(new Error('ECONNREFUSED'))
+			.mockResolvedValue({ fillPauseLeftMs: 200_000, watching: true });
+
+		collectProcessReports.mockResolvedValue([
+			{ self: { nodeId: 'node-1', coreBuildId: 'build-c' } },
+		]);
 
 		const { pauseScopedCacheFills } = await import('./fill-pause.js');
 

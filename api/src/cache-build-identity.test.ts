@@ -6,7 +6,7 @@ import {
 	recordScopedCacheBuild,
 } from './cache-build-identity.js';
 import { flushCaches, getCache } from './cache.js';
-import { scopedCacheIndexStoreAvailable } from './scoped-cache/config.js';
+import { scopedCachePurgeEnabled } from './scoped-cache/config.js';
 import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
 import { useScopedCacheStore } from './scoped-cache/store.js';
 
@@ -28,7 +28,10 @@ const logger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn() }));
 vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));
 
 vi.mock('./scoped-cache/config.js', () => {
-	return { scopedCacheIndexStoreAvailable: vi.fn(() => true) };
+	return {
+		scopedCacheIndexStoreAvailable: vi.fn(() => true),
+		scopedCachePurgeEnabled: vi.fn(() => true),
+	};
 });
 
 vi.mock('./scoped-cache/store.js', () => ({ useScopedCacheStore: vi.fn() }));
@@ -491,11 +494,42 @@ describe('recordScopedCacheBuild', () => {
 		);
 	});
 
-	it('records nothing with no Redis to hold the index', async () => {
-		vi.mocked(scopedCacheIndexStoreAvailable).mockReturnValueOnce(false);
+	it(oneLine`
+		records nothing on a process that does not purge by scope, Redis or not —
+		it files no index-key set a pause would have to wait out
+	`, async () => {
+		vi.mocked(scopedCachePurgeEnabled).mockReturnValueOnce(false);
 
 		await recordScopedCacheBuild();
 
 		expect(useScopedCacheStore).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ label: 'a fraction', fillPauseMax: '4.1m', fillPauseMs: 246_000 },
+		{ label: 'a negative', fillPauseMax: '-5m', fillPauseMs: 0 },
+		{
+			label: 'an infinite',
+			fillPauseMax: `1${'0'.repeat(400)}`,
+			fillPauseMs: 0,
+		},
+	])(oneLine`
+		asks Redis for a whole number of ms off $label ceiling, a fraction rounded
+		up — the script refuses anything else only after recording the build
+	`, async ({ fillPauseMax, fillPauseMs }) => {
+		env['CACHE_BUILD_ID'] = 'build-b';
+		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPauseMax;
+
+		const recordBuildIdentity = vi.fn(async () => {
+			return { buildChanged: true, fillPauseLeftMs: 0 };
+		});
+
+		vi.mocked(useScopedCacheStore)
+			.mockReturnValue({ recordBuildIdentity } as any);
+
+		await recordScopedCacheBuild();
+
+		expect(recordBuildIdentity)
+			.toHaveBeenCalledExactlyOnceWith('build-b', fillPauseMs);
 	});
 });

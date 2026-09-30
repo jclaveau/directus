@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from './config.js';
+import { scopedCacheFillPaused } from './fill-pause.js';
 import { reapScopedCacheIndex } from './purge.js';
 import {
 	requestScopedCacheIndexReap,
@@ -13,6 +14,7 @@ import { useScopedCacheStore } from './store.js';
 vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
 vi.mock('./config.js', () => ({ scopedCachePurgeEnabled: vi.fn() }));
+vi.mock('./fill-pause.js', () => ({ scopedCacheFillPaused: vi.fn() }));
 vi.mock('./purge.js', () => ({ reapScopedCacheIndex: vi.fn() }));
 vi.mock('./store.js', () => ({ useScopedCacheStore: vi.fn() }));
 
@@ -144,6 +146,56 @@ describe('requestScopedCacheIndexReap', () => {
 
 		expect(lockCache.delete)
 		.toHaveBeenCalledExactlyOnceWith('scoped-cache-index:reap');
+	});
+
+	it(oneLine`
+		reaps nothing while the fill pause runs — its mark is refused, and the
+		pause's end asks for the pass
+	`, async () => {
+		vi.mocked(scopedCacheFillPaused).mockReturnValue(true);
+
+		const requested = requestScopedCacheIndexReap();
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await requested;
+
+		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
+		expect(lockCache.get).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		stops waiting for the lock once the fill pause runs — a pass then would be
+		refused its mark
+	`, async () => {
+		vi.mocked(scopedCacheFillPaused)
+			.mockReturnValueOnce(false)
+			.mockReturnValue(true);
+
+		lockCache.get.mockResolvedValueOnce(true);
+
+		const requested = requestScopedCacheIndexReap();
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await vi.waitFor(() => expect(lockCache.get).toHaveBeenCalled());
+		await vi.advanceTimersByTimeAsync(5_000);
+		await requested;
+
+		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
+		expect(lockCache.get).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		reaps once the fill pause ended — the request its end sends
+	`, async () => {
+		vi.mocked(scopedCacheFillPaused).mockReturnValue(false);
+
+		const requested = requestScopedCacheIndexReap();
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await requested;
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
 	});
 
 	it('asks for nothing with scoped purging off', async () => {

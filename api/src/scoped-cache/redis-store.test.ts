@@ -849,16 +849,49 @@ describe('fileIndexedEntries', () => {
 		]]);
 	});
 
-	// Sets that carry no member, so the argument count stays under its own cap
-	// and only the set count can start the second call.
-	it('starts a new call past 500 sets of one collection', async () => {
+	// A read bounded to 30 primary keys files one member under 30 home pins: the
+	// set count alone starts the second call.
+	it('starts a new call past 25 sets of one collection', async () => {
 		await redisScopedCacheStore().fileIndexedEntries(
-			Array.from({ length: 501 }, (_, index) => {
+			[{
+				fingerprint: parseScopedCacheFingerprint(
+					`slot:&id=,${Array.from({ length: 30 }, (_, at) => at + 10).join(',')},&`,
+				),
+				keys: ['key-a'],
+				indexPath: 'owner',
+				homePinFields: ['id'],
+			}],
+			60,
+		);
+
+		expect(indexFile.mock.calls).toHaveLength(2);
+		expect(indexFile.mock.calls[0]).toHaveLength(78);
+		expect(indexFile.mock.calls[0]![0]).toBe(26);
+
+		expect(indexFile.mock.calls[0]![2]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=10',
+		);
+
+		expect(indexFile.mock.calls[0]![26]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=34',
+		);
+
+		expect(indexFile.mock.calls[1]).toHaveLength(18);
+		expect(indexFile.mock.calls[1]![0]).toBe(6);
+
+		expect(indexFile.mock.calls[1]![2]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=35',
+		);
+	});
+
+	// Two sets, far under the set and argument caps, whose members together pass
+	// 64 KiB: only the byte count can start the second call.
+	it('starts a new call past 64 KiB of members of one collection', async () => {
+		await redisScopedCacheStore().fileIndexedEntries(
+			['ada', 'bob'].map((owner) => {
 				return {
-					fingerprint: parseScopedCacheFingerprint(
-						`slot:&owner=,v${index},&`,
-					),
-					keys: [],
+					fingerprint: parseScopedCacheFingerprint(`slot:&owner=,${owner},&`),
+					keys: [`key-${'k'.repeat(40000)}`],
 					indexPath: 'owner',
 					homePinFields: [],
 				};
@@ -867,27 +900,34 @@ describe('fileIndexedEntries', () => {
 		);
 
 		expect(indexFile.mock.calls).toHaveLength(2);
-		expect(indexFile.mock.calls[0]).toHaveLength(1003);
-		expect(indexFile.mock.calls[0]![0]).toBe(501);
+		expect(indexFile.mock.calls[0]).toHaveLength(5);
 
 		expect(indexFile.mock.calls[0]![2]).toBe(
-			'scalabus:scoped-cache-index:fingerprint:slot:owner=v0',
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
 		);
 
-		expect(indexFile.mock.calls[0]![501]).toBe(
-			'scalabus:scoped-cache-index:fingerprint:slot:owner=v499',
+		expect(indexFile.mock.calls[1]).toHaveLength(5);
+
+		expect(indexFile.mock.calls[1]![2]).toBe(
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',
 		);
+	});
 
-		expect(indexFile.mock.calls[0]![502]).toBe(60);
-		expect(indexFile.mock.calls[0]![1002]).toBe(0);
-
-		expect(indexFile.mock.calls[1]).toEqual([
-			2,
-			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			'scalabus:scoped-cache-index:fingerprint:slot:owner=v500',
+	// One set whose members alone pass 64 KiB still goes out, in a call of its
+	// own.
+	it('files a set past 64 KiB of members on its own', async () => {
+		await redisScopedCacheStore().fileIndexedEntries(
+			[{
+				fingerprint: parseScopedCacheFingerprint('slot:&owner=,ada,&'),
+				keys: [`key-${'k'.repeat(70000)}`],
+				indexPath: 'owner',
+				homePinFields: [],
+			}],
 			60,
-			0,
-		]);
+		);
+
+		expect(indexFile.mock.calls).toHaveLength(1);
+		expect(indexFile.mock.calls[0]![0]).toBe(2);
 	});
 
 	// Two sets, far under the set cap, whose members together pass 1000
@@ -949,22 +989,42 @@ describe('fileIndexedEntries', () => {
 // how a set an older build filed without naming it gets adopted.
 describe('scopedCacheCollectionIndexKeysRegisterScript', () => {
 	it(oneLine`
-		only ever moves the expiry out and compares it in milliseconds
+		reads each set's expiry itself, names only the sets still held, and only
+		ever moves the expiry out, in milliseconds
 	`, () => {
-		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
-			"local existed = redis.call('EXISTS', KEYS[1])\n"
-			+ "redis.call('SADD', KEYS[1], unpack(ARGV, 2))",
-		);
+		expect(scopedCacheCollectionIndexKeysRegisterScript).toBe(`
+local live = {}
+local want = 0
+local unbounded = false
 
-		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
-			"redis.call('PERSIST', KEYS[1])",
-		);
+for i = 2, #KEYS do
+	local left = redis.call('PTTL', KEYS[i])
+	if left == -1 then
+		unbounded = true
+		live[#live + 1] = KEYS[i]
+	elseif left >= 0 then
+		want = math.max(want, left)
+		live[#live + 1] = KEYS[i]
+	end
+end
 
-		expect(scopedCacheCollectionIndexKeysRegisterScript).toContain(
-			"local ttl = redis.call('PTTL', KEYS[1])\n"
-			+ 'if existed == 0 or (ttl >= 0 and ttl < want) then\n'
-			+ "\tredis.call('PEXPIRE', KEYS[1], want)",
-		);
+if #live == 0 then
+	return 0
+end
+
+local existed = redis.call('EXISTS', KEYS[1])
+redis.call('SADD', KEYS[1], unpack(live))
+if unbounded then
+	redis.call('PERSIST', KEYS[1])
+	return #live
+end
+local ttl = redis.call('PTTL', KEYS[1])
+if existed == 0 or (ttl >= 0 and ttl < want) then
+	redis.call('PEXPIRE', KEYS[1], want)
+end
+
+return #live
+`);
 	});
 });
 
@@ -2243,24 +2303,22 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 	});
 
 	it(oneLine`
-		names each set it reads in its collection's index-key set with the set's own
-		expiry, so a set filed by a node without the index-key set is found again
+		names the sets of one SCAN page in one register call per collection, so a
+		set filed by a node without the index-key set is found again
 	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
 			[
 				'scalabus:scoped-cache-index:fingerprint:slot:',
 				'scalabus:scoped-cache-index:fingerprint:note:',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
 			],
 		]);
 
 		sscan
 			.mockResolvedValueOnce(['0', ['slot:&|key-a']])
-			.mockResolvedValueOnce(['0', ['note:&|key-b']]);
-
-		pttl
-			.mockResolvedValueOnce(5000)
-			.mockResolvedValueOnce(-1);
+			.mockResolvedValueOnce(['0', ['note:&|key-b']])
+			.mockResolvedValueOnce(['0', ['slot:&owner=,ana,&|key-c']]);
 
 		scopedCacheIndexReap.mockResolvedValue(0);
 
@@ -2269,15 +2327,23 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 			86400,
 		);
 
+		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheCollectionIndexKeysRegister',
+			{ lua: scopedCacheCollectionIndexKeysRegisterScript },
+		);
+
+		expect(pttl).not.toHaveBeenCalled();
+
 		expect(scopedCacheCollectionIndexKeysRegister.mock.calls).toEqual([
 			[
+				3,
 				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				5000,
 				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=ana',
 			],
 			[
+				2,
 				'scalabus:scoped-cache-index:collection-index-keys:note',
-				-1,
 				'scalabus:scoped-cache-index:fingerprint:note:',
 			],
 		]);
@@ -2293,7 +2359,6 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		]);
 
 		sscan.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-a']]);
-		pttl.mockResolvedValueOnce(5000);
 		scopedCacheIndexReap.mockResolvedValue(0);
 
 		await redisScopedCacheStore().reapIndexedEntries(
@@ -2302,27 +2367,10 @@ return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
 		);
 
 		expect(scopedCacheCollectionIndexKeysRegister.mock.calls).toEqual([[
+			2,
 			'scalabus:scoped-cache-index:collection-index-keys:slot',
-			5000,
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 		]]);
-	});
-
-	it('names nothing for a set gone by the end of its read', async () => {
-		scan.mockResolvedValueOnce([
-			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:'],
-		]);
-
-		sscan.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
-		scopedCacheIndexReap.mockResolvedValue(1);
-
-		await redisScopedCacheStore().reapIndexedEntries(
-			(key) => key,
-			86400,
-		);
-
-		expect(scopedCacheCollectionIndexKeysRegister).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
