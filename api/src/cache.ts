@@ -198,7 +198,9 @@ interface StoreClientState {
  * Wait until every Redis tier can take a command. The dial `getConfig` starts
  * leaves the client open but not ready, and `disableOfflineQueue` refuses what
  * is sent in between: a `directus cache flush` process builds its tiers and
- * clears them in the same tick, so every one of its clears went out in that gap.
+ * clears them in the same tick, so every one of its clears went out in that gap,
+ * and so does a settings write switching the cache on where the environment
+ * leaves it off, which builds the response tier only to clear it.
  * Waits at most `storeReadyTimeoutMs`, then lets the commands fail and be
  * reported, since a Redis that never answers is a failed flush, not a hung one.
  * A server's tiers are ready long before, so there it waits only through an
@@ -483,6 +485,8 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	const { cache, systemCache, lockCache } = getCache();
 	const refusedTargets: CacheFlushTarget[] = [];
 	let refusedIndexKeys = 0;
+
+	await awaitStoresReady([cache, systemCache, lockCache]);
 
 	if (targets.includes('system')) {
 		// forced so it runs even while a lock is held; its `schemaChanged` publish

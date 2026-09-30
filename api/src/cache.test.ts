@@ -1797,14 +1797,46 @@ describe('a flush over redis tiers still connecting', () => {
 	});
 
 	test(oneLine`
+		clears a response tier just built, as switching the cache on in the
+		settings does, once it is ready
+	`, async () => {
+		const { clearCacheTargets, stores } = await reloadWithConnectingStores();
+
+		stores.system.client.isReady = true;
+		stores.lock.client.isReady = true;
+
+		const clearing = clearCacheTargets(['response']);
+
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect([...stores.response.entries])
+			.toEqual([['scalabus_response:read', 'r']]);
+
+		stores.response.client.isReady = true;
+		stores.response.client.emit('ready');
+
+		await expect(clearing).resolves.toBeUndefined();
+		expect([...stores.response.entries]).toEqual([]);
+	});
+
+	test(oneLine`
 		fails an admin clear whose tiers redis refused, where Keyv alone would
 		have answered 200 over a cache still full
 	`, async () => {
 		const { clearCacheTargets, stores } = await reloadWithConnectingStores();
 
-		await expect(clearCacheTargets(['system', 'response', 'locks']))
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+
+		const refused = expect(clearCacheTargets(['system', 'response', 'locks']))
 			.rejects
 			.toThrowError(/redis refused the system, response, locks clear/);
+
+		await vi.advanceTimersByTimeAsync(5000);
+		await refused;
 
 		expect([...stores.response.entries])
 			.toEqual([['scalabus_response:read', 'r']]);
