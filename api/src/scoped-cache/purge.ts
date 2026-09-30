@@ -141,8 +141,9 @@ export function scopedCacheCollectionsChangedByOnDelete(
  * whole namespace. Both the payload key and its `__expires_at` sibling are indexed.
  * When a cache TTL is set, the index self-expires at
  * `cache_settings.scoped_index_ttl_factor` (2) times that TTL, as a net for
- * filings orphaned by a crash between write and purge; with no TTL the cached entries never expire
- * either, so the index is left unbounded to match — a normal purge still drains it.
+ * filings orphaned by a crash between write and purge; with no TTL the cached
+ * entries never expire either, so the index is left unbounded to match — a normal
+ * purge still drains it.
  *
  * `cacheTtl` is the TTL the caller wrote the entry with, read once for both: the
  * settings override can change between two reads of it.
