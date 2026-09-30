@@ -594,7 +594,10 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		and.optional(
-			'the declaration read only the index sets its value names:',
+			oneLine`
+				the declaration read the home pin sets and only the index sets it
+				names:
+			`,
 			(table: Record<string, string>[]) => {
 				expect(indexReads).toEqual(table);
 			},
@@ -710,6 +713,24 @@ describe.each(vendors)('%s', (vendor) => {
 			oneLine`
 				a purge declared on another collection reads only the sets it
 				names
+			`,
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a purge declared on the index path purges a read filed under a home
+				pin
 			`,
 			(steps) => {
 				const ids = new Map<string, number>();

@@ -240,12 +240,12 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |                       |                |     - id            |
       |                       |                |     - note          |
       |                       |                |     - owner         |
-    And the declaration read only the index sets its value names:
+    And the declaration read the home pin sets and only the index sets it names:
       | command | index set                     |
       | scan    | declared_pin_slot:pin:*       |
       | sscan   | declared_pin_slot:            |
       | sscan   | declared_pin_slot:owner=alpha |
-    Then the read is purged, its own set among the two read:
+    Then the read is purged, its own set among the index sets read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
       |   - id         |   note: rewritten     |     owner:     |
@@ -254,6 +254,61 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |   owner: alpha |                       |     - id       |
       |                |                       |     - note     |
       |                |                       |     - owner    |
+    And the witness reads are still cached, not matching "owner: beta":
+      | query         | response              | fingerprints   |
+      | fields:       | - marker: other_owner | - pinnedScope: |+
+      |   - id        |   note: third         |     owner:     |
+      |   - note      |                       |       - beta   |
+      | filter:       |                       |   viewFields:  |
+      |   owner: beta |                       |     - id       |
+      |               |                       |     - note     |
+      |               |                       |     - owner    |
+
+  Scenario: a purge declared on the index path purges a read filed under a home pin
+    Given the zones:
+      | marker     | label |
+      | north_zone | north |
+      | south_zone | south |
+    And the slots:
+      | marker      | owner | zone       | note  | amount |
+      | target_slot | alpha | north_zone | first | 10     |
+      | other_owner | beta  | south_zone | third | 30     |
+    And this read is cached:
+      | query          | response              | fingerprints    |
+      | fields:        | - marker: target_slot | - pinnedScope:  |+
+      |   - id         |   note: first         |     zone.label: |
+      |   - note       |                       |       - north   |
+      | filter:        |                       |   viewFields:   |
+      |   zone:        |                       |     - id        |
+      |     label:     |                       |     - note      |
+      |       north    |                       |     - zone      |
+    And the witness reads are cached:
+      | query         | response              | fingerprints   |
+      | fields:       | - marker: other_owner | - pinnedScope: |+
+      |   - id        |   note: third         |     owner:     |
+      |   - note      |                       |       - beta   |
+      | filter:       |                       |   viewFields:  |
+      |   owner: beta |                       |     - id       |
+      |               |                       |     - note     |
+      |               |                       |     - owner    |
+    When the signal rewrites the slots and declares:
+      | query                 | declared       | purged fingerprints |
+      | - marker: target_slot | - pinnedScope: | - pinnedScope:      |+
+      |   note: rewritten     |     owner:     |     zone.label:     |
+      |                       |       - alpha  |       - north       |
+      |                       |                |   viewFields:       |
+      |                       |                |     - id            |
+      |                       |                |     - note          |
+      |                       |                |     - zone          |
+    Then the read is purged, filed under "pin:zone.label=north" and pinning no owner:
+      | query          | response              | fingerprints    |
+      | fields:        | - marker: target_slot | - pinnedScope:  |+
+      |   - id         |   note: rewritten     |     zone.label: |
+      |   - note       |                       |       - north   |
+      | filter:        |                       |   viewFields:   |
+      |   zone:        |                       |     - id        |
+      |     label:     |                       |     - note      |
+      |       north    |                       |     - zone      |
     And the witness reads are still cached, not matching "owner: beta":
       | query         | response              | fingerprints   |
       | fields:       | - marker: other_owner | - pinnedScope: |+
