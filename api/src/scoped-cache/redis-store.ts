@@ -15,7 +15,7 @@
 
 import { useEnv } from '@directus/env';
 import { randomUUID } from 'node:crypto';
-import { cacheSettingOr } from '../cache-settings.js';
+import { cacheSetting } from '../cache-settings.js';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -63,7 +63,7 @@ const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
  * reply — to keep the handful the write actually matched.
  */
 function scopedCacheIndexScanCount(): number {
-	return cacheSettingOr('scoped_index_scan_count', 1000);
+	return cacheSetting('scoped_index_scan_count');
 }
 
 // How many keys a SCAN is asked to look at per round trip. `@keyv/redis` uses 1000
@@ -601,7 +601,7 @@ export function scopedCacheRowIndexGlobs(
 			// Every pattern is a pass over the set, so past a point narrowing costs
 			// more round trips than the members it saves sending: the sets are then
 			// read whole and every member tested here instead.
-			if (globPatterns.size > cacheSettingOr('scoped_max_index_globs', 64)) {
+			if (globPatterns.size > cacheSetting('scoped_max_index_globs')) {
 				return null;
 			}
 		}

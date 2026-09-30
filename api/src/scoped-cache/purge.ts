@@ -4,7 +4,7 @@ import emitter from '../emitter.js';
 import {
 	resolvedCacheTtl,
 } from '../cache-config.js';
-import { cacheSettingOr } from '../cache-settings.js';
+import { cacheSetting } from '../cache-settings.js';
 import {
 	cacheExpiresAtKey,
 	cacheSidecarOwner,
@@ -164,7 +164,7 @@ export async function indexScopedCacheEntry(
 	// pipeline. Ceiled after the factor: EXPIRE refuses a fraction.
 	const ttlSeconds = Math.ceil(
 		getMilliseconds(cacheTtl, 0)
-		* cacheSettingOr('scoped_index_ttl_factor', 2)
+		* cacheSetting('scoped_index_ttl_factor')
 		/ 1000,
 	);
 

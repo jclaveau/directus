@@ -30,6 +30,9 @@ const service = vi.hoisted(() => {
 		getCacheAuditSchedule: vi.fn(),
 		getCacheAuditQueue: vi.fn(),
 		updateCacheAuditSchedule: vi.fn(),
+		readCacheSettings: vi.fn(),
+		updateCacheSettings: vi.fn(),
+		clearCacheSettings: vi.fn(),
 		constructed: [] as unknown[],
 	};
 });
@@ -63,6 +66,9 @@ vi.mock('../../services/utils.js', () => {
 			getCacheAuditSchedule = service.getCacheAuditSchedule;
 			getCacheAuditQueue = service.getCacheAuditQueue;
 			updateCacheAuditSchedule = service.updateCacheAuditSchedule;
+			readCacheSettings = service.readCacheSettings;
+			updateCacheSettings = service.updateCacheSettings;
+			clearCacheSettings = service.clearCacheSettings;
 		},
 	};
 });
@@ -128,7 +134,10 @@ import {
 import type { CacheAuditFinding } from '../../cache-audit.js';
 import type { CacheAuditRun } from '../../cache-audit-runs.js';
 // Type-only, so the mock above still stands in for the module at runtime.
-import type { UtilsService as GuardedUtils } from '../../services/utils.js';
+import type {
+	CacheSettingsAnswer,
+	UtilsService as GuardedUtils,
+} from '../../services/utils.js';
 import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
 
 const context = {
@@ -183,6 +192,8 @@ test('Every tool is described well enough for a model to choose it', () => {
 		'list_cache_latencies',
 		'read_cache_timeseries',
 		'read_cache_stats_state',
+		'read_cache_settings',
+		'write_cache_settings',
 		'run_cache_audit',
 		'list_cache_audits',
 		'read_cache_audit',
@@ -220,6 +231,7 @@ test('Only the reads declare themselves reads', () => {
 		'write_supervisor_config',
 		'restart_autoscale_pool',
 		'run_autoscale_drill',
+		'write_cache_settings',
 		'run_cache_audit',
 		'write_cache_audit_schedule',
 	]);
@@ -333,6 +345,8 @@ test('A deployment that reports no processes offers no tool for them', () => {
 			'list_cache_latencies',
 			'read_cache_timeseries',
 			'read_cache_stats_state',
+			'read_cache_settings',
+			'write_cache_settings',
 			'run_cache_audit',
 			'list_cache_audits',
 			'read_cache_audit',
@@ -397,6 +411,8 @@ test('Every tool declares the subsystem it reads', () => {
 		'autoscale',
 		'autoscale_drill',
 		'autoscale_drill',
+		'cache',
+		'cache',
 		'cache',
 		'cache',
 		'cache',
@@ -531,6 +547,32 @@ test('The configuration write refuses a patch that is not an object', async () =
 		findSystemMcpTool('write_autoscale_config')!
 			.run({ config: 'maxWorkers=8', note: 'why' }, context),
 	).rejects.toThrowError('`config` has to be an object of configuration fields');
+});
+
+test('The cache settings write sends the fields down as given', async () => {
+	await findSystemMcpTool('write_cache_settings')!.run(
+		{ settings: { audit_limit: 40, value_max_size: null } },
+		context,
+	);
+
+	expect(service.updateCacheSettings)
+		.toHaveBeenCalledWith({ audit_limit: 40, value_max_size: null });
+});
+
+test('The cache settings write drops them all on clear', async () => {
+	await findSystemMcpTool('write_cache_settings')!.run({ clear: true }, context);
+
+	expect(service.clearCacheSettings).toHaveBeenCalledOnce();
+	expect(service.updateCacheSettings).not.toHaveBeenCalled();
+});
+
+test('The cache settings write refuses fields that are not an object', async () => {
+	await expect(
+		findSystemMcpTool('write_cache_settings')!
+			.run({ settings: 'audit_limit=40' }, context),
+	).rejects.toThrowError('`settings` has to be an object of cache settings');
+
+	expect(service.updateCacheSettings).not.toHaveBeenCalled();
 });
 
 test('The supervisor write sends the note down with the options', async () => {
@@ -915,6 +957,21 @@ const auditFinding: CacheAuditFinding = {
 	purgesSinceFilled: [],
 };
 
+const cacheSettingsAnswer: CacheSettingsAnswer = {
+	key: 'directus_settings.cache_settings',
+	sharedSettings: { audit_limit: 40 },
+	resolved: {
+		enabled: { value: true, source: 'env' },
+		value_max_size: { value: false, source: 'env' },
+		stats_max_bytes: { value: '2gb', source: 'env' },
+		audit_limit: { value: 40, source: 'settings' },
+		audit_max_duration: { value: '10m', source: 'env' },
+		scoped_max_index_globs: { value: 64, source: 'default' },
+		scoped_index_scan_count: { value: 1000, source: 'default' },
+		scoped_index_ttl_factor: { value: 2, source: 'default' },
+	},
+};
+
 const auditRun: CacheAuditRun = {
 	id: 7,
 	startedAt: 1_700_000_000_000,
@@ -976,6 +1033,10 @@ test('Every declared output property is one the tool actually answers', () => {
 		list_cache_latencies: CacheGroupLatencyRecord[];
 		read_cache_timeseries: CacheTimeseries;
 		read_cache_stats_state: CacheStatsState;
+		read_cache_settings:
+			Awaited<ReturnType<GuardedUtils['readCacheSettings']>>;
+		write_cache_settings:
+			Awaited<ReturnType<GuardedUtils['updateCacheSettings']>>;
 		run_cache_audit: Awaited<ReturnType<GuardedUtils['auditCache']>>;
 		list_cache_audits: Awaited<ReturnType<GuardedUtils['getCacheAudits']>>;
 		read_cache_audit: Awaited<ReturnType<GuardedUtils['getCacheAudit']>>;
@@ -1257,6 +1318,8 @@ test('Every declared output property is one the tool actually answers', () => {
 			bufferLength: 0,
 			droppedEvents: 0,
 		},
+		read_cache_settings: cacheSettingsAnswer,
+		write_cache_settings: cacheSettingsAnswer,
 		run_cache_audit: auditRun,
 		list_cache_audits: [auditRun],
 		read_cache_audit: { ...auditRun, findings: [auditFinding], findingsTotal: 1 },

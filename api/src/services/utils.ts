@@ -19,6 +19,12 @@ import type {
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	refreshCacheSettings,
+	resolveCacheSettings,
+	type CacheSettingField,
+	type ResolvedCacheSetting,
+} from '../cache-settings.js';
+import {
 	cacheExpiresAtKey,
 	cachePinsKey,
 	storedScopedCachePinLabels,
@@ -94,6 +100,7 @@ import {
 	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
+	type SharedSettings,
 } from '../processes/lib/shared-settings.js';
 import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
 import {
@@ -225,6 +232,26 @@ export interface AutoscaleConfigAnswer extends AutoscaleSharedSettingsAnswer {
 	 * a value it displays came from.
 	 */
 	supervisor: AutoscaleSharedSettingsAnswer;
+}
+
+function cacheSettingsAnswer(
+	sharedSettings: SharedSettings | null,
+): CacheSettingsAnswer {
+	return {
+		key: `directus_settings.${SHARED_SETTINGS_COLUMNS.cache}`,
+		sharedSettings,
+		resolved: resolveCacheSettings(sharedSettings),
+	};
+}
+
+/**
+ * What a cache settings read answers with: the stored layer, and every field
+ * as it resolves on the node answering.
+ */
+export interface CacheSettingsAnswer {
+	key: string;
+	sharedSettings: SharedSettings | null;
+	resolved: Record<CacheSettingField, ResolvedCacheSetting>;
 }
 
 export class UtilsService {
@@ -689,6 +716,72 @@ export class UtilsService {
 		this.assertAdmin('truncate cache stats');
 
 		await truncateCacheEvents();
+	}
+
+	async readCacheSettings(): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('inspect the cache settings');
+
+		return cacheSettingsAnswer(
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache),
+		);
+	}
+
+	/**
+	 * Lay a patch over the cache settings, `null` giving a field back to its
+	 * fallback.
+	 *
+	 * Through the settings singleton, whose guard refuses a value outside its
+	 * rule, and whose filter clears the response cache before a write switches
+	 * it on where the environment leaves it off.
+	 */
+	async updateCacheSettings(
+		patch: Record<string, unknown>,
+	): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('change the cache settings');
+
+		const merged: SharedSettings = {
+			...await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache),
+		};
+
+		for (const [field, value] of Object.entries(patch)) {
+			if (value === null) {
+				delete merged[field];
+			}
+			else {
+				merged[field] = value;
+			}
+		}
+
+		const sharedSettings = Object.keys(merged).length === 0
+			? null
+			: merged;
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.cache,
+			sharedSettings,
+			this.settingsOptions,
+		);
+
+		// The other nodes hear of it over the bus; this one answers from what it
+		// just wrote rather than waiting on its own announcement.
+		await refreshCacheSettings();
+
+		return cacheSettingsAnswer(sharedSettings);
+	}
+
+	/** Drop the cache settings, so every field comes from its fallback again. */
+	async clearCacheSettings(): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('clear the cache settings');
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.cache,
+			null,
+			this.settingsOptions,
+		);
+
+		await refreshCacheSettings();
+
+		return cacheSettingsAnswer(null);
 	}
 
 	async readProcesses(details?: ProcessDetail[]): Promise<ProcessesReport> {

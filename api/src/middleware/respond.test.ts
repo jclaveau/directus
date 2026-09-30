@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { CacheSettingField } from '../cache-settings.js';
 
 // Hoisted, because `scoped-cache.js` is now imported for real (see its mock
 // below) and reads `useEnv()` at module scope — which runs while the mock
@@ -21,10 +22,12 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
 
 vi.mock('../cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../cache-settings.js')>();
+
 	return {
-		...await importOriginal<typeof import('../cache-settings.js')>(),
-		cacheSettingOr: (field: string, fallback: unknown) => {
-			return cacheLayer[field] ?? fallback;
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
 		},
 	};
 });

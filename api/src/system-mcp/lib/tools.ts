@@ -210,6 +210,27 @@ const SCHEDULE_PROPERTIES = {
 	},
 } as const;
 
+/** What reading and writing the cache settings answer. */
+const CACHE_SETTINGS_OUTPUT = {
+	type: 'object',
+	properties: {
+		key: {
+			type: 'string',
+			description: 'The settings column the cache settings are stored in.',
+		},
+		sharedSettings: {
+			type: ['object', 'null'],
+			description: 'The fields the cache settings set, or null for none.',
+		},
+		resolved: {
+			type: 'object',
+			description: 'Every field as this node reads it: `value`, and '
+				+ '`source` — "settings", "env" for the environment variable it '
+				+ 'overrides, or "default" for a built-in value.',
+		},
+	},
+} as const;
+
 /** The lookback a cache read takes, described once for every default. */
 function windowProperty(fallbackWindow: string) {
 	return {
@@ -881,6 +902,80 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			},
 			annotations: READ_ONLY,
 			run: async (_args, context) => utils(context).getCacheStatsState(),
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_settings',
+			group: 'cache',
+			title: 'Read the cache settings',
+			description:
+				'The cache settings every node reads live, and what each field '
+				+ 'resolves to with where it comes from: the setting, the environment '
+				+ 'variable it overrides, or a built-in default. Read it before '
+				+ 'changing any of them.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readCacheSettings(),
+		}),
+		defineSystemMcpTool({
+			name: 'write_cache_settings',
+			group: 'cache',
+			title: 'Change the cache settings',
+			description:
+				'Lay fields over the cache settings, which every node picks up at '
+				+ 'once — no redeploy. Pass a field as null to give it back to its '
+				+ 'environment variable or default, and `clear: true` to drop them '
+				+ 'all. A value outside its rule is refused. Switching `enabled` on '
+				+ 'where CACHE_ENABLED is off first clears the response cache, since '
+				+ 'nodes that held none purged nothing while it was off.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					settings: {
+						type: 'object',
+						description: 'The fields to set: enabled (over CACHE_ENABLED), '
+							+ 'value_max_size (false or a size such as "2mb", over '
+							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (a size, over '
+							+ 'CACHE_STATS_MAX_BYTES), audit_limit (an integer from 0, '
+							+ 'over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
+							+ 'such as "10m", over CACHE_AUDIT_MAX_DURATION), '
+							+ 'scoped_max_index_globs (an integer from 1, default 64), '
+							+ 'scoped_index_scan_count (an integer from 1, default 1000), '
+							+ 'scoped_index_ttl_factor (a number from 1, default 2). A '
+							+ 'null value clears that field.',
+					},
+					clear: {
+						type: 'boolean',
+						description: 'Drop the whole cache settings, so every field '
+							+ 'comes from its fallback again.',
+					},
+				},
+			},
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const service = utils(context);
+
+				if (args['clear'] === true) {
+					return service.clearCacheSettings();
+				}
+
+				const settings = args['settings'];
+
+				if (
+					typeof settings !== 'object'
+					|| settings === null
+					|| Array.isArray(settings)
+				) {
+					throw new InvalidPayloadError({
+						reason: '`settings` has to be an object of cache settings',
+					});
+				}
+
+				return service.updateCacheSettings(
+					settings as Record<string, unknown>,
+				);
+			},
 		}),
 		defineSystemMcpTool({
 			name: 'run_cache_audit',

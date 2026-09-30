@@ -20,6 +20,7 @@ import type {
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CacheSettingField } from '../cache-settings.js';
 import {
 	type ScopedCacheFilterKeying,
 	ScopedCacheReadPlan,
@@ -101,10 +102,12 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
 
 vi.mock('../cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../cache-settings.js')>();
+
 	return {
-		...await importOriginal<typeof import('../cache-settings.js')>(),
-		cacheSettingOr: (field: string, fallback: unknown) => {
-			return cacheLayer[field] ?? fallback;
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
 		},
 	};
 });

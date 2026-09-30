@@ -18,7 +18,12 @@ const toolNames = [
 	'list_cache_latencies',
 	'read_cache_timeseries',
 	'read_cache_stats_state',
+	'read_cache_settings',
+	'write_cache_settings',
 ];
+
+// The one tool the default groups offer that changes how the deployment runs.
+const writeToolNames = ['write_cache_settings'];
 
 // The reads that look back over a period, as against the ones that answer about
 // right now (`list_processes`, `read_cache_stats_state`) or about a single named
@@ -376,9 +381,13 @@ describe('System MCP Tests', () => {
 
 			for (const tool of tools) {
 				expect(tool.title).toBeTruthy();
+
 				// Read-only is advertised, not merely true, so a client can call
-				// one without asking the user to approve it.
-				expect(tool.annotations.readOnlyHint).toBe(true);
+				// one without asking the user to approve it; the write says it is
+				// one, so the client asks first.
+				expect(tool.annotations.readOnlyHint)
+					.toBe(writeToolNames.includes(tool.name) === false);
+
 				expect(tool.annotations.destructiveHint).toBe(false);
 				expect(tool.outputSchema.type).toBe('object');
 				// The description is what a model chooses on, so it has to say what
@@ -572,6 +581,46 @@ describe('System MCP Tests', () => {
 			const state = await callTool(vendor, 'read_cache_stats_state');
 
 			expect(JSON.parse(state.body.result.content[0].text).enabled).toBe(true);
+		});
+	});
+
+	describe('Changes the cache settings every node reads', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// A field that only moves what a purge costs: this suite shares the
+			// settings singleton with every instance booting meanwhile.
+			const written = await callTool(vendor, 'write_cache_settings', {
+				settings: { scoped_index_scan_count: 500 },
+			});
+
+			expect(written.body.result.isError).toBeUndefined();
+
+			expect(written.body.result.structuredContent.sharedSettings)
+				.toEqual({ scoped_index_scan_count: 500 });
+
+			const read = await callTool(vendor, 'read_cache_settings');
+
+			expect(read.body.result.structuredContent.resolved.scoped_index_scan_count)
+				.toEqual({ value: 500, source: 'settings' });
+
+			// The guard behind PATCH /settings refuses it here too.
+			const refused = await callTool(vendor, 'write_cache_settings', {
+				settings: { scoped_index_ttl_factor: 0.5 },
+			});
+
+			expect(refused.body.result.isError).toBe(true);
+
+			expect(refused.body.result.content[0].text).toContain(
+				"'cache_settings.scoped_index_ttl_factor' has to be a number from 1",
+			);
+
+			const cleared = await callTool(vendor, 'write_cache_settings', {
+				clear: true,
+			});
+
+			expect(cleared.body.result.structuredContent.sharedSettings).toBeNull();
+
+			expect(cleared.body.result.structuredContent.resolved.scoped_index_scan_count)
+				.toEqual({ value: 1000, source: 'default' });
 		});
 	});
 

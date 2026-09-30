@@ -50,7 +50,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { queryCachable } from '../utils/query-cachable.js';
-import { cacheEnabled, cacheSettingOr } from '../cache-settings.js';
+import { cacheEnabled, cacheSetting } from '../cache-settings.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -109,10 +109,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	let exceedsMaxSize = false;
 	let valueSize = 0;
 
-	const valueMaxSize = cacheSettingOr(
-		'value_max_size',
-		env['CACHE_VALUE_MAX_SIZE'] as string | false,
-	);
+	const valueMaxSize = cacheSetting('value_max_size');
 
 	if (valueMaxSize !== false) {
 		valueSize = res.locals['payload']

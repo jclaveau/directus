@@ -8,8 +8,8 @@ import { isPositiveDuration } from './utils/get-milliseconds.js';
 
 /**
  * `cache_settings`, mirrored so the hot path reads a module variable rather
- * than the database. A field it does not hold is answered by the environment
- * or the default its reader passes.
+ * than the database. A field it does not hold is answered by its rule's
+ * fallback.
  */
 let cacheSettings: SharedSettings = {};
 
@@ -21,54 +21,94 @@ function isIntegerFrom(minimum: number) {
 	return (value: unknown) => Number.isInteger(value) && (value as number) >= minimum;
 }
 
+/** What each field reads as, whether the layer or its fallback answers. */
+export interface CacheSettingValues {
+	enabled: boolean;
+	value_max_size: string | false;
+	stats_max_bytes: string | false | undefined;
+	audit_limit: number | undefined;
+	audit_max_duration: string | undefined;
+	scoped_max_index_globs: number;
+	scoped_index_scan_count: number;
+	scoped_index_ttl_factor: number;
+}
+
+export type CacheSettingField = keyof CacheSettingValues;
+
+/** Where a field's value comes from when the layer does not set it. */
+export type CacheSettingFallbackSource = 'env' | 'default';
+
+interface CacheSettingRule<F extends CacheSettingField> {
+	accepts: (value: unknown) => boolean;
+	expected: string;
+	fallbackSource: CacheSettingFallbackSource;
+	fallback: () => CacheSettingValues[F];
+}
+
 /**
- * Every field the layer takes, and what a value has to be. Each one only
- * changes what a later fill or purge costs, never which entries a write
- * reaches: a field that could leave an entry no purge finds stays in the
- * environment.
+ * Every field the layer takes, what a value has to be, and what answers when
+ * the layer leaves it out. Each one only changes what a later fill or purge
+ * costs, never which entries a write reaches: a field that could leave an
+ * entry no purge finds stays in the environment.
  */
-const CACHE_SETTING_RULES = {
+const CACHE_SETTING_RULES: {
+	[F in CacheSettingField]: CacheSettingRule<F>;
+} = {
 	enabled: {
-		accepts: (value: unknown) => typeof value === 'boolean',
+		accepts: (value) => typeof value === 'boolean',
 		expected: 'true, false or null',
+		fallbackSource: 'env',
+		fallback: () => useEnv()['CACHE_ENABLED'] === true,
 	},
 	value_max_size: {
-		accepts: (value: unknown) => value === false || isByteSize(value),
+		accepts: (value) => value === false || isByteSize(value),
 		expected: 'false, a size such as "2mb", or null',
+		fallbackSource: 'env',
+		fallback: () => useEnv()['CACHE_VALUE_MAX_SIZE'] as string | false,
 	},
 	stats_max_bytes: {
 		accepts: isByteSize,
 		expected: 'a size such as "2gb", or null',
+		fallbackSource: 'env',
+		fallback: () => {
+			return useEnv()['CACHE_STATS_MAX_BYTES'] as string | false | undefined;
+		},
 	},
 	audit_limit: {
 		accepts: isIntegerFrom(0),
 		expected: 'an integer from 0, or null',
+		fallbackSource: 'env',
+		fallback: () => useEnv()['CACHE_AUDIT_LIMIT'] as number | undefined,
 	},
 	audit_max_duration: {
-		accepts: (value: unknown) => {
-			return typeof value === 'string' && isPositiveDuration(value);
-		},
+		accepts: (value) => typeof value === 'string' && isPositiveDuration(value),
 		expected: 'a duration such as "10m", or null',
+		fallbackSource: 'env',
+		fallback: () => useEnv()['CACHE_AUDIT_MAX_DURATION'] as string | undefined,
 	},
 	scoped_max_index_globs: {
 		accepts: isIntegerFrom(1),
 		expected: 'an integer from 1, or null',
+		fallbackSource: 'default',
+		fallback: () => 64,
 	},
 	scoped_index_scan_count: {
 		accepts: isIntegerFrom(1),
 		expected: 'an integer from 1, or null',
+		fallbackSource: 'default',
+		fallback: () => 1000,
 	},
 	// Below 1 the index would expire before the entries it lists, and a purge
 	// would miss them.
 	scoped_index_ttl_factor: {
-		accepts: (value: unknown) => {
+		accepts: (value) => {
 			return typeof value === 'number' && Number.isFinite(value) && value >= 1;
 		},
 		expected: 'a number from 1, or null',
+		fallbackSource: 'default',
+		fallback: () => 2,
 	},
-} as const;
-
-export type CacheSettingField = keyof typeof CACHE_SETTING_RULES;
+};
 
 function isCacheSettingField(field: string): field is CacheSettingField {
 	return Object.hasOwn(CACHE_SETTING_RULES, field);
@@ -97,16 +137,48 @@ export function assertUsableCacheSettings(document: SharedSettings): void {
 }
 
 /**
- * The layer's value for `field`, else `fallback`. The mirror only holds values
- * their rule accepts, so the type is the one the rule checked.
+ * The layer's value for `field`, else its rule's fallback. The mirror only
+ * holds values their rule accepts, so the type is the one the rule checked.
  */
-export function cacheSettingOr<T>(field: CacheSettingField, fallback: T): T {
-	return (cacheSettings[field] ?? fallback) as T;
+export function cacheSetting<F extends CacheSettingField>(
+	field: F,
+): CacheSettingValues[F] {
+	return (cacheSettings[field] ?? CACHE_SETTING_RULES[field].fallback()) as
+		CacheSettingValues[F];
+}
+
+/** One field as a stored layer resolves it on this node. */
+export interface ResolvedCacheSetting {
+	value: unknown;
+	source: 'settings' | CacheSettingFallbackSource;
+}
+
+/**
+ * Every field as `document` resolves it here: the stored value its rule
+ * accepts, else the fallback and where that comes from.
+ */
+export function resolveCacheSettings(
+	document: SharedSettings | null,
+): Record<CacheSettingField, ResolvedCacheSetting> {
+	const fields = Object.keys(CACHE_SETTING_RULES) as CacheSettingField[];
+
+	return Object.fromEntries(fields.map((field) => {
+		const rule = CACHE_SETTING_RULES[field];
+		const stored = document?.[field];
+
+		const resolved: ResolvedCacheSetting = stored !== undefined
+			&& stored !== null
+			&& rule.accepts(stored)
+			? { value: stored, source: 'settings' }
+			: { value: rule.fallback() ?? null, source: rule.fallbackSource };
+
+		return [field, resolved];
+	})) as Record<CacheSettingField, ResolvedCacheSetting>;
 }
 
 /** Whether this node serves and fills the response cache. */
 export function cacheEnabled(): boolean {
-	return cacheSettingOr('enabled', useEnv()['CACHE_ENABLED'] === true);
+	return cacheSetting('enabled');
 }
 
 /**

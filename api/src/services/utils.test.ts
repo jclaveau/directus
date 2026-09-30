@@ -6,6 +6,7 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
+import { refreshCacheSettings } from '../cache-settings.js';
 import {
 	listCacheAuditRuns,
 	readCacheAuditFindings,
@@ -80,6 +81,16 @@ vi.mock('../cache.js');
 vi.mock('../cache-audit-runs.js');
 vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
+
+vi.mock('../cache-settings.js', () => {
+	return {
+		refreshCacheSettings: vi.fn(),
+		resolveCacheSettings: vi.fn(() => {
+			return { audit_limit: { value: 40, source: 'settings' } };
+		}),
+	};
+});
+
 vi.mock('../scoped-cache/index.js');
 vi.mock('../utils/compress.js');
 vi.mock('../processes/autoscale/lib/drill.js');
@@ -979,6 +990,83 @@ describe('Services / Utils', () => {
 			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
 
 			await expect(service(nonAdmin).clearAutoscaleConfig())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('cache settings', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		it('lays the patch over what is stored, a null dropping its field', async () => {
+			vi.mocked(readSharedSettings)
+				.mockResolvedValue({ audit_limit: 40, value_max_size: '2mb' });
+
+			const answer = await service(admin).updateCacheSettings({
+				value_max_size: null,
+				scoped_index_ttl_factor: 3,
+			});
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{ audit_limit: 40, scoped_index_ttl_factor: 3 },
+				expect.anything(),
+			);
+
+			expect(answer).toEqual({
+				key: 'directus_settings.cache_settings',
+				sharedSettings: { audit_limit: 40, scoped_index_ttl_factor: 3 },
+				resolved: { audit_limit: { value: 40, source: 'settings' } },
+			});
+		});
+
+		it('writes none at all once the patch drops the last field', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await service(admin).updateCacheSettings({ audit_limit: null });
+
+			expect(writeSharedSettings)
+				.toHaveBeenCalledWith('cache_settings', null, expect.anything());
+		});
+
+		// The other nodes hear of it over the bus; this one answers the next
+		// request from its mirror, which the announcement may not have reached.
+		it('re-reads this node\'s mirror once the write landed', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			await service(admin).updateCacheSettings({ audit_limit: 40 });
+
+			expect(vi.mocked(refreshCacheSettings).mock.invocationCallOrder[0])
+				.toBeGreaterThan(
+					vi.mocked(writeSharedSettings).mock.invocationCallOrder[0]!,
+				);
+		});
+
+		it('clears them by writing none at all', async () => {
+			await service(admin).clearCacheSettings();
+
+			expect(writeSharedSettings)
+				.toHaveBeenCalledWith('cache_settings', null, expect.anything());
+		});
+
+		it('refuses a non-admin reading or changing them', async () => {
+			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+			await expect(service(nonAdmin).readCacheSettings())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).updateCacheSettings({ audit_limit: 40 }))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).clearCacheSettings())
 				.rejects
 				.toThrowError(ForbiddenError);
 

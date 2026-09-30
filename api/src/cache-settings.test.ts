@@ -4,10 +4,11 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
 	assertUsableCacheSettings,
 	cacheEnabled,
-	cacheSettingOr,
+	cacheSetting,
 	flushBeforeEnabling,
 	initCacheSettings,
 	refreshCacheSettings,
+	resolveCacheSettings,
 	responseCacheWanted,
 	seedCacheSettings,
 } from './cache-settings.js';
@@ -176,15 +177,22 @@ test.each([
 });
 
 test('answers a field from the layer over the fallback', async () => {
+	vi.mocked(useEnv).mockReturnValue({
+		CACHE_AUDIT_LIMIT: 250,
+		CACHE_AUDIT_MAX_DURATION: '10m',
+	});
+
 	vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
 
 	await refreshCacheSettings();
 
-	expect(cacheSettingOr('audit_limit', 250)).toBe(40);
-	expect(cacheSettingOr('audit_max_duration', '10m')).toBe('10m');
+	expect(cacheSetting('audit_limit')).toBe(40);
+	expect(cacheSetting('audit_max_duration')).toBe('10m');
 });
 
 test('keeps the usable fields of a row written around the guard', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_AUDIT_LIMIT: 250 });
+
 	vi.mocked(readSharedSettings).mockResolvedValue({
 		audit_limit: -1,
 		value_max_size: '2mb',
@@ -193,8 +201,30 @@ test('keeps the usable fields of a row written around the guard', async () => {
 
 	await refreshCacheSettings();
 
-	expect(cacheSettingOr('audit_limit', 250)).toBe(250);
-	expect(cacheSettingOr('value_max_size', false)).toBe('2mb');
+	expect(cacheSetting('audit_limit')).toBe(250);
+	expect(cacheSetting('value_max_size')).toBe('2mb');
+});
+
+test('resolves every field against the environment and the defaults', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		CACHE_ENABLED: false,
+		CACHE_VALUE_MAX_SIZE: false,
+		CACHE_STATS_MAX_BYTES: '2gb',
+		CACHE_AUDIT_LIMIT: 0,
+		CACHE_AUDIT_MAX_DURATION: '10m',
+	});
+
+	expect(resolveCacheSettings({ audit_limit: 40, scoped_index_ttl_factor: 0.5 }))
+		.toEqual({
+			enabled: { value: false, source: 'env' },
+			value_max_size: { value: false, source: 'env' },
+			stats_max_bytes: { value: '2gb', source: 'env' },
+			audit_limit: { value: 40, source: 'settings' },
+			audit_max_duration: { value: '10m', source: 'env' },
+			scoped_max_index_globs: { value: 64, source: 'default' },
+			scoped_index_scan_count: { value: 1000, source: 'default' },
+			scoped_index_ttl_factor: { value: 2, source: 'default' },
+		});
 });
 
 test('reads the cache_settings column', async () => {

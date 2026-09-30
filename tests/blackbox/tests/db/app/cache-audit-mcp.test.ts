@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // the cache reads without handing it a run that replays every live entry.
 //
 // Its own instance, because `system-mcp.test.ts` pins the exact tool list of a
-// deployment that never named this group, and every tool there is read-only.
+// deployment that never named this group.
 // Beside it, a node with CACHE_AUDIT_ENABLED off — the traffic-serving shape:
 // it offers no audit tool, answers no audit route, and runs no schedule, while
 // the schedule the other node writes still reaches it over the bus.
