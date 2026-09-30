@@ -192,9 +192,10 @@ CACHE_ENABLED=false
 # How many keys one collection may be pinned by on a single scoped read. Over it
 # the read falls back to that collection's declared scope slices, then to its bare
 # pin — more purging, never staler. Each pin costs a Redis set and a member of the
-# collection's fingerprint index, so raise it for hit ratio and lower it for
-# memory. [250]
-# CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
+# collection's fingerprint index, so raise it for fewer evictions and lower it for
+# cheaper fills. From 0 to 100000; a value outside ends the boot. The cache page
+# can set it live for every node. [64]
+# CACHE_SCOPED_MAX_PINS_PER_COLLECTION=64
 
 # How many ways to satisfy one filter are carried apart before they are carried
 # side by side instead. A filter ANDing two `_in`s of ten values each has a

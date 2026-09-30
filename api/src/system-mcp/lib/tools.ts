@@ -950,8 +950,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
 							+ 'scoped_index_scan_count (an integer from 1 to 100000, over '
 							+ 'CACHE_SCOPED_INDEX_SCAN_COUNT), scoped_index_ttl_factor (a '
-							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR). A '
-							+ 'null value clears that field.',
+							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR), '
+							+ 'scoped_max_pins_per_collection (an integer from 0 to 100000, '
+							+ 'over CACHE_SCOPED_MAX_PINS_PER_COLLECTION). A null value '
+							+ 'clears that field.',
 					},
 					clear: {
 						type: 'boolean',

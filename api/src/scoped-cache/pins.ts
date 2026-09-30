@@ -6,6 +6,7 @@ import type {
 	ScopedCachePin,
 	Type,
 } from '@directus/types';
+import { cacheSetting } from '../cache-settings.js';
 
 const env = useEnv();
 
@@ -294,13 +295,14 @@ export function scopedCacheCollectionPinsFromRows(
  * bind parameters and wipes a whole collection's cache above it. This one only
  * costs the one response its pin, which is still cached.
  *
- * Operator-tunable because the right number is deployment-specific — it weighs
- * store memory against the hit ratio the pin buys, and a pin costs one set plus a
- * member of the collection's fingerprint index (130 B measured, on a TTL every write
+ * Operator-tunable, live from the cache page for every node, because the right
+ * number is deployment-specific: it weighs what a fill costs Redis against how
+ * many entries a write evicts, and a pin costs one set plus a member of the
+ * collection's fingerprint index (130 B measured, on a TTL every write
  * refreshes). No setting of it can serve a stale row.
  */
 export function scopedCacheMaxPinsPerCollection(): number {
-	return env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] as number;
+	return cacheSetting('scoped_max_pins_per_collection');
 }
 
 /**
