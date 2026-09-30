@@ -1013,29 +1013,135 @@ describe('Services / Utils', () => {
 			return new UtilsService({ knex: db, schema, accountability });
 		}
 
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ['Date'] });
+			vi.setSystemTime(new Date('2026-09-30T08:00:00.000Z'));
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
 		it('lays the patch over what is stored, a null dropping its field', async () => {
 			vi.mocked(readSharedSettings)
 				.mockResolvedValue({ audit_limit: 40, value_max_size: '2mb' });
 
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
 			const answer = await service(admin).updateCacheSettings({
 				value_max_size: null,
 				scoped_index_ttl_factor: 3,
-			});
+			}, 'admin');
 
 			expect(writeSharedSettings).toHaveBeenCalledWith(
 				'cache_settings',
-				{ audit_limit: 40, scoped_index_ttl_factor: 3 },
+				{
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
 				expect.anything(),
 			);
 
 			expect(answer).toEqual({
 				key: 'directus_settings.cache_settings',
-				sharedSettings: { audit_limit: 40, scoped_index_ttl_factor: 3 },
+				sharedSettings: {
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				setByEmail: 'ann@example.com',
 				resolved: { audit_limit: { value: 40, source: 'settings' } },
 			});
 
-			expect(resolveCacheSettings)
-				.toHaveBeenCalledWith({ audit_limit: 40, scoped_index_ttl_factor: 3 });
+			expect(resolveCacheSettings).toHaveBeenCalledWith({
+				audit_limit: 40,
+				scoped_index_ttl_factor: 3,
+				setBy: 'admin-id',
+				setAt: '2026-09-30T08:00:00.000Z',
+				setFrom: 'admin',
+			});
+		});
+
+		// The layer outlives the incident that justified it, and the questions it
+		// is then asked are who left it, when, and through what.
+		it('stamps a write from the MCP with its surface', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			const answer = await service(admin)
+				.updateCacheSettings({ audit_limit: 40 }, 'mcp');
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					audit_limit: 40,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'mcp',
+				},
+				expect.anything(),
+			);
+
+			expect(answer).toMatchObject({
+				sharedSettings: { setFrom: 'mcp' },
+				setByEmail: 'ann@example.com',
+			});
+		});
+
+		it('refuses a patch that sends a stamp of its own', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			await expect(service(admin).updateCacheSettings(
+				{ audit_limit: 40, setBy: 'someone-else' },
+				'admin',
+			))
+				.rejects
+				.toThrowError(`'cache_settings.setBy' is not a cache setting`);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+
+		it('replaces the stored stamp rather than refusing the next patch', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({
+				audit_limit: 40,
+				setBy: 'earlier-id',
+				setAt: '2026-01-01T00:00:00.000Z',
+				setFrom: 'mcp',
+			});
+
+			await service(admin).updateCacheSettings(
+				{ scoped_index_ttl_factor: 3 },
+				'admin',
+			);
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				expect.anything(),
+			);
+		});
+
+		it('names the user behind the stamp it reads', async () => {
+			vi.mocked(readSharedSettings)
+				.mockResolvedValue({ audit_limit: 40, setBy: 'writer-id' });
+
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await expect(service(admin).readCacheSettings()).resolves.toMatchObject({
+				sharedSettings: { audit_limit: 40, setBy: 'writer-id' },
+				setByEmail: 'ann@example.com',
+			});
 		});
 
 		// Two writers each laying a field over the row they read would otherwise
@@ -1043,7 +1149,8 @@ describe('Services / Utils', () => {
 		it('reads the row under the transaction that writes it', async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
 
-			await service(admin).updateCacheSettings({ scoped_index_ttl_factor: 3 });
+			await service(admin)
+				.updateCacheSettings({ scoped_index_ttl_factor: 3 }, 'admin');
 
 			const [readColumn, lockingTransaction] =
 				vi.mocked(readSharedSettings).mock.calls[0]!;
@@ -1052,7 +1159,13 @@ describe('Services / Utils', () => {
 
 			expect(writeSharedSettings).toHaveBeenCalledWith(
 				'cache_settings',
-				{ audit_limit: 40, scoped_index_ttl_factor: 3 },
+				{
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
 				expect.objectContaining({ knex: lockingTransaction }),
 			);
 
@@ -1072,11 +1185,18 @@ describe('Services / Utils', () => {
 				value_max_size: '2mb',
 			});
 
-			await service(admin).updateCacheSettings({ scoped_index_ttl_factor: 3 });
+			await service(admin)
+				.updateCacheSettings({ scoped_index_ttl_factor: 3 }, 'admin');
 
 			expect(writeSharedSettings).toHaveBeenCalledWith(
 				'cache_settings',
-				{ value_max_size: '2mb', scoped_index_ttl_factor: 3 },
+				{
+					value_max_size: '2mb',
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
 				expect.anything(),
 			);
 		});
@@ -1084,7 +1204,7 @@ describe('Services / Utils', () => {
 		it('refuses a null for a field that is not a cache setting', async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
 
-			await expect(service(admin).updateCacheSettings({ ttl: null }))
+			await expect(service(admin).updateCacheSettings({ ttl: null }, 'admin'))
 				.rejects
 				.toThrowError(`'cache_settings.ttl' is not a cache setting`);
 
@@ -1095,7 +1215,7 @@ describe('Services / Utils', () => {
 		it('refuses a patch that names no field', async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
 
-			await expect(service(admin).updateCacheSettings({}))
+			await expect(service(admin).updateCacheSettings({}, 'admin'))
 				.rejects
 				.toThrowError(InvalidPayloadError);
 
@@ -1103,9 +1223,14 @@ describe('Services / Utils', () => {
 		});
 
 		it('writes none at all once the patch drops the last field', async () => {
-			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+			vi.mocked(readSharedSettings).mockResolvedValue({
+				audit_limit: 40,
+				setBy: 'earlier-id',
+				setAt: '2026-01-01T00:00:00.000Z',
+				setFrom: 'mcp',
+			});
 
-			await service(admin).updateCacheSettings({ audit_limit: null });
+			await service(admin).updateCacheSettings({ audit_limit: null }, 'admin');
 
 			expect(writeSharedSettings)
 				.toHaveBeenCalledWith('cache_settings', null, expect.anything());
@@ -1116,7 +1241,7 @@ describe('Services / Utils', () => {
 		it('re-reads this node\'s mirror once the write landed', async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue(null);
 
-			await service(admin).updateCacheSettings({ audit_limit: 40 });
+			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
 
 			expect(vi.mocked(refreshCacheSettings).mock.invocationCallOrder[0])
 				.toBeGreaterThan(
@@ -1124,8 +1249,13 @@ describe('Services / Utils', () => {
 				);
 		});
 
-		it('clears them by writing none at all', async () => {
-			await service(admin).clearCacheSettings();
+		it('clears them by writing none at all, stamp included', async () => {
+			await expect(service(admin).clearCacheSettings()).resolves.toEqual({
+				key: 'directus_settings.cache_settings',
+				sharedSettings: null,
+				setByEmail: null,
+				resolved: { audit_limit: { value: 40, source: 'settings' } },
+			});
 
 			expect(writeSharedSettings)
 				.toHaveBeenCalledWith('cache_settings', null, expect.anything());
@@ -1138,7 +1268,10 @@ describe('Services / Utils', () => {
 				.rejects
 				.toThrowError(ForbiddenError);
 
-			await expect(service(nonAdmin).updateCacheSettings({ audit_limit: 40 }))
+			await expect(service(nonAdmin).updateCacheSettings(
+				{ audit_limit: 40 },
+				'admin',
+			))
 				.rejects
 				.toThrowError(ForbiddenError);
 

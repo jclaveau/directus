@@ -550,14 +550,14 @@ test('The configuration write refuses a patch that is not an object', async () =
 	).rejects.toThrowError('`config` has to be an object of configuration fields');
 });
 
-test('The cache settings write sends the fields down as given', async () => {
+test('The cache settings write sends the fields down from the MCP', async () => {
 	await findSystemMcpTool('write_cache_settings')!.run(
 		{ settings: { audit_limit: 40, value_max_size: null } },
 		context,
 	);
 
 	expect(service.updateCacheSettings)
-		.toHaveBeenCalledWith({ audit_limit: 40, value_max_size: null });
+		.toHaveBeenCalledWith({ audit_limit: 40, value_max_size: null }, 'mcp');
 });
 
 test('The cache settings write drops them all on clear', async () => {
@@ -982,7 +982,13 @@ const auditFinding: CacheAuditFinding = {
 
 const cacheSettingsAnswer: CacheSettingsAnswer = {
 	key: 'directus_settings.cache_settings',
-	sharedSettings: { audit_limit: 40 },
+	sharedSettings: {
+		audit_limit: 40,
+		setBy: 'jean-id',
+		setAt: '2026-09-30T08:00:00.000Z',
+		setFrom: 'mcp',
+	},
+	setByEmail: 'jean@example.com',
 	resolved: {
 		response: { value: true, source: 'env', fallback: true },
 		value_max_size: { value: false, source: 'env', fallback: false },
@@ -1000,7 +1006,13 @@ const auditRun: CacheAuditRun = {
 	startedAt: 1_700_000_000_000,
 	finishedAt: 1_700_000_000_012,
 	trigger: 'mcp',
-	options: { limit: null, user: null, collection: null, purge: false },
+	options: {
+		limit: null,
+		user: null,
+		collection: null,
+		purge: false,
+		maxDurationMs: 600_000,
+	},
 	scanned: 2,
 	counts: {
 		fresh: 1,

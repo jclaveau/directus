@@ -7,6 +7,7 @@ import {
 	cacheSettingRows,
 	type CacheSettingsAnswer,
 	type CacheSettingSource,
+	cacheSettingsStamp,
 	parseCacheSettingValue,
 } from './cache-settings-panel';
 
@@ -34,6 +35,38 @@ const badInputFields = ref(new Map<string, HTMLInputElement>());
 const inputGenerations = ref<Record<string, number>>({});
 
 const rows = computed(() => cacheSettingRows(answer.value));
+
+/**
+ * The stamp as one sentence, worded as the autoscale panel words its own, and
+ * assembled here rather than out of template fragments, which drop the spaces
+ * between them the moment one of the fragments is conditional.
+ */
+const stampLine = computed(() => {
+	const stamp = cacheSettingsStamp(answer.value, Date.now());
+
+	if (stamp === null) {
+		return null;
+	}
+
+	const parts = [t('cache_settings_set_by', 'Configured')];
+
+	if (stamp.setBy !== null) {
+		parts.push(`by ${stamp.setBy}`);
+	}
+
+	if (stamp.setFrom === 'admin') {
+		parts.push(`from ${t('cache_settings_from_admin', 'the admin')}`);
+	}
+
+	if (stamp.setFrom === 'mcp') {
+		parts.push(`from ${t('cache_settings_from_mcp', 'the system MCP')}`);
+	}
+
+	parts.push(`${stamp.days}${t('cache_settings_days_ago', 'd ago')}`);
+
+	return parts.join(' ');
+});
+
 const dirty = computed(() => Object.keys(drafts.value).length > 0);
 
 onMounted(load);
@@ -376,6 +409,8 @@ function resetsTo(row: CacheSettingRow): string {
 		<p v-if="answer" class="key">
 			{{ t('cache_settings_key', 'Stored in') }} {{ answer.key }}
 		</p>
+
+		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>
 	</div>
 </template>
 
@@ -384,7 +419,8 @@ function resetsTo(row: CacheSettingRow): string {
 	margin-block-end: 32px;
 }
 
-.key {
+.key,
+.stamp {
 	margin-block-end: 8px;
 	color: var(--theme--foreground-subdued);
 }

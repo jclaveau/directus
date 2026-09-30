@@ -602,7 +602,12 @@ describe('System MCP Tests', () => {
 				expect(written.body.result.isError).toBeUndefined();
 
 				expect(written.body.result.structuredContent.sharedSettings)
-					.toEqual({ scoped_index_scan_count: 500 });
+					.toEqual({
+						scoped_index_scan_count: 500,
+						setBy: expect.any(String),
+						setAt: expect.any(String),
+						setFrom: 'mcp',
+					});
 
 				const read = await callTool(vendor, 'read_cache_settings');
 

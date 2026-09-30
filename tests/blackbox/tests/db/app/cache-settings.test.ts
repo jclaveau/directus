@@ -184,11 +184,16 @@ describe('Cache settings', () => {
 		it('switches the peer through /utils/cache/settings and back', async () => {
 			const writerUrl = getUrl(vendor, envs[vendor]!.writer);
 
-			await request(writerUrl)
+			const written = await request(writerUrl)
 				.patch('/utils/cache/settings')
 				.send({ response: true })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(200);
+
+			expect(written.body.data).toMatchObject({
+				sharedSettings: { response: true, setFrom: 'admin' },
+				setByEmail: USER.ADMIN.EMAIL,
+			});
 
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 
@@ -197,7 +202,21 @@ describe('Cache settings', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(200);
 
-			expect(read.body.data.sharedSettings).toEqual({ response: true });
+			expect(read.body.data.sharedSettings).toEqual({
+				response: true,
+				setBy: expect.any(String),
+				setAt: expect.any(String),
+				setFrom: 'admin',
+			});
+
+			const stamped = await request(writerUrl)
+				.patch('/utils/cache/settings')
+				.send({ setFrom: 'mcp' })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(400);
+
+			expect(stamped.body.errors[0].message)
+				.toContain("'cache_settings.setFrom' is not a cache setting");
 
 			expect(read.body.data.resolved.response)
 				.toEqual({ value: true, source: 'settings', fallback: false });

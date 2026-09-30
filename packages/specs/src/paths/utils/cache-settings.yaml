@@ -28,7 +28,9 @@ patch:
     write goes through the settings guard, which refuses an unknown field or
     a value outside its rule, and switching `response` on where CACHE_RESPONSE,
     else CACHE_ENABLED, is off clears the response cache first. Every node
-    reads the change on the bus. Admin only.
+    reads the change on the bus. The stored layer is stamped with `setBy`,
+    `setAt` and `setFrom: admin`, which a patch cannot send itself. Admin
+    only.
   operationId: update-cache-settings
   requestBody:
     content:

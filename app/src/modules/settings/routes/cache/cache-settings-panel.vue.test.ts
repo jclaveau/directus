@@ -196,6 +196,38 @@ describe('what the panel shows', () => {
 			.toBe('Stored in directus_settings.cache_settings');
 	});
 
+	test('the panel names who last wrote the settings, from where', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date('2026-09-30T09:00:00.000Z'));
+
+		vi.mocked(api.get).mockResolvedValue({
+			data: {
+				data: {
+					key: 'directus_settings.cache_settings',
+					sharedSettings: {
+						audit_limit: 40,
+						setBy: 'writer-id',
+						setAt: '2026-09-28T08:00:00.000Z',
+						setFrom: 'mcp',
+					},
+					setByEmail: 'ann@example.com',
+					resolved: {},
+				},
+			},
+		});
+
+		const wrapper = mount(CacheSettingsPanel, { global });
+		await flushPromises();
+		vi.useRealTimers();
+
+		expect(wrapper.find('.stamp').text())
+			.toBe('Configured by ann@example.com from the system MCP 2d ago');
+	});
+
+	test('the panel names no writer where no write stamped one', async () => {
+		expect((await mounted()).find('.stamp').exists()).toBe(false);
+	});
+
 	test('a failed read is shown as it came', async () => {
 		vi.mocked(api.get).mockRejectedValue({
 			response: { data: { errors: [{ message: 'You don\'t have permission' }] } },

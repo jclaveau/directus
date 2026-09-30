@@ -19,7 +19,7 @@ import type {
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
-	assertUsableCacheSettings,
+	assertUsableCacheSettingsPatch,
 	refreshCacheSettings,
 	resolveCacheSettings,
 	usableCacheSettings,
@@ -236,23 +236,15 @@ export interface AutoscaleConfigAnswer extends AutoscaleSharedSettingsAnswer {
 	supervisor: AutoscaleSharedSettingsAnswer;
 }
 
-function cacheSettingsAnswer(
-	sharedSettings: SharedSettings | null,
-): CacheSettingsAnswer {
-	return {
-		key: `directus_settings.${SHARED_SETTINGS_COLUMNS.cache}`,
-		sharedSettings,
-		resolved: resolveCacheSettings(sharedSettings),
-	};
-}
-
 /**
- * What a cache settings read answers with: the stored layer, and every field
- * as it resolves on the node answering.
+ * What a cache settings read answers with: the stored layer, who left it, and
+ * every field as it resolves on the node answering.
  */
 export interface CacheSettingsAnswer {
 	key: string;
 	sharedSettings: SharedSettings | null;
+	/** The address behind the stored layer's `setBy`, `null` where there is none. */
+	setByEmail: string | null;
 	resolved: Record<CacheSettingField, ResolvedCacheSetting>;
 }
 
@@ -723,9 +715,20 @@ export class UtilsService {
 	async readCacheSettings(): Promise<CacheSettingsAnswer> {
 		this.assertAdmin('inspect the cache settings');
 
-		return cacheSettingsAnswer(
+		return this.cacheSettingsAnswer(
 			await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache),
 		);
+	}
+
+	private async cacheSettingsAnswer(
+		sharedSettings: SharedSettings | null,
+	): Promise<CacheSettingsAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.cache}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+			resolved: resolveCacheSettings(sharedSettings),
+		};
 	}
 
 	/**
@@ -737,10 +740,12 @@ export class UtilsService {
 	 * it on where the environment leaves it off. The row is read and written
 	 * under one lock, so two patches never both lay a field over the same read.
 	 * A stored field the mirror would not apply is dropped rather than left to
-	 * refuse every patch of the others.
+	 * refuse every patch of the others. The layer is stamped with who wrote it,
+	 * when and through which surface, as the autoscale settings are.
 	 */
 	async updateCacheSettings(
 		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
 	): Promise<CacheSettingsAnswer> {
 		this.assertAdmin('change the cache settings');
 
@@ -750,7 +755,7 @@ export class UtilsService {
 			});
 		}
 
-		assertUsableCacheSettings(patch);
+		assertUsableCacheSettingsPatch(patch);
 
 		const sharedSettings = await this.knex.transaction(async (settingsTrx) => {
 			const merged = usableCacheSettings(
@@ -768,7 +773,12 @@ export class UtilsService {
 
 			const patchedSettings = Object.keys(merged).length === 0
 				? null
-				: merged;
+				: {
+					...merged,
+					setBy: this.accountability?.user ?? null,
+					setAt: new Date().toISOString(),
+					setFrom: surface,
+				};
 
 			await writeSharedSettings(
 				SHARED_SETTINGS_COLUMNS.cache,
@@ -783,10 +793,13 @@ export class UtilsService {
 		// just wrote rather than waiting on its own announcement.
 		await refreshCacheSettings();
 
-		return cacheSettingsAnswer(sharedSettings);
+		return this.cacheSettingsAnswer(sharedSettings);
 	}
 
-	/** Drop the cache settings, so every field comes from its fallback again. */
+	/**
+	 * Drop the cache settings, so every field comes from its fallback again.
+	 * Nothing is left to stamp, as with the autoscale settings.
+	 */
 	async clearCacheSettings(): Promise<CacheSettingsAnswer> {
 		this.assertAdmin('clear the cache settings');
 
@@ -798,7 +811,7 @@ export class UtilsService {
 
 		await refreshCacheSettings();
 
-		return cacheSettingsAnswer(null);
+		return this.cacheSettingsAnswer(null);
 	}
 
 	async readProcesses(details?: ProcessDetail[]): Promise<ProcessesReport> {

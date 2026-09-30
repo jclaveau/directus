@@ -7,6 +7,25 @@ properties:
   sharedSettings:
     type: object
     nullable: true
+    description: >
+      The fields the cache settings set, null where nothing is set, with the
+      stamp of the write that left them beside the fields.
+    properties:
+      setBy:
+        type: string
+        nullable: true
+        description: The id of whoever wrote it, which survives a rename.
+      setAt:
+        type: string
+      setFrom:
+        type: string
+        enum: [admin, mcp]
+  setByEmail:
+    type: string
+    nullable: true
+    description: >
+      The address of whoever wrote it, resolved from the id in the stamp. Null
+      where the id names no user any more, or where nothing is stored.
   resolved:
     type: object
     additionalProperties:

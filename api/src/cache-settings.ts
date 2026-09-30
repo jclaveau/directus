@@ -148,11 +148,31 @@ function isCacheSettingField(field: string): field is CacheSettingField {
 }
 
 /**
+ * Who wrote the layer, when, and through which surface. Stored beside the
+ * fields, written by the write itself, and never a setting the mirror applies.
+ */
+const CACHE_SETTINGS_STAMP_FIELDS = ['setBy', 'setAt', 'setFrom'];
+
+function isStampField(field: string): boolean {
+	return CACHE_SETTINGS_STAMP_FIELDS.includes(field);
+}
+
+/**
  * Refuse a layer the mirror would read as something else: an unknown field is
  * a setting nothing applies, and a value its rule refuses reads as unset.
  */
 export function assertUsableCacheSettings(document: SharedSettings): void {
 	for (const [field, value] of Object.entries(document)) {
+		if (isStampField(field)) {
+			if (value !== null && typeof value !== 'string') {
+				throw new InvalidPayloadError({
+					reason: `'cache_settings.${field}' has to be a string`,
+				});
+			}
+
+			continue;
+		}
+
 		if (isCacheSettingField(field) === false) {
 			throw new InvalidPayloadError({
 				reason: `'cache_settings.${field}' is not a cache setting`,
@@ -167,6 +187,22 @@ export function assertUsableCacheSettings(document: SharedSettings): void {
 			});
 		}
 	}
+}
+
+/**
+ * Refuse a patch the way a stored layer is refused, and a stamp field as well:
+ * the stamp is the write's own, so a patch naming one names no cache setting.
+ */
+export function assertUsableCacheSettingsPatch(patch: SharedSettings): void {
+	const stampField = Object.keys(patch).find(isStampField);
+
+	if (stampField !== undefined) {
+		throw new InvalidPayloadError({
+			reason: `'cache_settings.${stampField}' is not a cache setting`,
+		});
+	}
+
+	assertUsableCacheSettings(patch);
 }
 
 /**

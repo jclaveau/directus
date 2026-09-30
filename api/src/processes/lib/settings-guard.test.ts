@@ -92,6 +92,18 @@ test('lets the cache layer hand response back to the environment', () => {
 	expect(checking({ cache_settings: { response: null } })).not.toThrow();
 });
 
+// The service writes the layer stamped, and through this same guard.
+test('lets the cache layer carry the stamp of its write', () => {
+	expect(checking({
+		cache_settings: {
+			response: false,
+			setBy: 'admin-id',
+			setAt: '2026-09-30T08:00:00.000Z',
+			setFrom: 'admin',
+		},
+	})).not.toThrow();
+});
+
 test('refuses a field the cache layer does not have', () => {
 	expect(checking({ cache_settings: { ttl: '1h' } }))
 		.toThrowError(`'cache_settings.ttl' is not a cache setting`);

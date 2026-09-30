@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { cacheSettingRows, parseCacheSettingValue } from './cache-settings-panel';
+import {
+	cacheSettingRows,
+	cacheSettingsStamp,
+	parseCacheSettingValue,
+} from './cache-settings-panel';
 
 describe('cacheSettingRows', () => {
 	test('a row carries the value, its layer, the stored one and the fallback', () => {
@@ -56,5 +60,50 @@ describe('parseCacheSettingValue', () => {
 		['size', null, null],
 	] as const)('%s %j is %j', (kind, raw, parsed) => {
 		expect(parseCacheSettingValue(kind, raw)).toBe(parsed);
+	});
+});
+
+describe('cacheSettingsStamp', () => {
+	test('names the writer by address, with its surface and age', () => {
+		expect(cacheSettingsStamp({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: {
+				audit_limit: 40,
+				setBy: 'writer-id',
+				setAt: '2026-09-27T08:00:00.000Z',
+				setFrom: 'mcp',
+			},
+			setByEmail: 'ann@example.com',
+			resolved: {},
+		}, Date.parse('2026-09-30T09:00:00.000Z'))).toEqual({
+			setBy: 'ann@example.com',
+			setFrom: 'mcp',
+			days: 3,
+		});
+	});
+
+	test('names the writer by id where no address answers it', () => {
+		expect(cacheSettingsStamp({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: {
+				setBy: 'deleted-id',
+				setAt: '2026-09-30T08:00:00.000Z',
+				setFrom: 'elsewhere',
+			},
+			setByEmail: null,
+			resolved: {},
+		}, Date.parse('2026-09-30T09:00:00.000Z'))).toEqual({
+			setBy: 'deleted-id',
+			setFrom: null,
+			days: 0,
+		});
+	});
+
+	test('is none where no write stamped the settings', () => {
+		expect(cacheSettingsStamp({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: { audit_limit: 40 },
+			resolved: {},
+		}, Date.parse('2026-09-30T09:00:00.000Z'))).toBeNull();
 	});
 });

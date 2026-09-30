@@ -378,7 +378,9 @@ describe('utils controller /cache/settings', () => {
 			vi.fn(),
 		);
 
-		expect(updateCacheSettings).toHaveBeenCalledWith({ audit_limit: 40 });
+		expect(updateCacheSettings)
+			.toHaveBeenCalledWith({ audit_limit: 40 }, 'admin');
+
 		expect(res.status).toHaveBeenCalledWith(200);
 
 		expect(json).toHaveBeenCalledWith({

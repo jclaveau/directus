@@ -38,7 +38,45 @@ export interface ResolvedCacheSetting {
 export interface CacheSettingsAnswer {
 	key: string;
 	sharedSettings: Record<string, unknown> | null;
+	/** The address behind the stored `setBy`, `null` where there is none. */
+	setByEmail?: string | null;
 	resolved: Record<string, ResolvedCacheSetting>;
+}
+
+/** Who wrote the stored settings, through which surface, and how long ago. */
+export interface CacheSettingsStamp {
+	setBy: string | null;
+	setFrom: 'admin' | 'mcp' | null;
+	days: number;
+}
+
+/**
+ * The stamp of the last write, `null` where nothing stamped one. The address
+ * where the api could name one, else the id it stamped: a user since deleted
+ * is still worth reporting as an id.
+ */
+export function cacheSettingsStamp(
+	answer: CacheSettingsAnswer | null,
+	nowMs: number,
+): CacheSettingsStamp | null {
+	const setAt = answer?.sharedSettings?.['setAt'];
+
+	if (typeof setAt !== 'string') {
+		return null;
+	}
+
+	const setBy = answer?.sharedSettings?.['setBy'];
+	const setFrom = answer?.sharedSettings?.['setFrom'];
+
+	return {
+		setBy: answer?.setByEmail ?? (typeof setBy === 'string'
+			? setBy
+			: null),
+		setFrom: setFrom === 'admin' || setFrom === 'mcp'
+			? setFrom
+			: null,
+		days: Math.floor((nowMs - Date.parse(setAt)) / 86_400_000),
+	};
 }
 
 /**

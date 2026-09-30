@@ -588,6 +588,10 @@ cache_settings_apply_all: Apply all changes
 cache_settings_reset_all: Reset all changes
 cache_settings_reset_fallbacks: Reset to env and defaults
 cache_settings_key: Stored in
+cache_settings_set_by: Configured
+cache_settings_from_admin: the admin
+cache_settings_from_mcp: the system MCP
+cache_settings_days_ago: d ago
 original: Original
 url: URL
 import_label: Import

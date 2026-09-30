@@ -568,6 +568,7 @@ router.patch(
 
 		const updated = await service.updateCacheSettings(
 			patch as Record<string, unknown>,
+			'admin',
 		);
 
 		res.status(200).json({ data: updated });

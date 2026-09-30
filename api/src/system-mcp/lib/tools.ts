@@ -220,7 +220,13 @@ const CACHE_SETTINGS_OUTPUT = {
 		},
 		sharedSettings: {
 			type: ['object', 'null'],
-			description: 'The fields the cache settings set, or null for none.',
+			description: 'The fields the cache settings set, or null for none. '
+				+ 'Carries `setBy`, `setAt` and `setFrom` beside them: who wrote '
+				+ 'them, when, and through "admin" or "mcp".',
+		},
+		setByEmail: {
+			type: ['string', 'null'],
+			description: 'The address behind `setBy`, or null for none.',
 		},
 		resolved: {
 			type: 'object',
@@ -929,7 +935,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				+ 'them all. A value outside its rule is refused. Switching `response` '
 				+ 'on where CACHE_RESPONSE, else CACHE_ENABLED, is off first clears the '
 				+ 'response cache, since nodes that held none purged nothing while it '
-				+ 'was off.',
+				+ 'was off. A write is stamped `setFrom: "mcp"` with its user and time.',
 			inputSchema: {
 				type: 'object',
 				properties: {
@@ -982,6 +988,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 
 				return service.updateCacheSettings(
 					settings as Record<string, unknown>,
+					'mcp',
 				);
 			},
 		}),

@@ -3,6 +3,7 @@ import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
 	assertUsableCacheSettings,
+	assertUsableCacheSettingsPatch,
 	cacheEnabled,
 	cacheSetting,
 	flushBeforeEnabling,
@@ -11,6 +12,7 @@ import {
 	resolveCacheSettings,
 	responseCacheWanted,
 	seedCacheSettings,
+	usableCacheSettings,
 } from './cache-settings.js';
 import { buildResponseCache, clearCacheTargets } from './cache.js';
 import emitter from './emitter.js';
@@ -117,6 +119,13 @@ test.each([
 	{ scoped_index_ttl_factor: 1.5 },
 	{ scoped_index_ttl_factor: 100 },
 	{ audit_limit: null },
+	{
+		audit_limit: 40,
+		setBy: 'writer-id',
+		setAt: '2026-09-30T08:00:00.000Z',
+		setFrom: 'admin',
+	},
+	{ setBy: null },
 ])('accepts %o', (document) => {
 	expect(() => assertUsableCacheSettings(document)).not.toThrow();
 });
@@ -193,8 +202,36 @@ test.each([
 		`,
 	],
 	[{ ttl: '1h' }, `'cache_settings.ttl' is not a cache setting`],
+	[{ setAt: 7 }, `'cache_settings.setAt' has to be a string`],
 ])('refuses %o', (document, reason) => {
 	expect(() => assertUsableCacheSettings(document)).toThrowError(reason);
+});
+
+test.each([
+	[{ setBy: 'writer-id' }, `'cache_settings.setBy' is not a cache setting`],
+	[
+		{ audit_limit: 40, setAt: '2026-09-30T08:00:00.000Z' },
+		`'cache_settings.setAt' is not a cache setting`,
+	],
+	[{ setFrom: 'admin' }, `'cache_settings.setFrom' is not a cache setting`],
+	[{ audit_limit: -1 }, `'cache_settings.audit_limit' has to be`],
+])('refuses the patch %o', (patch, reason) => {
+	expect(() => assertUsableCacheSettingsPatch(patch)).toThrowError(reason);
+});
+
+test('accepts a patch of cache settings alone', () => {
+	expect(() => assertUsableCacheSettingsPatch({ audit_limit: 40 }))
+		.not
+		.toThrow();
+});
+
+test('leaves the stamp out of the fields the mirror applies', () => {
+	expect(usableCacheSettings({
+		audit_limit: 40,
+		setBy: 'writer-id',
+		setAt: '2026-09-30T08:00:00.000Z',
+		setFrom: 'admin',
+	})).toEqual({ audit_limit: 40 });
 });
 
 // Past these Redis refuses the command a purge or a fill sends, and every purge
