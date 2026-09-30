@@ -29,9 +29,6 @@ const [
 
 const PENDING = 'directus_scoped_cache_pending_purges';
 
-// Rows per INSERT: 6 columns each, well under Postgres' 65535 bind parameters.
-const INSERT_CHUNK = 1000;
-
 /**
  * `POST /perf-pending-retry/record` with `{ collection, ids }` records what a
  * write of those rows records when its purge fails: the bare fingerprint and one
@@ -61,22 +58,19 @@ export default function registerEndpoint(router, { database }) {
 					}),
 				].map(renderScopedCacheFingerprint);
 
-			const rows = fingerprints.map((fingerprint) => {
-				return {
-					failed_at: new Date(),
-					mode,
-					collection,
-					scoped_cache_fingerprint: fingerprint,
-					attempts: 0,
-					last_error: 'seeded by the pending-retry bench',
-				};
+			// One row for the write, as a failed purge records it.
+			await database(PENDING).insert({
+				failed_at: new Date(),
+				mode,
+				collection,
+				scoped_cache_fingerprints: mode === 'collection'
+					? null
+					: JSON.stringify(fingerprints),
+				attempts: 0,
+				last_error: 'seeded by the pending-retry bench',
 			});
 
-			for (let at = 0; at < rows.length; at += INSERT_CHUNK) {
-				await database(PENDING).insert(rows.slice(at, at + INSERT_CHUNK));
-			}
-
-			return response.json({ recorded: rows.length });
+			return response.json({ recorded: fingerprints.length });
 		}
 		catch (error) {
 			return next(error);

@@ -52,6 +52,7 @@ vi.mock('../scoped-cache-pending-purges.js', () => {
 		clearPendingScopedCachePurges: vi.fn(),
 		countFailedScopedCachePurgeRetry: vi.fn(),
 		listPendingScopedCachePurges: vi.fn(),
+		MAX_RECORDED_FINGERPRINTS_PER_COLLECTION: 1000,
 		recordPendingScopedCachePurge: vi.fn(),
 	};
 });

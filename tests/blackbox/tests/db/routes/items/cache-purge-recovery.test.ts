@@ -271,7 +271,7 @@ describe(oneLine`
 
 			// Recorded as a fingerprint rather than a Redis key, so the retry can rebuild
 			// the key against whatever CACHE_NAMESPACE is set to when it runs.
-			const pending = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
+			const pending = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 
 			// Every row, not only the one asserted below: `toContainEqual` permits others,
 			// and a `namespace` row drains as `cache.clear()` — which would wipe the
@@ -279,14 +279,18 @@ describe(oneLine`
 			// the wrong culprit.
 			mark(`recorded while down: ${JSON.stringify(pending)}`);
 
-			expect(pending).toContainEqual({
+			// One row for the write, every fingerprint it could not drop in its list.
+			expect(pending).toEqual([{
 				mode: 'slices',
 				// The serialised form the index holds, with every value comma-wrapped
 				// so a partial fingerprint globs cleanly. Spelled out rather than
 				// imported: what is asserted is the string that reached Postgres, not
 				// the renderer that wrote it.
-				scoped_cache_fingerprint: `${NOTE}:&id=,${readNote},&`,
-			});
+				scoped_cache_fingerprints: expect.arrayContaining([
+					`${NOTE}:&`,
+					`${NOTE}:&id=,${readNote},&`,
+				]),
+			}]);
 
 			await proxy.open();
 
@@ -300,7 +304,7 @@ describe(oneLine`
 			let drained: Array<Record<string, unknown>> = [];
 
 			for (let attempt = 0; attempt < 80; attempt++) {
-				drained = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
+				drained = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 
 				if (drained.length === 0) {
 					break;
@@ -491,6 +495,17 @@ describe(oneLine`
 			await assertInstanceAlive();
 			expect(written.status).toBe(200);
 
+			// One row for the one write, whatever the number of keys it touched.
+			expect(await db(PENDING).select('mode', 'scoped_cache_fingerprints'))
+				.toEqual([{
+					mode: 'slices',
+					scoped_cache_fingerprints: expect.arrayContaining([
+						`${NOTE}:&`,
+						`${NOTE}:&id=,${pair[0]},&`,
+						`${NOTE}:&id=,${pair[1]},&`,
+					]),
+				}]);
+
 			await proxy.open();
 
 			for (let attempt = 0; attempt < 80; attempt++) {
@@ -589,6 +604,70 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			records a write touching more keys than a retry replays one by one as a
+			collection purge, so its record stays one small row and the retry drops
+			every entry of the collection
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await emptyCache();
+			await db(PENDING).delete();
+
+			const batch: number[] = (await CreateItem(vendor, {
+				collection: NOTE,
+				item: Array.from({ length: 1001 }, (_, at) => ({ subject: `batch-${at}` })),
+			})).map((note: { id: number }) => note.id);
+
+			// Outside the batch: a precise retry would leave its read cached, so its
+			// MISS below is what tells the collection purge from the precise one.
+			await cachedRead(readNote);
+
+			await proxy.cut();
+
+			const written = await request(url)
+				.patch(`/items/${NOTE}`)
+				.send({ keys: batch, data: { subject: `renamed-${Date.now()}` } })
+				.set('Authorization', auth)
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
+					throw error;
+				});
+
+			await assertInstanceAlive();
+			expect(written.status).toBe(200);
+
+			expect(await db(PENDING)
+				.select('mode', 'collection', 'scoped_cache_fingerprints'))
+				.toEqual([{
+					mode: 'collection',
+					collection: NOTE,
+					scoped_cache_fingerprints: null,
+				}]);
+
+			await proxy.open();
+
+			let drained: Array<Record<string, unknown>> = [];
+
+			for (let attempt = 0; attempt < 80; attempt++) {
+				drained = await db(PENDING).select('id');
+
+				if (drained.length === 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			expect(drained).toEqual([]);
+			expect((await get(readNote)).headers[cacheStatusHeader]).toBe('MISS');
+
+			await request(url)
+				.delete(`/items/${NOTE}`)
+				.send(batch)
+				.set('Authorization', auth);
+		}, 60_000);
+
+		it(oneLine`
 			finishes a recorded purge at BOOT, with nothing having read through the cache
 			yet — node-redis dials on its first command, so a fresh process finds its
 			response store neither open nor ready, and reading that as an outage retires
@@ -608,7 +687,7 @@ describe(oneLine`
 
 			await assertInstanceAlive();
 
-			const recorded = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
+			const recorded = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 			mark(`recorded before the boot case: ${JSON.stringify(recorded)}`);
 			expect(recorded.length).toBeGreaterThan(0);
 
@@ -640,7 +719,7 @@ describe(oneLine`
 				let drained: Array<Record<string, unknown>> = [];
 
 				for (let attempt = 0; attempt < 60; attempt++) {
-					drained = await db(PENDING).select('mode', 'scoped_cache_fingerprint');
+					drained = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 
 					if (drained.length === 0) {
 						break;

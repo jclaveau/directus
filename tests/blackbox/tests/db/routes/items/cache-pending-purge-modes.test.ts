@@ -72,6 +72,7 @@ describe(oneLine`
 
 		let instance: ChildProcess;
 		let db: Knex;
+		let slicedA1: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -92,7 +93,7 @@ describe(oneLine`
 				],
 			});
 
-			await Promise.all([
+			const [sliced] = await Promise.all([
 				CreateItem(vendor, {
 					collection: SLICED,
 					item: [
@@ -105,6 +106,8 @@ describe(oneLine`
 					item: [{ label: 'untouched' }],
 				}),
 			]);
+
+			slicedA1 = sliced[0].id;
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -142,6 +145,12 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		function readA1() {
+			return request(getUrl(vendor, env))
+				.get(`/items/${SLICED}/${slicedA1}`)
+				.set('Authorization', auth);
+		}
+
 		function readSibling() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${SIBLING}`)
@@ -153,16 +162,12 @@ describe(oneLine`
 			expect((await read()).headers[cacheStatusHeader]).toBe('HIT');
 		}
 
-		function record(row: {
-			mode: string;
-			collection: string | null;
-			scoped_cache_fingerprint?: string | null;
-		}) {
+		function record(row: { mode: string; collection: string | null }) {
 			return db(PENDING).insert({
 				failed_at: new Date(),
 				mode: row.mode,
 				collection: row.collection,
-				scoped_cache_fingerprint: row.scoped_cache_fingerprint ?? null,
+				scoped_cache_fingerprints: null,
 				attempts: 0,
 				last_error: 'seeded by the pending-purge modes spec',
 			});
@@ -185,13 +190,13 @@ describe(oneLine`
 			throw new Error(`timed out waiting for ${what}`);
 		}
 
-		// The two shapes this spec seeds, and nothing else: a scan of its own
+		// The shapes this spec seeds, and nothing else: a record of its own
 		// collection, and the null-collection row no mutation ever records. Every
 		// read and delete goes through this, so a sibling's in-flight record is
 		// neither counted here nor thrown away.
 		function ownRows() {
 			return db(PENDING)
-				.where({ mode: 'collection', collection: SLICED })
+				.where({ collection: SLICED })
 				.orWhere((builder: Knex.QueryBuilder) => {
 					builder.where({ mode: 'collection' }).whereNull('collection');
 				});
@@ -277,6 +282,80 @@ describe(oneLine`
 				.select('last_error');
 
 			expect(String(lastError)).toMatch(/names no collection/);
+		}, 60_000);
+
+		it(oneLine`
+			retries one collection's records naming more fingerprints between them than
+			a retry replays one by one as a collection purge, so a read none of them
+			names drops too
+		`, async () => {
+			await clearCache();
+			await ownRows().delete();
+
+			await fill(readA1);
+
+			// Rows no read names: replayed one by one they would leave a1 cached, so
+			// its MISS is the collection purge.
+			const recorded = Array.from({ length: 1001 }, (_, at) => {
+				return {
+					failed_at: new Date(),
+					mode: 'slices',
+					collection: SLICED,
+					scoped_cache_fingerprints: JSON.stringify([
+						`${SLICED}:&id=,${1_000_000 + at},&`,
+					]),
+					attempts: 0,
+					last_error: 'seeded by the pending-purge modes spec',
+				};
+			});
+
+			await db.batchInsert(PENDING, recorded, 500);
+
+			// A sibling spec's instance may drain the rows first and purge its own
+			// namespace, so a set that vanished without the MISS is seeded again.
+			await until(async () => {
+				if ((await readA1()).headers[cacheStatusHeader] === 'MISS') {
+					return true;
+				}
+
+				if ((await pendingRows()).length === 0) {
+					await db.batchInsert(PENDING, recorded, 500);
+				}
+
+				return false;
+			}, 'the records to purge the collection whole');
+
+			expect((await readSibling()).headers[cacheStatusHeader]).toBe('HIT');
+		}, 60_000);
+
+		it(oneLine`
+			clears a backlog past the bind parameter limit — one delete naming every
+			drained id would be refused, and the backlog retried forever
+		`, async () => {
+			await clearCache();
+			await ownRows().delete();
+
+			await db.batchInsert(
+				PENDING,
+				Array.from({ length: 70_000 }, () => {
+					return {
+						failed_at: new Date(),
+						mode: 'collection',
+						collection: SLICED,
+						scoped_cache_fingerprints: null,
+						attempts: 0,
+						last_error: 'seeded by the pending-purge modes spec',
+					};
+				}),
+				5000,
+			);
+
+			await until(
+				async () => (await pendingRows()).length === 0,
+				'the backlog to clear',
+			);
+
+			expect(await pendingRows()).toEqual([]);
 		}, 60_000);
 	});
 });
