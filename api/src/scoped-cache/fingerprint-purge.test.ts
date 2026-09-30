@@ -121,6 +121,10 @@ beforeEach(() => {
 		scan,
 		// A reap has marked the index-key sets complete since the last flush.
 		mget: async () => ['1', '1'],
+		// The index-key sets name the sets the case declared.
+		smismember: async (_collectionIndexKeysKey: string, ...indexKeys: string[]) => {
+			return indexKeys.map((indexKey) => Number(Object.hasOwn(members, indexKey)));
+		},
 		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
@@ -169,8 +173,13 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads the bare set, the one its row owns, and the home pin set of each value
-		it carries, and no other
+		it carries, and no other, until a reap marks the index-key sets complete
 	`, async () => {
+		vi.mocked(useRedis).mockReturnValue({
+			...useRedis(),
+			mget: async () => [null, '1'],
+		} as any);
+
 		await purgeScopedCache(cache, 'slot', [], null, {
 			rowFingerprints: [{
 				collection: 'slot',
@@ -187,6 +196,34 @@ describe('a purge shown the rows it wrote', () => {
 			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced',
 			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha',
 		]);
+	});
+
+	it(oneLine`
+		reads only the home pin sets the index-key set names once a reap has marked
+		it complete: a value no read was filed under has no set to read
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [
+				'slot:&id=,1,&view=,method,&|ns:entry-one',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
+
+		expect(sscan.mock.calls).toEqual([
+			['ns:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			['ns:scoped-cache-index:fingerprint:slot:owner=alpha', '0', 'COUNT', 1000],
+			['ns:scoped-cache-index:fingerprint:slot:pin:id=1', '0', 'COUNT', 1000],
+		]);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
 	});
 
 	it(oneLine`
@@ -374,6 +411,12 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it('reads a set larger than one page to its end', async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [],
+			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced': [],
+			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha': [],
+		};
+
 		sscan.mockImplementationOnce(async () => {
 			return ['7', ['slot:&|ns:entry-first']];
 		});
