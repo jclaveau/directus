@@ -293,6 +293,7 @@ describe(oneLine`
 			await ownRows().delete();
 
 			await fill(readA1);
+			await fill(readSibling);
 
 			// Rows no read names: replayed one by one they would leave a1 cached, so
 			// its MISS is the collection purge.

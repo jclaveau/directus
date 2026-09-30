@@ -613,9 +613,11 @@ describe(oneLine`
 			await emptyCache();
 			await db(PENDING).delete();
 
+			// 100 keys, the most one mutation takes: with the bare fingerprint they
+			// name 101, one past the retry's cap.
 			const batch: number[] = (await CreateItem(vendor, {
 				collection: NOTE,
-				item: Array.from({ length: 101 }, (_, at) => ({ subject: `batch-${at}` })),
+				item: Array.from({ length: 100 }, (_, at) => ({ subject: `batch-${at}` })),
 			})).map((note: { id: number }) => note.id);
 
 			// Outside the batch: a precise retry would leave its read cached, so its
