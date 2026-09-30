@@ -3,9 +3,10 @@ Feature: The metrics count which way a collection-wide purge found its sets
   directus_scoped_cache_index_reads_total counts the collection-wide reads of
   the index by mode: `registry` through the collection's index-key set, while
   the index-key sets are marked complete, and `scan`, a keyspace SCAN, while
-  they are not. A `scan` count still rising long after a flush is a reap that
-  never wrote the marker back. Here the reap is scheduled once a year, and the
-  marker is dropped and written by hand once the boot's own pass wrote it.
+  they are not. A `scan` count still rising long after a deploy is a reap that
+  never wrote the marker for the generation the deploy moved. Here the reap is
+  scheduled once a year, and the marker is dropped and written by hand once the
+  boot's own pass wrote it.
 
   Scenario: a purge while the index-key sets are not marked complete counts a scan
     Given these rows of index_read_metric_scan:

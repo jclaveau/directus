@@ -13,7 +13,6 @@ import {
 	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
 	scopedCacheIndexGenerationReadScript,
-	scopedCacheIndexInvalidateScript,
 	scopedCacheIndexReapScript,
 	scopedCacheCollectionIndexKeysRegisterScript,
 	scopedCacheCollectionIndexKeysPruneScript,
@@ -32,6 +31,12 @@ vi.mock('@directus/env', () => {
 	return { useEnv: () => env };
 });
 
+const logger = vi.hoisted(() => {
+	return { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() };
+});
+
+vi.mock('../logger/index.js', () => ({ useLogger: () => logger }));
+
 const srem = vi.fn();
 const unlink = vi.fn();
 const indexFile = vi.fn();
@@ -42,7 +47,6 @@ const pttl = vi.fn();
 const defineCommand = vi.fn();
 const scopedCacheEpochBump = vi.fn();
 const scopedCacheIndexReap = vi.fn();
-const scopedCacheIndexInvalidate = vi.fn();
 const scopedCacheIndexGenerationRead = vi.fn();
 const scopedCacheIndexCompleteMark = vi.fn();
 const scopedCacheIndexBuildRecord = vi.fn();
@@ -54,47 +58,50 @@ const sadd = vi.fn();
 
 const mget = vi.fn();
 const get = vi.fn();
+const del = vi.fn();
 const set = vi.fn();
 const evalScript = vi.fn();
 const onEvent = vi.fn();
 const redisState = { status: 'connecting' };
 
+// One client for both databases, as with `CACHE_REDIS_DB` unset: which of the
+// two a key lives in is what the blackbox suite reads.
 vi.mock('../redis/index.js', () => {
-	return {
-		useCacheRedis: () => {
-			return {
-				defineCommand,
-				scopedCacheEpochBump,
-				scopedCacheIndexReap,
-				scopedCacheIndexInvalidate,
-				scopedCacheIndexGenerationRead,
-				scopedCacheIndexCompleteMark,
-				scopedCacheIndexBuildRecord,
-				scopedCacheFillPauseWatch,
-				scopedCacheFillPauseEnd,
-				scopedCacheCollectionIndexKeysRegister,
-				scopedCacheCollectionIndexKeysPrune,
-				pttl,
-				scan,
-				sscan,
-				sadd,
-				mget,
-				get,
-				set,
-				eval: evalScript,
-				on: onEvent,
-				status: redisState.status,
-				pipeline: () => {
-					return {
-						srem,
-						unlink,
-						scopedCacheIndexFile: indexFile,
-						exec: pipelineExec,
-					};
-				},
-			};
-		},
+	const redisClient = () => {
+		return {
+			defineCommand,
+			scopedCacheEpochBump,
+			scopedCacheIndexReap,
+			scopedCacheIndexGenerationRead,
+			scopedCacheIndexCompleteMark,
+			scopedCacheIndexBuildRecord,
+			scopedCacheFillPauseWatch,
+			scopedCacheFillPauseEnd,
+			scopedCacheCollectionIndexKeysRegister,
+			scopedCacheCollectionIndexKeysPrune,
+			pttl,
+			scan,
+			sscan,
+			sadd,
+			mget,
+			get,
+			del,
+			set,
+			eval: evalScript,
+			on: onEvent,
+			status: redisState.status,
+			pipeline: () => {
+				return {
+					srem,
+					unlink,
+					scopedCacheIndexFile: indexFile,
+					exec: pipelineExec,
+				};
+			},
+		};
 	};
+
+	return { useCacheRedis: redisClient, useRedis: redisClient };
 });
 
 describe('scopedCacheFingerprintIndexKeys', () => {
@@ -1174,20 +1181,18 @@ describe('scanCollectionIndexedEntries', () => {
 		]);
 
 		expect(mget.mock.calls).toEqual([[[
-			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'scalabus:scoped-cache-collection-index-keys-complete',
 			'scalabus:scoped-cache-index-generation',
 		]]]);
 
 		expect(scan).not.toHaveBeenCalled();
 	});
 
-	// A set filed while nothing named it — by an older build, or before a flush
-	// that dropped the index-key set and not the set — is found only by a SCAN
-	// until a reap names it.
+	// A set filed while nothing named it, by an older build, is found only by a
+	// SCAN until a reap names it.
 	it.each([
-		['no reap has written the marker', null, '7'],
-		['a drop moved the generation past the marker', '7', '8'],
-		['a FLUSHDB took the generation', '7', null],
+		['a deploy moved the generation past the marker', '7', '8'],
+		['the shared database holds no generation', '7', null],
 		['an empty marker is left with no generation', '', null],
 	])(oneLine`
 		scans the keyspace for the collection's sets when %s
@@ -1638,8 +1643,8 @@ describe('takeCollectionIndexedKeys', () => {
 	});
 
 	it(oneLine`
-		counts a read by keyspace scan: one holding up after a flush is a reap
-		that never wrote the marker back
+		counts a read by keyspace scan: one holding up after a deploy is a reap
+		that never wrote the marker for the generation the deploy moved
 	`, async () => {
 		const inc = vi.fn();
 		_cache.metrics = { getScopedCacheIndexReadMetric: () => ({ inc }) } as any;
@@ -1707,7 +1712,7 @@ describe('takeCollectionIndexedKeys', () => {
 
 describe('takeStrandedSweptIndexKeys', () => {
 	beforeEach(() => {
-		for (const command of [scan, sscan, evalScript, unlink]) {
+		for (const command of [scan, sscan, evalScript, unlink, mget]) {
 			command.mockReset();
 		}
 	});
@@ -1818,63 +1823,48 @@ describe('takeStrandedSweptIndexKeys', () => {
 
 describe('dropIndex', () => {
 	beforeEach(() => {
-		for (const command of [scan, unlink, scopedCacheIndexInvalidate]) {
+		for (const command of [scan, unlink, pipelineExec]) {
 			command.mockReset();
 		}
 	});
 
-	it('takes the marker back before it reads anything to unlink', async () => {
+	it(oneLine`
+		unlinks only the sets holding members, and keeps the index-key sets and the
+		swept index-key set — a name whose set is gone reads empty
+	`, async () => {
 		scan.mockResolvedValueOnce([
 			'0',
-			['scalabus:scoped-cache-index:fingerprint:slot:'],
+			[
+				'scalabus:scoped-cache-index:collection-index-keys:slot',
+				'scalabus:scoped-cache-index:swept-index-keys',
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-index:swept:slot:0c1f:1',
+			],
 		]);
 
-		await redisScopedCacheStore().dropIndex();
+		pipelineExec.mockResolvedValueOnce([[null, 2]]);
 
-		expect(scopedCacheIndexInvalidate.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:collection-index-keys-complete',
-			'scalabus:scoped-cache-index-generation',
-		]]);
-
-		expect(scopedCacheIndexInvalidate.mock.invocationCallOrder[0])
-			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
+		expect(await redisScopedCacheStore().dropIndex())
+			.toEqual({ dropped: 2, refused: 0 });
 
 		expect(unlink.mock.calls).toEqual([[
-			['scalabus:scoped-cache-index:fingerprint:slot:'],
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-index:swept:slot:0c1f:1',
+			],
 		]]);
-	});
-
-	it('unlinks nothing when the store refuses to take the marker back', async () => {
-		scopedCacheIndexInvalidate.mockRejectedValueOnce(new Error('OOM'));
-
-		await expect(redisScopedCacheStore().dropIndex()).rejects.toThrow('OOM');
-
-		expect(scan).not.toHaveBeenCalled();
-		expect(unlink).not.toHaveBeenCalled();
-	});
-
-	it('deletes the marker and moves the generation in one script', () => {
-		expect(scopedCacheIndexInvalidateScript).toBe(`
-redis.call('DEL', KEYS[1])
-
-local now = redis.call('TIME')
-local seed = now[1] .. string.format('%06d', tonumber(now[2]))
-
-redis.call('SET', KEYS[2], seed, 'NX')
-
-return redis.call('INCR', KEYS[2])
-`);
 	});
 });
 
 describe('recordBuildIdentity', () => {
 	beforeEach(() => {
 		scopedCacheIndexBuildRecord.mockReset();
+		del.mockReset();
 	});
 
 	it(oneLine`
-		records the build beside the marker and the generation it takes back, and
-		the fill pause it opens
+		records the build beside the generation it moves and the fill pause it
+		opens, and deletes no marker: the moved generation no longer matches it
 	`, async () => {
 		scopedCacheIndexBuildRecord.mockResolvedValueOnce([1, 600_000]);
 
@@ -1884,7 +1874,6 @@ describe('recordBuildIdentity', () => {
 
 		expect(scopedCacheIndexBuildRecord.mock.calls).toEqual([[
 			'scalabus:scoped-cache-index-build',
-			'scalabus:scoped-cache-index:collection-index-keys-complete',
 			'scalabus:scoped-cache-index-generation',
 			'scalabus:scoped-cache-fill-pause',
 			'build-b',
@@ -1893,24 +1882,28 @@ describe('recordBuildIdentity', () => {
 
 		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheIndexBuildRecord',
-			{ numberOfKeys: 4, lua: scopedCacheIndexBuildRecordScript },
+			{ numberOfKeys: 3, lua: scopedCacheIndexBuildRecordScript },
 		);
+
+		expect(del).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
 		answers the build already recorded unchanged, with what is left of the
-		pause another boot opened
+		pause another boot opened, and leaves the marker
 	`, async () => {
 		scopedCacheIndexBuildRecord.mockResolvedValueOnce([0, 4_000]);
 
 		expect(
 			await redisScopedCacheStore().recordBuildIdentity('build-b', 600_000),
 		).toEqual({ buildChanged: false, fillPauseLeftMs: 4_000 });
+
+		expect(del).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
-		takes the marker back, moves the generation and opens the pause only for a
-		build not recorded, in one script, and reads the pause back for any
+		moves the generation and opens the pause only for a build not recorded, in
+		one script, and reads the pause back for any
 	`, () => {
 		expect(scopedCacheIndexBuildRecordScript).toBe(`
 local changed = 0
@@ -1919,20 +1912,19 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then
 	changed = 1
 
 	redis.call('SET', KEYS[1], ARGV[1])
-	redis.call('DEL', KEYS[2])
 
 	local now = redis.call('TIME')
 	local seed = now[1] .. string.format('%06d', tonumber(now[2]))
 
-	redis.call('SET', KEYS[3], seed, 'NX')
-	redis.call('INCR', KEYS[3])
+	redis.call('SET', KEYS[2], seed, 'NX')
+	redis.call('INCR', KEYS[2])
 
 	if tonumber(ARGV[2]) > 0 then
-		redis.call('SET', KEYS[4], ARGV[1], 'PX', ARGV[2])
+		redis.call('SET', KEYS[3], ARGV[1], 'PX', ARGV[2])
 	end
 end
 
-local pauseLeft = redis.call('PTTL', KEYS[4])
+local pauseLeft = redis.call('PTTL', KEYS[3])
 
 if pauseLeft < 0 then
 	pauseLeft = 0
@@ -2057,20 +2049,23 @@ describe('reapIndexedEntries', () => {
 			sadd,
 			get,
 			set,
+			mget,
 			scopedCacheIndexGenerationRead,
 			scopedCacheIndexCompleteMark,
+			logger.info,
 		]) {
 			command.mockReset();
 		}
 
 		pttl.mockResolvedValue(-2);
-		scopedCacheIndexGenerationRead.mockResolvedValue(['41', '9']);
+		scopedCacheIndexGenerationRead.mockResolvedValue('41');
+		get.mockResolvedValue('9');
 		scopedCacheIndexCompleteMark.mockResolvedValue(1);
 	});
 
 	it(oneLine`
-		marks the index-key sets complete with the generation and the wholesale
-		counter it read before its scan, once the pass ends
+		marks the index-key sets complete with the generation it read before its
+		scan, once the pass ends and the wholesale counter reads the same again
 	`, async () => {
 		scan
 			.mockResolvedValueOnce(['3', []])
@@ -2089,46 +2084,104 @@ describe('reapIndexedEntries', () => {
 
 		expect(scopedCacheIndexGenerationRead.mock.calls).toEqual([[
 			'scalabus:scoped-cache-index-generation',
-			'scalabus:scoped-cache-epoch:*',
 		]]);
 
+		expect(get.mock.calls).toEqual([
+			['scalabus:scoped-cache-epoch:*'],
+			['scalabus:scoped-cache-epoch:*'],
+		]);
+
 		expect(scopedCacheIndexCompleteMark.mock.calls).toEqual([[
-			'scalabus:scoped-cache-index:collection-index-keys-complete',
+			'scalabus:scoped-cache-collection-index-keys-complete',
 			'scalabus:scoped-cache-index-generation',
-			'scalabus:scoped-cache-epoch:*',
 			'scalabus:scoped-cache-fill-pause',
 			'41',
-			'9',
 		]]);
 
 		expect(defineCommand).toHaveBeenCalledWith(
+			'scopedCacheIndexGenerationRead',
+			{ numberOfKeys: 1, lua: scopedCacheIndexGenerationReadScript },
+		);
+
+		expect(defineCommand).toHaveBeenCalledWith(
 			'scopedCacheIndexCompleteMark',
-			{ numberOfKeys: 4, lua: scopedCacheIndexCompleteMarkScript },
+			{ numberOfKeys: 3, lua: scopedCacheIndexCompleteMarkScript },
 		);
 
 		expect(scopedCacheIndexGenerationRead.mock.invocationCallOrder[0])
 			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
 
-		expect(scopedCacheIndexCompleteMark.mock.invocationCallOrder[0])
+		expect(get.mock.invocationCallOrder[0])
+			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
+
+		expect(get.mock.invocationCallOrder[1])
 			.toBeGreaterThan(scan.mock.invocationCallOrder[1]!);
+
+		expect(scopedCacheIndexCompleteMark.mock.invocationCallOrder[0])
+			.toBeGreaterThan(get.mock.invocationCallOrder[1]!);
+
+		expect(logger.info).toHaveBeenCalledExactlyOnceWith(
+			'[scoped-cache] index-key sets marked complete at generation 41',
+		);
 
 		expect(set).not.toHaveBeenCalled();
 	});
 
+	// The generation and the pause are read in the script that writes: a deploy
+	// landing between a separate read and the SET would go unseen.
 	it(oneLine`
-		writes the marker only in the script that rereads what the reap read, and
-		never during a deploy's fill pause
+		marks nothing when the script answers that a deploy moved the generation
+		or opened a fill pause since the scan began
+	`, async () => {
+		scan.mockResolvedValueOnce(['0', []]);
+		scopedCacheIndexCompleteMark.mockResolvedValueOnce(0);
+
+		await redisScopedCacheStore().reapIndexedEntries((key) => key, 86400);
+
+		expect(scopedCacheIndexCompleteMark.mock.calls).toEqual([[
+			'scalabus:scoped-cache-collection-index-keys-complete',
+			'scalabus:scoped-cache-index-generation',
+			'scalabus:scoped-cache-fill-pause',
+			'41',
+		]]);
+
+		expect(logger.info).toHaveBeenCalledExactlyOnceWith(oneLine`
+			[scoped-cache] index-key sets not marked complete: a deploy or a flush
+			since generation 41, or a deploy's fill pause runs
+		`);
+	});
+
+	// The wholesale counter lives in the cache database, the marker in the shared
+	// one: no script reads both.
+	it.each([
+		['a flush moved it', '9', '10'],
+		['a flush seeded it', null, '1'],
+	])(oneLine`
+		never runs the marking script when the wholesale counter reads otherwise
+		after the scan than before it — %s
+	`, async (_case, flushEpochBefore, flushEpochAfter) => {
+		scan.mockResolvedValueOnce(['0', []]);
+
+		get
+			.mockResolvedValueOnce(flushEpochBefore)
+			.mockResolvedValueOnce(flushEpochAfter);
+
+		await redisScopedCacheStore().reapIndexedEntries((key) => key, 86400);
+
+		expect(scopedCacheIndexCompleteMark).not.toHaveBeenCalled();
+
+		expect(logger.info).toHaveBeenCalledExactlyOnceWith(oneLine`
+			[scoped-cache] index-key sets not marked complete: a deploy or a flush
+			since generation 41, or a deploy's fill pause runs
+		`);
+	});
+
+	it(oneLine`
+		writes the marker only in the script that rereads the generation the reap
+		read, and never while a fill pause runs
 	`, () => {
 		expect(scopedCacheIndexCompleteMarkScript).toBe(`
-if redis.call('GET', KEYS[2]) ~= ARGV[1] then
-	return 0
-end
-
-if redis.call('EXISTS', KEYS[4]) == 1 then
-	return 0
-end
-
-if (redis.call('GET', KEYS[3]) or '') ~= ARGV[2] then
+if redis.call('GET', KEYS[2]) ~= ARGV[1] or redis.call('EXISTS', KEYS[3]) == 1 then
 	return 0
 end
 
@@ -2145,7 +2198,7 @@ local seed = now[1] .. string.format('%06d', tonumber(now[2]))
 
 redis.call('SET', KEYS[1], seed, 'NX')
 
-return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
+return redis.call('GET', KEYS[1])
 `);
 	});
 

@@ -23,7 +23,9 @@ vi.mock('directus/version', () => {
 	};
 });
 
-const logger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn() }));
+const logger = vi.hoisted(() => {
+	return { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
+});
 
 vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));
 
@@ -401,6 +403,11 @@ describe('flushCachesIfBuildChanged', () => {
 });
 
 describe('recordScopedCacheBuild', () => {
+	// The shipped default.
+	beforeEach(() => {
+		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = '5m';
+	});
+
 	it(oneLine`
 		records the core build with auto-flush off and pauses fills for what is
 		left of the window — a build rolled back to may have filed sets the
@@ -505,20 +512,12 @@ describe('recordScopedCacheBuild', () => {
 		expect(useScopedCacheStore).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		{ label: 'a fraction', fillPauseMax: '4.1m', fillPauseMs: 246_000 },
-		{ label: 'a negative', fillPauseMax: '-5m', fillPauseMs: 0 },
-		{
-			label: 'an infinite',
-			fillPauseMax: `1${'0'.repeat(400)}`,
-			fillPauseMs: 0,
-		},
-	])(oneLine`
-		asks Redis for a whole number of ms off $label ceiling, a fraction rounded
+	it(oneLine`
+		asks Redis for a whole number of ms off a fraction of a ceiling, rounded
 		up — the script refuses anything else only after recording the build
-	`, async ({ fillPauseMax, fillPauseMs }) => {
+	`, async () => {
 		env['CACHE_BUILD_ID'] = 'build-b';
-		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPauseMax;
+		env['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = '4.1m';
 
 		const recordBuildIdentity = vi.fn(async () => {
 			return { buildChanged: true, fillPauseLeftMs: 0 };
@@ -530,6 +529,6 @@ describe('recordScopedCacheBuild', () => {
 		await recordScopedCacheBuild();
 
 		expect(recordBuildIdentity)
-			.toHaveBeenCalledExactlyOnceWith('build-b', fillPauseMs);
+			.toHaveBeenCalledExactlyOnceWith('build-b', 246_000);
 	});
 });

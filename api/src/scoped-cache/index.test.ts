@@ -1216,7 +1216,6 @@ describe('dropScopedCacheIndex', () => {
 			scan,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump,
-			scopedCacheIndexInvalidate: vi.fn(),
 			pipeline: () => pipeline,
 		};
 
@@ -1320,14 +1319,34 @@ describe('dropScopedCacheIndex', () => {
 	});
 
 	it(oneLine`
-		asks for a reap once the index is gone — the drop took the completeness
-		marker, and every collection-wide purge SCANs until a reap writes it back
+		forces a reap once the index is gone — the index-key sets still name the
+		sets it unlinked, and the marker it kept would turn a reap away
 	`, async () => {
 		mockScan(['0', ['ns:scoped-cache-index:fingerprint:articles']]);
 
 		await dropScopedCacheIndex();
 
-		expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
+		expect(requestScopedCacheIndexReap)
+			.toHaveBeenCalledExactlyOnceWith({ forcePass: true });
+	});
+
+	it(oneLine`
+		unlinks the sets and keeps what names them — the index-key sets and the
+		swept index-key set
+	`, async () => {
+		const { unlink } = mockScan(['0', [
+			'ns:scoped-cache-index:collection-index-keys:articles',
+			'ns:scoped-cache-index:swept-index-keys',
+			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:swept:articles:0c1f:1',
+		]]);
+
+		expect(await dropScopedCacheIndex()).toEqual({ dropped: 2, refused: 0 });
+
+		expect(unlink.mock.calls).toEqual([[[
+			'ns:scoped-cache-index:fingerprint:articles:',
+			'ns:scoped-cache-index:swept:articles:0c1f:1',
+		]]]);
 	});
 
 	it(oneLine`
@@ -1499,9 +1518,6 @@ describe('flushResponseCache', () => {
 			scopedCacheEpochBump: async (_epochKeyCount: number, epochKey: string) => {
 				calls.push(`bump ${epochKey}`);
 			},
-			scopedCacheIndexInvalidate: async () => {
-				calls.push('invalidate');
-			},
 			pipeline: () => pipeline,
 		} as any);
 
@@ -1526,7 +1542,6 @@ describe('flushResponseCache', () => {
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:*',
 			'clear',
-			'invalidate',
 			'scan',
 			'unlink',
 			'exec',
@@ -1544,7 +1559,6 @@ describe('flushResponseCache', () => {
 
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:*',
-			'invalidate',
 			'scan',
 			'unlink',
 			'exec',
@@ -1585,7 +1599,6 @@ describe('flushResponseCache', () => {
 		expect(calls).toEqual([
 			'bump ns:scoped-cache-epoch:*',
 			'clear',
-			'invalidate',
 			'bump ns:scoped-cache-epoch:*',
 		]);
 
@@ -1667,12 +1680,13 @@ describe('retryPendingScopedCachePurges', () => {
 
 			return ['0', indexedMembers[setKey] ?? []];
 		}),
-		// A reap has marked the index-key sets complete since the last flush, so
-		// only the reap walks the keyspace.
+		// A reap has marked the index-key sets complete at this generation, so
+		// only the reap walks the keyspace: the marker and the generation read the
+		// same.
 		mget: vi.fn(async () => ['1', '1']),
 		get: vi.fn(async () => '1'),
 		set: vi.fn(),
-		scopedCacheIndexGenerationRead: vi.fn(async () => ['1', '1']),
+		scopedCacheIndexGenerationRead: vi.fn(async () => '1'),
 		scopedCacheIndexCompleteMark: vi.fn(async () => 1),
 		scan: vi.fn(async (_cursor: string, _match: string, pattern: string) => {
 			const scanned = pattern.slice(0, -1);
@@ -2560,8 +2574,8 @@ describe('startScopedCachePurgeRecovery', () => {
 	});
 
 	it(oneLine`
-		asks for a reap at boot and on every reconnect, once a changed build took
-		the marker back — the schedule may be hours away or off
+		asks for a reap at boot and on every reconnect, once a changed build moved
+		the generation past the marker — the schedule may be hours away or off
 	`, async () => {
 		const on = vi.fn();
 		vi.mocked(useRedis).mockReturnValue({ on } as any);

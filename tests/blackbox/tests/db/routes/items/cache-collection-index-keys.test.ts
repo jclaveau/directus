@@ -29,7 +29,7 @@ const feature = loadFeature(
 describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-collection-index-keys-${vendor}`;
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
-	const markerKey = `${indexPrefix}collection-index-keys-complete`;
+	const markerKey = `${namespace}:scoped-cache-collection-index-keys-complete`;
 	const generationKey = `${namespace}:scoped-cache-index-generation`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';
@@ -171,19 +171,26 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(flushed.statusCode).toBe(200);
 		});
 
-		// Before the kept marker goes back: a pass finishing after that would
-		// write its own over it.
+		// The flush unlinks the sets and keeps their names: only the pass it asks
+		// for releases them, the marker or none.
 		and.optional(
-			'the reap the flush asked for has marked the index-key sets complete',
+			/^the reap the flush asked for has released the names in \w+$/,
 			async () => {
-				await expect.poll(async () => {
-					const [marker, generation] = await redisClient.mget(
-						markerKey,
-						generationKey,
+				await expect.poll(() => {
+					return redisClient.scard(
+						`${indexPrefix}collection-index-keys:${collection}`,
 					);
+				}, { timeout: 15_000 }).toBe(0);
+			},
+		);
 
-					return marker === generation && marker !== keptMarker;
-				}, { timeout: 15_000 }).toBe(true);
+		// A name whose set the flush unlinked reads empty, and every fill after it
+		// names the set it files into: nothing the flush left goes unnamed.
+		then.optional(
+			'the marker still reads as it was kept, naming the index generation',
+			async () => {
+				expect(await redisClient.mget(markerKey, generationKey))
+					.toEqual([keptMarker, keptMarker]);
 			},
 		);
 
@@ -224,11 +231,6 @@ describe.each(vendors)('%s', (vendor) => {
 				)).toBe(1);
 			},
 		);
-
-		// What a reap that read the generation before the flush writes after it.
-		and.optional('the marker is written back as it was kept', async () => {
-			expect(await redisClient.set(markerKey, keptMarker!)).toBe('OK');
-		});
 
 		and.optional(/^the index-key set of \w+ is gone$/, async () => {
 			expect(await redisClient.del(
@@ -538,7 +540,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			'a marker written before a flush vouches for nothing after it',
+			'a marker written before a flush still vouches after it',
 			defineIndexKeySteps,
 			60_000,
 		);

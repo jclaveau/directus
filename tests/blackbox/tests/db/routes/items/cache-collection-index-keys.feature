@@ -13,10 +13,12 @@ Feature: A collection-wide purge reaches every set through the index-key set
 
   A purge trusts the index-key sets only once a reap has walked the whole index
   and marked them complete, with the index generation as it read before its
-  walk. Until then, and once a flush has moved that generation, it scans the
-  keyspace for the collection's sets as before the index-key sets existed. Here
-  the marking is done by hand, the reap being set to once a year; only a flush
-  or a boot asks for a pass of its own.
+  walk. Until then, and once a deploy has moved that generation, it scans the
+  keyspace for the collection's sets as before the index-key sets existed. A
+  flush moves neither: it unlinks the sets and keeps their names, which read
+  empty until the pass it asks for releases them. Here the marking is done by
+  hand, the reap being set to once a year; only a flush or a boot asks for a
+  pass of its own.
 
   Scenario: a set created after the index-key set exists is purged with the collection
     Given these rows of index_keys_new:
@@ -176,7 +178,7 @@ Feature: A collection-wide purge reaches every set through the index-key set
       | name | fields     | cache |
       | ada  | name,label | MISS  |
 
-  Scenario: a marker written before a flush vouches for nothing after it
+  Scenario: a marker written before a flush still vouches after it
     Given these rows of index_keys_flushed:
       | name | label |
       | ada  | old   |
@@ -186,17 +188,16 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And the index-key sets are marked complete
     And the marker is kept as it reads now
     When the cache is flushed
-    And the reap the flush asked for has marked the index-key sets complete
+    And the reap the flush asked for has released the names in index_keys_flushed
+    Then the marker still reads as it was kept, naming the index generation
     And these reads are cached again:
       | name | fields     |
       | ada  | name,label |
-    And the index-key set of index_keys_flushed no longer names the set of ada
-    And the marker is written back as it was kept
     When every read of index_keys_flushed is purged
     Then the purge read these index sets, in order:
       | command | arguments                                                                    |
       | sscan   | <index>swept-index-keys 0 MATCH <index>swept:index_keys_flushed:* COUNT 1000 |
-      | scan    | 0 MATCH <index>fingerprint:index_keys_flushed:* COUNT 1000                   |
+      | sscan   | <index>collection-index-keys:index_keys_flushed 0 COUNT 1000                 |
       | sscan   | <index>swept:index_keys_flushed:<sweep>:1 0 COUNT 1000                       |
     And these reads answer:
       | name | fields     | cache |

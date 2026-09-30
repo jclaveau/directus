@@ -198,6 +198,71 @@ describe('requestScopedCacheIndexReap', () => {
 		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
 	});
 
+	it(oneLine`
+		reaps once for a forced request while the index-key sets are marked
+		complete — a drop keeps the names of the sets it unlinked, and only a pass
+		releases them
+	`, async () => {
+		indexKeysComplete.mockResolvedValue(true);
+
+		const requested = requestScopedCacheIndexReap({ forcePass: true });
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await requested;
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+	});
+
+	it('forces the waiting pass a forced request joins', async () => {
+		indexKeysComplete.mockResolvedValue(true);
+
+		const requested = [
+			requestScopedCacheIndexReap(),
+			requestScopedCacheIndexReap({ forcePass: true }),
+		];
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await Promise.all(requested);
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		forces one pass only — a request after it reads the marker again
+	`, async () => {
+		indexKeysComplete.mockResolvedValue(true);
+
+		const forced = requestScopedCacheIndexReap({ forcePass: true });
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await forced;
+
+		const unforced = requestScopedCacheIndexReap();
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await unforced;
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		reaps nothing for a forced request while the fill pause runs — the pause's
+		end asks for the pass
+	`, async () => {
+		vi.mocked(scopedCacheFillPaused).mockReturnValue(true);
+
+		const requested = requestScopedCacheIndexReap({ forcePass: true });
+
+		await vi.advanceTimersByTimeAsync(1_000);
+		await requested;
+
+		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
+		expect(lockCache.get).not.toHaveBeenCalled();
+	});
+
 	it('asks for nothing with scoped purging off', async () => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(false);
 

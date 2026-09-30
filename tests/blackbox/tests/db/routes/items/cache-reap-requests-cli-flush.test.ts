@@ -1,6 +1,7 @@
 import config, { paths } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import { oneLine } from '@directus/utils';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'events';
@@ -15,7 +16,7 @@ const feature = loadFeature(
 
 describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-reap-requests-cli-${vendor}`;
-	const markerKey = `${namespace}:scoped-cache-index:collection-index-keys-complete`;
+	const markerKey = `${namespace}:scoped-cache-collection-index-keys-complete`;
 	const generationKey = `${namespace}:scoped-cache-index-generation`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';
@@ -57,8 +58,10 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		scenario(
-			'a running node reaps after "directus cache flush" ran in a process of its '
-			+ 'own',
+			oneLine`
+				a running node keeps trusting the index-key sets after "directus cache
+				flush" ran in another process
+			`,
 			({ given, when, then, and }) => {
 				let flushedGeneration: string | null = null;
 				let flushExitCode: number | null = null;
@@ -90,20 +93,15 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(flushExitCode).toBe(0);
 				});
 
-				// Written only by a pass the running node ran: the command's own
-				// request died with it, and the schedule is a year out.
+				// Read as the command exits, before any pass: the flush unlinks the
+				// sets and keeps their names, which read empty, so it moves neither
+				// the marker nor the generation.
 				and(
-					'the index-key sets are marked complete at a generation after the '
-					+ 'flush',
+					'the index-key sets are still marked complete at the generation '
+					+ 'before the flush',
 					async () => {
-						await expect.poll(async () => {
-							const [marker, generation] = await redisClient.mget(
-								markerKey,
-								generationKey,
-							);
-
-							return marker === generation && generation !== flushedGeneration;
-						}, { timeout: 15_000 }).toBe(true);
+						expect(await redisClient.mget(markerKey, generationKey))
+							.toEqual([flushedGeneration, flushedGeneration]);
 					},
 				);
 			},

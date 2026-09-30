@@ -23,7 +23,7 @@ const feature = loadFeature('./tests/db/routes/items/cache-index-marker.feature'
 describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-index-marker-${vendor}`;
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
-	const markerKey = `${indexPrefix}collection-index-keys-complete`;
+	const markerKey = `${namespace}:scoped-cache-collection-index-keys-complete`;
 	const generationKey = `${namespace}:scoped-cache-index-generation`;
 	const fillPauseKey = `${namespace}:scoped-cache-fill-pause`;
 	const env = cloneDeep(config.envs);
@@ -168,6 +168,75 @@ describe.each(vendors)('%s', (vendor) => {
 		expect(pauseLeftMs).toBeGreaterThan(50_000);
 	}
 
+	// The reads the purge sends to this collection's index sets, as MONITOR sees
+	// them. A moved set's key carries a fresh uuid, spelled `<sweep>` here.
+	async function purgeEveryReadOf(collection: string) {
+		const purgeReads: Record<string, string>[] = [];
+
+		const monitor = redisClient.duplicate({
+			monitor: true,
+			lazyConnect: false,
+		});
+
+		await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
+			monitor.once('monitoring', resolveMonitoring);
+
+			// ioredis flips to monitoring only after the OK resolves, so a
+			// line landing in the same chunk finds an empty command queue.
+			monitor.on('error', (monitorError: Error) => {
+				if (!monitorError.message.startsWith('Command queue state error')) {
+					rejectMonitoring(monitorError);
+				}
+			});
+		});
+
+		const endSentinel = `${namespace}:monitor-sentinel:${randomUUID()}`;
+
+		const endSeen = new Promise<void>((resolveEnd) => {
+			monitor.on('monitor', (_time: string, commandArgs: string[]) => {
+				const command = commandArgs[0]!.toLowerCase();
+
+				const indexKeys = commandArgs.slice(1).filter((key) => {
+					return key.startsWith(indexPrefix);
+				});
+
+				const indexRead = {
+					command,
+					keys: indexKeys.map((key) => {
+						return key.slice(indexPrefix.length)
+							.replace(/[0-9a-f-]{36}/, '<sweep>');
+					}).join(' '),
+				};
+
+				if (commandArgs[1] === endSentinel) {
+					resolveEnd();
+				}
+				// Once per key read: a scan of the keyspace takes several pages.
+				else if (
+					['scan', 'sscan'].includes(command)
+					&& indexKeys.some((key) => key.includes(collection))
+					&& !purgeReads.some((purgeRead) => {
+						return purgeRead['command'] === command
+							&& purgeRead['keys'] === indexRead.keys;
+					})
+				) {
+					purgeReads.push(indexRead);
+				}
+			});
+		});
+
+		const purged = await request(getUrl(vendor, env))
+			.post(`/cache-collection-purge/${collection}`)
+			.set('Authorization', auth);
+
+		expect(purged.statusCode).toBe(200);
+
+		await Promise.all([endSeen, redisClient.get(endSentinel)]);
+		monitor.disconnect();
+
+		return purgeReads;
+	}
+
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
 			collections: collections.map((collection) => {
@@ -201,16 +270,112 @@ describe.each(vendors)('%s', (vendor) => {
 	});
 
 	defineFeature(feature, (scenario) => {
+		// Its own steps: jest-cucumber binds definitions to steps in order, and
+		// this one caches a read on either side of the flush.
+		scenario(
+			'a flush with no reap scheduled keeps the index-key sets marked complete',
+			({ given, and, when, then }) => {
+				const collection = 'index_marker_flush';
+
+				const collectionIndexKeysKey
+					= `${indexPrefix}collection-index-keys:${collection}`;
+
+				let flushedGeneration: string | null = null;
+				let purgeReads: Record<string, string>[] = [];
+
+				given(
+					/^these rows of (\w+):$/,
+					async (_rowsOf: string, table: Record<string, string>[]) => {
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${collection}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				and('these reads are cached:', (table: Record<string, string>[]) => {
+					return expectCached(collection, table);
+				});
+
+				and('the index-key sets are marked complete', async () => {
+					await expect.poll(async () => {
+						const [marker, generation] = await redisClient.mget(
+							markerKey,
+							generationKey,
+						);
+
+						return marker !== null && marker === generation;
+					}, { timeout: 15_000 }).toBe(true);
+				});
+
+				when('the cache is flushed', async () => {
+					flushedGeneration = await redisClient.get(generationKey);
+
+					const flushed = await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+
+					expect(flushed.statusCode).toBe(200);
+				});
+
+				// Read as the flush answers, before any reap: the flush unlinks only
+				// the index sets, and moves neither the marker nor the generation.
+				then(
+					'the index-key sets are still marked complete at the generation '
+					+ 'before the flush',
+					async () => {
+						expect(await redisClient.mget(markerKey, generationKey))
+							.toEqual([flushedGeneration, flushedGeneration]);
+					},
+				);
+
+				// Only the pass the flush asked for releases the names whose set the
+				// flush unlinked: the marker still vouches, and the schedule is a year
+				// out.
+				and(
+					/^the index-key set of \w+ names no set, a reap later$/,
+					async () => {
+						await expect.poll(() => redisClient.scard(collectionIndexKeysKey), {
+							timeout: 15_000,
+						}).toBe(0);
+					},
+				);
+
+				and('these reads are cached:', (table: Record<string, string>[]) => {
+					return expectCached(collection, table);
+				});
+
+				when(/^every read of \w+ is purged$/, async () => {
+					purgeReads = await purgeEveryReadOf(collection);
+				});
+
+				then(
+					'the purge read these index sets, in order:',
+					(table: Record<string, string>[]) => {
+						expect(purgeReads).toEqual(table);
+					},
+				);
+
+				and('these reads answer:', async (table: Record<string, string>[]) => {
+					for (const row of table) {
+						expect((await readByName(collection, row)).headers[cacheStatusHeader])
+							.toBe(row['cache']);
+					}
+				});
+			},
+			60_000,
+		);
+
 		for (const scenarioTitle of [
-			'a flush with no reap scheduled has the index-key sets marked complete '
-				+ 'again',
 			'the wholesale counter expiring leaves the index-key sets trusted',
 			'a restart on the same build leaves the marker vouching',
-			'a restart on another build takes the marker back, with auto-flush off',
+			'a restart on another build moves the generation past the marker, '
+			+ 'with auto-flush off',
 		]) {
 			scenario(scenarioTitle, ({ given, and, when, then }) => {
 				let collection = '';
-				let flushedGeneration: string | null = null;
 				let keptMarker: string | null = null;
 				const purgeReads: Record<string, string>[] = [];
 
@@ -225,33 +390,6 @@ describe.each(vendors)('%s', (vendor) => {
 							.set('Authorization', auth);
 
 						expect(created.statusCode).toBe(200);
-					},
-				);
-
-				when.optional('the cache is flushed', async () => {
-					flushedGeneration = await redisClient.get(generationKey);
-
-					const flushed = await request(getUrl(vendor, env))
-						.post('/utils/cache/clear')
-						.set('Authorization', auth);
-
-					expect(flushed.statusCode).toBe(200);
-				});
-
-				// Written only by the pass the flush asked for: the schedule is a
-				// year out.
-				then.optional(
-					'the index-key sets are marked complete at a generation after the '
-					+ 'flush',
-					async () => {
-						await expect.poll(async () => {
-							const [marker, generation] = await redisClient.mget(
-								markerKey,
-								generationKey,
-							);
-
-							return marker === generation && generation !== flushedGeneration;
-						}, { timeout: 15_000 }).toBe(true);
 					},
 				);
 
@@ -313,70 +451,8 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				// The reads the purge sends to this collection's index sets, as
-				// MONITOR sees them. A moved set's key carries a fresh uuid, spelled
-				// `<sweep>` here.
 				when.optional(/^every read of \w+ is purged$/, async () => {
-					const monitor = redisClient.duplicate({
-						monitor: true,
-						lazyConnect: false,
-					});
-
-					await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
-						monitor.once('monitoring', resolveMonitoring);
-
-						// ioredis flips to monitoring only after the OK resolves, so a
-						// line landing in the same chunk finds an empty command queue.
-						monitor.on('error', (monitorError: Error) => {
-							if (!monitorError.message.startsWith('Command queue state error')) {
-								rejectMonitoring(monitorError);
-							}
-						});
-					});
-
-					const endSentinel = `${namespace}:monitor-sentinel:${randomUUID()}`;
-
-					const endSeen = new Promise<void>((resolveEnd) => {
-						monitor.on('monitor', (_time: string, commandArgs: string[]) => {
-							const command = commandArgs[0]!.toLowerCase();
-
-							const indexKeys = commandArgs.slice(1).filter((key) => {
-								return key.startsWith(indexPrefix);
-							});
-
-							const indexRead = {
-								command,
-								keys: indexKeys.map((key) => {
-									return key.slice(indexPrefix.length)
-										.replace(/[0-9a-f-]{36}/, '<sweep>');
-								}).join(' '),
-							};
-
-							if (commandArgs[1] === endSentinel) {
-								resolveEnd();
-							}
-							// Once per key read: a scan of the keyspace takes several pages.
-							else if (
-								['scan', 'sscan'].includes(command)
-								&& indexKeys.some((key) => key.includes(collection))
-								&& !purgeReads.some((purgeRead) => {
-									return purgeRead['command'] === command
-										&& purgeRead['keys'] === indexRead.keys;
-								})
-							) {
-								purgeReads.push(indexRead);
-							}
-						});
-					});
-
-					const purged = await request(getUrl(vendor, env))
-						.post(`/cache-collection-purge/${collection}`)
-						.set('Authorization', auth);
-
-					expect(purged.statusCode).toBe(200);
-
-					await Promise.all([endSeen, redisClient.get(endSentinel)]);
-					monitor.disconnect();
+					purgeReads.push(...await purgeEveryReadOf(collection));
 				});
 
 				then.optional(
@@ -452,9 +528,11 @@ describe.each(vendors)('%s', (vendor) => {
 				});
 
 				// Both boots asked for a reap, and neither may mark while the build
-				// before could still be filing.
+				// before could still be filing. Nothing deletes the marker: the
+				// generation the boot moved is what it no longer names.
 				and('the index-key sets are not marked complete', async () => {
-					expect(await redisClient.get(markerKey)).toBeNull();
+					expect(await redisClient.get(markerKey))
+						.not.toBe(await redisClient.get(generationKey));
 				});
 
 				when('the second instance stops', stopSecondInstance);

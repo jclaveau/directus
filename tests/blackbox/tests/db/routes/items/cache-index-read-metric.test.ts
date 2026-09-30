@@ -22,8 +22,7 @@ const feature = loadFeature(
 // read of the collection.
 describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-index-read-metric-${vendor}`;
-	const indexPrefix = `${namespace}:scoped-cache-index:`;
-	const markerKey = `${indexPrefix}collection-index-keys-complete`;
+	const markerKey = `${namespace}:scoped-cache-collection-index-keys-complete`;
 	const generationKey = `${namespace}:scoped-cache-index-generation`;
 	const env = cloneDeep(config.envs);
 	env[vendor]['CACHE_ENABLED'] = 'true';

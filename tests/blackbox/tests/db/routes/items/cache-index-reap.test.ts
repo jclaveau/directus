@@ -522,8 +522,8 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(flushed.statusCode).toBe(200);
 				});
 
-				// Polled: the flush takes the marker back, and the next reap writes
-				// the generation that flush moved.
+				// Polled: the reap the flush asks for writes the generation, which
+				// the flush leaves as it was.
 				then(
 					'the next reap marks the index-key sets complete with the generation',
 					async () => {
@@ -535,7 +535,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 						await expect.poll(async () => {
 							return redisClient.get(
-								`${indexPrefix}collection-index-keys-complete`,
+								`${namespace}:scoped-cache-collection-index-keys-complete`,
 							);
 						}, { timeout: 5_000 }).toBe(generation);
 					},

@@ -575,7 +575,7 @@ describe.each(vendors)('%s', (vendor) => {
 			const namespace = env[vendor]['CACHE_NAMESPACE'];
 
 			expect(await redis.set(
-				`${namespace}:scoped-cache-index:collection-index-keys-complete`,
+				`${namespace}:scoped-cache-collection-index-keys-complete`,
 				await redis.get(`${namespace}:scoped-cache-index-generation`) ?? '',
 			)).toBe('OK');
 		});

@@ -2,9 +2,10 @@ Feature: The index-key sets are trusted again without waiting for the schedule
 
   A collection-wide purge reads the collection's index-key set only while the
   completeness marker names the index generation; otherwise it scans the
-  keyspace. A flush drops the marker with the index, and only a reap writes it
-  back. Here the reap is scheduled once a year, so any pass these scenarios see
-  is one a flush or a boot asked for.
+  keyspace. A flush unlinks the index sets and keeps the index-key sets and the
+  marker: a name whose set is gone reads empty, and the one reap the flush asks
+  for, marker or none, releases it. Here the reap is scheduled once a year, so
+  any pass these scenarios see is one a flush or a boot asked for.
 
   A boot of a build other than the one the last boot recorded moves the
   generation, whatever CACHE_AUTO_FLUSH_ON_DEPLOY says, here off: a build rolled
@@ -18,12 +19,17 @@ Feature: The index-key sets are trusted again without waiting for the schedule
   build joins the pause running. A pause holds back only the fills: a read cached
   before it still answers from the cache. A max of 0 opens none.
 
-  Scenario: a flush with no reap scheduled has the index-key sets marked complete again
+  Scenario: a flush with no reap scheduled keeps the index-key sets marked complete
     Given these rows of index_marker_flush:
       | name | label |
       | ada  | old   |
+    And these reads are cached:
+      | name | fields     |
+      | ada  | name,label |
+    And the index-key sets are marked complete
     When the cache is flushed
-    Then the index-key sets are marked complete at a generation after the flush
+    Then the index-key sets are still marked complete at the generation before the flush
+    And the index-key set of index_marker_flush names no set, a reap later
     And these reads are cached:
       | name | fields     |
       | ada  | name,label |
@@ -62,7 +68,7 @@ Feature: The index-key sets are trusted again without waiting for the schedule
     When the instance restarts on the build marker-build-a
     Then the kept marker still names the index generation
 
-  Scenario: a restart on another build takes the marker back, with auto-flush off
+  Scenario: a restart on another build moves the generation past the marker, with auto-flush off
     Given the index-key sets are marked complete
     And the marker is kept as it reads now
     When the instance restarts on the build marker-build-b

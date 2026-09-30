@@ -21,7 +21,7 @@ const feature = loadFeature(
 describe.each(vendors)('%s', (vendor) => {
 	const namespace = `directus-fill-pause-ceiling-${vendor}`;
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
-	const markerKey = `${indexPrefix}collection-index-keys-complete`;
+	const markerKey = `${namespace}:scoped-cache-collection-index-keys-complete`;
 	const generationKey = `${namespace}:scoped-cache-index-generation`;
 	const fillPauseKey = `${namespace}:scoped-cache-fill-pause`;
 	const env = cloneDeep(config.envs);
@@ -217,8 +217,11 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
+				// Nothing deletes the marker: the generation the boot moved is what it
+				// no longer names.
 				and.optional('the index-key sets are not marked complete', async () => {
-					expect(await redisClient.get(markerKey)).toBeNull();
+					expect(await redisClient.get(markerKey))
+						.not.toBe(await redisClient.get(generationKey));
 				});
 
 				// The pause lives out the expiry the boot gave it: no watcher took it

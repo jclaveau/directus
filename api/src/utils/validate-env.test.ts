@@ -2,7 +2,11 @@ import { useEnv } from '@directus/env';
 import type { Logger } from 'pino';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
-import { validateBooleanEnv, validateEnv } from './validate-env.js';
+import {
+	validateBooleanEnv,
+	validateDurationEnv,
+	validateEnv,
+} from './validate-env.js';
 
 vi.mock('@directus/env');
 
@@ -77,6 +81,42 @@ test('takes a variable the deployment never set', () => {
 	delete process.env['BOOLEAN_TEST_VARIABLE'];
 
 	validateBooleanEnv(['BOOLEAN_TEST_VARIABLE']);
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+// Taking one would open no fill pause, and a new build would fill beside the
+// build before.
+test.each([
+	{
+		value: '-5m',
+		message: '"DURATION_TEST_VARIABLE" Environment Variable is "-5m", '
+			+ 'which is not a duration of 0 or more.',
+	},
+	{
+		value: 'five minutes',
+		message: '"DURATION_TEST_VARIABLE" Environment Variable is '
+			+ '"five minutes", which is not a duration of 0 or more.',
+	},
+	{
+		value: `1${'0'.repeat(400)}`,
+		message: '"DURATION_TEST_VARIABLE" Environment Variable is '
+			+ `"1${'0'.repeat(400)}", which is not a duration of 0 or more.`,
+	},
+])('refuses the duration $value', ({ value, message }) => {
+	vi.mocked(useEnv).mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+
+	validateDurationEnv(['DURATION_TEST_VARIABLE']);
+
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
+	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+});
+
+test.each(['0', '5m', '4.1m'])('takes the duration %j', (value) => {
+	vi.mocked(useEnv).mockReturnValueOnce({ DURATION_TEST_VARIABLE: value });
+
+	validateDurationEnv(['DURATION_TEST_VARIABLE']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

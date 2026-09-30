@@ -7,7 +7,7 @@ import { once } from 'events';
 import getPort from 'get-port';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
-import { afterAll, describe, expect } from 'vitest';
+import { afterAll, describe, expect, vi } from 'vitest';
 
 const feature = loadFeature(
 	'./tests/db/routes/items/cache-fill-pause-max-value.feature',
@@ -152,6 +152,59 @@ describe.each(vendors)('%s', (vendor) => {
 
 				and('no fill pause runs', async () => {
 					expect(await redisClient.exists(fillPauseKey)).toBe(0);
+				});
+			},
+			60_000,
+		);
+
+		scenario(
+			'a negative ceiling ends the node before it records a build',
+			({ given, when, then, and }) => {
+				given('the instance has stopped', stopInstance);
+
+				and('the namespace holds no keys', clearNamespace);
+
+				// Not awaited on `/server/ping`: the node may end before it listens.
+				when(
+					/^a scoped instance starts on ([\w-]+) pausing for at most ([\w.-]+)$/,
+					async (buildId: string, fillPause: string) => {
+						env[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
+						env[vendor]['CACHE_BUILD_ID'] = buildId;
+						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPause;
+						env[vendor].PORT = String(await getPort());
+						instanceLog = [];
+
+						const spawned = spawn('node', [paths.cli, 'start'], {
+							cwd: paths.cwd,
+							env: env[vendor],
+						});
+
+						spawned.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
+						spawned.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
+						instance = spawned;
+					},
+				);
+
+				// Once the Redis client is ready, which the boot does not wait on.
+				then(/^the instance exits with code (\d+)$/, async (exitCode: string) => {
+					await vi.waitFor(() => {
+						expect(instance?.exitCode).toBe(Number(exitCode));
+					}, { timeout: 30_000, interval: 250 });
+
+					instance = null;
+				});
+
+				and(
+					/^the instance logged that ([\w.-]+) is not a duration of 0 or more$/,
+					(fillPause: string) => {
+						expect(instanceLog.join('')).toContain(
+							`is \\"${fillPause}\\", which is not a duration of 0 or more.`,
+						);
+					},
+				);
+
+				and('no build is recorded', async () => {
+					expect(await redisClient.get(buildKey)).toBeNull();
 				});
 			},
 			60_000,
