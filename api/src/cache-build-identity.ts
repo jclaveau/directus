@@ -11,7 +11,7 @@ import { resolveCoreBuildId } from './core-build-id.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
-import { cacheEnabled, envResponseCache } from './cache-settings.js';
+import { responseCacheWanted } from './cache-settings.js';
 import { scopedCachePurgeEnabled } from './scoped-cache/config.js';
 import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
 import { useScopedCacheStore } from './scoped-cache/store.js';
@@ -155,11 +155,10 @@ export async function flushCachesIfBuildChanged(
 
 	// Only a redis response cache survives a container swap; a memory store boots
 	// empty, so there is nothing stale to heal and no shared store to persist the
-	// fingerprint in. A deployment serving nothing skips it too: switching the
-	// layer on clears the tier first.
-	const servingConfigured = envResponseCache() || cacheEnabled();
-
-	if (servingConfigured === false || env['CACHE_STORE'] !== 'redis') {
+	// fingerprint in. Whether the tier serves does not matter: a node that is not
+	// serving yet still holds it, and would serve this build's entries the moment
+	// the setting switches on, from a seed that failed as much as from a write.
+	if (responseCacheWanted() === false || env['CACHE_STORE'] !== 'redis') {
 		return;
 	}
 
