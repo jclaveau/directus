@@ -213,7 +213,15 @@ export async function readAllSharedSettings(): Promise<
 			.from('directus_settings')
 			.first();
 	}
-	catch {
+	catch (readError: unknown) {
+		const cacheColumnExists = await getDatabase()
+			.schema
+			.hasColumn('directus_settings', SHARED_SETTINGS_COLUMNS.cache);
+
+		if (cacheColumnExists) {
+			throw readError;
+		}
+
 		// Ahead of its migration the cache column does not exist yet, and the
 		// autoscale pair read beside it must not fail with it.
 		row = await getDatabase()

@@ -194,12 +194,41 @@ test('reads the autoscale pair where the cache column is missing', async () => {
 				},
 			};
 		},
+		schema: { hasColumn: async () => false },
 	} as never);
 
 	await expect(readAllSharedSettings()).resolves.toMatchObject({
 		autoscale_settings: { maxWorkers: 8 },
 		supervisor_settings: { listenTimeout: 20 },
 	});
+});
+
+// A dropped connection is not a missing column: reading the pair alone would
+// report the cache setting as never stored.
+test('rethrows a failed read while the cache column exists', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+
+	vi.mocked(getDatabase).mockReturnValue({
+		select: (selectedColumns: string | string[]) => {
+			return {
+				from: () => {
+					return {
+						first: async () => {
+							if ([selectedColumns].flat().includes(SHARED_SETTINGS_COLUMNS.cache)) {
+								throw new Error('Connection terminated unexpectedly');
+							}
+
+							return { [SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 } };
+						},
+					};
+				},
+			};
+		},
+		schema: { hasColumn: async () => true },
+	} as never);
+
+	await expect(readAllSharedSettings())
+		.rejects.toThrow('Connection terminated unexpectedly');
 });
 
 test('reads the column the way Postgres answers it', async () => {
