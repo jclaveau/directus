@@ -124,7 +124,9 @@ vi.mock('../cache-config.js', () => {
 	return { resolvedCacheTtl: mocks.resolvedCacheTtl };
 });
 
-vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
+vi.mock('../logger/index.js', () => {
+	return { useLogger: () => ({ debug: vi.fn(), warn: mocks.warn }) };
+});
 
 vi.mock('../utils/permissions-cachable.js', () => {
 	return { permissionsCachable: mocks.permissionsCachable };

@@ -1,6 +1,6 @@
 import { Knex } from 'knex';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { allVendors, type Vendor } from './get-dbs-to-test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -44,6 +44,18 @@ let logLevel = 'error';
 if (process.env['TEST_SAVE_LOGS']) {
 	logLevel = allowedLogLevels.includes(process.env['TEST_SAVE_LOGS']) ? process.env['TEST_SAVE_LOGS'] : 'info';
 }
+
+// Copies each spawned process's output to server-logs/, so an instance a suite
+// starts for itself leaves a trace too (see setup/server-log-tee.mjs).
+const serverLogConfig: Record<string, string> = process.env['TEST_SAVE_LOGS']
+	? {
+		NODE_OPTIONS: [
+			process.env['NODE_OPTIONS'],
+			`--import=${pathToFileURL(join(paths.cwd, 'setup', 'server-log-tee.mjs'))}`,
+		].filter(Boolean).join(' '),
+		BLACKBOX_SERVER_LOG_DIR: join(paths.cwd, 'server-logs'),
+	}
+	: {};
 
 const directusAuthConfig = {
 	AUTH_PROVIDERS: 'saml',
@@ -96,6 +108,7 @@ const directusConfig = {
 	WEBSOCKETS_ENABLED: 'true',
 	...directusAuthConfig,
 	...directusStorageConfig,
+	...serverLogConfig,
 };
 
 const config: Config = {
