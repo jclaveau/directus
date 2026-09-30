@@ -11,6 +11,7 @@ import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
+import { cacheSetting } from './cache-settings.js';
 import { cacheExpiresAtKey, cachePinsKey } from './cache-sidecars.js';
 import { cacheStoreDropsEntries } from './cache-store-probe.js';
 import getDatabase from './database/index.js';
@@ -2668,7 +2669,7 @@ export async function reapCacheConfigEvents(): Promise<number> {
  */
 export async function enforceCacheStatsBudget(): Promise<void> {
 	const maxBytes = parseBytes(
-		String(useEnv()['CACHE_STATS_MAX_BYTES'] ?? ''),
+		String(cacheSetting('stats_max_bytes') ?? ''),
 	);
 
 	// Dynamic because the helper index pulls every dialect, and each of those

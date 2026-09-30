@@ -20,6 +20,7 @@ import type {
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CacheSettingField } from '../cache-settings.js';
 import {
 	type ScopedCacheFilterKeying,
 	ScopedCacheReadPlan,
@@ -99,6 +100,20 @@ const env = vi.hoisted(() => {
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
+
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('../cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../cache-settings.js')>();
+
+	return {
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
+		},
+	};
+});
+
 vi.mock('../redis/index.js');
 
 vi.mock('../emitter.js', () => {
@@ -182,6 +197,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	delete cacheLayer['scoped_index_ttl_factor'];
 });
 
 // The one spelling of a pin that the fingerprint index, the purge attribution and
@@ -1156,6 +1172,42 @@ describe('indexScopedCacheEntry', () => {
 			'ns:scoped-cache-index:collection-index-keys:articles',
 			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
 			3600,
+			2,
+			'articles:&author=,7,&|entry',
+			'articles:&author=,7,&|entry__expires_at',
+		]]);
+	});
+
+	it(oneLine`
+		stretches the index by the cache layer's factor, in whole seconds since
+		EXPIRE refuses a fraction
+	`, async () => {
+		const indexFile = vi.fn().mockReturnThis();
+		cacheLayer['scoped_index_ttl_factor'] = 1.5;
+
+		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
+			pipeline: () => {
+				return {
+					scopedCacheIndexFile: indexFile,
+					exec: vi.fn().mockResolvedValue([]),
+				};
+			},
+		} as any);
+
+		await indexScopedCacheEntry(
+			'entry',
+			[{ collection: 'articles', pinnedScope: { author: ['7'] } }],
+			[],
+			{ collections: {}, relations: [] },
+			'2s',
+		);
+
+		expect(indexFile.mock.calls).toEqual([[
+			2,
+			'ns:scoped-cache-index:collection-index-keys:articles',
+			'ns:scoped-cache-index:fingerprint:articles:pin:author=7',
+			3,
 			2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
@@ -5031,12 +5083,39 @@ describe('reading and bumping the purge counters', () => {
 		]);
 	});
 
-	// Every read pays this round trip, so it is skipped wherever its answer could
-	// not matter. Nothing is filled with the response cache off.
+	// Nothing is filled with the response cache off, and the reading says so: a
+	// read answering once serving is back on has no counter to guard its fill.
+	it(oneLine`
+		reads nothing, and marks the reading, when the response cache is off
+	`, async () => {
+		env['CACHE_ENABLED'] = false;
+
+		expect(await readScopedCacheEpochs(['articles']))
+			.toEqual({ '*serving-off': null });
+
+		expect(mget).not.toHaveBeenCalled();
+	});
+
+	// A full purge clears what a read taken while off already fetched, and
+	// serving coming back on must still refuse to fill it.
 	it.each([
-		['the response cache is off', () => {
-			env['CACHE_ENABLED'] = false;
+		['scoped purging is off', () => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 		}],
+		['there is no Redis configured', () => {
+			vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		}],
+	])('marks a reading taken while off when %s', async (_case, disable) => {
+		disable();
+		env['CACHE_ENABLED'] = false;
+
+		expect(await readScopedCacheEpochs(['articles']))
+			.toEqual({ '*serving-off': null });
+	});
+
+	// Every read pays this round trip, so it is skipped wherever its answer could
+	// not matter.
+	it.each([
 		['scoped purging is off', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 		}],

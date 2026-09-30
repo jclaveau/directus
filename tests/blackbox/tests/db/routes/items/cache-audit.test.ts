@@ -1338,6 +1338,7 @@ describe('The cache audit replays live entries against the database', () => {
 				user: null,
 				collection: ROWS,
 				purge: false,
+				maxDurationMs: 600_000,
 			});
 		}, 60_000);
 

@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions } from '@directus/types';
+import type { Knex } from 'knex';
 import { parseJSON } from '@directus/utils/values';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
@@ -16,6 +17,7 @@ import { useLogger } from '../../logger/index.js';
 export const SHARED_SETTINGS_COLUMNS = {
 	autoscale: 'autoscale_settings',
 	supervisor: 'supervisor_settings',
+	cache: 'cache_settings',
 } as const;
 
 /** What the floor below falls back to, in seconds. */
@@ -50,7 +52,7 @@ export interface SharedSettings {
 }
 
 /**
- * The channel every node watches for a change to either column.
+ * The channel every node watches for a change to any of these columns.
  *
  * It carries which column moved and nothing else. A subscriber answers by
  * re-reading the table, so a message lost to an outage costs staleness until
@@ -146,32 +148,48 @@ async function connectionIsDeclared(): Promise<boolean> {
 	return false;
 }
 
-/** What the column holds, or `null` where it holds nothing usable. */
+/**
+ * What the column holds, or `null` where it holds nothing usable.
+ *
+ * Through `lockingDatabase` when given, locking the row until that transaction
+ * ends, so a writer laying a patch over what it read keeps a concurrent one
+ * from reading the same row.
+ */
 export async function readSharedSettings(
 	column: SharedSettingsColumn,
+	lockingDatabase?: Knex,
 ): Promise<SharedSettings | null> {
-	if (await connectionIsDeclared() === false) {
-		return null;
+	let settingsDatabase = lockingDatabase;
+
+	if (settingsDatabase === undefined) {
+		if (await connectionIsDeclared() === false) {
+			return null;
+		}
+
+		// Imported lazily so the autoscaler — its own process, reading this on a
+		// slow floor rather than on its tick — does not pull the dialect graph in
+		// at load.
+		const { default: getDatabase } = await import('../../database/index.js');
+		settingsDatabase = getDatabase();
 	}
 
-	// Imported lazily so the autoscaler — its own process, reading this on a slow
-	// floor rather than on its tick — does not pull the dialect graph in at load.
-	const { default: getDatabase } = await import('../../database/index.js');
+	const settingsQuery = settingsDatabase.select(column).from('directus_settings');
 
-	const row = await getDatabase()
-		.select(column)
-		.from('directus_settings')
-		.first();
+	if (lockingDatabase) {
+		settingsQuery.forUpdate();
+	}
+
+	const row = await settingsQuery.first();
 
 	return asSharedSettings(row?.[column]);
 }
 
 /**
- * Both columns in a single statement.
+ * Every column in a single statement.
  *
- * A page reads them together — one is meaningless without the other, since a
- * value it shows could have come from either — so they are fetched together
- * rather than a row at a time.
+ * The processes page reads the autoscale and supervisor pair together — one is
+ * meaningless without the other, since a value it shows could have come from
+ * either — so they are fetched together rather than a row at a time.
  */
 export async function readAllSharedSettings(): Promise<
 	Record<SharedSettingsColumn, SharedSettings | null>
@@ -179,19 +197,46 @@ export async function readAllSharedSettings(): Promise<
 	const columns = Object.values(SHARED_SETTINGS_COLUMNS);
 
 	if (await connectionIsDeclared() === false) {
-		return { autoscale_settings: null, supervisor_settings: null };
+		return {
+			autoscale_settings: null,
+			supervisor_settings: null,
+			cache_settings: null,
+		};
 	}
 
 	const { default: getDatabase } = await import('../../database/index.js');
+	let row: Record<string, unknown> | undefined;
 
-	const row = await getDatabase()
-		.select(columns)
-		.from('directus_settings')
-		.first();
+	try {
+		row = await getDatabase()
+			.select(columns)
+			.from('directus_settings')
+			.first();
+	}
+	catch (readError: unknown) {
+		const cacheColumnExists = await getDatabase()
+			.schema
+			.hasColumn('directus_settings', SHARED_SETTINGS_COLUMNS.cache);
+
+		if (cacheColumnExists) {
+			throw readError;
+		}
+
+		// Ahead of its migration the cache column does not exist yet, and the
+		// autoscale pair read beside it must not fail with it.
+		row = await getDatabase()
+			.select([
+				SHARED_SETTINGS_COLUMNS.autoscale,
+				SHARED_SETTINGS_COLUMNS.supervisor,
+			])
+			.from('directus_settings')
+			.first();
+	}
 
 	return {
 		autoscale_settings: asSharedSettings(row?.['autoscale_settings']),
 		supervisor_settings: asSharedSettings(row?.['supervisor_settings']),
+		cache_settings: asSharedSettings(row?.['cache_settings']),
 	};
 }
 
@@ -242,7 +287,7 @@ export function onSharedSettingsChanged(
 }
 
 /**
- * Announce every write this instance makes to either column, whatever made it.
+ * Announce every write this instance makes to any column, whatever made it.
  *
  * From the action rather than from `SettingsService`, for the reason
  * `initCacheConfig` gives: an import running against this instance writes the
@@ -271,19 +316,27 @@ export async function initSharedSettings(): Promise<void> {
 					continue;
 				}
 
-				const announced = useBus()
-					.publish<SharedSettingsChange>(CHANGED_CHANNEL, { column });
-
-				// The write is already durable, so an unreachable bus costs the
-				// other nodes their floor rather than the value. Dropped, it
-				// would end the process that has just answered the operator.
-				announced.catch((error: unknown) => {
-					useLogger().warn(
-						error,
-						`[shared-settings] could not announce ${column}`,
-					);
-				});
+				announceSharedSettings(column);
 			}
 		});
 	}
+}
+
+/**
+ * Tell the other nodes `column` changed, so they re-read it.
+ *
+ * A write made inside a caller's transaction fires its `settings.update` action
+ * before that transaction commits, and a node re-reading on that announcement
+ * reads the row it replaces. Such a caller announces again once committed.
+ */
+export function announceSharedSettings(column: SharedSettingsColumn): void {
+	const announced = useBus()
+		.publish<SharedSettingsChange>(CHANGED_CHANNEL, { column });
+
+	// The write is already durable, so an unreachable bus costs the other nodes
+	// their floor rather than the value. Dropped, it would end the process that
+	// has just answered the operator.
+	announced.catch((error: unknown) => {
+		useLogger().warn(error, `[shared-settings] could not announce ${column}`);
+	});
 }

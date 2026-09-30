@@ -60,6 +60,9 @@ jobs:
       REDIS: redis://localhost:6379
       CACHE_AUTO_PURGE: 'true'
       CACHE_AUTO_PURGE_MODE: scoped
+      # A first boot records its build and opens the deploy fill pause, which
+      # refuses every fill the traffic below asks for; no build came before.
+      CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0'
       CACHE_STATS_ENABLED: 'true'
       ADMIN_EMAIL: admin@example.com
       # Throwaway localhost-only instance — a fixed password is fine and lets the
@@ -135,7 +138,13 @@ jobs:
 
           # Fail fast with a clear message rather than let the Playwright assertions
           # trip on an empty chart downstream.
-          [ "${HAS:-}" = "true" ] || { echo "latency data absent after drain wait"; exit 1; }
+          [ "${HAS:-}" = "true" ] || {
+            echo "latency data absent after drain wait; buckets carrying each percentile:"
+            curl -s "http://localhost:8055/utils/cache/timeseries?window=5m&buckets=60" \
+              -H "authorization: Bearer $TOKEN" \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const b=JSON.parse(s).data.buckets;for(const k of ["hitP50","fillP50","anomalyP50","missP50"])console.log(k,b.filter(x=>x[k]!=null).length)})'
+            exit 1
+          }
 
       - name: Install Playwright chromium
         run: pnpm --filter tests-acceptance exec playwright install --with-deps chromium

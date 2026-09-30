@@ -33,6 +33,12 @@ properties:
         nullable: true
       purge:
         type: boolean
+      maxDurationMs:
+        type: integer
+        nullable: true
+        description: >-
+          The time budget the run started with, which the reaper judges it by.
+          Null on a run started before it was recorded.
   scanned:
     type: integer
   counts:

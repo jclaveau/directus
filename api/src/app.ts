@@ -55,6 +55,11 @@ import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { type CoreMountPath, coreMountPaths } from './core-mounts.js';
 import { initCacheConfig } from './cache-config.js';
+import {
+	initCacheSettings,
+	seedCacheSettings,
+	validateCacheSettingsEnv,
+} from './cache-settings.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
 import { validateBooleanEnv, validateDurationEnv } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
@@ -113,6 +118,7 @@ export default async function createApp(): Promise<express.Application> {
 	// Ending the process after the listen would pass the deployment's healthcheck
 	// and crash-loop behind it.
 	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
+	validateCacheSettingsEnv();
 
 	await validateDatabaseConnection();
 
@@ -153,6 +159,8 @@ export default async function createApp(): Promise<express.Application> {
 	await flowManager.initialize();
 
 	// Extensions + core loaded; heal a redis cache left stale by a code-only deploy.
+	// Before the deploy flush, which asks whether this node holds a response cache.
+	await seedCacheSettings();
 	await flushCachesIfBuildChanged(extensionManager);
 
 	// And finish any purge that failed after its mutation committed — a previous
@@ -419,6 +427,7 @@ export default async function createApp(): Promise<express.Application> {
 	await cacheAuditSchedule();
 	await scopedCacheReapSchedule();
 	await initCacheConfig();
+	await initCacheSettings();
 	await initSharedSettings();
 	initPoolHealthMirror();
 	await initSharedSettingsGuard();

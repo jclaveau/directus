@@ -15,6 +15,7 @@
 
 import { useEnv } from '@directus/env';
 import { randomUUID } from 'node:crypto';
+import { cacheSetting } from '../cache-settings.js';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -81,7 +82,9 @@ const SCOPED_CACHE_INDEX_FILE_BYTES = 64 * 1024;
  * memory — and hold Redis for the length of the reply — to keep the handful the
  * write actually matched.
  */
-const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
+function scopedCacheIndexScanCount(): number {
+	return cacheSetting('scoped_index_scan_count');
+}
 
 /**
  * How many sets one round of a row scan reads at once.
@@ -1043,7 +1046,7 @@ async function* scanScopedCacheSetMembers(
 			setKey,
 			scanCursor,
 			'COUNT',
-			SCOPED_CACHE_INDEX_SCAN_COUNT,
+			scopedCacheIndexScanCount(),
 		);
 
 		scanCursor = next;
@@ -1072,7 +1075,7 @@ async function* takeSweptIndexKeys(
 				sweptIndexKeysKey,
 				scanCursor,
 				'COUNT',
-				SCOPED_CACHE_INDEX_SCAN_COUNT,
+				scopedCacheIndexScanCount(),
 			)
 			: await redis.sscan(
 				sweptIndexKeysKey,
@@ -1080,7 +1083,7 @@ async function* takeSweptIndexKeys(
 				'MATCH',
 				sweptGlob,
 				'COUNT',
-				SCOPED_CACHE_INDEX_SCAN_COUNT,
+				scopedCacheIndexScanCount(),
 			);
 
 		scanCursor = next;
@@ -1117,7 +1120,7 @@ async function* scanCollectionIndexKeys(
 				collectionIndexKeysKey,
 				scanCursor,
 				'COUNT',
-				SCOPED_CACHE_INDEX_SCAN_COUNT,
+				scopedCacheIndexScanCount(),
 			)
 			: await redis.sscan(
 				collectionIndexKeysKey,
@@ -1125,7 +1128,7 @@ async function* scanCollectionIndexKeys(
 				'MATCH',
 				nameGlob,
 				'COUNT',
-				SCOPED_CACHE_INDEX_SCAN_COUNT,
+				scopedCacheIndexScanCount(),
 			);
 
 		scanCursor = next;
@@ -1177,7 +1180,7 @@ async function collectSweptIndexKeys(
 			sweptKey,
 			scanCursor,
 			'COUNT',
-			SCOPED_CACHE_INDEX_SCAN_COUNT,
+			scopedCacheIndexScanCount(),
 		);
 
 		scanCursor = next;
@@ -1540,7 +1543,7 @@ async function* scanScopedCacheIndexKeys(
 						indexKey,
 						scanCursor,
 						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
+						scopedCacheIndexScanCount(),
 					);
 				}),
 			);
@@ -2104,7 +2107,7 @@ const redisStore: ScopedCacheStore = {
 						indexKey,
 						scanCursor,
 						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
+						scopedCacheIndexScanCount(),
 					);
 
 					scanCursor = next;

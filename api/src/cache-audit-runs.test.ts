@@ -3,6 +3,7 @@ import { ServiceUnavailableError } from '@directus/errors';
 import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CacheSettingField } from './cache-settings.js';
 import {
 	auditCache,
 	type CacheAuditFinding,
@@ -37,6 +38,19 @@ vi.mock('./cache-audit.js', () => {
 
 const env = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
+
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('./cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('./cache-settings.js')>();
+
+	return {
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
+		},
+	};
+});
 
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
@@ -78,6 +92,7 @@ beforeEach(() => {
 	delete env['CACHE_AUDIT_LIMIT'];
 	delete env['CACHE_AUDIT_MAX_DURATION'];
 	delete env['CACHE_STORE'];
+	delete cacheLayer['audit_limit'];
 	env['CACHE_AUDIT_ENABLED'] = true;
 	lockCache.held.clear();
 	vi.mocked(getDatabase).mockReturnValue(db);
@@ -168,6 +183,7 @@ describe('startCacheAuditRun', () => {
 				user: null,
 				collection: 'articles',
 				purge: true,
+				maxDurationMs: null,
 			}),
 			new Date(1_700_000_000_000),
 			'cli',
@@ -262,6 +278,7 @@ describe('runCacheAudit', () => {
 	`, async () => {
 		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
 		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.insert('directus_cache_audit_findings').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockResolvedValue(report);
@@ -275,9 +292,22 @@ describe('runCacheAudit', () => {
 			maxDurationMs: 600_000,
 		});
 
-		expect(tracker.history.insert[0]!.bindings).toContain('mcp');
-		// The close, then the orphan sweep; then the history is pruned.
-		expect(tracker.history.update).toHaveLength(2);
+		expect(tracker.history.insert[0]!.bindings).toEqual([
+			JSON.stringify({
+				limit: 5,
+				user: null,
+				collection: null,
+				purge: false,
+				maxDurationMs: 600_000,
+			}),
+			new Date(1_700_000_000_000),
+			'mcp',
+		]);
+
+		// The close, then the open runs read for the orphan sweep; then the
+		// history is pruned.
+		expect(tracker.history.update).toHaveLength(1);
+		expect(tracker.history.select).toHaveLength(1);
 		expect(tracker.history.delete).toHaveLength(1);
 	});
 
@@ -471,6 +501,21 @@ describe('runCacheAudit', () => {
 			.toMatchObject({ limit: 250 });
 	});
 
+	it('slices by the cache layer over CACHE_AUDIT_LIMIT', async () => {
+		env['CACHE_AUDIT_LIMIT'] = 250;
+		cacheLayer['audit_limit'] = 40;
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('cron');
+
+		expect(auditCache)
+			.toHaveBeenCalledWith(expect.objectContaining({ limit: 40 }));
+	});
+
 	it(oneLine`
 		leaves a run its own limit, and the whole queue when the env says 0
 	`, async () => {
@@ -510,6 +555,7 @@ describe('runCacheAudit', () => {
 	`, async () => {
 		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
 		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockRejectedValue(new Error('redis is away'));
 
@@ -530,13 +576,14 @@ describe('runCacheAudit', () => {
 		tracker.on.insert('directus_cache_audit_findings')
 			.simulateError('disk full');
 
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockResolvedValue(report);
 
 		await expect(runCacheAudit('rest')).rejects.toThrow('disk full');
 
-		// The close's update, then the failure's, then the orphan sweep.
-		expect(tracker.history.update).toHaveLength(3);
+		// The close's update, then the failure's.
+		expect(tracker.history.update).toHaveLength(2);
 
 		expect(tracker.history.update[1]!.bindings)
 			.toContainEqual(expect.stringContaining('disk full'));
@@ -889,7 +936,7 @@ describe('readCacheAuditFindings', () => {
 
 describe('reapCacheAuditRuns', () => {
 	it('drops the runs started before retention, 30 days by default', async () => {
-		tracker.on.update('directus_cache_audits').response(0);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(3);
 
 		expect(await reapCacheAuditRuns()).toBe(3);
@@ -903,25 +950,89 @@ describe('reapCacheAuditRuns', () => {
 		process died, before pruning
 	`, async () => {
 		env['CACHE_AUDIT_MAX_DURATION'] = '10m';
+
+		tracker.on.select('directus_cache_audits').response([
+			{
+				id: 4,
+				started_at: new Date(1_700_000_000_000 - 2 * 600_000 - 3_600_001),
+				options: '{"limit":null,"user":null,"collection":null,"purge":false}',
+			},
+			{
+				id: 5,
+				started_at: new Date(1_700_000_000_000 - 60_000),
+				options: '{"limit":null,"user":null,"collection":null,"purge":false}',
+			},
+		]);
+
 		tracker.on.update('directus_cache_audits').response(1);
 		tracker.on.delete('directus_cache_audits').response(0);
 
 		await reapCacheAuditRuns();
 
-		const [sweep] = tracker.history.update;
-
-		expect(sweep!.sql).toMatch(/finished_at. is null/);
-
-		expect(sweep!.bindings).toEqual([
+		expect(tracker.history.update[0]!.bindings).toEqual([
 			new Date(1_700_000_000_000),
 			'The run did not finish: its process died',
-			new Date(1_700_000_000_000 - 2 * 600_000 - 3_600_000),
+			4,
+		]);
+	});
+
+	it(oneLine`
+		leaves open a run still inside the budget it started with, though the
+		budget was lowered since
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '10m';
+
+		tracker.on.select('directus_cache_audits').response([
+			{
+				id: 6,
+				started_at: new Date(1_700_000_000_000 - 7_200_000),
+				options: oneLine`
+					{"limit":null,"user":null,"collection":null,"purge":false,
+					"maxDurationMs":86400000}
+				`,
+			},
+		]);
+
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		await reapCacheAuditRuns();
+
+		expect(tracker.history.update).toEqual([]);
+	});
+
+	it(oneLine`
+		closes a run past the budget it started with, though the budget was
+		raised since
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '24h';
+
+		tracker.on.select('directus_cache_audits').response([
+			{
+				id: 7,
+				started_at: new Date(1_700_000_000_000 - 2 * 60_000 - 3_600_001),
+				options: oneLine`
+					{"limit":null,"user":null,"collection":null,"purge":false,
+					"maxDurationMs":60000}
+				`,
+			},
+		]);
+
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		await reapCacheAuditRuns();
+
+		expect(tracker.history.update[0]!.bindings).toEqual([
+			new Date(1_700_000_000_000),
+			'The run did not finish: its process died',
+			7,
 		]);
 	});
 
 	it('takes CACHE_AUDIT_RETENTION', async () => {
 		env['CACHE_AUDIT_RETENTION'] = '2h';
-		tracker.on.update('directus_cache_audits').response(0);
+		tracker.on.select('directus_cache_audits').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 
 		await reapCacheAuditRuns();

@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { CacheSettingField } from '../cache-settings.js';
 
 // Hoisted, because `scoped-cache.js` is now imported for real (see its mock
 // below) and reads `useEnv()` at module scope — which runs while the mock
@@ -17,6 +18,19 @@ const env: Record<string, any> = vi.hoisted(() => {
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
+
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('../cache-settings.js', async (importOriginal) => {
+	const original = await importOriginal<typeof import('../cache-settings.js')>();
+
+	return {
+		...original,
+		cacheSetting: (field: CacheSettingField) => {
+			return cacheLayer[field] ?? original.cacheSetting(field);
+		},
+	};
+});
 
 const mocks = vi.hoisted(() => {
 	return {
@@ -168,6 +182,7 @@ vi.mock('../services/import-export.js', () => {
 import { setCacheValue } from '../cache.js';
 import emitter from '../emitter.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
+import { readScopedCacheEpochs } from '../scoped-cache/fill-guard.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
@@ -209,6 +224,7 @@ function makeReq(
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	env['CACHE_VALUE_MAX_SIZE'] = false;
+	delete cacheLayer['value_max_size'];
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
@@ -1109,6 +1125,34 @@ describe('respond middleware', () => {
 			expect.any(Number),
 			'anomaly',
 		);
+	});
+
+	test('caps the value by the cache layer over the environment', async () => {
+		cacheLayer['value_max_size'] = '1b';
+		const res = makeRes({ data: [{ id: 1, blob: 'x'.repeat(100) }] });
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+	});
+
+	// The counters are skipped while serving is off, so a read that started then
+	// and answers once it is back on has nothing to compare a purge against.
+	test(oneLine`
+		fills nothing from a read whose purge counters were skipped while serving
+		was off
+	`, async () => {
+		env['CACHE_ENABLED'] = false;
+		const epochsWhileOff = await readScopedCacheEpochs(['articles']);
+		env['CACHE_ENABLED'] = true;
+
+		await respond(
+			makeReq(),
+			makeRes({ data: [{ id: 1 }] }, { scopedCacheEpochs: epochsWhileOff }),
+			next,
+		);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 	});
 
 	test('$NOW query filter is not cached', async () => {

@@ -17,6 +17,9 @@ const startAutoscaleReload = vi.fn();
 const readAutoscaleDrill = vi.fn();
 const startAutoscaleDrill = vi.fn();
 const stopAutoscaleDrill = vi.fn();
+const readCacheSettings = vi.fn();
+const updateCacheSettings = vi.fn();
+const clearCacheSettings = vi.fn();
 
 vi.mock('../services/utils.js', () => {
 	return {
@@ -37,6 +40,9 @@ vi.mock('../services/utils.js', () => {
 				readAutoscaleDrill,
 				startAutoscaleDrill,
 				stopAutoscaleDrill,
+				readCacheSettings,
+				updateCacheSettings,
+				clearCacheSettings,
 			};
 		}),
 	};
@@ -334,6 +340,84 @@ describe('utils controller /cache/audits', () => {
 		}));
 
 		expect(updateCacheAuditSchedule).not.toHaveBeenCalled();
+	});
+});
+
+describe('utils controller /cache/settings', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	test('reads the settings live, never from the cache they tune', async () => {
+		const answer = { key: 'directus_settings.cache_settings' };
+		readCacheSettings.mockResolvedValueOnce(answer);
+
+		const res = { locals: {} } as any;
+		const next = vi.fn();
+
+		await handlerFor('/cache/settings')(
+			{ accountability: null, schema: {} } as any,
+			res,
+			next,
+		);
+
+		expect(res.locals['cache']).toBe(false);
+		expect(res.locals['payload']).toEqual({ data: answer });
+		expect(next).toHaveBeenCalledOnce();
+	});
+
+	test('hands a patch down and answers with the settings it left', async () => {
+		updateCacheSettings.mockResolvedValueOnce({
+			sharedSettings: { audit_limit: 40 },
+		});
+
+		const json = vi.fn();
+		const res = { status: vi.fn(() => ({ json })) } as any;
+
+		await handlerFor('/cache/settings', 'patch')(
+			{ accountability: null, schema: {}, body: { audit_limit: 40 } } as any,
+			res,
+			vi.fn(),
+		);
+
+		expect(updateCacheSettings)
+			.toHaveBeenCalledWith({ audit_limit: 40 }, 'admin');
+
+		expect(res.status).toHaveBeenCalledWith(200);
+
+		expect(json).toHaveBeenCalledWith({
+			data: { sharedSettings: { audit_limit: 40 } },
+		});
+	});
+
+	test.each([[['audit_limit']], [null], ['audit_limit']])(
+		'refuses %j as a patch',
+		async (body) => {
+			const res = { status: vi.fn() } as any;
+			const req = { accountability: null, schema: {}, body } as any;
+			const next = vi.fn();
+
+			await handlerFor('/cache/settings', 'patch')(req, res, next);
+
+			expect(next.mock.calls[0]![0].message).toContain(
+				'An object of cache settings is required',
+			);
+
+			expect(updateCacheSettings).not.toHaveBeenCalled();
+		},
+	);
+
+	test('clearing answers with the settings it left', async () => {
+		clearCacheSettings.mockResolvedValueOnce({ sharedSettings: null });
+
+		const json = vi.fn();
+
+		await handlerFor('/cache/settings', 'delete')(
+			{ accountability: null, schema: {} } as any,
+			{ status: vi.fn(() => ({ json })) } as any,
+			vi.fn(),
+		);
+
+		expect(clearCacheSettings).toHaveBeenCalledOnce();
+		expect(json).toHaveBeenCalledWith({ data: { sharedSettings: null } });
 	});
 });
 

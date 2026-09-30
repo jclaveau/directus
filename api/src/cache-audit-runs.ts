@@ -16,6 +16,7 @@ import {
 	type CacheAuditVerdict,
 } from './cache-audit.js';
 import type { CacheEntryPurgeRecord } from './cache-events.js';
+import { cacheSetting } from './cache-settings.js';
 import { getCache } from './cache.js';
 import {
 	holdCacheLock,
@@ -49,6 +50,7 @@ export interface CacheAuditRunOptions {
 	user: string | null;
 	collection: string | null;
 	purge: boolean;
+	maxDurationMs: number | null;
 }
 
 export interface CacheAuditRun {
@@ -119,7 +121,7 @@ function retentionMs(): number {
 // and the time budget the in-flight claim is sized to.
 function maxDurationMs(): number {
 	const configured = getMilliseconds(
-		useEnv()['CACHE_AUDIT_MAX_DURATION'],
+		cacheSetting('audit_max_duration'),
 		DEFAULT_MAX_DURATION_MS,
 	);
 
@@ -132,7 +134,7 @@ function maxDurationMs(): number {
 // knob, and what keeps "Audit now" on a large cache from outliving the
 // request. 0 is the whole queue.
 function defaultLimit(): number | undefined {
-	const configured = Number(useEnv()['CACHE_AUDIT_LIMIT'] ?? 0);
+	const configured = Number(cacheSetting('audit_limit') ?? 0);
 
 	return Number.isInteger(configured) && configured > 0
 		? configured
@@ -291,6 +293,7 @@ export async function startCacheAuditRun(
 		user: options.user ?? null,
 		collection: options.collection ?? null,
 		purge: options.purge === true,
+		maxDurationMs: options.maxDurationMs ?? null,
 	};
 
 	const [row] = await getDatabase()('directus_cache_audits')
@@ -479,10 +482,28 @@ export async function reapCacheAuditRuns(): Promise<number> {
 	const db = getDatabase();
 	const now = Date.now();
 
-	await db('directus_cache_audits')
-		.whereNull('finished_at')
-		.where('started_at', '<', new Date(now - 2 * maxDurationMs() - ORPHAN_GRACE_MS))
-		.update({ finished_at: new Date(now), error: DIED_ERROR });
+	const openRuns = await db('directus_cache_audits')
+		.select('id', 'started_at', 'options')
+		.whereNull('finished_at');
+
+	// Each run is judged by the budget it started with: a budget lowered since
+	// must not close a run still inside its own.
+	const diedRunIds = openRuns
+		.filter((openRun) => {
+			const runBudgetMs = (json(openRun['options']) as
+				Partial<CacheAuditRunOptions> | null)?.maxDurationMs ?? maxDurationMs();
+
+			const startedAt = new Date(openRun['started_at']).getTime();
+
+			return startedAt < now - 2 * runBudgetMs - ORPHAN_GRACE_MS;
+		})
+		.map((openRun) => openRun['id']);
+
+	if (diedRunIds.length > 0) {
+		await db('directus_cache_audits')
+			.whereIn('id', diedRunIds)
+			.update({ finished_at: new Date(now), error: DIED_ERROR });
+	}
 
 	return db('directus_cache_audits')
 		.where('started_at', '<', new Date(now - retentionMs()))

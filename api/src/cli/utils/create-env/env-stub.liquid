@@ -165,6 +165,9 @@ RATE_LIMITER_DURATION=1
 # Whether or not caching is enabled. [false]
 CACHE_ENABLED=false
 
+# Whether the response cache serves and fills, over CACHE_ENABLED [CACHE_ENABLED]
+# CACHE_RESPONSE=true
+
 # How long the cache is persisted ["5m"]
 # CACHE_TTL="30m"
 
@@ -199,6 +202,18 @@ CACHE_ENABLED=false
 # hundred writes to file and a hundred compares to purge. Over it the read is
 # pinned to each value on its own — wider purges, never staler. [16]
 # CACHE_SCOPED_MAX_QUERY_CASES=16
+
+# How many members one SSCAN of a scoped index set asks Redis for per round trip.
+# Higher is fewer round trips per purge, lower holds Redis for less per command.
+# From 1 to 100000; a value outside ends the boot. The cache page can set it
+# live for every node. [1000]
+# CACHE_SCOPED_INDEX_SCAN_COUNT=1000
+
+# How many cache TTLs a scoped index set outlives the entries it lists by, as a
+# net for filings a crashed fill left behind. From 1 to 100: below 1 the index
+# would expire before its entries and a purge would miss them, so a value outside
+# ends the boot. The cache page can set it live for every node. [2]
+# CACHE_SCOPED_INDEX_TTL_FACTOR=2
 
 # How often a purge that failed with Redis still reachable (OOM under noeviction,
 # a LOADING replica) is retried from its recorded row; a reconnect retries it
@@ -333,7 +348,7 @@ CACHE_AUDIT_LIMIT=0
 # one, whatever CACHE_AUDIT_LIMIT says: a cron tick never outlives its interval,
 # and "Audit now" answers. A run stopped this way is recorded as timed out. One
 # audit runs at a time; a run asked for while another is in flight is refused
-# (503). ["10m"]
+# (503). Up to 24h; a value outside ends the boot. ["10m"]
 CACHE_AUDIT_MAX_DURATION="10m"
 
 # JSON-pointer globs a cache audit ignores when comparing a stored body with a

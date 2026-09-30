@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // the cache reads without handing it a run that replays every live entry.
 //
 // Its own instance, because `system-mcp.test.ts` pins the exact tool list of a
-// deployment that never named this group, and every tool there is read-only.
+// deployment that never named this group.
 // Beside it, a node with CACHE_AUDIT_ENABLED off — the traffic-serving shape:
 // it offers no audit tool, answers no audit route, and runs no schedule, while
 // the schedule the other node writes still reaches it over the bus.
@@ -55,7 +55,7 @@ describe('Cache audit over the system MCP', () => {
 		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
 		env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
-		env[vendor]['SYSTEM_MCP_TOOLS'] = 'cache,cache_audit';
+		env[vendor]['SYSTEM_MCP_TOOLS'] = 'cache,cache_audit,cache_settings';
 
 		const optedOutEnv = cloneDeep(env);
 		optedOutEnv[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-off-${vendor}`;
@@ -177,7 +177,7 @@ describe('Cache audit over the system MCP', () => {
 		}
 
 		it(oneLine`
-			lists the audit tools beside the cache reads, and marks the two that act
+			lists the audit tools beside the cache reads, and marks the three that act
 		`, async () => {
 			const response = await call({
 				jsonrpc: '2.0',
@@ -196,15 +196,20 @@ describe('Cache audit over the system MCP', () => {
 
 			expect(names).toEqual(expect.arrayContaining(auditToolNames));
 			expect(names).toContain('list_cache_entries');
+			expect(names).toContain('write_cache_settings');
 
 			// The group named, not every group: the processes tool stays out.
 			expect(names).not.toContain('list_processes');
 
-			// A run replays every live entry and a schedule change reaches every
-			// node: neither is a read a client may call on its own initiative.
+			// A run replays every live entry, and a schedule or settings change
+			// reaches every node: none is a read a client may call on its own
+			// initiative.
 			for (const tool of tools) {
-				const acts = ['run_cache_audit', 'write_cache_audit_schedule']
-					.includes(tool.name);
+				const acts = [
+					'run_cache_audit',
+					'write_cache_audit_schedule',
+					'write_cache_settings',
+				].includes(tool.name);
 
 				expect(tool.annotations.readOnlyHint, tool.name).toBe(!acts);
 			}

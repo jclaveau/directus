@@ -13,7 +13,11 @@ vi.mock('@/api', () => {
 // Capture the options the component hands ApexCharts so a test can drive its
 // callbacks (tooltip renderer, axis formatters) without a real SVG chart.
 const chartMock = vi.hoisted(() => {
-	return { configs: [] as any[], hidden: [] as string[] };
+	return {
+		configs: [] as any[],
+		hidden: [] as string[],
+		updatedElements: [] as unknown[],
+	};
 });
 
 // The page mounts two charts (counts + latency); record every config so a test can
@@ -21,7 +25,10 @@ const chartMock = vi.hoisted(() => {
 vi.mock('apexcharts', () => {
 	return {
 		default: class {
-			constructor(_el: unknown, config: any) {
+			chartElement: unknown;
+
+			constructor(chartElement: unknown, config: any) {
+				this.chartElement = chartElement;
 				chartMock.configs.push(config);
 			}
 
@@ -31,6 +38,7 @@ vi.mock('apexcharts', () => {
 
 			updateOptions(config: any) {
 				chartMock.configs.push(config);
+				chartMock.updatedElements.push(this.chartElement);
 
 				return Promise.resolve();
 			}
@@ -63,6 +71,7 @@ vi.mock('@/utils/notify', () => {
 import api from '@/api';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import CachePage from './cache.vue';
+import CacheSettingsPanel from './cache-settings-panel.vue';
 
 const ENTRIES = [
 	{
@@ -207,9 +216,10 @@ const global = {
 		},
 	},
 	components: { SearchInput, PrivateView, VPagination, VSelect },
-	// The audit panel reads its own routes and has its own tests; here it would
-	// only be handed this file's answers for the page's routes.
-	stubs: { CacheAuditPanel: true },
+	// The audit and settings panels read their own routes and have their own
+	// tests; here they would only be handed this file's answers for the page's
+	// routes.
+	stubs: { CacheAuditPanel: true, CacheSettingsPanel: true },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
@@ -261,6 +271,7 @@ describe('CachePage', () => {
 		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
 		chartMock.configs = [];
 		chartMock.hidden = [];
+		chartMock.updatedElements = [];
 
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
@@ -1505,6 +1516,37 @@ describe('CachePage', () => {
 		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
 	});
 
+	it('reloads the page once the drawer changed a cache setting', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+		vi.mocked(api.get).mockClear();
+
+		wrapper.findComponent(CacheSettingsPanel).vm.$emit('changed');
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '24h' },
+		});
+	});
+
+	it('hands the settings panel every refresh of the page', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const keyBeforeRefresh = wrapper.findComponent(CacheSettingsPanel)
+			.props('refreshKey');
+
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		expect(wrapper.findComponent(CacheSettingsPanel).props('refreshKey'))
+			.not.toBe(keyBeforeRefresh);
+	});
+
 	it('builds a compact tooltip + human TTL axis from the chart config', async () => {
 		mockCacheGet(ENTRIES, {
 			// A non-zero bucket so hasTimeseries is true and the chart is built.
@@ -1905,5 +1947,30 @@ describe('CachePage', () => {
 
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.not.toContain('Misses');
+	});
+
+	// ApexCharts rebuilds its tooltip on every update, so a refresh would wipe
+	// the reading a user is taking under the pointer.
+	it('holds the redraw of the chart the pointer is over', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const [countsChart, latencyChart] = wrapper.findAll('.chart');
+		chartMock.updatedElements = [];
+
+		await countsChart!.trigger('pointerenter');
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		// Only the latency chart, which nobody is reading, redraws.
+		expect(chartMock.updatedElements).toContain(latencyChart!.element);
+		expect(chartMock.updatedElements).not.toContain(countsChart!.element);
+
+		await countsChart!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(chartMock.updatedElements).toContain(countsChart!.element);
 	});
 });

@@ -1,5 +1,7 @@
 import type { Accountability } from '@directus/types';
 import { beforeEach, test, vi, expect } from 'vitest';
+import { cacheEnabled } from '../../cache-settings.js';
+import { getCache, getCacheValue } from '../../cache.js';
 import { PoliciesService } from '../../services/policies.js';
 import { UsersService } from '../../services/users.js';
 import { RolesService } from '../../services/roles.js';
@@ -7,6 +9,16 @@ import { withMeta } from '../../utils/read-meta.js';
 import type { Context } from '../types.js';
 import { fetchDynamicVariableData } from './fetch-dynamic-variable-data.js';
 import type { DynamicVariableContext } from './extract-required-dynamic-variable-context.js';
+
+vi.mock('../../cache.js', () => {
+	return {
+		getCache: vi.fn(() => ({ cache: null })),
+		getCacheValue: vi.fn(),
+		setCacheValue: vi.fn(),
+	};
+});
+
+vi.mock('../../cache-settings.js', () => ({ cacheEnabled: vi.fn(() => false) }));
 
 vi.mock('../../services/users.js', () => ({
 	UsersService: vi.fn(),
@@ -100,4 +112,32 @@ test('Returns filter context for current policies', async () => {
 
 	expect(res['$CURRENT_POLICIES']).toBe(policies);
 	expect(PoliciesService.prototype.readMany).toHaveBeenCalledWith(['policy-1'], { fields: ['name', 'id'] });
+});
+
+// Nothing fills it while serving is off, so what it holds was filled before and
+// may be stale.
+test('reads no filter context from a cache that is not serving', async () => {
+	const currentUser = withMeta({}, { scopedCacheFingerprints: [] });
+
+	vi.mocked(getCache).mockReturnValue({ cache: {} } as never);
+	vi.mocked(cacheEnabled).mockReturnValue(false);
+	vi.mocked(getCacheValue).mockResolvedValue({ email: 'stale@example.com' });
+	vi.mocked(UsersService.prototype.readOne).mockResolvedValue(currentUser);
+
+	const contextData = await fetchDynamicVariableData(
+		{
+			accountability: { user: 'user', roles: [] as string[] } as Accountability,
+			policies: [],
+			dynamicVariableContext: {
+				$CURRENT_USER: new Set(['email']),
+				$CURRENT_ROLE: new Set(),
+				$CURRENT_ROLES: new Set(),
+				$CURRENT_POLICIES: new Set(),
+			},
+		},
+		{} as Context,
+	);
+
+	expect(contextData['$CURRENT_USER']).toBe(currentUser);
+	expect(getCacheValue).not.toHaveBeenCalled();
 });

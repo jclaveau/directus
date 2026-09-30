@@ -7,6 +7,12 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	flushBeforeEnabling,
+	markEnablingFlushed,
+	refreshCacheSettings,
+	resolveCacheSettings,
+} from '../cache-settings.js';
+import {
 	listCacheAuditRuns,
 	readCacheAuditFindings,
 	readCacheAuditRun,
@@ -53,6 +59,7 @@ import {
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
+	announceSharedSettings,
 	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
@@ -80,6 +87,19 @@ vi.mock('../cache.js');
 vi.mock('../cache-audit-runs.js');
 vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
+
+vi.mock('../cache-settings.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache-settings.js')>(),
+		flushBeforeEnabling: vi.fn(),
+		markEnablingFlushed: vi.fn(),
+		refreshCacheSettings: vi.fn(),
+		resolveCacheSettings: vi.fn(() => {
+			return { audit_limit: { value: 40, source: 'settings' } };
+		}),
+	};
+});
+
 vi.mock('../scoped-cache/index.js');
 vi.mock('../utils/compress.js');
 vi.mock('../processes/autoscale/lib/drill.js');
@@ -91,12 +111,19 @@ vi.mock('../processes/autoscale/lib/resolve-config.js');
 
 // Named here rather than taken from the module, so the columns the service
 // reads and writes are pinned by the test rather than by whatever it imports.
-vi.mock('../processes/lib/shared-settings.js', () => {
+vi.mock('../processes/lib/shared-settings.js', async (importOriginal) => {
+	const original = await importOriginal<
+		typeof import('../processes/lib/shared-settings.js')
+	>();
+
 	return {
+		asSharedSettings: original.asSharedSettings,
 		SHARED_SETTINGS_COLUMNS: {
 			autoscale: 'autoscale_settings',
 			supervisor: 'supervisor_settings',
+			cache: 'cache_settings',
 		},
+		announceSharedSettings: vi.fn(),
 		readAllSharedSettings: vi.fn(),
 		readSharedSettings: vi.fn(),
 		writeSharedSettings: vi.fn(),
@@ -875,6 +902,7 @@ describe('Services / Utils', () => {
 			vi.mocked(readAllSharedSettings).mockResolvedValue({
 				[SHARED_SETTINGS_COLUMNS.autoscale]: columns.autoscale ?? null,
 				[SHARED_SETTINGS_COLUMNS.supervisor]: columns.supervisor ?? null,
+				[SHARED_SETTINGS_COLUMNS.cache]: null,
 			});
 		}
 
@@ -977,6 +1005,331 @@ describe('Services / Utils', () => {
 			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
 
 			await expect(service(nonAdmin).clearAutoscaleConfig())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('cache settings', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ['Date'] });
+			vi.setSystemTime(new Date('2026-09-30T08:00:00.000Z'));
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('lays the patch over what is stored, a null dropping its field', async () => {
+			vi.mocked(readSharedSettings)
+				.mockResolvedValue({ audit_limit: 40, value_max_size: '2mb' });
+
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			const answer = await service(admin).updateCacheSettings({
+				value_max_size: null,
+				scoped_index_ttl_factor: 3,
+			}, 'admin');
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				expect.anything(),
+			);
+
+			expect(answer).toEqual({
+				key: 'directus_settings.cache_settings',
+				sharedSettings: {
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				setByEmail: 'ann@example.com',
+				resolved: { audit_limit: { value: 40, source: 'settings' } },
+			});
+
+			expect(resolveCacheSettings).toHaveBeenCalledWith({
+				audit_limit: 40,
+				scoped_index_ttl_factor: 3,
+				setBy: 'admin-id',
+				setAt: '2026-09-30T08:00:00.000Z',
+				setFrom: 'admin',
+			});
+		});
+
+		// The layer outlives the incident that justified it, and the questions it
+		// is then asked are who left it, when, and through what.
+		it('stamps a write from the MCP with its surface', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			const answer = await service(admin)
+				.updateCacheSettings({ audit_limit: 40 }, 'mcp');
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					audit_limit: 40,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'mcp',
+				},
+				expect.anything(),
+			);
+
+			expect(answer).toMatchObject({
+				sharedSettings: { setFrom: 'mcp' },
+				setByEmail: 'ann@example.com',
+			});
+		});
+
+		it('refuses a patch that sends a stamp of its own', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			await expect(service(admin).updateCacheSettings(
+				{ audit_limit: 40, setBy: 'someone-else' },
+				'admin',
+			))
+				.rejects
+				.toThrowError(`'cache_settings.setBy' is not a cache setting`);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+
+		it('replaces the stored stamp rather than refusing the next patch', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({
+				audit_limit: 40,
+				setBy: 'earlier-id',
+				setAt: '2026-01-01T00:00:00.000Z',
+				setFrom: 'mcp',
+			});
+
+			await service(admin).updateCacheSettings(
+				{ scoped_index_ttl_factor: 3 },
+				'admin',
+			);
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				expect.anything(),
+			);
+		});
+
+		it('names the user behind the stamp it reads', async () => {
+			vi.mocked(readSharedSettings)
+				.mockResolvedValue({ audit_limit: 40, setBy: 'writer-id' });
+
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await expect(service(admin).readCacheSettings()).resolves.toMatchObject({
+				sharedSettings: { audit_limit: 40, setBy: 'writer-id' },
+				setByEmail: 'ann@example.com',
+			});
+		});
+
+		// Two writers each laying a field over the row they read would otherwise
+		// both write, and the later would drop the earlier's field.
+		it('reads the row under the transaction that writes it', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await service(admin)
+				.updateCacheSettings({ scoped_index_ttl_factor: 3 }, 'admin');
+
+			const [readColumn, lockingTransaction] =
+				vi.mocked(readSharedSettings).mock.calls[0]!;
+
+			expect(readColumn).toBe('cache_settings');
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					audit_limit: 40,
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				expect.objectContaining({ knex: lockingTransaction }),
+			);
+
+			expect(tracker.history.transactions)
+				.toMatchObject([{ state: 'committed' }]);
+		});
+
+		// The write's own announcement goes out before the commit, and a node
+		// re-reading on it would keep the value this write replaces.
+		it('announces the write once its transaction has committed', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			vi.mocked(announceSharedSettings).mockImplementation(() => {
+				expect(tracker.history.transactions)
+					.toMatchObject([{ state: 'committed' }]);
+			});
+
+			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
+
+			expect(announceSharedSettings).toHaveBeenCalledWith('cache_settings');
+		});
+
+		// A clear held inside the transaction keeps the row locked for as long
+		// as it runs, past the database's idle-in-transaction timeout.
+		it('clears ahead of the transaction that locks the row', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			vi.mocked(flushBeforeEnabling).mockImplementation(async () => {
+				expect(tracker.history.transactions).toEqual([]);
+				return true;
+			});
+
+			await service(admin).updateCacheSettings({ response: true }, 'admin');
+
+			expect(flushBeforeEnabling).toHaveBeenCalledWith(
+				{ cache_settings: { response: true } },
+				{ accountability: expect.objectContaining({ admin: true }) },
+			);
+		});
+
+		it.each([
+			{ clearedAhead: true, marks: 1 },
+			{ clearedAhead: false, marks: 0 },
+		])(
+			'spares the transaction its own clear only when one was taken ahead: %o',
+			async ({ clearedAhead, marks }) => {
+				vi.mocked(readSharedSettings).mockResolvedValue(null);
+				vi.mocked(flushBeforeEnabling).mockResolvedValue(clearedAhead);
+
+				await service(admin).updateCacheSettings({ response: true }, 'admin');
+
+				expect(markEnablingFlushed).toHaveBeenCalledTimes(marks);
+			},
+		);
+
+		// One field stored around the guard would otherwise refuse every write to
+		// the others, and the page could never repair it.
+		it(oneLine`
+			drops a stored field that is unknown or refused rather than refusing the
+			patch of another
+		`, async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({
+				ttl: '1h',
+				audit_limit: -1,
+				value_max_size: '2mb',
+			});
+
+			await service(admin)
+				.updateCacheSettings({ scoped_index_ttl_factor: 3 }, 'admin');
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{
+					value_max_size: '2mb',
+					scoped_index_ttl_factor: 3,
+					setBy: 'admin-id',
+					setAt: '2026-09-30T08:00:00.000Z',
+					setFrom: 'admin',
+				},
+				expect.anything(),
+			);
+		});
+
+		it('refuses a null for a field that is not a cache setting', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await expect(service(admin).updateCacheSettings({ ttl: null }, 'admin'))
+				.rejects
+				.toThrowError(`'cache_settings.ttl' is not a cache setting`);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+
+		// A write of nothing would still leave a revision naming who made it.
+		it('refuses a patch that names no field', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await expect(service(admin).updateCacheSettings({}, 'admin'))
+				.rejects
+				.toThrowError(InvalidPayloadError);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+
+		it('writes none at all once the patch drops the last field', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({
+				audit_limit: 40,
+				setBy: 'earlier-id',
+				setAt: '2026-01-01T00:00:00.000Z',
+				setFrom: 'mcp',
+			});
+
+			await service(admin).updateCacheSettings({ audit_limit: null }, 'admin');
+
+			expect(writeSharedSettings)
+				.toHaveBeenCalledWith('cache_settings', null, expect.anything());
+		});
+
+		// The other nodes hear of it over the bus; this one answers the next
+		// request from its mirror, which the announcement may not have reached.
+		it('re-reads this node\'s mirror once the write landed', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
+
+			expect(vi.mocked(refreshCacheSettings).mock.invocationCallOrder[0])
+				.toBeGreaterThan(
+					vi.mocked(writeSharedSettings).mock.invocationCallOrder[0]!,
+				);
+		});
+
+		it('clears them by writing none at all, stamp included', async () => {
+			await expect(service(admin).clearCacheSettings()).resolves.toEqual({
+				key: 'directus_settings.cache_settings',
+				sharedSettings: null,
+				setByEmail: null,
+				resolved: { audit_limit: { value: 40, source: 'settings' } },
+			});
+
+			expect(writeSharedSettings)
+				.toHaveBeenCalledWith('cache_settings', null, expect.anything());
+		});
+
+		it('refuses a non-admin reading or changing them', async () => {
+			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+			await expect(service(nonAdmin).readCacheSettings())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).updateCacheSettings(
+				{ audit_limit: 40 },
+				'admin',
+			))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).clearCacheSettings())
 				.rejects
 				.toThrowError(ForbiddenError);
 

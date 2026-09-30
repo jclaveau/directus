@@ -240,6 +240,20 @@ describe('flushCachesIfBuildChanged', () => {
 		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
 	});
 
+	// The tier is held while serving is off, and the setting can switch it on
+	// with no clear: a flow writing without events, or a boot whose read of the
+	// setting failed until the next poll.
+	it('flushes with the response cache switched off', async () => {
+		env['CACHE_ENABLED'] = false;
+		const lockCache = makeLockCache();
+		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+		files.set('/ext/a/index.js', 'hook-a-v1');
+
+		await flushCachesIfBuildChanged(managerOf([hook('a', '/ext/a')]));
+
+		expect(flushCaches).toHaveBeenCalledWith(true);
+	});
+
 	it('does nothing when the stored identity matches the build', async () => {
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
@@ -311,7 +325,6 @@ describe('flushCachesIfBuildChanged', () => {
 	it.each([
 		['disabled switch', { CACHE_AUTO_FLUSH_ON_DEPLOY: false }],
 		['non-redis store', { CACHE_STORE: 'memory' }],
-		['cache disabled', { CACHE_ENABLED: false }],
 	])('skips entirely (%s): no getCache, no flush', async (_label, overrides) => {
 		Object.assign(env, overrides);
 

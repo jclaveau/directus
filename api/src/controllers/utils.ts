@@ -534,6 +534,65 @@ router.post(
 	}),
 );
 
+router.get(
+	'/cache/settings',
+	asyncHandler(async (req, res, next) => {
+		const utilsService = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await utilsService.readCacheSettings() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/settings',
+	asyncHandler(async (req, res) => {
+		const utilsService = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const settingsPatch: unknown = req.body;
+
+		if (
+			typeof settingsPatch !== 'object'
+			|| settingsPatch === null
+			|| Array.isArray(settingsPatch)
+		) {
+			throw new InvalidPayloadError({
+				reason: 'An object of cache settings is required',
+			});
+		}
+
+		const updatedSettings = await utilsService.updateCacheSettings(
+			settingsPatch as Record<string, unknown>,
+			'admin',
+		);
+
+		res.status(200).json({ data: updatedSettings });
+		return;
+	}),
+);
+
+router.delete(
+	'/cache/settings',
+	asyncHandler(async (req, res) => {
+		const utilsService = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.status(200).json({ data: await utilsService.clearCacheSettings() });
+		return;
+	}),
+);
+
 // These serve one panel, and its subject is a pool this worker reaches only
 // over the bus — which without Redis is an emitter it shares with nobody. The
 // process that scales is found over it and the restart below is asked for over

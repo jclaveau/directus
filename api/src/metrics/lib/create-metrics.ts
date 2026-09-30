@@ -14,6 +14,10 @@ import {
 import { redisConfigAvailable, useRedis } from '../../redis/index.js';
 import { getStorage } from '../../storage/index.js';
 import type { MetricService } from '../types/metric.js';
+import {
+	cacheEnabled,
+	responseCacheWanted,
+} from '../../cache-settings.js';
 
 const isPM2 = 'PM2_HOME' in process.env;
 const METRICS_SYNC_PACKET = 'directus:metrics---data-sync';
@@ -149,7 +153,7 @@ export function createMetrics() {
 	}
 
 	function getCacheErrorMetric(): Counter | null {
-		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
+		if (services.includes('cache') === false || responseCacheWanted() === false) {
 			return null;
 		}
 
@@ -194,7 +198,7 @@ export function createMetrics() {
 	// counter (result=hit|miss) so hit-ratio is a PromQL rate() away, independent of
 	// the CACHE_STATS opt-in (that's the durable drill-down; this is the live gauge).
 	function getCacheResponseMetric(): Counter | null {
-		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
+		if (services.includes('cache') === false || cacheEnabled() === false) {
 			return null;
 		}
 
@@ -218,7 +222,7 @@ export function createMetrics() {
 	// after a deploy is a changed build that moved the generation past the
 	// marker, with no reap since to write it again.
 	function getScopedCacheIndexReadMetric(): Counter | null {
-		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
+		if (services.includes('cache') === false || responseCacheWanted() === false) {
 			return null;
 		}
 

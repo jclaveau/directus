@@ -22,6 +22,7 @@ import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
 import { merge } from '../utils/lodash-es-used.js';
 import { SettingsService } from './settings.js';
+import { responseCacheWanted } from '../cache-settings.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -328,7 +329,7 @@ export class ServerService {
 		}
 
 		async function testCache(): Promise<Record<string, HealthCheck[]>> {
-			if (env['CACHE_ENABLED'] !== true) {
+			if (responseCacheWanted() === false) {
 				return {};
 			}
 

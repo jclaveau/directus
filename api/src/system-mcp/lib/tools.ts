@@ -210,6 +210,34 @@ const SCHEDULE_PROPERTIES = {
 	},
 } as const;
 
+/** What reading and writing the cache settings answer. */
+const CACHE_SETTINGS_OUTPUT = {
+	type: 'object',
+	properties: {
+		key: {
+			type: 'string',
+			description: 'The settings column the cache settings are stored in.',
+		},
+		sharedSettings: {
+			type: ['object', 'null'],
+			description: 'The fields the cache settings set, or null for none. '
+				+ 'Carries `setBy`, `setAt` and `setFrom` beside them: who wrote '
+				+ 'them, when, and through "admin" or "mcp".',
+		},
+		setByEmail: {
+			type: ['string', 'null'],
+			description: 'The address behind `setBy`, or null for none.',
+		},
+		resolved: {
+			type: 'object',
+			description: 'Every field as this node reads it: `value`, '
+				+ '`source` — "settings", or "env" for the environment variable '
+				+ 'it overrides — and `fallback`, what clearing the field would '
+				+ 'leave it on.',
+		},
+	},
+} as const;
+
 /** The lookback a cache read takes, described once for every default. */
 function windowProperty(fallbackWindow: string) {
 	return {
@@ -881,6 +909,88 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			},
 			annotations: READ_ONLY,
 			run: async (_args, context) => utils(context).getCacheStatsState(),
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_settings',
+			group: 'cache',
+			title: 'Read the cache settings',
+			description:
+				'The cache settings every node reads live, and what each field '
+				+ 'resolves to with where it comes from: the setting, or the '
+				+ 'environment variable it overrides. Read it before changing any of '
+				+ 'them.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readCacheSettings(),
+		}),
+		defineSystemMcpTool({
+			name: 'write_cache_settings',
+			group: 'cache_settings',
+			title: 'Change the cache settings',
+			description:
+				'Lay fields over the cache settings, which every node picks up at '
+				+ 'once — no redeploy. Pass a field as null to give it back to its '
+				+ 'environment variable or default, and `clear: true` alone to drop '
+				+ 'them all. A value outside its rule is refused. Switching `response` '
+				+ 'on where CACHE_RESPONSE, else CACHE_ENABLED, is off first clears the '
+				+ 'response cache, since nodes that held none purged nothing while it '
+				+ 'was off. A write is stamped `setFrom: "mcp"` with its user and time.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					settings: {
+						type: 'object',
+						description: 'The fields to set: response (over CACHE_RESPONSE, '
+							+ 'else CACHE_ENABLED), '
+							+ 'value_max_size (false or a size such as "2mb", over '
+							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (false or a size, '
+							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '
+							+ '0, over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
+							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
+							+ 'scoped_index_scan_count (an integer from 1 to 100000, over '
+							+ 'CACHE_SCOPED_INDEX_SCAN_COUNT), scoped_index_ttl_factor (a '
+							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR). A '
+							+ 'null value clears that field.',
+					},
+					clear: {
+						type: 'boolean',
+						description: 'Drop the whole cache settings, so every field '
+							+ 'comes from its fallback again.',
+					},
+				},
+			},
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const utilsService = utils(context);
+				const settingsPatch = args['settings'];
+
+				if (args['clear'] === true) {
+					if (settingsPatch !== undefined) {
+						throw new InvalidPayloadError({
+							reason: '`clear` and `settings` cannot be sent together',
+						});
+					}
+
+					return utilsService.clearCacheSettings();
+				}
+
+				if (
+					typeof settingsPatch !== 'object'
+					|| settingsPatch === null
+					|| Array.isArray(settingsPatch)
+				) {
+					throw new InvalidPayloadError({
+						reason: '`settings` has to be an object of cache settings',
+					});
+				}
+
+				return utilsService.updateCacheSettings(
+					settingsPatch as Record<string, unknown>,
+					'mcp',
+				);
+			},
 		}),
 		defineSystemMcpTool({
 			name: 'run_cache_audit',

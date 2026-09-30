@@ -20,7 +20,8 @@ tags:
   - name: System Diagnostics
     description:
       What this deployment is doing right now — the processes it runs and the behaviour of its
-      response cache. Read-only, and readable by an administrator only.
+      response cache — and the cache levers an operator moves live (the cache settings, the
+      audit schedule, an audit run). Readable and writable by an administrator only.
     x-authentication: admin
   - name: Autoscaling
     description:
@@ -312,6 +313,8 @@ paths:
     $ref: './paths/utils/cache-timeseries.yaml'
   /utils/cache/stats:
     $ref: './paths/utils/cache-stats.yaml'
+  /utils/cache/settings:
+    $ref: './paths/utils/cache-settings.yaml'
   /utils/processes:
     $ref: './paths/utils/processes.yaml'
   /utils/autoscale:
@@ -371,6 +374,8 @@ components:
       $ref: './components/cache-audit-run.yaml'
     CacheAuditSchedule:
       $ref: './components/cache-audit-schedule.yaml'
+    CacheSettingsAnswer:
+      $ref: './components/cache-settings-answer.yaml'
     Presets:
       $ref: './components/preset.yaml'
     Collections:

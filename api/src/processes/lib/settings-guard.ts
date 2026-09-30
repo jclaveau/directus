@@ -1,5 +1,6 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type { Item } from '@directus/types';
+import { assertUsableCacheSettings } from '../../cache-settings.js';
 import { parseSharedSettingsPatch } from '../autoscale/lib/shared-settings.js';
 import { configWithSharedSettings } from '../autoscale/lib/resolve-config.js';
 import {
@@ -46,7 +47,7 @@ function documentIn(
 }
 
 /**
- * Refuse a settings write that would store a layer the pool cannot run.
+ * Refuse a settings write that would store a layer nothing can run.
  *
  * The same checks `/utils/autoscale` makes, applied to the column instead of to
  * the route: the columns are ordinary fields of the settings singleton, so
@@ -74,6 +75,14 @@ export function assertUsableSharedSettings(payload: Partial<Item>): void {
 
 		if (supervisor !== null) {
 			parseSupervisorPatch(supervisor);
+		}
+	}
+
+	if (SHARED_SETTINGS_COLUMNS.cache in payload) {
+		const cacheLayer = documentIn(payload, SHARED_SETTINGS_COLUMNS.cache);
+
+		if (cacheLayer !== null) {
+			assertUsableCacheSettings(cacheLayer);
 		}
 	}
 }

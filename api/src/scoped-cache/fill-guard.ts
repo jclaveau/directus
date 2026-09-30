@@ -7,6 +7,7 @@ import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { earlierScopedCacheEpoch } from './pins.js';
+import { cacheEnabled } from '../cache-settings.js';
 import { scopedCacheEpochKey } from './redis-store.js';
 
 const env = useEnv();
@@ -16,6 +17,20 @@ const env = useEnv();
  * wholesale entry, and its presence is what says the counters were read at all.
  */
 export type ScopedCacheEpochs = Record<string, string | null>;
+
+/**
+ * The entry a reading carries when it skipped the counters because this node
+ * was not serving. A fill from it has no counter to compare a purge against, so
+ * `respond` refuses it when serving came back on before the read answered.
+ */
+export const SERVING_OFF_EPOCH = '*serving-off';
+
+/** Whether a reading was skipped because this node was not serving. */
+export function readWhileServingOff(
+	epochsBeforeQuery: ScopedCacheEpochs | undefined,
+): boolean {
+	return epochsBeforeQuery !== undefined && SERVING_OFF_EPOCH in epochsBeforeQuery;
+}
 
 /**
  * How long a purge counter is held. Long enough that no read outlives its own
@@ -59,9 +74,13 @@ export function scopedCacheEpochTtlSeconds(): number {
 export async function readScopedCacheEpochs(
 	collections: Iterable<string>,
 ): Promise<ScopedCacheEpochs> {
-	// Every read pays this round trip, so it is skipped wherever its answer cannot
-	// matter: nothing is filled with the response cache off.
-	if (!env['CACHE_ENABLED'] || !scopedCachePurgeEnabled()) {
+	// Every read pays this round trip, so it is skipped while nothing is filled,
+	// and the reading says so, whatever the purge mode.
+	if (!cacheEnabled()) {
+		return { [SERVING_OFF_EPOCH]: null };
+	}
+
+	if (!scopedCachePurgeEnabled()) {
 		return {};
 	}
 

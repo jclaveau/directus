@@ -45,6 +45,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
 	CACHE_ENABLED: 'boolean',
+	CACHE_RESPONSE: 'boolean',
 	CACHE_COMPRESSION_ENABLED: 'boolean',
 	CACHE_KEY_HASH_ENABLED: 'boolean',
 	CACHE_TTL: 'string',
@@ -54,6 +55,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_AUTO_PURGE_MODE: 'string',
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 'number',
 	CACHE_SCOPED_MAX_QUERY_CASES: 'number',
+	CACHE_SCOPED_INDEX_SCAN_COUNT: 'number',
+	CACHE_SCOPED_INDEX_TTL_FACTOR: 'number',
 	CACHE_SCOPED_PURGE_RETRY_INTERVAL: 'string',
 	CACHE_SCOPED_EPOCH_TTL: 'string',
 	CACHE_SCOPED_INDEX_REAP_SCHEDULE: 'string',

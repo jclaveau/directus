@@ -1377,6 +1377,24 @@ describe('getCache', () => {
 		store.client.destroy();
 	});
 
+	// Every node on a shared store purges on writes whatever `response` says, so a
+	// node whose mirror lags the switch never leaves a write unpurged.
+	test(oneLine`
+		holds a response tier on redis where neither the environment nor the
+		layer enables serving
+	`, async () => {
+		const { cache: responseCache } = await reloadCacheWith({
+			CACHE_ENABLED: false,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			REDIS_HOST: 'localhost',
+			REDIS_PORT: '6108',
+		});
+
+		expect(responseCache?.namespace).toBe('scalabus_response');
+	});
+
 	test(oneLine`
 		and on the one built from a REDIS url, which reaches the adapter as options
 		rather than as a string, so both spellings back off the same way
@@ -1865,17 +1883,117 @@ describe('a flush over redis tiers still connecting', () => {
 	});
 
 	test(oneLine`
+		clears a response tier just built, as switching the cache on in the
+		settings does, once it is ready
+	`, async () => {
+		const { clearCacheTargets, stores } = await reloadWithConnectingStores();
+
+		stores.system.client.isReady = true;
+		stores.lock.client.isReady = true;
+
+		const clearing = clearCacheTargets(['response']);
+
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect([...stores.response.entries])
+			.toEqual([['scalabus_response:read', 'r']]);
+
+		stores.response.client.isReady = true;
+		stores.response.client.emit('ready');
+
+		await expect(clearing).resolves.toBeUndefined();
+		expect([...stores.response.entries]).toEqual([]);
+	});
+
+	test(oneLine`
 		fails an admin clear whose tiers redis refused, where Keyv alone would
 		have answered 200 over a cache still full
 	`, async () => {
 		const { clearCacheTargets, stores } = await reloadWithConnectingStores();
 
-		await expect(clearCacheTargets(['system', 'response', 'locks']))
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+
+		const refused = expect(clearCacheTargets(['system', 'response', 'locks']))
 			.rejects
 			.toThrowError(/redis refused the system, response, locks clear/);
 
+		await vi.advanceTimersByTimeAsync(5000);
+		await refused;
+
 		expect([...stores.response.entries])
 			.toEqual([['scalabus_response:read', 'r']]);
+	});
+});
+
+describe('a redis deployment whose environment leaves the cache off', () => {
+	async function reloadWithReadyStores() {
+		setEnv({
+			CACHE_ENABLED: false,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			REDIS_HOST: 'localhost',
+			REDIS_PORT: '6108',
+		});
+
+		vi.resetModules();
+
+		const reloaded = await import('./cache.js');
+		const { cache, systemCache, lockCache } = reloaded.getCache();
+
+		const stores = {
+			response: connectingStore([['scalabus_response:read', 'r']]),
+			system: connectingStore(),
+			lock: connectingStore(),
+		};
+
+		stores.response.client.isReady = true;
+		stores.system.client.isReady = true;
+		stores.lock.client.isReady = true;
+		systemCache.store = stores.system;
+		lockCache.store = stores.lock;
+
+		return {
+			cache,
+			flushCaches: reloaded.flushCaches,
+			clearCacheTargets: reloaded.clearCacheTargets,
+			stores,
+		};
+	}
+
+	// A migration or `directus cache flush` never reads the layer, and the nodes
+	// it enabled serve what the flush would have dropped.
+	test('still flushes the response tier', async () => {
+		const {
+			cache: responseCache,
+			flushCaches,
+			stores: readyStores,
+		} = await reloadWithReadyStores();
+
+		expect(responseCache).not.toBeNull();
+		responseCache!.store = readyStores.response;
+
+		await expect(flushCaches(true)).resolves.toMatchObject({ failures: [] });
+		expect([...readyStores.response.entries]).toEqual([]);
+	});
+
+	test('still clears the response tier an admin asks to clear', async () => {
+		const {
+			cache: responseCache,
+			clearCacheTargets,
+			stores: readyStores,
+		} = await reloadWithReadyStores();
+
+		expect(responseCache).not.toBeNull();
+		responseCache!.store = readyStores.response;
+
+		await clearCacheTargets(['response']);
+
+		expect([...readyStores.response.entries]).toEqual([]);
 	});
 });
 

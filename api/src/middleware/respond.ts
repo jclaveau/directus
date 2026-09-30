@@ -27,6 +27,7 @@ import {
 	scopedCacheSweptDuringFill,
 	type ScopedCacheEpochs,
 } from '../scoped-cache/index.js';
+import { readWhileServingOff } from '../scoped-cache/fill-guard.js';
 import {
 	recordPendingScopedCachePurge,
 } from '../scoped-cache-pending-purges.js';
@@ -51,6 +52,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { queryCachable } from '../utils/query-cachable.js';
+import { cacheEnabled, cacheSetting } from '../cache-settings.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -109,12 +111,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	let exceedsMaxSize = false;
 	let valueSize = 0;
 
-	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
+	const valueMaxSize = cacheSetting('value_max_size');
+
+	if (valueMaxSize !== false) {
 		valueSize = res.locals['payload']
 			? stringByteSize(JSON.stringify(res.locals['payload']))
 			: 0;
 
-		const maxSize = parseBytesConfiguration(env['CACHE_VALUE_MAX_SIZE'] as string);
+		const maxSize = parseBytesConfiguration(valueMaxSize);
 
 		if (maxSize !== null) {
 			exceedsMaxSize = valueSize > maxSize;
@@ -199,7 +203,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const cacheableRequest =
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
-		env['CACHE_ENABLED'] === true &&
+		cacheEnabled() &&
 		!!cache &&
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
@@ -220,6 +224,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	);
 
 	const unguardedScope = unguardedScopeCollections.length > 0;
+	const epochsReadWhileOff = readWhileServingOff(epochsBeforeQuery);
 
 	let filled = false;
 
@@ -230,6 +235,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
 		unguardedScope === false &&
+		epochsReadWhileOff === false &&
 		dynamicQueryFilter === false &&
 		scopedCacheFillPaused() === false &&
 		(await permissionsCachable(
@@ -388,7 +394,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// payload); only serialize again when that gate is off.
 					let size = valueSize;
 
-					if (env['CACHE_VALUE_MAX_SIZE'] === false) {
+					if (valueMaxSize === false) {
 						size = res.locals['payload']
 							? stringByteSize(JSON.stringify(res.locals['payload']))
 							: 0;
