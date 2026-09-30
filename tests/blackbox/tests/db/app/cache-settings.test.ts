@@ -177,6 +177,43 @@ describe('Cache settings', () => {
 			expect(await readCacheStatus(vendor)).toBe('MISS');
 		});
 
+		// The route the cache page's drawer writes through.
+		it('switches the peer through /utils/cache/settings and back', async () => {
+			const writerUrl = getUrl(vendor, envs[vendor]!.writer);
+
+			await request(writerUrl)
+				.patch('/utils/cache/settings')
+				.send({ enabled: true })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(200);
+
+			expect(await awaitServing(vendor, true)).toBe('MISS');
+
+			const read = await request(getUrl(vendor, envs[vendor]!.peer))
+				.get('/utils/cache/settings')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(200);
+
+			expect(read.body.data.sharedSettings).toEqual({ enabled: true });
+
+			expect(read.body.data.resolved.enabled)
+				.toEqual({ value: true, source: 'settings', fallback: false });
+
+			await request(writerUrl)
+				.patch('/utils/cache/settings')
+				.send({ scoped_index_ttl_factor: 0.5 })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(400);
+
+			const cleared = await request(writerUrl)
+				.delete('/utils/cache/settings')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(200);
+
+			expect(cleared.body.data.sharedSettings).toBe(null);
+			expect(await awaitServing(vendor, false)).toBe(undefined);
+		});
+
 		it('refuses an enabled the peers would read as unset', async () => {
 			await request(getUrl(vendor, envs[vendor]!.writer))
 				.patch('/settings')

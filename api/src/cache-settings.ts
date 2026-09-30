@@ -151,11 +151,14 @@ export function cacheSetting<F extends CacheSettingField>(
 export interface ResolvedCacheSetting {
 	value: unknown;
 	source: 'settings' | CacheSettingFallbackSource;
+	/** What clearing the field would leave it on. */
+	fallback: unknown;
 }
 
 /**
  * Every field as `document` resolves it here: the stored value its rule
- * accepts, else the fallback and where that comes from.
+ * accepts, else the fallback and where that comes from — the fallback given
+ * either way.
  */
 export function resolveCacheSettings(
 	document: SharedSettings | null,
@@ -165,12 +168,13 @@ export function resolveCacheSettings(
 	return Object.fromEntries(fields.map((field) => {
 		const rule = CACHE_SETTING_RULES[field];
 		const stored = document?.[field];
+		const fallback = rule.fallback() ?? null;
 
 		const resolved: ResolvedCacheSetting = stored !== undefined
 			&& stored !== null
 			&& rule.accepts(stored)
-			? { value: stored, source: 'settings' }
-			: { value: rule.fallback() ?? null, source: rule.fallbackSource };
+			? { value: stored, source: 'settings', fallback }
+			: { value: fallback, source: rule.fallbackSource, fallback };
 
 		return [field, resolved];
 	})) as Record<CacheSettingField, ResolvedCacheSetting>;

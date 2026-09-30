@@ -312,6 +312,8 @@ paths:
     $ref: './paths/utils/cache-timeseries.yaml'
   /utils/cache/stats:
     $ref: './paths/utils/cache-stats.yaml'
+  /utils/cache/settings:
+    $ref: './paths/utils/cache-settings.yaml'
   /utils/processes:
     $ref: './paths/utils/processes.yaml'
   /utils/autoscale:
@@ -371,6 +373,8 @@ components:
       $ref: './components/cache-audit-run.yaml'
     CacheAuditSchedule:
       $ref: './components/cache-audit-schedule.yaml'
+    CacheSettingsAnswer:
+      $ref: './components/cache-settings-answer.yaml'
     Presets:
       $ref: './components/preset.yaml'
     Collections:

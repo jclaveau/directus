@@ -21,7 +21,9 @@ import type {
 } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import CacheAuditPanel from './cache-audit-panel.vue';
+import CacheSettingsPanel from './cache-settings-panel.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
+import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
 	buildGroups,
@@ -1880,7 +1882,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<private-view :title="t('cache', 'Cache')">
+	<private-view :title="t('cache', 'Cache')" :sidebar-width="720">
 		<template #headline>
 			<v-breadcrumb :items="[{ name: t('settings'), to: '/settings' }]" />
 		</template>
@@ -1938,6 +1940,10 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
+			<sidebar-detail icon="tune" :title="t('cache_settings', 'Cache settings')">
+				<cache-settings-panel @changed="load" />
+			</sidebar-detail>
+
 			<auto-refresh
 				v-model="refreshInterval"
 				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"

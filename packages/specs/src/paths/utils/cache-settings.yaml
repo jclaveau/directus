@@ -1,0 +1,68 @@
+get:
+  summary: Read the cache settings
+  description: >
+    The cache settings stored in the settings singleton, the column they live
+    in, and every field as the answering node resolves it: its value, whether
+    that comes from the settings, the environment or a built-in default, and
+    what clearing the field would leave it on. Admin only.
+  operationId: read-cache-settings
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/CacheSettingsAnswer'
+      description: Successful request
+  tags:
+    - System Diagnostics
+patch:
+  summary: Change the cache settings
+  description: >
+    Lays a patch over the cache settings, field by field. A field set to null
+    is removed and handed back to its environment variable or default. The
+    write goes through the settings guard, which refuses an unknown field or
+    a value outside its rule, and switching `enabled` on where CACHE_ENABLED
+    is off clears the response cache first. Every node reads the change on
+    the bus. Admin only.
+  operationId: update-cache-settings
+  requestBody:
+    content:
+      application/json:
+        schema:
+          type: object
+          example:
+            audit_limit: 40
+            value_max_size: null
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/CacheSettingsAnswer'
+      description: Successful request
+  tags:
+    - System Diagnostics
+delete:
+  summary: Clear the cache settings
+  description: >
+    Clears the cache settings column, so every field comes from its
+    environment variable or default again. Admin only.
+  operationId: clear-cache-settings
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/CacheSettingsAnswer'
+      description: Successful request
+  tags:
+    - System Diagnostics

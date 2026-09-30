@@ -534,6 +534,60 @@ router.post(
 	}),
 );
 
+router.get(
+	'/cache/settings',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.readCacheSettings() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/settings',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const patch: unknown = req.body;
+
+		if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+			throw new InvalidPayloadError({
+				reason: 'An object of cache settings is required',
+			});
+		}
+
+		const updated = await service.updateCacheSettings(
+			patch as Record<string, unknown>,
+		);
+
+		res.status(200).json({ data: updated });
+		return;
+	}),
+);
+
+router.delete(
+	'/cache/settings',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.status(200).json({ data: await service.clearCacheSettings() });
+		return;
+	}),
+);
+
 // These serve one panel, and its subject is a pool this worker reaches only
 // over the bus — which without Redis is an emitter it shares with nobody. The
 // process that scales is found over it and the restart below is asked for over

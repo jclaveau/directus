@@ -600,7 +600,7 @@ describe('System MCP Tests', () => {
 			const read = await callTool(vendor, 'read_cache_settings');
 
 			expect(read.body.result.structuredContent.resolved.scoped_index_scan_count)
-				.toEqual({ value: 500, source: 'settings' });
+				.toEqual({ value: 500, source: 'settings', fallback: 1000 });
 
 			// The guard behind PATCH /settings refuses it here too.
 			const refused = await callTool(vendor, 'write_cache_settings', {
@@ -620,7 +620,7 @@ describe('System MCP Tests', () => {
 			expect(cleared.body.result.structuredContent.sharedSettings).toBeNull();
 
 			expect(cleared.body.result.structuredContent.resolved.scoped_index_scan_count)
-				.toEqual({ value: 1000, source: 'default' });
+				.toEqual({ value: 1000, source: 'default', fallback: 1000 });
 		});
 	});
 

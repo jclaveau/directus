@@ -1,0 +1,24 @@
+type: object
+description: The cache settings, where they are kept, and how each field resolves.
+properties:
+  key:
+    type: string
+    example: directus_settings.cache_settings
+  sharedSettings:
+    type: object
+    nullable: true
+  resolved:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        value: {}
+        source:
+          type: string
+          enum: [settings, env, default]
+        fallback: {}
+    example:
+      audit_limit:
+        value: 40
+        source: settings
+        fallback: 0

@@ -63,6 +63,7 @@ vi.mock('@/utils/notify', () => {
 import api from '@/api';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import CachePage from './cache.vue';
+import CacheSettingsPanel from './cache-settings-panel.vue';
 
 const ENTRIES = [
 	{
@@ -207,9 +208,10 @@ const global = {
 		},
 	},
 	components: { SearchInput, PrivateView, VPagination, VSelect },
-	// The audit panel reads its own routes and has its own tests; here it would
-	// only be handed this file's answers for the page's routes.
-	stubs: { CacheAuditPanel: true },
+	// The audit and settings panels read their own routes and have their own
+	// tests; here they would only be handed this file's answers for the page's
+	// routes.
+	stubs: { CacheAuditPanel: true, CacheSettingsPanel: true },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
@@ -1503,6 +1505,21 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
+	});
+
+	it('reloads the page once the drawer changed a cache setting', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+		vi.mocked(api.get).mockClear();
+
+		wrapper.findComponent(CacheSettingsPanel).vm.$emit('changed');
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '24h' },
+		});
 	});
 
 	it('builds a compact tooltip + human TTL axis from the chart config', async () => {

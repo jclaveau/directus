@@ -216,14 +216,18 @@ test('resolves every field against the environment and the defaults', () => {
 
 	expect(resolveCacheSettings({ audit_limit: 40, scoped_index_ttl_factor: 0.5 }))
 		.toEqual({
-			enabled: { value: false, source: 'env' },
-			value_max_size: { value: false, source: 'env' },
-			stats_max_bytes: { value: '2gb', source: 'env' },
-			audit_limit: { value: 40, source: 'settings' },
-			audit_max_duration: { value: '10m', source: 'env' },
-			scoped_max_index_globs: { value: 64, source: 'default' },
-			scoped_index_scan_count: { value: 1000, source: 'default' },
-			scoped_index_ttl_factor: { value: 2, source: 'default' },
+			enabled: { value: false, source: 'env', fallback: false },
+			value_max_size: { value: false, source: 'env', fallback: false },
+			stats_max_bytes: { value: '2gb', source: 'env', fallback: '2gb' },
+			audit_limit: { value: 40, source: 'settings', fallback: 0 },
+			audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
+			scoped_max_index_globs: { value: 64, source: 'default', fallback: 64 },
+			scoped_index_scan_count: {
+				value: 1000,
+				source: 'default',
+				fallback: 1000,
+			},
+			scoped_index_ttl_factor: { value: 2, source: 'default', fallback: 2 },
 		});
 });
 
