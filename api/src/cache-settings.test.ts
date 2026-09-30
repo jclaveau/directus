@@ -15,6 +15,7 @@ import {
 	responseCacheWanted,
 	seedCacheSettings,
 	usableCacheSettings,
+	validateCacheSettingsEnv,
 } from './cache-settings.js';
 import { buildResponseCache, clearCacheTargets } from './cache.js';
 import emitter from './emitter.js';
@@ -50,7 +51,7 @@ vi.mock('./processes/lib/shared-settings.js', async (importOriginal) => {
 
 beforeEach(async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: true });
-	vi.mocked(useLogger).mockReturnValue({ warn: vi.fn() } as never);
+	vi.mocked(useLogger).mockReturnValue({ warn: vi.fn(), error: vi.fn() } as never);
 	vi.mocked(readSharedSettings).mockResolvedValue(null);
 
 	await refreshCacheSettings();
@@ -307,17 +308,42 @@ test('resolves every field against the environment', () => {
 });
 
 // A factor below 1 expires the index before its entries, and a purge misses
-// them: the environment is held to the rule the layer is.
-test('reads a scoped variable its rule refuses as the built-in value', () => {
+// them: the environment is held to the rule the layer is, and a deployment
+// carrying one fails before it listens.
+test('ends the boot on a variable its rule refuses', () => {
 	vi.mocked(useEnv).mockReturnValue({
-		CACHE_SCOPED_INDEX_SCAN_COUNT: 0,
+		CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
 		CACHE_SCOPED_INDEX_TTL_FACTOR: 0.5,
 	});
 
-	expect(resolveCacheSettings(null)).toMatchObject({
-		scoped_index_scan_count: { value: 1000, source: 'env', fallback: 1000 },
-		scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
+	const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+		throw new Error('exited');
 	});
+
+	expect(() => validateCacheSettingsEnv()).toThrowError('exited');
+	expect(exit).toHaveBeenCalledWith(1);
+
+	expect(vi.mocked(useLogger)().error).toHaveBeenCalledWith(
+		'"CACHE_SCOPED_INDEX_TTL_FACTOR" Environment Variable is 0.5, '
+			+ 'which is not a number from 1 to 100.',
+	);
+});
+
+test('boots on the variables it is given, and on none of the optional ones', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		CACHE_ENABLED: true,
+		CACHE_VALUE_MAX_SIZE: 1048576,
+		CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
+		CACHE_SCOPED_INDEX_TTL_FACTOR: 2,
+	});
+
+	const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+		throw new Error('exited');
+	});
+
+	validateCacheSettingsEnv();
+
+	expect(exit).not.toHaveBeenCalled();
 });
 
 test('reads the cache_settings column', async () => {

@@ -55,7 +55,11 @@ import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { type CoreMountPath, coreMountPaths } from './core-mounts.js';
 import { initCacheConfig } from './cache-config.js';
-import { initCacheSettings, seedCacheSettings } from './cache-settings.js';
+import {
+	initCacheSettings,
+	seedCacheSettings,
+	validateCacheSettingsEnv,
+} from './cache-settings.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
 import { validateBooleanEnv, validateDurationEnv } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
@@ -114,6 +118,7 @@ export default async function createApp(): Promise<express.Application> {
 	// Ending the process after the listen would pass the deployment's healthcheck
 	// and crash-loop behind it.
 	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
+	validateCacheSettingsEnv();
 
 	await validateDatabaseConnection();
 

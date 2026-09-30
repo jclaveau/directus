@@ -23,7 +23,13 @@ let appliedSettingsRead = 0;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// A number of bytes as well: the variable arrives as one when it is written as
+// digits, and the response cache has always read it that way.
 function isByteSize(value: unknown): boolean {
+	if (Number.isInteger(value)) {
+		return (value as number) > 0;
+	}
+
 	return typeof value === 'string' && (parseByteSize(value) ?? 0) > 0;
 }
 
@@ -43,23 +49,6 @@ function isIndexTtlFactor(value: unknown): boolean {
 	return typeof value === 'number' && value >= 1 && value <= 100;
 }
 
-/**
- * The variable's value where its rule accepts it, else `builtIn`: a value the
- * layer would refuse is refused from the environment too.
- */
-function acceptedEnvOr(
-	variable: string,
-	accepts: (value: unknown) => boolean,
-	builtIn: number,
-): number {
-	const envValue = useEnv()[variable];
-
-	if (accepts(envValue)) {
-		return envValue as number;
-	}
-
-	return builtIn;
-}
 
 /** What each field reads as, whether the layer or its fallback answers. */
 export interface CacheSettingValues {
@@ -75,6 +64,7 @@ export interface CacheSettingValues {
 export type CacheSettingField = keyof CacheSettingValues;
 
 interface CacheSettingRule<F extends CacheSettingField> {
+	variable: string;
 	accepts: (value: unknown) => boolean;
 	expected: string;
 	fallback: () => CacheSettingValues[F];
@@ -105,16 +95,19 @@ const CACHE_SETTING_RULES: {
 	[F in CacheSettingField]: CacheSettingRule<F>;
 } = {
 	response: {
+		variable: 'CACHE_RESPONSE',
 		accepts: (value) => typeof value === 'boolean',
 		expected: 'true, false or null',
 		fallback: envResponseCache,
 	},
 	value_max_size: {
+		variable: 'CACHE_VALUE_MAX_SIZE',
 		accepts: (value) => value === false || isByteSize(value),
 		expected: 'false, a size such as "2mb", or null',
 		fallback: () => useEnv()['CACHE_VALUE_MAX_SIZE'] as string | false,
 	},
 	stats_max_bytes: {
+		variable: 'CACHE_STATS_MAX_BYTES',
 		accepts: (value) => value === false || isByteSize(value),
 		expected: 'false, a size such as "2gb", or null',
 		fallback: () => {
@@ -122,11 +115,13 @@ const CACHE_SETTING_RULES: {
 		},
 	},
 	audit_limit: {
+		variable: 'CACHE_AUDIT_LIMIT',
 		accepts: isIntegerBetween(0, Number.MAX_SAFE_INTEGER),
 		expected: 'an integer from 0, or null',
 		fallback: () => useEnv()['CACHE_AUDIT_LIMIT'] as number | undefined,
 	},
 	audit_max_duration: {
+		variable: 'CACHE_AUDIT_MAX_DURATION',
 		accepts: (value) => {
 			return typeof value === 'string'
 				&& isPositiveDuration(value)
@@ -136,20 +131,41 @@ const CACHE_SETTING_RULES: {
 		fallback: () => useEnv()['CACHE_AUDIT_MAX_DURATION'] as string | undefined,
 	},
 	scoped_index_scan_count: {
+		variable: 'CACHE_SCOPED_INDEX_SCAN_COUNT',
 		accepts: isScanCount,
 		expected: 'an integer from 1 to 100000, or null',
-		fallback: () => {
-			return acceptedEnvOr('CACHE_SCOPED_INDEX_SCAN_COUNT', isScanCount, 1000);
-		},
+		fallback: () => useEnv()['CACHE_SCOPED_INDEX_SCAN_COUNT'] as number,
 	},
 	scoped_index_ttl_factor: {
+		variable: 'CACHE_SCOPED_INDEX_TTL_FACTOR',
 		accepts: isIndexTtlFactor,
 		expected: 'a number from 1 to 100, or null',
-		fallback: () => {
-			return acceptedEnvOr('CACHE_SCOPED_INDEX_TTL_FACTOR', isIndexTtlFactor, 2);
-		},
+		fallback: () => useEnv()['CACHE_SCOPED_INDEX_TTL_FACTOR'] as number,
 	},
 };
+
+/**
+ * Refuse a variable the layer's own rule would refuse, at boot, before the
+ * server listens: a deployment carrying one fails its healthcheck and the one
+ * before keeps the traffic, rather than running on a value nobody asked for.
+ * An optional variable left unset is not checked.
+ */
+export function validateCacheSettingsEnv(): void {
+	for (const rule of Object.values(CACHE_SETTING_RULES)) {
+		const envValue = rule.fallback();
+
+		if (envValue === undefined || rule.accepts(envValue)) {
+			continue;
+		}
+
+		useLogger().error(
+			`"${rule.variable}" Environment Variable is ${JSON.stringify(envValue)}, `
+				+ `which is not ${rule.expected.replace(/, or null$/, '')}.`,
+		);
+
+		process.exit(1);
+	}
+}
 
 function isCacheSettingField(field: string): field is CacheSettingField {
 	return Object.hasOwn(CACHE_SETTING_RULES, field);

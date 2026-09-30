@@ -48,16 +48,20 @@ patch:
               oneOf:
                 - type: boolean
                   enum: [false]
+                - type: integer
+                  minimum: 1
                 - type: string
                   nullable: true
-              description: false, or a size such as "2mb". Over CACHE_VALUE_MAX_SIZE.
+              description: false, a number of bytes, or a size such as "2mb". Over CACHE_VALUE_MAX_SIZE.
             stats_max_bytes:
               oneOf:
                 - type: boolean
                   enum: [false]
+                - type: integer
+                  minimum: 1
                 - type: string
                   nullable: true
-              description: false, or a size such as "2gb". Over CACHE_STATS_MAX_BYTES.
+              description: false, a number of bytes, or a size such as "2gb". Over CACHE_STATS_MAX_BYTES.
             audit_limit:
               type: integer
               minimum: 0
