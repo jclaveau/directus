@@ -89,15 +89,23 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await awaitDirectusConnection(Number(env[vendor].PORT));
 
-		// The boot's own reap, over before the scenario clears.
-		await expect.poll(async () => {
+		// The boot's own reap, over before the scenario clears. A loop, as
+		// `expect.poll` runs inside a test only.
+		const deadline = Date.now() + 30_000;
+		let bootReapOver = false;
+
+		while (!bootReapOver && Date.now() < deadline) {
 			const [marker, generation] = await redisClient.mget(
 				markerKey,
 				generationKey,
 			);
 
-			return marker !== null && marker === generation;
-		}, { interval: 100, timeout: 30_000 }).toBe(true);
+			bootReapOver = marker !== null && marker === generation;
+
+			await sleep(100);
+		}
+
+		expect(bootReapOver).toBe(true);
 	}, 60_000);
 
 	afterAll(async () => {
