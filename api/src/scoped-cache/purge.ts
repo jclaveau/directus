@@ -23,8 +23,8 @@ import {
 	clearPendingScopedCachePurges,
 	countFailedScopedCachePurgeRetry,
 	listPendingScopedCachePurges,
-	MAX_RECORDED_FINGERPRINTS_PER_COLLECTION,
 	recordPendingScopedCachePurge,
+	scopedCachePurgeRetryMaxFingerprints,
 } from '../scoped-cache-pending-purges.js';
 import {
 	getMilliseconds,
@@ -915,7 +915,7 @@ function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 	const coarsenedCollections: string[] = [];
 
 	for (const [collection, declared] of declaredByCollection) {
-		if (declared.length > MAX_RECORDED_FINGERPRINTS_PER_COLLECTION) {
+		if (declared.length > scopedCachePurgeRetryMaxFingerprints()) {
 			coarsenedCollections.push(collection);
 			declaredByCollection.delete(collection);
 		}

@@ -296,7 +296,7 @@ describe(oneLine`
 
 			// Rows no read names: replayed one by one they would leave a1 cached, so
 			// its MISS is the collection purge.
-			const recorded = Array.from({ length: 1001 }, (_, at) => {
+			const recorded = Array.from({ length: 101 }, (_, at) => {
 				return {
 					failed_at: new Date(),
 					mode: 'slices',

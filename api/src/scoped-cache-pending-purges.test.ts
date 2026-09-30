@@ -128,7 +128,7 @@ describe('recordPendingScopedCachePurge', () => {
 				mode: 'slices',
 				collection: 'articles',
 				scopedCacheFingerprints: [
-					...Array.from({ length: 1001 }, (_, id) => `articles:&id=,${id},&`),
+					...Array.from({ length: 101 }, (_, id) => `articles:&id=,${id},&`),
 					'authors:&id=,7,&',
 				],
 			},
@@ -163,7 +163,7 @@ describe('recordPendingScopedCachePurge', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheFingerprints: Array.from({ length: 1001 }, (_, id) => {
+				scopedCacheFingerprints: Array.from({ length: 101 }, (_, id) => {
 					return `articles:&id=,${id},&`;
 				}),
 			},
@@ -187,7 +187,7 @@ describe('recordPendingScopedCachePurge', () => {
 			{
 				mode: 'slices',
 				collection: 'articles',
-				scopedCacheFingerprints: Array.from({ length: 1000 }, (_, id) => {
+				scopedCacheFingerprints: Array.from({ length: 100 }, (_, id) => {
 					return `articles:&id=,${id},&`;
 				}),
 			},

@@ -615,7 +615,7 @@ describe(oneLine`
 
 			const batch: number[] = (await CreateItem(vendor, {
 				collection: NOTE,
-				item: Array.from({ length: 1001 }, (_, at) => ({ subject: `batch-${at}` })),
+				item: Array.from({ length: 101 }, (_, at) => ({ subject: `batch-${at}` })),
 			})).map((note: { id: number }) => note.id);
 
 			// Outside the batch: a precise retry would leave its read cached, so its

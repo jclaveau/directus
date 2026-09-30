@@ -220,6 +220,13 @@ CACHE_ENABLED=false
 # too. 0 leaves the reconnect as the only retry. [1m]
 # CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
 
+# How many fingerprints of one collection a failed purge's retry drops one by
+# one. Past it the retry purges the whole collection: every cached entry is
+# matched against every fingerprint, so a long list costs more than the
+# collection. From 0 to 100000; a value outside ends the boot. The cache page can
+# set it live for every node. [100]
+# CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS=100
+
 # How long a collection's purge counter is held. A read takes it before its query
 # and again after the fill, and a purge recreating an expired counter starts it
 # at Redis's clock, never at a value it held — so this only has to outlive the

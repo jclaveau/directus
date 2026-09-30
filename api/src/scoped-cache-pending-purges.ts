@@ -1,4 +1,5 @@
 import type { CachePurgeMode } from '@directus/types';
+import { cacheSetting } from './cache-settings.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { parseScopedCacheFingerprint } from './scoped-cache/fingerprint.js';
@@ -10,8 +11,17 @@ const TABLE = 'directus_scoped_cache_pending_purges';
  * the retry purges the collection whole: every cached entry of the collection is
  * matched against every recorded fingerprint, so a precise retry costs entries
  * times fingerprints, while a collection purge costs the entries alone.
+ *
+ * Measured by `tests/perf/pending-retry.perf.test.ts`: both costs grow with the
+ * entries cached, and they cross at about 35 fingerprints whatever that number.
+ * Over 100 000 entries, 101 fingerprints drained in 8.1 s holding the event loop
+ * 68 ms at most, and 1001 in 69 s holding it 400 ms, where a collection purge of
+ * 10 000 entries held it 15 ms. The default keeps a page of keys precise, at a
+ * loop block a request can wait out.
  */
-export const MAX_RECORDED_FINGERPRINTS_PER_COLLECTION = 1000;
+export function scopedCachePurgeRetryMaxFingerprints(): number {
+	return cacheSetting('scoped_purge_retry_max_fingerprints');
+}
 
 // Ids per statement, well under Postgres' 65535 bind parameters.
 const ID_CHUNK_SIZE = 10_000;
@@ -107,7 +117,7 @@ function pendingScopedCachePurgeRows(
 	const coarsenedRows: PendingScopedCachePurge[] = [];
 
 	for (const [collection, fingerprints] of fingerprintsByCollection) {
-		if (fingerprints.length > MAX_RECORDED_FINGERPRINTS_PER_COLLECTION) {
+		if (fingerprints.length > scopedCachePurgeRetryMaxFingerprints()) {
 			coarsenedRows.push({
 				mode: 'collection',
 				collection,

@@ -149,7 +149,7 @@ vi.mock('../scoped-cache-pending-purges.js', () => {
 		clearPendingScopedCachePurges: vi.fn(),
 		countFailedScopedCachePurgeRetry: vi.fn(),
 		listPendingScopedCachePurges: vi.fn(),
-		MAX_RECORDED_FINGERPRINTS_PER_COLLECTION: 1000,
+		scopedCachePurgeRetryMaxFingerprints: () => 100,
 		recordPendingScopedCachePurge: vi.fn(),
 	};
 });
@@ -2194,7 +2194,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheFingerprints: Array.from({ length: 1001 }, (_, id) => {
+			scopedCacheFingerprints: Array.from({ length: 101 }, (_, id) => {
 				return `articles:&id=,${id},&`;
 			}),
 			ids: [7],
@@ -2231,7 +2231,7 @@ describe('retryPendingScopedCachePurges', () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheFingerprints: Array.from({ length: 1000 }, (_, id) => {
+			scopedCacheFingerprints: Array.from({ length: 100 }, (_, id) => {
 				return `articles:&id=,${id},&`;
 			}),
 			ids: [7],

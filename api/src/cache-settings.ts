@@ -43,6 +43,9 @@ function isIntegerBetween(minimum: number, maximum: number) {
 
 const isScanCount = isIntegerBetween(1, 100000);
 
+// 0 retries every recorded purge as its whole collection.
+const isRetryFingerprintCap = isIntegerBetween(0, 100000);
+
 // Below 1 the index would expire before the entries it lists, and a purge
 // would miss them.
 function isIndexTtlFactor(value: unknown): boolean {
@@ -59,6 +62,7 @@ export interface CacheSettingValues {
 	audit_max_duration: string | undefined;
 	scoped_index_scan_count: number;
 	scoped_index_ttl_factor: number;
+	scoped_purge_retry_max_fingerprints: number;
 }
 
 export type CacheSettingField = keyof CacheSettingValues;
@@ -151,6 +155,18 @@ const CACHE_SETTING_RULES: {
 		expected: 'a number from 1 to 100, or null',
 		fallback: () => {
 			return (useEnv()['CACHE_SCOPED_INDEX_TTL_FACTOR'] ?? 2) as number;
+		},
+	},
+	// Past the cap a retry purges the collection whole rather than one slice at a
+	// time: wider, never staler, so a change only moves what a retry costs and how
+	// much of the cache it drops.
+	scoped_purge_retry_max_fingerprints: {
+		variable: 'CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS',
+		accepts: isRetryFingerprintCap,
+		expected: 'an integer from 0 to 100000, or null',
+		fallback: () => {
+			return (useEnv()['CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS'] ?? 100) as
+				number;
 		},
 	},
 };
