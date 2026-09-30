@@ -5096,6 +5096,23 @@ describe('reading and bumping the purge counters', () => {
 		expect(mget).not.toHaveBeenCalled();
 	});
 
+	// A full purge clears what a read taken while off already fetched, and
+	// serving coming back on must still refuse to fill it.
+	it.each([
+		['scoped purging is off', () => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'full';
+		}],
+		['there is no Redis configured', () => {
+			vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		}],
+	])('marks a reading taken while off when %s', async (_case, disable) => {
+		disable();
+		env['CACHE_ENABLED'] = false;
+
+		expect(await readScopedCacheEpochs(['articles']))
+			.toEqual({ '*serving-off': null });
+	});
+
 	// Every read pays this round trip, so it is skipped wherever its answer could
 	// not matter.
 	it.each([

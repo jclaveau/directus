@@ -74,14 +74,14 @@ export function scopedCacheEpochTtlSeconds(): number {
 export async function readScopedCacheEpochs(
 	collections: Iterable<string>,
 ): Promise<ScopedCacheEpochs> {
-	if (!scopedCachePurgeEnabled()) {
-		return {};
-	}
-
 	// Every read pays this round trip, so it is skipped while nothing is filled,
-	// and the reading says so.
+	// and the reading says so, whatever the purge mode.
 	if (!cacheEnabled()) {
 		return { [SERVING_OFF_EPOCH]: null };
+	}
+
+	if (!scopedCachePurgeEnabled()) {
+		return {};
 	}
 
 	// `*` rides along so a wholesale flush invalidates an in-flight read too.
