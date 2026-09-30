@@ -562,7 +562,8 @@ function clearResponseCache(arm: Arm): Promise<unknown> {
 /**
  * Wait for the reap a clear requests on a scoped arm to mark its index complete.
  * The pass runs a second after the clear, off the request path, and would land in
- * whatever is measured next.
+ * whatever is measured next. A clear keeps the marker, so once it is complete the
+ * reap a clear requests is turned away and there is nothing left to wait for.
  */
 async function awaitRequestedReap(arm: Arm): Promise<void> {
 	if (arm.env['CACHE_AUTO_PURGE_MODE'] !== 'scoped') {
@@ -574,7 +575,7 @@ async function awaitRequestedReap(arm: Arm): Promise<void> {
 
 	while (performance.now() < deadline) {
 		const [marker, generation] = await redis.mget(
-			`${namespace}:scoped-cache-index:collection-index-keys-complete`,
+			`${namespace}:scoped-cache-collection-index-keys-complete`,
 			`${namespace}:scoped-cache-index-generation`,
 		);
 
