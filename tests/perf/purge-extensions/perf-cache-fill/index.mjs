@@ -31,6 +31,7 @@ const [
 	{ default: emitter },
 	{ indexScopedCacheEntry },
 	{ requestScopedCacheIndexReap },
+	{ scopedCacheFillPaused },
 	{ getCacheKey },
 	{ getMilliseconds },
 	{ readMeta },
@@ -43,6 +44,7 @@ const [
 	importFromApi('emitter.js'),
 	importFromApi('scoped-cache/index.js'),
 	importFromApi('scoped-cache/reap-requests.js'),
+	importFromApi('scoped-cache/fill-pause.js'),
 	importFromApi('utils/get-cache-key.js'),
 	importFromApi('utils/get-milliseconds.js'),
 	importFromApi('utils/read-meta.js'),
@@ -140,8 +142,9 @@ export default function registerEndpoint(router, { services, getSchema, env }) {
 	/**
 	 * `POST /perf-cache-fill/reap` joins the reap a flush asks for, or asks for
 	 * one, and answers once it has run: the bench turns the scheduled one off. It
-	 * names in Redis the key marking the index-key sets complete and the
-	 * generation it has to hold.
+	 * names in Redis the key marking the index-key sets complete, the
+	 * generation it has to hold and the fill pause, and whether this process
+	 * still pauses its fills.
 	 */
 	router.post('/reap', async (request, response) => {
 		if (!request.accountability?.admin) {
@@ -158,6 +161,10 @@ export default function registerEndpoint(router, { services, getSchema, env }) {
 					+ 'scoped-cache-collection-index-keys-complete',
 				generationKey:
 					`${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`,
+				fillPauseKey: `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause`,
+				// A reap skips its mark while fills are paused, so a missing
+				// mark says which of the two it was.
+				fillsPaused: scopedCacheFillPaused(),
 			});
 		}
 		catch (error) {

@@ -1339,11 +1339,20 @@ async function clearResponseCache(): Promise<void> {
  * measured would be that scan's, and the reap's own commands would land in them.
  */
 async function markIndexKeySetsComplete(): Promise<void> {
-	const { markerKey, generationKey } = await api('/perf-cache-fill/reap', {
-		method: 'POST',
-	});
+	const {
+		markerKey,
+		generationKey,
+		fillPauseKey,
+		fillsPaused,
+	} = await api('/perf-cache-fill/reap', { method: 'POST' });
 
-	expect(await redis.get(markerKey), 'the index-key sets marked complete')
+	const pauseLeftMs = await redis.pttl(fillPauseKey);
+
+	expect(
+		await redis.get(markerKey),
+		`the index-key sets marked complete (fills paused: ${fillsPaused}, `
+		+ `pause key TTL: ${pauseLeftMs} ms)`,
+	)
 		.toBe(await redis.get(generationKey));
 }
 
