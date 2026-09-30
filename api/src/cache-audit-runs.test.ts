@@ -314,7 +314,8 @@ describe('runCacheAudit', () => {
 			expect(lockCache.held.get('cache-audit:run')).toBe('1700000000000:run-1');
 			expect(lockCache.set).toHaveBeenCalledTimes(1);
 
-			vi.advanceTimersByTime(90_000);
+			// Each renewal reads the claim before it writes it.
+			await vi.advanceTimersByTimeAsync(90_000);
 
 			expect(lockCache.set).toHaveBeenCalledTimes(4);
 

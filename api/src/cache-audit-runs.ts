@@ -186,7 +186,9 @@ export async function runCacheAudit(
 
 		// None when the run in flight ended since, or a node of an older build
 		// holds the claim as a Keyv value.
-		const inFlightSince = Number(holderToken?.split(':')[0]);
+		const inFlightSince = typeof holderToken === 'string'
+			? Number(holderToken.split(':')[0])
+			: Number.NaN;
 
 		throw new ServiceUnavailableError({
 			service: 'cache-audit',
