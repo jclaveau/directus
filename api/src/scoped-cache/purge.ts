@@ -61,6 +61,7 @@ import {
 	scopedCacheEpochTtlSeconds,
 } from './fill-guard.js';
 import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
+import { scopedCacheFillPaused } from './fill-pause.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
 import {
 	scopedCacheEpochBumpScript,
@@ -616,9 +617,13 @@ async function purgeScopedCacheIndexWhere(
  * rechecked before this move still keeps its entry
  * (https://github.com/jclaveau/directus/issues/547).
  *
- * The store takes the completeness marker back before it unlinks anything, so
- * every collection-wide purge SCANs from here on; the reap requested once the
- * drop is over writes the marker back, schedule or none.
+ * The store unlinks only the sets holding members, and keeps the index-key sets
+ * naming them and their completeness marker: a name whose set is gone reads
+ * empty, so the collection-wide purges keep reading the index-key sets. The reap
+ * requested once the drop is over releases those names, marker or none,
+ * schedule or none. A one-shot command exits before that reap runs; the nodes
+ * hearing its `cacheCleared` ask for one that the marker still turns away, and
+ * the names wait for the next reap.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!scopedCacheIndexStoreAvailable()) {
@@ -633,7 +638,7 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 		// of the fills in flight with it. And in every mode, as the drop is.
 		await bumpScopedCacheEpochsInEveryMode(['*']);
 
-		void requestScopedCacheIndexReap();
+		void requestScopedCacheIndexReap({ forcePass: true });
 	}
 }
 
@@ -651,8 +656,10 @@ export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
  * The entries only, so a flush that reports the index drop apart from the clear
  * can; `flushResponseCache` is the two together. With `CACHE_REDIS_DB` set, the
  * one FLUSHDB takes the index and the counters too, the wholesale one it just
- * moved included: a read that took none would compare equal after its fill. So
- * the same MULTI moves it again, from the server's clock, and no fill can recheck
+ * moved included — not the recorded build, the index generation, the index's
+ * completeness marker or the fill pause, which the shared database holds. A
+ * read that took no counter would compare equal after its fill. So the same
+ * MULTI moves it again, from the server's clock, and no fill can recheck
  * in between. A Redis that refused that move — out of memory — gets it once more
  * after the MULTI, which leaves a fill rechecking in between kept. Answers
  * whether it was that FLUSHDB.
@@ -1231,13 +1238,40 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 // Before the request, which skips on a marker the build change is to clear.
 // Lazily: `cache-build-identity.ts` imports `cache.js`, which imports this.
-async function recordBuildThenRequestReap(): Promise<void> {
-	const { recordScopedCacheBuild } = await import(
-		'../cache-build-identity.js'
-	);
+async function recordBuildThenRequestReap(
+	buildRecordWanted: boolean,
+): Promise<void> {
+	if (buildRecordWanted) {
+		const { recordScopedCacheBuild } = await import(
+			'../cache-build-identity.js'
+		);
 
-	await recordScopedCacheBuild();
+		await recordScopedCacheBuild();
+	}
+
 	await requestScopedCacheIndexReap();
+}
+
+// A one-shot command — `cache flush`, a migration, a schema apply — exits
+// before the reap its flush asked for runs, and tells the nodes only on the bus.
+function reapOnFlushElsewhere(logger: ReturnType<typeof useLogger>): void {
+	import('../bus/index.js')
+		.then(({ useBus }) => {
+			return useBus().subscribe<{ targets: string[] }>(
+				'cacheCleared',
+				({ targets }) => {
+					if (targets.includes('response')) {
+						void requestScopedCacheIndexReap();
+					}
+				},
+			);
+		})
+		.catch((error: any) => {
+			logger.warn(
+				error,
+				`[scoped-cache] could not hear the flushes of other processes: ${error}`,
+			);
+		});
 }
 
 /**
@@ -1257,6 +1291,7 @@ export function startScopedCachePurgeRecovery(): void {
 	}
 
 	const logger = useLogger();
+	let firstReady = true;
 
 	const recover = () => {
 		retryPendingScopedCachePurges()
@@ -1291,9 +1326,21 @@ export function startScopedCachePurgeRecovery(): void {
 
 		recover();
 
+		if (firstReady) {
+			reapOnFlushElsewhere(logger);
+		}
+
+		// Again on a later `ready` only while fills stay paused, as a record Redis
+		// refused leaves them: a process of the build before reconnecting through
+		// a deploy would record its build back over the new one, and open a pause
+		// the new build cannot end.
+		const buildRecordWanted = firstReady || scopedCacheFillPaused();
+
+		firstReady = false;
+
 		// A boot, or a reconnect after an outage a flush may have landed in,
 		// whose own reap request may have found Redis down.
-		recordBuildThenRequestReap().catch((error: any) => {
+		recordBuildThenRequestReap(buildRecordWanted).catch((error: any) => {
 			logger.warn(error, `[scoped-cache] boot index reap failed: ${error}`);
 		});
 	});

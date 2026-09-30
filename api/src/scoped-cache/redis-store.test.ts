@@ -2059,13 +2059,12 @@ describe('reapIndexedEntries', () => {
 
 		pttl.mockResolvedValue(-2);
 		scopedCacheIndexGenerationRead.mockResolvedValue('41');
-		get.mockResolvedValue('9');
 		scopedCacheIndexCompleteMark.mockResolvedValue(1);
 	});
 
 	it(oneLine`
 		marks the index-key sets complete with the generation it read before its
-		scan, once the pass ends and the wholesale counter reads the same again
+		scan once the pass ends, whatever a flush moved the wholesale counter to
 	`, async () => {
 		scan
 			.mockResolvedValueOnce(['3', []])
@@ -2086,10 +2085,7 @@ describe('reapIndexedEntries', () => {
 			'scalabus:scoped-cache-index-generation',
 		]]);
 
-		expect(get.mock.calls).toEqual([
-			['scalabus:scoped-cache-epoch:*'],
-			['scalabus:scoped-cache-epoch:*'],
-		]);
+		expect(get).not.toHaveBeenCalled();
 
 		expect(scopedCacheIndexCompleteMark.mock.calls).toEqual([[
 			'scalabus:scoped-cache-collection-index-keys-complete',
@@ -2111,14 +2107,8 @@ describe('reapIndexedEntries', () => {
 		expect(scopedCacheIndexGenerationRead.mock.invocationCallOrder[0])
 			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
 
-		expect(get.mock.invocationCallOrder[0])
-			.toBeLessThan(scan.mock.invocationCallOrder[0]!);
-
-		expect(get.mock.invocationCallOrder[1])
-			.toBeGreaterThan(scan.mock.invocationCallOrder[1]!);
-
 		expect(scopedCacheIndexCompleteMark.mock.invocationCallOrder[0])
-			.toBeGreaterThan(get.mock.invocationCallOrder[1]!);
+			.toBeGreaterThan(scan.mock.invocationCallOrder[1]!);
 
 		expect(logger.info).toHaveBeenCalledExactlyOnceWith(
 			'[scoped-cache] index-key sets marked complete at generation 41',
@@ -2146,33 +2136,8 @@ describe('reapIndexedEntries', () => {
 		]]);
 
 		expect(logger.info).toHaveBeenCalledExactlyOnceWith(oneLine`
-			[scoped-cache] index-key sets not marked complete: a deploy or a flush
-			since generation 41, or a deploy's fill pause runs
-		`);
-	});
-
-	// The wholesale counter lives in the cache database, the marker in the shared
-	// one: no script reads both.
-	it.each([
-		['a flush moved it', '9', '10'],
-		['a flush seeded it', null, '1'],
-	])(oneLine`
-		never runs the marking script when the wholesale counter reads otherwise
-		after the scan than before it — %s
-	`, async (_case, flushEpochBefore, flushEpochAfter) => {
-		scan.mockResolvedValueOnce(['0', []]);
-
-		get
-			.mockResolvedValueOnce(flushEpochBefore)
-			.mockResolvedValueOnce(flushEpochAfter);
-
-		await redisScopedCacheStore().reapIndexedEntries((key) => key, 86400);
-
-		expect(scopedCacheIndexCompleteMark).not.toHaveBeenCalled();
-
-		expect(logger.info).toHaveBeenCalledExactlyOnceWith(oneLine`
-			[scoped-cache] index-key sets not marked complete: a deploy or a flush
-			since generation 41, or a deploy's fill pause runs
+			[scoped-cache] index-key sets not marked complete: a deploy since
+			generation 41, or a deploy's fill pause runs
 		`);
 	});
 

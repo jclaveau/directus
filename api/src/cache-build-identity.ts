@@ -10,7 +10,7 @@ import { resolveCoreBuildId } from './core-build-id.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
-import { scopedCacheIndexStoreAvailable } from './scoped-cache/config.js';
+import { scopedCachePurgeEnabled } from './scoped-cache/config.js';
 import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
 import { useScopedCacheStore } from './scoped-cache/store.js';
 
@@ -224,23 +224,31 @@ export async function flushCachesIfBuildChanged(
  * the index is filed, and reading every bundle is what a boot cannot afford twice.
  * A replica of one build reads the same identity, so only a deploy opens a pause.
  * Never throws: a boot must not fail on it. Fills stay paused when it fails, until
- * the reconnect that runs it again.
+ * the reconnect that runs it again. `CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX` is a
+ * duration of 0 or more by then: `validateDurationEnv` refused any other at boot.
  */
 export async function recordScopedCacheBuild(): Promise<void> {
-	if (!scopedCacheIndexStoreAvailable()) {
+	// A process that does not purge by scope files no index-key set, so its build
+	// has nothing to pause for.
+	if (!scopedCachePurgeEnabled()) {
 		return;
 	}
 
 	const logger = useLogger();
 
+	const parsedPauseMs = getMilliseconds(
+		useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'],
+		0,
+	);
+
 	try {
 		const buildIdentity = resolveCoreBuildId();
 
+		// `SET ... PX` refuses a fraction ("4.1m" parses to 245999.99999999997),
+		// and refuses it after the script has recorded the build. Up, so a pause
+		// never runs shorter than asked.
 		const { buildChanged, fillPauseLeftMs } = await useScopedCacheStore()
-			.recordBuildIdentity(
-				buildIdentity,
-				getMilliseconds(useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'], 0),
-			);
+			.recordBuildIdentity(buildIdentity, Math.ceil(parsedPauseMs));
 
 		pauseScopedCacheFills(fillPauseLeftMs, buildIdentity);
 

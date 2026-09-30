@@ -16,6 +16,12 @@ export const PROCESSES_REPORT_CHANNEL = 'processes:report';
 export interface ProcessesQueryMessage {
 	requestId: string;
 	details: ProcessDetail[];
+	/**
+	 * Set by the fill pause after a deploy, which reads only each process's node
+	 * and build: a node leaves out the supervisor's list and its capacity. A node
+	 * of a build older than the field ignores it and answers in full.
+	 */
+	nodeBuildOnly?: boolean;
 }
 
 /** What one process answers with about itself. */

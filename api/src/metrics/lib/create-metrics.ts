@@ -215,7 +215,8 @@ export function createMetrics() {
 
 	// How a collection-wide purge found the sets its collection is filed in: the
 	// index-key set a reap vouched for, or a keyspace SCAN. `scan` holding up
-	// after a flush is a reap that never wrote the marker back.
+	// after a deploy is a changed build that moved the generation past the
+	// marker, with no reap since to write it again.
 	function getScopedCacheIndexReadMetric(): Counter | null {
 		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
 			return null;

@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/config.js';
+import { scopedCacheFillPaused } from '../scoped-cache/fill-pause.js';
 import { runScopedCacheIndexReap } from '../scoped-cache/reap-requests.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 
@@ -29,6 +30,12 @@ export default async function schedule(): Promise<boolean> {
 	}
 
 	scheduleSynchronizedJob('scoped-cache-index-reap', reapSchedule, async () => {
+		// None while fills are paused: the pause refuses the mark a pass writes,
+		// and its end asks for the one pass that can write it.
+		if (scopedCacheFillPaused()) {
+			return;
+		}
+
 		// A failed reap leaves members naming nothing, which a purge tests and finds
 		// nothing for: a compare, never a stale hit, so the next tick retries it.
 		// Skipped while a pass a flush or a boot asked for holds the lock: the

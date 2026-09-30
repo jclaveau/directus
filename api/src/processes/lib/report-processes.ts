@@ -58,7 +58,8 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 	// asked for — a caller narrows what is said about each process, it cannot
 	// remove the spine they are listed on. The size this parameter exists to save
 	// is the env, which is per process and stays narrowable.
-	const reportsSupervisor = allowed.includes('stats');
+	const reportsSupervisor = allowed.includes('stats')
+		&& query.nodeBuildOnly !== true;
 
 	const message: ProcessesReportMessage = {
 		requestId: query.requestId,

@@ -109,7 +109,10 @@ async function lookAtFillPause(buildIdentity: string): Promise<void> {
 
 		fillsPausedUntil = Date.now() + fillPauseLeftMs;
 
+		// Another node's looks count while this one is not watching, so the ones
+		// this node counted before no longer run in a row.
 		if (!watching) {
+			quietLooks = 0;
 			return;
 		}
 
@@ -127,6 +130,8 @@ async function lookAtFillPause(buildIdentity: string): Promise<void> {
 		}
 	}
 	catch (error) {
+		quietLooks = 0;
+
 		// Paused still, until a look that reaches Redis or the ceiling.
 		useLogger().warn(
 			error,
@@ -145,7 +150,7 @@ async function lookAtFillPause(buildIdentity: string): Promise<void> {
  * build before. A process with no build in its report is older than the field.
  */
 async function onlyThisBuildAnswers(buildIdentity: string): Promise<boolean> {
-	const reports = await collectProcessReports([]);
+	const reports = await collectProcessReports([], { nodeBuildOnly: true });
 
 	const answeredItself = reports.some((report) => {
 		return report.self.nodeId === nodeId;
@@ -155,6 +160,11 @@ async function onlyThisBuildAnswers(buildIdentity: string): Promise<boolean> {
 		return report.self.coreBuildId !== buildIdentity;
 	});
 
+	// TODO: a build before that is alive but never answers, with
+	// `PROCESSES_REPORT_ENABLED=false` or on another `BUS_NAMESPACE`, reads as
+	// gone, and the pause ends after `QUIET_LOOKS_TO_RESUME` looks. Ending only
+	// once another build answered and went silent would hold every deploy whose
+	// build before left ahead of the first look to the ceiling instead.
 	return answeredItself && otherBuildsAnswering.length === 0;
 }
 

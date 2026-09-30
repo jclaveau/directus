@@ -21,6 +21,10 @@ import {
 import { _cache } from '../metrics/lib/instance.js';
 import {
 	useCacheRedis,
+	// Only for the keys saying how far the index is trusted, never the index: a
+	// FLUSHDB of the cache database must leave them (`useScriptedSharedRedis`).
+	// eslint-disable-next-line no-restricted-imports
+	useRedis,
 } from '../redis/index.js';
 import type { ChainableCommander, Redis } from 'ioredis';
 import {
@@ -54,6 +58,19 @@ const env = useEnv();
  * splitting changes nothing but how many calls it takes.
  */
 const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
+
+/**
+ * How many sets, and how many bytes of members, one `scopedCacheIndexFile` call
+ * files at most.
+ *
+ * Every member carries the read's whole fingerprint, so a read bounded to a list
+ * of primary keys files the same kilobytes under each of its hundreds of home
+ * pins: one call for all of them is a megabyte-sized script holding Redis for
+ * milliseconds, the blocking `SCOPED_CACHE_UNLINK_CHUNK` keeps a delete from.
+ * A call always takes one set, however large its members.
+ */
+const SCOPED_CACHE_INDEX_FILE_SETS = 25;
+const SCOPED_CACHE_INDEX_FILE_BYTES = 64 * 1024;
 
 /**
  * How many members one `SSCAN` of an index set is asked to look at per round trip.
@@ -237,31 +254,53 @@ return #gone
 `;
 
 /**
- * Name index sets in their collection's index-key set, and give that set an
- * expiry that only ever moves out, past `ARGV[1]` milliseconds — or none, for
- * `-1`.
+ * Name the index sets Redis still holds in their collection's index-key set,
+ * and give that set an expiry that only ever moves out, past the longest of
+ * theirs — or none, while one of them keeps none.
  *
  * The index-key set is how a collection-wide purge finds a collection's sets
  * without a keyspace SCAN, so it must outlive every set it names: a set it
  * lost holds entries no collection-wide purge reaches. Milliseconds rather
  * than the index script's seconds, because `TTL` rounds: an index-key set
  * 0.4 s short of the wanted expiry reads as not short, and would expire that
- * long before a set filed beside it.
+ * long before a set filed beside it. Each set's expiry is read here, so a fill
+ * moving one out can only land before the read or after the move.
  *
- * KEYS[1] is the index-key set, ARGV[1] the expiry and the rest the set names.
+ * KEYS[1] is the index-key set and the rest the set names. Answers how many it
+ * named.
  */
 export const scopedCacheCollectionIndexKeysRegisterScript = `
+local live = {}
+local want = 0
+local unbounded = false
+
+for i = 2, #KEYS do
+	local left = redis.call('PTTL', KEYS[i])
+	if left == -1 then
+		unbounded = true
+		live[#live + 1] = KEYS[i]
+	elseif left >= 0 then
+		want = math.max(want, left)
+		live[#live + 1] = KEYS[i]
+	end
+end
+
+if #live == 0 then
+	return 0
+end
+
 local existed = redis.call('EXISTS', KEYS[1])
-redis.call('SADD', KEYS[1], unpack(ARGV, 2))
-local want = tonumber(ARGV[1])
-if want < 0 then
+redis.call('SADD', KEYS[1], unpack(live))
+if unbounded then
 	redis.call('PERSIST', KEYS[1])
-	return
+	return #live
 end
 local ttl = redis.call('PTTL', KEYS[1])
 if existed == 0 or (ttl >= 0 and ttl < want) then
 	redis.call('PEXPIRE', KEYS[1], want)
 end
+
+return #live
 `;
 
 /**
@@ -297,36 +336,13 @@ return live
 `;
 
 /**
- * Take back what the completeness marker vouches for before a drop unlinks
- * anything: the marker goes, and the index generation moves, so a reap that read
- * the generation before this cannot write the marker back
- * (`scopedCacheIndexCompleteMarkScript`).
+ * The index generation as a reap reads it before its SCAN, seeded from `TIME` the
+ * way the purge counters are when there is none yet: a reap with no generation to
+ * name could never mark anything complete, and one seeded again never repeats a
+ * value a marker was written with.
  *
- * The generation is seeded from `TIME` the way the purge counters are, so one
- * recreated after a FLUSHDB never repeats a value a marker was written with. No
- * expiry: a marker is good for as long as the generation it names stands, and
- * only a drop or a changed build moves it.
- *
- * KEYS are the marker and the generation.
- */
-export const scopedCacheIndexInvalidateScript = `
-redis.call('DEL', KEYS[1])
-
-local now = redis.call('TIME')
-local seed = now[1] .. string.format('%06d', tonumber(now[2]))
-
-redis.call('SET', KEYS[2], seed, 'NX')
-
-return redis.call('INCR', KEYS[2])
-`;
-
-/**
- * The index generation and the wholesale counter as a reap reads them before its
- * SCAN, seeding the generation when a FLUSHDB took it: a reap with no generation
- * to name could never mark anything complete.
- *
- * KEYS are the generation and the wholesale counter. Answers with both, the
- * counter as `''` when there is none.
+ * KEYS is the generation, in the shared database. No expiry: a marker is good for
+ * as long as the generation it names stands, and only a changed build moves it.
  */
 export const scopedCacheIndexGenerationReadScript = `
 local now = redis.call('TIME')
@@ -334,34 +350,22 @@ local seed = now[1] .. string.format('%06d', tonumber(now[2]))
 
 redis.call('SET', KEYS[1], seed, 'NX')
 
-return { redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]) or '' }
+return redis.call('GET', KEYS[1])
 `;
 
 /**
- * Write the completeness marker, only while nothing dropped the index since the
- * reap read it: the generation still reads what it read, which a drop of this
- * build moves before it unlinks, and so does the wholesale counter, which a drop
- * of a build older than the generation moves after. A separate check and `SET`
- * let a drop start in between, and the marker then vouches for an index that
- * drop is cutting.
+ * Write the completeness marker, only while the generation still reads what the
+ * reap read before its SCAN and no fill pause runs: a deploy moves the one and
+ * opens the other in a single step (`scopedCacheIndexBuildRecordScript`). A
+ * separate check and `SET` let it land in between, and the marker then names
+ * the generation it moved away from, over sets the new build never saw named.
+ * All three sit in the shared database.
  *
- * Nor while a changed build's fill pause runs: the nodes of the build before
- * are still filing sets nothing names (`scopedCacheIndexBuildRecordScript`).
- *
- * KEYS are the marker, the generation, the wholesale counter and the fill
- * pause; ARGV the generation and the counter as the reap read them. Answers 1
- * when it wrote.
+ * KEYS are the marker, the generation and the fill pause; ARGV the generation
+ * as the reap read it. Answers 1 when it wrote.
  */
 export const scopedCacheIndexCompleteMarkScript = `
-if redis.call('GET', KEYS[2]) ~= ARGV[1] then
-	return 0
-end
-
-if redis.call('EXISTS', KEYS[4]) == 1 then
-	return 0
-end
-
-if (redis.call('GET', KEYS[3]) or '') ~= ARGV[2] then
+if redis.call('GET', KEYS[2]) ~= ARGV[1] or redis.call('EXISTS', KEYS[3]) == 1 then
 	return 0
 end
 
@@ -371,10 +375,10 @@ return 1
 `;
 
 /**
- * Record the build this process runs, and when it is not the one recorded, take
- * the completeness marker back the way a drop does. A build older than the
- * index-key sets, rolled back to and forward from, filed sets nothing names while
- * the marker a later build wrote still vouched for them.
+ * Record the build this process runs, and when it is not the one recorded, move
+ * the index generation, so the completeness marker no longer names it. A build
+ * older than the index-key sets, rolled back to and forward from, filed sets
+ * nothing names while the marker a later build wrote still vouched for them.
  *
  * A change also opens the fill pause, for at most ARGV[2] ms: the nodes
  * of the build before go on filling through a rolling deploy, and neither
@@ -382,9 +386,10 @@ return 1
  * process, so a replica booting on the recorded build joins the window already
  * running instead of filling through it.
  *
- * KEYS are the recorded build, the marker, the generation and the fill pause;
- * ARGV the build and the pause in ms, 0 for none. Answers whether the build
- * changed, 1 or 0, and the ms left of the pause, 0 when none runs.
+ * KEYS are the recorded build, the generation and the fill pause, all in the
+ * shared database, which a FLUSHDB of the cache database leaves; ARGV the build
+ * and the pause in ms, 0 for none. Answers whether the build changed, 1 or 0,
+ * and the ms left of the pause, 0 when none runs.
  */
 export const scopedCacheIndexBuildRecordScript = `
 local changed = 0
@@ -393,20 +398,19 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then
 	changed = 1
 
 	redis.call('SET', KEYS[1], ARGV[1])
-	redis.call('DEL', KEYS[2])
 
 	local now = redis.call('TIME')
 	local seed = now[1] .. string.format('%06d', tonumber(now[2]))
 
-	redis.call('SET', KEYS[3], seed, 'NX')
-	redis.call('INCR', KEYS[3])
+	redis.call('SET', KEYS[2], seed, 'NX')
+	redis.call('INCR', KEYS[2])
 
 	if tonumber(ARGV[2]) > 0 then
-		redis.call('SET', KEYS[4], ARGV[1], 'PX', ARGV[2])
+		redis.call('SET', KEYS[3], ARGV[1], 'PX', ARGV[2])
 	end
 end
 
-local pauseLeft = redis.call('PTTL', KEYS[4])
+local pauseLeft = redis.call('PTTL', KEYS[3])
 
 if pauseLeft < 0 then
 	pauseLeft = 0
@@ -469,10 +473,10 @@ type ScopedCacheIndexFileCommand = {
 
 type ScopedCacheCollectionIndexKeysRegisterCommand = {
 	scopedCacheCollectionIndexKeysRegister(
+		keyCount: number,
 		collectionIndexKeysKey: string,
-		expiryMilliseconds: number,
 		...indexKeys: string[]
-	): Promise<null>;
+	): Promise<number>;
 };
 
 type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexFileCommand;
@@ -481,6 +485,7 @@ type ScopedCacheIndexPipeline = ChainableCommander & ScopedCacheIndexFileCommand
 type ScopedCacheIndexFileCall = {
 	indexKeys: string[];
 	filingArguments: Array<string | number>;
+	memberBytes: number;
 };
 
 type ScopedCacheCollectionIndexKeysPruneCommand = {
@@ -507,35 +512,22 @@ type ScopedCacheIndexReapCommand = {
 	): Promise<number>;
 };
 
-type ScopedCacheIndexInvalidateCommand = {
-	scopedCacheIndexInvalidate(
-		markerKey: string,
-		generationKey: string,
-	): Promise<number>;
-};
-
 type ScopedCacheIndexGenerationReadCommand = {
-	scopedCacheIndexGenerationRead(
-		generationKey: string,
-		flushEpochKey: string,
-	): Promise<[string, string]>;
+	scopedCacheIndexGenerationRead(generationKey: string): Promise<string>;
 };
 
 type ScopedCacheIndexCompleteMarkCommand = {
 	scopedCacheIndexCompleteMark(
 		markerKey: string,
 		generationKey: string,
-		flushEpochKey: string,
 		fillPauseKey: string,
 		generationRead: string,
-		flushEpochRead: string,
 	): Promise<number>;
 };
 
 type ScopedCacheIndexBuildRecordCommand = {
 	scopedCacheIndexBuildRecord(
 		buildKey: string,
-		markerKey: string,
 		generationKey: string,
 		fillPauseKey: string,
 		buildIdentity: string,
@@ -566,7 +558,6 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexReapCommand
 	& ScopedCacheCollectionIndexKeysPruneCommand
 	& ScopedCacheCollectionIndexKeysRegisterCommand
-	& ScopedCacheIndexInvalidateCommand
 	& ScopedCacheIndexGenerationReadCommand
 	& ScopedCacheIndexCompleteMarkCommand
 	& ScopedCacheIndexBuildRecordCommand
@@ -576,8 +567,7 @@ type ScopedCacheScriptedRedis = Redis
 const clientsCarryingScripts = new WeakSet<Redis>();
 
 /**
- * The shared client, with the index-filing and counter-bump scripts registered as
- * commands on it.
+ * `redis` with the index scripts registered as commands on it.
  *
  * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
  * `NOSCRIPT` — so the index-filing script crosses the wire once per server rather
@@ -586,9 +576,7 @@ const clientsCarryingScripts = new WeakSet<Redis>();
  * Registration is per client and idempotent, but `defineCommand` rebuilds the
  * command each time, so the set keeps it to the first call per connection.
  */
-function useScriptedRedis(): ScopedCacheScriptedRedis {
-	const redis = useCacheRedis();
-
+function withScopedCacheScripts(redis: Redis): ScopedCacheScriptedRedis {
 	if (! clientsCarryingScripts.has(redis)) {
 		redis.defineCommand('scopedCacheIndexFile', {
 			lua: scopedCacheIndexFileScript,
@@ -604,7 +592,6 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 		});
 
 		redis.defineCommand('scopedCacheCollectionIndexKeysRegister', {
-			numberOfKeys: 1,
 			lua: scopedCacheCollectionIndexKeysRegisterScript,
 		});
 
@@ -612,23 +599,18 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 			lua: scopedCacheCollectionIndexKeysPruneScript,
 		});
 
-		redis.defineCommand('scopedCacheIndexInvalidate', {
-			numberOfKeys: 2,
-			lua: scopedCacheIndexInvalidateScript,
-		});
-
 		redis.defineCommand('scopedCacheIndexGenerationRead', {
-			numberOfKeys: 2,
+			numberOfKeys: 1,
 			lua: scopedCacheIndexGenerationReadScript,
 		});
 
 		redis.defineCommand('scopedCacheIndexCompleteMark', {
-			numberOfKeys: 4,
+			numberOfKeys: 3,
 			lua: scopedCacheIndexCompleteMarkScript,
 		});
 
 		redis.defineCommand('scopedCacheIndexBuildRecord', {
-			numberOfKeys: 4,
+			numberOfKeys: 3,
 			lua: scopedCacheIndexBuildRecordScript,
 		});
 
@@ -646,6 +628,21 @@ function useScriptedRedis(): ScopedCacheScriptedRedis {
 	}
 
 	return redis as ScopedCacheScriptedRedis;
+}
+
+/** The client of the cache database: the index, its entries, their counters. */
+function useScriptedRedis(): ScopedCacheScriptedRedis {
+	return withScopedCacheScripts(useCacheRedis());
+}
+
+/**
+ * The client of the shared database: what says how far the index can be trusted
+ * rather than what it holds — the recorded build, the index generation, the
+ * completeness marker, the fill pause and its watch. A FLUSHDB of the cache
+ * database must leave those: taking the pause resumes the fills it holds back.
+ */
+function useScriptedSharedRedis(): ScopedCacheScriptedRedis {
+	return withScopedCacheScripts(useRedis());
 }
 
 /**
@@ -858,37 +855,46 @@ export function scopedCacheEpochKey(collection: string): string {
  * The key saying the index-key sets name every set the index holds. It holds the
  * index generation a reap read before its SCAN, and vouches for them only while
  * the generation still reads the same (`collectionIndexKeysComplete`). No
- * expiry: a drop is what ends it, deleting it before it unlinks anything, and
- * inside the prefix so a drop of an older build takes it too.
+ * expiry, and nothing deletes it: only a changed build can leave a set nothing
+ * names, and that build moves the generation. In the shared database, as the
+ * generation: a FLUSHDB of the cache one takes every entry with the index-key
+ * sets naming them, and what fills after it names its sets as it files them.
  */
 function scopedCacheCollectionIndexKeysCompleteKey(): string {
-	return `${scopedCacheIndexPrefix()}collection-index-keys-complete`;
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-collection-index-keys-complete`;
 }
 
 /**
- * The counter a drop of the index moves, and the completeness marker names.
- * Outside the prefix, so the drop that moves it does not unlink it, and apart
- * from the purge counters: the wholesale one expires, and a marker naming it
- * went back to a SCAN every day nothing flushed.
+ * The counter a changed build moves, and the completeness marker names. In the
+ * shared database, so a FLUSHDB of the cache one leaves it with the marker, and
+ * apart from the purge counters: the wholesale one expires,
+ * and a marker naming it went back to a SCAN every day nothing flushed.
  */
 function scopedCacheIndexGenerationKey(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`;
 }
 
-/** The build the last process to boot ran. Outside the prefix, as the generation. */
+/**
+ * The build the last process to boot ran. In the shared database, as the
+ * generation.
+ */
 function scopedCacheIndexBuildKey(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-index-build`;
 }
 
 /**
  * Set while a changed build holds its fills (`scopedCacheIndexBuildRecordScript`).
- * Outside the prefix, as the generation: a drop of the index must not end it.
+ * In the shared database, as the generation: neither a drop of the index nor a
+ * FLUSHDB of the cache database may end it.
  */
 function scopedCacheFillPauseKey(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause`;
 }
 
-/** Names the node watching the fill pause (`scopedCacheFillPauseWatchScript`). */
+/**
+ * Names the node watching the fill pause, beside it
+ * (`scopedCacheFillPauseWatchScript`).
+ */
 function scopedCacheFillPauseWatchKey(): string {
 	return `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause-watch`;
 }
@@ -916,18 +922,17 @@ function scopedCacheCollectionIndexGlob(collection: string): string {
  * they existed.
  *
  * A fill names every set it files into, but some sets were filed with nothing
- * naming them: by the build before the index-key sets, or before a flush that
- * dropped an index-key set and failed to drop a set it named. Only the reap
- * names those, so the marker is written by a reap that walked the whole index,
- * and holds the index generation as it was BEFORE that walk. A drop moves the
- * generation before it unlinks anything, so one landing during the walk leaves
- * the marker unwritten, and one landing after it leaves a marker naming a
- * generation that is gone. A generation a FLUSHDB took reads as none and is
- * recreated at a value it never held, so neither can match an earlier marker.
+ * naming them, by the build before the index-key sets. Only the reap names
+ * those, so the marker is written by a reap that walked the whole index, and
+ * holds the index generation as it was BEFORE that walk. A drop of this build
+ * unlinks only the index sets, never the index-key sets naming them, so the
+ * marker still tells the truth after it: a name whose set is gone reads empty.
+ * A FLUSHDB of the cache database leaves the marker too: it takes every entry
+ * with the sets naming them, and each later fill names the sets it files.
  *
- * A boot of a build other than the last one recorded takes the marker back
+ * A boot of a build other than the last one recorded moves the generation
  * (`recordBuildIdentity`), so a build rolled back to and forward again leaves
- * none standing over the sets it filed. The nodes of an older build go on
+ * no marker naming it over the sets it filed. The nodes of an older build go on
  * filing through a rolling deploy, so that boot also opens a fill pause during
  * which no marker is written, and the reap at its close names what they filed.
  * Accepted: a node of the older build outliving the pause files sets nothing
@@ -935,7 +940,7 @@ function scopedCacheCollectionIndexGlob(collection: string): string {
  * collection-wide purge misses their entries.
  */
 async function collectionIndexKeysComplete(): Promise<boolean> {
-	const [marker, generation] = await useCacheRedis().mget([
+	const [marker, generation] = await useRedis().mget([
 		scopedCacheCollectionIndexKeysCompleteKey(),
 		scopedCacheIndexGenerationKey(),
 	]);
@@ -1577,28 +1582,30 @@ async function reapIndexMembers(
 }
 
 /**
- * Name one set in its collection's index-key set with the set's own expiry,
- * which the index-key set then keeps at least. Not one script with the read: a
- * fill moving the set's expiry out in between moves the index-key set's past
- * it too.
+ * Name the sets one SCAN page found in their collections' index-key sets, one
+ * script per collection and chunk, which reads each set's own expiry.
  */
 async function registerCollectionIndexKeys(
-	collection: string,
-	indexKey: string,
+	indexKeysByCollection: ReadonlyMap<string, readonly string[]>,
 ): Promise<void> {
-	const redis = useScriptedRedis();
-	const indexExpiry = await redis.pttl(indexKey);
+	for (const [collection, indexKeys] of indexKeysByCollection) {
+		for (
+			let at = 0;
+			at < indexKeys.length;
+			at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
+		) {
+			const chunkKeys = indexKeys.slice(
+				at,
+				at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS,
+			);
 
-	// Gone since it was read: nothing left to name.
-	if (indexExpiry === -2) {
-		return;
+			await useScriptedRedis().scopedCacheCollectionIndexKeysRegister(
+				chunkKeys.length + 1,
+				scopedCacheCollectionIndexKeysKey(collection),
+				...chunkKeys,
+			);
+		}
 	}
-
-	await redis.scopedCacheCollectionIndexKeysRegister(
-		scopedCacheCollectionIndexKeysKey(collection),
-		indexExpiry,
-		indexKey,
-	);
 }
 
 const redisStore: ScopedCacheStore = {
@@ -1635,6 +1642,10 @@ const redisStore: ScopedCacheStore = {
 				return renderScopedCacheIndexMember(fingerprint, key);
 			});
 
+			const filingBytes = members.reduce((total, member) => {
+				return total + Buffer.byteLength(member);
+			}, 0);
+
 			const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(
 				fingerprint.collection,
 			);
@@ -1652,23 +1663,26 @@ const redisStore: ScopedCacheStore = {
 				let fileCall = collectionCalls.at(-1);
 
 				const callIsFull = fileCall !== undefined && (
-					fileCall.indexKeys.length >= SCOPED_CACHE_INDEX_CHUNK_MEMBERS
+					fileCall.indexKeys.length >= SCOPED_CACHE_INDEX_FILE_SETS
+					|| fileCall.memberBytes + filingBytes
+					> SCOPED_CACHE_INDEX_FILE_BYTES
 					|| fileCall.filingArguments.length + members.length
 					> SCOPED_CACHE_INDEX_CHUNK_MEMBERS * 2
 				);
 
 				if (fileCall === undefined || callIsFull) {
-					fileCall = { indexKeys: [], filingArguments: [] };
+					fileCall = { indexKeys: [], filingArguments: [], memberBytes: 0 };
 					collectionCalls.push(fileCall);
 				}
 
 				fileCall.indexKeys.push(indexKey);
 				fileCall.filingArguments.push(members.length, ...members);
+				fileCall.memberBytes += filingBytes;
 			}
 		}
 
-		// One call per collection files its sets and names them, so a set's name
-		// crosses the wire once per fill, as the set's own key.
+		// Each call files its sets and names them, so a set's name crosses the
+		// wire once per fill, as the set's own key.
 		for (const [collectionIndexKeysKey, collectionCalls] of callsByCollectionKey) {
 			for (const { indexKeys, filingArguments } of collectionCalls) {
 				pipeline.scopedCacheIndexFile(
@@ -1935,9 +1949,11 @@ const redisStore: ScopedCacheStore = {
 	 *
 	 * A pass that reaches its end has named every set the index held when it
 	 * began, so it writes the marker `collectionIndexKeysComplete` trusts, holding
-	 * the index generation read before the SCAN — unless a drop moved it since
-	 * (`scopedCacheIndexCompleteMarkScript`). A pass that throws writes nothing
-	 * and leaves the marker as it was.
+	 * the index generation read before the SCAN — unless a changed build moved
+	 * it since or a fill pause runs (`scopedCacheIndexCompleteMarkScript`). A
+	 * flush during the pass does not stop it: the names of the sets it unlinks
+	 * read empty. A pass that
+	 * throws writes nothing and leaves the marker as it was.
 	 */
 	async reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
@@ -1953,13 +1969,10 @@ const redisStore: ScopedCacheStore = {
 		const indexKeyPrefix = `${scopedCacheIndexPrefix()}fingerprint:`;
 		const sweptKeyPrefix = `${scopedCacheIndexPrefix()}swept:`;
 
-		// Before the SCAN: a drop landing during it moves the generation past what
-		// the marker will hold.
-		const [generationRead, flushEpochRead] = await useScriptedRedis()
-			.scopedCacheIndexGenerationRead(
-				scopedCacheIndexGenerationKey(),
-				scopedCacheEpochKey('*'),
-			);
+		// Before the SCAN: a deploy landing during it moves the generation past
+		// what the marker will be written against.
+		const generationRead = await useScriptedSharedRedis()
+			.scopedCacheIndexGenerationRead(scopedCacheIndexGenerationKey());
 
 		// The whole prefix rather than `fingerprint:*` alone, so the index-key
 		// sets come back from the same pass: MATCH filters after the walk, so the
@@ -1999,6 +2012,8 @@ const redisStore: ScopedCacheStore = {
 
 			tally.indexKeys += indexKeys.length;
 
+			const pageKeysByCollection = new Map<string, string[]>();
+
 			for (const indexKey of indexKeys) {
 				let scanCursor = '0';
 				let setCollection: string | null = null;
@@ -2031,28 +2046,32 @@ const redisStore: ScopedCacheStore = {
 				while (scanCursor !== '0');
 
 				if (setCollection !== null) {
-					await registerCollectionIndexKeys(setCollection, indexKey);
+					const collectionKeys = pageKeysByCollection.get(setCollection) ?? [];
+
+					collectionKeys.push(indexKey);
+					pageKeysByCollection.set(setCollection, collectionKeys);
 				}
 			}
+
+			await registerCollectionIndexKeys(pageKeysByCollection);
 		}
 
-		const markedComplete = await useScriptedRedis()
+		// No check of the wholesale counter: a flush during the pass unlinks sets
+		// the index-key sets keep naming, and a name whose set is gone reads empty.
+		const markedComplete = await useScriptedSharedRedis()
 			.scopedCacheIndexCompleteMark(
 				scopedCacheCollectionIndexKeysCompleteKey(),
 				scopedCacheIndexGenerationKey(),
-				scopedCacheEpochKey('*'),
 				scopedCacheFillPauseKey(),
 				generationRead,
-				flushEpochRead,
 			) === 1;
 
 		useLogger().info(
 			markedComplete
 				? `[scoped-cache] index-key sets marked complete at generation `
 				+ `${generationRead}`
-				: `[scoped-cache] index-key sets not marked complete: the index was `
-				+ `dropped since generation ${generationRead}, or a deploy's fill `
-				+ 'pause runs',
+				: `[scoped-cache] index-key sets not marked complete: a deploy `
+				+ `since generation ${generationRead}, or a deploy's fill pause runs`,
 		);
 
 		return tally;
@@ -2067,22 +2086,27 @@ const redisStore: ScopedCacheStore = {
 	 * The keys the pre-scoped-cache-index layout left behind are not swept here:
 	 * they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
 	 *
-	 * The marker goes first, and the generation moves with it, before anything
-	 * is unlinked: a drop cut short leaves index-key sets naming less than the
-	 * index holds, which only a SCAN still reaches. Refused, it throws before the
-	 * unlink, so no drop ever leaves a marker vouching for what it cut.
+	 * Only the sets holding members go. The index-key sets and the swept
+	 * index-key set stay, as the marker in the shared database does: a drop cut
+	 * short then leaves names whose set is gone, which read empty, never a set
+	 * nothing names, so the marker still tells the truth and the collection-wide
+	 * reads keep trusting the index-key sets through a flush. The names go with
+	 * the reap the drop asks for.
 	 */
 	async dropIndex(): Promise<ScopedCacheUnlinkTally> {
 		const tally = { dropped: 0, refused: 0 };
+		const collectionIndexKeysPrefix = scopedCacheCollectionIndexKeysKey('');
 
-		await useScriptedRedis().scopedCacheIndexInvalidate(
-			scopedCacheCollectionIndexKeysCompleteKey(),
-			scopedCacheIndexGenerationKey(),
-		);
+		const sweptIndexKeysKey = scopedCacheSweptIndexKeysKey();
 
-		for await (const batch of scanScopedCacheKeys(
+		for await (const foundKeys of scanScopedCacheKeys(
 			`${scopedCacheIndexGlobPrefix()}*`,
 		)) {
+			const batch = foundKeys.filter((foundKey) => {
+				return foundKey !== sweptIndexKeysKey
+					&& ! foundKey.startsWith(collectionIndexKeysPrefix);
+			});
+
 			const batchTally = await unlinkScopedCacheKeys(batch);
 
 			tally.dropped += batchTally.dropped;
@@ -2121,10 +2145,9 @@ const redisStore: ScopedCacheStore = {
 		buildIdentity: string,
 		fillPauseMs: number,
 	): Promise<ScopedCacheBuildRecord> {
-		const [changed, fillPauseLeftMs] = await useScriptedRedis()
+		const [changed, fillPauseLeftMs] = await useScriptedSharedRedis()
 			.scopedCacheIndexBuildRecord(
 				scopedCacheIndexBuildKey(),
-				scopedCacheCollectionIndexKeysCompleteKey(),
 				scopedCacheIndexGenerationKey(),
 				scopedCacheFillPauseKey(),
 				buildIdentity,
@@ -2138,7 +2161,7 @@ const redisStore: ScopedCacheStore = {
 		watcherNodeId: string,
 		watchMs: number,
 	): Promise<ScopedCacheFillPauseLook> {
-		const [fillPauseLeftMs, watching] = await useScriptedRedis()
+		const [fillPauseLeftMs, watching] = await useScriptedSharedRedis()
 			.scopedCacheFillPauseWatch(
 				scopedCacheFillPauseKey(),
 				scopedCacheFillPauseWatchKey(),
@@ -2150,7 +2173,7 @@ const redisStore: ScopedCacheStore = {
 	},
 
 	async endFillPause(buildIdentity: string): Promise<boolean> {
-		const ended = await useScriptedRedis().scopedCacheFillPauseEnd(
+		const ended = await useScriptedSharedRedis().scopedCacheFillPauseEnd(
 			scopedCacheFillPauseKey(),
 			scopedCacheFillPauseWatchKey(),
 			buildIdentity,

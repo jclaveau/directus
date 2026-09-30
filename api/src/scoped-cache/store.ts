@@ -227,8 +227,8 @@ export interface ScopedCacheStore {
 	 * A moved set no swept index-key set names is named there, for the recovery
 	 * to release (`releaseStrandedScopedCacheSweeps`). And every set is named in
 	 * its collection's index-key set, so a pass that reaches its end lets the
-	 * collection-wide reads trust those sets until the next drop, rather than
-	 * SCAN the keyspace — unless a drop started during the pass.
+	 * collection-wide reads trust those sets, rather than SCAN the keyspace —
+	 * unless a deploy started during the pass or a fill pause runs.
 	 */
 	reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
@@ -237,7 +237,7 @@ export interface ScopedCacheStore {
 
 	/**
 	 * Whether the collection-wide reads trust the index-key sets right now: a
-	 * reap marked them complete, and no drop started since.
+	 * reap marked them complete, and no deploy or flush took that back since.
 	 */
 	indexKeysComplete(): Promise<boolean>;
 
@@ -269,9 +269,9 @@ export interface ScopedCacheStore {
 	endFillPause(buildIdentity: string): Promise<boolean>;
 
 	/**
-	 * Drop the whole index, reporting what it cost. The collection-wide reads stop
-	 * trusting the index-key sets BEFORE anything is dropped, and THROWS when the
-	 * store refuses that: a drop cut short leaves sets those no longer name.
+	 * Drop every set the index files members in, reporting what it cost. The
+	 * index-key sets naming them stay, and so does their completeness: a name
+	 * whose set is gone reads empty, and a reap releases it.
 	 */
 	dropIndex(): Promise<ScopedCacheUnlinkTally>;
 

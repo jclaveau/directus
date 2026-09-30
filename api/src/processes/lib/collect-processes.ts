@@ -178,6 +178,7 @@ export function buildProcessesTree(
  */
 export async function collectProcessReports(
 	details: ProcessDetail[],
+	{ nodeBuildOnly = false }: { nodeBuildOnly?: boolean } = {},
 ): Promise<ProcessesReportMessage[]> {
 	const bus = useBus();
 	const requestId = randomUUID();
@@ -192,7 +193,9 @@ export async function collectProcessReports(
 	await bus.subscribe<ProcessesReportMessage>(PROCESSES_REPORT_CHANNEL, collect);
 
 	try {
-		const query: ProcessesQueryMessage = { requestId, details };
+		const query: ProcessesQueryMessage = nodeBuildOnly
+			? { requestId, details, nodeBuildOnly }
+			: { requestId, details };
 
 		await bus.publish(PROCESSES_QUERY_CHANNEL, query);
 

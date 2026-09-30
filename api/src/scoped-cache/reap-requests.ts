@@ -1,5 +1,6 @@
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from './config.js';
+import { scopedCacheFillPaused } from './fill-pause.js';
 import { useScopedCacheStore } from './store.js';
 
 // Short-lived and renewed while the pass goes on, as the audit run's is: a
@@ -13,21 +14,38 @@ const REAP_LOCK_POLL_MS = 5_000;
 
 let requestedPass: Promise<void> | null = null;
 let passRequestedAgain = false;
+let forcedPassRequested = false;
+
+type ScopedCacheIndexReapRequest = {
+	/**
+	 * Walk the index even while its index-key sets are marked complete. What a
+	 * drop asks for: it keeps the names of the sets it unlinked, marker and all,
+	 * and only a pass releases them.
+	 */
+	forcePass?: boolean;
+};
 
 /**
  * Walk the index once more, soon, unless its index-key sets are already marked
- * complete. What a drop of the index and a boot ask for: until a reap walks it,
- * every collection-wide purge SCANs the keyspace, and the scheduled reap may be
- * hours away or switched off.
+ * complete — `forcePass` walks it anyway — or fills are paused. What a drop of
+ * the index and a boot ask for: until a reap walks it, every collection-wide
+ * purge SCANs the keyspace, and the scheduled reap may be hours away or switched
+ * off.
  *
- * Coalesced: a request while one is waiting joins it, and one while a pass runs
- * gets one more pass after it, so a burst of flushes costs one or two. Never
- * rejects and never blocks the caller's own work: a pass that fails is logged,
- * and costs SCANs until the next, never a stale hit.
+ * Coalesced: a request while one is waiting joins it, forcing it when it forces,
+ * and one while a pass runs gets one more pass after it, so a burst of flushes
+ * costs one or two. Never rejects and never blocks the caller's own work: a pass
+ * that fails is logged, and costs SCANs until the next, never a stale hit.
  */
-export function requestScopedCacheIndexReap(): Promise<void> {
+export function requestScopedCacheIndexReap(
+	reapRequest: ScopedCacheIndexReapRequest = {},
+): Promise<void> {
 	if (!scopedCachePurgeEnabled()) {
 		return Promise.resolve();
+	}
+
+	if (reapRequest.forcePass === true) {
+		forcedPassRequested = true;
 	}
 
 	if (requestedPass !== null) {
@@ -48,9 +66,12 @@ async function runRequestedReaps(): Promise<void> {
 		await waitUnreferenced(REAP_REQUEST_DEBOUNCE_MS);
 		// After the wait: what arrived during it is answered by this pass.
 		passRequestedAgain = false;
+		const passForced = forcedPassRequested;
+
+		forcedPassRequested = false;
 
 		try {
-			await reapUntilMarkedComplete();
+			await reapUntilMarkedComplete(passForced);
 		}
 		catch (error: any) {
 			useLogger().warn(
@@ -63,9 +84,14 @@ async function runRequestedReaps(): Promise<void> {
 }
 
 // A pass already holding the lock may have read the index before the drop that
-// asked for this one, and then marks nothing: wait for it, and look again.
-async function reapUntilMarkedComplete(): Promise<void> {
-	while (await useScopedCacheStore().indexKeysComplete() === false) {
+// asked for this one, and then marks nothing: wait for it, and look again. None
+// while fills are paused: the pause refuses its mark, and its end asks for the
+// one pass that can write it, and releases what the drop left.
+async function reapUntilMarkedComplete(passForced: boolean): Promise<void> {
+	while (
+		!scopedCacheFillPaused()
+		&& (passForced || await useScopedCacheStore().indexKeysComplete() === false)
+	) {
 		if (await runScopedCacheIndexReap()) {
 			return;
 		}
