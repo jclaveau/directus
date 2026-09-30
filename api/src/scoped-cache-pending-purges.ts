@@ -14,10 +14,15 @@ const TABLE = 'directus_scoped_cache_pending_purges';
  *
  * Measured by `tests/perf/pending-retry.perf.test.ts`: both costs grow with the
  * entries cached, and they cross at about 35 fingerprints whatever that number.
- * Over 100 000 entries, 101 fingerprints drained in 8.1 s holding the event loop
- * 68 ms at most, and 1001 in 69 s holding it 400 ms, where a collection purge of
- * 10 000 entries held it 15 ms. The default keeps a page of keys precise, at a
- * loop block a request can wait out.
+ * Over 10 000 entries, 101 fingerprints drained in 771 ms holding the event loop
+ * 40 ms at most, and 1001 in 5.1 s holding it 273 ms, where a collection purge
+ * took 352 ms holding it 15 ms. Over 100 000 entries, 101 held it 68 ms and 1001
+ * held it 400 ms; the collection purge was not measured there. The default is
+ * set by that loop block, not by the crossover.
+ *
+ * A write records one fingerprint per key plus the bare one, so the default
+ * keeps a write of up to 99 keys precise: a full batch of 100 is retried as its
+ * whole collection.
  */
 export function scopedCachePurgeRetryMaxFingerprints(): number {
 	return cacheSetting('scoped_purge_retry_max_fingerprints');
