@@ -25,7 +25,7 @@ describe('cacheSettingRows', () => {
 			fallback: 0,
 		});
 
-		expect(rows[7]).toMatchObject({
+		expect(rows[6]).toMatchObject({
 			field: 'scoped_index_ttl_factor',
 			variable: 'CACHE_SCOPED_INDEX_TTL_FACTOR',
 			value: 2,

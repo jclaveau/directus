@@ -637,7 +637,7 @@ describe('System MCP Tests', () => {
 			expect(cleared.body.result.structuredContent.sharedSettings).toBeNull();
 
 			expect(cleared.body.result.structuredContent.resolved.scoped_index_scan_count)
-				.toEqual({ value: 1000, source: 'default', fallback: 1000 });
+				.toEqual({ value: 1000, source: 'env', fallback: 1000 });
 		});
 	});
 

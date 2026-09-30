@@ -231,9 +231,9 @@ const CACHE_SETTINGS_OUTPUT = {
 		resolved: {
 			type: 'object',
 			description: 'Every field as this node reads it: `value`, '
-				+ '`source` — "settings", "env" for the environment variable it '
-				+ 'overrides, or "default" for a built-in value — and `fallback`, '
-				+ 'what clearing the field would leave it on.',
+				+ '`source` — "settings", or "env" for the environment variable '
+				+ 'it overrides — and `fallback`, what clearing the field would '
+				+ 'leave it on.',
 		},
 	},
 } as const;
