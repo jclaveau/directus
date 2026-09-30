@@ -5,7 +5,7 @@ import { recordScopedCacheBuild } from '../cache-build-identity.js';
 import { useLogger } from '../logger/index.js';
 import { redisConfigAvailable, useCacheRedis } from '../redis/index.js';
 import { listPendingScopedCachePurges } from '../scoped-cache-pending-purges.js';
-import { scopedCacheFillPaused } from './fill-pause.js';
+import { scopedCacheBuildRecorded, scopedCacheFillPaused } from './fill-pause.js';
 import { startScopedCachePurgeRecovery } from './purge.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
 
@@ -23,7 +23,10 @@ vi.mock('../bus/index.js', () => ({ useBus: vi.fn() }));
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
 vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
 vi.mock('../emitter.js', () => ({ default: { emitAction: vi.fn() } }));
-vi.mock('./fill-pause.js', () => ({ scopedCacheFillPaused: vi.fn() }));
+
+vi.mock('./fill-pause.js', () => {
+	return { scopedCacheBuildRecorded: vi.fn(), scopedCacheFillPaused: vi.fn() };
+});
 
 vi.mock('./reap-requests.js', () => {
 	return { requestScopedCacheIndexReap: vi.fn() };
@@ -76,6 +79,10 @@ describe('startScopedCachePurgeRecovery on a reconnect', () => {
 	`, async () => {
 		vi.mocked(scopedCacheFillPaused).mockReturnValue(false);
 
+		vi.mocked(scopedCacheBuildRecorded)
+			.mockReturnValueOnce(false)
+			.mockReturnValue(true);
+
 		startScopedCachePurgeRecovery();
 
 		redisOn.mock.calls[0]![1]();
@@ -98,6 +105,30 @@ describe('startScopedCachePurgeRecovery on a reconnect', () => {
 		record Redis refused leaves them paused until one gets through
 	`, async () => {
 		vi.mocked(scopedCacheFillPaused).mockReturnValue(true);
+
+		startScopedCachePurgeRecovery();
+
+		redisOn.mock.calls[0]![1]();
+
+		await vi.waitFor(() => {
+			expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
+		});
+
+		redisOn.mock.calls[0]![1]();
+
+		await vi.waitFor(() => {
+			expect(requestScopedCacheIndexReap).toHaveBeenCalledTimes(2);
+		});
+
+		expect(recordScopedCacheBuild).toHaveBeenCalledTimes(2);
+	});
+
+	it(oneLine`
+		records the build again on a later ready once a refused record's pause
+		ran to its ceiling — the build is still unrecorded
+	`, async () => {
+		vi.mocked(scopedCacheFillPaused).mockReturnValue(false);
+		vi.mocked(scopedCacheBuildRecorded).mockReturnValue(false);
 
 		startScopedCachePurgeRecovery();
 
