@@ -579,14 +579,12 @@ cache_settings_field: Field
 cache_settings_value: Value
 cache_settings_source_settings: shared settings
 cache_settings_source_env: environment
-cache_settings_source_default: default
 cache_settings_cancel: Discard this change
 cache_settings_apply: Apply this change
-cache_settings_reset_default: 'Reset to the default:'
 cache_settings_reset_env: 'Reset to the environment:'
 cache_settings_apply_all: Apply all changes
 cache_settings_reset_all: Reset all changes
-cache_settings_reset_fallbacks: Reset to env and defaults
+cache_settings_reset_fallbacks: Reset to the environment
 cache_settings_key: Stored in
 cache_settings_set_by: Configured
 cache_settings_from_admin: the admin

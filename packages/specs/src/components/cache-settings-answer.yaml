@@ -34,7 +34,7 @@ properties:
         value: {}
         source:
           type: string
-          enum: [settings, env, default]
+          enum: [settings, env]
         fallback: {}
     example:
       audit_limit:

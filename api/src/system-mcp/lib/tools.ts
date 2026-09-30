@@ -916,9 +916,9 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Read the cache settings',
 			description:
 				'The cache settings every node reads live, and what each field '
-				+ 'resolves to with where it comes from: the setting, the environment '
-				+ 'variable it overrides, or a built-in default. Read it before '
-				+ 'changing any of them.',
+				+ 'resolves to with where it comes from: the setting, or the '
+				+ 'environment variable it overrides. Read it before changing any of '
+				+ 'them.',
 			inputSchema: { type: 'object', properties: {} },
 			outputSchema: CACHE_SETTINGS_OUTPUT,
 			annotations: READ_ONLY,
@@ -948,9 +948,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '
 							+ '0, over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
 							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
-							+ 'scoped_index_scan_count (an integer from 1 to 100000, '
-							+ 'default 1000), scoped_index_ttl_factor (a number from 1 to '
-							+ '100, default 2). A null value clears that field.',
+							+ 'scoped_index_scan_count (an integer from 1 to 100000, over '
+							+ 'CACHE_SCOPED_INDEX_SCAN_COUNT), scoped_index_ttl_factor (a '
+							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR). A '
+							+ 'null value clears that field.',
 					},
 					clear: {
 						type: 'boolean',

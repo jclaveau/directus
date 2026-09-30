@@ -3,8 +3,8 @@ get:
   description: >
     The cache settings stored in the settings singleton, the column they live
     in, and every field as the answering node resolves it: its value, whether
-    that comes from the settings, the environment or a built-in default, and
-    what clearing the field would leave it on. Admin only.
+    that comes from the settings or the environment, and what clearing the
+    field would leave it on. Admin only.
   operationId: read-cache-settings
   responses:
     '200':
@@ -72,13 +72,13 @@ patch:
               minimum: 1
               maximum: 100000
               nullable: true
-              description: Default 1000.
+              description: Over CACHE_SCOPED_INDEX_SCAN_COUNT.
             scoped_index_ttl_factor:
               type: number
               minimum: 1
               maximum: 100
               nullable: true
-              description: Default 2.
+              description: Over CACHE_SCOPED_INDEX_TTL_FACTOR.
           example:
             audit_limit: 40
             value_max_size: null

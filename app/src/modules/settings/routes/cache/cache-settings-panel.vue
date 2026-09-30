@@ -140,9 +140,7 @@ function sourceLabel(source: CacheSettingSource | null): string {
 		return t('cache_settings_source_settings', 'shared settings');
 	}
 
-	return source === 'env'
-		? t('cache_settings_source_env', 'environment')
-		: t('cache_settings_source_default', 'default');
+	return t('cache_settings_source_env', 'environment');
 }
 
 /** The change being typed, else what the node runs on. */
@@ -192,7 +190,7 @@ function refusesBadInput(rows: CacheSettingRow[]): boolean {
 	}
 
 	error.value = `${t('not_a_number')}: ${
-		unreadable.map((row) => row.variable ?? row.field).join(', ')
+		unreadable.map((row) => row.variable).join(', ')
 	}`;
 
 	return true;
@@ -265,9 +263,7 @@ async function resetToFallbacks(): Promise<void> {
 
 /** What resetting a field would leave it on, named in the button that does it. */
 function resetsTo(row: CacheSettingRow): string {
-	const back = row.variable === null
-		? t('cache_settings_reset_default', 'Reset to the default:')
-		: t('cache_settings_reset_env', 'Reset to the environment:');
+	const back = t('cache_settings_reset_env', 'Reset to the environment:');
 
 	return row.fallback === null
 		? `${back} —`
@@ -289,7 +285,7 @@ function resetsTo(row: CacheSettingRow): string {
 			<tbody>
 				<tr v-for="row in rows" :key="row.field">
 					<td>
-						<span v-tooltip="row.description">{{ row.variable ?? row.field }}</span>
+						<span v-tooltip="row.description">{{ row.variable }}</span>
 					</td>
 					<td class="edit">
 						<!-- `v-select`'s own root has no layout box, so the cell's flex
@@ -332,7 +328,7 @@ function resetsTo(row: CacheSettingRow): string {
 								:step="row.step"
 								:suffix="row.unit"
 								:disabled="saving"
-								:aria-label="row.variable ?? row.field"
+								:aria-label="row.variable"
 								@update:model-value="updateDraft(row.field, $event)"
 								@input="trackBadInput(row.field, $event)"
 								@keyup.enter="applyRow(row)"
@@ -402,7 +398,7 @@ function resetsTo(row: CacheSettingRow): string {
 				:disabled="!answer?.sharedSettings || saving"
 				@click="resetToFallbacks"
 			>
-				{{ t('cache_settings_reset_fallbacks', 'Reset to env and defaults') }}
+				{{ t('cache_settings_reset_fallbacks', 'Reset to the environment') }}
 			</v-button>
 		</div>
 

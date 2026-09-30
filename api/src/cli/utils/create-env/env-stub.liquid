@@ -203,6 +203,18 @@ CACHE_ENABLED=false
 # pinned to each value on its own — wider purges, never staler. [16]
 # CACHE_SCOPED_MAX_QUERY_CASES=16
 
+# How many members one SSCAN of a scoped index set asks Redis for per round trip.
+# Higher is fewer round trips per purge, lower holds Redis for less per command.
+# From 1 to 100000; a value outside is read as the default. The cache page can
+# set it live for every node. [1000]
+# CACHE_SCOPED_INDEX_SCAN_COUNT=1000
+
+# How many cache TTLs a scoped index set outlives the entries it lists by, as a
+# net for filings a crashed fill left behind. From 1 to 100: below 1 the index
+# would expire before its entries and a purge would miss them, so a value outside
+# is read as the default. The cache page can set it live for every node. [2]
+# CACHE_SCOPED_INDEX_TTL_FACTOR=2
+
 # How often a purge that failed with Redis still reachable (OOM under noeviction,
 # a LOADING replica) is retried from its recorded row; a reconnect retries it
 # too. 0 leaves the reconnect as the only retry. [1m]

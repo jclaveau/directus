@@ -995,8 +995,8 @@ const cacheSettingsAnswer: CacheSettingsAnswer = {
 		stats_max_bytes: { value: '2gb', source: 'env', fallback: '2gb' },
 		audit_limit: { value: 40, source: 'settings', fallback: 0 },
 		audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
-		scoped_index_scan_count: { value: 1000, source: 'default', fallback: 1000 },
-		scoped_index_ttl_factor: { value: 2, source: 'default', fallback: 2 },
+		scoped_index_scan_count: { value: 1000, source: 'env', fallback: 1000 },
+		scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
 	},
 };
 

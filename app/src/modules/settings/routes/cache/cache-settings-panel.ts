@@ -2,7 +2,7 @@
 export type CacheSettingKind = 'boolean' | 'number' | 'size' | 'text';
 
 /** Where a field's value comes from, as the api resolves it. */
-export type CacheSettingSource = 'settings' | 'env' | 'default';
+export type CacheSettingSource = 'settings' | 'env';
 
 export interface CacheSettingOption {
 	text: string;
@@ -11,11 +11,8 @@ export interface CacheSettingOption {
 
 export interface CacheSettingField {
 	field: string;
-	/**
-	 * The variable the field overrides, which is what the page names it by, or
-	 * none where a built-in default is what it overrides.
-	 */
-	variable: string | null;
+	/** The variable the field overrides, which is what the page names it by. */
+	variable: string;
 	kind: CacheSettingKind;
 	/** What this field does to the cache, in a sentence, shown on hover. */
 	description: string;
@@ -132,7 +129,7 @@ export const CACHE_SETTING_FIELDS: CacheSettingField[] = [
 	},
 	{
 		field: 'scoped_index_scan_count',
-		variable: null,
+		variable: 'CACHE_SCOPED_INDEX_SCAN_COUNT',
 		kind: 'number',
 		description: 'How many members each SSCAN of a tag index looks at per '
 			+ 'round trip.',
@@ -142,7 +139,7 @@ export const CACHE_SETTING_FIELDS: CacheSettingField[] = [
 	},
 	{
 		field: 'scoped_index_ttl_factor',
-		variable: null,
+		variable: 'CACHE_SCOPED_INDEX_TTL_FACTOR',
 		kind: 'number',
 		description: 'How much longer a tag index lives than the entries it '
 			+ 'lists. Below 1 a purge would miss entries, so the guard refuses it.',

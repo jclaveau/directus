@@ -63,10 +63,10 @@ function answered(sharedSettings: Record<string, unknown> | null) {
 					audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
 					scoped_index_scan_count: {
 						value: 1000,
-						source: 'default',
+						source: 'env',
 						fallback: 1000,
 					},
-					scoped_index_ttl_factor: { value: 2, source: 'default', fallback: 2 },
+					scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
 				},
 			},
 		},
@@ -104,7 +104,7 @@ beforeEach(() => {
 });
 
 describe('what the panel shows', () => {
-	test('a row is named by its variable, else by its field', async () => {
+	test('a row is named by its variable', async () => {
 		const wrapper = await mounted();
 
 		expect(wrapper.findAll('tbody tr > td:first-child')
@@ -115,8 +115,8 @@ describe('what the panel shows', () => {
 				'CACHE_STATS_MAX_BYTES',
 				'CACHE_AUDIT_LIMIT',
 				'CACHE_AUDIT_MAX_DURATION',
-				'scoped_index_scan_count',
-				'scoped_index_ttl_factor',
+				'CACHE_SCOPED_INDEX_SCAN_COUNT',
+				'CACHE_SCOPED_INDEX_TTL_FACTOR',
 			]);
 	});
 
@@ -130,9 +130,9 @@ describe('what the panel shows', () => {
 			.text())
 			.toBe('shared settings');
 
-		expect(row(wrapper, 'scoped_index_ttl_factor').find('.source')
+		expect(row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR').find('.source')
 			.text())
-			.toBe('default');
+			.toBe('environment');
 	});
 
 	test('a layer is named in words, not by its code', async () => {
@@ -150,7 +150,6 @@ describe('what the panel shows', () => {
 		'cache_settings_source_settings',
 		'cache_settings_cancel',
 		'cache_settings_apply',
-		'cache_settings_reset_default',
 		'cache_settings_reset_env',
 		'cache_settings_apply_all',
 		'cache_settings_reset_all',
@@ -243,14 +242,14 @@ describe('editing one field', () => {
 	test('a typed number is written as a number, and reads as stored', async () => {
 		const wrapper = await mounted();
 
-		await row(wrapper, 'scoped_index_ttl_factor').find('input')
+		await row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR').find('input')
 			.setValue('1.5');
 
-		expect(row(wrapper, 'scoped_index_ttl_factor').find('.source')
+		expect(row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR').find('.source')
 			.text())
 			.toBe('shared settings');
 
-		await press(row(wrapper, 'scoped_index_ttl_factor'), '.apply button');
+		await press(row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR'), '.apply button');
 
 		expect(api.patch).toHaveBeenCalledWith('/utils/cache/settings', {
 			scoped_index_ttl_factor: 1.5,
@@ -317,10 +316,10 @@ describe('editing one field', () => {
 			disabled: false,
 		});
 
-		expect(row(wrapper, 'scoped_index_ttl_factor')
+		expect(row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR')
 			.findAllComponents(VButton)[2]
 			.props()).toMatchObject({
-			tooltip: 'Reset to the default: 2',
+			tooltip: 'Reset to the environment: 2',
 			disabled: true,
 		});
 	});
@@ -402,16 +401,17 @@ describe('editing one field', () => {
 
 		const wrapper = mount(CacheSettingsPanel, { global });
 		await flushPromises();
-		const scanCountInput = row(wrapper, 'scoped_index_scan_count').find('input');
+		const scanCountInput = row(wrapper, 'CACHE_SCOPED_INDEX_SCAN_COUNT')
+			.find('input');
 
 		Object.defineProperty(scanCountInput.element, 'validity', {
 			value: { badInput: true },
 		});
 
 		await scanCountInput.setValue('');
-		await press(row(wrapper, 'scoped_index_scan_count'), '.cancel button');
+		await press(row(wrapper, 'CACHE_SCOPED_INDEX_SCAN_COUNT'), '.cancel button');
 
-		expect(row(wrapper, 'scoped_index_scan_count').find('input').element)
+		expect(row(wrapper, 'CACHE_SCOPED_INDEX_SCAN_COUNT').find('input').element)
 			.not.toBe(scanCountInput.element);
 	});
 
@@ -429,10 +429,10 @@ describe('editing one field', () => {
 
 		const wrapper = await mounted();
 
-		await row(wrapper, 'scoped_index_ttl_factor').find('input')
+		await row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR').find('input')
 			.setValue('0.5');
 
-		await press(row(wrapper, 'scoped_index_ttl_factor'), '.apply button');
+		await press(row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR'), '.apply button');
 
 		expect(wrapper.find('.v-notice')
 			.text()).toBe(
@@ -440,7 +440,7 @@ describe('editing one field', () => {
 			+ 'or null',
 		);
 
-		expect(row(wrapper, 'scoped_index_ttl_factor').find('input').element.value)
+		expect(row(wrapper, 'CACHE_SCOPED_INDEX_TTL_FACTOR').find('input').element.value)
 			.toBe('0.5');
 	});
 });
@@ -469,7 +469,7 @@ describe('the whole form at once', () => {
 		await row(wrapper, 'CACHE_AUDIT_LIMIT').find('input')
 			.setValue('80');
 
-		await row(wrapper, 'scoped_index_scan_count').find('input')
+		await row(wrapper, 'CACHE_SCOPED_INDEX_SCAN_COUNT').find('input')
 			.setValue('500');
 
 		await press(wrapper, '.bulk .v-button:nth-child(1) button');

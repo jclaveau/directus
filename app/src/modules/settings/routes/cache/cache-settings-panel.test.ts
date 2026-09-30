@@ -12,7 +12,7 @@ describe('cacheSettingRows', () => {
 			sharedSettings: { audit_limit: 40 },
 			resolved: {
 				audit_limit: { value: 40, source: 'settings', fallback: 0 },
-				scoped_index_ttl_factor: { value: 2, source: 'default', fallback: 2 },
+				scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
 			},
 		});
 
@@ -27,9 +27,9 @@ describe('cacheSettingRows', () => {
 
 		expect(rows[7]).toMatchObject({
 			field: 'scoped_index_ttl_factor',
-			variable: null,
+			variable: 'CACHE_SCOPED_INDEX_TTL_FACTOR',
 			value: 2,
-			source: 'default',
+			source: 'env',
 			sharedSettings: null,
 			fallback: 2,
 		});

@@ -281,13 +281,15 @@ test('keeps the usable fields of a row written around the guard', async () => {
 	expect(cacheSetting('value_max_size')).toBe('2mb');
 });
 
-test('resolves every field against the environment and the defaults', () => {
+test('resolves every field against the environment', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		CACHE_ENABLED: false,
 		CACHE_VALUE_MAX_SIZE: false,
 		CACHE_STATS_MAX_BYTES: '2gb',
 		CACHE_AUDIT_LIMIT: 0,
 		CACHE_AUDIT_MAX_DURATION: '10m',
+		CACHE_SCOPED_INDEX_SCAN_COUNT: 500,
+		CACHE_SCOPED_INDEX_TTL_FACTOR: 3,
 	});
 
 	expect(resolveCacheSettings({ audit_limit: 40, scoped_index_ttl_factor: 0.5 }))
@@ -297,13 +299,23 @@ test('resolves every field against the environment and the defaults', () => {
 			stats_max_bytes: { value: '2gb', source: 'env', fallback: '2gb' },
 			audit_limit: { value: 40, source: 'settings', fallback: 0 },
 			audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
-			scoped_index_scan_count: {
-				value: 1000,
-				source: 'default',
-				fallback: 1000,
-			},
-			scoped_index_ttl_factor: { value: 2, source: 'default', fallback: 2 },
+			scoped_index_scan_count: { value: 500, source: 'env', fallback: 500 },
+			scoped_index_ttl_factor: { value: 3, source: 'env', fallback: 3 },
 		});
+});
+
+// A factor below 1 expires the index before its entries, and a purge misses
+// them: the environment is held to the rule the layer is.
+test('reads a scoped variable its rule refuses as the built-in value', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		CACHE_SCOPED_INDEX_SCAN_COUNT: 0,
+		CACHE_SCOPED_INDEX_TTL_FACTOR: 0.5,
+	});
+
+	expect(resolveCacheSettings(null)).toMatchObject({
+		scoped_index_scan_count: { value: 1000, source: 'env', fallback: 1000 },
+		scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
+	});
 });
 
 test('reads the cache_settings column', async () => {
