@@ -30,6 +30,8 @@ const [
 	{ writeCacheTombstone },
 	{ default: emitter },
 	{ indexScopedCacheEntry },
+	{ requestScopedCacheIndexReap },
+	{ scopedCacheFillPaused },
 	{ getCacheKey },
 	{ getMilliseconds },
 	{ readMeta },
@@ -41,6 +43,8 @@ const [
 	importFromApi('cache-events.js'),
 	importFromApi('emitter.js'),
 	importFromApi('scoped-cache/index.js'),
+	importFromApi('scoped-cache/reap-requests.js'),
+	importFromApi('scoped-cache/fill-pause.js'),
 	importFromApi('utils/get-cache-key.js'),
 	importFromApi('utils/get-milliseconds.js'),
 	importFromApi('utils/read-meta.js'),
@@ -78,7 +82,7 @@ async function fillEntry(request, fill) {
 
 	const { redisKey } = await getCacheKey(keyedRequest);
 	const now = Date.now();
-	const cacheTtl = resolvedCacheTtl();
+	const cacheTtl = fill.ttlMs ?? resolvedCacheTtl();
 	const ttlMs = getMilliseconds(cacheTtl);
 	const expiresAt = now + getMilliseconds(cacheTtl, 0);
 
@@ -105,6 +109,23 @@ async function fillEntry(request, fill) {
 	]);
 
 	await writeCacheTombstone(redisKey, expiresAt);
+
+	return redisKey;
+}
+
+/**
+ * The names Redis holds an entry and its `__expires_at` sibling under: both
+ * namespaces, the way `cache-drop.ts` builds them.
+ */
+function rawEntryKeys(redisKey) {
+	const { cache } = getCache();
+
+	return [redisKey, cacheExpiresAtKey(redisKey)].map((key) => {
+		return cache.store.createKeyPrefix(
+			`${cache.namespace}:${key}`,
+			cache.store.namespace,
+		);
+	});
 }
 
 /**
@@ -112,11 +133,55 @@ async function fillEntry(request, fill) {
  * limits }] }` caches `GET /items/<collection>?filter[<pk>][_eq]=<id><filter>
  * &limit=<limit>&fields=<fields>` for every limit of every row, as the admin
  * calling it. `filter` is optional, raw as a query string hands it over.
+ *
+ * With `ttlMs`, the entries and their filing take that TTL instead of the
+ * cache's, and the answer also names in Redis the call's first entry and its
+ * sibling, for the caller to watch expire.
  */
-export default function registerEndpoint(router, { services, getSchema }) {
+export default function registerEndpoint(router, { services, getSchema, env }) {
+	/**
+	 * `POST /perf-cache-fill/reap` joins the reap a flush asks for, or asks for
+	 * one, and answers once it has run: the bench turns the scheduled one off. It
+	 * names in Redis the key marking the index-key sets complete, the
+	 * generation it has to hold and the fill pause, and whether this process
+	 * still pauses its fills.
+	 */
+	router.post('/reap', async (request, response) => {
+		if (!request.accountability?.admin) {
+			return response.status(403).json({
+				errors: [{ message: 'admin only' }],
+			});
+		}
+
+		try {
+			await requestScopedCacheIndexReap();
+
+			return response.json({
+				markerKey: `${env['CACHE_NAMESPACE']}:`
+					+ 'scoped-cache-collection-index-keys-complete',
+				generationKey:
+					`${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`,
+				fillPauseKey: `${env['CACHE_NAMESPACE']}:scoped-cache-fill-pause`,
+				// A reap skips its mark while fills are paused, so a missing
+				// mark says which of the two it was.
+				fillsPaused: scopedCacheFillPaused(),
+			});
+		}
+		catch (error) {
+			return response.status(500).json({ errors: [{ message: error.message }] });
+		}
+	});
+
 	router.post('/', async (request, response, next) => {
 		try {
-			const { collection, fields, rows, filter: sharedFilter = {} } = request.body;
+			const {
+				collection,
+				fields,
+				rows,
+				filter: sharedFilter = {},
+				ttlMs,
+			} = request.body;
+
 			const schema = request.schema ?? await getSchema();
 			const accountability = request.accountability;
 			const primaryKeyField = schema.collections[collection].primary;
@@ -165,15 +230,27 @@ export default function registerEndpoint(router, { services, getSchema }) {
 						accountability,
 						payload,
 						fingerprints,
+						ttlMs,
 					};
 				});
 			}));
 
 			const fills = fillsByRow.flat();
 
-			await Promise.all(fills.map((fill) => fillEntry(request, fill)));
+			const redisKeys = await Promise.all(fills.map((fill) => {
+				return fillEntry(request, fill);
+			}));
 
-			response.json({ filled: fills.length });
+			if (ttlMs === undefined) {
+				response.json({ filled: fills.length });
+
+				return;
+			}
+
+			response.json({
+				filled: fills.length,
+				expiringKeys: rawEntryKeys(redisKeys[0]),
+			});
 		}
 		catch (error) {
 			next(error);

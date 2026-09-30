@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { scopedCachePurgeEnabled } from '../scoped-cache/config.js';
-import { reapScopedCacheIndex } from '../scoped-cache/purge.js';
+import { scopedCacheFillPaused } from '../scoped-cache/fill-pause.js';
+import { runScopedCacheIndexReap } from '../scoped-cache/reap-requests.js';
 import { scheduleSynchronizedJob } from '../utils/schedule.js';
 import scopedCacheReapSchedule from './scoped-cache-reap.js';
 
@@ -17,8 +18,12 @@ vi.mock('../scoped-cache/config.js', () => {
 	return { scopedCachePurgeEnabled: vi.fn(() => true) };
 });
 
-vi.mock('../scoped-cache/purge.js', () => {
-	return { reapScopedCacheIndex: vi.fn() };
+vi.mock('../scoped-cache/fill-pause.js', () => {
+	return { scopedCacheFillPaused: vi.fn(() => false) };
+});
+
+vi.mock('../scoped-cache/reap-requests.js', () => {
+	return { runScopedCacheIndexReap: vi.fn() };
 });
 
 vi.mock('../utils/schedule.js', async (importOriginal) => {
@@ -43,16 +48,30 @@ describe('scoped-cache-reap', () => {
 		);
 	});
 
-	test('runs the reap on each tick', async () => {
+	test('runs the reap on each tick with fills not paused', async () => {
+		vi.mocked(scopedCacheFillPaused).mockReturnValueOnce(false);
+
 		await scopedCacheReapSchedule();
 
 		await vi.mocked(scheduleSynchronizedJob).mock.calls[0]![2](new Date());
 
-		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+		expect(runScopedCacheIndexReap).toHaveBeenCalledOnce();
+	});
+
+	// The pause refuses the mark a pass writes, and its end asks for the one
+	// pass that writes it.
+	test('skips the reap on a tick while fills are paused', async () => {
+		vi.mocked(scopedCacheFillPaused).mockReturnValueOnce(true);
+
+		await scopedCacheReapSchedule();
+
+		await vi.mocked(scheduleSynchronizedJob).mock.calls[0]![2](new Date());
+
+		expect(runScopedCacheIndexReap).not.toHaveBeenCalled();
 	});
 
 	test('logs a failed reap rather than throwing it out of the tick', async () => {
-		vi.mocked(reapScopedCacheIndex)
+		vi.mocked(runScopedCacheIndexReap)
 			.mockRejectedValueOnce(new Error('Connection is closed.'));
 
 		await scopedCacheReapSchedule();
@@ -80,7 +99,8 @@ describe('scoped-cache-reap', () => {
 
 		expect(warn).toHaveBeenCalledWith(
 			'[scoped-cache] CACHE_SCOPED_INDEX_REAP_SCHEDULE is not a cron rule '
-			+ '(hourly) — expired entries stay in the index',
+			+ '(hourly) — only a flush or a boot reaps the index, so '
+			+ 'expired entries pile up in it between them',
 		);
 	});
 });

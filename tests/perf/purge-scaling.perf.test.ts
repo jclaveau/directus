@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
@@ -39,6 +39,15 @@ import { summarise, type Summary } from './measure.js';
  * A boolean phase pins a boolean beside the primary key, true on every row: a
  * field whose one value every cached read shares, the way production's reads
  * pin `enabled` or `status` beside a narrower field.
+ *
+ * A last phase holds the live cache at the smallest size and grows what has
+ * expired instead: entries filled under a short TTL, measured once Redis has
+ * dropped them, while what named them may stay: index members on a layout
+ * whose sets outlive them, index-key names on one whose sets expire with them.
+ * Production's index is mostly those, between two reaps. A layout that forgets
+ * them on the purge pays for it on the first write, so that write is reported
+ * on its own beside the medians. A version save on the same collection reports
+ * what walking them costs a collection-wide purge.
  *
  * Seeded through the api rather than written into Redis: a layout the bench
  * wrote itself would measure the bench's idea of the index, and the point is to
@@ -80,6 +89,10 @@ const FILL_CONCURRENCY = 4;
 // How many entries the filler is checked against a GET on, before any size.
 const FIDELITY_ENTRIES = 1000;
 
+// The TTL the expired-entries phase fills with: long enough that a batch's
+// entries are still there when it answers, short enough to wait out.
+const EXPIRING_TTL_MS = 2000;
+
 const maxCommandScaling =
 	Number(process.env['PERF_PURGE_MAX_COMMAND_SCALING'] ?? 1.5);
 
@@ -87,6 +100,12 @@ const maxCommandScaling =
 // keyspace moves each command's cost a little on its own.
 const maxRedisTimeScaling =
 	Number(process.env['PERF_PURGE_MAX_REDIS_TIME_SCALING'] ?? 2);
+
+// A dead index-key name costs one EXISTS and one SREM when a collection purge
+// first walks it; the slack covers the purge's own commands moving a little.
+const maxCommandsPerDeadIndexKeyName = Number(
+	process.env['PERF_PURGE_MAX_COMMANDS_PER_DEAD_INDEX_KEY_NAME'] ?? 2.5,
+);
 
 const targetWallScaling = 1.5;
 
@@ -123,6 +142,10 @@ const TENANTS = 8;
 const VERSIONED = 'perf_versioned';
 const VERSIONED_ROWS = 4;
 const VERSIONED_ENTRIES = 5;
+
+// Creating a row of it runs a hook's `purgeBy` with the fingerprints the row
+// carries (`purge-extensions/perf-declared-purge`).
+const DECLARED_SIGNAL = 'perf_declared_signal';
 
 const rowCount = Math.ceil(largestSize / SLICE_ENTRIES);
 
@@ -235,6 +258,11 @@ async function startInstance(): Promise<ChildProcess> {
 			// measured, and no reap runs in the middle of a write.
 			CACHE_TTL: '6h',
 			CACHE_SCOPED_INDEX_REAP_SCHEDULE: 'off',
+			// A namespace no build recorded yet: a deploy's fill pause would warm
+			// nothing. Not the default one, where the job's `cli bootstrap` already
+			// recorded this build and opened a pause of the default length.
+			CACHE_NAMESPACE: 'perf-purge-scaling',
+			CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 		},
 	});
 
@@ -375,6 +403,33 @@ async function seedVersioned(): Promise<void> {
 	versionId = version.data.id;
 }
 
+async function seedDeclaredSignal(): Promise<void> {
+	const droppedSignal = await fetch(`${base}/collections/${DECLARED_SIGNAL}`, {
+		method: 'DELETE',
+		headers: authHeaders,
+	});
+
+	await droppedSignal.text();
+
+	await api('/collections', {
+		method: 'POST',
+		body: JSON.stringify({
+			collection: DECLARED_SIGNAL,
+			meta: {},
+			schema: {},
+			fields: [
+				{
+					field: 'id',
+					type: 'integer',
+					meta: { hidden: true },
+					schema: { is_primary_key: true, has_auto_increment: true },
+				},
+				{ field: 'declared', type: 'json', meta: {}, schema: {} },
+			],
+		}),
+	});
+}
+
 // Pinned on the primary key, and selecting the column a write changes, so the
 // write reaches every entry of its row's slice.
 function slicePath(phase: PurgePhase, entryIndex: number): string {
@@ -417,14 +472,23 @@ async function warmEntries(
 	return statuses;
 }
 
+// A fill under a short TTL, and the Redis names it sampled to watch expire.
+type ExpiringFill = {
+	ttlMs: number;
+	sampledKeys: string[];
+	aliveOnAnswer: number;
+};
+
 /**
  * Cache every entry in `[from, to)` in-process, `FILL_BATCH_ENTRIES` a call:
  * the reads `slicePath` names, under the keys and pins a GET of them files.
+ * With `expiring`, under its TTL, sampling one entry per call.
  */
 async function fillEntries(
 	phase: PurgePhase,
 	from: number,
 	to: number,
+	expiring?: ExpiringFill,
 ): Promise<number> {
 	const rowIds = phaseRowIds.get(phase.phaseName)!;
 	const batches: { id: number; limits: number[] }[][] = [];
@@ -458,10 +522,18 @@ async function fillEntries(
 					fields: 'id,label',
 					filter: phase.fillFilter,
 					rows,
+					ttlMs: expiring?.ttlMs,
 				}),
 			});
 
 			filled += answer.filled;
+
+			if (expiring) {
+				const sampled: string[] = answer.expiringKeys;
+
+				expiring.sampledKeys.push(...sampled);
+				expiring.aliveOnAnswer += await redis.exists(...sampled);
+			}
 		}
 	}
 
@@ -628,6 +700,80 @@ function timeCollectionPurge(idleRate: number): Promise<WriteSample> {
 	}, idleRate);
 }
 
+/** `writeReps` scoped PATCHes, each on a row the smallest size has warmed. */
+async function timeSliceWrites(
+	phase: PurgePhase,
+	idleRate: number,
+): Promise<WriteSample[]> {
+	const samples: WriteSample[] = [];
+
+	for (let rep = 0; rep < writeReps; rep++) {
+		samples.push(await timeWrite(phase, rep, idleRate));
+
+		// Put the purged slice back, so the next write finds the same cache.
+		const refill = await warmEntries(
+			phase,
+			rep * SLICE_ENTRIES,
+			(rep + 1) * SLICE_ENTRIES,
+		);
+
+		expect([...refill], `the slice ${phase.phaseName} write ${rep} purged`)
+			.toEqual(['MISS']);
+	}
+
+	return samples;
+}
+
+/** `writeReps` version saves, each over a freshly cached versioned collection. */
+async function timeCollectionPurges(idleRate: number): Promise<WriteSample[]> {
+	const collectionPurges: WriteSample[] = [];
+
+	for (let rep = 0; rep < writeReps; rep++) {
+		const versionedWarm = await warmVersionedEntries();
+
+		expect([...versionedWarm], `the versioned reads before save ${rep}`)
+			.toEqual(['MISS']);
+
+		collectionPurges.push(await timeCollectionPurge(idleRate));
+	}
+
+	return collectionPurges;
+}
+
+/**
+ * A hook's `purgeBy` on `tenant`, the index path. A read pinning only the
+ * primary key is filed under its home pin and could hold a row of any tenant,
+ * so the purge reads every home pin's set the collection has.
+ */
+async function timeDeclaredPurge(
+	phase: PurgePhase,
+	idleRate: number,
+): Promise<WriteSample> {
+	const declaredPurge = await timeRedisCost(() => {
+		return api(`/items/${DECLARED_SIGNAL}`, {
+			method: 'POST',
+			body: JSON.stringify({
+				declared: [
+					{ collection: phase.collection, pinnedScope: { tenant: ['t0'] } },
+				],
+			}),
+		});
+	}, idleRate);
+
+	// The first row is t0's: a read of it the purge left cached measured a
+	// declaration that reached nothing.
+	const declaredRead = await fetch(`${base}${slicePath(phase, 0)}`, {
+		headers: authHeaders,
+	});
+
+	await declaredRead.text();
+
+	expect(declaredRead.headers.get(STATUS_HEADER), 'a t0 read, declared purged')
+		.toBe('MISS');
+
+	return declaredPurge;
+}
+
 function commandBreakdown(sample: WriteSample): string {
 	return Object.entries(sample.byCommand)
 		.sort(([, a], [, b]) => b - a)
@@ -665,6 +811,60 @@ function scalingIn(
 	return largest.median / Math.max(smallest.median, Number.EPSILON);
 }
 
+function ratioOf(measured: number, against: number): string {
+	return `${(measured / Math.max(against, Number.EPSILON)).toFixed(2)}x`;
+}
+
+/** Reaped against flushed at one size, and whether the flushed arm scanned. */
+function flushedFigureOf(
+	size: number,
+	reapedPurges: WriteSample[],
+	flushedPurges: WriteSample[],
+): string {
+	const reapedCommands = summarise('reaped', reapedPurges.map((sample) => {
+		return sample.commands;
+	})).median;
+
+	const flushedCommands = summarise('flushed', flushedPurges.map((sample) => {
+		return sample.commands;
+	})).median;
+
+	const reapedMs = summarise('reaped', reapedPurges.map((sample) => {
+		return sample.redisMs;
+	})).median;
+
+	const flushedMs = summarise('flushed', flushedPurges.map((sample) => {
+		return sample.redisMs;
+	})).median;
+
+	return `- ${size} entries: reaped registry ${reapedCommands.toFixed(1)} vs`
+		+ ` flushed, requested reap ${flushedCommands.toFixed(1)} Redis commands`
+		+ ` (${ratioOf(flushedCommands, reapedCommands)}); reaped registry`
+		+ ` ${reapedMs.toFixed(2)} ms vs flushed, requested reap`
+		+ ` ${flushedMs.toFixed(2)} ms`
+		+ ` Redis time (${ratioOf(flushedMs, reapedMs)}); \`scan\` calls, flushed:`
+		+ ` rep 1 ${flushedPurges[0]!.byCommand['scan'] ?? 0}, last`
+		+ ` ${flushedPurges.at(-1)!.byCommand['scan'] ?? 0}`;
+}
+
+/** The declared purge at the largest size against the smallest. */
+function declaredFigureOf(declaredBySize: Map<number, WriteSample[]>): string {
+	const largest = declaredBySize.get(largestSize)![0]!;
+	const smallest = declaredBySize.get(smallestSize)![0]!;
+
+	return `- declared purge: ${largestSize} entries`
+		+ ` ${largest.commands.toFixed(1)} vs ${smallestSize} entries`
+		+ ` ${smallest.commands.toFixed(1)} Redis commands`
+		+ ` (${ratioOf(largest.commands, smallest.commands)}); ${largestSize}`
+		+ ` entries ${largest.redisMs.toFixed(2)} ms vs ${smallestSize} entries`
+		+ ` ${smallest.redisMs.toFixed(2)} ms Redis time`
+		+ ` (${ratioOf(largest.redisMs, smallest.redisMs)}); ${largestSize} entries`
+		+ ` ${largest.wallMs.toFixed(1)} ms vs ${smallestSize} entries`
+		+ ` ${smallest.wallMs.toFixed(1)} ms wall`
+		+ ` (${ratioOf(largest.wallMs, smallest.wallMs)}); \`scan\` calls:`
+		+ ` ${largest.byCommand['scan'] ?? 0} vs ${smallest.byCommand['scan'] ?? 0}`;
+}
+
 const FIGURE_HEADER = [
 	'| cache entries | Redis commands | Redis time | wall | wall p95 |',
 	'| ---: | ---: | ---: | ---: | ---: |',
@@ -675,6 +875,8 @@ type PhaseResult = {
 	idleRate: number;
 	bySize: Map<number, WriteSample[]>;
 	collectionPurgesBySize: Map<number, WriteSample[]>;
+	flushedPurgesBySize: Map<number, WriteSample[]>;
+	declaredPurgesBySize: Map<number, WriteSample[]>;
 	markdown: string[];
 	verdicts: string[];
 	scaling: Record<string, number>;
@@ -685,10 +887,13 @@ const phaseResults: PhaseResult[] = [];
 
 async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const idleRate = await measureIdleCommands();
 	const bySize = new Map<number, WriteSample[]>();
 	const collectionPurgesBySize = new Map<number, WriteSample[]>();
+	const flushedPurgesBySize = new Map<number, WriteSample[]>();
+	const declaredPurgesBySize = new Map<number, WriteSample[]>();
 	const report: string[] = [];
 	let warmed = 0;
 
@@ -704,7 +909,7 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 
 			// A warm that never filled measured an empty cache at every size.
 			expect([...warmStatuses], `${phase.phaseName} warming to ${size}`)
-				.toContain('MISS');
+				.toEqual(['MISS']);
 		}
 
 		const filled = await fillEntries(phase, readEnd, size);
@@ -735,42 +940,47 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 			.toBeGreaterThanOrEqual(size);
 
 		const filedUnder = await largestIndexSets(phase);
-		const samples: WriteSample[] = [];
-
-		for (let rep = 0; rep < writeReps; rep++) {
-			samples.push(await timeWrite(phase, rep, idleRate));
-
-			// Put the purged slice back, so the next write finds the same cache.
-			const refill = await warmEntries(
-				phase,
-				rep * SLICE_ENTRIES,
-				(rep + 1) * SLICE_ENTRIES,
-			);
-
-			expect([...refill], `the slice ${phase.phaseName} write ${rep} purged`)
-				.toContain('MISS');
-		}
+		const samples = await timeSliceWrites(phase, idleRate);
 
 		bySize.set(size, samples);
 
 		let collectionReport = '';
 
 		if (phase.timesCollectionPurge) {
-			const collectionPurges: WriteSample[] = [];
+			const collectionPurges = await timeCollectionPurges(idleRate);
 
-			for (let rep = 0; rep < writeReps; rep++) {
-				const versionedWarm = await warmVersionedEntries();
-
-				expect([...versionedWarm], `the versioned reads before save ${rep}`)
-					.toContain('MISS');
-
-				collectionPurges.push(await timeCollectionPurge(idleRate));
+			// Reaped, so the index-key sets vouch for the collection's sets: a SCAN
+			// means the purge measured the keyspace fallback instead.
+			for (const [rep, sample] of collectionPurges.entries()) {
+				expect(sample.byCommand, `collection purge ${rep} at ${size}`)
+					.not.toHaveProperty('scan');
 			}
 
 			collectionPurgesBySize.set(size, collectionPurges);
 
+			// Reaches every entry of the collection, so the cache is refilled below.
+			const declaredPurge = await timeDeclaredPurge(phase, idleRate);
+
+			declaredPurgesBySize.set(size, [declaredPurge]);
+
+			// The reap the flush asks for lands before the refill, as it does within
+			// a second of a flush: the saves then find the sets it named.
+			await clearResponseCache();
+			await markIndexKeySetsComplete();
+
+			const refilled = await fillEntries(phase, 0, size);
+
+			expect(refilled, `${phase.phaseName} refilled to ${size} after the flush`)
+				.toBe(size);
+
+			const flushedPurges = await timeCollectionPurges(idleRate);
+
+			flushedPurgesBySize.set(size, flushedPurges);
+
 			collectionReport = '; last collection purge:'
-				+ ` ${commandBreakdown(collectionPurges.at(-1)!)}`;
+				+ ` ${commandBreakdown(collectionPurges.at(-1)!)}; declared purge:`
+				+ ` ${commandBreakdown(declaredPurge)}; last flushed collection`
+				+ ` purge: ${commandBreakdown(flushedPurges.at(-1)!)}`;
 		}
 
 		report.push(
@@ -825,6 +1035,23 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 			'',
 			...FIGURE_HEADER,
 			...figureRowsOf(collectionPurgesBySize),
+			'',
+			'The same version saves after a flush and the reap it asks for: reaped'
+			+ ' registry vs flushed, requested reap. Medians; reported, gated on'
+			+ ' nothing.',
+			'',
+			...cacheSizes.map((size) => {
+				return flushedFigureOf(
+					size,
+					collectionPurgesBySize.get(size)!,
+					flushedPurgesBySize.get(size)!,
+				);
+			}),
+			'',
+			'One `purgeBy` on `tenant`, the index path, per size, over reads each'
+			+ ' filed under its primary key\'s home pin. Reported, gated on nothing.',
+			'',
+			declaredFigureOf(declaredPurgesBySize),
 			'',
 		);
 	}
@@ -883,6 +1110,8 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		idleRate,
 		bySize,
 		collectionPurgesBySize,
+		flushedPurgesBySize,
+		declaredPurgesBySize,
 		markdown,
 		verdicts,
 		scaling,
@@ -914,6 +1143,10 @@ async function writeResults(): Promise<string[]> {
 						samples: Object.fromEntries(result.bySize),
 						collectionPurgeSamples:
 							Object.fromEntries(result.collectionPurgesBySize),
+						flushedCollectionPurgeSamples:
+							Object.fromEntries(result.flushedPurgesBySize),
+						declaredPurgeSamples:
+							Object.fromEntries(result.declaredPurgesBySize),
 						scaling: result.scaling,
 					},
 				];
@@ -956,6 +1189,7 @@ beforeAll(async () => {
 	await seedPhase(PK_PHASE);
 	await seedPhase(BOOLEAN_PHASE);
 	await seedVersioned();
+	await seedDeclaredSignal();
 });
 
 afterAll(async () => {
@@ -1099,6 +1333,30 @@ async function clearResponseCache(): Promise<void> {
 	await api('/utils/cache/clear', { method: 'POST' });
 }
 
+/**
+ * Waits out the reap a flush asks for, the scheduled one being off. A flush
+ * voids the mark saying the index-key sets name every set, and until that reap
+ * writes it again every collection purge scans the keyspace instead: the purges
+ * measured would be that scan's, and the reap's own commands would land in them.
+ */
+async function markIndexKeySetsComplete(): Promise<void> {
+	const {
+		markerKey,
+		generationKey,
+		fillPauseKey,
+		fillsPaused,
+	} = await api('/perf-cache-fill/reap', { method: 'POST' });
+
+	const pauseLeftMs = await redis.pttl(fillPauseKey);
+
+	expect(
+		await redis.get(markerKey),
+		`the index-key sets marked complete (fills paused: ${fillsPaused}, `
+		+ `pause key TTL: ${pauseLeftMs} ms)`,
+	)
+		.toBe(await redis.get(generationKey));
+}
+
 // What the filler fidelity check found, carried into the report the purge
 // test writes.
 let fidelityReport: string[] = [];
@@ -1108,16 +1366,19 @@ test('the filler files what a GET files', async () => {
 	const pkRowCount = phaseRowIds.get(PK_PHASE.phaseName)!.length;
 	const entries = Math.min(FIDELITY_ENTRIES, pkRowCount * SLICE_ENTRIES);
 
+	// The reap each flush asks for, waited out, so it lands in neither shape.
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const warmStatuses = await warmEntries(PK_PHASE, 0, entries);
 
-	expect([...warmStatuses], 'the HTTP warm').toContain('MISS');
+	expect([...warmStatuses], 'the HTTP warm').toEqual(['MISS']);
 
 	const httpKeys = await redis.dbsize();
 	const http = await readKeyspaceShape();
 
 	await clearResponseCache();
+	await markIndexKeySetsComplete();
 
 	const filled = await fillEntries(PK_PHASE, 0, entries);
 
@@ -1234,3 +1495,469 @@ test.each([PK_PHASE, BOOLEAN_PHASE])(
 	},
 	60 * 60 * 1000,
 );
+
+// What the index of one collection still files, and what its index-key set names.
+type IndexCount = {
+	members: number;
+	indexSets: number;
+	indexKeyNames: number;
+	deadIndexKeyNames: number;
+};
+
+/**
+ * How many members the index sets of `collection` hold and how many sets hold
+ * them, whatever the layout names them or stores them as, and how many sets
+ * its index-key set names, of which how many Redis no longer holds. A layout
+ * without an index-key set names none.
+ */
+async function countIndexMembers(collection: string): Promise<IndexCount> {
+	let members = 0;
+	let indexSets = 0;
+	let cursor = '0';
+
+	do {
+		const [nextCursor, page] = await redis.scan(
+			cursor,
+			'MATCH',
+			`*:scoped-cache-index:fingerprint*:${collection}:*`,
+			'COUNT',
+			1000,
+		);
+
+		cursor = nextCursor;
+
+		for (const key of page) {
+			const type = await redis.type(key);
+
+			if (type === 'zset') {
+				members += await redis.zcard(key);
+				indexSets++;
+			}
+			else if (type === 'set') {
+				members += await redis.scard(key);
+				indexSets++;
+			}
+		}
+	} while (cursor !== '0');
+
+	const collectionIndexKeysKeyList = await redis.keys(
+		`*:scoped-cache-index:collection-index-keys:${collection}`,
+	);
+
+	let indexKeyNames = 0;
+	let deadIndexKeyNames = 0;
+
+	for (const collectionIndexKeysKey of collectionIndexKeysKeyList) {
+		let indexKeysCursor = '0';
+
+		do {
+			const [nextCursor, names] = await redis.sscan(
+				collectionIndexKeysKey,
+				indexKeysCursor,
+				'COUNT',
+				1000,
+			);
+
+			indexKeysCursor = nextCursor;
+			indexKeyNames += names.length;
+
+			const existing = await Promise.all(names.map((name) => {
+				return redis.exists(name);
+			}));
+
+			deadIndexKeyNames += existing.filter((held) => held === 0).length;
+		} while (indexKeysCursor !== '0');
+	}
+
+	return { members, indexSets, indexKeyNames, deadIndexKeyNames };
+}
+
+function describeIndexCount(count: IndexCount): string {
+	return `${count.members} members in ${count.indexSets} sets,`
+		+ ` ${count.indexKeyNames} index-key names`
+		+ ` (${count.deadIndexKeyNames} dead)`;
+}
+
+/** Seconds until Redis holds none of `rawKeys`. */
+async function waitUntilExpired(rawKeys: string[]): Promise<number> {
+	const startedAt = performance.now();
+	const deadline = Date.now() + 120_000;
+
+	while (await redis.exists(...rawKeys) > 0) {
+		if (Date.now() > deadline) {
+			throw new Error('the expiring entries were still in Redis after 120 s');
+		}
+
+		await new Promise((wake) => setTimeout(wake, 250));
+	}
+
+	return (performance.now() - startedAt) / 1000;
+}
+
+test('a scoped purge costs the same however much has expired', async () => {
+	const phase = PK_PHASE;
+	const rowIds = phaseRowIds.get(phase.phaseName)!;
+
+	// A version save purges its collection whole, so versioning the one the
+	// expired entries were filed in walks whatever its index still names.
+	await api(`/collections/${phase.collection}`, {
+		method: 'PATCH',
+		body: JSON.stringify({ meta: { versioning: true } }),
+	});
+
+	const sliceVersion = await api('/versions?fields=id', {
+		method: 'POST',
+		body: JSON.stringify({
+			key: 'bench-expired',
+			name: 'bench-expired',
+			collection: phase.collection,
+			item: String(rowIds[writeReps]),
+		}),
+	});
+
+	await clearResponseCache();
+	await markIndexKeySetsComplete();
+
+	const idleRate = await measureIdleCommands();
+	const writtenEntries = writeReps * SLICE_ENTRIES;
+	const liveWarm = await warmEntries(phase, 0, writtenEntries);
+
+	expect([...liveWarm], 'the live warm').toEqual(['MISS']);
+
+	const liveFilled = await fillEntries(phase, writtenEntries, smallestSize);
+
+	expect(liveFilled, 'live entries filled').toBe(smallestSize - writtenEntries);
+
+	const bySize = new Map<number, WriteSample[]>();
+	const collectionPurgesBySize = new Map<number, WriteSample[]>();
+	const slicePurgesBySize = new Map<number, WriteSample[]>();
+	const countsBySize = new Map<number, IndexCount>();
+	const countsBeforeSlicePurgeBySize = new Map<number, IndexCount>();
+	const report: string[] = [];
+	let filed = smallestSize;
+
+	for (const size of [...cacheSizes].sort((a, b) => a - b)) {
+		let expiryNote = 'nothing expired';
+
+		if (filed < size) {
+			const expiring: ExpiringFill = {
+				ttlMs: EXPIRING_TTL_MS,
+				sampledKeys: [],
+				aliveOnAnswer: 0,
+			};
+
+			const filled = await fillEntries(phase, filed, size, expiring);
+			const filledAt = Date.now();
+
+			expect(filled, `expiring entries filled to ${size}`).toBe(size - filed);
+
+			// Names Redis never held would read as expired from the start.
+			expect(expiring.aliveOnAnswer, 'sampled keys alive as their call answered')
+				.toBeGreaterThan(0);
+
+			const goneAfter = await waitUntilExpired(expiring.sampledKeys);
+
+			// A filing may be kept twice its entry's TTL: past that, a layout that
+			// forgets members by their expiry has had every chance to.
+			const indexMarginMs = filledAt + 2 * EXPIRING_TTL_MS + 1000 - Date.now();
+
+			await new Promise((wake) => setTimeout(wake, Math.max(indexMarginMs, 0)));
+
+			const sidecars = expiring.sampledKeys
+				.filter((key) => key.endsWith('__expires_at'))
+				.length;
+
+			expiryNote = `${size - filed} filled with a ${EXPIRING_TTL_MS} ms TTL;`
+				+ ` sampled ${expiring.sampledKeys.length - sidecars} payload and`
+				+ ` ${sidecars} \`__expires_at\` keys, ${expiring.aliveOnAnswer}`
+				+ ` alive as their call answered, all gone ${goneAfter.toFixed(1)} s`
+				+ ' after the fill';
+
+			filed = size;
+		}
+
+		const liveRead = await fetch(`${base}${slicePath(phase, smallestSize - 1)}`, {
+			headers: authHeaders,
+		});
+
+		await liveRead.text();
+
+		expect(liveRead.headers.get(STATUS_HEADER), `the last live entry at ${size}`)
+			.toBe('HIT');
+
+		const keyspace = await redis.dbsize();
+		const lingering = await countIndexMembers(phase.collection);
+
+		// Every live entry is still filed. What a layout keeps of the expired
+		// ones is what this phase reports, not what it requires.
+		expect(lingering.members, `index members once ${size} entries are filed`)
+			.toBeGreaterThanOrEqual(smallestSize);
+
+		// An index-key set names every set still standing, dead names or not.
+		expect(lingering.indexKeyNames, `index-key names once ${size} are filed`)
+			.toBeGreaterThan(0);
+
+		expect(
+			lingering.indexKeyNames - lingering.deadIndexKeyNames,
+			`live index-key names once ${size} entries are filed`,
+		).toBeGreaterThanOrEqual(lingering.indexSets);
+
+		countsBySize.set(size, lingering);
+
+		const samples = await timeSliceWrites(phase, idleRate);
+
+		bySize.set(size, samples);
+
+		const afterRowWrites = await countIndexMembers(phase.collection);
+
+		const collectionPurges = await timeCollectionPurges(idleRate);
+
+		for (const [rep, sample] of collectionPurges.entries()) {
+			expect(sample.byCommand, `expired: collection purge ${rep} at ${size}`)
+				.not.toHaveProperty('scan');
+		}
+
+		collectionPurgesBySize.set(size, collectionPurges);
+
+		countsBeforeSlicePurgeBySize.set(
+			size,
+			await countIndexMembers(phase.collection),
+		);
+
+		const slicePurges: WriteSample[] = [];
+		let afterFirstSlicePurge = afterRowWrites;
+
+		for (let rep = 0; rep < writeReps; rep++) {
+			slicePurges.push(await timeRedisCost(() => {
+				return api(`/versions/${sliceVersion.data.id}/save`, {
+					method: 'POST',
+					body: JSON.stringify({ label: `saved ${Date.now()}` }),
+				});
+			}, idleRate));
+
+			const purgedRead = await fetch(`${base}${slicePath(phase, 0)}`, {
+				headers: authHeaders,
+			});
+
+			await purgedRead.text();
+
+			expect(
+				purgedRead.headers.get(STATUS_HEADER),
+				`the ${phase.collection} save ${rep} at ${size}`,
+			).toBe('MISS');
+
+			if (rep === 0) {
+				afterFirstSlicePurge = await countIndexMembers(phase.collection);
+			}
+
+			// Put the live entries back, so the next save finds the same cache.
+			const refilled = await fillEntries(phase, 0, smallestSize);
+
+			expect(refilled, `live entries refilled after save ${rep}`)
+				.toBe(smallestSize);
+		}
+
+		for (const [rep, sample] of slicePurges.entries()) {
+			expect(sample.byCommand, `expired: ${phase.collection} save ${rep} at ${size}`)
+				.not.toHaveProperty('scan');
+		}
+
+		slicePurgesBySize.set(size, slicePurges);
+
+		const membersAfter = await countIndexMembers(phase.collection);
+
+		report.push(
+			`- ${size} filed: ${expiryNote}; ${keyspace} Redis keys; before the`
+			+ ` writes ${describeIndexCount(lingering)}; after the row writes`
+			+ ` ${describeIndexCount(afterRowWrites)}; after the first`
+			+ ` ${phase.collection} save ${describeIndexCount(afterFirstSlicePurge)};`
+			+ ` at the end ${describeIndexCount(membersAfter)}; rep 1:`
+			+ ` ${commandBreakdown(samples[0]!)}; last write:`
+			+ ` ${commandBreakdown(samples.at(-1)!)}; first ${phase.collection}`
+			+ ` save: ${commandBreakdown(slicePurges[0]!)}; last:`
+			+ ` ${commandBreakdown(slicePurges.at(-1)!)}`,
+		);
+	}
+
+	const expiredFigureRowsOf = (samplesBySize: Map<number, WriteSample[]>) => {
+		return cacheSizes.map((size) => {
+			const commands = seriesOf(samplesBySize, size, (sample) => sample.commands);
+			const redisMs = seriesOf(samplesBySize, size, (sample) => sample.redisMs);
+			const wallMs = seriesOf(samplesBySize, size, (sample) => sample.wallMs);
+			const firstRep = samplesBySize.get(size)![0]!;
+
+			const counted = countsBySize.get(size)!;
+
+			return `| ${size} | ${size - smallestSize} | ${counted.members}`
+				+ ` | ${counted.indexKeyNames} | ${counted.deadIndexKeyNames}`
+				+ ` | ${commands.median.toFixed(1)} | ${redisMs.median.toFixed(2)} ms`
+				+ ` | ${wallMs.median.toFixed(1)} ms | ${wallMs.p95.toFixed(1)} ms`
+				+ ` | ${firstRep.commands.toFixed(1)}`
+				+ ` | ${firstRep.redisMs.toFixed(2)} ms`
+				+ ` | ${firstRep.wallMs.toFixed(1)} ms |`;
+		});
+	};
+
+	const expiredAtLargest = largestSize - smallestSize;
+
+	const commandScaling = scalingIn(bySize, (sample) => sample.commands);
+	const redisTimeScaling = scalingIn(bySize, (sample) => sample.redisMs);
+
+	const firstRepScaling = bySize.get(largestSize)![0]!.commands
+		/ Math.max(bySize.get(smallestSize)![0]!.commands, Number.EPSILON);
+
+	const firstSlicePurgeScaling = slicePurgesBySize.get(largestSize)![0]!.commands
+		/ Math.max(slicePurgesBySize.get(smallestSize)![0]!.commands, Number.EPSILON);
+
+	const gates = [
+		['Redis commands per write', commandScaling, maxCommandScaling],
+		['Redis time per write', redisTimeScaling, maxRedisTimeScaling],
+		[
+			'Redis commands per collection purge',
+			scalingIn(collectionPurgesBySize, (sample) => sample.commands),
+			maxCommandScaling,
+		],
+		[
+			'Redis time per collection purge',
+			scalingIn(collectionPurgesBySize, (sample) => sample.redisMs),
+			maxRedisTimeScaling,
+		],
+	] as const;
+
+	const verdicts = gates.map(([label, measured, ceiling]) => {
+		const verdict = measured <= ceiling
+			? 'ok'
+			: 'OVER';
+
+		return `| expired: ${label}, ${expiredAtLargest} expired against 0`
+			+ ` | ${measured.toFixed(2)} | ${ceiling} | ${verdict} |`;
+	});
+
+	// What the first collection purge pays above the steady one, shared out
+	// over the dead index-key names it found. A layout with no index-key set
+	// has none, and nothing to share out.
+	const deadNamesAtLargest = countsBeforeSlicePurgeBySize.get(largestSize)!
+		.deadIndexKeyNames;
+
+	const largestSlicePurges = slicePurgesBySize.get(largestSize)!;
+
+	const steadySlicePurgeCommands = seriesOf(
+		slicePurgesBySize,
+		largestSize,
+		(sample) => sample.commands,
+	).median;
+
+	const perDeadName = deadNamesAtLargest > 0
+		? (largestSlicePurges[0]!.commands - steadySlicePurgeCommands)
+			/ deadNamesAtLargest
+		: null;
+
+	let perDeadNameVerdict = 'n/a';
+
+	if (perDeadName !== null) {
+		perDeadNameVerdict = perDeadName <= maxCommandsPerDeadIndexKeyName
+			? 'ok'
+			: 'OVER';
+	}
+
+	const perDeadNameMeasured = perDeadName === null
+		? '—'
+		: perDeadName.toFixed(2);
+
+	verdicts.push(
+		'| expired: Redis commands per dead index-key name, first collection purge'
+		+ ` | ${perDeadNameMeasured} | ${maxCommandsPerDeadIndexKeyName}`
+		+ ` | ${perDeadNameVerdict} |`,
+	);
+
+	const tableHeader = [
+		'| entries filed | expired | index members | index-key set names'
+		+ ' | dead index-key names | Redis commands | Redis time | wall | wall p95'
+		+ ' | rep 1 commands | rep 1 Redis time | rep 1 wall |',
+		'| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |'
+		+ ' ---: | ---: |',
+	];
+
+	const markdown = [
+		'### Purge scaling, expired entries',
+		'',
+		`${smallestSize} live entries at every size; the rest of each size filled`
+		+ ` with a ${EXPIRING_TTL_MS} ms TTL and measured once Redis had dropped`
+		+ ' them, whatever the layout still names of them counted beside each'
+		+ ' size. One scoped PATCH per rep,'
+		+ ` ${writeReps} reps per size, each purging a slice of ${SLICE_ENTRIES}`
+		+ ' live entries. Medians, and rep 1 on its own: a purge that forgets'
+		+ ' expired members pays for them on the first write after they expire,'
+		+ ' and the medians hide it.',
+		'',
+		...tableHeader,
+		...expiredFigureRowsOf(bySize),
+		'',
+		`One version save per rep, ${writeReps} reps per size, each purging the whole`
+		+ ` ${VERSIONED} collection, beside the same expired entries. Index members`
+		+ ` are ${phase.collection}'s.`,
+		'',
+		...tableHeader,
+		...expiredFigureRowsOf(collectionPurgesBySize),
+		'',
+		`One version save per rep on ${phase.collection} itself, ${writeReps} reps`
+		+ ` per size, each purging its ${smallestSize} live entries and walking`
+		+ ' whatever its index still names of the expired ones, the live entries'
+		+ ' refilled between reps. Only rep 1 above the median, per dead'
+		+ ' index-key name counted before it, is gated.',
+		'',
+		...tableHeader,
+		...expiredFigureRowsOf(slicePurgesBySize),
+		'',
+		...report,
+		'',
+		'#### Gates',
+		'',
+		'| ratio | measured | ceiling | |',
+		'| --- | ---: | ---: | --- |',
+		...verdicts,
+		'',
+	];
+
+	await mkdir(outputDir, { recursive: true });
+	await appendFile(join(outputDir, 'purge-scaling.md'), `${markdown.join('\n')}\n`);
+
+	await writeFile(
+		join(outputDir, 'purge-scaling-expired.json'),
+		`${JSON.stringify({
+			commit: process.env['PERF_HEAD_SHA'] ?? 'local',
+			measuredAt: new Date().toISOString(),
+			liveEntries: smallestSize,
+			expiringTtlMs: EXPIRING_TTL_MS,
+			indexCounts: Object.fromEntries(countsBySize),
+			indexCountsBeforeSlicePurge: Object.fromEntries(
+				countsBeforeSlicePurgeBySize,
+			),
+			commandsPerDeadIndexKeyName: perDeadName,
+			samples: Object.fromEntries(bySize),
+			collectionPurgeSamples: Object.fromEntries(collectionPurgesBySize),
+			slicePurgeSamples: Object.fromEntries(slicePurgesBySize),
+		}, null, 2)}\n`,
+	);
+
+	const over = verdicts.filter((line) => line.endsWith('OVER |'));
+	const statusFile = join(outputDir, 'purge-scaling.status.txt');
+	const earlierStatus = await readFile(statusFile, 'utf8').catch(() => '');
+
+	const breached = over.length > 0
+		? `expired: ${over.length} gate(s) OVER — `
+		: '';
+
+	await writeFile(
+		statusFile,
+		`${breached}${earlierStatus.trim()}; expired ${expiredAtLargest} vs 0:`
+		+ ` ${commandScaling.toFixed(2)}x redis cmds,`
+		+ ` ${redisTimeScaling.toFixed(2)}x redis time,`
+		+ ` rep 1 ${firstRepScaling.toFixed(2)}x redis cmds,`
+		+ ` ${phase.collection} save rep 1 ${firstSlicePurgeScaling.toFixed(2)}x,`
+		+ ` ${perDeadNameMeasured} cmds per dead index-key name`
+		+ ` (${deadNamesAtLargest} dead)\n`,
+	);
+
+	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
+}, 60 * 60 * 1000);

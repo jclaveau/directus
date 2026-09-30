@@ -172,19 +172,15 @@ export function buildProcessesTree(
 }
 
 /**
- * Ask every node on the bus to describe itself and fold the answers into a tree.
- *
- * PM2's API only reaches the daemon in its own container, so a single process can
- * only ever enumerate its own replica; the bus is what makes the other replicas
- * answerable at all. Without Redis the bus is local, and the report says so
- * instead of presenting one replica as the whole deployment.
+ * Ask every node on the bus to describe itself, and answer with what arrived
+ * within `PROCESSES_COLLECT_TIMEOUT`. A node that did not answer in time is
+ * missing from the list, as a node that is gone is.
  */
-export async function collectProcesses(
-	requested?: ProcessDetail[],
-): Promise<ProcessesReport> {
+export async function collectProcessReports(
+	details: ProcessDetail[],
+	{ nodeBuildOnly = false }: { nodeBuildOnly?: boolean } = {},
+): Promise<ProcessesReportMessage[]> {
 	const bus = useBus();
-	const details = requested ?? reportedProcessDetails();
-	const collectedForMs = processesCollectTimeoutMs();
 	const requestId = randomUUID();
 	const reports: ProcessesReportMessage[] = [];
 
@@ -197,20 +193,42 @@ export async function collectProcesses(
 	await bus.subscribe<ProcessesReportMessage>(PROCESSES_REPORT_CHANNEL, collect);
 
 	try {
-		const query: ProcessesQueryMessage = { requestId, details };
+		const query: ProcessesQueryMessage = nodeBuildOnly
+			? { requestId, details, nodeBuildOnly }
+			: { requestId, details };
 
 		await bus.publish(PROCESSES_QUERY_CHANNEL, query);
-		await new Promise((resolve) => setTimeout(resolve, collectedForMs));
+
+		await new Promise((resolve) => {
+			setTimeout(resolve, processesCollectTimeoutMs());
+		});
 	}
 	finally {
 		await bus.unsubscribe(PROCESSES_REPORT_CHANNEL, collect);
 	}
 
+	return reports;
+}
+
+/**
+ * Ask every node on the bus to describe itself and fold the answers into a tree.
+ *
+ * PM2's API only reaches the daemon in its own container, so a single process can
+ * only ever enumerate its own replica; the bus is what makes the other replicas
+ * answerable at all. Without Redis the bus is local, and the report says so
+ * instead of presenting one replica as the whole deployment.
+ */
+export async function collectProcesses(
+	requested?: ProcessDetail[],
+): Promise<ProcessesReport> {
+	const details = requested ?? reportedProcessDetails();
+	const reports = await collectProcessReports(details);
+
 	const services = buildProcessesTree(reports);
 
 	return {
 		collectedAt: Date.now(),
-		collectedForMs,
+		collectedForMs: processesCollectTimeoutMs(),
 		details,
 		services,
 		degraded: {

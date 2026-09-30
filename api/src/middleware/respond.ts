@@ -20,6 +20,7 @@ import {
 	mergedScopedCacheEpochs,
 	renderScopedCacheFingerprint,
 	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFillPaused,
 	scopedCacheFingerprintIsBare,
 	scopedCachePurgeEnabled,
 	scopedCachePinKeys,
@@ -230,6 +231,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		unautopurgeableScope === false &&
 		unguardedScope === false &&
 		dynamicQueryFilter === false &&
+		scopedCacheFillPaused() === false &&
 		(await permissionsCachable(
 			req.collection,
 			{

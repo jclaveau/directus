@@ -7,6 +7,7 @@ import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { earlierScopedCacheEpoch } from './pins.js';
+import { scopedCacheEpochKey } from './redis-store.js';
 
 const env = useEnv();
 
@@ -43,16 +44,6 @@ export function scopedCacheEpochTtlSeconds(): number {
 	}
 
 	return Math.max(Math.ceil(ttlMilliseconds / 1000), 5 * 60);
-}
-
-/**
- * A per-collection purge counter, bumped every time that collection's entries are
- * dropped. `*` is the wholesale entry, bumped by a flush that names no collection.
- * Kept outside `scoped-cache-index:`: a flush bumps `*` and then unlinks that
- * whole segment, and the counter has to survive the flush it counts.
- */
-export function scopedCacheEpochKey(collection: string): string {
-	return `${env['CACHE_NAMESPACE']}:scoped-cache-epoch:${collection}`;
 }
 
 /**
@@ -109,6 +100,17 @@ export async function bumpScopedCacheEpochs(
 		return;
 	}
 
+	await bumpScopedCacheEpochsInEveryMode(collections);
+}
+
+/**
+ * `bumpScopedCacheEpochs` whatever the purge mode, for a drop of the index: the
+ * flush command drops it in every mode, and a node still purging scoped — the
+ * mode is per process — keeps filing into the index it is cutting.
+ */
+export async function bumpScopedCacheEpochsInEveryMode(
+	collections: Iterable<string>,
+): Promise<void> {
 	const names = [...new Set(collections)];
 
 	if (names.length === 0) {

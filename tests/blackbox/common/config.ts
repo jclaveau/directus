@@ -78,6 +78,9 @@ const directusConfig = {
 	CACHE_SCHEMA: 'true',
 	CACHE_SCHEMA_MAX_ITERATIONS: '100',
 	CACHE_ENABLED: 'false',
+	// Every suite boots in a namespace no build recorded, which a deploy's fill
+	// pause would serve uncached for its whole run.
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 	RATE_LIMITER_ENABLED: 'false',
 	PRESSURE_LIMITER_ENABLED: 'false',
 	LOG_LEVEL: logLevel,

@@ -5,11 +5,14 @@ import { isTypeIn } from '@directus/utils';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { version } from 'directus/version';
 import { flushCaches, getCache } from './cache.js';
+import { resolveCoreBuildId } from './core-build-id.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
+import { scopedCachePurgeEnabled } from './scoped-cache/config.js';
+import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
+import { useScopedCacheStore } from './scoped-cache/store.js';
 
 // The response cache lives in an external redis and survives a container swap, so
 // a code-only deploy — a hook/extension or a core (fork) reshaping change shipped
@@ -20,45 +23,6 @@ import { useLogger } from './logger/index.js';
 
 const BUILD_IDENTITY_KEY = 'build-identity';
 const BUILD_IDENTITY_FLUSH_LOCK = 'build-identity-flush-lock';
-
-// The git commit baked into the dist by tsdown's `define` (see tsdown.config.ts).
-// A string in a shipped build, undefined in an unbundled dev run where the token
-// is never replaced.
-declare const __DIRECTUS_BUILD_COMMIT__: string | undefined;
-
-// Case B (core/fork logic): directus/version is intentionally pinned on the fork's
-// version line, so it can't detect a core reshaping change on its own. Resolve, in
-// order: an explicit override, the commit baked into the dist at build time (travels
-// with the build on any platform), the commit the platform injects at deploy time,
-// then the version string so a plain upstream version bump still moves the id.
-function resolveCoreBuildId(): string {
-	// TODO(reviewer): CACHE_BUILD_ID is probably overkill now the commit is baked —
-	// baked → railway → version already self-heals. Kept as a manual force/suppress
-	// escape hatch (bump to flush, pin to freeze); drop if we never reach for it.
-	const explicit = useEnv()['CACHE_BUILD_ID'];
-
-	if (typeof explicit === 'string' && explicit.length > 0) {
-		return explicit;
-	}
-
-	if (typeof __DIRECTUS_BUILD_COMMIT__ === 'string') {
-		const baked = __DIRECTUS_BUILD_COMMIT__;
-
-		if (baked) {
-			return baked;
-		}
-	}
-
-	// A platform-injected git SHA is not part of the directus env schema, so read it
-	// off process.env.
-	const gitCommitSha = process.env['RAILWAY_GIT_COMMIT_SHA'];
-
-	if (typeof gitCommitSha === 'string' && gitCommitSha.length > 0) {
-		return gitCommitSha;
-	}
-
-	return version;
-}
 
 // Only api-side extension code can reshape a read response; an app-only extension
 // (interface, display, layout, module, panel, theme) never runs server-side, so it
@@ -246,5 +210,66 @@ export async function flushCachesIfBuildChanged(
 	}
 	catch (err) {
 		logger.warn(err, '[cache] build-identity self-heal failed');
+	}
+}
+
+/**
+ * Stop trusting the index-key sets when this build is not the one the last boot
+ * ran, whatever `CACHE_AUTO_FLUSH_ON_DEPLOY` says: a build older than them, rolled
+ * back to, filed sets they do not name, and nothing else of it is left to notice.
+ * And hold this process's fills while the pause that change opened runs
+ * (`scopedCacheFillPaused`), which a replica booting on the recorded build joins.
+ *
+ * The core build alone, not the extension hash: an extension cannot change how
+ * the index is filed, and reading every bundle is what a boot cannot afford twice.
+ * A replica of one build reads the same identity, so only a deploy opens a pause.
+ * Never throws: a boot must not fail on it. Fills stay paused when it fails, until
+ * the reconnect that runs it again. `CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX` is a
+ * duration of 0 or more by then: `validateDurationEnv` refused any other at boot.
+ */
+export async function recordScopedCacheBuild(): Promise<void> {
+	// A process that does not purge by scope files no index-key set, so its build
+	// has nothing to pause for.
+	if (!scopedCachePurgeEnabled()) {
+		return;
+	}
+
+	const logger = useLogger();
+
+	const parsedPauseMs = getMilliseconds(
+		useEnv()['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'],
+		0,
+	);
+
+	try {
+		const buildIdentity = resolveCoreBuildId();
+
+		// `SET ... PX` refuses a fraction ("4.1m" parses to 245999.99999999997),
+		// and refuses it after the script has recorded the build. Up, so a pause
+		// never runs shorter than asked.
+		const { buildChanged, fillPauseLeftMs } = await useScopedCacheStore()
+			.recordBuildIdentity(buildIdentity, Math.ceil(parsedPauseMs));
+
+		pauseScopedCacheFills(fillPauseLeftMs, buildIdentity);
+
+		if (buildChanged) {
+			logger.info(
+				`[scoped-cache] build ${buildIdentity} differs from the last boot's: `
+				+ 'index-key sets untrusted until the next reap',
+			);
+		}
+
+		if (fillPauseLeftMs > 0) {
+			logger.info(
+				`[scoped-cache] fills paused after a deploy, for at most `
+				+ `${fillPauseLeftMs} ms`,
+			);
+		}
+	}
+	catch (error) {
+		logger.warn(
+			error,
+			`[scoped-cache] recording the build for the index failed: ${error}`,
+		);
 	}
 }

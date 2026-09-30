@@ -1,7 +1,8 @@
 import { useEnv } from '@directus/env';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/config.js';
-import { reapScopedCacheIndex } from '../scoped-cache/purge.js';
+import { scopedCacheFillPaused } from '../scoped-cache/fill-pause.js';
+import { runScopedCacheIndexReap } from '../scoped-cache/reap-requests.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 
 /**
@@ -21,17 +22,26 @@ export default async function schedule(): Promise<boolean> {
 	if (!validateCron(reapSchedule)) {
 		logger.warn(
 			`[scoped-cache] CACHE_SCOPED_INDEX_REAP_SCHEDULE is not a cron rule `
-			+ `(${reapSchedule}) — expired entries stay in the index`,
+			+ `(${reapSchedule}) — only a flush or a boot reaps the index, so `
+			+ 'expired entries pile up in it between them',
 		);
 
 		return false;
 	}
 
 	scheduleSynchronizedJob('scoped-cache-index-reap', reapSchedule, async () => {
+		// None while fills are paused: the pause refuses the mark a pass writes,
+		// and its end asks for the one pass that can write it.
+		if (scopedCacheFillPaused()) {
+			return;
+		}
+
 		// A failed reap leaves members naming nothing, which a purge tests and finds
 		// nothing for: a compare, never a stale hit, so the next tick retries it.
+		// Skipped while a pass a flush or a boot asked for holds the lock: the
+		// next tick walks what this one would have.
 		try {
-			await reapScopedCacheIndex();
+			await runScopedCacheIndexReap();
 		}
 		catch (error) {
 			logger.warn(

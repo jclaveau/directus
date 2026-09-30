@@ -84,6 +84,31 @@ describe('getCacheResponseMetric', () => {
 	});
 });
 
+describe('getScopedCacheIndexReadMetric', () => {
+	it('registers a counter labelled by mode and reuses it', async () => {
+		const metrics = createMetrics();
+
+		const first = metrics.getScopedCacheIndexReadMetric();
+
+		first!.inc({ mode: 'scan' });
+
+		expect(metrics.getScopedCacheIndexReadMetric()).toBe(first);
+
+		expect((await register.getMetricsAsJSON())
+			.find((metric) => {
+				return metric.name === 'directus_scoped_cache_index_reads_total';
+			})
+			?.values)
+			.toEqual([{ labels: { mode: 'scan' }, value: 1 }]);
+	});
+
+	it('returns null when the cache is disabled', () => {
+		env['CACHE_ENABLED'] = false;
+
+		expect(createMetrics().getScopedCacheIndexReadMetric()).toBeNull();
+	});
+});
+
 describe('getUnhandledRejectionMetric', () => {
 	it('registers a counter and reuses it on the second call', async () => {
 		const metrics = createMetrics();

@@ -32,7 +32,8 @@ import type { ScopedCacheFingerprint } from './fingerprint.js';
  * a store MAY split its index by, never something a caller reads back.
  * `homePinFields` is that collection's primary key, then its
  * `scoped_cache_fields` in their declared order: what a store may rank the split
- * of a read off the index path by, the first one the read pins winning.
+ * of a read by, the first one the read pins winning. The key, first, outranks
+ * the index path too.
  */
 export interface ScopedCacheIndexFiling {
 	fingerprint: ScopedCacheFingerprint;
@@ -56,8 +57,9 @@ export interface ScopedCacheIndexedEntry {
 }
 
 /**
- * One batch of a whole-collection take: what it dropped, what it named, and the
- * moved sets the caller releases once those keys are gone.
+ * One batch of a whole-collection take: how many index sets it took, the keys
+ * they held, and the moved sets the caller releases once those keys are gone. A
+ * name whose set was already gone is not a set taken.
  */
 export interface ScopedCacheIndexTake {
 	indexKeys: number;
@@ -77,10 +79,29 @@ export interface ScopedCacheUnlinkTally {
 	refused: number;
 }
 
-/** What a reap read, and how many members it removed from it. */
+/**
+ * What a reap read, how many members it removed from it, and how many moved
+ * sets it found that no swept index-key set named.
+ */
 export interface ScopedCacheReapTally {
 	indexKeys: number;
 	reaped: number;
+	strandedSweptKeys: number;
+}
+
+/** What recording the build found (`ScopedCacheStore.recordBuildIdentity`). */
+export interface ScopedCacheBuildRecord {
+	buildChanged: boolean;
+	/** What is left of the fill pause, whichever boot opened it; 0 when none runs. */
+	fillPauseLeftMs: number;
+}
+
+/** One node's look at the fill pause (`ScopedCacheStore.watchFillPause`). */
+export interface ScopedCacheFillPauseLook {
+	/** What is left of the fill pause; 0 when none runs. */
+	fillPauseLeftMs: number;
+	/** Whether this node is the one asking for the build before to be gone. */
+	watching: boolean;
 }
 
 export interface ScopedCacheStore {
@@ -198,19 +219,61 @@ export interface ScopedCacheStore {
 	 * set outlives what it names, so without this it grows with every read ever
 	 * cached.
 	 *
-	 * `rawKeyOf` names an entry the way the cache store holds it. `epochKeyOf` is
-	 * the purge counter of a collection, bumped in the same step as a removal from
-	 * that collection's sets: a fill files its members before it writes its entry,
+	 * `rawKeyOf` names an entry the way the cache store holds it. A collection's
+	 * purge counter is bumped in the same step as a removal from that collection's
+	 * sets: a fill files its members before it writes its entry,
 	 * and one caught in between looks expired. Bumped, it compares its counter
 	 * after the write and evicts the entry its members no longer name.
+	 *
+	 * A moved set no swept index-key set names is named there, for the recovery
+	 * to release (`releaseStrandedScopedCacheSweeps`). And every set is named in
+	 * its collection's index-key set, so a pass that reaches its end lets the
+	 * collection-wide reads trust those sets, rather than SCAN the keyspace —
+	 * unless a deploy started during the pass or a fill pause runs.
 	 */
 	reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
-		epochKeyOf: (collection: string) => string,
 		epochTtlSeconds: number,
 	): Promise<ScopedCacheReapTally>;
 
-	/** Drop the whole index, reporting what it cost. */
+	/**
+	 * Whether the collection-wide reads trust the index-key sets right now: a
+	 * reap marked them complete, and no deploy or flush took that back since.
+	 */
+	indexKeysComplete(): Promise<boolean>;
+
+	/**
+	 * Record the build this process runs. When it is not the one recorded, the
+	 * collection-wide reads stop trusting the index-key sets until a reap: a build
+	 * older than them may have run in between, filing sets they do not name.
+	 * A change also opens a fill pause of `fillPauseMs`, which every node reads
+	 * back here, the node that opened it and a replica booting into it alike.
+	 */
+	recordBuildIdentity(
+		buildIdentity: string,
+		fillPauseMs: number,
+	): Promise<ScopedCacheBuildRecord>;
+
+	/**
+	 * Look at the fill pause, claiming or renewing its watch for `watchMs`
+	 * unless another node holds it. One node watches at a time.
+	 */
+	watchFillPause(
+		watcherNodeId: string,
+		watchMs: number,
+	): Promise<ScopedCacheFillPauseLook>;
+
+	/**
+	 * End the fill pause `buildIdentity` opened, early. False when none runs, or
+	 * when a later deploy's replaced it.
+	 */
+	endFillPause(buildIdentity: string): Promise<boolean>;
+
+	/**
+	 * Drop every set the index files members in, reporting what it cost. The
+	 * index-key sets naming them stay, and so does their completeness: a name
+	 * whose set is gone reads empty, and a reap releases it.
+	 */
 	dropIndex(): Promise<ScopedCacheUnlinkTally>;
 
 	/**

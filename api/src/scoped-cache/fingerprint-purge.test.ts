@@ -68,24 +68,39 @@ let members: Record<string, string[]>;
 const srem = vi.fn();
 const swept: string[][] = [];
 
-const sscan = vi.fn(async (key: string, _cursor: string) => {
+// A purge holding no rows reads the collection's sets off its index-key set, so the
+// index-key set answers with the sets the case declared under that collection, those
+// a trailing-star MATCH names when one is sent.
+const sscan = vi.fn(async (key: string, _cursor: string, ...options: unknown[]) => {
+	const collectionIndexKeysPrefix = 'ns:scoped-cache-index:collection-index-keys:';
+
+	if (key.startsWith(collectionIndexKeysPrefix)) {
+		const collection = key.slice(collectionIndexKeysPrefix.length);
+
+		const setPrefix = options[0] === 'MATCH'
+			? String(options[1]).slice(0, -1)
+			: `ns:scoped-cache-index:fingerprint:${collection}:`;
+
+		return ['0', Object.keys(members).filter((set) => set.startsWith(setPrefix))];
+	}
+
 	return ['0', members[key] ?? []];
 });
 
-// A purge holding no rows reads the collection's sets off the keyspace, so the
-// scan answers with the sets the case declared under that collection.
-const scan = vi.fn(async (_cursor: string, _match: string, pattern: string) => {
-	const prefix = pattern.slice(0, -1);
+const scan = vi.fn(async () => ['0', []]);
 
-	return ['0', Object.keys(members).filter((key) => key.startsWith(prefix))];
-});
+const scopedCacheCollectionIndexKeysPrune = vi.fn(async (
+	_keyCount: number,
+	_collectionIndexKeysKey: string,
+	...indexKeys: string[]
+) => indexKeys);
 
 const evalScript = vi.fn(async (
 	_script: string,
 	numKeys: number,
 	...args: string[]
 ) => {
-	swept.push(args.slice(0, numKeys));
+	swept.push(args.slice(2, numKeys));
 	return [];
 });
 
@@ -94,7 +109,9 @@ beforeEach(() => {
 	members = {};
 	swept.length = 0;
 
-	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
+	vi.mocked(useLogger)
+		.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as any);
+
 	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());
@@ -102,6 +119,13 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
+		// A reap has marked the index-key sets complete since the last flush.
+		mget: async () => ['1', '1'],
+		// The index-key sets name the sets the case declared.
+		smismember: async (_collectionIndexKeysKey: string, ...indexKeys: string[]) => {
+			return indexKeys.map((indexKey) => Number(Object.hasOwn(members, indexKey)));
+		},
+		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
@@ -149,8 +173,13 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads the bare set, the one its row owns, and the home pin set of each value
-		it carries, and no other
+		it carries, and no other, until a reap marks the index-key sets complete
 	`, async () => {
+		vi.mocked(useRedis).mockReturnValue({
+			...useRedis(),
+			mget: async () => [null, '1'],
+		} as any);
+
 		await purgeScopedCache(cache, 'slot', [], null, {
 			rowFingerprints: [{
 				collection: 'slot',
@@ -167,6 +196,34 @@ describe('a purge shown the rows it wrote', () => {
 			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced',
 			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha',
 		]);
+	});
+
+	it(oneLine`
+		reads only the home pin sets the index-key set names once a reap has marked
+		it complete: a value no read was filed under has no set to read
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [
+				'slot:&id=,1,&view=,method,&|ns:entry-one',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
+
+		expect(sscan.mock.calls).toEqual([
+			['ns:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			['ns:scoped-cache-index:fingerprint:slot:owner=alpha', '0', 'COUNT', 1000],
+			['ns:scoped-cache-index:fingerprint:slot:pin:id=1', '0', 'COUNT', 1000],
+		]);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
 	});
 
 	it(oneLine`
@@ -354,6 +411,12 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it('reads a set larger than one page to its end', async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [],
+			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced': [],
+			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha': [],
+		};
+
 		sscan.mockImplementationOnce(async () => {
 			return ['7', ['slot:&|ns:entry-first']];
 		});
@@ -445,11 +508,15 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads a hook's pin on another collection off that collection's own index
-		bucket and its home pin sets, rather than scanning every set it owns
+		bucket and the home pin sets its index-key set names, rather than scanning the
+		keyspace
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:other:x=y': [
 				'other:&x=,y,&|ns:entry-x',
+			],
+			'ns:scoped-cache-index:fingerprint:other:pin:id=3': [
+				'other:&id=,3,&|ns:entry-home',
 			],
 		};
 
@@ -476,9 +543,16 @@ describe('a purge shown the rows it wrote', () => {
 			},
 		);
 
-		expect(scan.mock.calls.map(([, , pattern]) => pattern)).toEqual([
+		expect(sscan).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:collection-index-keys:other',
+			'0',
+			'MATCH',
 			'ns:scoped-cache-index:fingerprint:other:pin:*',
-		]);
+			'COUNT',
+			1000,
+		);
+
+		expect(scan).not.toHaveBeenCalled();
 
 		expect(sscan).toHaveBeenCalledWith(
 			'ns:scoped-cache-index:fingerprint:other:x=y',
@@ -488,6 +562,7 @@ describe('a purge shown the rows it wrote', () => {
 		);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-x');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-home');
 	});
 
 	it(oneLine`
@@ -616,6 +691,7 @@ describe('a purge shown the rows it wrote', () => {
 				throw new Error('redis is down');
 			}),
 			scan,
+			mget: async () => ['1', '1'],
 			eval: evalScript,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),

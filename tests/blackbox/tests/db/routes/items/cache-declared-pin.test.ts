@@ -13,6 +13,7 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -350,16 +351,19 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
-	// Every SCAN and SSCAN of the slot's index `signalsSent` caused, as the set it
-	// read past `fingerprint:`. MONITOR streams commands in the order Redis ran
+	// Every SCAN and SSCAN of the slot's index `signalsSent` caused — of its sets,
+	// or of the index-key set naming them — as the key it read past
+	// `scoped-cache-index:`, with the MATCH pattern an SSCAN narrowed its names by,
+	// past the slot's own sets. MONITOR streams commands in the order Redis ran
 	// them, so the two sentinel GETs bracket what the signals sent.
 	async function recordIndexReads(
 		signalsSent: () => Promise<void>,
 	): Promise<Record<string, string>[]> {
-		const fingerprintPrefix = `${env[vendor]['CACHE_NAMESPACE']}`
-			+ ':scoped-cache-index:fingerprint:';
+		const indexPrefix = `${env[vendor]['CACHE_NAMESPACE']}`
+			+ ':scoped-cache-index:';
 
-		const slotPrefix = `${fingerprintPrefix}${SLOT}:`;
+		const slotPrefix = `${indexPrefix}fingerprint:${SLOT}:`;
+		const collectionIndexKeysKey = `${indexPrefix}collection-index-keys:${SLOT}`;
 		const monitor = redis.duplicate({ monitor: true, lazyConnect: false });
 
 		await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
@@ -383,15 +387,24 @@ describe.each(vendors)('%s', (vendor) => {
 				? commandArgs[3]
 				: commandArgs[1];
 
-			if (
-				(command === 'scan' || command === 'sscan')
-				&& readSet?.startsWith(slotPrefix)
-			) {
-				const indexSet = readSet.slice(fingerprintPrefix.length);
+			const slotRead = readSet?.startsWith(slotPrefix)
+				|| (command === 'sscan' && readSet === collectionIndexKeysKey);
 
-				recordedReads.set(`${command} ${indexSet}`, {
+			if ((command === 'scan' || command === 'sscan') && slotRead) {
+				const indexSet = readSet!.slice(indexPrefix.length);
+
+				const matchAt = commandArgs.findIndex((commandArg) => {
+					return commandArg.toUpperCase() === 'MATCH';
+				});
+
+				const matching = command === 'sscan' && matchAt !== -1
+					? commandArgs[matchAt + 1]!.replace(slotPrefix, '')
+					: '';
+
+				recordedReads.set(`${command} ${indexSet} ${matching}`, {
 					'command': command,
 					'index set': indexSet,
+					'matching': matching,
 				});
 			}
 		});
@@ -506,9 +519,15 @@ describe.each(vendors)('%s', (vendor) => {
 			const { query, response, fingerprints } = table[0]!;
 			const readQuery = queryParameters(query!);
 
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
+			await awaitRequestedReap(
+				Number(env[vendor]['REDIS_PORT']),
+				env[vendor]['CACHE_NAMESPACE']!,
+				async () => {
+					await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+				},
+			);
 
 			const filedBefore = await indexedMembers();
 
@@ -550,6 +569,17 @@ describe.each(vendors)('%s', (vendor) => {
 				}
 			},
 		);
+
+		// What a reap's full pass writes: the index generation as it reads now.
+		// Without it a declaration scans the keyspace for the home pins' sets.
+		and.optional('the index-key sets are marked complete', async () => {
+			const namespace = env[vendor]['CACHE_NAMESPACE'];
+
+			expect(await redis.set(
+				`${namespace}:scoped-cache-collection-index-keys-complete`,
+				await redis.get(`${namespace}:scoped-cache-index-generation`) ?? '',
+			)).toBe('OK');
+		});
 	}
 
 	// The `query` cell names the slots the signal rewrites and the note each gets,
