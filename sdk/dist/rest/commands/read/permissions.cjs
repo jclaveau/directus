@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/permissions`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/permissions/${t}`,params:n??{},method:`GET`}),r=(t,n)=>()=>(e.throwIfEmpty(String(t),`Collection cannot be empty`),{path:`/permissions/me/${n?`${t}/${n}`:`${t}`}`,method:`GET`}),i=()=>()=>({path:`/permissions/me`,method:`GET`});exports.readItemPermissions=r,exports.readPermission=n,exports.readPermissions=t,exports.readUserPermissions=i;
+//# sourceMappingURL=permissions.cjs.map
