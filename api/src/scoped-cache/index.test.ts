@@ -2226,7 +2226,7 @@ describe('retryPendingScopedCachePurges', () => {
 
 	it(oneLine`
 		replays a record naming as many fingerprints as the limit one by one, so an
-		entry none of them reaches stays cached
+		entry pinned to a key none of them names stays cached
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
@@ -2238,14 +2238,18 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
-				'articles:&owner=,alpha,&|ns:entry-alpha',
+			'ns:scoped-cache-index:fingerprint:articles:id=3': [
+				'articles:&id=,3,&|ns:entry-near',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:id=5000': [
+				'articles:&id=,5000,&|ns:entry-far',
 			],
 		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-alpha');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-near');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-far');
 
 		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
 			collection: 'articles',

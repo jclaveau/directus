@@ -163,7 +163,7 @@ export async function listPendingScopedCachePurges(): Promise<
 			mode: row.mode,
 			collection: row.collection,
 			fingerprints: new Set<string>(),
-			ids: [],
+			ids: [] as number[],
 		};
 
 		seen.ids.push(row.id);
