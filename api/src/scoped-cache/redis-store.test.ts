@@ -403,8 +403,8 @@ describe('scopedCacheRowHomePinKeys', () => {
 
 	// The invariant the row scan rests on: a row drops an entry only by carrying
 	// one of its values on every field it pins, so on its home pin too. The row is
-	// `id=7, method=spaced, owner=alpha`, homed as prod ranks: the key first, then
-	// the scope fields in declared order.
+	// `id=7, method=spaced, owner=alpha`, homed as prod ranks: the key first, ahead
+	// of the index path too, then the scope fields in declared order.
 	it.each([
 		{
 			filed: 'slot:&id=,7,&view=,label,&',
@@ -424,6 +424,13 @@ describe('scopedCacheRowHomePinKeys', () => {
 		},
 		{
 			filed: 'slot:&id=,7,&method=,massed,spaced,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+		},
+		{
+			filed: 'slot:&id=,7,&owner=,alpha,&',
 			filedUnder: [
 				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
 			],
@@ -605,6 +612,31 @@ describe('removeIndexedEntries', () => {
 			['scalabus:scoped-cache-index:fingerprint:slot:', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=4', member],
 			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7', member],
+		]);
+	});
+
+	it(oneLine`
+		prunes a read pinning the key and the index path from every key's set, the
+		key outranking the index path
+	`, async () => {
+		const member = 'slot:&id=,4,7,&owner=,alpha,&view=,id,&|cache-key';
+
+		await redisScopedCacheStore().removeIndexedEntries(
+			[{
+				fingerprint: parseScopedCacheFingerprint(member.split('|')[0]!),
+				key: 'cache-key',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+					member,
+				},
+			}],
+			'owner',
+		);
+
+		expect(srem.mock.calls).toEqual([
+			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7', member],
+			['scalabus:scoped-cache-index:fingerprint:slot:owner=alpha', member],
+			['scalabus:scoped-cache-index:fingerprint:slot:pin:id=4', member],
 		]);
 	});
 
