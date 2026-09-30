@@ -13,7 +13,11 @@ vi.mock('@/api', () => {
 // Capture the options the component hands ApexCharts so a test can drive its
 // callbacks (tooltip renderer, axis formatters) without a real SVG chart.
 const chartMock = vi.hoisted(() => {
-	return { configs: [] as any[], hidden: [] as string[] };
+	return {
+		configs: [] as any[],
+		hidden: [] as string[],
+		updatedElements: [] as unknown[],
+	};
 });
 
 // The page mounts two charts (counts + latency); record every config so a test can
@@ -21,7 +25,10 @@ const chartMock = vi.hoisted(() => {
 vi.mock('apexcharts', () => {
 	return {
 		default: class {
-			constructor(_el: unknown, config: any) {
+			chartElement: unknown;
+
+			constructor(chartElement: unknown, config: any) {
+				this.chartElement = chartElement;
 				chartMock.configs.push(config);
 			}
 
@@ -31,6 +38,7 @@ vi.mock('apexcharts', () => {
 
 			updateOptions(config: any) {
 				chartMock.configs.push(config);
+				chartMock.updatedElements.push(this.chartElement);
 
 				return Promise.resolve();
 			}
@@ -263,6 +271,7 @@ describe('CachePage', () => {
 		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
 		chartMock.configs = [];
 		chartMock.hidden = [];
+		chartMock.updatedElements = [];
 
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
@@ -1948,19 +1957,20 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		const [countsChart] = wrapper.findAll('.chart');
-		chartMock.configs = [];
+		const [countsChart, latencyChart] = wrapper.findAll('.chart');
+		chartMock.updatedElements = [];
 
 		await countsChart!.trigger('pointerenter');
 		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
 		await flushPromises();
 
 		// Only the latency chart, which nobody is reading, redraws.
-		expect(chartMock.configs).toHaveLength(1);
+		expect(chartMock.updatedElements).toContain(latencyChart!.element);
+		expect(chartMock.updatedElements).not.toContain(countsChart!.element);
 
 		await countsChart!.trigger('pointerleave');
 		await flushPromises();
 
-		expect(chartMock.configs).toHaveLength(2);
+		expect(chartMock.updatedElements).toContain(countsChart!.element);
 	});
 });

@@ -51,18 +51,18 @@ const stampLine = computed(() => {
 	const parts = [t('cache_settings_set_by', 'Configured')];
 
 	if (stamp.setBy !== null) {
-		parts.push(`by ${stamp.setBy}`);
+		parts.push(t('cache_settings_by', { writer: stamp.setBy }));
 	}
 
 	if (stamp.setFrom === 'admin') {
-		parts.push(`from ${t('cache_settings_from_admin', 'the admin')}`);
+		parts.push(t('cache_settings_from_admin'));
 	}
 
 	if (stamp.setFrom === 'mcp') {
-		parts.push(`from ${t('cache_settings_from_mcp', 'the system MCP')}`);
+		parts.push(t('cache_settings_from_mcp'));
 	}
 
-	parts.push(`${stamp.days}${t('cache_settings_days_ago', 'd ago')}`);
+	parts.push(t('cache_settings_days_ago', { days: stamp.days }));
 
 	return parts.join(' ');
 });
@@ -112,6 +112,10 @@ async function write(
 
 	try {
 		const response = await request();
+
+		// A read sent while the write was in flight may have found the row before
+		// the write committed.
+		latestRequest += 1;
 		answer.value = response.data.data;
 
 		// Switching the cache on can clear it, which the page's figures show.

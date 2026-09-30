@@ -110,8 +110,15 @@ const CACHE_SETTING_RULES: {
 		variable: 'CACHE_STATS_MAX_BYTES',
 		accepts: (value) => value === false || isByteSize(value),
 		expected: 'false, a size such as "2gb", or null',
+		// The variable is typed a string, so its `false` arrives spelled out.
 		fallback: () => {
-			return useEnv()['CACHE_STATS_MAX_BYTES'] as string | false | undefined;
+			const envValue = useEnv()['CACHE_STATS_MAX_BYTES'];
+
+			if (envValue === 'false') {
+				return false;
+			}
+
+			return envValue as string | false | undefined;
 		},
 	},
 	audit_limit: {
@@ -382,12 +389,12 @@ export interface EnablingWriteContext {
  * refuses the write, rather than switching on over entries it could not drop.
  *
  * Decided on the stored row, which a node that missed an announcement may read
- * otherwise than its mirror does.
+ * otherwise than its mirror does. Answers whether it cleared.
  */
 export async function flushBeforeEnabling(
 	payload: Partial<Item>,
 	context: EnablingWriteContext,
-): Promise<void> {
+): Promise<boolean> {
 	const {
 		SHARED_SETTINGS_COLUMNS,
 		asSharedSettings,
@@ -397,15 +404,15 @@ export async function flushBeforeEnabling(
 	const column = SHARED_SETTINGS_COLUMNS.cache;
 
 	if (column in payload === false || envResponseCache()) {
-		return;
+		return false;
 	}
 
 	if (asSharedSettings(payload[column])?.['response'] !== true) {
-		return;
+		return false;
 	}
 
 	if (context.database && enablingFlushedAhead.has(context.database)) {
-		return;
+		return false;
 	}
 
 	// The access check runs after this filter, so a caller it would refuse must
@@ -427,13 +434,15 @@ export async function flushBeforeEnabling(
 	const storedSettings = await readSharedSettings(column, context.database);
 
 	if (storedSettings?.['response'] === true) {
-		return;
+		return false;
 	}
 
 	const { buildResponseCache, clearCacheTargets } = await import('./cache.js');
 
 	buildResponseCache();
 	await clearCacheTargets(['response']);
+
+	return true;
 }
 
 /**

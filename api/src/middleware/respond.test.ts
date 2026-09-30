@@ -1,14 +1,6 @@
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
-import {
-	afterEach,
-	beforeEach,
-	describe,
-	expect,
-	onTestFinished,
-	test,
-	vi,
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { CacheSettingField } from '../cache-settings.js';
 
 // Hoisted, because `scoped-cache.js` is now imported for real (see its mock
@@ -1150,16 +1142,7 @@ describe('respond middleware', () => {
 		fills nothing from a read whose purge counters were skipped while serving
 		was off
 	`, async () => {
-		onTestFinished(() => {
-			delete env['CACHE_AUTO_PURGE_MODE'];
-			delete env['CACHE_STORE'];
-			delete env['REDIS_ENABLED'];
-		});
-
 		env['CACHE_ENABLED'] = false;
-		env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
-		env['CACHE_STORE'] = 'redis';
-		env['REDIS_ENABLED'] = true;
 		const epochsWhileOff = await readScopedCacheEpochs(['articles']);
 		env['CACHE_ENABLED'] = true;
 

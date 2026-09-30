@@ -762,13 +762,17 @@ export class UtilsService {
 
 		// A clear can outlast the database's idle-in-transaction timeout, and it
 		// would hold the row lock every other settings write waits on.
-		await flushBeforeEnabling(
+		const clearedAhead = await flushBeforeEnabling(
 			{ [SHARED_SETTINGS_COLUMNS.cache]: patch },
 			{ accountability: this.accountability },
 		);
 
 		const sharedSettings = await this.knex.transaction(async (settingsTrx) => {
-			markEnablingFlushed(settingsTrx);
+			// Skipped ahead because the row said on, the check runs again under the
+			// lock: a write switching it off in between is now in the row.
+			if (clearedAhead) {
+				markEnablingFlushed(settingsTrx);
+			}
 
 			const merged = usableCacheSettings(
 				await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, settingsTrx),

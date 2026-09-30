@@ -20,6 +20,8 @@ Feature: The cache_settings switch keeps a shared Redis cache in step
     purge.
   - The flush command empties the response cache, whether the setting is on
     or was never stored.
+  - An admin switch-on clears what an earlier period left in the response
+    cache.
   - A switch-on that is refused clears nothing: an anonymous caller gets a 403,
     an admin write the guard refuses for another column gets a 400, and the
     cached entry is still there after either.
@@ -45,6 +47,13 @@ Feature: The cache_settings switch keeps a shared Redis cache in step
     When `directus cache flush` runs
     Then it exits 0
     And the flush command's response cache no longer holds that entry
+
+  Scenario: an admin switch-on clears what an earlier period left
+    Given the reader serves no cached read
+    And the reader's response cache holds an entry
+    When an admin sends PATCH /settings {"cache_settings":{"response":true}}
+    Then it answers 200
+    And the reader's response cache no longer holds that entry
 
   Scenario: an anonymous switch-on clears nothing
     Given the reader serves no cached read

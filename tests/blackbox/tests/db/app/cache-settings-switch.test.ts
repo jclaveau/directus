@@ -97,14 +97,17 @@ describe.each(vendors)('%s', (vendor) => {
 
 	// The layer lives in the settings singleton every later suite boots on.
 	afterEach(async () => {
-		await request(getUrl(vendor, readerEnv))
-			.delete('/utils/cache/settings')
-			.set('Authorization', adminAuth)
-			.expect(200);
-
-		await sharedRedis.del(readerEntryKey, flushEntryKey);
-		flushRun = undefined;
-		lastResponse = undefined;
+		try {
+			await request(getUrl(vendor, readerEnv))
+				.delete('/utils/cache/settings')
+				.set('Authorization', adminAuth)
+				.expect(200);
+		}
+		finally {
+			await sharedRedis.del(readerEntryKey, flushEntryKey);
+			flushRun = undefined;
+			lastResponse = undefined;
+		}
 	});
 
 	// Awaited: the shard reuses the port range straight away, and an instance
@@ -292,6 +295,13 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(await sharedRedis.get(readerEntryKey)).toBe('before-switch');
 			},
 		);
+
+		and.optional(
+			'the reader\'s response cache no longer holds that entry',
+			async () => {
+				expect(await sharedRedis.exists(readerEntryKey)).toBe(0);
+			},
+		);
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -309,6 +319,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			'the flush command empties the response cache with no setting stored',
+			defineScenarioSteps,
+			60_000,
+		);
+
+		scenario(
+			'an admin switch-on clears what an earlier period left',
 			defineScenarioSteps,
 			60_000,
 		);

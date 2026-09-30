@@ -14,6 +14,7 @@ const emit = defineEmits<{
 
 const canvasEl = ref<HTMLElement | null>(null);
 let chartInstance: ApexCharts | null = null;
+let chartRendered: Promise<void> = Promise.resolve();
 let pointerInside = false;
 let redrawOwed = false;
 
@@ -25,8 +26,18 @@ async function drawChart(): Promise<void> {
 	if (chartInstance === null) {
 		const createdChart = new ApexCharts(canvasEl.value, props.options);
 		chartInstance = createdChart;
-		await createdChart.render();
+		chartRendered = createdChart.render();
+		await chartRendered;
 		emit('drawn', createdChart);
+		return;
+	}
+
+	// Options changing while the first render runs would update a chart that
+	// has no SVG yet, and one unmounted meanwhile has nothing left to update.
+	const drawnChart = chartInstance;
+	await chartRendered;
+
+	if (chartInstance !== drawnChart || props.options === null) {
 		return;
 	}
 
@@ -38,7 +49,6 @@ async function drawChart(): Promise<void> {
 		return;
 	}
 
-	const drawnChart = chartInstance;
 	await drawnChart.updateOptions(props.options, true, false);
 	emit('drawn', drawnChart);
 }

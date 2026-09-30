@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	flushBeforeEnabling,
+	markEnablingFlushed,
 	refreshCacheSettings,
 	resolveCacheSettings,
 } from '../cache-settings.js';
@@ -91,6 +92,7 @@ vi.mock('../cache-settings.js', async (importOriginal) => {
 	return {
 		...await importOriginal<typeof import('../cache-settings.js')>(),
 		flushBeforeEnabling: vi.fn(),
+		markEnablingFlushed: vi.fn(),
 		refreshCacheSettings: vi.fn(),
 		resolveCacheSettings: vi.fn(() => {
 			return { audit_limit: { value: 40, source: 'settings' } };
@@ -1208,6 +1210,21 @@ describe('Services / Utils', () => {
 				{ accountability: expect.objectContaining({ admin: true }) },
 			);
 		});
+
+		it.each([
+			{ clearedAhead: true, marks: 1 },
+			{ clearedAhead: false, marks: 0 },
+		])(
+			'spares the transaction its own clear only when one was taken ahead: %o',
+			async ({ clearedAhead, marks }) => {
+				vi.mocked(readSharedSettings).mockResolvedValue(null);
+				vi.mocked(flushBeforeEnabling).mockResolvedValue(clearedAhead);
+
+				await service(admin).updateCacheSettings({ response: true }, 'admin');
+
+				expect(markEnablingFlushed).toHaveBeenCalledTimes(marks);
+			},
+		);
 
 		// One field stored around the guard would otherwise refuse every write to
 		// the others, and the page could never repair it.

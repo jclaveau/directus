@@ -74,6 +74,25 @@ test('updates the chart when the options change', async () => {
 	expect(apex.updateOptions).toHaveBeenCalledWith({ series: [2] }, true, false);
 });
 
+test('updates a chart only once its first render has drawn it', async () => {
+	let finishRender: () => void = () => undefined;
+
+	apex.render.mockReturnValueOnce(new Promise<void>((resolve) => {
+		finishRender = resolve;
+	}));
+
+	const wrapper = mount(VChart, { props: { options: { series: [1] } } });
+	await wrapper.setProps({ options: { series: [2] } });
+	await flushPromises();
+
+	expect(apex.updateOptions).not.toHaveBeenCalled();
+
+	finishRender();
+	await flushPromises();
+
+	expect(apex.updateOptions).toHaveBeenCalledWith({ series: [2] }, true, false);
+});
+
 test('holds the update while the pointer is over the chart', async () => {
 	const wrapper = mount(VChart, { props: { options: { series: [1] } } });
 	await flushPromises();
@@ -99,6 +118,9 @@ test('applies the latest held options once when the pointer leaves', async () =>
 
 	expect(apex.updateOptions).toHaveBeenCalledTimes(1);
 	expect(apex.updateOptions).toHaveBeenCalledWith({ series: [3] }, true, false);
+
+	// The page re-applies what it hid on this, so the owed redraw announces too.
+	expect(wrapper.emitted('drawn')).toHaveLength(2);
 
 	// The held redraw is paid off, so the next visit owes nothing.
 	await wrapper.trigger('pointerenter');

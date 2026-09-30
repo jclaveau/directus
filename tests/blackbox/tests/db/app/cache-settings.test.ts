@@ -73,10 +73,19 @@ describe('Cache settings', () => {
 		await Promise.all(promises);
 	}, 180_000);
 
+	// Awaited: the next sequential suite takes a port straight away, and an
+	// instance still shutting down is still holding its own.
 	afterAll(async () => {
 		for (const vendor of vendors) {
 			for (const instance of directusInstances[vendor]!) {
-				instance.kill();
+				if (instance.exitCode === null) {
+					const instanceExited = new Promise((resolve) => {
+						instance.once('exit', resolve);
+					});
+
+					instance.kill();
+					await instanceExited;
+				}
 			}
 
 			await DeleteCollection(vendor, { collection: collectionName });

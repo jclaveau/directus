@@ -152,6 +152,7 @@ describe('what the panel shows', () => {
 		'cache_settings_from_admin',
 		'cache_settings_from_mcp',
 		'cache_settings_days_ago',
+		'cache_settings_by',
 		'cache_settings_cancel',
 		'cache_settings_apply',
 		'cache_settings_reset_env',
@@ -506,6 +507,49 @@ describe('a refresh of the page', () => {
 			.setValue('80');
 
 		await press(row(wrapper, 'CACHE_AUDIT_LIMIT'), '.apply button');
+		answerRead(answered({ audit_limit: 40 }));
+		await flushPromises();
+
+		expect(wrapper.find('.stamp').exists()).toBe(true);
+	});
+
+	// Sent while the write was in flight, it may still have found the old row.
+	test('a read sent during a write leaves what the write showed', async () => {
+		const wrapper = await mounted();
+		let answerRead: (value: unknown) => void = () => undefined;
+		let answerWrite: (value: unknown) => void = () => undefined;
+
+		vi.mocked(api.patch).mockReturnValueOnce(new Promise((resolve) => {
+			answerWrite = resolve;
+		}) as never);
+
+		vi.mocked(api.get).mockReturnValueOnce(new Promise((resolve) => {
+			answerRead = resolve;
+		}) as never);
+
+		await row(wrapper, 'CACHE_AUDIT_LIMIT').find('input')
+			.setValue('80');
+
+		await press(row(wrapper, 'CACHE_AUDIT_LIMIT'), '.apply button');
+		await wrapper.setProps({ refreshKey: 1 });
+
+		answerWrite({
+			data: {
+				data: {
+					key: 'directus_settings.cache_settings',
+					sharedSettings: {
+						audit_limit: 80,
+						setBy: 'writer-id',
+						setAt: '2026-09-30T08:00:00.000Z',
+						setFrom: 'admin',
+					},
+					setByEmail: 'ann@example.com',
+					resolved: {},
+				},
+			},
+		});
+
+		await flushPromises();
 		answerRead(answered({ audit_limit: 40 }));
 		await flushPromises();
 

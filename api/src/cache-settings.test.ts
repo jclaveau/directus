@@ -329,6 +329,22 @@ test('ends the boot on a variable its rule refuses', () => {
 	);
 });
 
+// TYPE_MAP types the variable a string, so the environment's `false` is "false".
+test('reads a spelled-out false stats budget as no budget, and boots on it', () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_STATS_MAX_BYTES: 'false' });
+
+	const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+		throw new Error('exited');
+	});
+
+	validateCacheSettingsEnv();
+
+	expect(exit).not.toHaveBeenCalled();
+
+	expect(resolveCacheSettings(null).stats_max_bytes)
+		.toEqual({ value: false, source: 'env', fallback: false });
+});
+
 test('boots on the variables it is given, and on none of the optional ones', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		CACHE_ENABLED: true,
@@ -456,6 +472,26 @@ test('clears the response cache before switching it on', async () => {
 
 	expect(buildResponseCache).toHaveBeenCalledTimes(1);
 	expect(clearCacheTargets).toHaveBeenCalledWith(['response']);
+});
+
+test('answers whether it cleared, so its caller knows to check again', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await expect(flushBeforeEnabling(
+		{ cache_settings: { response: true } },
+		{ accountability: null },
+	))
+		.resolves
+		.toBe(true);
+
+	vi.mocked(readSharedSettings).mockResolvedValue({ response: true });
+
+	await expect(flushBeforeEnabling(
+		{ cache_settings: { response: true } },
+		{ accountability: null },
+	))
+		.resolves
+		.toBe(false);
 });
 
 test('clears it from a document handed over as text', async () => {
