@@ -30,6 +30,12 @@ import { summarise, type Summary } from './measure.js';
  * and the time Redis spent executing them is what every other client queued
  * behind. The wall time is reported beside them and gates nothing.
  *
+ * A purge cheap on the whole can still send one command long enough to stall
+ * every other client: on 2026-09-28 one `SSCAN` over a large set held Redis 10 to
+ * 36 ms at a time, and cache HITs went from 14 to 175 ms. So each write also
+ * reports the slowest single command Redis ran for it, read from `SLOWLOG`, and
+ * each phase times HITs with writes purging beside them, and with none.
+ *
  * The primary-key phase also measures the purge that drops a whole collection: a
  * version save purges the collection it versions whatever its delta holds. The
  * versioned collection is small and stays the same size at every step, so what
@@ -107,11 +113,28 @@ const maxCommandsPerDeadIndexKeyName = Number(
 	process.env['PERF_PURGE_MAX_COMMANDS_PER_DEAD_INDEX_KEY_NAME'] ?? 2.5,
 );
 
+// Below it, a slowest command is a round trip's noise rather than a walk: a
+// ratio between two such is not read as growth.
+const SLOWEST_COMMAND_FLOOR_MS = 1;
+
+const maxSlowestCommandScaling = Number(
+	process.env['PERF_PURGE_MAX_SLOWEST_COMMAND_SCALING'] ?? 2,
+);
+
+// HITs timed with the writes running and without, and how many write beside them.
+const contendedHits = Number(process.env['PERF_PURGE_CONTENDED_HITS'] ?? 300);
+const CONTENDING_WRITERS = 2;
+
+const maxContendedHitScaling = Number(
+	process.env['PERF_PURGE_MAX_CONTENDED_HIT_SCALING'] ?? 2,
+);
+
 const targetWallScaling = 1.5;
 
 for (const [name, value] of [
 	['PERF_PURGE_WRITE_REPS', writeReps],
 	['PERF_PURGE_WARM_CONCURRENCY', warmConcurrency],
+	['PERF_PURGE_CONTENDED_HITS', contendedHits],
 	...cacheSizes.map((size) => ['PERF_PURGE_SIZES', size] as const),
 ] as const) {
 	if (!Number.isFinite(value) || value < 1) {
@@ -573,9 +596,41 @@ type CommandStats = {
 	byCommand: Record<string, number>;
 };
 
-// The bench's own `config` and `info` land in the same counters.
+// The bench's own `config`, `info` and `slowlog` land in the same counters.
 function isBenchCommand(name: string): boolean {
-	return name.startsWith('config') || name === 'info';
+	return name.startsWith('config')
+		|| name.startsWith('slowlog')
+		|| name === 'info';
+}
+
+type SlowestCommand = {
+	name: string;
+	ms: number;
+};
+
+/**
+ * The longest single command Redis ran since the last `SLOWLOG RESET`, the bench's
+ * own left out. The bench logs every command (`slowlog-log-slower-than 0`).
+ */
+async function readSlowestCommand(): Promise<SlowestCommand> {
+	const entries = await redis.call('SLOWLOG', 'GET', '-1') as [
+		number,
+		number,
+		number,
+		string[],
+	][];
+
+	let slowest: SlowestCommand = { name: 'none', ms: 0 };
+
+	for (const [, , micros, commandArgs] of entries) {
+		const name = String(commandArgs[0]).toLowerCase();
+
+		if (!isBenchCommand(name) && micros / 1000 > slowest.ms) {
+			slowest = { name, ms: micros / 1000 };
+		}
+	}
+
+	return slowest;
 }
 
 async function readCommandStats(): Promise<CommandStats> {
@@ -652,6 +707,7 @@ type WriteSample = {
 	redisMs: number;
 	wallMs: number;
 	byCommand: Record<string, number>;
+	slowestCommand: SlowestCommand;
 };
 
 async function timeRedisCost(
@@ -659,12 +715,14 @@ async function timeRedisCost(
 	idleRate: number,
 ): Promise<WriteSample> {
 	await redis.config('RESETSTAT');
+	await redis.call('SLOWLOG', 'RESET');
 	const startedAt = performance.now();
 
 	await sendRequest();
 
 	const wallMs = performance.now() - startedAt;
 	const counted = await readCommandStats();
+	const slowestCommand = await readSlowestCommand();
 	const idleCommands = idleRate * (performance.now() - startedAt) / 1000;
 
 	return {
@@ -672,6 +730,7 @@ async function timeRedisCost(
 		redisMs: counted.redisMs,
 		wallMs,
 		byCommand: counted.byCommand,
+		slowestCommand,
 	};
 }
 
@@ -774,6 +833,80 @@ async function timeDeclaredPurge(
 	return declaredPurge;
 }
 
+type ContendedHits = {
+	aloneMs: number[];
+	underWritesMs: number[];
+	writes: number;
+	slowestCommand: SlowestCommand;
+};
+
+/**
+ * `contendedHits` HITs timed one after another, first with nothing else running,
+ * then with `CONTENDING_WRITERS` loops of scoped PATCHes purging beside them. The
+ * HITs read entries past the written rows' slices, cached at every size, so what
+ * they wait on is the purges, never a fill.
+ */
+async function timeContendedHits(phase: PurgePhase): Promise<ContendedHits> {
+	const rowIds = phaseRowIds.get(phase.phaseName)!;
+	const writtenEntries = writeReps * SLICE_ENTRIES;
+	const readEntries = smallestSize - writtenEntries;
+
+	async function timeHits(): Promise<number[]> {
+		const hitMs: number[] = [];
+
+		for (let hit = 0; hit < contendedHits; hit++) {
+			const path = slicePath(phase, writtenEntries + hit % readEntries);
+			const startedAt = performance.now();
+			const response = await fetch(`${base}${path}`, { headers: authHeaders });
+
+			await response.text();
+			hitMs.push(performance.now() - startedAt);
+
+			expect(response.headers.get(STATUS_HEADER), `contended read of ${path}`)
+				.toBe('HIT');
+		}
+
+		return hitMs;
+	}
+
+	const aloneMs = await timeHits();
+	let writing = true;
+	let writes = 0;
+
+	async function writeUntilStopped(): Promise<void> {
+		while (writing) {
+			await api(`/items/${phase.collection}/${rowIds[writes % writeReps]}`, {
+				method: 'PATCH',
+				body: JSON.stringify({ label: `contended ${Date.now()}` }),
+			});
+
+			writes++;
+		}
+	}
+
+	await redis.call('SLOWLOG', 'RESET');
+
+	const writers = Array.from({ length: CONTENDING_WRITERS }, () => {
+		return writeUntilStopped();
+	});
+
+	const underWritesMs = await timeHits();
+
+	writing = false;
+	await Promise.all(writers);
+
+	const slowestCommand = await readSlowestCommand();
+
+	// HITs timed beside no write measured nothing but the HITs.
+	expect(writes, `writes beside the ${phase.phaseName} contended HITs`)
+		.toBeGreaterThan(0);
+
+	// Put the purged slices back, so what is measured next finds the same cache.
+	await warmEntries(phase, 0, writtenEntries);
+
+	return { aloneMs, underWritesMs, writes, slowestCommand };
+}
+
 function commandBreakdown(sample: WriteSample): string {
 	return Object.entries(sample.byCommand)
 		.sort(([, a], [, b]) => b - a)
@@ -865,6 +998,65 @@ function declaredFigureOf(declaredBySize: Map<number, WriteSample[]>): string {
 		+ ` ${largest.byCommand['scan'] ?? 0} vs ${smallest.byCommand['scan'] ?? 0}`;
 }
 
+/**
+ * The median slowest command per write at the largest size against the smallest,
+ * the smallest held at `SLOWEST_COMMAND_FLOOR_MS` at least.
+ */
+function slowestCommandScalingIn(
+	samplesBySize: Map<number, WriteSample[]>,
+): number {
+	const largest = seriesOf(samplesBySize, largestSize, (sample) => {
+		return sample.slowestCommand.ms;
+	});
+
+	const smallest = seriesOf(samplesBySize, smallestSize, (sample) => {
+		return sample.slowestCommand.ms;
+	});
+
+	return largest.median / Math.max(smallest.median, SLOWEST_COMMAND_FLOOR_MS);
+}
+
+function slowestCommandRowsOf(
+	samplesBySize: Map<number, WriteSample[]>,
+): string[] {
+	return cacheSizes.map((size) => {
+		const samples = samplesBySize.get(size)!;
+
+		const median = seriesOf(samplesBySize, size, (sample) => {
+			return sample.slowestCommand.ms;
+		}).median;
+
+		const slowestOfAll = samples.reduce((slowest, sample) => {
+			return sample.slowestCommand.ms > slowest.ms
+				? sample.slowestCommand
+				: slowest;
+		}, samples[0]!.slowestCommand);
+
+		return `- ${size} entries: median ${median.toFixed(2)} ms, slowest`
+			+ ` \`${slowestOfAll.name}\` ${slowestOfAll.ms.toFixed(2)} ms`;
+	});
+}
+
+const CONTENDED_HEADER = [
+	'| cache entries | HIT p50 alone | HIT p95 alone | HIT p50 under writes'
+	+ ' | HIT p95 under writes | writes | slowest command under writes |',
+	'| ---: | ---: | ---: | ---: | ---: | ---: | --- |',
+];
+
+function contendedRowsOf(contendedBySize: Map<number, ContendedHits>): string[] {
+	return cacheSizes.map((size) => {
+		const contended = contendedBySize.get(size)!;
+		const alone = summarise('alone', contended.aloneMs);
+		const underWrites = summarise('under writes', contended.underWritesMs);
+		const { name, ms } = contended.slowestCommand;
+
+		return `| ${size} | ${alone.median.toFixed(1)} ms | ${alone.p95.toFixed(1)} ms`
+			+ ` | ${underWrites.median.toFixed(1)} ms`
+			+ ` | ${underWrites.p95.toFixed(1)} ms | ${contended.writes}`
+			+ ` | \`${name}\` ${ms.toFixed(2)} ms |`;
+	});
+}
+
 const FIGURE_HEADER = [
 	'| cache entries | Redis commands | Redis time | wall | wall p95 |',
 	'| ---: | ---: | ---: | ---: | ---: |',
@@ -877,6 +1069,7 @@ type PhaseResult = {
 	collectionPurgesBySize: Map<number, WriteSample[]>;
 	flushedPurgesBySize: Map<number, WriteSample[]>;
 	declaredPurgesBySize: Map<number, WriteSample[]>;
+	contendedBySize: Map<number, ContendedHits>;
 	markdown: string[];
 	verdicts: string[];
 	scaling: Record<string, number>;
@@ -894,6 +1087,7 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 	const collectionPurgesBySize = new Map<number, WriteSample[]>();
 	const flushedPurgesBySize = new Map<number, WriteSample[]>();
 	const declaredPurgesBySize = new Map<number, WriteSample[]>();
+	const contendedBySize = new Map<number, ContendedHits>();
 	const report: string[] = [];
 	let warmed = 0;
 
@@ -943,6 +1137,7 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		const samples = await timeSliceWrites(phase, idleRate);
 
 		bySize.set(size, samples);
+		contendedBySize.set(size, await timeContendedHits(phase));
 
 		let collectionReport = '';
 
@@ -997,9 +1192,28 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		wall: scalingIn(bySize, (sample) => sample.wallMs),
 	};
 
+	scaling['slowestCommand'] = slowestCommandScalingIn(bySize);
+
+	const hitP95BySize = new Map([...contendedBySize].map(([size, contended]) => {
+		return [size, summarise(`${size}`, contended.underWritesMs).p95];
+	}));
+
+	scaling['contendedHitP95'] = hitP95BySize.get(largestSize)!
+		/ Math.max(hitP95BySize.get(smallestSize)!, Number.EPSILON);
+
 	const gates: [string, number, number][] = [
 		['Redis commands per write', scaling['commands']!, maxCommandScaling],
 		['Redis time per write', scaling['redisTime']!, maxRedisTimeScaling],
+		[
+			`slowest Redis command per write (floor ${SLOWEST_COMMAND_FLOOR_MS} ms)`,
+			scaling['slowestCommand'],
+			maxSlowestCommandScaling,
+		],
+		[
+			'HIT p95 with writes purging beside it',
+			scaling['contendedHitP95'],
+			maxContendedHitScaling,
+		],
 	];
 
 	const collectionMarkdown: string[] = [];
@@ -1080,6 +1294,17 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		...FIGURE_HEADER,
 		...figureRowsOf(bySize),
 		'',
+		'The slowest single command Redis ran for each write, median over the reps'
+		+ ' and the slowest of all: what every other client queued behind.',
+		'',
+		...slowestCommandRowsOf(bySize),
+		'',
+		`${contendedHits} HITs one after another, alone and then with`
+		+ ` ${CONTENDING_WRITERS} loops of scoped PATCHes purging beside them.`,
+		'',
+		...CONTENDED_HEADER,
+		...contendedRowsOf(contendedBySize),
+		'',
 		...collectionMarkdown,
 		...report,
 		'',
@@ -1103,7 +1328,9 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		+ ` ${scaling['commands']!.toFixed(2)}x cmds`
 		+ ` ${scaling['redisTime']!.toFixed(2)}x redis`
 		+ ` ${largestWall.median.toFixed(1)}/${smallestWall.median.toFixed(1)} ms`
-		+ `${collectionFigure}`;
+		+ `${collectionFigure}, hit p95`
+		+ ` ${hitP95BySize.get(largestSize)!.toFixed(1)}/`
+		+ `${hitP95BySize.get(smallestSize)!.toFixed(1)} ms`;
 
 	return {
 		phase,
@@ -1112,6 +1339,7 @@ async function measurePhase(phase: PurgePhase): Promise<PhaseResult> {
 		collectionPurgesBySize,
 		flushedPurgesBySize,
 		declaredPurgesBySize,
+		contendedBySize,
 		markdown,
 		verdicts,
 		scaling,
@@ -1147,6 +1375,7 @@ async function writeResults(): Promise<string[]> {
 							Object.fromEntries(result.flushedPurgesBySize),
 						declaredPurgeSamples:
 							Object.fromEntries(result.declaredPurgesBySize),
+						contendedHits: Object.fromEntries(result.contendedBySize),
 						scaling: result.scaling,
 					},
 				];
@@ -1182,8 +1411,21 @@ async function writeResults(): Promise<string[]> {
 	return overVerdicts;
 }
 
+// What `slowlog-log-slower-than` and `slowlog-max-len` held before the bench.
+let slowlogConfig: string[] = [];
+
 beforeAll(async () => {
 	redis = new Redis(redisUrl);
+
+	slowlogConfig = [
+		...await redis.config('GET', 'slowlog-log-slower-than') as string[],
+		...await redis.config('GET', 'slowlog-max-len') as string[],
+	];
+
+	// Every command, and more than the largest write sends.
+	await redis.config('SET', 'slowlog-log-slower-than', '0');
+	await redis.config('SET', 'slowlog-max-len', '100000');
+
 	instance = await startInstance();
 
 	await seedPhase(PK_PHASE);
@@ -1194,6 +1436,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	instance?.kill('SIGTERM');
+
+	for (let at = 0; at < slowlogConfig.length; at += 2) {
+		await redis.config('SET', slowlogConfig[at]!, slowlogConfig[at + 1]!);
+	}
+
 	await redis?.quit().catch(() => undefined);
 });
 
