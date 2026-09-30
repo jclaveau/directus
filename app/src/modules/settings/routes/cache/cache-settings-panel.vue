@@ -73,12 +73,31 @@ onMounted(load);
 
 watch(() => props.refreshKey, load);
 
+/**
+ * Bumped by every read and write, so a read answering after a later one, a
+ * write included, leaves what that one showed.
+ */
+let latestRequest = 0;
+
 async function load(): Promise<void> {
+	latestRequest += 1;
+	const thisRequest = latestRequest;
+
 	try {
 		const response = await api.get('/utils/cache/settings');
+
+		if (thisRequest !== latestRequest) {
+			return;
+		}
+
 		answer.value = response.data.data;
+		error.value = null;
 	}
 	catch (err: any) {
+		if (thisRequest !== latestRequest) {
+			return;
+		}
+
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
 	}
 }
@@ -87,6 +106,7 @@ async function load(): Promise<void> {
 async function write(
 	request: () => Promise<{ data: { data: CacheSettingsAnswer } }>,
 ): Promise<boolean> {
+	latestRequest += 1;
 	saving.value = true;
 	error.value = null;
 
@@ -283,7 +303,7 @@ function resetsTo(row: CacheSettingRow): string {
 				</tr>
 			</thead>
 			<tbody>
-				<tr v-for="row in rows" :key="row.field">
+				<tr v-for="row in rows" :key="row.field" :data-variable="row.variable">
 					<td>
 						<span v-tooltip="row.description">{{ row.variable }}</span>
 					</td>
@@ -292,6 +312,8 @@ function resetsTo(row: CacheSettingRow): string {
 						row lays this span out instead. -->
 						<span
 							v-if="row.options"
+							role="group"
+							:aria-label="row.variable"
 							class="control choice"
 							:class="{ pending: edited(row.field) }"
 						>

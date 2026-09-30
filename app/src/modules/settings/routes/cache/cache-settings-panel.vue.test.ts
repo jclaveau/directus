@@ -82,9 +82,8 @@ async function mounted() {
 	return wrapper;
 }
 
-function row(wrapper: any, name: string) {
-	return wrapper.findAll('tbody tr')
-		.find((candidate: any) => candidate.text().startsWith(name));
+function row(wrapper: any, variable: string) {
+	return wrapper.find(`tbody tr[data-variable="${variable}"]`);
 }
 
 async function press(wrapper: any, selector: string) {
@@ -148,6 +147,11 @@ describe('what the panel shows', () => {
 		'cache_settings_field',
 		'cache_settings_value',
 		'cache_settings_source_settings',
+		'cache_settings_source_env',
+		'cache_settings_set_by',
+		'cache_settings_from_admin',
+		'cache_settings_from_mcp',
+		'cache_settings_days_ago',
 		'cache_settings_cancel',
 		'cache_settings_apply',
 		'cache_settings_reset_env',
@@ -175,6 +179,15 @@ describe('what the panel shows', () => {
 
 		expect(auditRow.find('.reset button').attributes('aria-label'))
 			.toBe('Reset to the environment: 0');
+	});
+
+	test('the switch is named by its variable', async () => {
+		const wrapper = await mounted();
+
+		expect(row(wrapper, 'CACHE_RESPONSE')
+			.find('.choice')
+			.attributes('aria-label'))
+			.toBe('CACHE_RESPONSE');
 	});
 
 	test('a field says what it does on hover', async () => {
@@ -401,6 +414,7 @@ describe('editing one field', () => {
 
 		const wrapper = mount(CacheSettingsPanel, { global });
 		await flushPromises();
+
 		const scanCountInput = row(wrapper, 'CACHE_SCOPED_INDEX_SCAN_COUNT')
 			.find('input');
 
@@ -459,6 +473,58 @@ describe('a refresh of the page', () => {
 
 		expect(row(wrapper, 'CACHE_AUDIT_LIMIT').find('input').element.value)
 			.toBe('80');
+	});
+
+	// Sent before the write committed, it holds the row the write replaced.
+	test('a read answering after a write leaves what the write showed', async () => {
+		const wrapper = await mounted();
+		let answerRead: (value: unknown) => void = () => undefined;
+
+		vi.mocked(api.get).mockReturnValueOnce(new Promise((resolve) => {
+			answerRead = resolve;
+		}) as never);
+
+		vi.mocked(api.patch).mockResolvedValue({
+			data: {
+				data: {
+					key: 'directus_settings.cache_settings',
+					sharedSettings: {
+						audit_limit: 80,
+						setBy: 'writer-id',
+						setAt: '2026-09-30T08:00:00.000Z',
+						setFrom: 'admin',
+					},
+					setByEmail: 'ann@example.com',
+					resolved: {},
+				},
+			},
+		});
+
+		await wrapper.setProps({ refreshKey: 1 });
+
+		await row(wrapper, 'CACHE_AUDIT_LIMIT').find('input')
+			.setValue('80');
+
+		await press(row(wrapper, 'CACHE_AUDIT_LIMIT'), '.apply button');
+		answerRead(answered({ audit_limit: 40 }));
+		await flushPromises();
+
+		expect(wrapper.find('.stamp').exists()).toBe(true);
+	});
+
+	test('a read that succeeds takes down the error of one that failed', async () => {
+		vi.mocked(api.get).mockRejectedValueOnce({
+			response: { data: { errors: [{ message: 'Service Unavailable' }] } },
+		});
+
+		vi.mocked(api.get).mockResolvedValue(answered({ audit_limit: 40 }));
+		const wrapper = mount(CacheSettingsPanel, { global });
+		await flushPromises();
+
+		await wrapper.setProps({ refreshKey: 1 });
+		await flushPromises();
+
+		expect(wrapper.find('.v-notice').exists()).toBe(false);
 	});
 });
 
