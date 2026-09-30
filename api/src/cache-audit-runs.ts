@@ -173,14 +173,14 @@ export async function runCacheAudit(
 
 	// A claim Redis refuses to answer is Redis down, and the run goes on to fail
 	// on it and be recorded failed, which is the outage's trace in the history.
-	const claimed = await holdCacheLock(
+	const runClaimed = await holdCacheLock(
 		lockCache,
 		RUN_LOCK,
 		runToken,
 		RUN_LOCK_TTL_MS,
 	).catch(() => true);
 
-	if (!claimed) {
+	if (!runClaimed) {
 		const holderToken = await readCacheLockHolder(lockCache, RUN_LOCK)
 			.catch(() => null);
 

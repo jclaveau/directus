@@ -635,7 +635,7 @@ describe('The cache audit replays live entries against the database', () => {
 				.set('Authorization', auth);
 
 			// On the wire now, answered once the held replay lets it go.
-			const held = audit({ collection: HOLD }).then((response) => response);
+			const heldAudit = audit({ collection: HOLD }).then((response) => response);
 
 			// What a node writes once the claim expired under a slow run: XX, so
 			// it lands only while the held run holds the claim.
@@ -643,7 +643,7 @@ describe('The cache audit replays live entries against the database', () => {
 				return redisClient.set(runLockKey, 'another-node', 'PX', 60_000, 'XX');
 			}, { interval: 5, timeout: 15_000 }).toBe('OK');
 
-			expect((await held).statusCode).toBe(200);
+			expect((await heldAudit).statusCode).toBe(200);
 			expect(await redisClient.get(runLockKey)).toBe('another-node');
 		}, 60_000);
 

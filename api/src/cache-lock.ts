@@ -55,23 +55,23 @@ const clientsCarryingLockScripts = new WeakSet<Redis>();
  * `defineCommand` rebuilds the command each time.
  */
 function useLockScriptedRedis(): CacheLockScriptedRedis {
-	const redis = useRedis();
+	const sharedRedis = useRedis();
 
-	if (!clientsCarryingLockScripts.has(redis)) {
-		redis.defineCommand('cacheLockHold', {
+	if (!clientsCarryingLockScripts.has(sharedRedis)) {
+		sharedRedis.defineCommand('cacheLockHold', {
 			numberOfKeys: 1,
 			lua: cacheLockHoldScript,
 		});
 
-		redis.defineCommand('cacheLockRelease', {
+		sharedRedis.defineCommand('cacheLockRelease', {
 			numberOfKeys: 1,
 			lua: cacheLockReleaseScript,
 		});
 
-		clientsCarryingLockScripts.add(redis);
+		clientsCarryingLockScripts.add(sharedRedis);
 	}
 
-	return redis as CacheLockScriptedRedis;
+	return sharedRedis as CacheLockScriptedRedis;
 }
 
 /**
@@ -103,13 +103,13 @@ export async function holdCacheLock(
 		return true;
 	}
 
-	const held = await useLockScriptedRedis().cacheLockHold(
+	const holdAnswer = await useLockScriptedRedis().cacheLockHold(
 		rawKeyOf(lockKey),
 		ownerToken,
 		lockTtlMs,
 	);
 
-	return held === 1;
+	return holdAnswer === 1;
 }
 
 /** Releases the lock only while the owner's token still holds it. */

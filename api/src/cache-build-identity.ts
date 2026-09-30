@@ -114,10 +114,10 @@ async function flushHoldingTheLock(
 	flushToken: string,
 ): Promise<void> {
 	const { lockCache } = getCache();
-	let refreshing: Promise<unknown> = Promise.resolve();
+	let lockRefreshing: Promise<unknown> = Promise.resolve();
 
 	const refresh = setInterval(() => {
-		refreshing = holdCacheLock(
+		lockRefreshing = holdCacheLock(
 			lockCache,
 			BUILD_IDENTITY_FLUSH_LOCK,
 			flushToken,
@@ -135,7 +135,7 @@ async function flushHoldingTheLock(
 	finally {
 		clearInterval(refresh);
 		// A refresh still on the wire would claim the lock again after the release.
-		await refreshing;
+		await lockRefreshing;
 
 		await releaseCacheLock(lockCache, BUILD_IDENTITY_FLUSH_LOCK, flushToken)
 			.catch(() => undefined);

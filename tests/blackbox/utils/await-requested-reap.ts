@@ -32,7 +32,7 @@ export async function awaitRequestedReap(
 				generationKey,
 			);
 
-			if (marker === generation) {
+			if (marker !== null && marker === generation) {
 				return;
 			}
 
