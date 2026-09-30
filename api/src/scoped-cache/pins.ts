@@ -281,17 +281,18 @@ export function scopedCacheCollectionPinsFromRows(
  * a set in the store plus a fingerprint index member, and the write side deletes
  * them one by one.
  *
- * Sized above a default page of nested parents (the default `limit` is 100), below
- * an import-sized one. NOT the bound
- * https://github.com/jclaveau/directus/issues/392 is deciding, though both coarsen
- * rather than fan out and both fail toward over-purge:
+ * Sized from the fill a pin costs, measured by `tests/perf/pin-fanout.perf.test.ts`
+ * (#392): a read pinning 200 parents added 435 Redis commands over an uncached
+ * read at 250, and 8 at 64, where it falls back to the parents' slices or to the
+ * bare collection. What that buys back is on the write: over 1600 such reads
+ * cached, one parent's update evicted 153 of them pinned by key, 200 through a
+ * slice, and all 1600 through the bare collection. Every cap from 4 to 64
+ * measured the same fill, so 64 keeps the pins of a small nested page.
  *
- * - #392 bounds what a WRITE emits, forced by Postgres's 65 535 bind parameters,
- *   and picks its number from the purge crossover. Above it a whole collection's
- *   cache goes.
- * - This bounds what a READ attaches. Nothing structural forces it, and a read
- *   never purges — so the crossover #392 measures does not apply. Above it this
- *   one response loses its pin and is still cached.
+ * NOT the bound a purge's record is held to, though both coarsen rather than fan
+ * out and both fail toward over-purge: that one is forced by Postgres's 65 535
+ * bind parameters and wipes a whole collection's cache above it. This one only
+ * costs the one response its pin, which is still cached.
  *
  * Operator-tunable because the right number is deployment-specific — it weighs
  * store memory against the hit ratio the pin buys, and a pin costs one set plus a

@@ -619,4 +619,4 @@ test('what the pin cap trades between a fill and a write', async () => {
 	}
 
 	lines.push('');
-});
+}, 30 * 60 * 1000);
