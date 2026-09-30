@@ -2,6 +2,7 @@ export * from './config.js';
 export * from './hook-declarations.js';
 export * from './pins.js';
 export * from './fill-guard.js';
+export * from './fill-pause.js';
 export * from './fingerprint.js';
 export * from './index-path.js';
 export * from './mutated-rows.js';

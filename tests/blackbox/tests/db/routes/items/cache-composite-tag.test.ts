@@ -13,6 +13,7 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import Redis from 'ioredis';
@@ -661,9 +662,15 @@ describe.each(vendors)('%s', (vendor) => {
 			const { query, response, fingerprints } = table[0]!;
 			const readQuery = queryParameters(query!);
 
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
+			await awaitRequestedReap(
+				Number(env[vendor]['REDIS_PORT']),
+				env[vendor]['CACHE_NAMESPACE']!,
+				async () => {
+					await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+				},
+			);
 
 			const filedBefore = await indexedMembers();
 

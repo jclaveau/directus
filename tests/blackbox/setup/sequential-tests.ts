@@ -47,7 +47,12 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-poisoning-write.test.ts',
 			'/tests/db/routes/items/cache-primary-key-scope.test.ts',
 			'/tests/db/routes/items/cache-purge-recovery.test.ts',
-			'/tests/db/routes/items/cache-raw-purge.test.ts',
+			// A chain: both create and drop the two collections the cache-raw-purge
+			// extension names, so they run in one shard, one after the other.
+			[
+				'/tests/db/routes/items/cache-raw-purge.test.ts',
+				'/tests/db/routes/items/cache-primary-key-home-pin.test.ts',
+			],
 			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
 			'/tests/db/routes/items/cache-read-scope.test.ts',
 			'/tests/db/routes/items/cache-read-inflight-purge.test.ts',

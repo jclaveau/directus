@@ -221,8 +221,26 @@ CACHE_ENABLED=false
 # index set outlives its entries, and every read filed into it pushes its expiry
 # out, so the set of a collection read all day never expires: without this it
 # keeps a member for every entry ever cached, and every write to the collection
-# tests them all again. Cron syntax, run on one node per tick. [0 * * * *]
+# tests them all again. The same pass prunes the names of sets that are gone,
+# releases the swept sets a stranded sweep left, and writes the completeness
+# marker a collection-wide purge needs to skip its keyspace SCAN. A flush and a
+# boot run one pass too, whatever this says; left off or invalid, only those
+# reap. Cron syntax, run on one node per tick. [0 * * * *]
 # CACHE_SCOPED_INDEX_REAP_SCHEDULE="0 * * * *"
+
+# The longest a boot of a build other than the last one recorded holds every
+# node of it from filling the scoped cache. The nodes of the build before keep
+# serving and filling through a rolling deploy, and file their entries where
+# this build's purges find them only by scanning the keyspace; entries this
+# build filed where theirs cannot reach would be served stale after their
+# purges. So this build serves every read uncached and writes no completeness
+# marker until no process of another build has answered the processes query
+# three looks in a row (5s apart), or this ceiling passes, then asks for a
+# reap, which names what the old build filed and writes the marker. Needs
+# PROCESSES_REPORT_ENABLED: without it the pause always runs to the ceiling.
+# A replica booting on the recorded build joins the pause running. 0 turns it
+# off. [5m]
+# CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX=5m
 
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,

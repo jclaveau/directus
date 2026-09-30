@@ -50,7 +50,9 @@ env:
   NODE_OPTIONS: --max_old_space_size=6144
   # setup.ts only writes server-log-<vendor>.txt when this is set, and only on server
   # exit — without it the "Directus server logs" failure step has nothing to print.
-  TEST_SAVE_LOGS: '1'
+  # It also copies every spawned process's output to server-logs/ (uploaded below),
+  # at debug so the scoped cache's fill guard and purge counters show.
+  TEST_SAVE_LOGS: debug
   # Setting COVERAGE_DIR flips api/tsdown.config.ts to instrument with rolldown-plugin-istanbul,
   # and the spawned blackbox servers (which inherit process.env) dump __coverage__ here on shutdown.
   COVERAGE_DIR: ${{ github.workspace }}/coverage/blackbox
@@ -124,6 +126,19 @@ jobs:
 
       - name: Run tests
         run: TEST_DB=sqlite3 pnpm run test:blackbox --project common
+
+      # Every process the suite spawned, one file each, kept whatever the outcome:
+      # a flaky failure is debugged from the run it happened in, not a rerun.
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-server-logs-common
+          path: |
+            tests/blackbox/server-logs/
+            tests/blackbox/server-log-*.txt
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Merge + upload blackbox coverage
         if: always()
@@ -236,6 +251,19 @@ jobs:
             tail -400 "$log"
             echo "::endgroup::"
           done
+
+      # Every process the suite spawned, one file each, kept whatever the outcome:
+      # a flaky failure is debugged from the run it happened in, not a rerun.
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-server-logs-${{ matrix.vendor }}-${{ matrix.shard }}
+          path: |
+            tests/blackbox/server-logs/
+            tests/blackbox/server-log-*.txt
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Merge + upload blackbox coverage
         if: always()

@@ -217,6 +217,31 @@ export function createMetrics() {
 		return metric;
 	}
 
+	// How a collection-wide purge found the sets its collection is filed in: the
+	// index-key set a reap vouched for, or a keyspace SCAN. `scan` holding up
+	// after a deploy is a changed build that moved the generation past the
+	// marker, with no reap since to write it again.
+	function getScopedCacheIndexReadMetric(): Counter | null {
+		if (services.includes('cache') === false || responseCacheWanted() === false) {
+			return null;
+		}
+
+		let metric = register
+			.getSingleMetric('directus_scoped_cache_index_reads_total') as
+			| Counter
+			| undefined;
+
+		if (!metric) {
+			metric = new Counter({
+				name: 'directus_scoped_cache_index_reads_total',
+				help: 'Collection-wide index reads by mode (registry/scan)',
+				labelNames: ['mode'],
+			});
+		}
+
+		return metric;
+	}
+
 	function getRedisErrorMetric(): Counter | null {
 		if (services.includes('redis') === false || redisConfigAvailable() !== true) {
 			return null;
@@ -364,6 +389,7 @@ export function createMetrics() {
 		getDatabaseResponseMetric,
 		getCacheErrorMetric,
 		getCacheResponseMetric,
+		getScopedCacheIndexReadMetric,
 		getRedisErrorMetric,
 		getUnhandledRejectionMetric,
 		getStorageErrorMetric,

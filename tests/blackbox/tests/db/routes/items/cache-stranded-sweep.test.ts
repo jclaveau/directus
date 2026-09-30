@@ -117,7 +117,8 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				// What the sweep's move script does, under the key it moves to: the
-				// set renamed away from the one every write reads.
+				// set renamed away from the one every write reads, its name moved from
+				// the collection's index-key set to the swept one.
 				and(
 					'a sweep moved the index set of this name aside, then died:',
 					async (table: Record<string, string>[]) => {
@@ -128,6 +129,16 @@ describe.each(vendors)('%s', (vendor) => {
 							+ `${STRANDED}:${randomUUID()}:1`;
 
 						expect(await redisClient.rename(indexKey, sweptKey)).toBe('OK');
+
+						await redisClient.srem(
+							`${namespace}:scoped-cache-index:collection-index-keys:${STRANDED}`,
+							indexKey,
+						);
+
+						await redisClient.sadd(
+							`${namespace}:scoped-cache-index:swept-index-keys`,
+							sweptKey,
+						);
 					},
 				);
 

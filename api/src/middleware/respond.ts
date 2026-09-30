@@ -20,6 +20,7 @@ import {
 	mergedScopedCacheEpochs,
 	renderScopedCacheFingerprint,
 	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFillPaused,
 	scopedCacheFingerprintIsBare,
 	scopedCachePurgeEnabled,
 	scopedCachePinKeys,
@@ -236,6 +237,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		unguardedScope === false &&
 		epochsReadWhileOff === false &&
 		dynamicQueryFilter === false &&
+		scopedCacheFillPaused() === false &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -312,6 +314,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				sweptDuringFill = await scopedCacheSweptDuringFill(epochsBeforeQuery);
 
 				if (sweptDuringFill !== undefined) {
+					// The one trace of an entry that was filled and dropped at once: the
+					// next read of it is a MISS with nothing else to say why.
+					logger.debug(
+						`[scoped-cache] ${redisKey} evicted after its fill: the `
+						+ `${sweptDuringFill} purge counter moved during it`,
+					);
+
 					// This is the one purge that knows precisely which key is stale, and
 					// everywhere else a purge that could not run is recorded for a retry.
 					// A store that swallowed the delete answers `undefined` rather than

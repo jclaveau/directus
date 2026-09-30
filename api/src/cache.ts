@@ -21,6 +21,7 @@ import {
 	dropScopedCacheIndex,
 	scopedCachePurgeEnabled,
 } from './scoped-cache/index.js';
+import { requestScopedCacheIndexReap } from './scoped-cache/reap-requests.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -517,6 +518,15 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		// linger. A FLUSHDB took it with the entries.
 		if (!flushedDatabase) {
 			refusedIndexKeys = (await dropScopedCacheIndex()).refused;
+
+			// Answered once the reap the drop asked for is over. A pass finding a
+			// member whose entry Redis does not hold yet takes a fill in flight for
+			// an expired entry and moves the purge counter, so the fill evicts what
+			// it wrote: a read sent right after the answer lost its fill.
+			await requestScopedCacheIndexReap({
+				forcePass: true,
+				skipDebounce: true,
+			});
 		}
 	}
 
