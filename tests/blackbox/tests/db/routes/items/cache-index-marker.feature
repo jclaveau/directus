@@ -17,7 +17,8 @@ Feature: The index-key sets are trusted again without waiting for the schedule
   every set the other files. It ends once no process of another build answers
   the processes query three looks in a row. A replica booting on the recorded
   build joins the pause running. A pause holds back only the fills: a read cached
-  before it still answers from the cache. A max of 0 opens none.
+  before it still answers from the cache, and a write purges it as ever, by the
+  slice of its scope field "name". A max of 0 opens none.
 
   Scenario: a flush with no reap scheduled keeps the index-key sets marked complete
     Given these rows of index_marker_flush:
@@ -127,3 +128,26 @@ Feature: The index-key sets are trusted again without waiting for the schedule
       | name | fields     |
       | ada  | name,label |
     When the second instance stops
+
+  Scenario: a write while fills are paused still purges a read cached before it
+    Given these rows of index_marker_pause_write:
+      | markers   | name | label |
+      | target_1  | ada  | old   |
+      | witness_1 | bob  | old   |
+    And these reads are cached:
+      | markers   | name | fields     |
+      | target_1  | ada  | name,label |
+      | witness_1 | bob  | name,label |
+    And a second instance runs on marker-build-h
+    When the instance restarts on marker-build-i pausing fills for at most 2m
+    Then the fill pause is open
+    When the label of ada becomes new while the fill pause is open
+    Then these reads answer, as the write purged the slice "name: ada" alone:
+      | markers   | name | fields     | cache | label |
+      | target_1  | ada  | name,label | MISS  | new   |
+      | witness_1 | bob  | name,label | HIT   | old   |
+    And these reads are not cached, as the fill their MISS asks for is held back:
+      | markers  | name | fields     |
+      | target_1 | ada  | name,label |
+    When the second instance stops
+    Then the fill pause ends long before its ceiling

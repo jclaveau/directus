@@ -2,6 +2,7 @@ import config, { getUrl, paths } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
+	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
 import { CreateCollections, DeleteCollection } from '@common/functions';
@@ -13,6 +14,7 @@ import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import getPort from 'get-port';
 import Redis from 'ioredis';
+import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
@@ -46,6 +48,10 @@ describe.each(vendors)('%s', (vendor) => {
 	// sets these scenarios check the fill names itself.
 	env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '0 0 1 1 *';
 
+	// The home pin scenarios read which way a purge found its sets off
+	// directus_scoped_cache_index_reads_total.
+	env[vendor]['METRICS_ENABLED'] = 'true';
+
 	const collections = [
 		'index_keys_new',
 		'index_keys_unnamed',
@@ -58,6 +64,14 @@ describe.each(vendors)('%s', (vendor) => {
 		'index_keys_unmarked',
 		'index_keys_flushed',
 	];
+
+	// Scoped on a field other than `name`, and never on the primary key, so a
+	// read pinning the key or a second scope field is filed under a home pin.
+	const homePinScopes: Record<string, string[]> = {
+		home_pin_key: ['owner'],
+		home_pin_second: ['owner', 'label'],
+		home_pin_untouched: ['owner', 'label'],
+	};
 
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -74,7 +88,18 @@ describe.each(vendors)('%s', (vendor) => {
 						{ field: 'label', type: 'string', meta: {} },
 					],
 				};
-			}),
+			}).concat(
+				Object.entries(homePinScopes).map(([collection, scopeFields]) => {
+					return {
+						collection,
+						meta: { scoped_cache_fields: scopeFields },
+						fields: [
+							{ field: 'owner', type: 'string', meta: {} },
+							{ field: 'label', type: 'string', meta: {} },
+						],
+					};
+				}),
+			),
 		});
 
 		env[vendor].PORT = String(await getPort());
@@ -96,7 +121,10 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await redisClient.quit();
 
-		for (const collection of collections) {
+		for (const collection of [
+			...collections,
+			...Object.keys(homePinScopes),
+		]) {
 			await DeleteCollection(vendor, { collection });
 		}
 	});
@@ -466,6 +494,164 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 	}
 
+	// A counter no read incremented yet is absent from the exposition: 0.
+	async function countedIndexReads(): Promise<Record<string, number>> {
+		const exposed = await request(getUrl(vendor, env))
+			.get('/metrics')
+			.set('Authorization', auth);
+
+		expect(exposed.statusCode).toBe(200);
+
+		const counted: Record<string, number> = { scan: 0, registry: 0 };
+
+		for (const [, mode, count] of exposed.text.matchAll(
+			/^directus_scoped_cache_index_reads_total\{mode="(\w+)"\} (\d+)$/gm,
+		)) {
+			counted[mode!] = Number(count);
+		}
+
+		return counted;
+	}
+
+	// A `query` cell holds the `Query` the read is made of: `fields` goes as a
+	// list, `filter` as the JSON Directus parses (`sanitize-query.ts`).
+	function readHomePinned(collection: string, query: string) {
+		const { fields, filter } = loadYaml(query) as {
+			fields: string[];
+			filter: Record<string, unknown>;
+		};
+
+		return request(getUrl(vendor, env))
+			.get(`/items/${collection}`)
+			.query({ fields, filter: JSON.stringify(filter) })
+			.set('Authorization', auth);
+	}
+
+	// A `set` cell spells what follows `fingerprint:<collection>:` in the key.
+	function homePinSetKey(collection: string, indexSet: string) {
+		return `${indexPrefix}fingerprint:${collection}:${indexSet}`;
+	}
+
+	function defineHomePinSteps({ given, and, when, then }: StepFunctions) {
+		let purgedCollection = '';
+		let countedBefore: Record<string, number> = {};
+		let countedAfter: Record<string, number> = {};
+
+		given(
+			'these rows, each written to its own collection:',
+			async (table: Record<string, string>[]) => {
+				for (const { collection, id, owner, label } of parseGherkinTable<{
+					collection: string;
+					id: number;
+					owner: string;
+					label: string;
+				}>(table)) {
+					const created = await request(getUrl(vendor, env))
+						.post(`/items/${collection}`)
+						.send({ id, owner, label })
+						.set('Authorization', auth);
+
+					expect(created.statusCode).toBe(200);
+				}
+			},
+		);
+
+		// The fill lands after the response, and files the entry under the set
+		// the cell names: the set exists only once something is filed in it.
+		and(
+			/^these reads are cached, each in the set of .+:$/,
+			async (table: Record<string, string>[]) => {
+				for (const { collection, query, set: indexSet } of table) {
+					expect(
+						(await readHomePinned(collection!, query!))
+							.headers[cacheStatusHeader],
+					).toBe('MISS');
+
+					await expect.poll(async () => {
+						return (await readHomePinned(collection!, query!))
+							.headers[cacheStatusHeader];
+					}, { timeout: 5_000 }).toBe('HIT');
+
+					expect(await redisClient.exists(
+						homePinSetKey(collection!, indexSet!),
+					)).toBe(1);
+				}
+			},
+		);
+
+		and(
+			/^the index-key set of (\w+) names these sets, so the purge finds them there:$/,
+			async (namedBy: string, table: Record<string, string>[]) => {
+				purgedCollection = namedBy;
+
+				for (const { set: indexSet } of table) {
+					expect(await redisClient.sismember(
+						`${indexPrefix}collection-index-keys:${purgedCollection}`,
+						homePinSetKey(purgedCollection, indexSet!),
+					)).toBe(1);
+				}
+			},
+		);
+
+		// What a reap's full pass writes: the index generation as it read
+		// before the pass.
+		and(
+			'the index-key sets are marked complete, so a purge trusts them over a scan',
+			async () => {
+				expect(await redisClient.set(
+					markerKey,
+					(await redisClient.get(generationKey))!,
+				)).toBe('OK');
+			},
+		);
+
+		// Read on each side of the purge alone: the fills before it read no
+		// collection-wide index.
+		when(/^every read of \w+ is purged$/, async () => {
+			countedBefore = await countedIndexReads();
+
+			const purged = await request(getUrl(vendor, env))
+				.post(`/cache-collection-purge/${purgedCollection}`)
+				.set('Authorization', auth);
+
+			expect(purged.statusCode).toBe(200);
+			countedAfter = await countedIndexReads();
+		});
+
+		then(
+			oneLine`
+				the purge found its sets through the index-key set, not a scan of
+				the keyspace:
+			`,
+			(table: Record<string, string>[]) => {
+				for (const { mode, grew } of table) {
+					if (grew === 'yes') {
+						expect(countedAfter[mode!])
+							.toBeGreaterThan(countedBefore[mode!]!);
+					}
+					else {
+						expect(countedAfter[mode!]).toBe(countedBefore[mode!]);
+					}
+				}
+			},
+		);
+
+		and(
+			oneLine`
+				these reads answer, the purged collection's gone and the other's
+				still cached:
+			`,
+			async (table: Record<string, string>[]) => {
+				for (const { collection, query, cache } of table) {
+					expect(
+						(await readHomePinned(collection!, query!))
+							.headers[cacheStatusHeader],
+					).toBe(cache);
+				}
+			},
+		);
+	}
+
 	defineFeature(feature, (scenario) => {
 		scenario(
 			oneLine`
@@ -542,6 +728,24 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'a marker written before a flush still vouches after it',
 			defineIndexKeySteps,
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a read filed under its primary key's home pin is purged with the
+				collection
+			`,
+			defineHomePinSteps,
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a read filed under a second scope field's home pin is purged with the
+				collection
+			`,
+			defineHomePinSteps,
 			60_000,
 		);
 	});

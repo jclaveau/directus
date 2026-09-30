@@ -202,3 +202,104 @@ Feature: A collection-wide purge reaches every set through the index-key set
     And these reads answer:
       | name | fields     | cache |
       | ada  | name,label | MISS  |
+
+  # Every scenario above scopes its collection on `name` alone, so each read it
+  # caches is filed under the index path's set (`name=ada`). A read pinning the
+  # primary key, or a scope field other than the index path, is filed under a
+  # home pin's set instead (`pin:<field>=<value>`, the primary key ranked first,
+  # then `scoped_cache_fields` in their declared order). These two scenarios
+  # purge such a read through the index-key set, and check the metrics that the
+  # purge read the index-key set rather than scanned the keyspace for it.
+
+  Scenario: a read filed under its primary key's home pin is purged with the collection
+    Given these rows, each written to its own collection:
+      | markers   | collection         | id | owner | label |
+      | target_1  | home_pin_key       | 1  | ann   | old   |
+      | witness_1 | home_pin_untouched | 1  | ann   | old   |
+    And these reads are cached, each in the set of its primary key, index path or home pin:
+      | markers   | collection         | query     | set      |
+      | target_1  | home_pin_key       | fields:   | pin:id=1 |+
+      |           |                    |   - id    |          |
+      |           |                    |   - label |          |
+      |           |                    | filter:   |          |
+      |           |                    |   id: 1   |          |
+      | witness_1 | home_pin_untouched | fields:   | pin:id=1 |+
+      |           |                    |   - id    |          |
+      |           |                    |   - label |          |
+      |           |                    | filter:   |          |
+      |           |                    |   id: 1   |          |
+    And the index-key set of home_pin_key names these sets, so the purge finds them there:
+      | markers  | set      |
+      | target_1 | pin:id=1 |
+    And the index-key sets are marked complete, so a purge trusts them over a scan
+    When every read of home_pin_key is purged
+    Then the purge found its sets through the index-key set, not a scan of the keyspace:
+      | mode     | grew |
+      | scan     | no   |
+      | registry | yes  |
+    And these reads answer, the purged collection's gone and the other's still cached:
+      | markers   | collection         | query     | cache |
+      | target_1  | home_pin_key       | fields:   | MISS  |+
+      |           |                    |   - id    |       |
+      |           |                    |   - label |       |
+      |           |                    | filter:   |       |
+      |           |                    |   id: 1   |       |
+      | witness_1 | home_pin_untouched | fields:   | HIT   |+
+      |           |                    |   - id    |       |
+      |           |                    |   - label |       |
+      |           |                    | filter:   |       |
+      |           |                    |   id: 1   |       |
+
+  # `owner` is home_pin_second's index path, so a read of "label: x" pins no
+  # index value and is filed under its home pin on `label`, the first scope field
+  # it pins; a read of "owner: bob" beside it is filed under the index path's set.
+  Scenario: a read filed under a second scope field's home pin is purged with the collection
+    Given these rows, each written to its own collection:
+      | markers   | collection         | id | owner | label |
+      | target_1  | home_pin_second    | 1  | ann   | x     |
+      | target_2  | home_pin_second    | 2  | bob   | y     |
+      | witness_1 | home_pin_untouched | 2  | ann   | x     |
+    And these reads are cached, each in the set of its primary key, index path or home pin:
+      | markers   | collection         | query        | set         |
+      | target_1  | home_pin_second    | fields:      | pin:label=x |+
+      |           |                    |   - id       |             |
+      |           |                    |   - label    |             |
+      |           |                    | filter:      |             |
+      |           |                    |   label: x   |             |
+      | target_2  | home_pin_second    | fields:      | owner=bob   |+
+      |           |                    |   - id       |             |
+      |           |                    |   - owner    |             |
+      |           |                    | filter:      |             |
+      |           |                    |   owner: bob |             |
+      | witness_1 | home_pin_untouched | fields:      | pin:label=x |+
+      |           |                    |   - id       |             |
+      |           |                    |   - label    |             |
+      |           |                    | filter:      |             |
+      |           |                    |   label: x   |             |
+    And the index-key set of home_pin_second names these sets, so the purge finds them there:
+      | markers  | set         |
+      | target_1 | pin:label=x |
+      | target_2 | owner=bob   |
+    And the index-key sets are marked complete, so a purge trusts them over a scan
+    When every read of home_pin_second is purged
+    Then the purge found its sets through the index-key set, not a scan of the keyspace:
+      | mode     | grew |
+      | scan     | no   |
+      | registry | yes  |
+    And these reads answer, the purged collection's gone and the other's still cached:
+      | markers   | collection         | query        | cache |
+      | target_1  | home_pin_second    | fields:      | MISS  |+
+      |           |                    |   - id       |       |
+      |           |                    |   - label    |       |
+      |           |                    | filter:      |       |
+      |           |                    |   label: x   |       |
+      | target_2  | home_pin_second    | fields:      | MISS  |+
+      |           |                    |   - id       |       |
+      |           |                    |   - owner    |       |
+      |           |                    | filter:      |       |
+      |           |                    |   owner: bob |       |
+      | witness_1 | home_pin_untouched | fields:      | HIT   |+
+      |           |                    |   - id       |       |
+      |           |                    |   - label    |       |
+      |           |                    | filter:      |       |
+      |           |                    |   label: x   |       |

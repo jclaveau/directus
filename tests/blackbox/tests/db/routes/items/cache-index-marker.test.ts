@@ -46,6 +46,7 @@ describe.each(vendors)('%s', (vendor) => {
 		'index_marker_pause',
 		'index_marker_pause_served',
 		'index_marker_unpaused',
+		'index_marker_pause_write',
 	];
 
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
@@ -664,6 +665,92 @@ describe.each(vendors)('%s', (vendor) => {
 				});
 
 				when('the second instance stops', stopSecondInstance);
+			},
+			150_000,
+		);
+
+		// After the one above, whose instance a max of 0 left unpaused.
+		scenario(
+			'a write while fills are paused still purges a read cached before it',
+			({ given, and, when, then }) => {
+				let collection = '';
+
+				given(
+					/^these rows of (\w+):$/,
+					async (rowsOf: string, table: Record<string, string>[]) => {
+						collection = rowsOf;
+
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${collection}`)
+							.send(table.map(({ name, label }) => ({ name, label })))
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				and('these reads are cached:', (table: Record<string, string>[]) => {
+					return expectCached(collection, table);
+				});
+
+				and(/^a second instance runs on ([\w-]+)$/, startSecondInstance);
+
+				when(
+					/^the instance restarts on ([\w-]+) pausing fills for at most (\w+)$/,
+					restartOnBuild,
+				);
+
+				then('the fill pause is open', async () => {
+					expect(await redisClient.exists(fillPauseKey)).toBe(1);
+				});
+
+				// By query, so the purge binds the rows' committed name, not a key.
+				when(
+					/^the label of (\w+) becomes (\w+) while the fill pause is open$/,
+					async (name: string, label: string) => {
+						const updated = await request(getUrl(vendor, env))
+							.patch(`/items/${collection}`)
+							.send({
+								query: { filter: { name: { _eq: name } } },
+								data: { label },
+							})
+							.set('Authorization', auth);
+
+						expect(updated.statusCode).toBe(200);
+						expect(await redisClient.exists(fillPauseKey)).toBe(1);
+					},
+				);
+
+				// Never the old body: a MISS here is the write reaching the entry
+				// cached before the pause.
+				then(
+					'these reads answer, as the write purged the slice "name: ada" alone:',
+					async (table: Record<string, string>[]) => {
+						for (const row of table) {
+							const read = await readByName(collection, row);
+
+							expect(read.headers[cacheStatusHeader]).toBe(row['cache']);
+
+							expect(read.body.data)
+								.toEqual([{ name: row['name'], label: row['label'] }]);
+						}
+					},
+				);
+
+				and(
+					'these reads are not cached, as the fill their MISS asks for is '
+					+ 'held back:',
+					(table: Record<string, string>[]) => {
+						return expectNotCached(collection, table);
+					},
+				);
+
+				when('the second instance stops', stopSecondInstance);
+
+				then(
+					'the fill pause ends long before its ceiling',
+					expectFillPauseEndsEarly,
+				);
 			},
 			150_000,
 		);
