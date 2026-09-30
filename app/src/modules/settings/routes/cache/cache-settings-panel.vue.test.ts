@@ -251,6 +251,24 @@ describe('editing one field', () => {
 		});
 	});
 
+	test('an unreadable number is refused, not written as a reset', async () => {
+		const wrapper = await mounted();
+		const input = row(wrapper, 'CACHE_AUDIT_LIMIT').find('input');
+
+		Object.defineProperty(input.element, 'validity', {
+			value: { badInput: true },
+		});
+
+		await input.setValue('');
+		await press(row(wrapper, 'CACHE_AUDIT_LIMIT'), '.apply button');
+		await press(wrapper, '.bulk .v-button:nth-child(1) button');
+
+		expect(api.patch).not.toHaveBeenCalled();
+
+		expect(wrapper.find('.v-notice')
+			.text()).toBe('Not a number: CACHE_AUDIT_LIMIT');
+	});
+
 	test('a refused write is reported and leaves the value to correct', async () => {
 		vi.mocked(api.patch).mockRejectedValue({
 			response: {

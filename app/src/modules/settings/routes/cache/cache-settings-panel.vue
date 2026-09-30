@@ -3,7 +3,6 @@ import api from '@/api';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
-	type CacheSettingKind,
 	type CacheSettingRow,
 	cacheSettingRows,
 	type CacheSettingsAnswer,
@@ -19,6 +18,10 @@ const answer = ref<CacheSettingsAnswer | null>(null);
 const error = ref<string | null>(null);
 const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
+
+// A number field holding what the browser cannot read reports it as emptied,
+// which would write a reset, so the fields in that state are kept apart.
+const badInputFields = ref(new Set<string>());
 
 const rows = computed(() => cacheSettingRows(answer.value));
 const dirty = computed(() => Object.keys(drafts.value).length > 0);
@@ -104,27 +107,64 @@ function shown(row: CacheSettingRow): string | null {
 		: String(row.value);
 }
 
-async function applyRow(field: string, kind: CacheSettingKind): Promise<void> {
-	const value = parseCacheSettingValue(kind, drafts.value[field]);
+function trackBadInput(field: string, event: Event): void {
+	if ((event.target as HTMLInputElement).validity.badInput) {
+		badInputFields.value.add(field);
+	}
+	else {
+		badInputFields.value.delete(field);
+	}
+}
 
-	if (await writePatch({ [field]: value })) {
-		delete drafts.value[field];
+/** Refuse the write while one of `rows` holds what the browser cannot read. */
+function refusesBadInput(rows: CacheSettingRow[]): boolean {
+	const unreadable = rows.filter((row) => badInputFields.value.has(row.field));
+
+	if (unreadable.length === 0) {
+		return false;
+	}
+
+	error.value = `${t('cache_settings_not_a_number', 'Not a number:')} ${
+		unreadable.map((row) => row.variable ?? row.field).join(', ')
+	}`;
+
+	return true;
+}
+
+function forgetDraft(field: string): void {
+	delete drafts.value[field];
+	badInputFields.value.delete(field);
+}
+
+async function applyRow(row: CacheSettingRow): Promise<void> {
+	if (refusesBadInput([row])) {
+		return;
+	}
+
+	const value = parseCacheSettingValue(row.kind, drafts.value[row.field]);
+
+	if (await writePatch({ [row.field]: value })) {
+		forgetDraft(row.field);
 	}
 }
 
 function cancelRow(field: string): void {
-	delete drafts.value[field];
+	forgetDraft(field);
 }
 
 async function resetRow(field: string): Promise<void> {
 	if (await writePatch({ [field]: null })) {
-		delete drafts.value[field];
+		forgetDraft(field);
 	}
 }
 
 /** Every pending change in one write, refused or taken whole. */
 async function applyAll(): Promise<void> {
 	const patch: Record<string, unknown> = {};
+
+	if (refusesBadInput(rows.value.filter((row) => edited(row.field)))) {
+		return;
+	}
 
 	for (const row of rows.value) {
 		if (edited(row.field)) {
@@ -137,17 +177,18 @@ async function applyAll(): Promise<void> {
 	}
 
 	for (const field of Object.keys(patch)) {
-		delete drafts.value[field];
+		forgetDraft(field);
 	}
 }
 
 function resetAll(): void {
 	drafts.value = {};
+	badInputFields.value.clear();
 }
 
 async function resetToFallbacks(): Promise<void> {
 	if (await write(() => api.delete('/utils/cache/settings'))) {
-		drafts.value = {};
+		resetAll();
 	}
 }
 
@@ -220,7 +261,8 @@ function resetsTo(row: CacheSettingRow): string {
 								:suffix="row.unit"
 								:disabled="saving"
 								@update:model-value="drafts[row.field] = $event"
-								@keyup.enter="applyRow(row.field, row.kind)"
+								@input="trackBadInput(row.field, $event)"
+								@keyup.enter="applyRow(row)"
 							>
 								<template #append>
 									<span class="source" :class="{ pending: edited(row.field) }">
@@ -248,7 +290,7 @@ function resetsTo(row: CacheSettingRow): string {
 							class="apply"
 							:tooltip="t('cache_settings_apply', 'Apply this change')"
 							:disabled="saving || !edited(row.field)"
-							@click="applyRow(row.field, row.kind)"
+							@click="applyRow(row)"
 						>
 							<v-icon name="check" x-small />
 						</v-button>
