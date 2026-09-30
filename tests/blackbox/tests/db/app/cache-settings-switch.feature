@@ -1,7 +1,7 @@
 Feature: The cache_settings switch keeps a shared Redis cache in step
 
   Every node here boots with CACHE_ENABLED=false and CACHE_STORE=redis, on the
-  same database, Redis and CACHE_NAMESPACE, so only `cache_settings.enabled`
+  same database, Redis and CACHE_NAMESPACE, so only `cache_settings.response`
   turns the response cache on.
 
   - The reader hears every change to the setting on its bus.
@@ -49,13 +49,13 @@ Feature: The cache_settings switch keeps a shared Redis cache in step
   Scenario: an anonymous switch-on clears nothing
     Given the reader serves no cached read
     And the reader's response cache holds an entry
-    When an anonymous caller sends PATCH /settings {"cache_settings":{"enabled":true}}
+    When an anonymous caller sends PATCH /settings {"cache_settings":{"response":true}}
     Then it answers 403
     And the reader's response cache still holds that entry
 
   Scenario: a switch-on the guard refuses for its autoscale part clears nothing
     Given the reader serves no cached read
     And the reader's response cache holds an entry
-    When an admin sends PATCH /settings {"autoscale_settings":{"not_a_setting":1},"cache_settings":{"enabled":true}}
+    When an admin sends PATCH /settings {"autoscale_settings":{"not_a_setting":1},"cache_settings":{"response":true}}
     Then it answers 400 saying "'not_a_setting' is not a field of the autoscale configuration"
     And the reader's response cache still holds that entry

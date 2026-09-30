@@ -56,7 +56,7 @@ function answered(sharedSettings: Record<string, unknown> | null) {
 				key: 'directus_settings.cache_settings',
 				sharedSettings,
 				resolved: {
-					enabled: { value: true, source: 'env', fallback: true },
+					response: { value: true, source: 'env', fallback: true },
 					value_max_size: { value: '2mb', source: 'env', fallback: '2mb' },
 					stats_max_bytes: { value: null, source: 'env', fallback: null },
 					audit_limit: { value: 40, source: 'settings', fallback: 0 },
@@ -111,7 +111,7 @@ describe('what the panel shows', () => {
 		expect(wrapper.findAll('tbody tr > td:first-child')
 			.map((cell: any) => cell.text()))
 			.toEqual([
-				'CACHE_ENABLED',
+				'CACHE_RESPONSE',
 				'CACHE_VALUE_MAX_SIZE',
 				'CACHE_STATS_MAX_BYTES',
 				'CACHE_AUDIT_LIMIT',
@@ -183,7 +183,7 @@ describe('what the panel shows', () => {
 	test('a field says what it does on hover', async () => {
 		const wrapper = await mounted();
 
-		expect(row(wrapper, 'CACHE_ENABLED').find('td span')
+		expect(row(wrapper, 'CACHE_RESPONSE').find('td span')
 			.attributes('title'))
 			.toContain('clears the response cache first');
 	});
@@ -242,15 +242,15 @@ describe('editing one field', () => {
 
 	test('switching the cache is chosen, and written as a boolean', async () => {
 		const wrapper = await mounted();
-		const select = row(wrapper, 'CACHE_ENABLED').findComponent(VSelect);
+		const select = row(wrapper, 'CACHE_RESPONSE').findComponent(VSelect);
 
 		expect(select.props('modelValue')).toBe('true');
 
 		select.vm.$emit('update:modelValue', 'false');
-		await press(row(wrapper, 'CACHE_ENABLED'), '.apply button');
+		await press(row(wrapper, 'CACHE_RESPONSE'), '.apply button');
 
 		expect(api.patch).toHaveBeenCalledWith('/utils/cache/settings', {
-			enabled: false,
+			response: false,
 		});
 
 		expect(wrapper.emitted('changed')).toHaveLength(1);

@@ -26,9 +26,9 @@ patch:
     Lays a patch over the cache settings, field by field. A field set to null
     is removed and handed back to its environment variable or default. The
     write goes through the settings guard, which refuses an unknown field or
-    a value outside its rule, and switching `enabled` on where CACHE_ENABLED
-    is off clears the response cache first. Every node reads the change on
-    the bus. Admin only.
+    a value outside its rule, and switching `response` on where CACHE_RESPONSE,
+    else CACHE_ENABLED, is off clears the response cache first. Every node
+    reads the change on the bus. Admin only.
   operationId: update-cache-settings
   requestBody:
     content:
@@ -38,10 +38,10 @@ patch:
           minProperties: 1
           additionalProperties: false
           properties:
-            enabled:
+            response:
               type: boolean
               nullable: true
-              description: Over CACHE_ENABLED.
+              description: Over CACHE_RESPONSE, else CACHE_ENABLED.
             value_max_size:
               oneOf:
                 - type: boolean

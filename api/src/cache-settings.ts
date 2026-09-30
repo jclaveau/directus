@@ -37,7 +37,7 @@ function isIntegerBetween(minimum: number, maximum: number) {
 
 /** What each field reads as, whether the layer or its fallback answers. */
 export interface CacheSettingValues {
-	enabled: boolean;
+	response: boolean;
 	value_max_size: string | false;
 	stats_max_bytes: string | false | undefined;
 	audit_limit: number | undefined;
@@ -59,6 +59,18 @@ interface CacheSettingRule<F extends CacheSettingField> {
 	fallback: () => CacheSettingValues[F];
 }
 
+/** `CACHE_RESPONSE` where it is set, else `CACHE_ENABLED`. */
+export function envResponseCache(): boolean {
+	const env = useEnv();
+	const responseSwitch = env['CACHE_RESPONSE'];
+
+	if (typeof responseSwitch === 'boolean') {
+		return responseSwitch;
+	}
+
+	return env['CACHE_ENABLED'] === true;
+}
+
 /**
  * Every field the layer takes, what a value has to be, and what answers when
  * the layer leaves it out. Each one only changes what a later fill or purge
@@ -71,11 +83,11 @@ interface CacheSettingRule<F extends CacheSettingField> {
 const CACHE_SETTING_RULES: {
 	[F in CacheSettingField]: CacheSettingRule<F>;
 } = {
-	enabled: {
+	response: {
 		accepts: (value) => typeof value === 'boolean',
 		expected: 'true, false or null',
 		fallbackSource: 'env',
-		fallback: () => useEnv()['CACHE_ENABLED'] === true,
+		fallback: envResponseCache,
 	},
 	value_max_size: {
 		accepts: (value) => value === false || isByteSize(value),
@@ -222,7 +234,7 @@ export function resolveCacheSettings(
 
 /** Whether this node serves and fills the response cache. */
 export function cacheEnabled(): boolean {
-	return cacheSetting('enabled');
+	return cacheSetting('response');
 }
 
 /**
@@ -230,18 +242,16 @@ export function cacheEnabled(): boolean {
  *
  * Wider than `cacheEnabled`: a write purges through the instance, so a node
  * holds one wherever an entry it could reach may be served. On Redis that is
- * every node, whatever `enabled` reads here: the store is shared, and a node
+ * every node, whatever `response` reads here: the store is shared, and a node
  * whose mirror lags the switch still has to purge what the others fill. On a
  * memory store only this node serves its entries, so it holds one once the
  * environment or the layer enables serving, and keeps it where the layer later
  * switches serving off.
  */
 export function responseCacheWanted(): boolean {
-	const env = useEnv();
-
-	return env['CACHE_ENABLED'] === true
+	return envResponseCache()
 		|| cacheEnabled()
-		|| env['CACHE_STORE'] === 'redis';
+		|| useEnv()['CACHE_STORE'] === 'redis';
 }
 
 /** Re-read the layer from `directus_settings` into the mirror. */
@@ -311,11 +321,11 @@ export async function flushBeforeEnabling(
 
 	const column = SHARED_SETTINGS_COLUMNS.cache;
 
-	if (column in payload === false || useEnv()['CACHE_ENABLED'] === true) {
+	if (column in payload === false || envResponseCache()) {
 		return;
 	}
 
-	if (asSharedSettings(payload[column])?.['enabled'] !== true) {
+	if (asSharedSettings(payload[column])?.['response'] !== true) {
 		return;
 	}
 
@@ -333,7 +343,7 @@ export async function flushBeforeEnabling(
 
 	const storedSettings = await readSharedSettings(column, context.database);
 
-	if (storedSettings?.['enabled'] === true) {
+	if (storedSettings?.['response'] === true) {
 		return;
 	}
 

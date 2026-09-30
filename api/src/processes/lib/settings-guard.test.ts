@@ -85,11 +85,11 @@ test.each([
 });
 
 test('lets the cache layer switch the response cache off', () => {
-	expect(checking({ cache_settings: { enabled: false } })).not.toThrow();
+	expect(checking({ cache_settings: { response: false } })).not.toThrow();
 });
 
-test('lets the cache layer hand enabled back to the environment', () => {
-	expect(checking({ cache_settings: { enabled: null } })).not.toThrow();
+test('lets the cache layer hand response back to the environment', () => {
+	expect(checking({ cache_settings: { response: null } })).not.toThrow();
 });
 
 test('refuses a field the cache layer does not have', () => {
@@ -97,9 +97,9 @@ test('refuses a field the cache layer does not have', () => {
 		.toThrowError(`'cache_settings.ttl' is not a cache setting`);
 });
 
-test('refuses an enabled the mirror would read as unset', () => {
-	expect(checking({ cache_settings: { enabled: 'false' } }))
-		.toThrowError(`'cache_settings.enabled' has to be true, false or null`);
+test('refuses a response the mirror would read as unset', () => {
+	expect(checking({ cache_settings: { response: 'false' } }))
+		.toThrowError(`'cache_settings.response' has to be true, false or null`);
 });
 
 // A JSON column comes back as a string on sqlite, and a write may hand one

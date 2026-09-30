@@ -33,7 +33,7 @@ describe('cacheSettingRows', () => {
 
 	test('nothing read yet leaves every row without a value or a layer', () => {
 		expect(cacheSettingRows(null)[0]).toMatchObject({
-			field: 'enabled',
+			field: 'response',
 			value: null,
 			source: null,
 			sharedSettings: null,

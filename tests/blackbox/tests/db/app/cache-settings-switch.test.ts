@@ -150,7 +150,7 @@ describe.each(vendors)('%s', (vendor) => {
 		when.optional('the reader switches the cache on', async () => {
 			await request(getUrl(vendor, readerEnv))
 				.patch('/utils/cache/settings')
-				.send({ enabled: true })
+				.send({ response: true })
 				.set('Authorization', adminAuth)
 				.expect(200);
 		});

@@ -2,7 +2,7 @@ import type { Knex } from 'knex';
 
 /**
  * `directus_settings.cache_settings` — the fleet-wide layer laid over the
- * `CACHE_*` environment, starting with `enabled`.
+ * `CACHE_*` environment, starting with `response`.
  *
  * Nullable, and `null` means the whole layer is unset: every field then comes
  * from the environment chain.

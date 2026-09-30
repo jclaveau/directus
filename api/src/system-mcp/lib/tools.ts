@@ -926,15 +926,17 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'Lay fields over the cache settings, which every node picks up at '
 				+ 'once — no redeploy. Pass a field as null to give it back to its '
 				+ 'environment variable or default, and `clear: true` alone to drop '
-				+ 'them all. A value outside its rule is refused. Switching `enabled` on '
-				+ 'where CACHE_ENABLED is off first clears the response cache, since '
-				+ 'nodes that held none purged nothing while it was off.',
+				+ 'them all. A value outside its rule is refused. Switching `response` '
+				+ 'on where CACHE_RESPONSE, else CACHE_ENABLED, is off first clears the '
+				+ 'response cache, since nodes that held none purged nothing while it '
+				+ 'was off.',
 			inputSchema: {
 				type: 'object',
 				properties: {
 					settings: {
 						type: 'object',
-						description: 'The fields to set: enabled (over CACHE_ENABLED), '
+						description: 'The fields to set: response (over CACHE_RESPONSE, '
+							+ 'else CACHE_ENABLED), '
 							+ 'value_max_size (false or a size such as "2mb", over '
 							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (false or a size, '
 							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '

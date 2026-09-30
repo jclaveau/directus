@@ -134,7 +134,7 @@ test('reads every column in a single statement', async () => {
 	first.mockResolvedValue({
 		[SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 },
 		[SHARED_SETTINGS_COLUMNS.supervisor]: JSON.stringify({ listenTimeout: 20 }),
-		[SHARED_SETTINGS_COLUMNS.cache]: { enabled: false },
+		[SHARED_SETTINGS_COLUMNS.cache]: { response: false },
 	});
 
 	const select = vi.fn(() => ({ from: () => ({ first }) }));
@@ -143,7 +143,7 @@ test('reads every column in a single statement', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: { maxWorkers: 8 },
 		supervisor_settings: { listenTimeout: 20 },
-		cache_settings: { enabled: false },
+		cache_settings: { response: false },
 	});
 
 	expect(select).toHaveBeenCalledTimes(1);

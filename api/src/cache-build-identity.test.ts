@@ -285,6 +285,7 @@ describe('flushCachesIfBuildChanged', () => {
 		['disabled switch', { CACHE_AUTO_FLUSH_ON_DEPLOY: false }],
 		['non-redis store', { CACHE_STORE: 'memory' }],
 		['cache disabled', { CACHE_ENABLED: false }],
+		['response cache off', { CACHE_RESPONSE: false }],
 	])('skips entirely (%s): no getCache, no flush', async (_label, overrides) => {
 		Object.assign(env, overrides);
 

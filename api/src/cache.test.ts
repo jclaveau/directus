@@ -1309,7 +1309,7 @@ describe('getCache', () => {
 		store.client.destroy();
 	});
 
-	// Every node on a shared store purges on writes whatever `enabled` says, so a
+	// Every node on a shared store purges on writes whatever `response` says, so a
 	// node whose mirror lags the switch never leaves a write unpurged.
 	test(oneLine`
 		holds a response tier on redis where neither the environment nor the

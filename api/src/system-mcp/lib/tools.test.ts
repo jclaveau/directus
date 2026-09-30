@@ -984,7 +984,7 @@ const cacheSettingsAnswer: CacheSettingsAnswer = {
 	key: 'directus_settings.cache_settings',
 	sharedSettings: { audit_limit: 40 },
 	resolved: {
-		enabled: { value: true, source: 'env', fallback: true },
+		response: { value: true, source: 'env', fallback: true },
 		value_max_size: { value: false, source: 'env', fallback: false },
 		stats_max_bytes: { value: '2gb', source: 'env', fallback: '2gb' },
 		audit_limit: { value: 40, source: 'settings', fallback: 0 },

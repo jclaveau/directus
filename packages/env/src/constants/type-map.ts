@@ -45,6 +45,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
 	CACHE_ENABLED: 'boolean',
+	CACHE_RESPONSE: 'boolean',
 	CACHE_COMPRESSION_ENABLED: 'boolean',
 	CACHE_KEY_HASH_ENABLED: 'boolean',
 	CACHE_TTL: 'string',

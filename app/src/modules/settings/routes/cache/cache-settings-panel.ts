@@ -50,12 +50,12 @@ export interface CacheSettingsAnswer {
  */
 export const CACHE_SETTING_FIELDS: CacheSettingField[] = [
 	{
-		field: 'enabled',
-		variable: 'CACHE_ENABLED',
+		field: 'response',
+		variable: 'CACHE_RESPONSE',
 		kind: 'boolean',
 		description: 'Disabled stops every node serving and filling the response '
-			+ 'cache. Enabling it where CACHE_ENABLED is off clears the response '
-			+ 'cache first, so nothing filled before is served.',
+			+ 'cache. Enabling it where CACHE_RESPONSE, else CACHE_ENABLED, is off '
+			+ 'clears the response cache first, so nothing filled before is served.',
 		options: [
 			{ text: 'enabled', value: 'true' },
 			{ text: 'disabled', value: 'false' },

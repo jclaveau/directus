@@ -13,9 +13,9 @@ const collectionName = 'test_cache_settings';
 const cacheStatusHeader = 'x-cache-status';
 
 // `directus_settings.cache_settings` tunes the response cache on every node,
-// over what the environment says. Both nodes boot with `CACHE_ENABLED` off, so
-// a cache status is the setting's doing, and every assertion is made on the
-// node that did NOT write.
+// over what the environment says. Both nodes boot with `CACHE_RESPONSE` off
+// over an enabling `CACHE_ENABLED`, so a cache status is the setting's doing,
+// and every assertion is made on the node that did NOT write.
 describe('Cache settings', () => {
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
 	const envs = {} as Record<Vendor, { writer: Env; peer: Env }>;
@@ -41,7 +41,8 @@ describe('Cache settings', () => {
 			const nsPrefix = `directus-cache-settings-${vendor}`;
 
 			const writer = cloneDeep(config.envs);
-			writer[vendor]['CACHE_ENABLED'] = 'false';
+			writer[vendor]['CACHE_ENABLED'] = 'true';
+			writer[vendor]['CACHE_RESPONSE'] = 'false';
 			writer[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
 			writer[vendor]['CACHE_STORE'] = 'redis';
 			writer[vendor]['REDIS_HOST'] = 'localhost';
@@ -134,23 +135,23 @@ describe('Cache settings', () => {
 	}
 
 	describe.each(vendors)('%s', (vendor) => {
-		it('caches nothing with CACHE_ENABLED off and the layer unset', async () => {
+		it('caches nothing with CACHE_RESPONSE off and the layer unset', async () => {
 			expect(await readCacheStatus(vendor)).toBe(undefined);
 			expect(await readCacheStatus(vendor)).toBe(undefined);
 		});
 
 		it('caches on the peer once the writer switches it on', async () => {
-			await writeCacheSettings(vendor, { enabled: true });
+			await writeCacheSettings(vendor, { response: true });
 
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 			expect(await readCacheStatus(vendor)).toBe('HIT');
 		});
 
 		it('stops caching on the peer once the writer switches it off', async () => {
-			await writeCacheSettings(vendor, { enabled: true });
+			await writeCacheSettings(vendor, { response: true });
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 
-			await writeCacheSettings(vendor, { enabled: false });
+			await writeCacheSettings(vendor, { response: false });
 
 			expect(await awaitServing(vendor, false)).toBe(undefined);
 			expect(await readCacheStatus(vendor)).toBe(undefined);
@@ -160,20 +161,20 @@ describe('Cache settings', () => {
 		// switching it back on has to start from empty rather than serve what the
 		// earlier period filled.
 		it('drops what an earlier period filled when switched back on', async () => {
-			await writeCacheSettings(vendor, { enabled: true });
+			await writeCacheSettings(vendor, { response: true });
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 			expect(await readCacheStatus(vendor)).toBe('HIT');
 
-			await writeCacheSettings(vendor, { enabled: false });
+			await writeCacheSettings(vendor, { response: false });
 			expect(await awaitServing(vendor, false)).toBe(undefined);
 
-			await writeCacheSettings(vendor, { enabled: true });
+			await writeCacheSettings(vendor, { response: true });
 
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 		});
 
 		it('fills nothing past the size cap the writer sets', async () => {
-			await writeCacheSettings(vendor, { enabled: true, value_max_size: '1b' });
+			await writeCacheSettings(vendor, { response: true, value_max_size: '1b' });
 
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 			expect(await readCacheStatus(vendor)).toBe('MISS');
@@ -185,7 +186,7 @@ describe('Cache settings', () => {
 
 			await request(writerUrl)
 				.patch('/utils/cache/settings')
-				.send({ enabled: true })
+				.send({ response: true })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(200);
 
@@ -196,9 +197,9 @@ describe('Cache settings', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(200);
 
-			expect(read.body.data.sharedSettings).toEqual({ enabled: true });
+			expect(read.body.data.sharedSettings).toEqual({ response: true });
 
-			expect(read.body.data.resolved.enabled)
+			expect(read.body.data.resolved.response)
 				.toEqual({ value: true, source: 'settings', fallback: false });
 
 			const refused = await request(writerUrl)
@@ -220,15 +221,15 @@ describe('Cache settings', () => {
 			expect(await awaitServing(vendor, false)).toBe(undefined);
 		});
 
-		it('refuses an enabled the peers would read as unset', async () => {
+		it('refuses a response the peers would read as unset', async () => {
 			const refused = await request(getUrl(vendor, envs[vendor]!.writer))
 				.patch('/settings')
-				.send({ cache_settings: { enabled: 'yes' } })
+				.send({ cache_settings: { response: 'yes' } })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(400);
 
 			expect(refused.body.errors[0].message).toContain(
-				"'cache_settings.enabled' has to be true, false or null",
+				"'cache_settings.response' has to be true, false or null",
 			);
 		});
 	});
