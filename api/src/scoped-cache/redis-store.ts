@@ -994,6 +994,44 @@ async function* scanCollectionIndexKeyNames(
 	);
 }
 
+/**
+ * The home pin sets among `homePinKeys` that the collection's index-key set
+ * names, once a reap has marked those complete, or all of them before.
+ *
+ * A filing names its set in the script that fills it, so under a complete mark
+ * a set left unnamed holds nothing, and a write carrying twenty fields reads
+ * the few its rows' values were filed under rather than twenty. A name may
+ * outlive its set, which reads empty.
+ */
+async function namedHomePinKeys(
+	collection: string,
+	homePinKeys: string[],
+): Promise<string[]> {
+	if (homePinKeys.length === 0 || !await collectionIndexKeysComplete()) {
+		return homePinKeys;
+	}
+
+	const redis = useScriptedRedis();
+	const collectionIndexKeysKey = scopedCacheCollectionIndexKeysKey(collection);
+	const chunkLookups: Promise<number[]>[] = [];
+
+	// Sent together, so the lookup costs one round trip.
+	for (
+		let keyAt = 0;
+		keyAt < homePinKeys.length;
+		keyAt += SCOPED_CACHE_INDEX_CHUNK_MEMBERS
+	) {
+		chunkLookups.push(redis.smismember(
+			collectionIndexKeysKey,
+			...homePinKeys.slice(keyAt, keyAt + SCOPED_CACHE_INDEX_CHUNK_MEMBERS),
+		));
+	}
+
+	const named = (await Promise.all(chunkLookups)).flat();
+
+	return homePinKeys.filter((_homePinKey, keyAt) => named[keyAt] === 1);
+}
+
 /** The members of one set, a page at a time. */
 async function* scanScopedCacheSetMembers(
 	setKey: string,
@@ -1744,7 +1782,7 @@ const redisStore: ScopedCacheStore = {
 		}
 	},
 
-	scanRowIndexedEntries(
+	async* scanRowIndexedEntries(
 		collection: string,
 		rowFingerprints: readonly ScopedCacheFingerprint[],
 		indexPath: string | null,
@@ -1752,9 +1790,12 @@ const redisStore: ScopedCacheStore = {
 		// Every set an entry some row can drop is filed in: its index value's, its
 		// home pin's, or the bare one. The bare set also still holds what the
 		// layout before home pins filed there, read whole now.
-		return scanScopedCacheIndexKeys([
+		yield* scanScopedCacheIndexKeys([
 			...scopedCacheRowIndexKeys(collection, rowFingerprints, indexPath),
-			...scopedCacheRowHomePinKeys(collection, rowFingerprints),
+			...await namedHomePinKeys(
+				collection,
+				scopedCacheRowHomePinKeys(collection, rowFingerprints),
+			),
 		]);
 	},
 
