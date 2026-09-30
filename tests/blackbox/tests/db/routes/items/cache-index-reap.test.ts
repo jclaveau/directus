@@ -19,6 +19,7 @@ const INDEX_REAP_PINNED = 'index_reap_pinned';
 const INDEX_REAP_WINDOW = 'index_reap_window';
 const INDEX_REAP_REGISTRY = 'index_reap_registry';
 const INDEX_REAP_STRANDED = 'index_reap_stranded';
+const INDEX_REAP_LOCK = 'index_reap_lock';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTtlSeconds = 8;
 
@@ -47,6 +48,10 @@ describe.each(vendors)('%s', (vendor) => {
 		`${namespace}:scoped-cache-index:fingerprint:${INDEX_REAP_PINNED}:name=`;
 
 	const indexPrefix = `${namespace}:scoped-cache-index:`;
+
+	// Namespaced twice, as Keyv names every lock-cache key.
+	const reapLockKey =
+		`${namespace}_lock::${namespace}_lock:scoped-cache-index:reap`;
 
 	const redisClient = new Redis({ host: 'localhost', port: 6108 });
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -94,6 +99,13 @@ describe.each(vendors)('%s', (vendor) => {
 						{ field: 'label', type: 'string', meta: {} },
 					],
 				},
+				{
+					collection: INDEX_REAP_LOCK,
+					fields: [
+						{ field: 'name', type: 'string', meta: {} },
+						{ field: 'label', type: 'string', meta: {} },
+					],
+				},
 			],
 		});
 
@@ -114,6 +126,7 @@ describe.each(vendors)('%s', (vendor) => {
 			await redisClient.del(key);
 		}
 
+		await redisClient.del(reapLockKey);
 		await redisClient.quit();
 
 		await DeleteCollection(vendor, { collection: INDEX_REAP });
@@ -121,6 +134,7 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: INDEX_REAP_WINDOW });
 		await DeleteCollection(vendor, { collection: INDEX_REAP_REGISTRY });
 		await DeleteCollection(vendor, { collection: INDEX_REAP_STRANDED });
+		await DeleteCollection(vendor, { collection: INDEX_REAP_LOCK });
 	});
 
 	defineFeature(feature, (scenario) => {
@@ -542,6 +556,110 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 			},
 			60_000,
+		);
+
+		scenario(
+			'a reap releases the reap\'s lock only while it holds it',
+			({ given, and, when, then }) => {
+				const seededIndexKeys = Array.from({ length: 5000 }, (_, seeded) => {
+					return `${indexPrefix}fingerprint:${INDEX_REAP_LOCK}:seeded=${seeded}`;
+				});
+
+				given(
+					`these rows of ${INDEX_REAP_LOCK}:`,
+					async (table: Record<string, string>[]) => {
+						const created = await request(getUrl(vendor, env))
+							.post(`/items/${INDEX_REAP_LOCK}`)
+							.send(table)
+							.set('Authorization', auth);
+
+						expect(created.statusCode).toBe(200);
+					},
+				);
+
+				// Each set costs the reap its own round trips, so 5000 hold a pass
+				// for long enough to be caught holding the lock. Their members copy
+				// a real read's fingerprint and name keys nothing ever cached.
+				and(
+					`the index of ${INDEX_REAP_LOCK} holds 5000 sets naming no cached read`,
+					async () => {
+						const cached = await request(getUrl(vendor, env))
+							.get(`/items/${INDEX_REAP_LOCK}`)
+							.query({ 'filter[name][_eq]': 'ada', fields: 'name,label' })
+							.set('Authorization', auth);
+
+						expect(cached.headers[cacheStatusHeader]).toBe('MISS');
+
+						const [realMember] = await redisClient.smembers(
+							`${indexPrefix}fingerprint:${INDEX_REAP_LOCK}:`,
+						);
+
+						expect(realMember).toBeDefined();
+
+						const fingerprint = realMember!.slice(
+							0,
+							realMember!.lastIndexOf('|'),
+						);
+
+						const seeding = redisClient.pipeline();
+
+						for (const [seeded, seededIndexKey] of seededIndexKeys.entries()) {
+							seeding.sadd(seededIndexKey, `${fingerprint}|never-cached-${seeded}`);
+							seeding.expire(seededIndexKey, 60);
+						}
+
+						await seeding.exec();
+					},
+				);
+
+				// What a node claiming a lock that expired under a slow pass writes,
+				// only once the pass is walking the seeded sets: XX, so a pass that
+				// released first leaves nothing to take over.
+				when(
+					'another node takes the reap\'s lock while a reap walks those sets',
+					async () => {
+						await expect.poll(async () => {
+							const walking = await redisClient.exists(...seededIndexKeys)
+								< seededIndexKeys.length;
+
+							if (!walking) {
+								return null;
+							}
+
+							return redisClient.set(
+								reapLockKey,
+								'another-node',
+								'PX',
+								60_000,
+								'XX',
+							);
+						}, { interval: 5, timeout: 20_000 }).toBe('OK');
+					},
+				);
+
+				then('the reap takes the 5000 sets out', async () => {
+					await expect.poll(async () => {
+						return redisClient.exists(...seededIndexKeys);
+					}, { timeout: 30_000 }).toBe(0);
+				});
+
+				// Past the pass's release, which follows its last set within a few
+				// round trips, and past the next scheduled pass a second later.
+				and(
+					oneLine`
+						the reap's lock still names the other node, as the reap no longer
+						held it
+					`,
+					async () => {
+						await new Promise((resolve) => {
+							setTimeout(resolve, 1_500);
+						});
+
+						expect(await redisClient.get(reapLockKey)).toBe('another-node');
+					},
+				);
+			},
+			90_000,
 		);
 	});
 });

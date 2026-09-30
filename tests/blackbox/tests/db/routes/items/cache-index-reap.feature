@@ -25,6 +25,12 @@ Feature: The members naming an expired entry are reaped from the index
   each full walk marks them complete with the index generation as it read before
   the walk, so a flush moving that generation voids the mark until the next.
 
+  One reap runs at a time across the nodes, under a lock that expires if its node
+  dies. A pass slower than the lock's TTL lost it to the next node's claim, and
+  deleted that node's lock as it ended: a third node could then claim it too, and
+  two passes ran at once. A pass now releases the lock only while it names that
+  pass.
+
   Scenario: a read that expired leaves the index, a read still cached stays
     Given these rows of index_reap:
       | name | label |
@@ -91,3 +97,12 @@ Feature: The members naming an expired entry are reaped from the index
   Scenario: a reap marks the index-key sets complete with the index generation
     Given the cache is flushed
     Then the next reap marks the index-key sets complete with the generation
+
+  Scenario: a reap releases the reap's lock only while it holds it
+    Given these rows of index_reap_lock:
+      | name | label |
+      | ada  | old   |
+    And the index of index_reap_lock holds 5000 sets naming no cached read
+    When another node takes the reap's lock while a reap walks those sets
+    Then the reap takes the 5000 sets out
+    And the reap's lock still names the other node, as the reap no longer held it
