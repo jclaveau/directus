@@ -948,8 +948,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '
 							+ '0, over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
 							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
-							+ 'scoped_max_index_globs (an integer from 1 to 10000, default '
-							+ '64), scoped_index_scan_count (an integer from 1 to 100000, '
+							+ 'scoped_index_scan_count (an integer from 1 to 100000, '
 							+ 'default 1000), scoped_index_ttl_factor (a number from 1 to '
 							+ '100, default 2). A null value clears that field.',
 					},

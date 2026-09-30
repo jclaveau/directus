@@ -42,7 +42,6 @@ export interface CacheSettingValues {
 	stats_max_bytes: string | false | undefined;
 	audit_limit: number | undefined;
 	audit_max_duration: string | undefined;
-	scoped_max_index_globs: number;
 	scoped_index_scan_count: number;
 	scoped_index_ttl_factor: number;
 }
@@ -118,12 +117,6 @@ const CACHE_SETTING_RULES: {
 		expected: 'a duration such as "10m", up to "24h", or null',
 		fallbackSource: 'env',
 		fallback: () => useEnv()['CACHE_AUDIT_MAX_DURATION'] as string | undefined,
-	},
-	scoped_max_index_globs: {
-		accepts: isIntegerBetween(1, 10000),
-		expected: 'an integer from 1 to 10000, or null',
-		fallbackSource: 'default',
-		fallback: () => 64,
 	},
 	scoped_index_scan_count: {
 		accepts: isIntegerBetween(1, 100000),

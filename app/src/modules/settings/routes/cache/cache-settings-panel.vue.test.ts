@@ -61,7 +61,6 @@ function answered(sharedSettings: Record<string, unknown> | null) {
 					stats_max_bytes: { value: null, source: 'env', fallback: null },
 					audit_limit: { value: 40, source: 'settings', fallback: 0 },
 					audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
-					scoped_max_index_globs: { value: 64, source: 'default', fallback: 64 },
 					scoped_index_scan_count: {
 						value: 1000,
 						source: 'default',
@@ -116,7 +115,6 @@ describe('what the panel shows', () => {
 				'CACHE_STATS_MAX_BYTES',
 				'CACHE_AUDIT_LIMIT',
 				'CACHE_AUDIT_MAX_DURATION',
-				'scoped_max_index_globs',
 				'scoped_index_scan_count',
 				'scoped_index_ttl_factor',
 			]);
@@ -404,17 +402,17 @@ describe('editing one field', () => {
 
 		const wrapper = mount(CacheSettingsPanel, { global });
 		await flushPromises();
-		const globsInput = row(wrapper, 'scoped_max_index_globs').find('input');
+		const scanCountInput = row(wrapper, 'scoped_index_scan_count').find('input');
 
-		Object.defineProperty(globsInput.element, 'validity', {
+		Object.defineProperty(scanCountInput.element, 'validity', {
 			value: { badInput: true },
 		});
 
-		await globsInput.setValue('');
-		await press(row(wrapper, 'scoped_max_index_globs'), '.cancel button');
+		await scanCountInput.setValue('');
+		await press(row(wrapper, 'scoped_index_scan_count'), '.cancel button');
 
-		expect(row(wrapper, 'scoped_max_index_globs').find('input').element)
-			.not.toBe(globsInput.element);
+		expect(row(wrapper, 'scoped_index_scan_count').find('input').element)
+			.not.toBe(scanCountInput.element);
 	});
 
 	test('a refused write is reported and leaves the value to correct', async () => {

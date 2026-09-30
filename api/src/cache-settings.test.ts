@@ -111,8 +111,6 @@ test.each([
 	{ audit_limit: 0 },
 	{ audit_max_duration: '10m' },
 	{ audit_max_duration: '24h' },
-	{ scoped_max_index_globs: 1 },
-	{ scoped_max_index_globs: 10000 },
 	{ scoped_index_scan_count: 1000 },
 	{ scoped_index_scan_count: 100000 },
 	{ scoped_index_ttl_factor: 1 },
@@ -181,13 +179,6 @@ test.each([
 		`,
 	],
 	[
-		{ scoped_max_index_globs: 0 },
-		oneLine`
-			'cache_settings.scoped_max_index_globs' has to be
-			an integer from 1 to 10000, or null
-		`,
-	],
-	[
 		{ scoped_index_scan_count: '1000' },
 		oneLine`
 			'cache_settings.scoped_index_scan_count' has to be
@@ -244,10 +235,6 @@ test.each([
 	[
 		{ scoped_index_scan_count: 100001 },
 		`'cache_settings.scoped_index_scan_count' has to be`,
-	],
-	[
-		{ scoped_max_index_globs: 10001 },
-		`'cache_settings.scoped_max_index_globs' has to be`,
 	],
 	[
 		{ scoped_index_ttl_factor: 101 },
@@ -310,7 +297,6 @@ test('resolves every field against the environment and the defaults', () => {
 			stats_max_bytes: { value: '2gb', source: 'env', fallback: '2gb' },
 			audit_limit: { value: 40, source: 'settings', fallback: 0 },
 			audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
-			scoped_max_index_globs: { value: 64, source: 'default', fallback: 64 },
 			scoped_index_scan_count: {
 				value: 1000,
 				source: 'default',

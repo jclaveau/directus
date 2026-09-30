@@ -131,16 +131,6 @@ export const CACHE_SETTING_FIELDS: CacheSettingField[] = [
 			+ 'the rest to the next one.',
 	},
 	{
-		field: 'scoped_max_index_globs',
-		variable: null,
-		kind: 'number',
-		description: 'How many patterns a scoped purge narrows a tag index with. '
-			+ 'Past it the index is read whole and every member tested.',
-		unit: 'globs',
-		min: 1,
-		step: 1,
-	},
-	{
 		field: 'scoped_index_scan_count',
 		variable: null,
 		kind: 'number',
