@@ -177,7 +177,7 @@ describe('Cache audit over the system MCP', () => {
 		}
 
 		it(oneLine`
-			lists the audit tools beside the cache reads, and marks the two that act
+			lists the audit tools beside the cache reads, and marks the three that act
 		`, async () => {
 			const response = await call({
 				jsonrpc: '2.0',
@@ -200,11 +200,15 @@ describe('Cache audit over the system MCP', () => {
 			// The group named, not every group: the processes tool stays out.
 			expect(names).not.toContain('list_processes');
 
-			// A run replays every live entry and a schedule change reaches every
-			// node: neither is a read a client may call on its own initiative.
+			// A run replays every live entry, and a schedule or settings change
+			// reaches every node: none is a read a client may call on its own
+			// initiative.
 			for (const tool of tools) {
-				const acts = ['run_cache_audit', 'write_cache_audit_schedule']
-					.includes(tool.name);
+				const acts = [
+					'run_cache_audit',
+					'write_cache_audit_schedule',
+					'write_cache_settings',
+				].includes(tool.name);
 
 				expect(tool.annotations.readOnlyHint, tool.name).toBe(!acts);
 			}
