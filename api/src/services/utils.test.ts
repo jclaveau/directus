@@ -1201,6 +1201,7 @@ describe('Services / Utils', () => {
 
 			vi.mocked(flushBeforeEnabling).mockImplementation(async () => {
 				expect(tracker.history.transactions).toEqual([]);
+				return true;
 			});
 
 			await service(admin).updateCacheSettings({ response: true }, 'admin');
