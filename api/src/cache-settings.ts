@@ -134,13 +134,13 @@ const CACHE_SETTING_RULES: {
 		variable: 'CACHE_SCOPED_INDEX_SCAN_COUNT',
 		accepts: isScanCount,
 		expected: 'an integer from 1 to 100000, or null',
-		fallback: () => useEnv()['CACHE_SCOPED_INDEX_SCAN_COUNT'] as number,
+		fallback: () => (useEnv()['CACHE_SCOPED_INDEX_SCAN_COUNT'] as number | undefined) ?? 1000,
 	},
 	scoped_index_ttl_factor: {
 		variable: 'CACHE_SCOPED_INDEX_TTL_FACTOR',
 		accepts: isIndexTtlFactor,
 		expected: 'a number from 1 to 100, or null',
-		fallback: () => useEnv()['CACHE_SCOPED_INDEX_TTL_FACTOR'] as number,
+		fallback: () => (useEnv()['CACHE_SCOPED_INDEX_TTL_FACTOR'] as number | undefined) ?? 2,
 	},
 };
 
