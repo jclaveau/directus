@@ -3,6 +3,7 @@ import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
+import { responseCacheWanted } from './cache-enabled.js';
 import {
 	deserializeCacheEnvelope,
 	serializeCacheEnvelope,
@@ -124,6 +125,30 @@ function warnOnCacheFailure(keyv: Keyv, cacheLabel: string): void {
 	warnOncePerConnectionOutage(client, cacheLabel, keyv);
 }
 
+/**
+ * Build the response tier if this node has none yet. `getCache` builds it when
+ * `responseCacheWanted` says so; a write switching the cache on builds it ahead
+ * of that, to clear it.
+ */
+export function buildResponseCache(): Keyv {
+	if (cache === null) {
+		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
+
+		cache = getKeyvInstance(
+			env['CACHE_STORE'] === 'redis'
+				? 'redis'
+				: 'memory',
+			getMilliseconds(env['CACHE_TTL']),
+			'_response',
+			cacheRedisDatabase(),
+		);
+
+		warnOnCacheFailure(cache, 'response-cache');
+	}
+
+	return cache;
+}
+
 export function getCache(): {
 	cache: Keyv | null;
 	systemCache: Keyv;
@@ -134,17 +159,8 @@ export function getCache(): {
 		? 'redis'
 		: 'memory';
 
-	if (env['CACHE_ENABLED'] === true && cache === null) {
-		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
-
-		cache = getKeyvInstance(
-			store,
-			getMilliseconds(env['CACHE_TTL']),
-			'_response',
-			cacheRedisDatabase(),
-		);
-
-		warnOnCacheFailure(cache, 'response-cache');
+	if (responseCacheWanted()) {
+		buildResponseCache();
 	}
 
 	if (systemCache === null) {

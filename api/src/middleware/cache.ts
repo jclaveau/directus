@@ -23,6 +23,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
+import { cacheEnabled } from '../cache-enabled.js';
 
 const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next) => {
 	const env = useEnv();
@@ -30,7 +31,11 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 	const logger = useLogger();
 
 	if (req.method.toLowerCase() !== 'get' && req.originalUrl?.startsWith('/graphql') === false) return next();
-	if (env['CACHE_ENABLED'] !== true) return next();
+
+	if (cacheEnabled() === false) {
+		return next();
+	}
+
 	if (!cache) return next();
 
 	// Reference point for the request→response duration telemetry: cache-serve

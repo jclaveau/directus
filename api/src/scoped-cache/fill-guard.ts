@@ -7,6 +7,7 @@ import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { earlierScopedCacheEpoch } from './pins.js';
+import { cacheEnabled } from '../cache-enabled.js';
 
 const env = useEnv();
 
@@ -70,7 +71,7 @@ export async function readScopedCacheEpochs(
 ): Promise<ScopedCacheEpochs> {
 	// Every read pays this round trip, so it is skipped wherever its answer cannot
 	// matter: nothing is filled with the response cache off.
-	if (!env['CACHE_ENABLED'] || !scopedCachePurgeEnabled()) {
+	if (!cacheEnabled() || !scopedCachePurgeEnabled()) {
 		return {};
 	}
 

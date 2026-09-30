@@ -92,6 +92,7 @@ test('reads nothing through a connection missing a variable', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: null,
 		supervisor_settings: null,
+		cache_settings: null,
 	});
 
 	// Said, because the pool then scales on the environment chain alone and
@@ -117,6 +118,7 @@ test('answers nothing where the deployment names no database', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: null,
 		supervisor_settings: null,
+		cache_settings: null,
 	});
 
 	expect(first).not.toHaveBeenCalled();
@@ -124,12 +126,13 @@ test('answers nothing where the deployment names no database', async () => {
 
 // A page reads both, and a value it shows could have come from either, so they
 // are taken in one statement rather than a row at a time.
-test('reads both columns in a single statement', async () => {
+test('reads every column in a single statement', async () => {
 	const { default: getDatabase } = await import('../../database/index.js');
 
 	first.mockResolvedValue({
 		[SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 },
 		[SHARED_SETTINGS_COLUMNS.supervisor]: JSON.stringify({ listenTimeout: 20 }),
+		[SHARED_SETTINGS_COLUMNS.cache]: { enabled: false },
 	});
 
 	const select = vi.fn(() => ({ from: () => ({ first }) }));
@@ -138,6 +141,7 @@ test('reads both columns in a single statement', async () => {
 	await expect(readAllSharedSettings()).resolves.toEqual({
 		autoscale_settings: { maxWorkers: 8 },
 		supervisor_settings: { listenTimeout: 20 },
+		cache_settings: { enabled: false },
 	});
 
 	expect(select).toHaveBeenCalledTimes(1);

@@ -1,10 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { drainStdout } from '../../utils/drain-stdout.js';
+import { seedCacheEnabled } from '../../../cache-enabled.js';
 import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
 import { redisConfigAvailable } from '../../../redis/index.js';
 import cacheFlush from './flush.js';
 
+vi.mock('../../../cache-enabled.js');
 vi.mock('../../../cache.js');
 vi.mock('../../../logger/index.js');
 vi.mock('../../../redis/index.js');
@@ -47,6 +49,17 @@ test('forces the flush and exits 0', async () => {
 
 	expect(flushCaches).toHaveBeenCalledWith(true);
 	expect(error).not.toHaveBeenCalled();
+});
+
+// A deployment switched on by `cache_settings` has a response tier only once
+// the layer is read.
+test('reads the cache layer before flushing', async () => {
+	vi.mocked(flushCaches).mockResolvedValue(report());
+
+	await expect(cacheFlush()).rejects.toThrowError('exit:0');
+
+	expect(vi.mocked(seedCacheEnabled).mock.invocationCallOrder[0])
+		.toBeLessThan(vi.mocked(flushCaches).mock.invocationCallOrder[0]!);
 });
 
 test('reports the failure and exits 1', async () => {

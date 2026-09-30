@@ -16,6 +16,7 @@ import { useLogger } from '../../logger/index.js';
 export const SHARED_SETTINGS_COLUMNS = {
 	autoscale: 'autoscale_settings',
 	supervisor: 'supervisor_settings',
+	cache: 'cache_settings',
 } as const;
 
 /** What the floor below falls back to, in seconds. */
@@ -50,7 +51,7 @@ export interface SharedSettings {
 }
 
 /**
- * The channel every node watches for a change to either column.
+ * The channel every node watches for a change to any of these columns.
  *
  * It carries which column moved and nothing else. A subscriber answers by
  * re-reading the table, so a message lost to an outage costs staleness until
@@ -167,11 +168,11 @@ export async function readSharedSettings(
 }
 
 /**
- * Both columns in a single statement.
+ * Every column in a single statement.
  *
- * A page reads them together — one is meaningless without the other, since a
- * value it shows could have come from either — so they are fetched together
- * rather than a row at a time.
+ * The processes page reads the autoscale and supervisor pair together — one is
+ * meaningless without the other, since a value it shows could have come from
+ * either — so they are fetched together rather than a row at a time.
  */
 export async function readAllSharedSettings(): Promise<
 	Record<SharedSettingsColumn, SharedSettings | null>
@@ -179,7 +180,11 @@ export async function readAllSharedSettings(): Promise<
 	const columns = Object.values(SHARED_SETTINGS_COLUMNS);
 
 	if (await connectionIsDeclared() === false) {
-		return { autoscale_settings: null, supervisor_settings: null };
+		return {
+			autoscale_settings: null,
+			supervisor_settings: null,
+			cache_settings: null,
+		};
 	}
 
 	const { default: getDatabase } = await import('../../database/index.js');
@@ -192,6 +197,7 @@ export async function readAllSharedSettings(): Promise<
 	return {
 		autoscale_settings: asSharedSettings(row?.['autoscale_settings']),
 		supervisor_settings: asSharedSettings(row?.['supervisor_settings']),
+		cache_settings: asSharedSettings(row?.['cache_settings']),
 	};
 }
 
@@ -242,7 +248,7 @@ export function onSharedSettingsChanged(
 }
 
 /**
- * Announce every write this instance makes to either column, whatever made it.
+ * Announce every write this instance makes to any column, whatever made it.
  *
  * From the action rather than from `SettingsService`, for the reason
  * `initCacheConfig` gives: an import running against this instance writes the

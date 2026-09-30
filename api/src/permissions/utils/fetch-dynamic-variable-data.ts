@@ -1,7 +1,7 @@
-import { useEnv } from '@directus/env';
 import type { Accountability } from '@directus/types';
 import { getSimpleHash } from '@directus/utils';
 import { resolvedCacheTtl } from '../../cache-config.js';
+import { cacheEnabled } from '../../cache-enabled.js';
 import { getCache, getCacheValue, setCacheValue } from '../../cache.js';
 import type { Context } from '../types.js';
 import { getMilliseconds } from '../../utils/get-milliseconds.js';
@@ -102,7 +102,6 @@ async function fetchContextData(
 	fetch: (fields: string[]) => Promise<Record<string, any>>,
 ) {
 	const { cache } = getCache();
-	const env = useEnv();
 
 	const fields = Array.from(permissionContext[key]!);
 
@@ -119,7 +118,7 @@ async function fetchContextData(
 	if (!data) {
 		data = await fetch(fields);
 
-		if (cache && env['CACHE_ENABLED'] !== false) {
+		if (cache && cacheEnabled()) {
 			// Pass the live TTL so these entries honour a cache-page override, not the
 			// response Keyv's boot-time default (the one other response-cache write that
 			// would otherwise ignore the override).

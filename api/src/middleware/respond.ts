@@ -50,6 +50,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { queryCachable } from '../utils/query-cachable.js';
+import { cacheEnabled } from '../cache-enabled.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -198,7 +199,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const cacheableRequest =
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
-		env['CACHE_ENABLED'] === true &&
+		cacheEnabled() &&
 		!!cache &&
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
