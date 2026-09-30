@@ -259,7 +259,9 @@ async function startInstance(): Promise<ChildProcess> {
 			CACHE_TTL: '6h',
 			CACHE_SCOPED_INDEX_REAP_SCHEDULE: 'off',
 			// A namespace no build recorded yet: a deploy's fill pause would warm
-			// nothing.
+			// nothing. Not the default one, where the job's `cli bootstrap` already
+			// recorded this build and opened a pause of the default length.
+			CACHE_NAMESPACE: 'perf-purge-scaling',
 			CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 		},
 	});
