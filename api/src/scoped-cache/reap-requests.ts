@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { cacheEntryRawKeyOf } from '../cache-drop.js';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from './config.js';
 import { scopedCacheFillPaused } from './fill-pause.js';
@@ -103,22 +105,36 @@ async function reapUntilMarkedComplete(passForced: boolean): Promise<void> {
 /**
  * One reap of the index, unless another holds the reap's lock — on this node
  * or any other. Answers whether it ran.
+ *
+ * The lock names the pass holding it, so a pass that lost it to its TTL never
+ * renews or releases the one another pass claimed since. It keeps its key in
+ * the lock cache, which a lock flush clears.
  */
 export async function runScopedCacheIndexReap(): Promise<boolean> {
 	// Lazily, for the reason `reapScopedCacheIndex` imports `cache.js` lazily:
 	// both import back the module that imports this one.
 	const { getCache } = await import('../cache.js');
-	const { lockCache } = getCache();
+	const reapLockKey = cacheEntryRawKeyOf(getCache().lockCache)?.(REAP_LOCK);
 
-	if (await lockCache.get(REAP_LOCK)) {
+	// Only a Redis lock cache is one every node reads, and the index is in
+	// Redis only: a reap has nothing to walk without it.
+	if (reapLockKey === undefined) {
 		return false;
 	}
 
-	await lockCache.set(REAP_LOCK, true, REAP_LOCK_TTL_MS);
+	const store = useScopedCacheStore();
+	const passToken = randomUUID();
+
+	if (!(await store.holdIndexReapLock(reapLockKey, passToken, REAP_LOCK_TTL_MS))) {
+		return false;
+	}
+
 	let renewing: Promise<unknown> = Promise.resolve();
 
 	const renewal = setInterval(() => {
-		renewing = lockCache.set(REAP_LOCK, true, REAP_LOCK_TTL_MS).catch(() => {});
+		renewing = store
+			.holdIndexReapLock(reapLockKey, passToken, REAP_LOCK_TTL_MS)
+			.catch(() => {});
 	}, REAP_LOCK_RENEW_MS);
 
 	renewal.unref();
@@ -132,7 +148,9 @@ export async function runScopedCacheIndexReap(): Promise<boolean> {
 		clearInterval(renewal);
 		// A renewal still on the wire would land after the release.
 		await renewing;
-		await lockCache.delete(REAP_LOCK);
+
+		// Refused, the lock stays until its TTL: only the next pass waits longer.
+		await store.releaseIndexReapLock(reapLockKey, passToken).catch(() => {});
 	}
 
 	return true;

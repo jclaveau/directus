@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
+import { cacheEntryRawKeyOf } from '../cache-drop.js';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from './config.js';
 import { scopedCacheFillPaused } from './fill-pause.js';
@@ -11,28 +12,40 @@ import {
 } from './reap-requests.js';
 import { useScopedCacheStore } from './store.js';
 
+vi.mock('node:crypto', () => ({ randomUUID: () => 'pass-1' }));
 vi.mock('../cache.js', () => ({ getCache: vi.fn() }));
+vi.mock('../cache-drop.js', () => ({ cacheEntryRawKeyOf: vi.fn() }));
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
 vi.mock('./config.js', () => ({ scopedCachePurgeEnabled: vi.fn() }));
 vi.mock('./fill-pause.js', () => ({ scopedCacheFillPaused: vi.fn() }));
 vi.mock('./purge.js', () => ({ reapScopedCacheIndex: vi.fn() }));
 vi.mock('./store.js', () => ({ useScopedCacheStore: vi.fn() }));
 
-const lockCache = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+const holdIndexReapLock = vi.fn();
+const releaseIndexReapLock = vi.fn();
 const indexKeysComplete = vi.fn();
 const warn = vi.fn();
 
 beforeEach(() => {
 	vi.useFakeTimers();
 	vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
-	vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+	vi.mocked(getCache).mockReturnValue({ lockCache: {} } as any);
+
+	vi.mocked(cacheEntryRawKeyOf).mockReturnValue((key) => {
+		return `scalabus_lock::scalabus_lock:${key}`;
+	});
+
 	vi.mocked(useLogger).mockReturnValue({ warn } as any);
 
 	vi.mocked(useScopedCacheStore)
-		.mockReturnValue({ indexKeysComplete } as any);
+		.mockReturnValue({
+			indexKeysComplete,
+			holdIndexReapLock,
+			releaseIndexReapLock,
+		} as any);
 
-	lockCache.get.mockResolvedValue(undefined);
-	lockCache.set.mockResolvedValue(true);
+	holdIndexReapLock.mockResolvedValue(true);
+	releaseIndexReapLock.mockResolvedValue(undefined);
 	indexKeysComplete.mockResolvedValue(false);
 });
 
@@ -55,19 +68,21 @@ describe('requestScopedCacheIndexReap', () => {
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
 
-		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await vi.waitFor(() => expect(releaseIndexReapLock).toHaveBeenCalled());
 		await Promise.all(requested);
 
 		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
 
-		expect(lockCache.set).toHaveBeenCalledExactlyOnceWith(
-			'scoped-cache-index:reap',
-			true,
+		expect(holdIndexReapLock).toHaveBeenCalledExactlyOnceWith(
+			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
+			'pass-1',
 			120_000,
 		);
 
-		expect(lockCache.delete)
-		.toHaveBeenCalledExactlyOnceWith('scoped-cache-index:reap');
+		expect(releaseIndexReapLock).toHaveBeenCalledExactlyOnceWith(
+			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
+			'pass-1',
+		);
 	});
 
 	it(oneLine`
@@ -83,7 +98,7 @@ describe('requestScopedCacheIndexReap', () => {
 		const requested = requestScopedCacheIndexReap();
 
 		await vi.waitFor(() => {
-			expect(lockCache.delete).toHaveBeenCalledTimes(2);
+			expect(releaseIndexReapLock).toHaveBeenCalledTimes(2);
 		}, { timeout: 5_000 });
 
 		await requested;
@@ -101,29 +116,29 @@ describe('requestScopedCacheIndexReap', () => {
 		await requested;
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
-		expect(lockCache.get).not.toHaveBeenCalled();
+		expect(holdIndexReapLock).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
 		waits for a pass holding the lock, then reaps if that pass marked nothing —
 		it may have read the index before the drop
 	`, async () => {
-		lockCache.get.mockResolvedValueOnce(true);
+		holdIndexReapLock.mockResolvedValueOnce(false);
 
 		const requested = requestScopedCacheIndexReap();
 
 		await vi.advanceTimersByTimeAsync(1_000);
-		await vi.waitFor(() => expect(lockCache.get).toHaveBeenCalled());
+		await vi.waitFor(() => expect(holdIndexReapLock).toHaveBeenCalled());
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
 
 		await vi.advanceTimersByTimeAsync(5_000);
-		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await vi.waitFor(() => expect(releaseIndexReapLock).toHaveBeenCalled());
 
 		await requested;
 
 		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
-		expect(lockCache.get).toHaveBeenCalledTimes(2);
+		expect(holdIndexReapLock).toHaveBeenCalledTimes(2);
 	});
 
 	it(oneLine`
@@ -144,8 +159,10 @@ describe('requestScopedCacheIndexReap', () => {
 			'[scoped-cache] requested index reap failed: Error: Connection is closed.',
 		);
 
-		expect(lockCache.delete)
-		.toHaveBeenCalledExactlyOnceWith('scoped-cache-index:reap');
+		expect(releaseIndexReapLock).toHaveBeenCalledExactlyOnceWith(
+			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
+			'pass-1',
+		);
 	});
 
 	it(oneLine`
@@ -160,7 +177,7 @@ describe('requestScopedCacheIndexReap', () => {
 		await requested;
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
-		expect(lockCache.get).not.toHaveBeenCalled();
+		expect(holdIndexReapLock).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
@@ -171,17 +188,17 @@ describe('requestScopedCacheIndexReap', () => {
 			.mockReturnValueOnce(false)
 			.mockReturnValue(true);
 
-		lockCache.get.mockResolvedValueOnce(true);
+		holdIndexReapLock.mockResolvedValueOnce(false);
 
 		const requested = requestScopedCacheIndexReap();
 
 		await vi.advanceTimersByTimeAsync(1_000);
-		await vi.waitFor(() => expect(lockCache.get).toHaveBeenCalled());
+		await vi.waitFor(() => expect(holdIndexReapLock).toHaveBeenCalled());
 		await vi.advanceTimersByTimeAsync(5_000);
 		await requested;
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
-		expect(lockCache.get).toHaveBeenCalledOnce();
+		expect(holdIndexReapLock).toHaveBeenCalledOnce();
 	});
 
 	it(oneLine`
@@ -192,7 +209,7 @@ describe('requestScopedCacheIndexReap', () => {
 		const requested = requestScopedCacheIndexReap();
 
 		await vi.advanceTimersByTimeAsync(1_000);
-		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await vi.waitFor(() => expect(releaseIndexReapLock).toHaveBeenCalled());
 		await requested;
 
 		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
@@ -208,7 +225,7 @@ describe('requestScopedCacheIndexReap', () => {
 		const requested = requestScopedCacheIndexReap({ forcePass: true });
 
 		await vi.advanceTimersByTimeAsync(1_000);
-		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await vi.waitFor(() => expect(releaseIndexReapLock).toHaveBeenCalled());
 		await requested;
 
 		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
@@ -223,7 +240,7 @@ describe('requestScopedCacheIndexReap', () => {
 		];
 
 		await vi.advanceTimersByTimeAsync(1_000);
-		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await vi.waitFor(() => expect(releaseIndexReapLock).toHaveBeenCalled());
 		await Promise.all(requested);
 
 		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
@@ -237,7 +254,7 @@ describe('requestScopedCacheIndexReap', () => {
 		const forced = requestScopedCacheIndexReap({ forcePass: true });
 
 		await vi.advanceTimersByTimeAsync(1_000);
-		await vi.waitFor(() => expect(lockCache.delete).toHaveBeenCalled());
+		await vi.waitFor(() => expect(releaseIndexReapLock).toHaveBeenCalled());
 		await forced;
 
 		const unforced = requestScopedCacheIndexReap();
@@ -260,7 +277,7 @@ describe('requestScopedCacheIndexReap', () => {
 		await requested;
 
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
-		expect(lockCache.get).not.toHaveBeenCalled();
+		expect(holdIndexReapLock).not.toHaveBeenCalled();
 	});
 
 	it('asks for nothing with scoped purging off', async () => {
@@ -274,11 +291,11 @@ describe('requestScopedCacheIndexReap', () => {
 
 describe('runScopedCacheIndexReap', () => {
 	it('reaps nothing while another pass holds the lock', async () => {
-		lockCache.get.mockResolvedValueOnce(true);
+		holdIndexReapLock.mockResolvedValueOnce(false);
 
 		expect(await runScopedCacheIndexReap()).toBe(false);
 		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
-		expect(lockCache.set).not.toHaveBeenCalled();
+		expect(releaseIndexReapLock).not.toHaveBeenCalled();
 	});
 
 	it('renews the lock while the pass runs', async () => {
@@ -290,9 +307,30 @@ describe('runScopedCacheIndexReap', () => {
 
 		expect(await runScopedCacheIndexReap()).toBe(true);
 
-		expect(lockCache.set.mock.calls).toEqual([
-			['scoped-cache-index:reap', true, 120_000],
-			['scoped-cache-index:reap', true, 120_000],
+		expect(holdIndexReapLock.mock.calls).toEqual([
+			['scalabus_lock::scalabus_lock:scoped-cache-index:reap', 'pass-1', 120_000],
+			['scalabus_lock::scalabus_lock:scoped-cache-index:reap', 'pass-1', 120_000],
 		]);
+	});
+
+	it(oneLine`
+		answers the pass ran when the release is refused — the lock stays until
+		its TTL
+	`, async () => {
+		releaseIndexReapLock.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		expect(await runScopedCacheIndexReap()).toBe(true);
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		reaps nothing with a lock cache outside Redis — no other node reads it, and
+		the index lives in Redis only
+	`, async () => {
+		vi.mocked(cacheEntryRawKeyOf).mockReturnValueOnce(null);
+
+		expect(await runScopedCacheIndexReap()).toBe(false);
+		expect(reapScopedCacheIndex).not.toHaveBeenCalled();
+		expect(holdIndexReapLock).not.toHaveBeenCalled();
 	});
 });
