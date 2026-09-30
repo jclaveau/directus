@@ -99,6 +99,7 @@ import {
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
+	announceSharedSettings,
 	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
@@ -789,8 +790,10 @@ export class UtilsService {
 			return patchedSettings;
 		});
 
-		// The other nodes hear of it over the bus; this one answers from what it
-		// just wrote rather than waiting on its own announcement.
+		// The announcement the write fired went out before the commit, so the
+		// other nodes re-read on this one; this node answers from what it just
+		// wrote rather than waiting on its own announcement.
+		announceSharedSettings(SHARED_SETTINGS_COLUMNS.cache);
 		await refreshCacheSettings();
 
 		return this.cacheSettingsAnswer(sharedSettings);

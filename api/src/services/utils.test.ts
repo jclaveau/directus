@@ -57,6 +57,7 @@ import {
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
+	announceSharedSettings,
 	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
@@ -118,6 +119,7 @@ vi.mock('../processes/lib/shared-settings.js', async (importOriginal) => {
 			supervisor: 'supervisor_settings',
 			cache: 'cache_settings',
 		},
+		announceSharedSettings: vi.fn(),
 		readAllSharedSettings: vi.fn(),
 		readSharedSettings: vi.fn(),
 		writeSharedSettings: vi.fn(),
@@ -1171,6 +1173,21 @@ describe('Services / Utils', () => {
 
 			expect(tracker.history.transactions)
 				.toMatchObject([{ state: 'committed' }]);
+		});
+
+		// The write's own announcement goes out before the commit, and a node
+		// re-reading on it would keep the value this write replaces.
+		it('announces the write once its transaction has committed', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			vi.mocked(announceSharedSettings).mockImplementation(() => {
+				expect(tracker.history.transactions)
+					.toMatchObject([{ state: 'committed' }]);
+			});
+
+			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
+
+			expect(announceSharedSettings).toHaveBeenCalledWith('cache_settings');
 		});
 
 		// One field stored around the guard would otherwise refuse every write to

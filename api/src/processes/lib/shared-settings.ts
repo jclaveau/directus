@@ -308,19 +308,27 @@ export async function initSharedSettings(): Promise<void> {
 					continue;
 				}
 
-				const announced = useBus()
-					.publish<SharedSettingsChange>(CHANGED_CHANNEL, { column });
-
-				// The write is already durable, so an unreachable bus costs the
-				// other nodes their floor rather than the value. Dropped, it
-				// would end the process that has just answered the operator.
-				announced.catch((error: unknown) => {
-					useLogger().warn(
-						error,
-						`[shared-settings] could not announce ${column}`,
-					);
-				});
+				announceSharedSettings(column);
 			}
 		});
 	}
+}
+
+/**
+ * Tell the other nodes `column` changed, so they re-read it.
+ *
+ * A write made inside a caller's transaction fires its `settings.update` action
+ * before that transaction commits, and a node re-reading on that announcement
+ * reads the row it replaces. Such a caller announces again once committed.
+ */
+export function announceSharedSettings(column: SharedSettingsColumn): void {
+	const announced = useBus()
+		.publish<SharedSettingsChange>(CHANGED_CHANNEL, { column });
+
+	// The write is already durable, so an unreachable bus costs the other nodes
+	// their floor rather than the value. Dropped, it would end the process that
+	// has just answered the operator.
+	announced.catch((error: unknown) => {
+		useLogger().warn(error, `[shared-settings] could not announce ${column}`);
+	});
 }
