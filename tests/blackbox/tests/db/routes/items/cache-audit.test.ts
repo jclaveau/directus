@@ -14,10 +14,18 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
+import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+} from 'vitest';
 
 // `POST /utils/cache/audit` replays every live entry against the database and
 // says which ones the database no longer agrees with (jclaveau/directus#498).
@@ -601,6 +609,42 @@ describe('The cache audit replays live entries against the database', () => {
 			// Let go with the run: the next ask is a run of its own.
 			const next = await audit({ collection: HOLD });
 			expect(next.statusCode).toBe(200);
+		}, 60_000);
+
+		it(oneLine`
+			leaves the claim another node took once the run's own lapsed, rather
+			than dropping it as the run ends
+		`, async () => {
+			const namespace = env[vendor]['CACHE_NAMESPACE'];
+			// Namespaced twice, as Keyv names every lock-cache key.
+			const runLockKey = `${namespace}_lock::${namespace}_lock:cache-audit:run`;
+			const redisClient = new Redis({ host: 'localhost', port: 6108 });
+
+			onTestFinished(async () => {
+				await redisClient.del(runLockKey);
+				await redisClient.quit();
+			});
+
+			await clearCache();
+			await warm(() => readCollection(HOLD));
+			await auditSettled({ collection: HOLD });
+
+			await request(url)
+				.patch(`/items/${HOLD_FLAG}/${holdFlagId}`)
+				.send({ armed: 'yes' })
+				.set('Authorization', auth);
+
+			// On the wire now, answered once the held replay lets it go.
+			const held = audit({ collection: HOLD }).then((response) => response);
+
+			// What a node writes once the claim expired under a slow run: XX, so
+			// it lands only while the held run holds the claim.
+			await expect.poll(() => {
+				return redisClient.set(runLockKey, 'another-node', 'PX', 60_000, 'XX');
+			}, { interval: 5, timeout: 15_000 }).toBe('OK');
+
+			expect((await held).statusCode).toBe(200);
+			expect(await redisClient.get(runLockKey)).toBe('another-node');
 		}, 60_000);
 
 		it(oneLine`
