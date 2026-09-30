@@ -5,6 +5,7 @@ import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { formatDuration } from '@/utils/format-duration';
 import { formatFilesize } from '@/utils/format-filesize';
 import { getStringifiedValue } from '@/utils/get-stringified-value';
+import VChart from '@/components/v-chart.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import type { HeaderRaw, Sort } from '@/components/v-table/types';
 import type {
@@ -15,8 +16,8 @@ import type {
 	ResolvedEnvVariable,
 } from '@directus/types';
 import { useLocalStorage } from '@vueuse/core';
-import ApexCharts, { type ApexOptions } from 'apexcharts';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import type { ApexOptions } from 'apexcharts';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
 import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
@@ -238,12 +239,6 @@ function copyRaw(key: string, node: ProcessNode): void {
 
 const autoscaleActionsEl = ref<HTMLElement | null>(null);
 const autoscaleSummaryEl = ref<HTMLElement | null>(null);
-const usageChartEl = ref<HTMLElement | null>(null);
-const cpuChartEl = ref<HTMLElement | null>(null);
-const memoryChartEl = ref<HTMLElement | null>(null);
-let usageChart: ApexCharts | null = null;
-let cpuChart: ApexCharts | null = null;
-let memoryChart: ApexCharts | null = null;
 
 /** The latest totals, as the figures a percentage on its own does not carry. */
 const usage = computed(() => {
@@ -317,7 +312,7 @@ function chartOptions(
  * pinned to 100 rather than scaled to the data: a chart that rescales to the
  * peak hides how much headroom is left, which is the one thing it is for.
  */
-function usageChartOptions(): ApexOptions {
+function usageChartConfig(): ApexOptions {
 	return {
 		chart: {
 			type: 'area',
@@ -353,7 +348,7 @@ function usageChartOptions(): ApexOptions {
 	};
 }
 
-function cpuChartOptions(): ApexOptions {
+function cpuChartConfig(): ApexOptions {
 	return chartOptions(
 		'cpuPercent',
 		t('processes_cpu_axis', 'CPU (% of a core)'),
@@ -361,7 +356,7 @@ function cpuChartOptions(): ApexOptions {
 	);
 }
 
-function memoryChartOptions(): ApexOptions {
+function memoryChartConfig(): ApexOptions {
 	return chartOptions(
 		'memoryBytes',
 		t('processes_memory_axis', 'Memory'),
@@ -369,71 +364,25 @@ function memoryChartOptions(): ApexOptions {
 	);
 }
 
-type ChartName = 'usage' | 'cpu' | 'memory';
+// Null until the first report answers, so each chart is built from it rather
+// than drawn as an empty axis first.
+const usageChartOptions = computed((): ApexOptions | null => {
+	return samples.value.length === 0
+		? null
+		: usageChartConfig();
+});
 
-/** The chart the pointer is over, whose redraw waits for the pointer to leave. */
-const reading = ref<ChartName | null>(null);
-const heldRedraw = ref(false);
+const cpuChartOptions = computed((): ApexOptions | null => {
+	return samples.value.length === 0
+		? null
+		: cpuChartConfig();
+});
 
-function release(): void {
-	reading.value = null;
-
-	if (heldRedraw.value) {
-		heldRedraw.value = false;
-		void renderCharts();
-	}
-}
-
-async function drawChart(
-	name: ChartName,
-	element: HTMLElement | null,
-	chart: ApexCharts | null,
-	options: () => ApexOptions,
-): Promise<ApexCharts | null> {
-	if (element === null) {
-		return chart;
-	}
-
-	if (chart === null) {
-		const drawn = new ApexCharts(element, options());
-		await drawn.render();
-		return drawn;
-	}
-
-	// An update rebuilds the tooltip, so a chart being read under the pointer
-	// would lose the reading on every refresh. The samples keep arriving; what
-	// they draw is what the pointer leaving asks for.
-	if (reading.value === name) {
-		heldRedraw.value = true;
-		return chart;
-	}
-
-	await chart.updateOptions(options(), true, false);
-	return chart;
-}
-
-async function renderCharts(): Promise<void> {
-	usageChart = await drawChart(
-		'usage',
-		usageChartEl.value,
-		usageChart,
-		usageChartOptions,
-	);
-
-	cpuChart = await drawChart(
-		'cpu',
-		cpuChartEl.value,
-		cpuChart,
-		cpuChartOptions,
-	);
-
-	memoryChart = await drawChart(
-		'memory',
-		memoryChartEl.value,
-		memoryChart,
-		memoryChartOptions,
-	);
-}
+const memoryChartOptions = computed((): ApexOptions | null => {
+	return samples.value.length === 0
+		? null
+		: memoryChartConfig();
+});
 
 // The processes that are scaling a pool, plucked from the tree the page already
 // holds: the values a pool is scaled on are resolved in the process that scales
@@ -470,8 +419,6 @@ async function load(): Promise<void> {
 		const response = await api.get('/utils/processes');
 		report.value = response.data.data;
 		samples.value = appendProcessSample(samples.value, response.data.data);
-
-		await renderCharts();
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
@@ -483,14 +430,6 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
-
-// ApexCharts attaches to the DOM outside Vue's tree, so leaving the page without
-// this leaks both charts and their resize listeners.
-onUnmounted(() => {
-	usageChart?.destroy();
-	cpuChart?.destroy();
-	memoryChart?.destroy();
-});
 </script>
 
 <template>
@@ -619,12 +558,7 @@ onUnmounted(() => {
 						) }}
 					</v-notice>
 
-					<div
-						ref="usageChartEl"
-						class="canvas"
-						@pointerenter="reading = 'usage'"
-						@pointerleave="release"
-					/>
+					<v-chart class="canvas" :options="usageChartOptions" />
 				</div>
 
 				<div class="chart">
@@ -640,12 +574,10 @@ onUnmounted(() => {
 						) }}
 					</v-notice>
 
-					<div
+					<v-chart
 						v-show="chartsCarryCpu"
-						ref="cpuChartEl"
 						class="canvas"
-						@pointerenter="reading = 'cpu'"
-						@pointerleave="release"
+						:options="cpuChartOptions"
 					/>
 				</div>
 
@@ -653,12 +585,7 @@ onUnmounted(() => {
 					<h3 class="chart-title">
 						{{ t('processes_memory_chart', 'Memory per process') }}
 					</h3>
-					<div
-						ref="memoryChartEl"
-						class="canvas"
-						@pointerenter="reading = 'memory'"
-						@pointerleave="release"
-					/>
+					<v-chart class="canvas" :options="memoryChartOptions" />
 				</div>
 			</div>
 

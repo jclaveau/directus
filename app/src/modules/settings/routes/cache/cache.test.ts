@@ -1939,4 +1939,28 @@ describe('CachePage', () => {
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.not.toContain('Misses');
 	});
+
+	// ApexCharts rebuilds its tooltip on every update, so a refresh would wipe
+	// the reading a user is taking under the pointer.
+	it('holds the redraw of the chart the pointer is over', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const [countsChart] = wrapper.findAll('.chart');
+		chartMock.configs = [];
+
+		await countsChart!.trigger('pointerenter');
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		// Only the latency chart, which nobody is reading, redraws.
+		expect(chartMock.configs).toHaveLength(1);
+
+		await countsChart!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(chartMock.configs).toHaveLength(2);
+	});
 });

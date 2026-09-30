@@ -8,8 +8,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
 import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { useLocalStorage } from '@vueuse/core';
-import ApexCharts, { type ApexOptions } from 'apexcharts';
-import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue';
+import type { default as ApexCharts, ApexOptions } from 'apexcharts';
+import { computed, onMounted, ref, watch, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { abbreviateNumber } from '@directus/utils';
 import type {
@@ -22,6 +22,7 @@ import type {
 import SettingsNavigation from '../../components/navigation.vue';
 import CacheAuditPanel from './cache-audit-panel.vue';
 import CacheSettingsPanel from './cache-settings-panel.vue';
+import VChart from '@/components/v-chart.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
@@ -793,10 +794,7 @@ const totalAnomalies = computed(() => {
 	return searchedAnomalies.value.reduce((sum, a) => sum + a.count, 0);
 });
 
-const chartEl = ref<HTMLElement | null>(null);
 let chart: ApexCharts | null = null;
-
-const latencyChartEl = ref<HTMLElement | null>(null);
 let latencyChart: ApexCharts | null = null;
 
 // Legend visibility persisted per chart, so a hidden/shown series survives a reload
@@ -1378,24 +1376,13 @@ function chartConfig(): ApexOptions {
 	};
 }
 
-function renderChart() {
-	if (!chartEl.value) {
-		return;
-	}
+const countsChartOptions = computed(() => {
+	return chartConfig();
+});
 
-	if (chart) {
-		void chart.updateOptions(chartConfig(), true, false).then(() => {
-			applyHiddenSeries(chart, countsHiddenSeries.value);
-		});
-
-		return;
-	}
-
-	chart = new ApexCharts(chartEl.value, chartConfig());
-
-	void chart.render().then(() => {
-		applyHiddenSeries(chart, countsHiddenSeries.value);
-	});
+function countsChartDrawn(drawnChart: ApexCharts) {
+	chart = drawnChart;
+	applyHiddenSeries(drawnChart, countsHiddenSeries.value);
 }
 
 type LatencyLine = {
@@ -1578,38 +1565,14 @@ function latencyChartConfig(): ApexOptions {
 	};
 }
 
-// Depend on chartEl too, not just the data: the chart's v-show container mounts a
-// tick after the route transition settles, so a data-only watcher fires while the
-// ref is still null. Re-firing when chartEl binds is what paints the first load.
-watch([timeseries, chartEl], renderChart, { deep: true, flush: 'post' });
+const latencyChartOptions = computed(() => {
+	return latencyChartConfig();
+});
 
-function renderLatencyChart() {
-	if (!latencyChartEl.value) {
-		return;
-	}
-
-	if (latencyChart) {
-		void latencyChart
-			.updateOptions(latencyChartConfig(), true, false)
-			.then(() => {
-				applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
-			});
-
-		return;
-	}
-
-	latencyChart = new ApexCharts(latencyChartEl.value, latencyChartConfig());
-
-	void latencyChart.render().then(() => {
-		applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
-	});
+function latencyChartDrawn(drawnChart: ApexCharts) {
+	latencyChart = drawnChart;
+	applyHiddenSeries(drawnChart, latencyHiddenSeries.value);
 }
-
-watch(
-	[timeseries, latencyChartEl],
-	renderLatencyChart,
-	{ deep: true, flush: 'post' },
-);
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -1880,13 +1843,6 @@ onMounted(() => {
 	void load();
 	void loadStatsState();
 });
-
-onUnmounted(() => {
-	chart?.destroy();
-	chart = null;
-	latencyChart?.destroy();
-	latencyChart = null;
-});
 </script>
 
 <template>
@@ -2027,7 +1983,11 @@ onUnmounted(() => {
 						</span>
 					</div>
 				</div>
-				<div ref="chartEl" class="chart" />
+				<v-chart
+					class="chart"
+					:options="countsChartOptions"
+					@drawn="countsChartDrawn"
+				/>
 			</div>
 
 			<div v-show="hasLatency" class="timeseries">
@@ -2079,7 +2039,11 @@ onUnmounted(() => {
 						</span>
 					</div>
 				</div>
-				<div ref="latencyChartEl" class="chart" />
+				<v-chart
+					class="chart"
+					:options="latencyChartOptions"
+					@drawn="latencyChartDrawn"
+				/>
 			</div>
 
 			<div class="summary-row">
