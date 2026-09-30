@@ -79,6 +79,11 @@ describe('startScopedCachePurgeRecovery on a reconnect', () => {
 		startScopedCachePurgeRecovery();
 
 		redisOn.mock.calls[0]![1]();
+
+		await vi.waitFor(() => {
+			expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
+		});
+
 		redisOn.mock.calls[0]![1]();
 
 		await vi.waitFor(() => {
@@ -97,6 +102,11 @@ describe('startScopedCachePurgeRecovery on a reconnect', () => {
 		startScopedCachePurgeRecovery();
 
 		redisOn.mock.calls[0]![1]();
+
+		await vi.waitFor(() => {
+			expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
+		});
+
 		redisOn.mock.calls[0]![1]();
 
 		await vi.waitFor(() => {

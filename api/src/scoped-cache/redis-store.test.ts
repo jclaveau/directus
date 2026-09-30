@@ -907,13 +907,13 @@ describe('fileIndexedEntries', () => {
 		);
 
 		expect(indexFile.mock.calls).toHaveLength(2);
-		expect(indexFile.mock.calls[0]).toHaveLength(5);
+		expect(indexFile.mock.calls[0]).toHaveLength(6);
 
 		expect(indexFile.mock.calls[0]![2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=ada',
 		);
 
-		expect(indexFile.mock.calls[1]).toHaveLength(5);
+		expect(indexFile.mock.calls[1]).toHaveLength(6);
 
 		expect(indexFile.mock.calls[1]![2]).toBe(
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=bob',

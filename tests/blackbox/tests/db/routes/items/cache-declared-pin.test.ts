@@ -519,13 +519,14 @@ describe.each(vendors)('%s', (vendor) => {
 			const { query, response, fingerprints } = table[0]!;
 			const readQuery = queryParameters(query!);
 
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
-
 			await awaitRequestedReap(
 				Number(env[vendor]['REDIS_PORT']),
 				env[vendor]['CACHE_NAMESPACE']!,
+				async () => {
+					await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+				},
 			);
 
 			const filedBefore = await indexedMembers();

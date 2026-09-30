@@ -189,6 +189,14 @@ describe(oneLine`
 				)]);
 			}
 
+			// Filing registers every set it writes, and a purge trusting a complete
+			// registry reaches only the sets named there.
+			await redisCommand(REDIS_PORT, [
+				'SADD',
+				`${namespace}:scoped-cache-index:collection-index-keys:${COLLECTION}`,
+				heldIndexKey,
+			]);
+
 			mark(`decoys planted (${decoyMemberCount})`);
 		}
 
@@ -260,12 +268,12 @@ describe(oneLine`
 			the next purge of the same slice reaches every entry filed during the first
 			one, rather than leaving one indexed by a set that purge dropped
 		`, async () => {
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
-
 			// Its pass would reap the decoys, and move the counter the held reads check.
-			await awaitRequestedReap(REDIS_PORT, namespace);
+			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
+				await request(getUrl(vendor, env))
+					.post('/utils/cache/clear')
+					.set('Authorization', auth);
+			});
 
 			const limits = await survivorsOf(await fillDuringPurge('v2'));
 
@@ -292,12 +300,12 @@ describe(oneLine`
 			a collection-wide purge reaches them too — it scans for the collection's
 			index sets rather than being handed the one a row names
 		`, async () => {
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
-
 			// Its pass would reap the decoys, and move the counter the held reads check.
-			await awaitRequestedReap(REDIS_PORT, namespace);
+			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
+				await request(getUrl(vendor, env))
+					.post('/utils/cache/clear')
+					.set('Authorization', auth);
+			});
 
 			const limits = await survivorsOf(await fillDuringPurge('v4'));
 
