@@ -402,36 +402,81 @@ describe('scopedCacheRowHomePinKeys', () => {
 	});
 
 	// The invariant the row scan rests on: a row drops an entry only by carrying
-	// one of its values on every field it pins, so on its home pin too.
-	it(oneLine`
-		names the set every entry a row drops is filed in, whichever field is its
-		home pin
-	`, () => {
+	// one of its values on every field it pins, so on its home pin too. The row is
+	// `id=7, method=spaced, owner=alpha`, homed as prod ranks: the key first, then
+	// the scope fields in declared order.
+	it.each([
+		{
+			filed: 'slot:&id=,7,&view=,label,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+		},
+		{
+			filed: 'slot:&id=,6,7,8,&method=,spaced,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=6',
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=8',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+		},
+		{
+			filed: 'slot:&id=,7,&method=,massed,spaced,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+		},
+		{
+			filed: 'slot:&method=,spaced,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:pin:method=spaced',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:pin:method=spaced',
+		},
+		{
+			filed: 'slot:&owner=,alpha,beta,&view=,id,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=alpha',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=beta',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:owner=alpha',
+		},
+		{
+			filed: 'slot:&view=,id,&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:',
+		},
+		{
+			filed: 'slot:&',
+			filedUnder: [
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+			],
+			readBack: 'scalabus:scoped-cache-index:fingerprint:slot:',
+		},
+	])('files $filed where a row it drops reads it back', ({
+		filed,
+		filedUnder,
+		readBack,
+	}) => {
 		const row = parseScopedCacheFingerprint(
 			'slot:&id=,7,&method=,spaced,&owner=,alpha,&',
 		);
 
-		const readSets = new Set([
+		expect(scopedCacheFingerprintIndexKeys(
+			parseScopedCacheFingerprint(filed),
+			'owner',
+			['id', 'owner', 'method'],
+		)).toEqual(filedUnder);
+
+		expect([
 			...scopedCacheRowIndexKeys('slot', [row], 'owner'),
 			...scopedCacheRowHomePinKeys('slot', [row]),
-		]);
-
-		for (const filed of [
-			'slot:&id=,7,&view=,label,&',
-			'slot:&id=,6,7,8,&method=,spaced,&',
-			'slot:&id=,7,&method=,massed,spaced,&',
-			'slot:&owner=,alpha,beta,&view=,id,&',
-			'slot:&view=,id,&',
-			'slot:&',
-		]) {
-			const filedIn = scopedCacheFingerprintIndexKeys(
-				parseScopedCacheFingerprint(filed),
-				'owner',
-				[],
-			);
-
-			expect(filedIn.some((indexKey) => readSets.has(indexKey))).toBe(true);
-		}
+		]).toContain(readBack);
 	});
 });
 

@@ -523,6 +523,42 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it(oneLine`
+		purges an entry a hook's pin on the index path finds under a home pin set:
+		it pins another field, so it can hold a row of any value there
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:other:pin:w=v': [
+				'other:&w=,v,&|ns:entry-homed',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'slot',
+			[],
+			{
+				schema: {
+					collections: { other: { scopedCacheFields: ['x'] } },
+					relations: [],
+				},
+			} as any,
+			{
+				rowFingerprints: [{
+					collection: 'slot',
+					pinnedScope: { owner: ['alpha'] },
+				}],
+				changed: null,
+				indexPath: 'owner',
+				declaredFingerprints: [
+					{ collection: 'other', pinnedScope: { x: ['y'] } },
+				],
+			},
+		);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-homed');
+	});
+
+	it(oneLine`
 		leaves an entry bound to another value of the field a hook declared: no row
 		carrying that pin is in it
 	`, async () => {

@@ -1328,8 +1328,7 @@ async function readKeyspaceShape(): Promise<{
 }
 
 async function clearResponseCache(): Promise<void> {
-	await fetch(`${base}/utils/cache/clear`, { method: 'POST', headers: authHeaders })
-		.then((response) => response.text());
+	await api('/utils/cache/clear', { method: 'POST' });
 }
 
 /**

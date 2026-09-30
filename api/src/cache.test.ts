@@ -3,6 +3,7 @@ import { oneLine } from '@directus/utils';
 import type { ScopedCacheDeclaredFingerprint } from '@directus/types';
 import type Keyv from 'keyv';
 import type { CacheDatabaseFlush } from './redis/index.js';
+import { EventEmitter } from 'node:events';
 import {
 	afterEach,
 	beforeEach,
@@ -164,6 +165,7 @@ const cacheHandlers = { ...busHandlers };
 
 const {
 	assertScopedCacheStoreSupported,
+	flushResponseCache,
 	indexScopedCacheEntry,
 	purgeScopedCache,
 	scopedCacheFingerprintOf,
@@ -188,6 +190,7 @@ afterEach(() => {
 	redis.get.mockImplementation(async () => '1');
 	cacheRedisDatabase.mockReturnValue(undefined);
 	flushCacheRedisDatabase.mockResolvedValue('not-flushed');
+	busPublish.mockResolvedValue(undefined);
 });
 
 // `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
@@ -1497,9 +1500,13 @@ describe('flushCaches', () => {
 		// flushed nothing.
 		expect(await cache!.get('response-key')).toBe('r');
 
+		// The index lives in that database too, so there is nothing left to scan
+		// for, and "dropped 0" would read as an index that was never there.
+		expect(redis.scan).not.toHaveBeenCalled();
+
 		expect(logger.info).toHaveBeenCalledWith(
 			expect.stringMatching(
-				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1, dropped 0 scoped-cache index keys$/,
+				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1$/,
 			),
 		);
 	});
@@ -1719,6 +1726,155 @@ describe('flushCaches', () => {
 	});
 });
 
+// Shaped like `@keyv/redis` over a node-redis client dialed and not yet ready:
+// open, so `getClient()` hands it over, and refusing every command until `ready`,
+// as `disableOfflineQueue` does. The adapter reports a refusal as an `error` event
+// and resolves, which is how `directus cache flush` exited 0 on the planner-795
+// preview having cleared neither `_system` nor `_lock`.
+function connectingStore(heldEntries: [string, string][] = []) {
+	const client = Object.assign(new EventEmitter(), {
+		isOpen: true,
+		isReady: false,
+	});
+
+	const entries = new Map(heldEntries);
+
+	const store = Object.assign(new EventEmitter(), {
+		client,
+		entries,
+		namespace: undefined as string | undefined,
+		async get(key: string) {
+			if (refusedOffline()) {
+				return undefined;
+			}
+
+			return entries.get(key);
+		},
+		async set(key: string, value: string) {
+			if (!refusedOffline()) {
+				entries.set(key, value);
+			}
+		},
+		async delete(key: string) {
+			return !refusedOffline() && entries.delete(key);
+		},
+		async clear() {
+			if (!refusedOffline()) {
+				entries.clear();
+			}
+		},
+	});
+
+	function refusedOffline() {
+		if (client.isReady) {
+			return false;
+		}
+
+		store.emit('error', new Error('The client is offline'));
+
+		return true;
+	}
+
+	return store;
+}
+
+describe('a flush over redis tiers still connecting', () => {
+	async function reloadWithConnectingStores() {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		vi.resetModules();
+
+		const reloaded = await import('./cache.js');
+		const { cache, systemCache, lockCache } = reloaded.getCache();
+
+		const stores = {
+			response: connectingStore([['scalabus_response:read', 'r']]),
+			system: connectingStore([['scalabus_system:schema', 's']]),
+			lock: connectingStore(),
+		};
+
+		cache!.store = stores.response;
+		systemCache.store = stores.system;
+		lockCache.store = stores.lock;
+
+		return {
+			flushCaches: reloaded.flushCaches,
+			clearCacheTargets: reloaded.clearCacheTargets,
+			stores,
+		};
+	}
+
+	test('waits for every tier to be ready before it clears one', async () => {
+		const { flushCaches, stores } = await reloadWithConnectingStores();
+
+		const flushing = flushCaches(true);
+
+		stores.response.client.isReady = true;
+		stores.response.client.emit('ready');
+		stores.lock.client.isReady = true;
+		stores.lock.client.emit('ready');
+
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect([...stores.response.entries])
+			.toEqual([['scalabus_response:read', 'r']]);
+
+		stores.system.client.isReady = true;
+		stores.system.client.emit('ready');
+
+		await expect(flushing).resolves.toMatchObject({ failures: [] });
+		expect([...stores.system.entries]).toEqual([]);
+		expect([...stores.response.entries]).toEqual([]);
+	});
+
+	test(oneLine`
+		reports the tiers a redis that never became ready refused, so the flush
+		command exits 1 instead of claiming them cleared
+	`, async () => {
+		const { flushCaches, stores } = await reloadWithConnectingStores();
+
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+
+		const flushing = flushCaches(true);
+
+		await vi.advanceTimersByTimeAsync(5000);
+
+		await expect(flushing).resolves.toMatchObject({
+			failures: ['system cache', 'response cache'],
+		});
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'[cache] redis stores not ready after 5000ms, flushing anyway',
+		);
+
+		expect([...stores.system.entries])
+			.toEqual([['scalabus_system:schema', 's']]);
+	});
+
+	test(oneLine`
+		fails an admin clear whose tiers redis refused, where Keyv alone would
+		have answered 200 over a cache still full
+	`, async () => {
+		const { clearCacheTargets, stores } = await reloadWithConnectingStores();
+
+		await expect(clearCacheTargets(['system', 'response', 'locks']))
+			.rejects
+			.toThrowError(/redis refused the system, response, locks clear/);
+
+		expect([...stores.response.entries])
+			.toEqual([['scalabus_response:read', 'r']]);
+	});
+});
+
 describe('a bus that cannot publish', () => {
 	beforeEach(() => {
 		setEnv({
@@ -1874,6 +2030,46 @@ describe('clearCacheTargets', () => {
 	});
 });
 
+// The index lives in the cache's own database, so after a FLUSHDB of it a scan
+// for the index has nothing to find — and `flushResponseCache` runs on every
+// permission, field or collection change.
+describe('a FLUSHDB takes the scoped-cache index with it', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			CACHE_AUTO_PURGE_MODE: 'scoped',
+		});
+
+		cacheRedisDatabase.mockReturnValue(1);
+		flushCacheRedisDatabase.mockResolvedValueOnce('flushed');
+	});
+
+	test('in clearCacheTargets', async () => {
+		await clearCacheTargets(['response']);
+
+		expect(redis.scan).not.toHaveBeenCalled();
+	});
+
+	test('in flushResponseCache', async () => {
+		await flushResponseCache(getCache().cache);
+
+		expect(redis.scan).not.toHaveBeenCalled();
+	});
+
+	test('and the flush says so', async () => {
+		await flushCaches(true);
+
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\[cache\] flushed in \d+ms, FLUSHDB on redis db 1, the scoped-cache index with it$/,
+			),
+		);
+	});
+});
+
 // A flush, like every purge, has to move the counters BEFORE it drops anything: a
 // read that snapshotted earlier and rechecks between the clear and a bump made after
 // it compares equal, keeps the entry it just wrote, and the index drop that follows
@@ -1960,8 +2156,6 @@ describe('the wholesale counter moves before the response clear', () => {
 			'bump scalabus:scoped-cache-epoch:*',
 			'FLUSHDB',
 			"bump scalabus:scoped-cache-epoch:* in the FLUSHDB's MULTI",
-			'scan',
-			'bump scalabus:scoped-cache-epoch:*',
 		]);
 	});
 
@@ -1979,8 +2173,6 @@ describe('the wholesale counter moves before the response clear', () => {
 		expect(calls).toEqual([
 			'bump scalabus:scoped-cache-epoch:*',
 			'FLUSHDB, the move in its MULTI refused',
-			'bump scalabus:scoped-cache-epoch:*',
-			'scan',
 			'bump scalabus:scoped-cache-epoch:*',
 		]);
 	});
@@ -2005,6 +2197,7 @@ describe('what the flush duration counts', () => {
 					}
 
 					on() {}
+					off() {}
 					async get() {}
 					async set() {}
 					async delete() {}

@@ -1196,7 +1196,7 @@ function scopedCacheHomePinIndexKey(
  * one-row write then reads whole, one per tenant listed first does not. The key
  * leads because it holds one row's value, so its set holds that row's reads and
  * no other's. A field declared unique would rank next to it, which the schema
- * does not expose yet (#579).
+ * does not expose yet (https://github.com/jclaveau/directus/issues/579).
  *
  * A read pinning none of them keeps the field with the fewest values, costing the
  * fewest filings, ties going to the lowest pin key so the choice never depends on
@@ -1451,9 +1451,13 @@ async function* scanScopedCacheIndexKeys(
 	const redis = useCacheRedis();
 	const scannedMembers = new Set<string>();
 
-	for (let at = 0; at < indexKeys.length; at += SCOPED_CACHE_INDEX_SCAN_SETS) {
+	for (
+		let setAt = 0;
+		setAt < indexKeys.length;
+		setAt += SCOPED_CACHE_INDEX_SCAN_SETS
+	) {
 		let pendingScans = indexKeys
-			.slice(at, at + SCOPED_CACHE_INDEX_SCAN_SETS)
+			.slice(setAt, setAt + SCOPED_CACHE_INDEX_SCAN_SETS)
 			.map((indexKey) => {
 				return { indexKey, scanCursor: '0' };
 			});
