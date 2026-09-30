@@ -166,7 +166,7 @@ const CACHE_SETTING_RULES: {
 		accepts: isPinCap,
 		expected: 'an integer from 0 to 100000, or null',
 		fallback: () => {
-			return (useEnv()['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] ?? 64) as number;
+			return (useEnv()['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] ?? 250) as number;
 		},
 	},
 };

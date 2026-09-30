@@ -194,8 +194,8 @@ CACHE_ENABLED=false
 # pin — more purging, never staler. Each pin costs a Redis set and a member of the
 # collection's fingerprint index, so raise it for fewer evictions and lower it for
 # cheaper fills. From 0 to 100000; a value outside ends the boot. The cache page
-# can set it live for every node. [64]
-# CACHE_SCOPED_MAX_PINS_PER_COLLECTION=64
+# can set it live for every node. [250]
+# CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
 
 # How many ways to satisfy one filter are carried apart before they are carried
 # side by side instead. A filter ANDing two `_in`s of ten values each has a

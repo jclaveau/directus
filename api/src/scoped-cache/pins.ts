@@ -288,7 +288,8 @@ export function scopedCacheCollectionPinsFromRows(
  * bare collection. What that buys back is on the write: over 1600 such reads
  * cached, one parent's update evicted 153 of them pinned by key, 200 through a
  * slice, and all 1600 through the bare collection. Every cap from 4 to 64
- * measured the same fill, so 64 keeps the pins of a small nested page.
+ * measured the same fill. Which side is worth paying depends on the traffic, so
+ * the default keeps the key pins of a 200-row page and the cache page moves it.
  *
  * NOT the bound a purge's record is held to, though both coarsen rather than fan
  * out and both fail toward over-purge: that one is forced by Postgres's 65 535

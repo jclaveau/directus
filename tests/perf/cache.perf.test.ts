@@ -141,14 +141,15 @@ const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ??
 // set per row. Gated on both counts, because the two moved for different reasons —
 // grouping a collection's slices into one index call halved the commands, and
 // sending the tag script by hash cut the bytes without touching the count.
-// Down from 500 now that a read pins at most 64 keys per collection and the fan
-// read's 200 authors fall back to their 8 tenant slices (#392): 31 where 446 ran.
+// Down from 500: 446 measured with the fan read's 200 authors pinned by key under
+// the default pin cap of 250. A cap of 64 falls back to their 8 tenant slices and
+// measured 31 (#392).
 const maxCommandsPerFanFill =
-	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 35);
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 460);
 
 const maxKilobytesPerFanFill =
-	// Down from 78 with the pin cap: 12.8 KB where 57.1 ran (#392).
-	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 15);
+	// Down from 78: 57.1 KB measured, 12.8 under a pin cap of 64 (#392).
+	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 60);
 
 const maxWriteCommandScaling =
 	// Down from 3.2 now that a purge sends one UNLINK per 500 keys rather than one
@@ -176,14 +177,14 @@ const maxCommandsAddedPerFanFill =
 
 // A scoped fill adds the epoch capture, its re-read, and the filing script: the
 // script plus a TTL, SADD and EXPIRE per index set, and the same three on the
-// set naming them. One set on a flat fill, 11 measured. The fan read's 200
-// authors span the 8 tenants, so it files 8 author slices, and their collection's
-// name set, on top of that (#392): what it may not do is grow with the rows.
+// set naming them. One set on a flat fill, 11 measured. The fan read pins its
+// 200 authors by key under the default pin cap, a set each, 446 measured: Redis
+// has no SADD over many keys, so that is the floor of a key pin (#392).
 const maxCommandsAddedPerScopedFill =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FILL'] ?? 11);
 
 const maxCommandsAddedPerScopedFanFill =
-	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FAN_FILL'] ?? 11 + 3 * 9);
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FAN_FILL'] ?? 460);
 
 // A purge that drops one slice should cost the same however much the cache holds.
 const targetWriteCommandScaling = 1.5;
@@ -304,9 +305,9 @@ const readShapes = [
 		// carries a DIFFERENT parent. What separates this from `wide` is the pin
 		// fan-out alone, which is the crossover #392 is about.
 		name: 'fan',
-		// Its own, looser pair: its authors span every tenant, so a fill files a
-		// set per tenant slice, and that is the cost the shape exists to expose
-		// rather than one the ceiling should hide. The target every shape is held
+		// Its own, looser pair: a read that pins one key per row writes a set per
+		// row too, and that is the cost the shape exists to expose rather than
+		// one the ceiling should hide. The target every shape is held
 		// to stays in Headroom.
 		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.20, missVsFull: 1.75 },
 		path: (tenant: string) => {
