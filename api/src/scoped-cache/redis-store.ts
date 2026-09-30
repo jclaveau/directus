@@ -1511,14 +1511,16 @@ interface ScopedCacheMemberLocation {
  *
  * A round's sets are sent together: ioredis writes each command as it is issued,
  * so the round costs one round trip, and a refused one rejects the round the way
- * a single `SSCAN` did. A member met twice — a set rehashed under the cursor, or
- * one entry filed under two of the sets read — is answered once.
+ * a single `SSCAN` did. A member met twice within a round — one entry filed
+ * under two of the sets read — is answered once. Only within a round: a scan
+ * remembering every member it met would hold the whole of a large set, which
+ * the paging exists to avoid, and a member answered again costs a repeated
+ * delete, which the purge counts once.
  */
 async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useCacheRedis();
-	const scannedMembers = new Set<string>();
 
 	for (
 		let setAt = 0;
@@ -1545,6 +1547,7 @@ async function* scanScopedCacheIndexKeys(
 
 			const entries: ScopedCacheIndexedEntry[] = [];
 			const unfinishedScans: typeof pendingScans = [];
+			const scannedMembers = new Set<string>();
 
 			for (const [replyAt, [next, members]] of scanReplies.entries()) {
 				const { indexKey } = pendingScans[replyAt]!;

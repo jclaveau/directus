@@ -557,6 +557,52 @@ describe('renderScopedCacheIndexMember', () => {
 	});
 });
 
+describe('scanRowIndexedEntries', () => {
+	beforeEach(() => {
+		sscan.mockReset();
+	});
+
+	it(oneLine`
+		answers a member again when a later round of the scan meets it: it holds
+		the members of one round, not of every set it has read
+	`, async () => {
+		sscan
+			.mockResolvedValueOnce(['7', ['slot:&|key-a']])
+			.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
+
+		const rounds = [];
+
+		for await (
+			const round of redisScopedCacheStore().scanRowIndexedEntries(
+				'slot',
+				[{ collection: 'slot', pinnedScope: {} }],
+				null,
+			)
+		) {
+			rounds.push(round);
+		}
+
+		expect(rounds).toEqual([
+			[{
+				fingerprint: parseScopedCacheFingerprint('slot:&'),
+				key: 'key-a',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:',
+					member: 'slot:&|key-a',
+				},
+			}],
+			[{
+				fingerprint: parseScopedCacheFingerprint('slot:&'),
+				key: 'key-a',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:',
+					member: 'slot:&|key-a',
+				},
+			}],
+		]);
+	});
+});
+
 describe('removeIndexedEntries', () => {
 	beforeEach(() => srem.mockClear());
 
