@@ -73,10 +73,14 @@ export interface ScopedCacheUnlinkTally {
 	refused: number;
 }
 
-/** What a reap read, and how many members it removed from it. */
+/**
+ * What a reap read, how many members it removed from it, and how many moved
+ * sets it found that no swept index-key set named.
+ */
 export interface ScopedCacheReapTally {
 	indexKeys: number;
 	reaped: number;
+	strandedSweptKeys: number;
 }
 
 export interface ScopedCacheStore {
@@ -199,6 +203,9 @@ export interface ScopedCacheStore {
 	 * that collection's sets: a fill files its members before it writes its entry,
 	 * and one caught in between looks expired. Bumped, it compares its counter
 	 * after the write and evicts the entry its members no longer name.
+	 *
+	 * A moved set no swept index-key set names is named there, for the recovery
+	 * to release (`releaseStrandedScopedCacheSweeps`).
 	 */
 	reapIndexedEntries(
 		rawKeyOf: (key: string) => string,
