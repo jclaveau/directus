@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { ForbiddenError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
@@ -8,6 +9,7 @@ import {
 	cacheSetting,
 	flushBeforeEnabling,
 	initCacheSettings,
+	markEnablingFlushed,
 	refreshCacheSettings,
 	resolveCacheSettings,
 	responseCacheWanted,
@@ -563,14 +565,35 @@ test('clears nothing where the stored row is already on', async () => {
 	expect(clearCacheTargets).not.toHaveBeenCalled();
 });
 
-// The access check runs after this filter, so a caller it would refuse must not
-// clear the tier on its way there.
-test('clears nothing for a caller who is not an admin', async () => {
+// A role granted update on directus_settings passes the access check that runs
+// after this filter, and switching on without the clear would serve what the
+// period the tier was off left behind.
+test('refuses a switch-on from a caller who is not an admin', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await expect(flushBeforeEnabling(
+		{ cache_settings: { response: true } },
+		{ accountability: { user: 'editor', admin: false } as never },
+	))
+		.rejects
+		.toThrowError(ForbiddenError);
+
+	expect(clearCacheTargets).not.toHaveBeenCalled();
+});
+
+// The service clears before it opens the transaction, and the write inside it
+// fires this filter again.
+test('clears nothing for a write that was cleared ahead', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+	const settingsTrx = {} as never;
+	markEnablingFlushed(settingsTrx);
 
 	await flushBeforeEnabling(
 		{ cache_settings: { response: true } },
-		{ accountability: { user: 'editor', admin: false } as never },
+		{
+			accountability: { user: 'admin', admin: true } as never,
+			database: settingsTrx,
+		},
 	);
 
 	expect(clearCacheTargets).not.toHaveBeenCalled();
@@ -647,11 +670,11 @@ test('hands the filter the caller the event carries', async () => {
 
 	await initCacheSettings();
 
-	await vi.mocked(emitter.onFilter).mock.calls[1]![1](
+	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
 		{ cache_settings: { response: true } },
 		{} as never,
 		{ accountability: { user: 'editor', admin: false } } as never,
-	);
-
-	expect(clearCacheTargets).not.toHaveBeenCalled();
+	))
+		.rejects
+		.toThrowError(ForbiddenError);
 });

@@ -20,6 +20,8 @@ import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	assertUsableCacheSettingsPatch,
+	flushBeforeEnabling,
+	markEnablingFlushed,
 	refreshCacheSettings,
 	resolveCacheSettings,
 	usableCacheSettings,
@@ -758,7 +760,16 @@ export class UtilsService {
 
 		assertUsableCacheSettingsPatch(patch);
 
+		// A clear can outlast the database's idle-in-transaction timeout, and it
+		// would hold the row lock every other settings write waits on.
+		await flushBeforeEnabling(
+			{ [SHARED_SETTINGS_COLUMNS.cache]: patch },
+			{ accountability: this.accountability },
+		);
+
 		const sharedSettings = await this.knex.transaction(async (settingsTrx) => {
+			markEnablingFlushed(settingsTrx);
+
 			const merged = usableCacheSettings(
 				await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, settingsTrx),
 			);

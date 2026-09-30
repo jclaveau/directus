@@ -7,6 +7,7 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	flushBeforeEnabling,
 	refreshCacheSettings,
 	resolveCacheSettings,
 } from '../cache-settings.js';
@@ -89,6 +90,7 @@ vi.mock('../cache-events.js');
 vi.mock('../cache-settings.js', async (importOriginal) => {
 	return {
 		...await importOriginal<typeof import('../cache-settings.js')>(),
+		flushBeforeEnabling: vi.fn(),
 		refreshCacheSettings: vi.fn(),
 		resolveCacheSettings: vi.fn(() => {
 			return { audit_limit: { value: 40, source: 'settings' } };
@@ -1188,6 +1190,23 @@ describe('Services / Utils', () => {
 			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
 
 			expect(announceSharedSettings).toHaveBeenCalledWith('cache_settings');
+		});
+
+		// A clear held inside the transaction keeps the row locked for as long
+		// as it runs, past the database's idle-in-transaction timeout.
+		it('clears ahead of the transaction that locks the row', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			vi.mocked(flushBeforeEnabling).mockImplementation(async () => {
+				expect(tracker.history.transactions).toEqual([]);
+			});
+
+			await service(admin).updateCacheSettings({ response: true }, 'admin');
+
+			expect(flushBeforeEnabling).toHaveBeenCalledWith(
+				{ cache_settings: { response: true } },
+				{ accountability: expect.objectContaining({ admin: true }) },
+			);
 		});
 
 		// One field stored around the guard would otherwise refuse every write to

@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { InvalidPayloadError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import type { EventContext, Item } from '@directus/types';
 import { parse as parseByteSize } from 'bytes';
 import type { Knex } from 'knex';
@@ -54,7 +54,11 @@ function acceptedEnvOr(
 ): number {
 	const envValue = useEnv()[variable];
 
-	return accepts(envValue) ? envValue as number : builtIn;
+	if (accepts(envValue)) {
+		return envValue as number;
+	}
+
+	return builtIn;
 }
 
 /** What each field reads as, whether the layer or its fallback answers. */
@@ -330,6 +334,17 @@ export async function seedCacheSettings(): Promise<void> {
 	}
 }
 
+/**
+ * The transactions whose write already had its clear, taken before the
+ * transaction opened so the row lock is not held across it.
+ */
+const enablingFlushedAhead = new WeakSet<Knex>();
+
+/** Let the filter below skip the clear for a write that already had it. */
+export function markEnablingFlushed(transaction: Knex): void {
+	enablingFlushedAhead.add(transaction);
+}
+
 /** The part of a filter's context the clear below is decided on. */
 export interface EnablingWriteContext {
 	accountability: EventContext['accountability'];
@@ -369,11 +384,19 @@ export async function flushBeforeEnabling(
 		return;
 	}
 
-	// The access check and the guard both run after this filter, so a caller
-	// or a write either would refuse must not clear the tier on its way there.
-	if (context.accountability !== null && context.accountability?.admin !== true) {
+	if (context.database && enablingFlushedAhead.has(context.database)) {
 		return;
 	}
+
+	// The access check runs after this filter, so a caller it would refuse must
+	// not clear the tier on its way there; nor may one it would let through
+	// switch on without the clear.
+	if (context.accountability !== null && context.accountability?.admin !== true) {
+		throw new ForbiddenError();
+	}
+
+	// The guard runs after this filter too, so a write it would refuse must not
+	// clear the tier either.
 
 	const { assertUsableSharedSettings } = await import(
 		'./processes/lib/settings-guard.js'
