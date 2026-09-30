@@ -254,9 +254,15 @@ export async function flushBeforeEnabling(payload: Partial<Item>): Promise<void>
 		return;
 	}
 
-	if (asSharedSettings(payload[column])?.['enabled'] !== true || cacheEnabled()) {
+	const nextSettings = asSharedSettings(payload[column]);
+
+	if (nextSettings?.['enabled'] !== true || cacheEnabled()) {
 		return;
 	}
+
+	// The guard runs after this filter, so a write it would refuse must not
+	// clear the tier on its way there.
+	assertUsableCacheSettings(nextSettings);
 
 	const { buildResponseCache, clearCacheTargets } = await import('./cache.js');
 

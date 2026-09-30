@@ -326,6 +326,17 @@ test('clears nothing for a write leaving the column alone', async () => {
 	expect(clearCacheTargets).not.toHaveBeenCalled();
 });
 
+test('clears nothing for a write the guard refuses', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await expect(flushBeforeEnabling({
+		cache_settings: { enabled: true, ttl: '1h' },
+	}))
+		.rejects.toThrowError('\'cache_settings.ttl\' is not a cache setting');
+
+	expect(clearCacheTargets).not.toHaveBeenCalled();
+});
+
 test('refuses the write when the clear is refused', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 
