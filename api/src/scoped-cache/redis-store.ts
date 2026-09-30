@@ -1252,7 +1252,12 @@ export function scopedCacheHomePin(
 
 /**
  * The keys of the sets one fingerprint is filed in: one per value it pins the
- * index path to, else one per value of its home pin, else the bare set.
+ * primary key to, else one per value it pins the index path to, else one per
+ * value of its home pin, else the bare set.
+ *
+ * The key outranks the index path: its set holds one row's reads, where the
+ * index path's holds a whole tenant's, which a one-row write would read back.
+ * `homePinFields` leads with it.
  *
  * A read bounded to a list of values depends on each of them and is dropped by a
  * write to any one, so it is filed under each — the same OR an `_in` already
@@ -1264,6 +1269,19 @@ export function scopedCacheFingerprintIndexKeys(
 	homePinFields: readonly string[],
 ): string[] {
 	const { collection } = fingerprint;
+	const [keyField] = homePinFields;
+
+	const pinnedScope = fingerprint.pinnedScope ?? {};
+
+	const keyValues = keyField !== undefined && Object.hasOwn(pinnedScope, keyField)
+		? [...new Set(pinnedScope[keyField])]
+		: [];
+
+	if (keyValues.length > 0) {
+		return keyValues.map((keyValue) => {
+			return scopedCacheHomePinIndexKey(collection, keyField!, keyValue);
+		});
+	}
 
 	const indexValues = indexPath === null
 		? undefined
@@ -1357,8 +1375,9 @@ export function scopedCacheRowHomePinKeys(
 
 /**
  * The keys of every set a fingerprint can have been filed in, whichever home pin
- * its filing chose: one per value it pins the index path to, else one per field
- * and value it pins, else the bare set.
+ * its filing chose: one per value it pins the index path to with one per value
+ * of each other field it pins, else one per field and value it pins, else the
+ * bare set.
  *
  * What a prune names rather than the filing's own keys, because the home pin is
  * ranked off the schema (the primary key, then the declared scope fields) and a
@@ -1375,8 +1394,20 @@ function scopedCacheFingerprintPrunedIndexKeys(
 		? undefined
 		: fingerprint.pinnedScope?.[indexPath];
 
+	// The key outranks the index path, so a read pinning both sits in the key's
+	// sets: the home pin sets of its other fields are named beside the index
+	// path's. The index path's own are not, since no filing uses them.
 	if (indexValues !== undefined && indexValues.length > 0) {
-		return scopedCacheFingerprintIndexKeys(fingerprint, indexPath, []);
+		const { [indexPath!]: _indexPathValues, ...otherPins }
+			= fingerprint.pinnedScope ?? {};
+
+		return [
+			...scopedCacheFingerprintIndexKeys(fingerprint, indexPath, []),
+			...scopedCacheRowHomePinKeys(
+				fingerprint.collection,
+				[{ ...fingerprint, pinnedScope: otherPins }],
+			),
+		];
 	}
 
 	const homePinKeys = scopedCacheRowHomePinKeys(

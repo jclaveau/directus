@@ -32,7 +32,8 @@ import type { ScopedCacheFingerprint } from './fingerprint.js';
  * a store MAY split its index by, never something a caller reads back.
  * `homePinFields` is that collection's primary key, then its
  * `scoped_cache_fields` in their declared order: what a store may rank the split
- * of a read off the index path by, the first one the read pins winning.
+ * of a read by, the first one the read pins winning. The key, first, outranks
+ * the index path too.
  */
 export interface ScopedCacheIndexFiling {
 	fingerprint: ScopedCacheFingerprint;
