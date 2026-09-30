@@ -82,14 +82,16 @@ describe('Cache settings', () => {
 		}
 	});
 
+	// The layer lives in the settings singleton every later suite boots on, and
+	// the next test starts from a peer that has heard it cleared.
 	afterEach(async () => {
-		// The layer lives in the settings singleton every later suite boots on.
 		for (const vendor of vendors) {
 			await request(getUrl(vendor, envs[vendor]!.writer))
-				.patch('/settings')
-				.send({ cache_settings: null })
+				.delete('/utils/cache/settings')
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(200);
+
+			expect(await awaitServing(vendor, false)).toBe(undefined);
 		}
 	});
 
@@ -199,11 +201,15 @@ describe('Cache settings', () => {
 			expect(read.body.data.resolved.enabled)
 				.toEqual({ value: true, source: 'settings', fallback: false });
 
-			await request(writerUrl)
+			const refused = await request(writerUrl)
 				.patch('/utils/cache/settings')
 				.send({ scoped_index_ttl_factor: 0.5 })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(400);
+
+			expect(refused.body.errors[0].message).toContain(
+				"'cache_settings.scoped_index_ttl_factor' has to be a number from 1",
+			);
 
 			const cleared = await request(writerUrl)
 				.delete('/utils/cache/settings')
@@ -215,11 +221,15 @@ describe('Cache settings', () => {
 		});
 
 		it('refuses an enabled the peers would read as unset', async () => {
-			await request(getUrl(vendor, envs[vendor]!.writer))
+			const refused = await request(getUrl(vendor, envs[vendor]!.writer))
 				.patch('/settings')
 				.send({ cache_settings: { enabled: 'yes' } })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 				.expect(400);
+
+			expect(refused.body.errors[0].message).toContain(
+				"'cache_settings.enabled' has to be true, false or null",
+			);
 		});
 	});
 });

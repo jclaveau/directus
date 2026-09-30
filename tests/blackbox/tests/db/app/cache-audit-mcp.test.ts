@@ -55,7 +55,7 @@ describe('Cache audit over the system MCP', () => {
 		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
 		env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
-		env[vendor]['SYSTEM_MCP_TOOLS'] = 'cache,cache_audit';
+		env[vendor]['SYSTEM_MCP_TOOLS'] = 'cache,cache_audit,cache_settings';
 
 		const optedOutEnv = cloneDeep(env);
 		optedOutEnv[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-off-${vendor}`;
@@ -196,6 +196,7 @@ describe('Cache audit over the system MCP', () => {
 
 			expect(names).toEqual(expect.arrayContaining(auditToolNames));
 			expect(names).toContain('list_cache_entries');
+			expect(names).toContain('write_cache_settings');
 
 			// The group named, not every group: the processes tool stays out.
 			expect(names).not.toContain('list_processes');

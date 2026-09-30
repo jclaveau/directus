@@ -1,4 +1,6 @@
 import type { EventContext } from '@directus/types';
+import knex from 'knex';
+import { MockClient, createTracker } from 'knex-mock-client';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { useEnv } from '@directus/env';
 import {
@@ -145,6 +147,59 @@ test('reads every column in a single statement', async () => {
 	});
 
 	expect(select).toHaveBeenCalledTimes(1);
+});
+
+// The cache page's write reads the row it lays a patch over; unlocked, two
+// writers read the same row and the later drops the earlier's field.
+test('locks the row it reads through a transaction', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+	const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+	const settingsTracker = createTracker(pgDatabase);
+
+	settingsTracker.on.select('directus_settings')
+		.response({ [SHARED_SETTINGS_COLUMNS.cache]: { audit_limit: 40 } });
+
+	vi.mocked(getDatabase).mockReturnValue(pgDatabase);
+
+	await expect(pgDatabase.transaction((openTransaction) => {
+		return readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, openTransaction);
+	})).resolves.toEqual({ audit_limit: 40 });
+
+	expect(settingsTracker.history.select[0]!.sql).toBe(
+		'select "cache_settings" from "directus_settings" limit $1 for update',
+	);
+});
+
+// Before its migration the cache column does not exist, and the autoscale
+// page reading beside it must not fail with it.
+test('reads the autoscale pair where the cache column is missing', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+
+	vi.mocked(getDatabase).mockReturnValue({
+		select: (selectedColumns: string | string[]) => {
+			return {
+				from: () => {
+					return {
+						first: async () => {
+							if ([selectedColumns].flat().includes(SHARED_SETTINGS_COLUMNS.cache)) {
+								throw new Error('column "cache_settings" does not exist');
+							}
+
+							return {
+								[SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 },
+								[SHARED_SETTINGS_COLUMNS.supervisor]: { listenTimeout: 20 },
+							};
+						},
+					};
+				},
+			};
+		},
+	} as never);
+
+	await expect(readAllSharedSettings()).resolves.toMatchObject({
+		autoscale_settings: { maxWorkers: 8 },
+		supervisor_settings: { listenTimeout: 20 },
+	});
 });
 
 test('reads the column the way Postgres answers it', async () => {

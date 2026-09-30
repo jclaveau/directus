@@ -6,7 +6,10 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
-import { refreshCacheSettings } from '../cache-settings.js';
+import {
+	refreshCacheSettings,
+	resolveCacheSettings,
+} from '../cache-settings.js';
 import {
 	listCacheAuditRuns,
 	readCacheAuditFindings,
@@ -82,8 +85,9 @@ vi.mock('../cache-audit-runs.js');
 vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
 
-vi.mock('../cache-settings.js', () => {
+vi.mock('../cache-settings.js', async (importOriginal) => {
 	return {
+		...await importOriginal<typeof import('../cache-settings.js')>(),
 		refreshCacheSettings: vi.fn(),
 		resolveCacheSettings: vi.fn(() => {
 			return { audit_limit: { value: 40, source: 'settings' } };
@@ -102,8 +106,13 @@ vi.mock('../processes/autoscale/lib/resolve-config.js');
 
 // Named here rather than taken from the module, so the columns the service
 // reads and writes are pinned by the test rather than by whatever it imports.
-vi.mock('../processes/lib/shared-settings.js', () => {
+vi.mock('../processes/lib/shared-settings.js', async (importOriginal) => {
+	const original = await importOriginal<
+		typeof import('../processes/lib/shared-settings.js')
+	>();
+
 	return {
+		asSharedSettings: original.asSharedSettings,
 		SHARED_SETTINGS_COLUMNS: {
 			autoscale: 'autoscale_settings',
 			supervisor: 'supervisor_settings',
@@ -1024,6 +1033,73 @@ describe('Services / Utils', () => {
 				sharedSettings: { audit_limit: 40, scoped_index_ttl_factor: 3 },
 				resolved: { audit_limit: { value: 40, source: 'settings' } },
 			});
+
+			expect(resolveCacheSettings)
+				.toHaveBeenCalledWith({ audit_limit: 40, scoped_index_ttl_factor: 3 });
+		});
+
+		// Two writers each laying a field over the row they read would otherwise
+		// both write, and the later would drop the earlier's field.
+		it('reads the row under the transaction that writes it', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await service(admin).updateCacheSettings({ scoped_index_ttl_factor: 3 });
+
+			const [readColumn, lockingTransaction] =
+				vi.mocked(readSharedSettings).mock.calls[0]!;
+
+			expect(readColumn).toBe('cache_settings');
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{ audit_limit: 40, scoped_index_ttl_factor: 3 },
+				expect.objectContaining({ knex: lockingTransaction }),
+			);
+
+			expect(tracker.history.transactions)
+				.toMatchObject([{ state: 'committed' }]);
+		});
+
+		// One field stored around the guard would otherwise refuse every write to
+		// the others, and the page could never repair it.
+		it(oneLine`
+			drops a stored field that is unknown or refused rather than refusing the
+			patch of another
+		`, async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({
+				ttl: '1h',
+				audit_limit: -1,
+				value_max_size: '2mb',
+			});
+
+			await service(admin).updateCacheSettings({ scoped_index_ttl_factor: 3 });
+
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				'cache_settings',
+				{ value_max_size: '2mb', scoped_index_ttl_factor: 3 },
+				expect.anything(),
+			);
+		});
+
+		it('refuses a null for a field that is not a cache setting', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await expect(service(admin).updateCacheSettings({ ttl: null }))
+				.rejects
+				.toThrowError(`'cache_settings.ttl' is not a cache setting`);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
+		});
+
+		// A write of nothing would still leave a revision naming who made it.
+		it('refuses a patch that names no field', async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+			await expect(service(admin).updateCacheSettings({}))
+				.rejects
+				.toThrowError(InvalidPayloadError);
+
+			expect(writeSharedSettings).not.toHaveBeenCalled();
 		});
 
 		it('writes none at all once the patch drops the last field', async () => {

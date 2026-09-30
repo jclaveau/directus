@@ -22,7 +22,7 @@ const toolNames = [
 	'write_cache_settings',
 ];
 
-// The one tool the default groups offer that changes how the deployment runs.
+// The one tool listed here that changes how the deployment runs.
 const writeToolNames = ['write_cache_settings'];
 
 // The reads that look back over a period, as against the ones that answer about
@@ -64,6 +64,9 @@ describe('System MCP Tests', () => {
 			envMcp[vendor]['REDIS_PORT'] = '6108';
 			envMcp[vendor]['CACHE_NAMESPACE'] = `blackbox-mcp-${vendor}`;
 			envMcp[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
+			// The default groups, and the settings write that is not one of them.
+			envMcp[vendor]['SYSTEM_MCP_TOOLS'] = 'processes,cache,cache_settings';
 
 			// One subsystem only: the cache tools must be neither listed nor callable.
 			const envMcpProcessesOnly = cloneDeep(envMcp);
@@ -586,37 +589,45 @@ describe('System MCP Tests', () => {
 
 	describe('Changes the cache settings every node reads', () => {
 		it.each(vendors)('%s', async (vendor) => {
-			// A field that only moves what a purge costs: this suite shares the
-			// settings singleton with every instance booting meanwhile.
-			const written = await callTool(vendor, 'write_cache_settings', {
-				settings: { scoped_index_scan_count: 500 },
-			});
+			let cleared: request.Response;
 
-			expect(written.body.result.isError).toBeUndefined();
+			// Cleared whatever fails first: this suite shares the settings
+			// singleton with every instance booting meanwhile.
+			try {
+				// A field that only moves what a purge costs.
+				const written = await callTool(vendor, 'write_cache_settings', {
+					settings: { scoped_index_scan_count: 500 },
+				});
 
-			expect(written.body.result.structuredContent.sharedSettings)
-				.toEqual({ scoped_index_scan_count: 500 });
+				expect(written.body.result.isError).toBeUndefined();
 
-			const read = await callTool(vendor, 'read_cache_settings');
+				expect(written.body.result.structuredContent.sharedSettings)
+					.toEqual({ scoped_index_scan_count: 500 });
 
-			expect(read.body.result.structuredContent.resolved.scoped_index_scan_count)
-				.toEqual({ value: 500, source: 'settings', fallback: 1000 });
+				const read = await callTool(vendor, 'read_cache_settings');
 
-			// The guard behind PATCH /settings refuses it here too, before anything
-			// is stored, so it answers as an argument the tool would not take.
-			const refused = await callTool(vendor, 'write_cache_settings', {
-				settings: { scoped_index_ttl_factor: 0.5 },
-			});
+				expect(
+					read.body.result.structuredContent.resolved.scoped_index_scan_count,
+				).toEqual({ value: 500, source: 'settings', fallback: 1000 });
 
-			expect(refused.body.error.code).toBe(-32602);
+				// The guard behind PATCH /settings refuses it here too, before
+				// anything is stored, so it answers as an argument the tool would
+				// not take.
+				const refused = await callTool(vendor, 'write_cache_settings', {
+					settings: { scoped_index_ttl_factor: 0.5 },
+				});
 
-			expect(refused.body.error.message).toContain(
-				"'cache_settings.scoped_index_ttl_factor' has to be a number from 1",
-			);
+				expect(refused.body.error.code).toBe(-32602);
 
-			const cleared = await callTool(vendor, 'write_cache_settings', {
-				clear: true,
-			});
+				expect(refused.body.error.message).toContain(
+					"'cache_settings.scoped_index_ttl_factor' has to be a number from 1",
+				);
+			}
+			finally {
+				cleared = await callTool(vendor, 'write_cache_settings', {
+					clear: true,
+				});
+			}
 
 			expect(cleared.body.result.structuredContent.sharedSettings).toBeNull();
 

@@ -158,6 +158,7 @@ beforeEach(() => {
 		'autoscale',
 		'autoscale_drill',
 		'cache',
+		'cache_settings',
 		'cache_audit',
 	]);
 
@@ -418,7 +419,7 @@ test('Every tool declares the subsystem it reads', () => {
 		'cache',
 		'cache',
 		'cache',
-		'cache',
+		'cache_settings',
 		'cache_audit',
 		'cache_audit',
 		'cache_audit',
@@ -563,6 +564,28 @@ test('The cache settings write drops them all on clear', async () => {
 	await findSystemMcpTool('write_cache_settings')!.run({ clear: true }, context);
 
 	expect(service.clearCacheSettings).toHaveBeenCalledOnce();
+	expect(service.updateCacheSettings).not.toHaveBeenCalled();
+});
+
+// The cache group is on by default and was read-only, so a deployment exposing
+// it did not hand an agent the switch that clears the response cache.
+test('The cache settings write is a group of its own, off by default', () => {
+	expect(findSystemMcpTool('write_cache_settings')!.group)
+		.toBe('cache_settings');
+
+	config.groups.mockReturnValue(['processes', 'cache']);
+
+	expect(findSystemMcpTool('write_cache_settings')).toBeUndefined();
+	expect(findSystemMcpTool('read_cache_settings')).toBeDefined();
+});
+
+test('The cache settings write refuses a clear sent with fields', async () => {
+	await expect(
+		findSystemMcpTool('write_cache_settings')!
+			.run({ clear: true, settings: { audit_limit: 40 } }, context),
+	).rejects.toThrowError('`clear` and `settings` cannot be sent together');
+
+	expect(service.clearCacheSettings).not.toHaveBeenCalled();
 	expect(service.updateCacheSettings).not.toHaveBeenCalled();
 });
 

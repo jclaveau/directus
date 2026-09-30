@@ -1522,6 +1522,22 @@ describe('CachePage', () => {
 		});
 	});
 
+	it('hands the settings panel every refresh of the page', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const keyBeforeRefresh = wrapper.findComponent(CacheSettingsPanel)
+			.props('refreshKey');
+
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		expect(wrapper.findComponent(CacheSettingsPanel).props('refreshKey'))
+			.not.toBe(keyBeforeRefresh);
+	});
+
 	it('builds a compact tooltip + human TTL axis from the chart config', async () => {
 		mockCacheGet(ENTRIES, {
 			// A non-zero bucket so hasTimeseries is true and the chart is built.

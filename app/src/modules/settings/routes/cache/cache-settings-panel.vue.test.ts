@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { i18n } from '@/lang';
+import { oneLine } from '@directus/utils';
 
 vi.mock('@/api', () => {
 	return {
@@ -136,6 +137,49 @@ describe('what the panel shows', () => {
 			.toBe('default');
 	});
 
+	test('a layer is named in words, not by its code', async () => {
+		const wrapper = await mounted();
+
+		expect(row(wrapper, 'CACHE_AUDIT_MAX_DURATION').find('.source')
+			.text())
+			.toBe('environment');
+	});
+
+	test.each([
+		'cache_settings',
+		'cache_settings_field',
+		'cache_settings_value',
+		'cache_settings_source_settings',
+		'cache_settings_cancel',
+		'cache_settings_apply',
+		'cache_settings_reset_default',
+		'cache_settings_reset_env',
+		'cache_settings_apply_all',
+		'cache_settings_reset_all',
+		'cache_settings_reset_fallbacks',
+		'cache_settings_key',
+	])('%s is translated', (translationKey) => {
+		expect(i18n.global.te(translationKey, 'en-US')).toBe(true);
+	});
+
+	// Named for a screen reader, which reads neither an icon nor a tooltip.
+	test('every input and row button says what it is for', async () => {
+		const wrapper = await mounted();
+		const auditRow = row(wrapper, 'CACHE_AUDIT_LIMIT');
+
+		expect(auditRow.find('input').attributes('aria-label'))
+			.toBe('CACHE_AUDIT_LIMIT');
+
+		expect(auditRow.find('.cancel button').attributes('aria-label'))
+			.toBe('Discard this change');
+
+		expect(auditRow.find('.apply button').attributes('aria-label'))
+			.toBe('Apply this change');
+
+		expect(auditRow.find('.reset button').attributes('aria-label'))
+			.toBe('Reset to the environment: 0');
+	});
+
 	test('a field says what it does on hover', async () => {
 		const wrapper = await mounted();
 
@@ -266,7 +310,79 @@ describe('editing one field', () => {
 		expect(api.patch).not.toHaveBeenCalled();
 
 		expect(wrapper.find('.v-notice')
-			.text()).toBe('Not a number: CACHE_AUDIT_LIMIT');
+			.text()).toBe('Not a Number: CACHE_AUDIT_LIMIT');
+	});
+
+	test('enter on a field nobody typed into writes nothing', async () => {
+		const wrapper = await mounted();
+
+		await row(wrapper, 'CACHE_AUDIT_LIMIT').find('input')
+			.trigger('keyup.enter');
+
+		await flushPromises();
+
+		expect(api.patch).not.toHaveBeenCalled();
+
+		expect(row(wrapper, 'CACHE_AUDIT_LIMIT').find('input').element.value)
+			.toBe('40');
+	});
+
+	// The arrows step the value without an input event, and what they leave is
+	// a number the browser reads.
+	test('a number stepped to after an unreadable one is written', async () => {
+		const wrapper = await mounted();
+		const limitInput = row(wrapper, 'CACHE_AUDIT_LIMIT').find('input');
+
+		Object.defineProperty(limitInput.element, 'validity', {
+			value: { badInput: true },
+			configurable: true,
+		});
+
+		await limitInput.setValue('');
+
+		Object.defineProperty(limitInput.element, 'validity', {
+			value: { badInput: false },
+		});
+
+		row(wrapper, 'CACHE_AUDIT_LIMIT').findComponent(VInput).vm
+			.$emit('update:modelValue', 41);
+
+		await press(row(wrapper, 'CACHE_AUDIT_LIMIT'), '.apply button');
+
+		expect(api.patch).toHaveBeenCalledWith('/utils/cache/settings', {
+			audit_limit: 41,
+		});
+	});
+
+	// The browser reads an unreadable number as empty, so a box whose value is
+	// null renders the same '' before and after, and only a new box drops the
+	// text still showing in it.
+	test(oneLine`
+		discarding an unreadable number gives a field with no value a new box
+	`, async () => {
+		vi.mocked(api.get).mockResolvedValue({
+			data: {
+				data: {
+					key: 'directus_settings.cache_settings',
+					sharedSettings: null,
+					resolved: {},
+				},
+			},
+		});
+
+		const wrapper = mount(CacheSettingsPanel, { global });
+		await flushPromises();
+		const globsInput = row(wrapper, 'scoped_max_index_globs').find('input');
+
+		Object.defineProperty(globsInput.element, 'validity', {
+			value: { badInput: true },
+		});
+
+		await globsInput.setValue('');
+		await press(row(wrapper, 'scoped_max_index_globs'), '.cancel button');
+
+		expect(row(wrapper, 'scoped_max_index_globs').find('input').element)
+			.not.toBe(globsInput.element);
 	});
 
 	test('a refused write is reported and leaves the value to correct', async () => {
@@ -296,6 +412,23 @@ describe('editing one field', () => {
 
 		expect(row(wrapper, 'scoped_index_ttl_factor').find('input').element.value)
 			.toBe('0.5');
+	});
+});
+
+describe('a refresh of the page', () => {
+	test('re-reads the settings and keeps what is being typed', async () => {
+		const wrapper = await mounted();
+
+		await row(wrapper, 'CACHE_AUDIT_LIMIT').find('input')
+			.setValue('80');
+
+		await wrapper.setProps({ refreshKey: 1 });
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledTimes(2);
+
+		expect(row(wrapper, 'CACHE_AUDIT_LIMIT').find('input').element.value)
+			.toBe('80');
 	});
 });
 
