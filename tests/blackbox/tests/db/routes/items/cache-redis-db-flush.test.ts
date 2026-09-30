@@ -94,6 +94,16 @@ describe.each(vendors)('%s', (vendor) => {
 		// joins it.
 		await redisByDatabase.shared.del(`${namespace}:scoped-cache-fill-pause`);
 		await redisByDatabase.cache.del(`${namespace}:scoped-cache-fill-pause`);
+
+		// An instance killed mid-reap leaves its reap's lock for its TTL, 120s,
+		// and the next instance's reap waits it out before marking the index.
+		const reapLocks = await redisByDatabase.shared.keys(
+			`${namespace}_lock*scoped-cache-index:reap`,
+		);
+
+		if (reapLocks.length > 0) {
+			await redisByDatabase.shared.del(...reapLocks);
+		}
 	});
 
 	afterAll(async () => {
