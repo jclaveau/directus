@@ -154,8 +154,8 @@ export default function registerEndpoint(router, { services, getSchema, env }) {
 			await requestScopedCacheIndexReap();
 
 			return response.json({
-				markerKey: `${env['CACHE_NAMESPACE']}:scoped-cache-index:`
-					+ 'collection-index-keys-complete',
+				markerKey: `${env['CACHE_NAMESPACE']}:`
+					+ 'scoped-cache-collection-index-keys-complete',
 				generationKey:
 					`${env['CACHE_NAMESPACE']}:scoped-cache-index-generation`,
 			});
