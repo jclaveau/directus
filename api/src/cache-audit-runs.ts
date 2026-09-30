@@ -44,6 +44,7 @@ export interface CacheAuditRunOptions {
 	user: string | null;
 	collection: string | null;
 	purge: boolean;
+	maxDurationMs: number | null;
 }
 
 export interface CacheAuditRun {
@@ -244,6 +245,7 @@ export async function startCacheAuditRun(
 		user: options.user ?? null,
 		collection: options.collection ?? null,
 		purge: options.purge === true,
+		maxDurationMs: options.maxDurationMs ?? null,
 	};
 
 	const [row] = await getDatabase()('directus_cache_audits')
@@ -430,10 +432,28 @@ export async function reapCacheAuditRuns(): Promise<number> {
 	const db = getDatabase();
 	const now = Date.now();
 
-	await db('directus_cache_audits')
-		.whereNull('finished_at')
-		.where('started_at', '<', new Date(now - 2 * maxDurationMs() - ORPHAN_GRACE_MS))
-		.update({ finished_at: new Date(now), error: DIED_ERROR });
+	const openRuns = await db('directus_cache_audits')
+		.select('id', 'started_at', 'options')
+		.whereNull('finished_at');
+
+	// Each run is judged by the budget it started with: a budget lowered since
+	// must not close a run still inside its own.
+	const diedRunIds = openRuns
+		.filter((openRun) => {
+			const runBudgetMs = (json(openRun['options']) as
+				Partial<CacheAuditRunOptions> | null)?.maxDurationMs ?? maxDurationMs();
+
+			const startedAt = new Date(openRun['started_at']).getTime();
+
+			return startedAt < now - 2 * runBudgetMs - ORPHAN_GRACE_MS;
+		})
+		.map((openRun) => openRun['id']);
+
+	if (diedRunIds.length > 0) {
+		await db('directus_cache_audits')
+			.whereIn('id', diedRunIds)
+			.update({ finished_at: new Date(now), error: DIED_ERROR });
+	}
 
 	return db('directus_cache_audits')
 		.where('started_at', '<', new Date(now - retentionMs()))
