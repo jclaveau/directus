@@ -106,18 +106,45 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		await redisByDatabase.cache.del(witnessKey);
+
+		// A pause left running would hold the fills of the next instance, which
+		// joins it.
+		await redisByDatabase.shared.del(`${namespace}:scoped-cache-fill-pause`);
+		await redisByDatabase.cache.del(`${namespace}:scoped-cache-fill-pause`);
+
+		// An instance killed mid-reap leaves its reap's lock for its TTL, 120s,
+		// and the next instance's reap waits it out before marking the index.
+		const reapLocks = await redisByDatabase.shared.keys(
+			`${namespace}_lock*scoped-cache-index:reap`,
+		);
+
+		if (reapLocks.length > 0) {
+			await redisByDatabase.shared.del(...reapLocks);
+		}
 	});
 
 	afterAll(async () => {
 		await redisByDatabase.cache.flushdb();
+
+		await redisByDatabase.shared.del(
+			`${namespace}:scoped-cache-index-build`,
+			`${namespace}:scoped-cache-index-generation`,
+			`${namespace}:scoped-cache-collection-index-keys-complete`,
+			`${namespace}:scoped-cache-fill-pause-watch`,
+		);
+
 		await redisByDatabase.shared.quit();
 		await redisByDatabase.cache.quit();
 		await DeleteCollection(vendor, { collection: NOTE });
 	});
 
-	async function bootInstance(database: string) {
+	async function bootInstance(
+		database: string,
+		instanceOverrides: Record<string, string> = {},
+	) {
 		const port = await getPort();
 		const instanceEnv = cloneDeep(env);
+		Object.assign(instanceEnv[vendor], instanceOverrides);
 
 		namespace = `directus-redis-db-flush-${vendor}-db${database}`;
 		instanceEnv[vendor]['CACHE_NAMESPACE'] = namespace;
@@ -240,6 +267,21 @@ describe.each(vendors)('%s', (vendor) => {
 			expect((await readNote()).headers[cacheStatusHeader]).toBe('HIT');
 		});
 
+		// By the pass the boot asked for.
+		and.optional(
+			'the shared database marks the index-key sets complete',
+			async () => {
+				await expect.poll(async () => {
+					const [marker, generation] = await redisByDatabase.shared.mget(
+						`${namespace}:scoped-cache-collection-index-keys-complete`,
+						`${namespace}:scoped-cache-index-generation`,
+					);
+
+					return marker !== null && marker === generation;
+				}, { timeout: 15_000 }).toBe(true);
+			},
+		);
+
 		and.optional(
 			/^a key outside every namespace is set in the (cache|shared) database$/,
 			async (database: 'cache' | 'shared') => {
@@ -313,6 +355,21 @@ describe.each(vendors)('%s', (vendor) => {
 			).toHaveLength(1);
 		});
 
+		// Read as the clear answers, before the reap it asked for: the FLUSHDB
+		// took the database the marker is not in.
+		and.optional(
+			'the shared database still marks the index-key sets complete',
+			async () => {
+				const [marker, generation] = await redisByDatabase.shared.mget(
+					`${namespace}:scoped-cache-collection-index-keys-complete`,
+					`${namespace}:scoped-cache-index-generation`,
+				);
+
+				expect(marker).not.toBeNull();
+				expect(marker).toBe(generation);
+			},
+		);
+
 		and.optional('the cache database holds no lock', async () => {
 			expect(await redisByDatabase.cache.keys(`${namespace}_lock*`))
 				.toEqual([]);
@@ -380,6 +437,69 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'a cache database equal to the one REDIS selects is ignored',
 			defineScenarioSteps,
+			60_000,
+		);
+
+		scenario(
+			'clearing the cache leaves a deploy\'s fill pause running',
+			({ given, and, when, then }) => {
+				given(
+					new RegExp([
+						String.raw`^an instance keeping its cache in database (\d+) boots`,
+						String.raw`on a new build pausing its fills for at most (\w+),`,
+						'its process reports off$',
+					].join(' ')),
+					async (database: string, fillPause: string) => {
+						await bootInstance(database, {
+							CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: fillPause,
+							PROCESSES_REPORT_ENABLED: 'false',
+						});
+					},
+				);
+
+				// The build is recorded once Redis is ready, which the boot does not
+				// wait for: a clear before it would open the pause after itself.
+				and(/^the instance logs "(.*)"$/, async (line: string) => {
+					await expect.poll(() => instanceLog.join(''), { timeout: 10_000 })
+						.toContain(line);
+				});
+
+				when('the cache is cleared', async () => {
+					const cleared = await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', adminAuth);
+
+					expect(cleared.status).toBe(200);
+				});
+
+				// A paused node looks at the pause every 5s, and the first look
+				// after a FLUSHDB that took it resumes the fills: a read then files
+				// its entry, and the one 2s later is a HIT.
+				then(
+					'a note read is not cached, a look at the fill pause later',
+					async () => {
+						await new Promise((resolve) => setTimeout(resolve, 7_000));
+
+						expect((await readNote()).headers[cacheStatusHeader]).toBe('MISS');
+
+						await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+						expect((await readNote()).headers[cacheStatusHeader]).toBe('MISS');
+					},
+				);
+
+				and(
+					'the shared database holds the recorded build, the index generation '
+					+ 'and the fill pause',
+					async () => {
+						expect(await redisByDatabase.shared.exists(
+							`${namespace}:scoped-cache-index-build`,
+							`${namespace}:scoped-cache-index-generation`,
+							`${namespace}:scoped-cache-fill-pause`,
+						)).toBe(3);
+					},
+				);
+			},
 			60_000,
 		);
 	});

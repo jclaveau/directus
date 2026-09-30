@@ -15,6 +15,22 @@ Feature: The members naming an expired entry are reaped from the index
   writes would be named by no index set. The reap moves the collection's counter
   first, and the fill, reading it moved, evicts what it wrote.
 
+  A collection-wide purge finds the collection's sets only through its index-key
+  set, and the only thing that finds a set outside it is the reap's walk of the
+  keyspace: an index-key set gone while its sets remain, or a set a node of an
+  older build moved aside without naming it anywhere. The reap names the first
+  again, and drops the reads the second names.
+
+  A purge trusts the index-key sets only once a reap has walked the whole index:
+  each full walk marks them complete with the index generation as it read before
+  the walk, so a flush moving that generation voids the mark until the next.
+
+  One reap runs at a time across the nodes, under a lock that expires if its node
+  dies. A pass slower than the lock's TTL lost it to the next node's claim, and
+  deleted that node's lock as it ended: a third node could then claim it too, and
+  two passes ran at once. A pass now releases the lock only while it names that
+  pass.
+
   Scenario: a read that expired leaves the index, a read still cached stays
     Given these rows of index_reap:
       | name | label |
@@ -54,3 +70,39 @@ Feature: The members naming an expired entry are reaped from the index
     Then the read of bob is filled again:
       | response                  |
       | [{name: bob, label: new}] |
+
+  Scenario: an index-key set that is gone is named again by the reap
+    Given these rows of index_reap_registry:
+      | name | label |
+      | ada  | old   |
+    And the read of ada is cached
+    And the index-key set of index_reap_registry is gone
+    Then the reap names the set of ada in the index-key set again
+    And the index-key set expires no sooner than the set of ada
+    And the read of ada is still cached
+    When every read of index_reap_registry is purged
+    Then the read of ada answers:
+      | cache |
+      | MISS  |
+
+  Scenario: a set an older build moved aside without naming it is released by the reap
+    Given these rows of index_reap_stranded:
+      | name | label |
+      | ada  | old   |
+    And the read of ada is cached
+    And a sweep of an older build moved the set of ada aside without naming it
+    Then the reap drops the read of ada before it expires
+    And the moved set is gone, and nothing names it
+
+  Scenario: a reap marks the index-key sets complete with the index generation
+    Given the cache is flushed
+    Then the next reap marks the index-key sets complete with the generation
+
+  Scenario: a reap releases the reap's lock only while it holds it
+    Given these rows of index_reap_lock:
+      | name | label |
+      | ada  | old   |
+    And the index of index_reap_lock holds 5000 sets naming no cached read
+    When another node takes the reap's lock while a reap walks those sets
+    Then the reap takes the 5000 sets out
+    And the reap's lock still names the other node, as the reap no longer held it

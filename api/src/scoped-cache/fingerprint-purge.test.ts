@@ -68,24 +68,39 @@ let members: Record<string, string[]>;
 const srem = vi.fn();
 const swept: string[][] = [];
 
-const sscan = vi.fn(async (key: string, _cursor: string) => {
+// A purge holding no rows reads the collection's sets off its index-key set, so the
+// index-key set answers with the sets the case declared under that collection, those
+// a trailing-star MATCH names when one is sent.
+const sscan = vi.fn(async (key: string, _cursor: string, ...options: unknown[]) => {
+	const collectionIndexKeysPrefix = 'ns:scoped-cache-index:collection-index-keys:';
+
+	if (key.startsWith(collectionIndexKeysPrefix)) {
+		const collection = key.slice(collectionIndexKeysPrefix.length);
+
+		const setPrefix = options[0] === 'MATCH'
+			? String(options[1]).slice(0, -1)
+			: `ns:scoped-cache-index:fingerprint:${collection}:`;
+
+		return ['0', Object.keys(members).filter((set) => set.startsWith(setPrefix))];
+	}
+
 	return ['0', members[key] ?? []];
 });
 
-// A purge holding no rows reads the collection's sets off the keyspace, so the
-// scan answers with the sets the case declared under that collection.
-const scan = vi.fn(async (_cursor: string, _match: string, pattern: string) => {
-	const prefix = pattern.slice(0, -1);
+const scan = vi.fn(async () => ['0', []]);
 
-	return ['0', Object.keys(members).filter((key) => key.startsWith(prefix))];
-});
+const scopedCacheCollectionIndexKeysPrune = vi.fn(async (
+	_keyCount: number,
+	_collectionIndexKeysKey: string,
+	...indexKeys: string[]
+) => indexKeys);
 
 const evalScript = vi.fn(async (
 	_script: string,
 	numKeys: number,
 	...args: string[]
 ) => {
-	swept.push(args.slice(0, numKeys));
+	swept.push(args.slice(2, numKeys));
 	return [];
 });
 
@@ -94,7 +109,9 @@ beforeEach(() => {
 	members = {};
 	swept.length = 0;
 
-	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
+	vi.mocked(useLogger)
+		.mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as any);
+
 	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useCacheRedis).mockImplementation(() => useRedis());
@@ -102,6 +119,13 @@ beforeEach(() => {
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
 		scan,
+		// A reap has marked the index-key sets complete since the last flush.
+		mget: async () => ['1', '1'],
+		// The index-key sets name the sets the case declared.
+		smismember: async (_collectionIndexKeysKey: string, ...indexKeys: string[]) => {
+			return indexKeys.map((indexKey) => Number(Object.hasOwn(members, indexKey)));
+		},
+		scopedCacheCollectionIndexKeysPrune,
 		eval: evalScript,
 		defineCommand: vi.fn(),
 		scopedCacheEpochBump: vi.fn(),
@@ -147,7 +171,15 @@ describe('a purge shown the rows it wrote', () => {
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-alpha-slow');
 	});
 
-	it('reads the bare set and the one its row owns, and no other', async () => {
+	it(oneLine`
+		reads the bare set, the one its row owns, and the home pin set of each value
+		it carries, and no other, until a reap marks the index-key sets complete
+	`, async () => {
+		vi.mocked(useRedis).mockReturnValue({
+			...useRedis(),
+			mget: async () => [null, '1'],
+		} as any);
+
 		await purgeScopedCache(cache, 'slot', [], null, {
 			rowFingerprints: [{
 				collection: 'slot',
@@ -160,7 +192,150 @@ describe('a purge shown the rows it wrote', () => {
 		expect([...new Set(sscan.mock.calls.map(([key]) => key))]).toEqual([
 			'ns:scoped-cache-index:fingerprint:slot:',
 			'ns:scoped-cache-index:fingerprint:slot:owner=alpha',
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1',
+			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced',
+			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha',
 		]);
+	});
+
+	it(oneLine`
+		reads only the home pin sets the index-key set names once a reap has marked
+		it complete: a value no read was filed under has no set to read
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [
+				'slot:&id=,1,&view=,method,&|ns:entry-one',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
+
+		expect(sscan.mock.calls).toEqual([
+			['ns:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
+			['ns:scoped-cache-index:fingerprint:slot:owner=alpha', '0', 'COUNT', 1000],
+			['ns:scoped-cache-index:fingerprint:slot:pin:id=1', '0', 'COUNT', 1000],
+		]);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
+	});
+
+	it(oneLine`
+		drops an entry pinned off the index path from its home pin set, and leaves
+		the one pinned to another value there
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [
+				'slot:&id=,1,&view=,method,&|ns:entry-one',
+			],
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=2': [
+				'slot:&id=,2,&view=,method,&|ns:entry-two',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], method: ['spaced'], owner: ['alpha'] },
+			}],
+			changed: ['method'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-one');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-two');
+
+		expect(srem).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1',
+			'slot:&id=,1,&view=,method,&|ns:entry-one',
+		);
+	});
+
+	it(oneLine`
+		drops a read pinning a row's key and a shared boolean, filed under the key,
+		when a write flips that boolean on the row
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=7': [
+				'slot:&enabled=,true,&id=,7,&view=,label,&|ns:entry-seven',
+			],
+		};
+
+		// The row before and after the write: `enabled` flipped to false.
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['true'], id: ['7'], owner: ['alpha'] },
+				},
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['false'], id: ['7'], owner: ['alpha'] },
+				},
+			],
+			changed: ['enabled'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-seven');
+	});
+
+	it(oneLine`
+		drops a read homed under its declared tenant when a write flips the shared
+		boolean it also pins
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:tenant=acme': [
+				'slot:&enabled=,true,&tenant=,acme,&view=,label,&|ns:entry-acme',
+			],
+		};
+
+		// The row before and after the write: `enabled` flipped to false.
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['true'], id: ['7'], tenant: ['acme'] },
+				},
+				{
+					collection: 'slot',
+					pinnedScope: { enabled: ['false'], id: ['7'], tenant: ['acme'] },
+				},
+			],
+			changed: ['enabled'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-acme');
+	});
+
+	// A build ranking home pins another way filed the same read under the boolean:
+	// the write reads every field and value its rows carry, so it finds it there.
+	it(oneLine`
+		drops the same read filed under the shared boolean instead of the key
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:enabled=true': [
+				'slot:&enabled=,true,&id=,7,&view=,label,&|ns:entry-seven',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { enabled: ['true'], id: ['7'], owner: ['alpha'] },
+			}],
+			changed: ['enabled'],
+			indexPath: 'owner',
+		});
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-seven');
 	});
 
 	it(oneLine`
@@ -236,6 +411,12 @@ describe('a purge shown the rows it wrote', () => {
 	});
 
 	it('reads a set larger than one page to its end', async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:pin:id=1': [],
+			'ns:scoped-cache-index:fingerprint:slot:pin:method=spaced': [],
+			'ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha': [],
+		};
+
 		sscan.mockImplementationOnce(async () => {
 			return ['7', ['slot:&|ns:entry-first']];
 		});
@@ -253,15 +434,15 @@ describe('a purge shown the rows it wrote', () => {
 			indexPath: null,
 		});
 
-		// One pass per pattern the rows can drop something under — the two bare ones
-		// plus one per pin of the row — and the first of them takes a second page.
-		expect(sscan.mock.calls.map(([, cursor]) => cursor)).toEqual([
-			'0',
-			'7',
-			'0',
-			'0',
-			'0',
-			'0',
+		// One pass per set the row can drop something in — the bare one plus one per
+		// value it carries — sent together, and the first of them takes a second
+		// page once the round is back.
+		expect(sscan.mock.calls.map(([key, cursor]) => [key, cursor])).toEqual([
+			['ns:scoped-cache-index:fingerprint:slot:', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:pin:id=1', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:pin:method=spaced', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:pin:owner=alpha', '0'],
+			['ns:scoped-cache-index:fingerprint:slot:', '7'],
 		]);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-first');
@@ -327,11 +508,15 @@ describe('a purge shown the rows it wrote', () => {
 
 	it(oneLine`
 		reads a hook's pin on another collection off that collection's own index
-		bucket, rather than scanning every set it owns
+		bucket and the home pin sets its index-key set names, rather than scanning the
+		keyspace
 	`, async () => {
 		members = {
 			'ns:scoped-cache-index:fingerprint:other:x=y': [
 				'other:&x=,y,&|ns:entry-x',
+			],
+			'ns:scoped-cache-index:fingerprint:other:pin:id=3': [
+				'other:&id=,3,&|ns:entry-home',
 			],
 		};
 
@@ -358,6 +543,15 @@ describe('a purge shown the rows it wrote', () => {
 			},
 		);
 
+		expect(sscan).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:collection-index-keys:other',
+			'0',
+			'MATCH',
+			'ns:scoped-cache-index:fingerprint:other:pin:*',
+			'COUNT',
+			1000,
+		);
+
 		expect(scan).not.toHaveBeenCalled();
 
 		expect(sscan).toHaveBeenCalledWith(
@@ -368,6 +562,43 @@ describe('a purge shown the rows it wrote', () => {
 		);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-x');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-home');
+	});
+
+	it(oneLine`
+		purges an entry a hook's pin on the index path finds under a home pin set:
+		it pins another field, so it can hold a row of any value there
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:other:pin:w=v': [
+				'other:&w=,v,&|ns:entry-homed',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'slot',
+			[],
+			{
+				schema: {
+					collections: { other: { scopedCacheFields: ['x'] } },
+					relations: [],
+				},
+			} as any,
+			{
+				rowFingerprints: [{
+					collection: 'slot',
+					pinnedScope: { owner: ['alpha'] },
+				}],
+				changed: null,
+				indexPath: 'owner',
+				declaredFingerprints: [
+					{ collection: 'other', pinnedScope: { x: ['y'] } },
+				],
+			},
+		);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-homed');
 	});
 
 	it(oneLine`
@@ -460,6 +691,7 @@ describe('a purge shown the rows it wrote', () => {
 				throw new Error('redis is down');
 			}),
 			scan,
+			mget: async () => ['1', '1'],
 			eval: evalScript,
 			defineCommand: vi.fn(),
 			scopedCacheEpochBump: vi.fn(),

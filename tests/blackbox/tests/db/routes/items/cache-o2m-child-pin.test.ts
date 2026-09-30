@@ -9,6 +9,7 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
@@ -223,10 +224,18 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		// Waits out the reap the flush requests: a pass landing during a later
+		// read's fill moves the purge counter it checks, and the fill is evicted.
 		function clearCache() {
-			return request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
+			return awaitRequestedReap(
+				Number(env[vendor]['REDIS_PORT']),
+				env[vendor]['CACHE_NAMESPACE']!,
+				async () => {
+					await request(getUrl(vendor, env))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+				},
+			);
 		}
 
 		it('pins the embedded child by its parent fk, never bare', async () => {
