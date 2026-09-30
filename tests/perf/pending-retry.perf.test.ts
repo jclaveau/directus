@@ -120,6 +120,9 @@ async function startInstance(): Promise<ChildProcess> {
 			CACHE_SCOPED_PURGE_RETRY_INTERVAL: '0',
 			CACHE_NAMESPACE: 'perf-pending-retry',
 			CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
+			// The fills saturate the event loop on purpose; the limiter's 503s would
+			// abort the fill a measure depends on.
+			PRESSURE_LIMITER_ENABLED: 'false',
 		},
 	});
 
@@ -295,7 +298,7 @@ async function measureDrain(
 
 	const after = await readCommandStats();
 
-	return {
+	const measure = {
 		entries,
 		retry,
 		fingerprints,
@@ -310,6 +313,12 @@ async function measureDrain(
 		purgedRead: await readStatus(0),
 		untouchedRead: await readStatus(untouchedRow),
 	};
+
+	// Printed as it lands, so a run that dies later still reports what it measured.
+	// eslint-disable-next-line no-console
+	console.info(JSON.stringify(measure));
+
+	return measure;
 }
 
 const measures: RetryMeasure[] = [];
