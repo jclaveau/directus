@@ -621,9 +621,10 @@ async function purgeScopedCacheIndexWhere(
  * naming them and their completeness marker: a name whose set is gone reads
  * empty, so the collection-wide purges keep reading the index-key sets. The reap
  * requested once the drop is over releases those names, marker or none,
- * schedule or none. A one-shot command exits before that reap runs; the nodes
- * hearing its `cacheCleared` ask for one that the marker still turns away, and
- * the names wait for the next reap.
+ * schedule or none. The operator's clear awaits that reap before it answers;
+ * the flush of a schema change does not. A one-shot command exits before that
+ * reap runs; the nodes hearing its `cacheCleared` ask for one that the marker
+ * still turns away, and the names wait for the next reap.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!scopedCacheIndexStoreAvailable()) {

@@ -283,6 +283,46 @@ describe('requestScopedCacheIndexReap', () => {
 		expect(holdCacheLock).not.toHaveBeenCalled();
 	});
 
+	it(oneLine`
+		reaps at once for a request skipping the debounce — the clear awaiting it
+		answers once the pass is over
+	`, async () => {
+		await requestScopedCacheIndexReap({ skipDebounce: true });
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		ends the debounce of the waiting pass a request skipping it joins, and
+		reaps once
+	`, async () => {
+		indexKeysComplete.mockResolvedValue(true);
+
+		const requested = [
+			requestScopedCacheIndexReap({ forcePass: true }),
+			requestScopedCacheIndexReap({ forcePass: true, skipDebounce: true }),
+		];
+
+		await Promise.all(requested);
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		reaps again at once for a request skipping the debounce during a pass — the
+		pass may have read the index before the drop that asked
+	`, async () => {
+		vi.mocked(reapScopedCacheIndex).mockImplementationOnce(async () => {
+			void requestScopedCacheIndexReap({ skipDebounce: true });
+
+			return 0;
+		});
+
+		await requestScopedCacheIndexReap({ skipDebounce: true });
+
+		expect(reapScopedCacheIndex).toHaveBeenCalledTimes(2);
+	});
+
 	it('asks for nothing with scoped purging off', async () => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(false);
 

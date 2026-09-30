@@ -150,6 +150,10 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
+const { requestScopedCacheIndexReap } = await import(
+	'./scoped-cache/reap-requests.js'
+);
+
 const {
 	clearCacheTargets,
 	clearSystemCache,
@@ -2027,6 +2031,31 @@ describe('clearCacheTargets', () => {
 		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
 			targets: ['response'],
 		});
+	});
+
+	test(oneLine`
+		answers once the reap it asks for is over, started without the debounce —
+		a pass walking the index during a later read's fill evicts that fill
+	`, async () => {
+		const reapPass = Promise.withResolvers<void>();
+
+		vi.mocked(requestScopedCacheIndexReap).mockReturnValue(reapPass.promise);
+
+		const clearing = clearCacheTargets(['response']);
+
+		await vi.waitFor(() => {
+			expect(requestScopedCacheIndexReap).toHaveBeenCalledWith({
+				forcePass: true,
+				skipDebounce: true,
+			});
+		});
+
+		expect(busPublish).not.toHaveBeenCalled();
+
+		reapPass.resolve();
+
+		await expect(clearing).resolves.toBeUndefined();
+		expect(busPublish).toHaveBeenCalledOnce();
 	});
 });
 

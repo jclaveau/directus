@@ -18,6 +18,8 @@ const REAP_LOCK_POLL_MS = 5_000;
 let requestedPass: Promise<void> | null = null;
 let passRequestedAgain = false;
 let forcedPassRequested = false;
+let promptPassRequested = false;
+let endDebounceEarly: (() => void) | null = null;
 
 type ScopedCacheIndexReapRequest = {
 	/**
@@ -26,6 +28,12 @@ type ScopedCacheIndexReapRequest = {
 	 * and only a pass releases them.
 	 */
 	forcePass?: boolean;
+	/**
+	 * Start the pass now rather than after the debounce. What a caller awaiting
+	 * the pass asks for: an operator's clear answers once its pass is over, and
+	 * a read sent after the answer then fills under no pass.
+	 */
+	skipDebounce?: boolean;
 };
 
 /**
@@ -37,8 +45,10 @@ type ScopedCacheIndexReapRequest = {
  *
  * Coalesced: a request while one is waiting joins it, forcing it when it forces,
  * and one while a pass runs gets one more pass after it, so a burst of flushes
- * costs one or two. Never rejects and never blocks the caller's own work: a pass
- * that fails is logged, and costs SCANs until the next, never a stale hit.
+ * costs one or two, and `skipDebounce` starts the waiting one at once. Resolves
+ * once the pass answering it is over, for a caller that awaits it. Never
+ * rejects: a pass that fails is logged, and costs SCANs until the next, never a
+ * stale hit.
  */
 export function requestScopedCacheIndexReap(
 	reapRequest: ScopedCacheIndexReapRequest = {},
@@ -49,6 +59,11 @@ export function requestScopedCacheIndexReap(
 
 	if (reapRequest.forcePass === true) {
 		forcedPassRequested = true;
+	}
+
+	if (reapRequest.skipDebounce === true) {
+		promptPassRequested = true;
+		endDebounceEarly?.();
 	}
 
 	if (requestedPass !== null) {
@@ -66,9 +81,13 @@ export function requestScopedCacheIndexReap(
 
 async function runRequestedReaps(): Promise<void> {
 	do {
-		await waitUnreferenced(REAP_REQUEST_DEBOUNCE_MS);
+		if (!promptPassRequested) {
+			await waitDebounce();
+		}
+
 		// After the wait: what arrived during it is answered by this pass.
 		passRequestedAgain = false;
+		promptPassRequested = false;
 		const passForced = forcedPassRequested;
 
 		forcedPassRequested = false;
@@ -153,6 +172,23 @@ export async function runScopedCacheIndexReap(): Promise<boolean> {
 	}
 
 	return true;
+}
+
+// Ended early by a request skipping the debounce, which then joins this pass.
+function waitDebounce(): Promise<void> {
+	return new Promise((resolve) => {
+		const debounceTimer = setTimeout(endDebounce, REAP_REQUEST_DEBOUNCE_MS);
+
+		debounceTimer.unref();
+
+		function endDebounce() {
+			clearTimeout(debounceTimer);
+			endDebounceEarly = null;
+			resolve();
+		}
+
+		endDebounceEarly = endDebounce;
+	});
 }
 
 function waitUnreferenced(delayMs: number): Promise<void> {
