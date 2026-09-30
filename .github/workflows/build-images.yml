@@ -1,0 +1,72 @@
+# Fixture images no registry publishes as-is. Built into the fork's own GHCR
+# namespace, like the mirrored ones (mirror-images.yml), and pulled from there by
+# tests/blackbox/docker-compose.yml.
+name: Build Images
+
+on:
+  # `workflow_dispatch` only lists a workflow once it is on the default branch,
+  # so the push trigger is what builds an image the first time and again
+  # whenever its Dockerfile changes.
+  push:
+    paths:
+      - .github/workflows/build-images.yml
+      - tests/blackbox/postgres-image/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    # A broken image never reports ready, so the smoke test's wait would spin.
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The tag names both extension versions the Dockerfile pins, so a bump
+          # there is a new tag here and in the compose file, never an overwrite.
+          - context: tests/blackbox/postgres-image
+            target: blackbox-postgres:pg18-ts2.30.2-postgis3.6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${{ matrix.target }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.target }}
+
+      # Fails the job if the image cannot create what init.sql creates.
+      - name: Smoke-test the extensions
+        run: |
+          image=ghcr.io/${{ github.repository_owner }}/${{ matrix.target }}
+          docker run -d --name smoke -e POSTGRES_PASSWORD=secret \
+            -v "$PWD/tests/blackbox/postgres-init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
+            "$image"
+          for _ in $(seq 1 60); do
+            docker logs smoke 2>&1 | grep -q 'init process complete' && break
+            sleep 1
+          done
+          until docker exec smoke pg_isready -q -U postgres; do sleep 1; done
+          docker exec smoke psql -U postgres -v ON_ERROR_STOP=1 -c \
+            "SELECT extname, extversion FROM pg_extension WHERE extname IN ('timescaledb', 'postgis')" \
+            | tee /dev/stderr | grep -c -E 'timescaledb|postgis' | grep -qx 2
