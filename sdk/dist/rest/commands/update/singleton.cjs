@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=require(`../../utils/throw-core-collection.cjs`),n=(n,r,i)=>()=>(e.throwIfEmpty(String(n),`Collection cannot be empty`),t.throwIfCoreCollection(n,`Cannot use updateSingleton for core collections`),{path:`/items/${n}`,params:i??{},body:JSON.stringify(r),method:`PATCH`});exports.updateSingleton=n;
+//# sourceMappingURL=singleton.cjs.map

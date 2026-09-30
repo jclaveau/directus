@@ -1,0 +1,2 @@
+import{isSystemCollection as e}from"../../utils/is-system-collection.js";const t=(t,n,r)=>()=>{let i=String(t);if(e(i))throw Error(`Cannot use createItems for core collections`);return{path:`/items/${i}`,params:r??{},body:JSON.stringify(n),method:`POST`}},n=(t,n,r)=>()=>{let i=String(t);if(e(i))throw Error(`Cannot use createItem for core collections`);return{path:`/items/${i}`,params:r??{},body:JSON.stringify(n),method:`POST`}};export{n as createItem,t as createItems};
+//# sourceMappingURL=items.js.map
