@@ -40,7 +40,7 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
-// The in-flight claim: a Keyv with a TTL, as the lock cache is.
+// The in-flight claim: a Keyv with a TTL, as the memory lock cache is.
 const lockCache = vi.hoisted(() => {
 	const held = new Map<string, unknown>();
 
@@ -55,6 +55,13 @@ const lockCache = vi.hoisted(() => {
 });
 
 vi.mock('./cache.js', () => ({ getCache: () => ({ lockCache }) }));
+
+vi.mock('node:crypto', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('node:crypto')>(),
+		randomUUID: () => 'run-1',
+	};
+});
 
 import getDatabase from './database/index.js';
 
@@ -304,7 +311,7 @@ describe('runCacheAudit', () => {
 		});
 
 		vi.mocked(auditCache).mockImplementation(async () => {
-			expect(lockCache.held.get('cache-audit:run')).toBe(1_700_000_000_000);
+			expect(lockCache.held.get('cache-audit:run')).toBe('1700000000000:run-1');
 			expect(lockCache.set).toHaveBeenCalledTimes(1);
 
 			vi.advanceTimersByTime(90_000);
@@ -333,7 +340,7 @@ describe('runCacheAudit', () => {
 		});
 
 		expect(lockCache.set)
-			.toHaveBeenCalledWith('cache-audit:run', 1_700_000_000_000, 120_000);
+			.toHaveBeenCalledWith('cache-audit:run', '1700000000000:run-1', 120_000);
 
 		expect(lockCache.delete).toHaveBeenCalledWith('cache-audit:run');
 		expect(lockCache.held.has('cache-audit:run')).toBe(false);
@@ -344,7 +351,7 @@ describe('runCacheAudit', () => {
 	});
 
 	it('refuses a run while another is in flight, before any row', async () => {
-		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+		lockCache.held.set('cache-audit:run', '1699999940000:run-2');
 
 		await expect(runCacheAudit('rest')).rejects.toThrow(
 			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
@@ -354,6 +361,53 @@ describe('runCacheAudit', () => {
 		expect(tracker.history.insert).toHaveLength(0);
 		// The refused ask leaves the claim to the run that holds it.
 		expect(lockCache.delete).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		refuses without a start where the claim is no token of this build — a node
+		of an older build holds it as a Keyv value
+	`, async () => {
+		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'Service "cache-audit" is unavailable. a cache audit is already running.',
+		);
+	});
+
+	it(oneLine`
+		leaves the claim another run took once its own lapsed, rather than
+		dropping it as the run ends
+	`, async () => {
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		vi.mocked(auditCache).mockImplementation(async () => {
+			lockCache.held.set('cache-audit:run', '1700000060000:run-2');
+
+			return report;
+		});
+
+		await runCacheAudit('rest');
+
+		expect(lockCache.held.get('cache-audit:run')).toBe('1700000060000:run-2');
+	});
+
+	it(oneLine`
+		runs, and records the run, when the claim cannot be asked for — Redis
+		down is the run's failure to record
+	`, async () => {
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		lockCache.get.mockRejectedValueOnce(new Error('Connection is closed.'));
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('rest');
+
+		expect(tracker.history.insert[0]!.sql).toMatch(/directus_cache_audits/);
 	});
 
 	it(oneLine`
@@ -470,7 +524,7 @@ describe('runCacheAudit', () => {
 
 describe('isCacheAuditInFlight', () => {
 	it('tells the refusal for a run in flight from any other failure', async () => {
-		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+		lockCache.held.set('cache-audit:run', '1699999940000:run-2');
 
 		const refused = await runCacheAudit('rest').catch((error) => error);
 
@@ -570,7 +624,17 @@ describe('listCacheAuditRuns', () => {
 
 	it('leaves an open run alone while its claim is held', async () => {
 		env['CACHE_STORE'] = 'redis';
-		lockCache.held.set('cache-audit:run', 1_699_999_999_000);
+		lockCache.held.set('cache-audit:run', '1699999999000:run-2');
+		tracker.on.select('directus_cache_audits').response([]);
+
+		await listCacheAuditRuns();
+
+		expect(tracker.history.update).toHaveLength(0);
+	});
+
+	it('leaves an open run alone while its claim cannot be read', async () => {
+		env['CACHE_STORE'] = 'redis';
+		lockCache.get.mockRejectedValueOnce(new Error('Connection is closed.'));
 		tracker.on.select('directus_cache_audits').response([]);
 
 		await listCacheAuditRuns();

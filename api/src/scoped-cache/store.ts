@@ -270,19 +270,6 @@ export interface ScopedCacheStore {
 	endFillPause(buildIdentity: string): Promise<boolean>;
 
 	/**
-	 * Claim the reap's lock for `lockTtlMs` as the pass `passToken`, or renew it
-	 * while it still names that pass. False when another pass holds it.
-	 */
-	holdIndexReapLock(
-		reapLockKey: string,
-		passToken: string,
-		lockTtlMs: number,
-	): Promise<boolean>;
-
-	/** Release the reap's lock, only while it still names the pass `passToken`. */
-	releaseIndexReapLock(reapLockKey: string, passToken: string): Promise<void>;
-
-	/**
 	 * Drop every set the index files members in, reporting what it cost. The
 	 * index-key sets naming them stay, and so does their completeness: a name
 	 * whose set is gone reads empty, and a reap releases it.

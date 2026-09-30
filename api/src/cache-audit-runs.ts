@@ -6,6 +6,7 @@ import {
 } from '@directus/errors';
 import { parseJSON } from '@directus/utils';
 import type { Knex } from 'knex';
+import { randomUUID } from 'node:crypto';
 import {
 	auditCache,
 	CACHE_AUDIT_VERDICTS,
@@ -16,6 +17,11 @@ import {
 } from './cache-audit.js';
 import type { CacheEntryPurgeRecord } from './cache-events.js';
 import { getCache } from './cache.js';
+import {
+	holdCacheLock,
+	readCacheLockHolder,
+	releaseCacheLock,
+} from './cache-lock.js';
 import getDatabase from './database/index.js';
 import { cacheAuditEnabled } from './utils/cache-audit-enabled.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -145,9 +151,9 @@ function defaultLimit(): number | undefined {
  * which is what the limit and the budget are there to bound. So a run that
  * finds another in flight is refused rather than started: a cron tick that
  * outlives its interval skips the next, and "Audit now" during one says so.
- * The claim is a read then a write, not one atomic step: two asks landing
- * within a round-trip of each other could both pass, which costs one doubled
- * run and nothing else.
+ * The claim names the run, so a run that lost it to its TTL never renews or
+ * releases the one another run claimed since. On Redis it is one script, so
+ * two asks never both win it. A memory claim is one process's.
  */
 export async function runCacheAudit(
 	trigger: CacheAuditTrigger,
@@ -162,23 +168,39 @@ export async function runCacheAudit(
 
 	const budgetMs = maxDurationMs();
 	const { lockCache } = getCache();
-	const inFlightSince = await lockCache.get(RUN_LOCK);
+	// Led by when the run began, which a run it refuses reads back.
+	const runToken = `${Date.now()}:${randomUUID()}`;
 
-	if (inFlightSince !== undefined) {
-		const since = new Date(Number(inFlightSince)).toISOString();
+	// A claim Redis refuses to answer is Redis down, and the run goes on to fail
+	// on it and be recorded failed, which is the outage's trace in the history.
+	const claimed = await holdCacheLock(
+		lockCache,
+		RUN_LOCK,
+		runToken,
+		RUN_LOCK_TTL_MS,
+	).catch(() => true);
+
+	if (!claimed) {
+		const holderToken = await readCacheLockHolder(lockCache, RUN_LOCK)
+			.catch(() => null);
+
+		// None when the run in flight ended since, or a node of an older build
+		// holds the claim as a Keyv value.
+		const inFlightSince = Number(holderToken?.split(':')[0]);
 
 		throw new ServiceUnavailableError({
 			service: 'cache-audit',
-			reason: `${IN_FLIGHT_REASON}, since ${since}`,
+			reason: Number.isFinite(inFlightSince)
+				? `${IN_FLIGHT_REASON}, since ${new Date(inFlightSince).toISOString()}`
+				: IN_FLIGHT_REASON,
 		});
 	}
 
-	const since = Date.now();
-	await lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS);
 	let renewing: Promise<unknown> = Promise.resolve();
 
 	const renewal = setInterval(() => {
-		renewing = lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS).catch(() => {});
+		renewing = holdCacheLock(lockCache, RUN_LOCK, runToken, RUN_LOCK_TTL_MS)
+			.catch(() => {});
 	}, RUN_LOCK_RENEW_MS);
 
 	renewal.unref();
@@ -212,7 +234,8 @@ export async function runCacheAudit(
 		// A renewal still on the wire would land after the release and hold
 		// the claim for one more TTL.
 		await renewing;
-		await lockCache.delete(RUN_LOCK);
+		// Refused, the claim stays until its TTL: only the next run waits longer.
+		await releaseCacheLock(lockCache, RUN_LOCK, runToken).catch(() => {});
 
 		// Once per run rather than on a schedule of its own: a history that is
 		// only written by runs only needs pruning when one happens — and a run
@@ -359,9 +382,11 @@ async function closeUnclaimedCacheAuditRuns(db: Knex): Promise<void> {
 		return;
 	}
 
-	const claimed = await getCache().lockCache.get(RUN_LOCK);
+	// A claim Redis cannot be asked about may still be held.
+	const holderToken = await readCacheLockHolder(getCache().lockCache, RUN_LOCK)
+		.catch(() => undefined);
 
-	if (claimed !== undefined) {
+	if (holderToken !== null) {
 		return;
 	}
 

@@ -10,8 +10,6 @@ import {
 	scopedCacheIndexBuildRecordScript,
 	scopedCacheFillPauseEndScript,
 	scopedCacheFillPauseWatchScript,
-	scopedCacheIndexReapLockHoldScript,
-	scopedCacheIndexReapLockReleaseScript,
 	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
 	scopedCacheIndexGenerationReadScript,
@@ -54,8 +52,6 @@ const scopedCacheIndexCompleteMark = vi.fn();
 const scopedCacheIndexBuildRecord = vi.fn();
 const scopedCacheFillPauseWatch = vi.fn();
 const scopedCacheFillPauseEnd = vi.fn();
-const scopedCacheIndexReapLockHold = vi.fn();
-const scopedCacheIndexReapLockRelease = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
 const sadd = vi.fn();
@@ -81,8 +77,6 @@ vi.mock('../redis/index.js', () => {
 			scopedCacheIndexBuildRecord,
 			scopedCacheFillPauseWatch,
 			scopedCacheFillPauseEnd,
-			scopedCacheIndexReapLockHold,
-			scopedCacheIndexReapLockRelease,
 			scopedCacheCollectionIndexKeysRegister,
 			scopedCacheCollectionIndexKeysPrune,
 			pttl,
@@ -2120,91 +2114,6 @@ if redis.call('SET', KEYS[2], ARGV[1], 'NX', 'PX', ARGV[2])
 end
 
 return { pauseLeft, watching }
-`);
-	});
-});
-
-describe('holdIndexReapLock', () => {
-	it(oneLine`
-		claims or renews the lock as the pass, in one script on the shared
-		database
-	`, async () => {
-		scopedCacheIndexReapLockHold.mockResolvedValueOnce(1);
-
-		expect(await redisScopedCacheStore().holdIndexReapLock(
-			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
-			'pass-1',
-			120_000,
-		)).toBe(true);
-
-		expect(scopedCacheIndexReapLockHold).toHaveBeenCalledExactlyOnceWith(
-			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
-			'pass-1',
-			120_000,
-		);
-
-		expect(defineCommand).toHaveBeenCalledWith(
-			'scopedCacheIndexReapLockHold',
-			{ numberOfKeys: 1, lua: scopedCacheIndexReapLockHoldScript },
-		);
-	});
-
-	it('answers a lock another pass holds', async () => {
-		scopedCacheIndexReapLockHold.mockResolvedValueOnce(0);
-
-		expect(await redisScopedCacheStore().holdIndexReapLock(
-			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
-			'pass-2',
-			120_000,
-		)).toBe(false);
-	});
-
-	it(oneLine`
-		claims a free lock, and renews only the one naming the pass
-	`, () => {
-		expect(scopedCacheIndexReapLockHoldScript).toBe(`
-if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then
-	return 1
-end
-
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then
-	return 0
-end
-
-redis.call('PEXPIRE', KEYS[1], ARGV[2])
-
-return 1
-`);
-	});
-});
-
-describe('releaseIndexReapLock', () => {
-	it('releases the lock as the pass, in one script', async () => {
-		scopedCacheIndexReapLockRelease.mockResolvedValueOnce(1);
-
-		await redisScopedCacheStore().releaseIndexReapLock(
-			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
-			'pass-1',
-		);
-
-		expect(scopedCacheIndexReapLockRelease).toHaveBeenCalledExactlyOnceWith(
-			'scalabus_lock::scalabus_lock:scoped-cache-index:reap',
-			'pass-1',
-		);
-
-		expect(defineCommand).toHaveBeenCalledWith(
-			'scopedCacheIndexReapLockRelease',
-			{ numberOfKeys: 1, lua: scopedCacheIndexReapLockReleaseScript },
-		);
-	});
-
-	it('deletes the lock only while it names the pass', () => {
-		expect(scopedCacheIndexReapLockReleaseScript).toBe(`
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then
-	return 0
-end
-
-return redis.call('DEL', KEYS[1])
 `);
 	});
 });

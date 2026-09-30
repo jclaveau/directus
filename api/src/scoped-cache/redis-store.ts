@@ -464,41 +464,6 @@ redis.call('DEL', KEYS[1], KEYS[2])
 return 1
 `;
 
-/**
- * Claim the reap's lock for ARGV[2] ms as the pass ARGV[1], or renew it while
- * it still names that pass. One script, so two claims never both win, and a
- * pass whose lock expired never renews the one another pass claimed since.
- *
- * KEYS is the lock. Answers 1 when the pass holds it.
- */
-export const scopedCacheIndexReapLockHoldScript = `
-if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then
-	return 1
-end
-
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then
-	return 0
-end
-
-redis.call('PEXPIRE', KEYS[1], ARGV[2])
-
-return 1
-`;
-
-/**
- * Release the reap's lock, only while it names the pass ARGV[1]: one that
- * expired under a slow pass may be another pass's by now.
- *
- * KEYS is the lock. Answers 1 when it released it.
- */
-export const scopedCacheIndexReapLockReleaseScript = `
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then
-	return 0
-end
-
-return redis.call('DEL', KEYS[1])
-`;
-
 type ScopedCacheIndexFileCommand = {
 	scopedCacheIndexFile(
 		keyCount: number,
@@ -587,18 +552,6 @@ type ScopedCacheFillPauseEndCommand = {
 	): Promise<number>;
 };
 
-type ScopedCacheIndexReapLockCommand = {
-	scopedCacheIndexReapLockHold(
-		reapLockKey: string,
-		passToken: string,
-		lockTtlMs: number,
-	): Promise<number>;
-	scopedCacheIndexReapLockRelease(
-		reapLockKey: string,
-		passToken: string,
-	): Promise<number>;
-};
-
 type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexFileCommand
 	& ScopedCacheEpochBumpCommand
@@ -609,8 +562,7 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheIndexCompleteMarkCommand
 	& ScopedCacheIndexBuildRecordCommand
 	& ScopedCacheFillPauseWatchCommand
-	& ScopedCacheFillPauseEndCommand
-	& ScopedCacheIndexReapLockCommand;
+	& ScopedCacheFillPauseEndCommand;
 
 const clientsCarryingScripts = new WeakSet<Redis>();
 
@@ -670,16 +622,6 @@ function withScopedCacheScripts(redis: Redis): ScopedCacheScriptedRedis {
 		redis.defineCommand('scopedCacheFillPauseEnd', {
 			numberOfKeys: 2,
 			lua: scopedCacheFillPauseEndScript,
-		});
-
-		redis.defineCommand('scopedCacheIndexReapLockHold', {
-			numberOfKeys: 1,
-			lua: scopedCacheIndexReapLockHoldScript,
-		});
-
-		redis.defineCommand('scopedCacheIndexReapLockRelease', {
-			numberOfKeys: 1,
-			lua: scopedCacheIndexReapLockReleaseScript,
 		});
 
 		clientsCarryingScripts.add(redis);
@@ -2317,30 +2259,6 @@ const redisStore: ScopedCacheStore = {
 		);
 
 		return ended === 1;
-	},
-
-	async holdIndexReapLock(
-		reapLockKey: string,
-		passToken: string,
-		lockTtlMs: number,
-	): Promise<boolean> {
-		const held = await useScriptedSharedRedis().scopedCacheIndexReapLockHold(
-			reapLockKey,
-			passToken,
-			lockTtlMs,
-		);
-
-		return held === 1;
-	},
-
-	async releaseIndexReapLock(
-		reapLockKey: string,
-		passToken: string,
-	): Promise<void> {
-		await useScriptedSharedRedis().scopedCacheIndexReapLockRelease(
-			reapLockKey,
-			passToken,
-		);
 	},
 
 	onStoreReady(listener: () => void): void {

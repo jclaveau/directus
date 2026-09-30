@@ -2,10 +2,11 @@ import { API_EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants
 import { useEnv } from '@directus/env';
 import type { Extension } from '@directus/types';
 import { isTypeIn } from '@directus/utils';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { flushCaches, getCache } from './cache.js';
+import { holdCacheLock, releaseCacheLock } from './cache-lock.js';
 import { resolveCoreBuildId } from './core-build-id.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
@@ -105,15 +106,23 @@ const STILL_FLUSHING = Symbol('still flushing');
 
 /**
  * Flushes, holding the lock for as long as that takes, and records the build it
- * flushed for once it is done.
+ * flushed for once it is done. The lock names the flush, so a flush that lost it
+ * to its TTL never renews or releases the one another instance claimed since.
  */
-async function flushHoldingTheLock(identity: string): Promise<void> {
+async function flushHoldingTheLock(
+	identity: string,
+	flushToken: string,
+): Promise<void> {
 	const { lockCache } = getCache();
+	let refreshing: Promise<unknown> = Promise.resolve();
 
 	const refresh = setInterval(() => {
-		lockCache
-			.set(BUILD_IDENTITY_FLUSH_LOCK, true, FLUSH_LOCK_MS)
-			.catch(() => undefined);
+		refreshing = holdCacheLock(
+			lockCache,
+			BUILD_IDENTITY_FLUSH_LOCK,
+			flushToken,
+			FLUSH_LOCK_MS,
+		).catch(() => undefined);
 	}, FLUSH_LOCK_REFRESH_MS);
 
 	// Nothing about a cache flush should hold a process that is otherwise done.
@@ -125,7 +134,11 @@ async function flushHoldingTheLock(identity: string): Promise<void> {
 	}
 	finally {
 		clearInterval(refresh);
-		await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK).catch(() => undefined);
+		// A refresh still on the wire would claim the lock again after the release.
+		await refreshing;
+
+		await releaseCacheLock(lockCache, BUILD_IDENTITY_FLUSH_LOCK, flushToken)
+			.catch(() => undefined);
 	}
 }
 
@@ -157,19 +170,24 @@ export async function flushCachesIfBuildChanged(
 
 		// Redis-gate so exactly one instance flushes when several boot together on
 		// a deploy. The lock + stored fingerprint live in lockCache, which
-		// flushCaches() leaves untouched. Non-atomic get-then-set: a loser returns
-		// here trusting the holder to flush, so two deploys inside one flush can
-		// drop the later one — bounded by CACHE_TTL, accepted.
-		if (await lockCache.get(BUILD_IDENTITY_FLUSH_LOCK)) {
+		// flushCaches() leaves untouched. A loser returns here trusting the holder
+		// to flush, so two deploys inside one flush can drop the later one —
+		// bounded by CACHE_TTL, accepted.
+		const flushToken = randomUUID();
+
+		if (!(await holdCacheLock(
+			lockCache,
+			BUILD_IDENTITY_FLUSH_LOCK,
+			flushToken,
+			FLUSH_LOCK_MS,
+		))) {
 			return;
 		}
-
-		await lockCache.set(BUILD_IDENTITY_FLUSH_LOCK, true, FLUSH_LOCK_MS);
 
 		// Re-read under the lock: another instance may have flushed and stored the
 		// new id since our check.
 		if ((await lockCache.get(BUILD_IDENTITY_KEY)) === identity) {
-			await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK);
+			await releaseCacheLock(lockCache, BUILD_IDENTITY_FLUSH_LOCK, flushToken);
 			return;
 		}
 
@@ -191,7 +209,7 @@ export async function flushCachesIfBuildChanged(
 		let waited: ReturnType<typeof setTimeout> | undefined;
 
 		const outcome = await Promise.race([
-			flushHoldingTheLock(identity).catch((error: unknown) => {
+			flushHoldingTheLock(identity, flushToken).catch((error: unknown) => {
 				logger.warn(error, '[cache] build-identity flush failed');
 			}),
 			new Promise<typeof STILL_FLUSHING>((resolve) => {

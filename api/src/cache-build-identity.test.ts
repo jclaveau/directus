@@ -44,6 +44,13 @@ vi.mock('./scoped-cache/fill-pause.js', () => {
 
 vi.mock('./cache.js', () => ({ flushCaches: vi.fn(), getCache: vi.fn() }));
 
+vi.mock('node:crypto', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('node:crypto')>(),
+		randomUUID: () => 'flush-1',
+	};
+});
+
 // path.resolve(ext.path, entrypoint) → content; readFile returns those bytes so a
 // content edit moves the fingerprint. An unmapped path rejects, and the extension
 // still contributes its name/version/type.
@@ -294,7 +301,7 @@ describe('flushCachesIfBuildChanged', () => {
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
 		lockCache.store.set('build-identity', 'stale');
-		lockCache.store.set('build-identity-flush-lock', true);
+		lockCache.store.set('build-identity-flush-lock', 'another-instance');
 
 		await flushCachesIfBuildChanged(managerOf([]));
 
@@ -341,7 +348,7 @@ describe('flushCachesIfBuildChanged', () => {
 			.filter(([key]) => key === 'build-identity-flush-lock');
 
 		expect(held.length).toBeGreaterThan(1);
-		expect(held.at(-1)).toEqual(['build-identity-flush-lock', true, 30_000]);
+		expect(held.at(-1)).toEqual(['build-identity-flush-lock', 'flush-1', 30_000]);
 
 		finish();
 		await booting;
@@ -378,13 +385,41 @@ describe('flushCachesIfBuildChanged', () => {
 		await booting;
 
 		expect(lockCache.store.has('build-identity')).toBe(false);
-		expect(lockCache.store.get('build-identity-flush-lock')).toBe(true);
+		expect(lockCache.store.get('build-identity-flush-lock')).toBe('flush-1');
 
 		finish();
 		await vi.advanceTimersByTimeAsync(0);
 
 		expect(lockCache.store.get('build-identity')).toEqual(expect.any(String));
 		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
+	});
+
+	// A flush whose renewals were held up past the TTL lost the lock to the next
+	// instance's claim: it renews and releases nothing of that one's.
+	it('leaves the lock another instance claimed during the flush', async () => {
+		vi.useFakeTimers();
+
+		const lockCache = makeLockCache();
+		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+		env['CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT'] = '5m';
+
+		let finish!: () => void;
+
+		vi.mocked(flushCaches).mockReturnValue(new Promise<any>((resolve) => {
+			finish = () => resolve(undefined);
+		}));
+
+		const booting = flushCachesIfBuildChanged(managerOf([]));
+
+		await vi.advanceTimersByTimeAsync(0);
+		lockCache.store.set('build-identity-flush-lock', 'another-instance');
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		finish();
+		await booting;
+
+		expect(lockCache.store.get('build-identity-flush-lock'))
+			.toBe('another-instance');
 	});
 
 	// A flush that failed flushed nothing: the build it was for is not recorded,

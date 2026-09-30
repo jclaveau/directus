@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { cacheEntryRawKeyOf } from '../cache-drop.js';
+import { holdCacheLock, releaseCacheLock } from '../cache-lock.js';
 import { useLogger } from '../logger/index.js';
 import { scopedCachePurgeEnabled } from './config.js';
 import { scopedCacheFillPaused } from './fill-pause.js';
@@ -114,26 +115,24 @@ export async function runScopedCacheIndexReap(): Promise<boolean> {
 	// Lazily, for the reason `reapScopedCacheIndex` imports `cache.js` lazily:
 	// both import back the module that imports this one.
 	const { getCache } = await import('../cache.js');
-	const reapLockKey = cacheEntryRawKeyOf(getCache().lockCache)?.(REAP_LOCK);
+	const { lockCache } = getCache();
 
 	// Only a Redis lock cache is one every node reads, and the index is in
 	// Redis only: a reap has nothing to walk without it.
-	if (reapLockKey === undefined) {
+	if (cacheEntryRawKeyOf(lockCache) === null) {
 		return false;
 	}
 
-	const store = useScopedCacheStore();
 	const passToken = randomUUID();
 
-	if (!(await store.holdIndexReapLock(reapLockKey, passToken, REAP_LOCK_TTL_MS))) {
+	if (!(await holdCacheLock(lockCache, REAP_LOCK, passToken, REAP_LOCK_TTL_MS))) {
 		return false;
 	}
 
 	let renewing: Promise<unknown> = Promise.resolve();
 
 	const renewal = setInterval(() => {
-		renewing = store
-			.holdIndexReapLock(reapLockKey, passToken, REAP_LOCK_TTL_MS)
+		renewing = holdCacheLock(lockCache, REAP_LOCK, passToken, REAP_LOCK_TTL_MS)
 			.catch(() => {});
 	}, REAP_LOCK_RENEW_MS);
 
@@ -150,7 +149,7 @@ export async function runScopedCacheIndexReap(): Promise<boolean> {
 		await renewing;
 
 		// Refused, the lock stays until its TTL: only the next pass waits longer.
-		await store.releaseIndexReapLock(reapLockKey, passToken).catch(() => {});
+		await releaseCacheLock(lockCache, REAP_LOCK, passToken).catch(() => {});
 	}
 
 	return true;
