@@ -49,14 +49,14 @@ patch:
                 - type: boolean
                   enum: [false]
                 - type: string
-              nullable: true
+                  nullable: true
               description: false, or a size such as "2mb". Over CACHE_VALUE_MAX_SIZE.
             stats_max_bytes:
               oneOf:
                 - type: boolean
                   enum: [false]
                 - type: string
-              nullable: true
+                  nullable: true
               description: false, or a size such as "2gb". Over CACHE_STATS_MAX_BYTES.
             audit_limit:
               type: integer
@@ -96,6 +96,8 @@ patch:
       description: The patch names no field, an unknown field, or a value outside its rule
     '403':
       description: The caller is not an administrator
+    '503':
+      description: Switching the response cache on could not clear it first, so nothing was written
   tags:
     - System Diagnostics
 delete:
