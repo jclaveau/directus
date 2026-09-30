@@ -1,6 +1,6 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type { Item } from '@directus/types';
-import { assertUsableCacheSettings } from '../../cache-enabled.js';
+import { assertUsableCacheSettings } from '../../cache-settings.js';
 import { parseSharedSettingsPatch } from '../autoscale/lib/shared-settings.js';
 import { configWithSharedSettings } from '../autoscale/lib/resolve-config.js';
 import {

@@ -7,7 +7,7 @@ import { scopedCachePurgeEnabled } from './config.js';
 import { useScopedCacheStore } from './store.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { earlierScopedCacheEpoch } from './pins.js';
-import { cacheEnabled } from '../cache-enabled.js';
+import { cacheEnabled } from '../cache-settings.js';
 
 const env = useEnv();
 

@@ -1,4 +1,4 @@
-import { seedCacheEnabled } from '../../../cache-enabled.js';
+import { seedCacheSettings } from '../../../cache-settings.js';
 import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
 import { redisConfigAvailable } from '../../../redis/index.js';
@@ -32,7 +32,7 @@ export default async function cacheFlush(): Promise<void> {
 
 	// A deployment switched on by `cache_settings` holds a response tier the
 	// environment alone would leave unbuilt, and unflushed.
-	await seedCacheEnabled();
+	await seedCacheSettings();
 
 	try {
 		report = await flushCaches(true);

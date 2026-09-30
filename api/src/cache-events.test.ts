@@ -54,6 +54,18 @@ const env: Record<string, any> = {
 };
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
+
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('./cache-settings.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('./cache-settings.js')>(),
+		cacheSettingOr: (field: string, fallback: unknown) => {
+			return cacheLayer[field] ?? fallback;
+		},
+	};
+});
+
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
@@ -232,6 +244,7 @@ beforeEach(() => {
 	env['CACHE_STATS_ENABLED'] = true;
 	env['CACHE_STATS_MAX_BYTES'] = false;
 	env['CACHE_STATS_MAX_BUFFER'] = false;
+	delete cacheLayer['stats_max_bytes'];
 
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useRedis).mockReturnValue(mockRedis as any);
@@ -1588,6 +1601,16 @@ describe('enforceCacheStatsBudget', () => {
 			],
 			expect.any(Date),
 		);
+	});
+
+	it('holds the budget the cache layer sets over the environment', async () => {
+		await armFlag(null);
+		cacheLayer['stats_max_bytes'] = '1kb';
+		scriptRing([5000, 100], [chunkOf('directus_cache_stats_purges', 48 * HOUR)]);
+
+		await enforceCacheStatsBudget();
+
+		expect(droppedChunks()).toHaveLength(1);
 	});
 
 	it('never disables capture to stay inside the byte budget', async () => {

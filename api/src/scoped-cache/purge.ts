@@ -4,6 +4,7 @@ import emitter from '../emitter.js';
 import {
 	resolvedCacheTtl,
 } from '../cache-config.js';
+import { cacheSettingOr } from '../cache-settings.js';
 import {
 	cacheExpiresAtKey,
 	cacheSidecarOwner,
@@ -135,21 +136,12 @@ export function scopedCacheCollectionsChangedByOnDelete(
 }
 
 /**
- * How much longer the index lives than the entries it indexes. Every write that
- * files a key into it moves that expiry out, so at 1 it would already outlive its
- * newest filing; the doubling is slack, not arithmetic — for an entry orphaned by
- * a crash between the write and its purge, and for siblings written outside this
- * pipeline. The index holds keys, not payloads, so the slack is nearly free.
- */
-const SCOPED_CACHE_INDEX_TTL_FACTOR = 2;
-
-/**
  * Index a freshly-cached response key under the query case it was read with, so a
  * later mutation can drop just the entries that case answers for instead of the
  * whole namespace. Both the payload key and its `__expires_at` sibling are indexed.
  * When a cache TTL is set, the index self-expires at
- * `SCOPED_CACHE_INDEX_TTL_FACTOR` times that TTL, as a net for filings orphaned by a
- * crash between write and purge; with no TTL the cached entries never expire
+ * `cache_settings.scoped_index_ttl_factor` (2) times that TTL, as a net for
+ * filings orphaned by a crash between write and purge; with no TTL the cached entries never expire
  * either, so the index is left unbounded to match — a normal purge still drains it.
  *
  * `cacheTtl` is the TTL the caller wrote the entry with, read once for both: the
@@ -166,8 +158,15 @@ export async function indexScopedCacheEntry(
 		return;
 	}
 
-	const ttlSeconds = Math.ceil(getMilliseconds(cacheTtl, 0) / 1000)
-		* SCOPED_CACHE_INDEX_TTL_FACTOR;
+	// Every write that files a key moves the index's expiry out, so at 1 it already
+	// outlives its newest filing; the doubling is slack for an entry orphaned by a
+	// crash between the write and its purge, and for siblings written outside this
+	// pipeline. Ceiled after the factor: EXPIRE refuses a fraction.
+	const ttlSeconds = Math.ceil(
+		getMilliseconds(cacheTtl, 0)
+		* cacheSettingOr('scoped_index_ttl_factor', 2)
+		/ 1000,
+	);
 
 	// One filing per collection the read touched, holding the entry and its
 	// siblings under the whole query case the read was bound to. A purge tests that

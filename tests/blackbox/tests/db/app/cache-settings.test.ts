@@ -9,14 +9,14 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-const collectionName = 'test_cache_enabled_setting';
+const collectionName = 'test_cache_settings';
 const cacheStatusHeader = 'x-cache-status';
 
-// `directus_settings.cache_settings.enabled` switches the response cache on or
-// off on every node, whatever `CACHE_ENABLED` says. Both nodes boot with it
-// off, so a cache status is the setting's doing, and every assertion is made on
-// the node that did NOT write.
-describe('Cache enabled setting', () => {
+// `directus_settings.cache_settings` tunes the response cache on every node,
+// over what the environment says. Both nodes boot with `CACHE_ENABLED` off, so
+// a cache status is the setting's doing, and every assertion is made on the
+// node that did NOT write.
+describe('Cache settings', () => {
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
 	const envs = {} as Record<Vendor, { writer: Env; peer: Env }>;
 
@@ -38,7 +38,7 @@ describe('Cache enabled setting', () => {
 				item: { name: 'first' },
 			});
 
-			const nsPrefix = `directus-cache-enabled-${vendor}`;
+			const nsPrefix = `directus-cache-settings-${vendor}`;
 
 			const writer = cloneDeep(config.envs);
 			writer[vendor]['CACHE_ENABLED'] = 'false';
@@ -93,10 +93,10 @@ describe('Cache enabled setting', () => {
 		}
 	});
 
-	function switchCache(vendor: Vendor, enabled: boolean) {
+	function writeCacheSettings(vendor: Vendor, cacheSettings: object) {
 		return request(getUrl(vendor, envs[vendor]!.writer))
 			.patch('/settings')
-			.send({ cache_settings: { enabled } })
+			.send({ cache_settings: cacheSettings })
 			.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 			.expect(200);
 	}
@@ -138,17 +138,17 @@ describe('Cache enabled setting', () => {
 		});
 
 		it('caches on the peer once the writer switches it on', async () => {
-			await switchCache(vendor, true);
+			await writeCacheSettings(vendor, { enabled: true });
 
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 			expect(await readCacheStatus(vendor)).toBe('HIT');
 		});
 
 		it('stops caching on the peer once the writer switches it off', async () => {
-			await switchCache(vendor, true);
+			await writeCacheSettings(vendor, { enabled: true });
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 
-			await switchCache(vendor, false);
+			await writeCacheSettings(vendor, { enabled: false });
 
 			expect(await awaitServing(vendor, false)).toBe(undefined);
 			expect(await readCacheStatus(vendor)).toBe(undefined);
@@ -158,16 +158,23 @@ describe('Cache enabled setting', () => {
 		// switching it back on has to start from empty rather than serve what the
 		// earlier period filled.
 		it('drops what an earlier period filled when switched back on', async () => {
-			await switchCache(vendor, true);
+			await writeCacheSettings(vendor, { enabled: true });
 			expect(await awaitServing(vendor, true)).toBe('MISS');
 			expect(await readCacheStatus(vendor)).toBe('HIT');
 
-			await switchCache(vendor, false);
+			await writeCacheSettings(vendor, { enabled: false });
 			expect(await awaitServing(vendor, false)).toBe(undefined);
 
-			await switchCache(vendor, true);
+			await writeCacheSettings(vendor, { enabled: true });
 
 			expect(await awaitServing(vendor, true)).toBe('MISS');
+		});
+
+		it('fills nothing past the size cap the writer sets', async () => {
+			await writeCacheSettings(vendor, { enabled: true, value_max_size: '1b' });
+
+			expect(await awaitServing(vendor, true)).toBe('MISS');
+			expect(await readCacheStatus(vendor)).toBe('MISS');
 		});
 
 		it('refuses an enabled the peers would read as unset', async () => {

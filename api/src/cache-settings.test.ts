@@ -1,13 +1,16 @@
 import { useEnv } from '@directus/env';
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
+	assertUsableCacheSettings,
 	cacheEnabled,
+	cacheSettingOr,
 	flushBeforeEnabling,
-	initCacheEnabled,
-	refreshCacheEnabled,
+	initCacheSettings,
+	refreshCacheSettings,
 	responseCacheWanted,
-	seedCacheEnabled,
-} from './cache-enabled.js';
+	seedCacheSettings,
+} from './cache-settings.js';
 import { buildResponseCache, clearCacheTargets } from './cache.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
@@ -44,7 +47,7 @@ beforeEach(async () => {
 	vi.mocked(useLogger).mockReturnValue({ warn: vi.fn() } as never);
 	vi.mocked(readSharedSettings).mockResolvedValue(null);
 
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 });
 
 afterEach(() => {
@@ -58,7 +61,7 @@ test('reads CACHE_ENABLED where the layer is unset', () => {
 test('switches serving off over an environment that enables it', async () => {
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: false });
 
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	expect(cacheEnabled()).toBe(false);
 });
@@ -67,7 +70,7 @@ test('switches serving on over an environment that disables it', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: true });
 
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	expect(cacheEnabled()).toBe(true);
 });
@@ -75,13 +78,127 @@ test('switches serving on over an environment that disables it', async () => {
 test('reads a null enabled as unset', async () => {
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: null });
 
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	expect(cacheEnabled()).toBe(true);
 });
 
+test.each([
+	{ enabled: true },
+	{ value_max_size: false },
+	{ value_max_size: '2mb' },
+	{ stats_max_bytes: '2gb' },
+	{ audit_limit: 0 },
+	{ audit_max_duration: '10m' },
+	{ scoped_max_index_globs: 1 },
+	{ scoped_index_scan_count: 1000 },
+	{ scoped_index_ttl_factor: 1 },
+	{ scoped_index_ttl_factor: 1.5 },
+	{ audit_limit: null },
+])('accepts %o', (document) => {
+	expect(() => assertUsableCacheSettings(document)).not.toThrow();
+});
+
+test.each([
+	[
+		{ value_max_size: true },
+		oneLine`
+			'cache_settings.value_max_size' has to be
+			false, a size such as "2mb", or null
+		`,
+	],
+	[
+		{ value_max_size: 'big' },
+		oneLine`
+			'cache_settings.value_max_size' has to be
+			false, a size such as "2mb", or null
+		`,
+	],
+	[
+		{ stats_max_bytes: '0' },
+		oneLine`
+			'cache_settings.stats_max_bytes' has to be
+			a size such as "2gb", or null
+		`,
+	],
+	[
+		{ audit_limit: -1 },
+		oneLine`
+			'cache_settings.audit_limit' has to be
+			an integer from 0, or null
+		`,
+	],
+	[
+		{ audit_limit: 2.5 },
+		oneLine`
+			'cache_settings.audit_limit' has to be
+			an integer from 0, or null
+		`,
+	],
+	[
+		{ audit_max_duration: 'soon' },
+		oneLine`
+			'cache_settings.audit_max_duration' has to be
+			a duration such as "10m", or null
+		`,
+	],
+	[
+		{ audit_max_duration: '0' },
+		oneLine`
+			'cache_settings.audit_max_duration' has to be
+			a duration such as "10m", or null
+		`,
+	],
+	[
+		{ scoped_max_index_globs: 0 },
+		oneLine`
+			'cache_settings.scoped_max_index_globs' has to be
+			an integer from 1, or null
+		`,
+	],
+	[
+		{ scoped_index_scan_count: '1000' },
+		oneLine`
+			'cache_settings.scoped_index_scan_count' has to be
+			an integer from 1, or null
+		`,
+	],
+	[
+		{ scoped_index_ttl_factor: 0.5 },
+		oneLine`
+			'cache_settings.scoped_index_ttl_factor' has to be
+			a number from 1, or null
+		`,
+	],
+	[{ ttl: '1h' }, `'cache_settings.ttl' is not a cache setting`],
+])('refuses %o', (document, reason) => {
+	expect(() => assertUsableCacheSettings(document)).toThrowError(reason);
+});
+
+test('answers a field from the layer over the fallback', async () => {
+	vi.mocked(readSharedSettings).mockResolvedValue({ audit_limit: 40 });
+
+	await refreshCacheSettings();
+
+	expect(cacheSettingOr('audit_limit', 250)).toBe(40);
+	expect(cacheSettingOr('audit_max_duration', '10m')).toBe('10m');
+});
+
+test('keeps the usable fields of a row written around the guard', async () => {
+	vi.mocked(readSharedSettings).mockResolvedValue({
+		audit_limit: -1,
+		value_max_size: '2mb',
+		ttl: '1h',
+	});
+
+	await refreshCacheSettings();
+
+	expect(cacheSettingOr('audit_limit', 250)).toBe(250);
+	expect(cacheSettingOr('value_max_size', false)).toBe('2mb');
+});
+
 test('reads the cache_settings column', async () => {
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	expect(readSharedSettings).toHaveBeenCalledWith('cache_settings');
 });
@@ -89,7 +206,7 @@ test('reads the cache_settings column', async () => {
 test('keeps the response tier where the layer switched serving off', async () => {
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: false });
 
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	expect(responseCacheWanted()).toBe(true);
 });
@@ -104,7 +221,7 @@ test('holds a response tier where only the layer enables it', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: true });
 
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	expect(responseCacheWanted()).toBe(true);
 });
@@ -114,13 +231,13 @@ test('leaves the environment in charge when the column is unreadable', async () 
 		new Error('column "cache_settings" does not exist'),
 	);
 
-	await seedCacheEnabled();
+	await seedCacheSettings();
 
 	expect(cacheEnabled()).toBe(true);
 
 	expect(vi.mocked(useLogger)().warn).toHaveBeenCalledWith(
 		new Error('column "cache_settings" does not exist'),
-		'[cache] cache_settings is unreadable; CACHE_ENABLED alone is read',
+		'[cache] cache_settings is unreadable; the environment alone is read',
 	);
 });
 
@@ -152,7 +269,7 @@ test('clears nothing where the environment enables the cache', async () => {
 test('clears nothing where the layer already enables it', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: true });
-	await refreshCacheEnabled();
+	await refreshCacheSettings();
 
 	await flushBeforeEnabling({ cache_settings: { enabled: true } });
 
@@ -187,7 +304,7 @@ test('refuses the write when the clear is refused', async () => {
 });
 
 test('re-reads the layer when a change to it is announced', async () => {
-	await initCacheEnabled();
+	await initCacheSettings();
 
 	expect(vi.mocked(onSharedSettingsChanged).mock.calls[0]![0])
 		.toBe('cache_settings');
@@ -200,7 +317,7 @@ test('re-reads the layer when a change to it is announced', async () => {
 test('re-reads the layer on the shared-settings floor', async () => {
 	vi.useFakeTimers();
 
-	await initCacheEnabled();
+	await initCacheSettings();
 
 	vi.mocked(readSharedSettings).mockResolvedValue({ enabled: false });
 	await vi.advanceTimersByTimeAsync(30000);
@@ -213,7 +330,7 @@ test('re-reads the layer on the shared-settings floor', async () => {
 test('clears ahead of the create as well as the update', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 
-	await initCacheEnabled();
+	await initCacheSettings();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
 		.toEqual(['settings.create', 'settings.update']);

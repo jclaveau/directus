@@ -96,6 +96,7 @@ vi.mock('../processes/lib/shared-settings.js', () => {
 		SHARED_SETTINGS_COLUMNS: {
 			autoscale: 'autoscale_settings',
 			supervisor: 'supervisor_settings',
+			cache: 'cache_settings',
 		},
 		readAllSharedSettings: vi.fn(),
 		readSharedSettings: vi.fn(),
@@ -875,6 +876,7 @@ describe('Services / Utils', () => {
 			vi.mocked(readAllSharedSettings).mockResolvedValue({
 				[SHARED_SETTINGS_COLUMNS.autoscale]: columns.autoscale ?? null,
 				[SHARED_SETTINGS_COLUMNS.supervisor]: columns.supervisor ?? null,
+				[SHARED_SETTINGS_COLUMNS.cache]: null,
 			});
 		}
 

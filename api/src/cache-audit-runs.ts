@@ -15,6 +15,7 @@ import {
 	type CacheAuditVerdict,
 } from './cache-audit.js';
 import type { CacheEntryPurgeRecord } from './cache-events.js';
+import { cacheSettingOr } from './cache-settings.js';
 import { getCache } from './cache.js';
 import getDatabase from './database/index.js';
 import { cacheAuditEnabled } from './utils/cache-audit-enabled.js';
@@ -113,7 +114,7 @@ function retentionMs(): number {
 // and the time budget the in-flight claim is sized to.
 function maxDurationMs(): number {
 	const configured = getMilliseconds(
-		useEnv()['CACHE_AUDIT_MAX_DURATION'],
+		cacheSettingOr('audit_max_duration', useEnv()['CACHE_AUDIT_MAX_DURATION']),
 		DEFAULT_MAX_DURATION_MS,
 	);
 
@@ -126,7 +127,9 @@ function maxDurationMs(): number {
 // knob, and what keeps "Audit now" on a large cache from outliving the
 // request. 0 is the whole queue.
 function defaultLimit(): number | undefined {
-	const configured = Number(useEnv()['CACHE_AUDIT_LIMIT'] ?? 0);
+	const configured = Number(
+		cacheSettingOr('audit_limit', useEnv()['CACHE_AUDIT_LIMIT']) ?? 0,
+	);
 
 	return Number.isInteger(configured) && configured > 0
 		? configured

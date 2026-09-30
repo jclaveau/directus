@@ -38,6 +38,17 @@ vi.mock('./cache-audit.js', () => {
 const env = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('./cache-settings.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('./cache-settings.js')>(),
+		cacheSettingOr: (field: string, fallback: unknown) => {
+			return cacheLayer[field] ?? fallback;
+		},
+	};
+});
+
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
 // The in-flight claim: a Keyv with a TTL, as the lock cache is.
@@ -71,6 +82,7 @@ beforeEach(() => {
 	delete env['CACHE_AUDIT_LIMIT'];
 	delete env['CACHE_AUDIT_MAX_DURATION'];
 	delete env['CACHE_STORE'];
+	delete cacheLayer['audit_limit'];
 	env['CACHE_AUDIT_ENABLED'] = true;
 	lockCache.held.clear();
 	vi.mocked(getDatabase).mockReturnValue(db);
@@ -392,6 +404,21 @@ describe('runCacheAudit', () => {
 
 		expect(JSON.parse(tracker.history.insert[0]!.bindings[0] as string))
 			.toMatchObject({ limit: 250 });
+	});
+
+	it('slices by the cache layer over CACHE_AUDIT_LIMIT', async () => {
+		env['CACHE_AUDIT_LIMIT'] = 250;
+		cacheLayer['audit_limit'] = 40;
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('cron');
+
+		expect(auditCache)
+			.toHaveBeenCalledWith(expect.objectContaining({ limit: 40 }));
 	});
 
 	it(oneLine`

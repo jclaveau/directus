@@ -50,7 +50,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { queryCachable } from '../utils/query-cachable.js';
-import { cacheEnabled } from '../cache-enabled.js';
+import { cacheEnabled, cacheSettingOr } from '../cache-settings.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -109,12 +109,17 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	let exceedsMaxSize = false;
 	let valueSize = 0;
 
-	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
+	const valueMaxSize = cacheSettingOr(
+		'value_max_size',
+		env['CACHE_VALUE_MAX_SIZE'] as string | false,
+	);
+
+	if (valueMaxSize !== false) {
 		valueSize = res.locals['payload']
 			? stringByteSize(JSON.stringify(res.locals['payload']))
 			: 0;
 
-		const maxSize = parseBytesConfiguration(env['CACHE_VALUE_MAX_SIZE'] as string);
+		const maxSize = parseBytesConfiguration(valueMaxSize);
 
 		if (maxSize !== null) {
 			exceedsMaxSize = valueSize > maxSize;
@@ -380,7 +385,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// payload); only serialize again when that gate is off.
 					let size = valueSize;
 
-					if (env['CACHE_VALUE_MAX_SIZE'] === false) {
+					if (valueMaxSize === false) {
 						size = res.locals['payload']
 							? stringByteSize(JSON.stringify(res.locals['payload']))
 							: 0;

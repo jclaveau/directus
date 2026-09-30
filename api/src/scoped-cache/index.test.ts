@@ -97,6 +97,18 @@ const env = vi.hoisted(() => {
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
+
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('../cache-settings.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache-settings.js')>(),
+		cacheSettingOr: (field: string, fallback: unknown) => {
+			return cacheLayer[field] ?? fallback;
+		},
+	};
+});
+
 vi.mock('../redis/index.js');
 
 vi.mock('../emitter.js', () => {
@@ -169,6 +181,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	delete cacheLayer['scoped_index_ttl_factor'];
 });
 
 // The one spelling of a pin that the fingerprint index, the purge attribution and
@@ -1124,6 +1137,40 @@ describe('indexScopedCacheEntry', () => {
 		expect(indexExpiry).toHaveBeenCalledWith(
 			'ns:scoped-cache-index:fingerprint:articles:',
 			3600,
+			'articles:&author=,7,&|entry',
+			'articles:&author=,7,&|entry__expires_at',
+		);
+	});
+
+	it(oneLine`
+		stretches the index by the cache layer's factor, in whole seconds since
+		EXPIRE refuses a fraction
+	`, async () => {
+		const indexExpiry = vi.fn().mockReturnThis();
+		cacheLayer['scoped_index_ttl_factor'] = 1.5;
+
+		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
+			pipeline: () => {
+				return {
+					sadd: vi.fn().mockReturnThis(),
+					scopedCacheIndexExpiry: indexExpiry,
+					exec: vi.fn().mockResolvedValue([]),
+				};
+			},
+		} as any);
+
+		await indexScopedCacheEntry(
+			'entry',
+			[{ collection: 'articles', pinnedScope: { author: ['7'] } }],
+			[],
+			{ collections: {}, relations: [] },
+			'1s',
+		);
+
+		expect(indexExpiry).toHaveBeenCalledWith(
+			'ns:scoped-cache-index:fingerprint:articles:',
+			2,
 			'articles:&author=,7,&|entry',
 			'articles:&author=,7,&|entry__expires_at',
 		);

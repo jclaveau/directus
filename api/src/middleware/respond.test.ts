@@ -18,6 +18,17 @@ const env: Record<string, any> = vi.hoisted(() => {
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
+const cacheLayer = vi.hoisted(() => ({}) as Record<string, unknown>);
+
+vi.mock('../cache-settings.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache-settings.js')>(),
+		cacheSettingOr: (field: string, fallback: unknown) => {
+			return cacheLayer[field] ?? fallback;
+		},
+	};
+});
+
 const mocks = vi.hoisted(() => {
 	return {
 		mockCache: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
@@ -205,6 +216,7 @@ function makeReq(
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	env['CACHE_VALUE_MAX_SIZE'] = false;
+	delete cacheLayer['value_max_size'];
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
@@ -1083,6 +1095,15 @@ describe('respond middleware', () => {
 			expect.any(Number),
 			'anomaly',
 		);
+	});
+
+	test('caps the value by the cache layer over the environment', async () => {
+		cacheLayer['value_max_size'] = '1b';
+		const res = makeRes({ data: [{ id: 1, blob: 'x'.repeat(100) }] });
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 	});
 
 	test('$NOW query filter is not cached', async () => {

@@ -23,7 +23,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
-import { cacheEnabled } from '../cache-enabled.js';
+import { cacheEnabled } from '../cache-settings.js';
 
 const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next) => {
 	const env = useEnv();

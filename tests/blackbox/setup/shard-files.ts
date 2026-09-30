@@ -121,7 +121,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// announcement that must not arrive.
 	'/tests/db/app/cache-config-broadcast.test.ts': 21_000,
 	// Two nodes to boot, then a few polls for an announcement that lands.
-	'/tests/db/app/cache-enabled-setting.test.ts': 12_000,
+	'/tests/db/app/cache-settings.test.ts': 12_000,
 	// One node to boot and three schema rebuilds watched on the wire.
 	'/tests/db/app/deployment-namespace.test.ts': 12_000,
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,

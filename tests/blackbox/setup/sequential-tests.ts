@@ -74,7 +74,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/app/cache-config-broadcast.test.ts',
 			// Writes `cache_settings` into the same singleton: an instance booting
 			// meanwhile would serve, or stop serving, on a layer it never set.
-			'/tests/db/app/cache-enabled-setting.test.ts',
+			'/tests/db/app/cache-settings.test.ts',
 			// Adds an o2m alias to `directus_users` and drops it after: an instance
 			// on its own namespace never hears that schema change, and 500s reading
 			// a user through the dropped table.

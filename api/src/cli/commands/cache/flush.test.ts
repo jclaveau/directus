@@ -1,12 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { drainStdout } from '../../utils/drain-stdout.js';
-import { seedCacheEnabled } from '../../../cache-enabled.js';
+import { seedCacheSettings } from '../../../cache-settings.js';
 import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
 import { redisConfigAvailable } from '../../../redis/index.js';
 import cacheFlush from './flush.js';
 
-vi.mock('../../../cache-enabled.js');
+vi.mock('../../../cache-settings.js');
 vi.mock('../../../cache.js');
 vi.mock('../../../logger/index.js');
 vi.mock('../../../redis/index.js');
@@ -58,7 +58,7 @@ test('reads the cache layer before flushing', async () => {
 
 	await expect(cacheFlush()).rejects.toThrowError('exit:0');
 
-	expect(vi.mocked(seedCacheEnabled).mock.invocationCallOrder[0])
+	expect(vi.mocked(seedCacheSettings).mock.invocationCallOrder[0])
 		.toBeLessThan(vi.mocked(flushCaches).mock.invocationCallOrder[0]!);
 });
 

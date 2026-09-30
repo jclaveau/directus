@@ -14,7 +14,7 @@ import {
 import { redisConfigAvailable, useRedis } from '../../redis/index.js';
 import { getStorage } from '../../storage/index.js';
 import type { MetricService } from '../types/metric.js';
-import { responseCacheWanted } from '../../cache-enabled.js';
+import { responseCacheWanted } from '../../cache-settings.js';
 
 const isPM2 = 'PM2_HOME' in process.env;
 const METRICS_SYNC_PACKET = 'directus:metrics---data-sync';

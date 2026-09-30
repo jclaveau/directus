@@ -1,7 +1,7 @@
 import type { Accountability } from '@directus/types';
 import { getSimpleHash } from '@directus/utils';
 import { resolvedCacheTtl } from '../../cache-config.js';
-import { cacheEnabled } from '../../cache-enabled.js';
+import { cacheEnabled } from '../../cache-settings.js';
 import { getCache, getCacheValue, setCacheValue } from '../../cache.js';
 import type { Context } from '../types.js';
 import { getMilliseconds } from '../../utils/get-milliseconds.js';

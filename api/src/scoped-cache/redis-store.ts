@@ -15,6 +15,7 @@
 
 import { useEnv } from '@directus/env';
 import { randomUUID } from 'node:crypto';
+import { cacheSettingOr } from '../cache-settings.js';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -61,7 +62,9 @@ const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
  * whole thing in this process's memory — and hold Redis for the length of the
  * reply — to keep the handful the write actually matched.
  */
-const SCOPED_CACHE_INDEX_SCAN_COUNT = 1000;
+function scopedCacheIndexScanCount(): number {
+	return cacheSettingOr('scoped_index_scan_count', 1000);
+}
 
 // How many keys a SCAN is asked to look at per round trip. `@keyv/redis` uses 1000
 // for the namespace clears that run beside these, and the 250 this replaced bought
@@ -341,15 +344,6 @@ async function unlinkScopedCacheKeys(
 }
 
 /**
- * How many globs one scan is narrowed by before it reads the set whole.
- *
- * Every pattern is a pass over the set, so past a point narrowing costs more
- * round trips than the members it saves sending. A write touching more values
- * than this reads the sets whole and tests every member here instead.
- */
-const SCOPED_CACHE_MAX_INDEX_GLOBS = 64;
-
-/**
  * The pin naming nothing, whose set every write to the collection reads.
  */
 const SCOPED_CACHE_BARE_PIN = '';
@@ -457,7 +451,7 @@ async function collectSweptIndexKeys(
 			sweptKey,
 			scanCursor,
 			'COUNT',
-			SCOPED_CACHE_INDEX_SCAN_COUNT,
+			scopedCacheIndexScanCount(),
 		);
 
 		scanCursor = next;
@@ -604,7 +598,10 @@ export function scopedCacheRowIndexGlobs(
 				globPatterns.add(`${collectionToken}:*&${pinKey}=*,${valueToken},*`);
 			}
 
-			if (globPatterns.size > SCOPED_CACHE_MAX_INDEX_GLOBS) {
+			// Every pattern is a pass over the set, so past a point narrowing costs
+			// more round trips than the members it saves sending: the sets are then
+			// read whole and every member tested here instead.
+			if (globPatterns.size > cacheSettingOr('scoped_max_index_globs', 64)) {
 				return null;
 			}
 		}
@@ -679,7 +676,7 @@ async function* scanScopedCacheIndexKeys(
 						indexKey,
 						scanCursor,
 						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
+						scopedCacheIndexScanCount(),
 					)
 					: await redis.sscan(
 						indexKey,
@@ -687,7 +684,7 @@ async function* scanScopedCacheIndexKeys(
 						'MATCH',
 						globPattern,
 						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
+						scopedCacheIndexScanCount(),
 					);
 
 				scanCursor = next;
@@ -1059,7 +1056,7 @@ const redisStore: ScopedCacheStore = {
 						indexKey,
 						scanCursor,
 						'COUNT',
-						SCOPED_CACHE_INDEX_SCAN_COUNT,
+						scopedCacheIndexScanCount(),
 					);
 
 					scanCursor = next;

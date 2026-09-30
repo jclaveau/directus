@@ -10,7 +10,7 @@ import { flushCaches, getCache } from './cache.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
-import { responseCacheWanted } from './cache-enabled.js';
+import { responseCacheWanted } from './cache-settings.js';
 
 // The response cache lives in an external redis and survives a container swap, so
 // a code-only deploy — a hook/extension or a core (fork) reshaping change shipped

@@ -3,7 +3,7 @@ import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
-import { responseCacheWanted } from './cache-enabled.js';
+import { responseCacheWanted } from './cache-settings.js';
 import {
 	deserializeCacheEnvelope,
 	serializeCacheEnvelope,
