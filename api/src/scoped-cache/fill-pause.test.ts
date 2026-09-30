@@ -81,63 +81,6 @@ describe('scopedCacheFillPaused', () => {
 	});
 });
 
-describe('pauseScopedCacheFillsUnrecorded', () => {
-	it(oneLine`
-		holds fills for the ceiling after a refused record, asking no watcher — the
-		pause that record would have opened is not in Redis to read
-	`, async () => {
-		const { pauseScopedCacheFillsUnrecorded, scopedCacheFillPaused } =
-			await import('./fill-pause.js');
-
-		pauseScopedCacheFillsUnrecorded(300_000);
-
-		await vi.advanceTimersByTimeAsync(299_999);
-		expect(scopedCacheFillPaused()).toBe(true);
-		expect(requestScopedCacheIndexReap).not.toHaveBeenCalled();
-
-		await vi.advanceTimersByTimeAsync(1);
-		expect(scopedCacheFillPaused()).toBe(false);
-		expect(requestScopedCacheIndexReap).toHaveBeenCalledOnce();
-		expect(watchFillPause).not.toHaveBeenCalled();
-		expect(collectProcessReports).not.toHaveBeenCalled();
-
-		expect(logger.info).toHaveBeenCalledExactlyOnceWith(oneLine`
-			[scoped-cache] fills resumed 300000 ms into the pause after a deploy, at
-			its ceiling with the build unrecorded
-		`);
-	});
-
-	it('fills again at once with no ceiling set', async () => {
-		const { pauseScopedCacheFillsUnrecorded, scopedCacheFillPaused } =
-			await import('./fill-pause.js');
-
-		pauseScopedCacheFillsUnrecorded(0);
-
-		expect(scopedCacheFillPaused()).toBe(false);
-	});
-});
-
-describe('scopedCacheBuildRecorded', () => {
-	it(oneLine`
-		counts the build as recorded only once a pause was read back from it — a
-		refused record's pause is not one
-	`, async () => {
-		const {
-			pauseScopedCacheFills,
-			pauseScopedCacheFillsUnrecorded,
-			scopedCacheBuildRecorded,
-		} = await import('./fill-pause.js');
-
-		expect(scopedCacheBuildRecorded()).toBe(false);
-
-		pauseScopedCacheFillsUnrecorded(300_000);
-		expect(scopedCacheBuildRecorded()).toBe(false);
-
-		pauseScopedCacheFills(0, 'build-c');
-		expect(scopedCacheBuildRecorded()).toBe(true);
-	});
-});
-
 describe('pauseScopedCacheFills', () => {
 	it(oneLine`
 		ends the pause once three looks in a row heard only this build, and asks

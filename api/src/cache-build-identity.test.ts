@@ -7,10 +7,7 @@ import {
 } from './cache-build-identity.js';
 import { flushCaches, getCache } from './cache.js';
 import { scopedCachePurgeEnabled } from './scoped-cache/config.js';
-import {
-	pauseScopedCacheFills,
-	pauseScopedCacheFillsUnrecorded,
-} from './scoped-cache/fill-pause.js';
+import { pauseScopedCacheFills } from './scoped-cache/fill-pause.js';
 import { useScopedCacheStore } from './scoped-cache/store.js';
 
 const env = vi.hoisted(() => ({}) as Record<string, any>);
@@ -42,10 +39,7 @@ vi.mock('./scoped-cache/config.js', () => {
 vi.mock('./scoped-cache/store.js', () => ({ useScopedCacheStore: vi.fn() }));
 
 vi.mock('./scoped-cache/fill-pause.js', () => {
-	return {
-		pauseScopedCacheFills: vi.fn(),
-		pauseScopedCacheFillsUnrecorded: vi.fn(),
-	};
+	return { pauseScopedCacheFills: vi.fn() };
 });
 
 vi.mock('./cache.js', () => ({ flushCaches: vi.fn(), getCache: vi.fn() }));
@@ -486,9 +480,8 @@ describe('recordScopedCacheBuild', () => {
 	});
 
 	it(oneLine`
-		logs a store that refuses rather than failing the boot, and pauses fills
-		for the ceiling only — a refusal with the link up fires no ready to record
-		the build again
+		logs a store that refuses rather than failing the boot, and leaves the
+		fills paused
 	`, async () => {
 		env['CACHE_BUILD_ID'] = 'build-b';
 
@@ -501,7 +494,6 @@ describe('recordScopedCacheBuild', () => {
 		await recordScopedCacheBuild();
 
 		expect(pauseScopedCacheFills).not.toHaveBeenCalled();
-		expect(pauseScopedCacheFillsUnrecorded).toHaveBeenCalledExactlyOnceWith(300_000);
 
 		expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
 			new Error('OOM'),
