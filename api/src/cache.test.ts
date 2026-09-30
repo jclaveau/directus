@@ -2037,9 +2037,13 @@ describe('clearCacheTargets', () => {
 		answers once the reap it asks for is over, started without the debounce —
 		a pass walking the index during a later read's fill evicts that fill
 	`, async () => {
-		const reapPass = Promise.withResolvers<void>();
+		let endReapPass = () => {};
 
-		vi.mocked(requestScopedCacheIndexReap).mockReturnValue(reapPass.promise);
+		vi.mocked(requestScopedCacheIndexReap).mockReturnValue(
+			new Promise<void>((resolve) => {
+				endReapPass = () => resolve();
+			}),
+		);
 
 		const clearing = clearCacheTargets(['response']);
 
@@ -2052,7 +2056,7 @@ describe('clearCacheTargets', () => {
 
 		expect(busPublish).not.toHaveBeenCalled();
 
-		reapPass.resolve();
+		endReapPass();
 
 		await expect(clearing).resolves.toBeUndefined();
 		expect(busPublish).toHaveBeenCalledOnce();
