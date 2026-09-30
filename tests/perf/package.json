@@ -8,6 +8,7 @@
 		"bench:cache": "vitest --watch=false cache.perf",
 		"bench:cache-flush": "vitest --watch=false cache-flush.perf",
 		"bench:purge-scaling": "vitest --watch=false purge-scaling.perf",
+		"bench:pending-retry": "vitest --watch=false pending-retry.perf",
 		"bench:devserver": "vitest --watch=false devserver.perf"
 	},
 	"devDependencies": {
