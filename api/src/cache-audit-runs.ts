@@ -140,6 +140,32 @@ function defaultLimit(): number | undefined {
 }
 
 /**
+ * When the run holding the claim began: what this build's token leads with, or
+ * what a node of an older build stored as the claim's Keyv value, raw on Redis
+ * and as is in a memory lock cache.
+ */
+function claimStartOf(holderToken: unknown): number {
+	if (typeof holderToken === 'number') {
+		return holderToken;
+	}
+
+	if (typeof holderToken !== 'string') {
+		return Number.NaN;
+	}
+
+	if (holderToken.startsWith('{')) {
+		try {
+			return Number(JSON.parse(holderToken).value);
+		}
+		catch {
+			return Number.NaN;
+		}
+	}
+
+	return Number(holderToken.split(':')[0]);
+}
+
+/**
  * Run an audit and record it — the one entrypoint every surface goes through,
  * so no run escapes the history, none runs on a node that opted out, none
  * runs beside another, and a run asking for no limit gets `CACHE_AUDIT_LIMIT`
@@ -184,11 +210,8 @@ export async function runCacheAudit(
 		const holderToken = await readCacheLockHolder(lockCache, RUN_LOCK)
 			.catch(() => null);
 
-		// None when the run in flight ended since, or a node of an older build
-		// holds the claim as a Keyv value.
-		const inFlightSince = typeof holderToken === 'string'
-			? Number(holderToken.split(':')[0])
-			: Number.NaN;
+		// None when the run in flight ended since.
+		const inFlightSince = claimStartOf(holderToken);
 
 		throw new ServiceUnavailableError({
 			service: 'cache-audit',

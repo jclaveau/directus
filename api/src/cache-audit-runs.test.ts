@@ -365,10 +365,32 @@ describe('runCacheAudit', () => {
 	});
 
 	it(oneLine`
-		refuses without a start where the claim is no token of this build — a node
-		of an older build holds it as a Keyv value
+		refuses, since the time it was taken, a claim a node of an older build holds
+		as the Keyv value of its start
 	`, async () => {
 		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
+		);
+	});
+
+	it(oneLine`
+		refuses, since the time it was taken, a claim a node of an older build holds
+		as that Keyv value read raw from Redis
+	`, async () => {
+		lockCache.held.set(
+			'cache-audit:run',
+			'{"value":1699999940000,"expires":1700000060000}',
+		);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
+		);
+	});
+
+	it('refuses without a start a claim whose start it cannot read', async () => {
+		lockCache.held.set('cache-audit:run', '{not json');
 
 		await expect(runCacheAudit('rest')).rejects.toThrow(
 			'Service "cache-audit" is unavailable. a cache audit is already running.',
