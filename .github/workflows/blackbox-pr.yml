@@ -18,6 +18,13 @@ jobs:
   # when a PR changes nothing the suite could exercise.
   decide:
     name: Decide
+    # A label event matters only for the labels read below. Any other one
+    # (dist-release, Preview) would start all the shards again, and blackbox.yml's
+    # concurrency group would cancel the run already going on the same head.
+    if: >-
+      (github.event.action != 'labeled' && github.event.action != 'unlabeled')
+      || contains(fromJSON('["Run Blackbox", "Run Blackbox Full", "Skip Blackbox"]'),
+        github.event.label.name)
     runs-on: ubuntu-latest
     permissions:
       contents: read
