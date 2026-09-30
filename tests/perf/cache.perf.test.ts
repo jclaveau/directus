@@ -270,7 +270,8 @@ function armsInRepOrder(rep: number): Arm[] {
 const readShapes = [
 	{
 		name: 'flat',
-		ceilings: { hitVsOff: 1.05, missVsOff: 1.60, hitVsFull: 1.20, missVsFull: 1.35 },
+		// missVsOff up from 1.60: trunk alone measured 1.45 to 1.65 over five runs.
+		ceilings: { hitVsOff: 1.05, missVsOff: 1.75, hitVsFull: 1.20, missVsFull: 1.35 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`,
 	},
