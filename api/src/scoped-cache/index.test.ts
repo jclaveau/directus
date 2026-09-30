@@ -4805,12 +4805,22 @@ describe('reading and bumping the purge counters', () => {
 		]);
 	});
 
+	// Nothing is filled with the response cache off, and the reading says so: a
+	// read answering once serving is back on has no counter to guard its fill.
+	it(oneLine`
+		reads nothing, and marks the reading, when the response cache is off
+	`, async () => {
+		env['CACHE_ENABLED'] = false;
+
+		expect(await readScopedCacheEpochs(['articles']))
+			.toEqual({ '*serving-off': null });
+
+		expect(mget).not.toHaveBeenCalled();
+	});
+
 	// Every read pays this round trip, so it is skipped wherever its answer could
-	// not matter. Nothing is filled with the response cache off.
+	// not matter.
 	it.each([
-		['the response cache is off', () => {
-			env['CACHE_ENABLED'] = false;
-		}],
 		['scoped purging is off', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 		}],

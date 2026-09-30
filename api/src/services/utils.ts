@@ -19,8 +19,10 @@ import type {
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	assertUsableCacheSettings,
 	refreshCacheSettings,
 	resolveCacheSettings,
+	usableCacheSettings,
 	type CacheSettingField,
 	type ResolvedCacheSetting,
 } from '../cache-settings.js';
@@ -732,35 +734,50 @@ export class UtilsService {
 	 *
 	 * Through the settings singleton, whose guard refuses a value outside its
 	 * rule, and whose filter clears the response cache before a write switches
-	 * it on where the environment leaves it off.
+	 * it on where the environment leaves it off. The row is read and written
+	 * under one lock, so two patches never both lay a field over the same read.
+	 * A stored field the mirror would not apply is dropped rather than left to
+	 * refuse every patch of the others.
 	 */
 	async updateCacheSettings(
 		patch: Record<string, unknown>,
 	): Promise<CacheSettingsAnswer> {
 		this.assertAdmin('change the cache settings');
 
-		const merged: SharedSettings = {
-			...await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache),
-		};
-
-		for (const [field, value] of Object.entries(patch)) {
-			if (value === null) {
-				delete merged[field];
-			}
-			else {
-				merged[field] = value;
-			}
+		if (Object.keys(patch).length === 0) {
+			throw new InvalidPayloadError({
+				reason: 'The patch names no cache setting',
+			});
 		}
 
-		const sharedSettings = Object.keys(merged).length === 0
-			? null
-			: merged;
+		assertUsableCacheSettings(patch);
 
-		await writeSharedSettings(
-			SHARED_SETTINGS_COLUMNS.cache,
-			sharedSettings,
-			this.settingsOptions,
-		);
+		const sharedSettings = await this.knex.transaction(async (settingsTrx) => {
+			const merged = usableCacheSettings(
+				await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, settingsTrx),
+			);
+
+			for (const [field, value] of Object.entries(patch)) {
+				if (value === null) {
+					delete merged[field];
+				}
+				else {
+					merged[field] = value;
+				}
+			}
+
+			const patchedSettings = Object.keys(merged).length === 0
+				? null
+				: merged;
+
+			await writeSharedSettings(
+				SHARED_SETTINGS_COLUMNS.cache,
+				patchedSettings,
+				{ ...this.settingsOptions, knex: settingsTrx },
+			);
+
+			return patchedSettings;
+		});
 
 		// The other nodes hear of it over the bus; this one answers from what it
 		// just wrote rather than waiting on its own announcement.

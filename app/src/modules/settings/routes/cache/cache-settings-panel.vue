@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import api from '@/api';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
 	type CacheSettingRow,
@@ -9,6 +9,11 @@ import {
 	type CacheSettingSource,
 	parseCacheSettingValue,
 } from './cache-settings-panel';
+
+const props = defineProps<{
+	/** Bumped by the page on each refresh, which re-reads the settings. */
+	refreshKey?: number;
+}>();
 
 const emit = defineEmits<{ changed: [] }>();
 
@@ -20,13 +25,20 @@ const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
 
 // A number field holding what the browser cannot read reports it as emptied,
-// which would write a reset, so the fields in that state are kept apart.
-const badInputFields = ref(new Set<string>());
+// which would write a reset, so the fields in that state are kept apart, with
+// the box that holds it.
+const badInputFields = ref(new Map<string, HTMLInputElement>());
+
+// Bumped to give a field a new box: one whose value is null renders '' before
+// and after its unreadable text is discarded, so only a new box drops it.
+const inputGenerations = ref<Record<string, number>>({});
 
 const rows = computed(() => cacheSettingRows(answer.value));
 const dirty = computed(() => Object.keys(drafts.value).length > 0);
 
 onMounted(load);
+
+watch(() => props.refreshKey, load);
 
 async function load(): Promise<void> {
 	try {
@@ -91,9 +103,13 @@ function sourceLabel(source: CacheSettingSource | null): string {
 		return '—';
 	}
 
-	return source === 'settings'
-		? t('cache_settings_source_settings', 'shared settings')
-		: source;
+	if (source === 'settings') {
+		return t('cache_settings_source_settings', 'shared settings');
+	}
+
+	return source === 'env'
+		? t('cache_settings_source_env', 'environment')
+		: t('cache_settings_source_default', 'default');
 }
 
 /** The change being typed, else what the node runs on. */
@@ -108,12 +124,30 @@ function shown(row: CacheSettingRow): string | null {
 }
 
 function trackBadInput(field: string, event: Event): void {
-	if ((event.target as HTMLInputElement).validity.badInput) {
-		badInputFields.value.add(field);
+	const fieldInput = event.target as HTMLInputElement;
+
+	if (fieldInput.validity.badInput) {
+		badInputFields.value.set(field, fieldInput);
 	}
 	else {
 		badInputFields.value.delete(field);
 	}
+}
+
+/**
+ * Take a value the box reports. A number's arrows step it without an input
+ * event, so the box is asked again whether it still holds unreadable text.
+ */
+function updateDraft(field: string, value: string | null): void {
+	drafts.value[field] = value;
+
+	if (badInputFields.value.get(field)?.validity.badInput === false) {
+		badInputFields.value.delete(field);
+	}
+}
+
+function inputKey(field: string): string {
+	return `${field}:${inputGenerations.value[field] ?? 0}`;
 }
 
 /** Refuse the write while one of `rows` holds what the browser cannot read. */
@@ -124,7 +158,7 @@ function refusesBadInput(rows: CacheSettingRow[]): boolean {
 		return false;
 	}
 
-	error.value = `${t('cache_settings_not_a_number', 'Not a number:')} ${
+	error.value = `${t('not_a_number')}: ${
 		unreadable.map((row) => row.variable ?? row.field).join(', ')
 	}`;
 
@@ -133,11 +167,14 @@ function refusesBadInput(rows: CacheSettingRow[]): boolean {
 
 function forgetDraft(field: string): void {
 	delete drafts.value[field];
-	badInputFields.value.delete(field);
+
+	if (badInputFields.value.delete(field)) {
+		inputGenerations.value[field] = (inputGenerations.value[field] ?? 0) + 1;
+	}
 }
 
 async function applyRow(row: CacheSettingRow): Promise<void> {
-	if (refusesBadInput([row])) {
+	if (edited(row.field) === false || refusesBadInput([row])) {
 		return;
 	}
 
@@ -182,8 +219,9 @@ async function applyAll(): Promise<void> {
 }
 
 function resetAll(): void {
-	drafts.value = {};
-	badInputFields.value.clear();
+	for (const field of Object.keys(drafts.value)) {
+		forgetDraft(field);
+	}
 }
 
 async function resetToFallbacks(): Promise<void> {
@@ -233,7 +271,7 @@ function resetsTo(row: CacheSettingRow): string {
 								:items="row.options"
 								small
 								:disabled="saving"
-								@update:model-value="drafts[row.field] = $event"
+								@update:model-value="updateDraft(row.field, $event)"
 							>
 								<template #append>
 									<span class="source" :class="{ pending: edited(row.field) }">
@@ -252,6 +290,7 @@ function resetsTo(row: CacheSettingRow): string {
 							}"
 						>
 							<v-input
+								:key="inputKey(row.field)"
 								:model-value="shown(row) ?? ''"
 								small
 								full-width
@@ -260,7 +299,8 @@ function resetsTo(row: CacheSettingRow): string {
 								:step="row.step"
 								:suffix="row.unit"
 								:disabled="saving"
-								@update:model-value="drafts[row.field] = $event"
+								:aria-label="row.variable ?? row.field"
+								@update:model-value="updateDraft(row.field, $event)"
 								@input="trackBadInput(row.field, $event)"
 								@keyup.enter="applyRow(row)"
 							>
@@ -278,6 +318,7 @@ function resetsTo(row: CacheSettingRow): string {
 							secondary
 							class="cancel"
 							:tooltip="t('cache_settings_cancel', 'Discard this change')"
+							:aria-label="t('cache_settings_cancel', 'Discard this change')"
 							:disabled="saving || !edited(row.field)"
 							@click="cancelRow(row.field)"
 						>
@@ -289,6 +330,7 @@ function resetsTo(row: CacheSettingRow): string {
 							icon
 							class="apply"
 							:tooltip="t('cache_settings_apply', 'Apply this change')"
+							:aria-label="t('cache_settings_apply', 'Apply this change')"
 							:disabled="saving || !edited(row.field)"
 							@click="applyRow(row)"
 						>
@@ -301,6 +343,7 @@ function resetsTo(row: CacheSettingRow): string {
 							secondary
 							class="reset"
 							:tooltip="resetsTo(row)"
+							:aria-label="resetsTo(row)"
 							:disabled="saving || row.sharedSettings === null"
 							@click="resetRow(row.field)"
 						>

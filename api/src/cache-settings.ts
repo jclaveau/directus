@@ -1,10 +1,14 @@
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
-import type { Item } from '@directus/types';
+import type { EventContext, Item } from '@directus/types';
 import { parse as parseByteSize } from 'bytes';
+import type { Knex } from 'knex';
 import { useLogger } from './logger/index.js';
 import type { SharedSettings } from './processes/lib/shared-settings.js';
-import { isPositiveDuration } from './utils/get-milliseconds.js';
+import {
+	getMilliseconds,
+	isPositiveDuration,
+} from './utils/get-milliseconds.js';
 
 /**
  * `cache_settings`, mirrored so the hot path reads a module variable rather
@@ -13,12 +17,22 @@ import { isPositiveDuration } from './utils/get-milliseconds.js';
  */
 let cacheSettings: SharedSettings = {};
 
+/** Which read the mirror holds, so a slower earlier one cannot replace it. */
+let startedSettingsReads = 0;
+let appliedSettingsRead = 0;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function isByteSize(value: unknown): boolean {
 	return typeof value === 'string' && (parseByteSize(value) ?? 0) > 0;
 }
 
-function isIntegerFrom(minimum: number) {
-	return (value: unknown) => Number.isInteger(value) && (value as number) >= minimum;
+function isIntegerBetween(minimum: number, maximum: number) {
+	return (value: unknown) => {
+		return Number.isInteger(value)
+			&& (value as number) >= minimum
+			&& (value as number) <= maximum;
+	};
 }
 
 /** What each field reads as, whether the layer or its fallback answers. */
@@ -50,6 +64,9 @@ interface CacheSettingRule<F extends CacheSettingField> {
  * the layer leaves it out. Each one only changes what a later fill or purge
  * costs, never which entries a write reaches: a field that could leave an
  * entry no purge finds stays in the environment.
+ *
+ * The upper bounds keep a value inside what Redis and the database accept: past
+ * them the command a purge, a fill or a reap sends is refused.
  */
 const CACHE_SETTING_RULES: {
 	[F in CacheSettingField]: CacheSettingRule<F>;
@@ -67,34 +84,38 @@ const CACHE_SETTING_RULES: {
 		fallback: () => useEnv()['CACHE_VALUE_MAX_SIZE'] as string | false,
 	},
 	stats_max_bytes: {
-		accepts: isByteSize,
-		expected: 'a size such as "2gb", or null',
+		accepts: (value) => value === false || isByteSize(value),
+		expected: 'false, a size such as "2gb", or null',
 		fallbackSource: 'env',
 		fallback: () => {
 			return useEnv()['CACHE_STATS_MAX_BYTES'] as string | false | undefined;
 		},
 	},
 	audit_limit: {
-		accepts: isIntegerFrom(0),
+		accepts: isIntegerBetween(0, Number.MAX_SAFE_INTEGER),
 		expected: 'an integer from 0, or null',
 		fallbackSource: 'env',
 		fallback: () => useEnv()['CACHE_AUDIT_LIMIT'] as number | undefined,
 	},
 	audit_max_duration: {
-		accepts: (value) => typeof value === 'string' && isPositiveDuration(value),
-		expected: 'a duration such as "10m", or null',
+		accepts: (value) => {
+			return typeof value === 'string'
+				&& isPositiveDuration(value)
+				&& getMilliseconds(value, Infinity) <= DAY_MS;
+		},
+		expected: 'a duration such as "10m", up to "24h", or null',
 		fallbackSource: 'env',
 		fallback: () => useEnv()['CACHE_AUDIT_MAX_DURATION'] as string | undefined,
 	},
 	scoped_max_index_globs: {
-		accepts: isIntegerFrom(1),
-		expected: 'an integer from 1, or null',
+		accepts: isIntegerBetween(1, 10000),
+		expected: 'an integer from 1 to 10000, or null',
 		fallbackSource: 'default',
 		fallback: () => 64,
 	},
 	scoped_index_scan_count: {
-		accepts: isIntegerFrom(1),
-		expected: 'an integer from 1, or null',
+		accepts: isIntegerBetween(1, 100000),
+		expected: 'an integer from 1 to 100000, or null',
 		fallbackSource: 'default',
 		fallback: () => 1000,
 	},
@@ -102,9 +123,9 @@ const CACHE_SETTING_RULES: {
 	// would miss them.
 	scoped_index_ttl_factor: {
 		accepts: (value) => {
-			return typeof value === 'number' && Number.isFinite(value) && value >= 1;
+			return typeof value === 'number' && value >= 1 && value <= 100;
 		},
-		expected: 'a number from 1, or null',
+		expected: 'a number from 1 to 100, or null',
 		fallbackSource: 'default',
 		fallback: () => 2,
 	},
@@ -134,6 +155,25 @@ export function assertUsableCacheSettings(document: SharedSettings): void {
 			});
 		}
 	}
+}
+
+/**
+ * The fields of a stored layer the mirror would apply. A row written around
+ * the guard — by hand, or before a field had a rule — keeps its usable fields
+ * rather than losing the whole layer.
+ */
+export function usableCacheSettings(
+	document: SharedSettings | null,
+): SharedSettings {
+	const usableFields: SharedSettings = {};
+
+	for (const [field, value] of Object.entries(document ?? {})) {
+		if (isCacheSettingField(field) && CACHE_SETTING_RULES[field].accepts(value)) {
+			usableFields[field] = value;
+		}
+	}
+
+	return usableFields;
 }
 
 /**
@@ -189,12 +229,19 @@ export function cacheEnabled(): boolean {
  * Whether this node holds a response cache at all.
  *
  * Wider than `cacheEnabled`: a write purges through the instance, so a node
- * where the setting switched serving off keeps it, and keeps purging. Were it
- * dropped, the entries filled before the switch would outlive every write made
- * while it was off, and be served again the moment it is switched back on.
+ * holds one wherever an entry it could reach may be served. On Redis that is
+ * every node, whatever `enabled` reads here: the store is shared, and a node
+ * whose mirror lags the switch still has to purge what the others fill. On a
+ * memory store only this node serves its entries, so it holds one once the
+ * environment or the layer enables serving, and keeps it where the layer later
+ * switches serving off.
  */
 export function responseCacheWanted(): boolean {
-	return useEnv()['CACHE_ENABLED'] === true || cacheEnabled();
+	const env = useEnv();
+
+	return env['CACHE_ENABLED'] === true
+		|| cacheEnabled()
+		|| env['CACHE_STORE'] === 'redis';
 }
 
 /** Re-read the layer from `directus_settings` into the mirror. */
@@ -203,18 +250,18 @@ export async function refreshCacheSettings(): Promise<void> {
 		'./processes/lib/shared-settings.js'
 	);
 
+	startedSettingsReads += 1;
+	const settingsRead = startedSettingsReads;
 	const storedSettings = await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache);
-	const usableFields: SharedSettings = {};
 
-	// A row written around the guard — by hand, or before a field had a rule —
-	// keeps its usable fields rather than losing the whole layer.
-	for (const [field, value] of Object.entries(storedSettings ?? {})) {
-		if (isCacheSettingField(field) && CACHE_SETTING_RULES[field].accepts(value)) {
-			usableFields[field] = value;
-		}
+	// The poll and the bus each start a read, and the database may answer them
+	// in either order.
+	if (settingsRead < appliedSettingsRead) {
+		return;
 	}
 
-	cacheSettings = usableFields;
+	appliedSettingsRead = settingsRead;
+	cacheSettings = usableCacheSettings(storedSettings);
 }
 
 /**
@@ -233,6 +280,12 @@ export async function seedCacheSettings(): Promise<void> {
 	}
 }
 
+/** The part of a filter's context the clear below is decided on. */
+export interface EnablingWriteContext {
+	accountability: EventContext['accountability'];
+	database?: Knex;
+}
+
 /**
  * Drop the response cache before a write switches it on where the environment
  * leaves it off.
@@ -242,11 +295,19 @@ export async function seedCacheSettings(): Promise<void> {
  * Before the write rather than after it: no node can start serving until the
  * row says so, and by then the entries are gone. A clear that is refused
  * refuses the write, rather than switching on over entries it could not drop.
+ *
+ * Decided on the stored row, which a node that missed an announcement may read
+ * otherwise than its mirror does.
  */
-export async function flushBeforeEnabling(payload: Partial<Item>): Promise<void> {
-	const { SHARED_SETTINGS_COLUMNS, asSharedSettings } = await import(
-		'./processes/lib/shared-settings.js'
-	);
+export async function flushBeforeEnabling(
+	payload: Partial<Item>,
+	context: EnablingWriteContext,
+): Promise<void> {
+	const {
+		SHARED_SETTINGS_COLUMNS,
+		asSharedSettings,
+		readSharedSettings,
+	} = await import('./processes/lib/shared-settings.js');
 
 	const column = SHARED_SETTINGS_COLUMNS.cache;
 
@@ -254,15 +315,27 @@ export async function flushBeforeEnabling(payload: Partial<Item>): Promise<void>
 		return;
 	}
 
-	const nextSettings = asSharedSettings(payload[column]);
-
-	if (nextSettings?.['enabled'] !== true || cacheEnabled()) {
+	if (asSharedSettings(payload[column])?.['enabled'] !== true) {
 		return;
 	}
 
-	// The guard runs after this filter, so a write it would refuse must not
-	// clear the tier on its way there.
-	assertUsableCacheSettings(nextSettings);
+	// The access check and the guard both run after this filter, so a caller
+	// or a write either would refuse must not clear the tier on its way there.
+	if (context.accountability !== null && context.accountability?.admin !== true) {
+		return;
+	}
+
+	const { assertUsableSharedSettings } = await import(
+		'./processes/lib/settings-guard.js'
+	);
+
+	assertUsableSharedSettings(payload);
+
+	const storedSettings = await readSharedSettings(column, context.database);
+
+	if (storedSettings?.['enabled'] === true) {
+		return;
+	}
 
 	const { buildResponseCache, clearCacheTargets } = await import('./cache.js');
 
@@ -297,8 +370,8 @@ export async function initCacheSettings(): Promise<void> {
 	// The create as well as the update: a deployment nobody has saved a setting
 	// on yet has no singleton row, and the first write to it makes one.
 	for (const event of ['settings.create', 'settings.update']) {
-		emitter.onFilter<Partial<Item>>(event, async (payload) => {
-			await flushBeforeEnabling(payload);
+		emitter.onFilter<Partial<Item>>(event, async (payload, _meta, context) => {
+			await flushBeforeEnabling(payload, context);
 
 			return payload;
 		});

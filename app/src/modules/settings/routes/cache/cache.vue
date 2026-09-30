@@ -499,6 +499,14 @@ const sections = computed(() => {
 // Totals track the filtered list, matching the endpoint count under a filter.
 const totalEntries = computed(() => searchedEntries.value.length);
 
+// Handed to the settings panel, which re-reads the settings on each bump.
+const settingsRefreshKey = ref(0);
+
+function refreshPage(): void {
+	settingsRefreshKey.value += 1;
+	void load();
+}
+
 async function load() {
 	const token = ++loadToken;
 	loading.value = true;
@@ -1941,13 +1949,13 @@ onUnmounted(() => {
 
 		<template #sidebar>
 			<sidebar-detail icon="tune" :title="t('cache_settings', 'Cache settings')">
-				<cache-settings-panel @changed="load" />
+				<cache-settings-panel :refresh-key="settingsRefreshKey" @changed="load" />
 			</sidebar-detail>
 
 			<auto-refresh
 				v-model="refreshInterval"
 				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"
-				@refresh="load"
+				@refresh="refreshPage"
 			/>
 		</template>
 

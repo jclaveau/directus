@@ -26,6 +26,7 @@ import {
 	scopedCacheSweptDuringFill,
 	type ScopedCacheEpochs,
 } from '../scoped-cache/index.js';
+import { readWhileServingOff } from '../scoped-cache/fill-guard.js';
 import {
 	recordPendingScopedCachePurge,
 } from '../scoped-cache-pending-purges.js';
@@ -222,6 +223,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	);
 
 	const unguardedScope = unguardedScopeCollections.length > 0;
+	const epochsReadWhileOff = readWhileServingOff(epochsBeforeQuery);
 
 	let filled = false;
 
@@ -232,6 +234,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
 		unguardedScope === false &&
+		epochsReadWhileOff === false &&
 		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,

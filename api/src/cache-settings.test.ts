@@ -125,7 +125,7 @@ test.each([
 		{ stats_max_bytes: '0' },
 		oneLine`
 			'cache_settings.stats_max_bytes' has to be
-			a size such as "2gb", or null
+			false, a size such as "2gb", or null
 		`,
 	],
 	[
@@ -146,35 +146,35 @@ test.each([
 		{ audit_max_duration: 'soon' },
 		oneLine`
 			'cache_settings.audit_max_duration' has to be
-			a duration such as "10m", or null
+			a duration such as "10m", up to "24h", or null
 		`,
 	],
 	[
 		{ audit_max_duration: '0' },
 		oneLine`
 			'cache_settings.audit_max_duration' has to be
-			a duration such as "10m", or null
+			a duration such as "10m", up to "24h", or null
 		`,
 	],
 	[
 		{ scoped_max_index_globs: 0 },
 		oneLine`
 			'cache_settings.scoped_max_index_globs' has to be
-			an integer from 1, or null
+			an integer from 1 to 10000, or null
 		`,
 	],
 	[
 		{ scoped_index_scan_count: '1000' },
 		oneLine`
 			'cache_settings.scoped_index_scan_count' has to be
-			an integer from 1, or null
+			an integer from 1 to 100000, or null
 		`,
 	],
 	[
 		{ scoped_index_ttl_factor: 0.5 },
 		oneLine`
 			'cache_settings.scoped_index_ttl_factor' has to be
-			a number from 1, or null
+			a number from 1 to 100, or null
 		`,
 	],
 	[{ ttl: '1h' }, `'cache_settings.ttl' is not a cache setting`],

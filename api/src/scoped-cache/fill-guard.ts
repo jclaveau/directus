@@ -18,6 +18,20 @@ const env = useEnv();
 export type ScopedCacheEpochs = Record<string, string | null>;
 
 /**
+ * The entry a reading carries when it skipped the counters because this node
+ * was not serving. A fill from it has no counter to compare a purge against, so
+ * `respond` refuses it when serving came back on before the read answered.
+ */
+export const SERVING_OFF_EPOCH = '*serving-off';
+
+/** Whether a reading was skipped because this node was not serving. */
+export function readWhileServingOff(
+	epochsBeforeQuery: ScopedCacheEpochs | undefined,
+): boolean {
+	return epochsBeforeQuery !== undefined && SERVING_OFF_EPOCH in epochsBeforeQuery;
+}
+
+/**
  * How long a purge counter is held. Long enough that no read outlives its own
  * before-query reading, short enough that a collection nobody writes to stops
  * holding a key.
@@ -69,10 +83,14 @@ export function scopedCacheEpochKey(collection: string): string {
 export async function readScopedCacheEpochs(
 	collections: Iterable<string>,
 ): Promise<ScopedCacheEpochs> {
-	// Every read pays this round trip, so it is skipped wherever its answer cannot
-	// matter: nothing is filled with the response cache off.
-	if (!cacheEnabled() || !scopedCachePurgeEnabled()) {
+	if (!scopedCachePurgeEnabled()) {
 		return {};
+	}
+
+	// Every read pays this round trip, so it is skipped while nothing is filled,
+	// and the reading says so.
+	if (!cacheEnabled()) {
+		return { [SERVING_OFF_EPOCH]: null };
 	}
 
 	// `*` rides along so a wholesale flush invalidates an in-flight read too.

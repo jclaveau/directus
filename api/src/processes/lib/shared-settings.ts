@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions } from '@directus/types';
+import type { Knex } from 'knex';
 import { parseJSON } from '@directus/utils/values';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
@@ -147,22 +148,38 @@ async function connectionIsDeclared(): Promise<boolean> {
 	return false;
 }
 
-/** What the column holds, or `null` where it holds nothing usable. */
+/**
+ * What the column holds, or `null` where it holds nothing usable.
+ *
+ * Through `lockingDatabase` when given, locking the row until that transaction
+ * ends, so a writer laying a patch over what it read keeps a concurrent one
+ * from reading the same row.
+ */
 export async function readSharedSettings(
 	column: SharedSettingsColumn,
+	lockingDatabase?: Knex,
 ): Promise<SharedSettings | null> {
-	if (await connectionIsDeclared() === false) {
-		return null;
+	let settingsDatabase = lockingDatabase;
+
+	if (settingsDatabase === undefined) {
+		if (await connectionIsDeclared() === false) {
+			return null;
+		}
+
+		// Imported lazily so the autoscaler — its own process, reading this on a
+		// slow floor rather than on its tick — does not pull the dialect graph in
+		// at load.
+		const { default: getDatabase } = await import('../../database/index.js');
+		settingsDatabase = getDatabase();
 	}
 
-	// Imported lazily so the autoscaler — its own process, reading this on a slow
-	// floor rather than on its tick — does not pull the dialect graph in at load.
-	const { default: getDatabase } = await import('../../database/index.js');
+	const settingsQuery = settingsDatabase.select(column).from('directus_settings');
 
-	const row = await getDatabase()
-		.select(column)
-		.from('directus_settings')
-		.first();
+	if (lockingDatabase) {
+		settingsQuery.forUpdate();
+	}
+
+	const row = await settingsQuery.first();
 
 	return asSharedSettings(row?.[column]);
 }
@@ -188,11 +205,25 @@ export async function readAllSharedSettings(): Promise<
 	}
 
 	const { default: getDatabase } = await import('../../database/index.js');
+	let row: Record<string, unknown> | undefined;
 
-	const row = await getDatabase()
-		.select(columns)
-		.from('directus_settings')
-		.first();
+	try {
+		row = await getDatabase()
+			.select(columns)
+			.from('directus_settings')
+			.first();
+	}
+	catch {
+		// Ahead of its migration the cache column does not exist yet, and the
+		// autoscale pair read beside it must not fail with it.
+		row = await getDatabase()
+			.select([
+				SHARED_SETTINGS_COLUMNS.autoscale,
+				SHARED_SETTINGS_COLUMNS.supervisor,
+			])
+			.from('directus_settings')
+			.first();
+	}
 
 	return {
 		autoscale_settings: asSharedSettings(row?.['autoscale_settings']),

@@ -920,13 +920,13 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 		}),
 		defineSystemMcpTool({
 			name: 'write_cache_settings',
-			group: 'cache',
+			group: 'cache_settings',
 			title: 'Change the cache settings',
 			description:
 				'Lay fields over the cache settings, which every node picks up at '
 				+ 'once — no redeploy. Pass a field as null to give it back to its '
-				+ 'environment variable or default, and `clear: true` to drop them '
-				+ 'all. A value outside its rule is refused. Switching `enabled` on '
+				+ 'environment variable or default, and `clear: true` alone to drop '
+				+ 'them all. A value outside its rule is refused. Switching `enabled` on '
 				+ 'where CACHE_ENABLED is off first clears the response cache, since '
 				+ 'nodes that held none purged nothing while it was off.',
 			inputSchema: {
@@ -936,14 +936,14 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'object',
 						description: 'The fields to set: enabled (over CACHE_ENABLED), '
 							+ 'value_max_size (false or a size such as "2mb", over '
-							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (a size, over '
-							+ 'CACHE_STATS_MAX_BYTES), audit_limit (an integer from 0, '
-							+ 'over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
-							+ 'such as "10m", over CACHE_AUDIT_MAX_DURATION), '
-							+ 'scoped_max_index_globs (an integer from 1, default 64), '
-							+ 'scoped_index_scan_count (an integer from 1, default 1000), '
-							+ 'scoped_index_ttl_factor (a number from 1, default 2). A '
-							+ 'null value clears that field.',
+							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (false or a size, '
+							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '
+							+ '0, over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
+							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
+							+ 'scoped_max_index_globs (an integer from 1 to 10000, default '
+							+ '64), scoped_index_scan_count (an integer from 1 to 100000, '
+							+ 'default 1000), scoped_index_ttl_factor (a number from 1 to '
+							+ '100, default 2). A null value clears that field.',
 					},
 					clear: {
 						type: 'boolean',
@@ -956,12 +956,17 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			annotations: CHANGES_CONFIG,
 			run: async (args, context) => {
 				const service = utils(context);
+				const settings = args['settings'];
 
 				if (args['clear'] === true) {
+					if (settings !== undefined) {
+						throw new InvalidPayloadError({
+							reason: '`clear` and `settings` cannot be sent together',
+						});
+					}
+
 					return service.clearCacheSettings();
 				}
-
-				const settings = args['settings'];
 
 				if (
 					typeof settings !== 'object'

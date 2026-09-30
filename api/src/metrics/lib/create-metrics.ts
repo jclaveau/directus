@@ -14,7 +14,10 @@ import {
 import { redisConfigAvailable, useRedis } from '../../redis/index.js';
 import { getStorage } from '../../storage/index.js';
 import type { MetricService } from '../types/metric.js';
-import { responseCacheWanted } from '../../cache-settings.js';
+import {
+	cacheEnabled,
+	responseCacheWanted,
+} from '../../cache-settings.js';
 
 const isPM2 = 'PM2_HOME' in process.env;
 const METRICS_SYNC_PACKET = 'directus:metrics---data-sync';
@@ -195,7 +198,7 @@ export function createMetrics() {
 	// counter (result=hit|miss) so hit-ratio is a PromQL rate() away, independent of
 	// the CACHE_STATS opt-in (that's the durable drill-down; this is the live gauge).
 	function getCacheResponseMetric(): Counter | null {
-		if (services.includes('cache') === false || responseCacheWanted() === false) {
+		if (services.includes('cache') === false || cacheEnabled() === false) {
 			return null;
 		}
 

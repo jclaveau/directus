@@ -10,7 +10,7 @@ import { flushCaches, getCache } from './cache.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
-import { responseCacheWanted } from './cache-settings.js';
+import { cacheEnabled } from './cache-settings.js';
 
 // The response cache lives in an external redis and survives a container swap, so
 // a code-only deploy — a hook/extension or a core (fork) reshaping change shipped
@@ -178,8 +178,11 @@ export async function flushCachesIfBuildChanged(
 
 	// Only a redis response cache survives a container swap; a memory store boots
 	// empty, so there is nothing stale to heal and no shared store to persist the
-	// fingerprint in.
-	if (responseCacheWanted() === false || env['CACHE_STORE'] !== 'redis') {
+	// fingerprint in. A deployment serving nothing skips it too: switching the
+	// layer on clears the tier first.
+	const servingConfigured = env['CACHE_ENABLED'] === true || cacheEnabled();
+
+	if (servingConfigured === false || env['CACHE_STORE'] !== 'redis') {
 		return;
 	}
 
