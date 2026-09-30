@@ -141,8 +141,10 @@ const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ??
 // set per row. Gated on both counts, because the two moved for different reasons —
 // grouping a collection's slices into one index call halved the commands, and
 // sending the tag script by hash cut the bytes without touching the count.
+// Down from 900 now that one index call files every home pin set of a fill:
+// 446 where trunk ran 809.
 const maxCommandsPerFanFill =
-	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 900);
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 500);
 
 const maxKilobytesPerFanFill =
 	// Up from 70 for the two key renames that landed after that ceiling was set
