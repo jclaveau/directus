@@ -153,18 +153,26 @@ async function commitWithRetries<T>(
  * the one it replaces let a reader re-index pre-commit rows under the tag just
  * dropped, stale until TTL, and held the connection `idle in transaction` for as
  * long as Redis took to answer (#363).
+ *
+ * A failure is logged, not thrown: the write is durable by now, and a 500 for it
+ * invites a client retry that duplicates a non-idempotent write. Same rule as the
+ * purge's own `purgeOrRecord`.
  */
 async function drainAfterCommit(
 	knex: Knex,
 	queuedTasks: AfterCommitTask[],
 ): Promise<void> {
 	// Every task runs even when one fails: each covers its own write, and the first
-	// failure surfacing must not leave the others' entries stale.
+	// failure must not leave the others' entries stale.
 	const outcomes = await Promise.allSettled(queuedTasks.map((task) => task(knex)));
-	const failedOutcome = outcomes.find((outcome) => outcome.status === 'rejected');
 
-	if (failedOutcome !== undefined) {
-		throw (failedOutcome as PromiseRejectedResult).reason;
+	for (const outcome of outcomes) {
+		if (outcome.status === 'rejected') {
+			useLogger().error(
+				outcome.reason,
+				`[transaction] a task queued after commit failed: ${outcome.reason}`,
+			);
+		}
 	}
 }
 

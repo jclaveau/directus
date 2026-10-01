@@ -2,10 +2,17 @@ import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { describe, expect, it, vi } from 'vitest';
+import { useLogger } from '../logger/index.js';
 import { queueAfterCommit, transaction } from './transaction.js';
 
 vi.mock('../database/index.js', () => {
 	return { getDatabaseClient: vi.fn(() => 'sqlite') };
+});
+
+vi.mock('../logger/index.js', () => {
+	const logger = { error: vi.fn(), trace: vi.fn() };
+
+	return { useLogger: vi.fn(() => logger) };
 });
 
 describe('queueAfterCommit', () => {
@@ -114,24 +121,35 @@ describe('queueAfterCommit', () => {
 	});
 
 	it(oneLine`
-		runs every task and rethrows the first failure, without re-running the write
-		that committed even when the failure carries a retry code
+		runs every task, logs a failure and returns the committed result, without
+		re-running the write even when the failure carries a retry code
 	`, async () => {
 		const db = knex.default({ client: MockClient });
 
 		createTracker(db);
 
+		const taskFailure = Object.assign(new Error('record failed'), {
+			code: 'SQLITE_BUSY',
+		});
+
 		const secondTask = vi.fn(async () => {});
 
 		const handler = vi.fn(async (trx: knex.Knex) => {
 			queueAfterCommit(trx, async () => {
-				throw Object.assign(new Error('redis down'), { code: 'SQLITE_BUSY' });
+				throw taskFailure;
 			});
 
 			queueAfterCommit(trx, secondTask);
+
+			return 'committed';
 		});
 
-		await expect(transaction(db, handler)).rejects.toThrow('redis down');
+		await expect(transaction(db, handler)).resolves.toBe('committed');
+
+		expect(useLogger().error).toHaveBeenCalledWith(
+			taskFailure,
+			'[transaction] a task queued after commit failed: Error: record failed',
+		);
 
 		expect(secondTask).toHaveBeenCalledOnce();
 		expect(handler).toHaveBeenCalledOnce();
