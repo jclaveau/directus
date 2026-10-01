@@ -34,7 +34,8 @@ function formatSeconds(ms) {
 
 const shardDirs = readdirSync(runDir, { withFileTypes: true })
 	.filter((dirEntry) => dirEntry.isDirectory())
-	.map((dirEntry) => join(runDir, dirEntry.name))
+	// An artifact keeps the `timings/` folder the run wrote into.
+	.map((dirEntry) => join(runDir, dirEntry.name, 'timings'))
 	.filter((shardDir) => existsSync(join(shardDir, 'modules.json')))
 	.sort();
 
@@ -65,10 +66,9 @@ for (const shardDir of shardDirs) {
 			return bootEntry.file === moduleTiming.file;
 		});
 
-		// The barrier is a `beforeAll` too: leave its wait out here as well.
 		const hookMs = moduleTiming.hooks.reduce((sumMs, hookTiming) => {
 			return sumMs + ((hookTiming.endMs ?? hookTiming.startMs) - hookTiming.startMs);
-		}, 0) - (gateWaits.get(moduleTiming.file) ?? 0);
+		}, 0);
 
 		const knownCost = fileCosts.get(moduleTiming.file);
 

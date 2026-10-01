@@ -5,6 +5,10 @@ import { flatAfterList, sequentialTestsList } from './sequential-tests';
 // once.
 export const MAX_WORKERS = 6;
 
+// How many of those a 4-vCPU runner actually carries: the middle phases of the
+// postgres run of 2026-10-01 spent 3.2-4.9 times their wall clock in files.
+const MIDDLE_PARALLELISM = 3.5;
+
 type Project = 'db' | 'common';
 
 // Measured per-file wall clock (ms; the `after` chain re-measured over the
@@ -14,41 +18,41 @@ type Project = 'db' | 'common';
 // Only used to BALANCE shards, so drift between runs doesn't matter — just the
 // relative ordering.
 const DURATION_HINTS_MS: Record<string, number> = {
-	'/tests/db/routes/items/no-relation.test.ts': 93_000,
-	'/tests/db/routes/items/m2a.test.ts': 83_000,
-	'/tests/db/routes/items/m2m.test.ts': 76_000,
-	'/tests/db/routes/items/m2o.test.ts': 63_000,
-	'/tests/db/routes/items/o2m.test.ts': 57_000,
+	'/tests/db/routes/items/no-relation.test.ts': 154_000,
+	'/tests/db/routes/items/m2a.test.ts': 53_000,
+	'/tests/db/routes/items/m2m.test.ts': 159_000,
+	'/tests/db/routes/items/m2o.test.ts': 33_000,
+	'/tests/db/routes/items/o2m.test.ts': 127_000,
 	'/tests/db/routes/items/redis-outage-survival.test.ts': 98_000,
 	'/tests/db/routes/auth/login.test.ts': 25_000,
-	'/tests/db/routes/items/cache-takeover-scope.test.ts': 16_000,
+	'/tests/db/routes/items/cache-takeover-scope.test.ts': 4_000,
 	'/tests/db/routes/auth/refresh.test.ts': 14_000,
 	'/tests/db/routes/items/cache-update-scope.test.ts': 11_000,
 	'/tests/db/routes/items/cache-delete-scope.test.ts': 11_000,
 	'/tests/db/routes/items/cache-read-scope.test.ts': 11_000,
 	'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts': 11_000,
-	'/tests/db/routes/items/cache-cancel-write.test.ts': 11_000,
+	'/tests/db/routes/items/cache-cancel-write.test.ts': 4_000,
 	'/tests/db/routes/items/cache-poisoning-write.test.ts': 11_000,
 	'/tests/db/routes/items/cache-primary-key-scope.test.ts': 11_000,
-	'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts': 13_000,
-	'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts': 13_000,
+	'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts': 4_000,
+	'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts': 4_000,
 	'/tests/db/routes/items/cache-purge-recovery.test.ts': 92_000,
 	// One spawned instance; two bursts wait out the anomaly drain.
 	'/tests/db/routes/items/cache-read-inflight-purge.test.ts': 30_000,
 	// One spawned instance; every case waits out the one-second descriptor
 	// drain before it audits.
-	'/tests/db/routes/items/cache-audit.test.ts': 62_000,
+	'/tests/db/routes/items/cache-audit.test.ts': 43_000,
 	// One spawned instance; the run under test blocks the loop 2.4s and the
 	// settle loop waits out the descriptor drain.
 	'/tests/db/routes/items/cache-audit-under-pressure.test.ts': 20_000,
 	// One spawned instance, held overloaded from boot.
-	'/tests/db/routes/server/pressure-replay-exempt.test.ts': 12_000,
+	'/tests/db/routes/server/pressure-replay-exempt.test.ts': 5_000,
 	// Two spawned instances and five CLI boots of the whole app.
 	'/tests/db/app/cache-audit-cli.test.ts': 56_000,
 	// Seven CLI boots of the whole app.
-	'/tests/db/app/schema-diff-cli.test.ts': 15_000,
+	'/tests/db/app/schema-diff-cli.test.ts': 6_000,
 	// One spawned instance; one case waits out the descriptor drain.
-	'/tests/db/app/cache-audit-mcp.test.ts': 60_000,
+	'/tests/db/app/cache-audit-mcp.test.ts': 10_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
 	// The `after` chain. The auth files spend their time waiting, not querying,
 	// so they cost the same on every vendor. `connects` sleeps out the REST
@@ -66,7 +70,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// out the collection window.
 	'/tests/db/app/processes.test.ts': 50_000,
 	// Two spawned instances, and one case holds a pool saturated for six seconds.
-	'/tests/db/app/pgbouncer.test.ts': 40_000,
+	'/tests/db/app/pgbouncer.test.ts': 4_000,
 	'/tests/db/app/system-mcp.test.ts': 10_000,
 	// A pm2 daemon per arm, and each assertion is a pool settling or a window
 	// spent proving it did not move. Measured over the postgres runs of
@@ -95,15 +99,15 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-supervisor-restart.test.ts': 12_000,
 	'/tests/db/app/autoscale-supervisor-options.test.ts': 6_000,
 	// Spawns two processes and asks one question of them.
-	'/tests/db/app/autoscale-processes.test.ts': 10_000,
-	'/tests/db/app/autoscale-config-validation.test.ts': 30_000,
+	'/tests/db/app/autoscale-processes.test.ts': 6_000,
+	'/tests/db/app/autoscale-config-validation.test.ts': 13_000,
 	// Three boots that end at the check and one that goes all the way
 	// through, each a full module load. Measured over the postgres run of
 	// 2026-09-14.
-	'/tests/db/app/autoscale-boolean-env.test.ts': 12_000,
+	'/tests/db/app/autoscale-boolean-env.test.ts': 19_000,
 	// A boot, a pool losing a worker, and an autoscaler started after it to
 	// report on.
-	'/tests/db/app/autoscale-pool-health.test.ts': 51_000,
+	'/tests/db/app/autoscale-pool-health.test.ts': 35_000,
 	// Three deployments, each booting a Directus and a pool for it: one waits
 	// out the hold it is asserting, and one walks a pool of eight up three
 	// seconds a worker.
@@ -122,12 +126,12 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// answers, then an autoscaler booted and cut off from its database. Both
 	// spawns answer in seconds; what the run measures is the boots.
 	'/tests/db/app/processes-missing-dependency.test.ts': 10_000,
-	'/tests/db/app/autoscale-drill.test.ts': 25_000,
+	'/tests/db/app/autoscale-drill.test.ts': 13_000,
 	// Three nodes to boot, then a poll that runs out its whole window for the
 	// announcement that must not arrive.
-	'/tests/db/app/cache-config-broadcast.test.ts': 21_000,
+	'/tests/db/app/cache-config-broadcast.test.ts': 9_000,
 	// Two nodes to boot, then a few polls for an announcement that lands.
-	'/tests/db/app/cache-settings.test.ts': 12_000,
+	'/tests/db/app/cache-settings.test.ts': 4_000,
 	// Two nodes to boot, and two `directus cache flush` processes.
 	'/tests/db/app/cache-settings-switch.test.ts': 15_000,
 	// One node to boot and three schema rebuilds watched on the wire.
@@ -135,11 +139,11 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 16_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 37_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
-	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,
-	'/tests/db/routes/collections/schema-cache.test.ts': 23_000,
-	'/tests/db/websocket/general.test.ts': 14_000,
-	'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts': 7_000,
-	'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts': 7_000,
+	'/tests/db/routes/permissions/cache-purge.test.ts': 9_000,
+	'/tests/db/routes/collections/schema-cache.test.ts': 6_000,
+	'/tests/db/websocket/general.test.ts': 6_000,
+	'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts': 4_000,
+	'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts': 4_000,
 	'/tests/db/routes/flows/webhook.test.ts': 6_000,
 	// These run in well under a second, which the source-size fallback does not
 	// guess anywhere near: it reads them as 4-10 s and moves real work off
@@ -150,6 +154,58 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/batch-update.test.ts': 500,
 	'/tests/db/routes/permissions/policy-user-integrity.test.ts': 400,
 	'/tests/db/routes/items/read-hook-null.test.ts': 200,
+	// Measured over the postgres run of 2026-10-01; no hint before it.
+	'/tests/db/routes/items/cache-index-marker.test.ts': 87_000,
+	'/tests/db/routes/items/cache-fill-pause-ceiling.test.ts': 85_000,
+	'/tests/db/routes/items/cache-fill-pause-older-build.test.ts': 51_000,
+	'/tests/db/app/autoscale-pool-health-refresh.test.ts': 50_000,
+	'/tests/db/routes/items/cache-redis-db-flush.test.ts': 35_000,
+	'/tests/db/routes/items/cache-index-reap.test.ts': 33_000,
+	'/tests/db/routes/items/cache-entry-envelope.test.ts': 28_000,
+	'/tests/db/app/cache-flush-cli.test.ts': 28_000,
+	'/tests/db/seed-database.test.ts': 28_000,
+	'/tests/db/routes/items/cache-composite-tag.test.ts': 22_000,
+	'/tests/db/routes/items/cache-purge-fingerprint-index-race.test.ts': 19_000,
+	'/tests/db/routes/schema/schema.test.ts': 19_000,
+	'/tests/db/routes/items/cache-ancestor-slice-deep-chain.test.ts': 18_000,
+	'/tests/db/routes/items/cache-case-along-scope-path.test.ts': 18_000,
+	'/tests/db/routes/items/cache-null-scope-telemetry.test.ts': 18_000,
+	'/tests/db/routes/items/cache-clear-awaits-reap.test.ts': 18_000,
+	'/tests/db/routes/items/cache-fill-pause-max-value.test.ts': 17_000,
+	'/tests/db/routes/items/cache-collection-index-keys.test.ts': 16_000,
+	'/tests/db/routes/items/cache-unguarded-scope.test.ts': 16_000,
+	'/tests/db/routes/items/cache-cascade-delete.test.ts': 15_000,
+	'/tests/db/routes/items/cache-crossing-scope-fk-pin.test.ts': 15_000,
+	'/tests/db/routes/items/cache-purge-counter.test.ts': 15_000,
+	'/tests/db/routes/items/cache-null-scope.test.ts': 14_000,
+	'/tests/db/routes/items/cache-pending-purge-modes.test.ts': 14_000,
+	'/tests/db/routes/items/cache-composite-tag-view.test.ts': 13_000,
+	'/tests/db/app/edge-allow-list-cli.test.ts': 13_000,
+	'/tests/db/routes/users/cache-last-page-purge.test.ts': 12_000,
+	'/tests/db/routes/items/cache-o2m-conflict-node-bounds.test.ts': 12_000,
+	'/tests/db/routes/items/cache-nested-paths-not-bare.test.ts': 12_000,
+	'/tests/db/routes/items/cache-m2o-through-o2m-pin.test.ts': 12_000,
+	'/tests/db/routes/items/cache-o2m-node-query-beyond.test.ts': 12_000,
+	'/tests/db/routes/items/cache-reap-requests-cli-flush.test.ts': 11_000,
+	'/tests/db/routes/items/cache-o2m-child-pin-permissions.test.ts': 11_000,
+	'/tests/db/routes/items/cache-reserved-names.test.ts': 11_000,
+	'/tests/db/routes/items/cache-index-set-expiry.test.ts': 11_000,
+	'/tests/db/routes/items/cache-keyed-filter-pin.test.ts': 11_000,
+	'/tests/db/routes/items/cache-composed-path-scope-to.test.ts': 11_000,
+	'/tests/db/routes/items/cache-ownership-ancestor-pin.test.ts': 11_000,
+	'/tests/db/routes/items/cache-declared-pin.test.ts': 11_000,
+	'/tests/db/routes/items/cache-crossing-scope-fk-pin-permissions.test.ts': 11_000,
+	'/tests/db/routes/items/cache-m2o-through-fk-no-key.test.ts': 11_000,
+	'/tests/db/routes/items/cache-index-read-metric.test.ts': 11_000,
+	'/tests/db/app/processes-core-build.test.ts': 10_000,
+	'/tests/db/routes/items/cache-in-filter-pin.test.ts': 10_000,
+	'/tests/db/routes/items/cache-o2m-child-pin.test.ts': 10_000,
+	'/tests/db/routes/items/cache-content-version.test.ts': 10_000,
+	'/tests/db/routes/items/cache-independent-sort-stale.test.ts': 10_000,
+	'/tests/db/routes/server/health-outstanding-migrations.test.ts': 10_000,
+	'/tests/db/routes/items/cache-or-root-filter-reverse-chain.test.ts': 10_000,
+	'/tests/db/routes/items/cache-read-inflight-system-flush.test.ts': 10_000,
+	'/tests/db/routes/items/cache-scoped-field-filter-pin.test.ts': 10_000,
 };
 
 export function fileWeight(file: string): number {
@@ -173,40 +229,82 @@ function groupWeight(group: string[]): number {
 
 type ShardGroup = {
 	files: string[];
-	// The share of a shard's wall clock the group takes: whole for an `after`
-	// chain, which runs alone, a worker's share for a middle file.
 	weight: number;
+	// An `after` chain runs alone once every middle file is done; a middle file
+	// shares the shard's workers.
+	serial: boolean;
 };
 
+type ShardBucket = {
+	groups: string[][];
+	serialMs: number;
+	middleMs: number;
+	longestMiddleMs: number;
+};
+
+// A shard's wall clock: its serial chain, after a middle phase that lasts at
+// least its longest file however many workers share the rest.
+function bucketCost(bucket: ShardBucket): number {
+	const middlePhaseMs = Math.max(
+		bucket.middleMs / MIDDLE_PARALLELISM,
+		bucket.longestMiddleMs,
+	);
+
+	return bucket.serialMs + middlePhaseMs;
+}
+
+function withGroup(bucket: ShardBucket, group: ShardGroup): ShardBucket {
+	if (group.serial) {
+		return { ...bucket, serialMs: bucket.serialMs + group.weight };
+	}
+
+	return {
+		...bucket,
+		middleMs: bucket.middleMs + group.weight,
+		longestMiddleMs: Math.max(bucket.longestMiddleMs, group.weight),
+	};
+}
+
 /**
- * Pack `groups` into `count` balanced buckets (heaviest-first → least-loaded
- * bucket). A group is a single file, or an ordered chain that has to stay whole.
- * `preloaded` is wall clock a bucket already spends on files packed elsewhere.
+ * Pack `groups` into `count` buckets, heaviest first, each into the bucket it
+ * makes cheapest. A group is a single file, or an ordered chain that has to
+ * stay whole. `preloadedMs` is serial time a bucket already spends on files
+ * placed elsewhere.
  */
 function packIntoBuckets(
 	groups: ShardGroup[],
 	count: number,
-	preloaded: number[],
+	preloadedMs: number[],
 ): string[][][] {
 	const weighted = groups.slice().sort((a, b) => {
 		return b.weight - a.weight || a.files[0]!.localeCompare(b.files[0]!);
 	});
 
-	const buckets = Array.from({ length: count }, (_, index) => {
-		return { groups: [] as string[][], total: preloaded[index] ?? 0 };
+	const buckets: ShardBucket[] = Array.from({ length: count }, (_, index) => {
+		return {
+			groups: [],
+			serialMs: preloadedMs[index] ?? 0,
+			middleMs: 0,
+			longestMiddleMs: 0,
+		};
 	});
 
-	for (const { files: group, weight } of weighted) {
-		const target = buckets.reduce((min, bucket) => {
-			if (bucket.total < min.total) {
-				return bucket;
+	for (const group of weighted) {
+		let bestIndex = 0;
+		let bestCost = Infinity;
+
+		for (const [index, bucket] of buckets.entries()) {
+			const cost = bucketCost(withGroup(bucket, group));
+
+			if (cost < bestCost) {
+				bestIndex = index;
+				bestCost = cost;
 			}
+		}
 
-			return min;
-		});
-
-		target.groups.push(group);
-		target.total += weight;
+		const chosen = withGroup(buckets[bestIndex]!, group);
+		chosen.groups = [...chosen.groups, group.files];
+		buckets[bestIndex] = chosen;
 	}
 
 	return buckets.map((bucket) => bucket.groups);
@@ -249,13 +347,11 @@ export function filesForShard(
 			});
 		})
 		.filter((group) => group.length > 0)
-		.map((group) => ({ files: group, weight: groupWeight(group) }));
+		.map((group) => ({ files: group, weight: groupWeight(group), serial: true }));
 
-	// Middle files share the shard's workers, while the after chain waits for
-	// all of them and then runs one file at a time.
 	const parallel = files
 		.filter((file) => !isBefore(file) && !isAfter(file))
-		.map((file) => ({ files: [file], weight: fileWeight(file) / MAX_WORKERS }));
+		.map((file) => ({ files: [file], weight: fileWeight(file), serial: false }));
 
 	const firstShardBefore = files.filter(isFirstShardOnly);
 
