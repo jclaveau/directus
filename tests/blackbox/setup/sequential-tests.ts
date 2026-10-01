@@ -35,22 +35,47 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 				'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts',
 				'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts',
 			],
-			// Every spawned instance drains the one `pending_purges` table whatever
-			// its namespace, so a sibling can finish a record against ITS namespace
-			// and leave these suites' entries stale. Serialised for that, not for
-			// spawning: 106 of the 160 db files boot an instance and run in the
-			// parallel middle.
+			// The suites below spawn their own Directus and came here one at a
+			// time, each after a race it lost in the parallel middle:
+			// `cache-takeover-scope` applied a unique constraint before its own
+			// junction columns existed (postgres 42703) while two siblings were
+			// spawning servers on the same runner.
+			//
+			// They are not every spawner, and the list does not aim to be. 106 of
+			// the 160 db files boot an instance, so a file absent here is the norm
+			// rather than an oversight — and a slot here buys less than it looks:
+			// `cache-audit` and `autoscale-churn` have each failed once from inside
+			// this chain, where the only company they had was the shard's own
+			// serial order. Serialising a file costs its whole runtime, so move one
+			// here on evidence that it raced, not on the fact that it spawns.
+			'/tests/db/routes/items/cache-cancel-write.test.ts',
+			'/tests/db/routes/items/cache-delete-scope.test.ts',
+			'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts',
+			'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts',
+			'/tests/db/routes/items/cache-nested-write.test.ts',
+			'/tests/db/routes/items/cache-poisoning-read.test.ts',
+			'/tests/db/routes/items/cache-poisoning-write.test.ts',
+			'/tests/db/routes/items/cache-primary-key-scope.test.ts',
 			'/tests/db/routes/items/cache-purge-recovery.test.ts',
-			'/tests/db/routes/items/cache-read-inflight-purge.test.ts',
-			'/tests/db/routes/items/redis-outage-survival.test.ts',
 			// A chain: both create and drop the two collections the cache-raw-purge
 			// extension names, so they run in one shard, one after the other.
 			[
 				'/tests/db/routes/items/cache-raw-purge.test.ts',
 				'/tests/db/routes/items/cache-primary-key-home-pin.test.ts',
 			],
-			// Drives the same extension, from collections of its own.
 			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
+			'/tests/db/routes/items/cache-read-scope.test.ts',
+			'/tests/db/routes/items/cache-read-inflight-purge.test.ts',
+			// Spawns an instance and builds a relation on a collection it has just
+			// created. Left in the parallel middle that create-then-relate gap is
+			// wide enough to lose: under a shard that packed it beside heavier
+			// company it read back `Collection "..." doesn't exist` from its own
+			// seed. Sixteen of its siblings already run here for the same reason.
+			'/tests/db/routes/items/cache-slice-index.test.ts',
+			'/tests/db/routes/items/cache-takeover-scope.test.ts',
+			'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts',
+			'/tests/db/routes/items/cache-update-scope.test.ts',
+			'/tests/db/routes/items/redis-outage-survival.test.ts',
 			// The three audit suites share one settings singleton: a schedule one
 			// of them writes reaches every node on the bus, the others' included,
 			// so a `0 3 * * *` landing mid-wait would starve a sibling's per-second
