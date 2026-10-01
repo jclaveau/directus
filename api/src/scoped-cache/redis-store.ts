@@ -1088,14 +1088,10 @@ async function* takeSweptIndexKeys(
 
 		scanCursor = next;
 		const keys: string[] = [];
-		let existingSets = 0;
+		const collectedBySet = await collectSweptIndexKeys(sweptKeys, keys);
 
-		for (const sweptKey of sweptKeys) {
-			// Redis holds no empty set: a set that names nothing is gone.
-			if (await collectSweptIndexKeys(sweptKey, keys) > 0) {
-				existingSets += 1;
-			}
-		}
+		// Redis holds no empty set: a set that names nothing is gone.
+		const existingSets = collectedBySet.filter((collected) => collected > 0).length;
 
 		yield { indexKeys: existingSets, keys, sweptKeys };
 	}
@@ -1162,38 +1158,70 @@ function scopedCacheSweptIndexGlob(collection: string): string {
 }
 
 /**
- * Append every entry key a moved set names to `keys`, read in pages rather than
+ * Append every entry key the moved sets name to `keys`, read in pages rather than
  * whole. Appended one at a time rather than returned for a spread: one set can
  * name more keys than a spread survives
- * (https://github.com/jclaveau/directus/issues/397). Answers how many it
- * appended.
+ * (https://github.com/jclaveau/directus/issues/397). Answers how many each set
+ * appended, in the order the sets were given.
+ *
+ * Read `SCOPED_CACHE_INDEX_SCAN_SETS` sets a round, the way a row scan reads
+ * them: a collection-wide purge moves a thousand sets and more, and one round
+ * trip per set was most of what it cost, every other purge of the process
+ * queued behind it (2026-10-01: about 5 ms a set in production).
  */
 async function collectSweptIndexKeys(
-	sweptKey: string,
+	sweptKeys: readonly string[],
 	keys: string[],
-): Promise<number> {
-	const keysBefore = keys.length;
-	let scanCursor = '0';
+): Promise<number[]> {
+	const redis = useCacheRedis();
+	const collectedBySet = sweptKeys.map(() => 0);
 
-	do {
-		const [next, members] = await useCacheRedis().sscan(
-			sweptKey,
-			scanCursor,
-			'COUNT',
-			scopedCacheIndexScanCount(),
-		);
+	for (
+		let setAt = 0;
+		setAt < sweptKeys.length;
+		setAt += SCOPED_CACHE_INDEX_SCAN_SETS
+	) {
+		let pendingScans = sweptKeys
+			.slice(setAt, setAt + SCOPED_CACHE_INDEX_SCAN_SETS)
+			.map((sweptKey, roundAt) => {
+				return { sweptKey, setIndex: setAt + roundAt, scanCursor: '0' };
+			});
 
-		scanCursor = next;
+		while (pendingScans.length > 0) {
+			const scanReplies = await Promise.all(
+				pendingScans.map(({ sweptKey, scanCursor }) => {
+					return redis.sscan(
+						sweptKey,
+						scanCursor,
+						'COUNT',
+						scopedCacheIndexScanCount(),
+					);
+				}),
+			);
 
-		// The fingerprint half is read past rather than parsed: this purge drops
-		// the key whichever query case filed it.
-		for (const member of members) {
-			keys.push(parseScopedCacheIndexMember(member).key);
+			const unfinishedScans: typeof pendingScans = [];
+
+			for (const [replyAt, [next, members]] of scanReplies.entries()) {
+				const pendingScan = pendingScans[replyAt]!;
+
+				if (next !== '0') {
+					unfinishedScans.push({ ...pendingScan, scanCursor: next });
+				}
+
+				// Only the key is read, the fingerprint never parsed: this purge drops
+				// the key whichever query case filed it.
+				for (const member of members) {
+					keys.push(scopedCacheIndexMemberKey(member));
+				}
+
+				collectedBySet[pendingScan.setIndex]! += members.length;
+			}
+
+			pendingScans = unfinishedScans;
 		}
 	}
-	while (scanCursor !== '0');
 
-	return keys.length - keysBefore;
+	return collectedBySet;
 }
 
 /**
@@ -1480,6 +1508,19 @@ export function renderScopedCacheIndexMember(
 	key: string,
 ): string {
 	return `${renderScopedCacheFingerprint(fingerprint)}|${key}`;
+}
+
+/**
+ * The cache key half of an index member, the fingerprint half skipped rather
+ * than parsed: `parseScopedCacheIndexMember(member).key` without building the
+ * fingerprint, which a kilobyte of pins makes most of the cost.
+ */
+export function scopedCacheIndexMemberKey(member: string): string {
+	const splitAt = indexOfUnescaped(member, '|');
+
+	return splitAt === -1
+		? ''
+		: member.slice(splitAt + 1);
 }
 
 export function parseScopedCacheIndexMember(
@@ -1967,8 +2008,9 @@ const redisStore: ScopedCacheStore = {
 
 				for (const sweptKey of sweptKeys) {
 					movedKeys.push(sweptKey);
-					await collectSweptIndexKeys(sweptKey, keys);
 				}
+
+				await collectSweptIndexKeys(sweptKeys, keys);
 			}
 
 			// A name whose set is already gone moves nothing, and counting it would

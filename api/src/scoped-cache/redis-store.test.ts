@@ -13,6 +13,7 @@ import {
 	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
 	scopedCacheIndexGenerationReadScript,
+	scopedCacheIndexMemberKey,
 	scopedCacheIndexReapScript,
 	scopedCacheCollectionIndexKeysRegisterScript,
 	scopedCacheCollectionIndexKeysPruneScript,
@@ -554,6 +555,17 @@ describe('renderScopedCacheIndexMember', () => {
 	it('reads a member holding no key as a fingerprint alone', () => {
 		expect(parseScopedCacheIndexMember('slot:&'))
 			.toEqual({ fingerprint: parseScopedCacheFingerprint('slot:&'), key: '' });
+	});
+});
+
+describe('scopedCacheIndexMemberKey', () => {
+	it('reads the key past the first separator the escapes do not cover', () => {
+		expect(scopedCacheIndexMemberKey('slot:&owner=,a\\|b,&|ns:a|b'))
+			.toBe('ns:a|b');
+	});
+
+	it('reads a member holding no key as no key', () => {
+		expect(scopedCacheIndexMemberKey('slot:&')).toBe('');
 	});
 });
 
