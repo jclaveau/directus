@@ -13,9 +13,10 @@ import { summarise } from './measure.js';
  *
  * On 2026-10-01 production's collection-wide purges took about 5 ms per set:
  * 5.6 s at 1k-2k sets, 27 s past 4k, 90 s with about 21 of them running at once.
- * They come from the planner's sort endpoint on `student_course`, whose index
- * holds about 1.3k sets. A hook's `purgeBy` on a field the index is not split by
- * walks the same sets, and took up to 48 s.
+ * They came from the planner's sort endpoint on `student_course`, whose index
+ * holds about 1.3k sets; #589 moves a sort onto the index path, and cascades,
+ * upsert takeovers and keyless raw purges still walk. A hook's `purgeBy` on a
+ * field the index is not split by walks the same sets, and took up to 48 s.
  *
  * Each arm seeds one collection with N sets of M entries — one set per row, the
  * row pinned as a home pin, about a kilobyte of pins beside it — and measures:
@@ -538,12 +539,16 @@ async function measureArm(armName: string, cli: string): Promise<ArmResult> {
 
 		// The write starts once the walks have, on the process running them.
 		const rowWriteDuringConcurrent = Math.max(...concurrencies);
-		await seedIndex(ports[0]!, concurrentSets);
+		const duringMs: number[] = [];
 
-		const walks = purge(ports[0]!, 'collection', rowWriteDuringConcurrent);
-		await new Promise((wake) => setTimeout(wake, 100));
-		const rowWriteDuringMs = await timeRowWrite(ports[0]!, rowId, ROW_WRITES);
-		await walks;
+		for (let at = 0; at < ROW_WRITES; at++) {
+			await seedIndex(ports[0]!, concurrentSets);
+
+			const walks = purge(ports[0]!, 'collection', rowWriteDuringConcurrent);
+			await new Promise((wake) => setTimeout(wake, 100));
+			duringMs.push(await timeRowWrite(ports[0]!, rowId, ROW_WRITES + at));
+			await walks;
+		}
 
 		return {
 			armName,
@@ -552,7 +557,7 @@ async function measureArm(armName: string, cli: string): Promise<ArmResult> {
 			declaredBySets,
 			concurrent,
 			rowWriteAloneMs: summarise('row write alone', aloneMs).median,
-			rowWriteDuringMs,
+			rowWriteDuringMs: summarise('row write during', duringMs).median,
 			rowWriteDuringConcurrent,
 		};
 	}
@@ -667,7 +672,7 @@ function writeReport(results: ArmResult[]): string[] {
 				+ ` | ${cell(sample.maxMs, baselineSample?.maxMs, 'ms')} |`;
 		}),
 		'',
-		`A one-row write alone: ${cell(
+		`A one-row write, median of ${ROW_WRITES}, alone: ${cell(
 			head.rowWriteAloneMs,
 			baseline?.rowWriteAloneMs,
 			'ms',

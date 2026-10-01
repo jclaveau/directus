@@ -95,9 +95,9 @@ async function inBatches(count, run) {
 }
 
 /**
- * `kind: 'collection'` is what `purgeForMutatedRows` runs for a sort; `kind:
- * 'declared'` is a hook's `purgeBy` on a field the index is not split by, which
- * reads every set of the collection the same way.
+ * `kind: 'collection'` is what a cascade, an upsert takeover or a keyless raw
+ * purge runs; `kind: 'declared'` is a hook's `purgeBy` on a field the index is
+ * not split by, which reads every set of the collection the same way.
  */
 function runPurge(cache, collection, kind, indexPath) {
 	if (kind === 'collection') {

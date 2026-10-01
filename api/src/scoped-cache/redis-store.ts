@@ -1166,8 +1166,8 @@ function scopedCacheSweptIndexGlob(collection: string): string {
  *
  * Read `SCOPED_CACHE_INDEX_SCAN_SETS` sets a round, the way a row scan reads
  * them: a collection-wide purge moves a thousand sets and more, and one round
- * trip per set was most of what it cost, every other purge of the process
- * queued behind it (2026-10-01: about 5 ms a set in production).
+ * trip per set was most of what it cost (2026-10-01: about 5 ms a set in
+ * production).
  */
 async function collectSweptIndexKeys(
 	sweptKeys: readonly string[],

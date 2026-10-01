@@ -2005,6 +2005,36 @@ describe('takeStrandedSweptIndexKeys', () => {
 			],
 		}]);
 	});
+
+	it(oneLine`
+		counts the sets of a later round in their own place, not over the first
+		round's
+	`, async () => {
+		const sweptKeys = Array.from(
+			{ length: 102 },
+			(_, at) => `scalabus:scoped-cache-index:swept:slot:dead:${at}`,
+		);
+
+		sscan.mockImplementation(async (key: string) => {
+			if (key === 'scalabus:scoped-cache-index:swept-index-keys') {
+				return ['0', sweptKeys];
+			}
+
+			return key === 'scalabus:scoped-cache-index:swept:slot:dead:0'
+				? ['0', []]
+				: ['0', ['slot:&|key']];
+		});
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeStrandedSweptIndexKeys()
+		) {
+			taken.push(take.indexKeys);
+		}
+
+		expect(taken).toEqual([101]);
+	});
 });
 
 describe('dropIndex', () => {
