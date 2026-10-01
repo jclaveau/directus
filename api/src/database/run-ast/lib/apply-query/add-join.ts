@@ -81,7 +81,7 @@ export function addJoin({ path, collection, aliasMap, rootQuery, schema, knex }:
 			: aliasMap[pathParts[0]!]?.alias;
 
 		if (!existingAlias) {
-			const alias = generateAlias();
+			const alias = generateUnusedAlias(aliasMap);
 			const aliasKey = parentFields ? `${parentFields}.${pathParts[0]}` : pathParts[0]!;
 			const aliasedParentCollection = aliasMap[parentFields ?? '']?.alias || parentCollection;
 
@@ -176,4 +176,17 @@ export function addJoin({ path, collection, aliasMap, rootQuery, schema, knex }:
 			followRelation(pathParts.slice(1), parent, `${parentFields ? parentFields + '.' : ''}${pathParts[0]}`);
 		}
 	}
+}
+
+// Two joins sharing an alias fail with "table name specified more than once" (42712)
+function generateUnusedAlias(aliasMap: AliasMap): string {
+	const aliasEntries = Object.values(aliasMap);
+	const usedAliases = new Set(aliasEntries.map((aliasEntry) => aliasEntry.alias));
+	let alias = generateAlias();
+
+	while (usedAliases.has(alias)) {
+		alias = generateAlias();
+	}
+
+	return alias;
 }
