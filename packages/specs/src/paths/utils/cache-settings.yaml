@@ -89,6 +89,12 @@ patch:
               maximum: 100000
               nullable: true
               description: Over CACHE_SCOPED_MAX_PINS_PER_COLLECTION.
+            scoped_purge_retry_max_fingerprints:
+              type: integer
+              minimum: 0
+              maximum: 100000
+              nullable: true
+              description: Over CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS.
           example:
             audit_limit: 40
             value_max_size: null

@@ -952,8 +952,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							+ 'CACHE_SCOPED_INDEX_SCAN_COUNT), scoped_index_ttl_factor (a '
 							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR), '
 							+ 'scoped_max_pins_per_collection (an integer from 0 to 100000, '
-							+ 'over CACHE_SCOPED_MAX_PINS_PER_COLLECTION). A null value '
-							+ 'clears that field.',
+							+ 'over CACHE_SCOPED_MAX_PINS_PER_COLLECTION), '
+							+ 'scoped_purge_retry_max_fingerprints (an integer from 0 to '
+							+ '100000, over CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS). A '
+							+ 'null value clears that field.',
 					},
 					clear: {
 						type: 'boolean',

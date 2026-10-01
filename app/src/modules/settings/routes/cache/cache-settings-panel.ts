@@ -158,6 +158,17 @@ export const CACHE_SETTING_FIELDS: CacheSettingField[] = [
 		min: 0,
 		step: 1,
 	},
+	{
+		field: 'scoped_purge_retry_max_fingerprints',
+		variable: 'CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS',
+		kind: 'number',
+		description: 'How many slices of one collection a failed purge is retried '
+			+ 'by. Past it the retry purges the whole collection: a faster retry, '
+			+ 'a colder cache.',
+		unit: 'fingerprints',
+		min: 0,
+		step: 1,
+	},
 ];
 
 export interface CacheSettingRow extends CacheSettingField {

@@ -72,6 +72,11 @@ function answered(sharedSettings: Record<string, unknown> | null) {
 						source: 'env',
 						fallback: 250,
 					},
+					scoped_purge_retry_max_fingerprints: {
+						value: 100,
+						source: 'env',
+						fallback: 100,
+					},
 				},
 			},
 		},
@@ -122,6 +127,7 @@ describe('what the panel shows', () => {
 				'CACHE_SCOPED_INDEX_SCAN_COUNT',
 				'CACHE_SCOPED_INDEX_TTL_FACTOR',
 				'CACHE_SCOPED_MAX_PINS_PER_COLLECTION',
+				'CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS',
 			]);
 	});
 

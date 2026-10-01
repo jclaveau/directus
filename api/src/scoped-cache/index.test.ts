@@ -149,6 +149,7 @@ vi.mock('../scoped-cache-pending-purges.js', () => {
 		clearPendingScopedCachePurges: vi.fn(),
 		countFailedScopedCachePurgeRetry: vi.fn(),
 		listPendingScopedCachePurges: vi.fn(),
+		scopedCachePurgeRetryMaxFingerprints: () => 100,
 		recordPendingScopedCachePurge: vi.fn(),
 	};
 });
@@ -2187,14 +2188,16 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		purges a whole collection for a record naming it by its legacy pin — a row
-		written before the fingerprint index existed says which collection went stale
-		and nothing narrower, so its reach is the collection
+		purges a whole collection for a record naming more of its fingerprints than
+		a retry replays one by one — matching each entry against each one costs more
+		than dropping the collection
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheFingerprints: ['articles:id=1'],
+			scopedCacheFingerprints: Array.from({ length: 101 }, (_, id) => {
+				return `articles:&id=,${id},&`;
+			}),
 			ids: [7],
 		}]);
 
@@ -2223,29 +2226,35 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
-		purges a whole collection for a legacy pin whose value ends in an ampersand —
-		it is no fingerprint, and read as one it pins nothing the index files
+		replays a record naming as many fingerprints as the limit one by one, so an
+		entry pinned to a key none of them names stays cached
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
 			collection: 'articles',
-			scopedCacheFingerprints: ['articles:title=Q&'],
+			scopedCacheFingerprints: Array.from({ length: 100 }, (_, id) => {
+				return `articles:&id=,${id},&`;
+			}),
 			ids: [7],
 		}]);
 
 		indexedMembers = {
-			'ns:scoped-cache-index:fingerprint:articles:owner=alpha': [
-				'articles:&title=,q,&|ns:entry-alpha',
+			'ns:scoped-cache-index:fingerprint:articles:id=3': [
+				'articles:&id=,3,&|ns:entry-near',
+			],
+			'ns:scoped-cache-index:fingerprint:articles:id=5000': [
+				'articles:&id=,5000,&|ns:entry-far',
 			],
 		};
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alpha');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-near');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-far');
 
 		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
 			collection: 'articles',
-			mode: 'collection',
+			mode: 'slices',
 		}));
 	});
 

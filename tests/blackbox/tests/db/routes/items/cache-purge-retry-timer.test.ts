@@ -100,13 +100,11 @@ describe(oneLine`
 
 		// Every process on this database shares the table, so nothing here may take
 		// it wholesale: a sibling's in-flight record deleted from under it drains
-		// nothing and still lets that spec's "the purge ran" MISS pass. Both shapes a
-		// failure over this collection records name it — `collection` mode in the
-		// column, slices mode in the label — and no other spec writes either.
+		// nothing and still lets that spec's "the purge ran" MISS pass. Every row a
+		// failure over this collection records names it in its column, and no other
+		// spec writes one.
 		function ownRows() {
-			return db(PENDING)
-				.where({ collection: NOTE })
-				.orWhere('scoped_cache_fingerprint', 'like', `${NOTE}%`);
+			return db(PENDING).where({ collection: NOTE });
 		}
 
 		function readSlotA() {
@@ -150,7 +148,7 @@ describe(oneLine`
 			expect(write.status).toBe(200);
 
 			const recorded = await ownRows()
-				.select('mode', 'collection', 'scoped_cache_fingerprint');
+				.select('mode', 'collection', 'scoped_cache_fingerprints');
 
 			expect(recorded.length).toBeGreaterThan(0);
 

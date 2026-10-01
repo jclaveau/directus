@@ -24,6 +24,7 @@ import {
 	countFailedScopedCachePurgeRetry,
 	listPendingScopedCachePurges,
 	recordPendingScopedCachePurge,
+	scopedCachePurgeRetryMaxFingerprints,
 } from '../scoped-cache-pending-purges.js';
 import {
 	getMilliseconds,
@@ -891,44 +892,19 @@ async function purgeOrRecord(
 
 /**
  * What a recorded purge target resolves to: the fingerprints to retry it with,
- * grouped by the collection each names, plus the collections whose record is a
- * legacy pin from before this table held fingerprints.
- *
- * A rendered fingerprint opens its body with `:&` right after the collection and
- * ends on its `&` terminator, which is what tells it from a pin — a pin whose
- * value ends in `&` passes the second test alone. A pin cannot be replayed
- * against the fingerprint index — it names a slice the index no longer files
- * anything under — so its collection is purged whole instead: wider than the
- * record asked for, which is the direction a recovery is allowed to miss in.
+ * grouped by the collection each names, plus the collections it names too many
+ * of to replay one by one. Those are purged whole: every entry of the collection
+ * is matched against every fingerprint, so past the limit the precise retry costs
+ * more than dropping the collection, which is the direction a recovery is allowed
+ * to miss in.
  */
 function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 	declaredByCollection: Map<string, ScopedCacheFingerprint[]>;
-	pinKeyedCollections: Set<string>;
+	coarsenedCollections: string[];
 } {
 	const declaredByCollection = new Map<string, ScopedCacheFingerprint[]>();
-	const pinKeyedCollections = new Set<string>();
 
 	for (const target of recorded) {
-		const fieldAt = target.indexOf(':');
-
-		const rendersFingerprint = target.includes(':&')
-			&& target.endsWith('&');
-
-		// A pin never opens its field with `&`. A colon inside the collection, or a
-		// pin value carrying `:&`, leaves both readings open, and then both run: a
-		// missed slice is stale, a wider purge is not.
-		if (rendersFingerprint === false || target[fieldAt + 1] !== '&') {
-			pinKeyedCollections.add(
-				fieldAt === -1
-					? target
-					: target.slice(0, fieldAt),
-			);
-		}
-
-		if (rendersFingerprint === false) {
-			continue;
-		}
-
 		const fingerprint = parseScopedCacheFingerprint(target);
 		const declared = declaredByCollection.get(fingerprint.collection) ?? [];
 
@@ -936,7 +912,16 @@ function recordedScopedCachePurgeTargets(recorded: readonly string[]): {
 		declaredByCollection.set(fingerprint.collection, declared);
 	}
 
-	return { declaredByCollection, pinKeyedCollections };
+	const coarsenedCollections: string[] = [];
+
+	for (const [collection, declared] of declaredByCollection) {
+		if (declared.length > scopedCachePurgeRetryMaxFingerprints()) {
+			coarsenedCollections.push(collection);
+			declaredByCollection.delete(collection);
+		}
+	}
+
+	return { declaredByCollection, coarsenedCollections };
 }
 
 // The drain in flight, so the next trigger queues behind it rather than beside it.
@@ -1144,7 +1129,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				});
 			}
 			else {
-				const { declaredByCollection, pinKeyedCollections } =
+				const { declaredByCollection, coarsenedCollections } =
 					recordedScopedCachePurgeTargets(target.scopedCacheFingerprints);
 
 				// Every collection the record reaches, before any of them is read: a
@@ -1153,7 +1138,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 				// drain is about to prune.
 				await bumpScopedCacheEpochs([
 					...declaredByCollection.keys(),
-					...pinKeyedCollections,
+					...coarsenedCollections,
 				]);
 
 				let evicted = 0;
@@ -1178,8 +1163,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 				// Records its own collection-mode purge, as it does everywhere else:
 				// it is the one that knows how many sets its scan turned up.
-				for (const pinKeyedCollection of pinKeyedCollections) {
-					await purgeCollectionScopedCache(cache, pinKeyedCollection, {
+				for (const coarsenedCollection of coarsenedCollections) {
+					await purgeCollectionScopedCache(cache, coarsenedCollection, {
 						scopedCachePurgeId: purgeId,
 						retried: true,
 					});
@@ -1200,7 +1185,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					);
 				}
 
-				// Only for what the fingerprints took: a legacy pin's collection purge
+				// Only for what the fingerprints took: a coarsened collection's purge
 				// records itself, and counting it here would show its entries evicted
 				// twice.
 				if (declaredByCollection.size > 0) {

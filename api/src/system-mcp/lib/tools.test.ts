@@ -998,6 +998,11 @@ const cacheSettingsAnswer: CacheSettingsAnswer = {
 		scoped_index_scan_count: { value: 1000, source: 'env', fallback: 1000 },
 		scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
 		scoped_max_pins_per_collection: { value: 250, source: 'env', fallback: 250 },
+		scoped_purge_retry_max_fingerprints: {
+			value: 100,
+			source: 'env',
+			fallback: 100,
+		},
 	},
 };
 

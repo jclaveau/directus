@@ -1,8 +1,35 @@
 import type { CachePurgeMode } from '@directus/types';
+import { cacheSetting } from './cache-settings.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
+import { parseScopedCacheFingerprint } from './scoped-cache/fingerprint.js';
 
 const TABLE = 'directus_scoped_cache_pending_purges';
+
+/**
+ * How many fingerprints of one collection a retry replays one by one. Past it,
+ * the retry purges the collection whole: every cached entry of the collection is
+ * matched against every recorded fingerprint, so a precise retry costs entries
+ * times fingerprints, while a collection purge costs the entries alone.
+ *
+ * Measured by `tests/perf/pending-retry.perf.test.ts`: both costs grow with the
+ * entries cached, and they cross at about 35 fingerprints whatever that number.
+ * Over 10 000 entries, 101 fingerprints drained in 771 ms holding the event loop
+ * 40 ms at most, and 1001 in 5.1 s holding it 273 ms, where a collection purge
+ * took 352 ms holding it 15 ms. Over 100 000 entries, 101 held it 68 ms and 1001
+ * held it 400 ms; the collection purge was not measured there. The default is
+ * set by that loop block, not by the crossover.
+ *
+ * A write records one fingerprint per key plus the bare one, so the default
+ * keeps a write of up to 99 keys precise: a full batch of 100 is retried as its
+ * whole collection.
+ */
+export function scopedCachePurgeRetryMaxFingerprints(): number {
+	return cacheSetting('scoped_purge_retry_max_fingerprints');
+}
+
+// Ids per statement, well under Postgres' 65535 bind parameters.
+const ID_CHUNK_SIZE = 10_000;
 
 export interface PendingScopedCachePurge {
 	mode: CachePurgeMode;
@@ -38,30 +65,84 @@ export async function recordPendingScopedCachePurge(
 	purge: PendingScopedCachePurge,
 	error: unknown,
 ): Promise<void> {
-	// A coarse purge names no fingerprint, so it is one row carrying only its mode
-	// and collection. `namespace` carries neither.
-	const recorded: (string | null)[] = purge.scopedCacheFingerprints.length > 0
-		? purge.scopedCacheFingerprints
-		: [null];
-
 	try {
-		await getDatabase()(TABLE).insert(recorded.map((fingerprint) => {
-			return {
-				failed_at: new Date(),
-				mode: purge.mode,
-				collection: purge.collection,
-				scoped_cache_fingerprint: fingerprint,
-				attempts: 0,
-				last_error: errorText(error),
-			};
-		}));
+		const recordedRows = pendingScopedCachePurgeRows(purge)
+			.map((pendingRow) => {
+				return {
+					failed_at: new Date(),
+					mode: pendingRow.mode,
+					collection: pendingRow.collection,
+					// Serialized by hand: the pg driver sends a JS array as a Postgres
+					// array literal, which a json column refuses.
+					scoped_cache_fingerprints:
+						pendingRow.scopedCacheFingerprints.length > 0
+							? JSON.stringify(pendingRow.scopedCacheFingerprints)
+							: null,
+					attempts: 0,
+					last_error: errorText(error),
+				};
+			});
+
+		await getDatabase()(TABLE).insert(recordedRows);
 	}
 	catch (recordError: any) {
-		useLogger().warn(
+		// An error, not a warning: the entries this record stood for stay stale
+		// until their TTL, with nothing else coming for them.
+		useLogger().error(
 			recordError,
 			`[scoped-cache] could not record a failed purge for retry: ${recordError}`,
 		);
 	}
+}
+
+/**
+ * The rows one failed purge is recorded as: one, holding every fingerprint it
+ * named, plus one collection-mode row per collection it named more fingerprints
+ * of than a retry replays one by one. A coarse purge names no fingerprint, so it
+ * is one row carrying only its mode and collection; `namespace` carries neither.
+ */
+function pendingScopedCachePurgeRows(
+	purge: PendingScopedCachePurge,
+): PendingScopedCachePurge[] {
+	if (purge.mode !== 'slices') {
+		return [{ ...purge, scopedCacheFingerprints: [] }];
+	}
+
+	const fingerprintsByCollection = new Map<string, string[]>();
+
+	for (const fingerprint of new Set(purge.scopedCacheFingerprints)) {
+		const { collection } = parseScopedCacheFingerprint(fingerprint);
+		const collectionFingerprints = fingerprintsByCollection.get(collection) ?? [];
+
+		collectionFingerprints.push(fingerprint);
+		fingerprintsByCollection.set(collection, collectionFingerprints);
+	}
+
+	const keptFingerprints: string[] = [];
+	const coarsenedRows: PendingScopedCachePurge[] = [];
+
+	for (const [collection, fingerprints] of fingerprintsByCollection) {
+		if (fingerprints.length > scopedCachePurgeRetryMaxFingerprints()) {
+			coarsenedRows.push({
+				mode: 'collection',
+				collection,
+				scopedCacheFingerprints: [],
+			});
+
+			continue;
+		}
+
+		keptFingerprints.push(...fingerprints);
+	}
+
+	if (keptFingerprints.length === 0 && coarsenedRows.length > 0) {
+		return coarsenedRows;
+	}
+
+	return [
+		{ ...purge, scopedCacheFingerprints: keptFingerprints },
+		...coarsenedRows,
+	];
 }
 
 /**
@@ -80,40 +161,50 @@ export async function listPendingScopedCachePurges(): Promise<
 	PendingScopedCachePurgeRow[]
 > {
 	const rows = await getDatabase()(TABLE)
-		.select('id', 'mode', 'collection', 'scoped_cache_fingerprint')
+		.select('id', 'mode', 'collection', 'scoped_cache_fingerprints')
 		.orderBy('id', 'asc');
 
-	const byTarget = new Map<string, PendingScopedCachePurgeRow>();
+	const byTarget = new Map<string, {
+		mode: CachePurgeMode;
+		collection: string | null;
+		fingerprints: Set<string>;
+		ids: number[];
+	}>();
 
 	for (const row of rows) {
 		const target = `${row.mode} ${row.collection ?? ''}`;
-		const fingerprint = row.scoped_cache_fingerprint;
-		const seen = byTarget.get(target);
 
-		if (seen !== undefined) {
-			seen.ids.push(row.id);
-
-			if (
-				fingerprint !== null
-				&& seen.scopedCacheFingerprints.includes(fingerprint) === false
-			) {
-				seen.scopedCacheFingerprints.push(fingerprint);
-			}
-
-			continue;
-		}
-
-		byTarget.set(target, {
+		const seen = byTarget.get(target) ?? {
 			mode: row.mode,
 			collection: row.collection,
-			scopedCacheFingerprints: fingerprint === null
-				? []
-				: [fingerprint],
-			ids: [row.id],
-		});
+			fingerprints: new Set<string>(),
+			ids: [] as number[],
+		};
+
+		seen.ids.push(row.id);
+
+		const stored: string[] | string | null = row.scoped_cache_fingerprints;
+
+		// Postgres hands a json column back parsed, SQLite as its text.
+		const fingerprints: string[] = typeof stored === 'string'
+			? JSON.parse(stored)
+			: stored ?? [];
+
+		for (const fingerprint of fingerprints) {
+			seen.fingerprints.add(fingerprint);
+		}
+
+		byTarget.set(target, seen);
 	}
 
-	return [...byTarget.values()];
+	return [...byTarget.values()].map((pendingTarget) => {
+		return {
+			mode: pendingTarget.mode,
+			collection: pendingTarget.collection,
+			scopedCacheFingerprints: [...pendingTarget.fingerprints],
+			ids: pendingTarget.ids,
+		};
+	});
 }
 
 /** Drop the rows a retry finished with. */
@@ -122,9 +213,11 @@ export async function clearPendingScopedCachePurges(ids: number[]): Promise<void
 		return;
 	}
 
-	await getDatabase()(TABLE)
-		.whereIn('id', ids)
-		.delete();
+	for (let at = 0; at < ids.length; at += ID_CHUNK_SIZE) {
+		await getDatabase()(TABLE)
+			.whereIn('id', ids.slice(at, at + ID_CHUNK_SIZE))
+			.delete();
+	}
 }
 
 /**
@@ -140,10 +233,12 @@ export async function countFailedScopedCachePurgeRetry(
 		return;
 	}
 
-	await getDatabase()(TABLE)
-		.whereIn('id', ids)
-		.update({ last_error: errorText(error) })
-		.increment('attempts', 1);
+	for (let at = 0; at < ids.length; at += ID_CHUNK_SIZE) {
+		await getDatabase()(TABLE)
+			.whereIn('id', ids.slice(at, at + ID_CHUNK_SIZE))
+			.update({ last_error: errorText(error) })
+			.increment('attempts', 1);
+	}
 }
 
 function errorText(error: unknown): string {

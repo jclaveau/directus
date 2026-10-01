@@ -15,7 +15,7 @@ import {
 
 const TABLE = 'directus_scoped_cache_pending_purges';
 
-const warn = vi.fn();
+const error = vi.fn();
 
 // Rows the next `select` resolves, and what each terminal was called with. A fresh
 // builder per `db(table)` call on purpose: sharing one across calls makes an await
@@ -29,7 +29,7 @@ beforeEach(() => {
 	selectRows = [];
 	calls = [];
 	insertFails = null;
-	vi.mocked(useLogger).mockReturnValue({ warn } as any);
+	vi.mocked(useLogger).mockReturnValue({ error } as any);
 
 	vi.mocked(getDatabase).mockImplementation((() => {
 		return (table: string) => {
@@ -80,7 +80,7 @@ afterEach(() => {
 
 describe('recordPendingScopedCachePurge', () => {
 	it(oneLine`
-		writes one row per failed fingerprint, each aimed at its rendered form
+		writes one row for the whole failed purge, its fingerprints as one json list
 	`, async () => {
 		await recordPendingScopedCachePurge(
 			{
@@ -91,27 +91,111 @@ describe('recordPendingScopedCachePurge', () => {
 			new Error('Connection is closed.'),
 		);
 
-		expect(calls).toHaveLength(1);
-		expect(calls[0]!.table).toBe(TABLE);
+		expect(calls).toEqual([{
+			table: TABLE,
+			op: 'insert',
+			payload: [{
+				failed_at: expect.any(Date),
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_fingerprints: '["articles:&id=,1,&","articles:&author=,7,&"]',
+				attempts: 0,
+				last_error: 'Connection is closed.',
+			}],
+		}]);
+	});
+
+	it('records a fingerprint named twice once', async () => {
+		await recordPendingScopedCachePurge(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: ['articles:&id=,1,&', 'articles:&id=,1,&'],
+			},
+			new Error('Connection is closed.'),
+		);
+
+		expect(calls[0]!.payload[0].scoped_cache_fingerprints)
+			.toBe('["articles:&id=,1,&"]');
+	});
+
+	it(oneLine`
+		records a collection it names more fingerprints of than a retry replays one
+		by one as a collection purge, and keeps the other collections' fingerprints
+	`, async () => {
+		await recordPendingScopedCachePurge(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: [
+					...Array.from({ length: 101 }, (_, id) => `articles:&id=,${id},&`),
+					'authors:&id=,7,&',
+				],
+			},
+			new Error('Connection is closed.'),
+		);
 
 		expect(calls[0]!.payload).toEqual([
 			{
 				failed_at: expect.any(Date),
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_fingerprint: 'articles:&id=,1,&',
+				scoped_cache_fingerprints: '["authors:&id=,7,&"]',
 				attempts: 0,
 				last_error: 'Connection is closed.',
 			},
 			{
 				failed_at: expect.any(Date),
-				mode: 'slices',
+				mode: 'collection',
 				collection: 'articles',
-				scoped_cache_fingerprint: 'articles:&author=,7,&',
+				scoped_cache_fingerprints: null,
 				attempts: 0,
 				last_error: 'Connection is closed.',
 			},
 		]);
+	});
+
+	it(oneLine`
+		records only the collection purge when every fingerprint names a collection
+		past the limit
+	`, async () => {
+		await recordPendingScopedCachePurge(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: Array.from({ length: 101 }, (_, id) => {
+					return `articles:&id=,${id},&`;
+				}),
+			},
+			new Error('Connection is closed.'),
+		);
+
+		expect(calls[0]!.payload).toEqual([{
+			failed_at: expect.any(Date),
+			mode: 'collection',
+			collection: 'articles',
+			scoped_cache_fingerprints: null,
+			attempts: 0,
+			last_error: 'Connection is closed.',
+		}]);
+	});
+
+	it(oneLine`
+		keeps a collection named exactly as many times as the limit precise
+	`, async () => {
+		await recordPendingScopedCachePurge(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheFingerprints: Array.from({ length: 100 }, (_, id) => {
+					return `articles:&id=,${id},&`;
+				}),
+			},
+			new Error('Connection is closed.'),
+		);
+
+		expect(calls[0]!.payload).toHaveLength(1);
+		expect(calls[0]!.payload[0].mode).toBe('slices');
 	});
 
 	it(oneLine`
@@ -126,7 +210,7 @@ describe('recordPendingScopedCachePurge', () => {
 			failed_at: expect.any(Date),
 			mode: 'collection',
 			collection: 'articles',
-			scoped_cache_fingerprint: null,
+			scoped_cache_fingerprints: null,
 			attempts: 0,
 			last_error: 'Connection is closed.',
 		}]);
@@ -142,15 +226,15 @@ describe('recordPendingScopedCachePurge', () => {
 			failed_at: expect.any(Date),
 			mode: 'namespace',
 			collection: null,
-			scoped_cache_fingerprint: null,
+			scoped_cache_fingerprints: null,
 			attempts: 0,
 			last_error: 'Connection is closed.',
 		}]);
 	});
 
 	it(oneLine`
-		a failing insert is logged and swallowed — the mutation already committed, so
-		throwing here would answer 500 for a write that succeeded
+		a failing insert is logged as an error and swallowed — the mutation already
+		committed, so throwing here would answer 500 for a write that succeeded
 	`, async () => {
 		insertFails = new Error('deadlock detected');
 
@@ -163,7 +247,11 @@ describe('recordPendingScopedCachePurge', () => {
 			new Error('Connection is closed.'),
 		)).resolves.toBeUndefined();
 
-		expect(warn).toHaveBeenCalledOnce();
+		expect(error).toHaveBeenCalledWith(
+			insertFails,
+			'[scoped-cache] could not record a failed purge for retry: '
+			+ 'Error: deadlock detected',
+		);
 	});
 
 	it('truncates the recorded error to 500 characters', async () => {
@@ -195,8 +283,8 @@ describe('recordPendingScopedCachePurge', () => {
 
 describe('listPendingScopedCachePurges', () => {
 	it(oneLine`
-		collapses every slice of one collection to a single retry carrying every row
-		it stands for, and keeps the modes apart
+		collapses every record of one collection to a single retry carrying every row
+		it stands for and each fingerprint once, and keeps the modes apart
 	`, async () => {
 		// An outage records the same slice once per write that touched it, so the
 		// duplicates here are the normal shape rather than an edge case.
@@ -205,25 +293,19 @@ describe('listPendingScopedCachePurges', () => {
 				id: 1,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_fingerprint: 'articles:&id=,1,&',
+				scoped_cache_fingerprints: ['articles:&id=,1,&', 'articles:&id=,2,&'],
 			},
 			{
 				id: 2,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_fingerprint: 'articles:&id=,2,&',
+				scoped_cache_fingerprints: ['articles:&id=,1,&'],
 			},
 			{
 				id: 3,
-				mode: 'slices',
-				collection: 'articles',
-				scoped_cache_fingerprint: 'articles:&id=,1,&',
-			},
-			{
-				id: 4,
 				mode: 'collection',
 				collection: 'articles',
-				scoped_cache_fingerprint: null,
+				scoped_cache_fingerprints: null,
 			},
 		];
 
@@ -232,15 +314,31 @@ describe('listPendingScopedCachePurges', () => {
 				mode: 'slices',
 				collection: 'articles',
 				scopedCacheFingerprints: ['articles:&id=,1,&', 'articles:&id=,2,&'],
-				ids: [1, 2, 3],
+				ids: [1, 2],
 			},
 			{
 				mode: 'collection',
 				collection: 'articles',
 				scopedCacheFingerprints: [],
-				ids: [4],
+				ids: [3],
 			},
 		]);
+	});
+
+	it('reads a list a driver hands back as its json text', async () => {
+		selectRows = [{
+			id: 1,
+			mode: 'slices',
+			collection: 'articles',
+			scoped_cache_fingerprints: '["articles:&id=,1,&"]',
+		}];
+
+		expect(await listPendingScopedCachePurges()).toEqual([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheFingerprints: ['articles:&id=,1,&'],
+			ids: [1],
+		}]);
 	});
 
 	it(oneLine`
@@ -252,19 +350,19 @@ describe('listPendingScopedCachePurges', () => {
 				id: 1,
 				mode: 'slices',
 				collection: 'articles',
-				scoped_cache_fingerprint: null,
+				scoped_cache_fingerprints: null,
 			},
 			{
 				id: 2,
 				mode: 'collection',
 				collection: 'articles',
-				scoped_cache_fingerprint: null,
+				scoped_cache_fingerprints: null,
 			},
 			{
 				id: 3,
 				mode: 'namespace',
 				collection: null,
-				scoped_cache_fingerprint: null,
+				scoped_cache_fingerprints: null,
 			},
 		];
 
@@ -282,6 +380,19 @@ describe('clearPendingScopedCachePurges', () => {
 		await clearPendingScopedCachePurges([4, 9]);
 
 		expect(calls).toEqual([{ table: TABLE, op: 'delete', payload: [4, 9] }]);
+	});
+
+	it(oneLine`
+		deletes past ten thousand rows in chunks, each statement under the bind
+		parameter limit
+	`, async () => {
+		await clearPendingScopedCachePurges(
+			Array.from({ length: 10_001 }, (_, at) => at + 1),
+		);
+
+		expect(calls).toHaveLength(2);
+		expect(calls[0]!.payload).toHaveLength(10_000);
+		expect(calls[1]).toEqual({ table: TABLE, op: 'delete', payload: [10_001] });
 	});
 
 	it(oneLine`
@@ -313,6 +424,27 @@ describe('countFailedScopedCachePurgeRetry', () => {
 				amount: 1,
 			},
 		}]);
+	});
+
+	it('counts past ten thousand rows in chunks', async () => {
+		await countFailedScopedCachePurgeRetry(
+			Array.from({ length: 10_001 }, (_, at) => at + 1),
+			new Error('Connection is closed.'),
+		);
+
+		expect(calls).toHaveLength(2);
+		expect(calls[0]!.payload.ids).toHaveLength(10_000);
+
+		expect(calls[1]).toEqual({
+			table: TABLE,
+			op: 'increment',
+			payload: {
+				ids: [10_001],
+				patch: { last_error: 'Connection is closed.' },
+				column: 'attempts',
+				amount: 1,
+			},
+		});
 	});
 
 	it(oneLine`

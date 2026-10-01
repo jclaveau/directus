@@ -29,7 +29,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, startup, cache, pin-fanout]
+        options: [all, startup, cache, pin-fanout, pending-retry]
       baseline:
         description: 'What to measure it against (default: the ref before it)'
         required: false
@@ -82,7 +82,8 @@ jobs:
     # mean. A failed Check means the commit does not run; there is nothing to measure.
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.suite != 'cache'
-       && inputs.suite != 'pin-fanout') ||
+       && inputs.suite != 'pin-fanout'
+       && inputs.suite != 'pending-retry') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
@@ -252,7 +253,8 @@ jobs:
     # reports is a ratio between configurations of ONE build.
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.suite != 'startup'
-       && inputs.suite != 'pin-fanout') ||
+       && inputs.suite != 'pin-fanout'
+       && inputs.suite != 'pending-retry') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
@@ -799,5 +801,55 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-devserver-${{ steps.commits.outputs.head_short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  pending-retry:
+    name: Pending purge retry
+    # Dispatch only: the measurement behind #392's retry threshold, which gates
+    # nothing.
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'pending-retry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: true
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          pnpm install
+
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the retry
+        run: pnpm --filter tests-perf bench:pending-retry
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: cat tests/perf/results/pending-retry.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-pending-retry-${{ github.sha }}
           path: tests/perf/results/
           if-no-files-found: warn
