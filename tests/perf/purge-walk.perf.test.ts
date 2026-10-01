@@ -359,6 +359,7 @@ async function assertRegistryPath(port: number): Promise<void> {
 
 type PurgeAnswer = {
 	durationsMs: number[];
+	finishedAtEpochMs: number;
 	wallMs: number;
 	cpuMs: number;
 	maxLoopDelayMs: number;
@@ -429,6 +430,8 @@ type ArmResult = {
 	rowWriteAloneMs: number;
 	rowWriteDuringMs: number;
 	rowWriteDuringConcurrent: number;
+	rowWriteOverlapped: number;
+	rowWriteTries: number;
 };
 
 async function timeWalk(
@@ -537,17 +540,35 @@ async function measureArm(armName: string, cli: string): Promise<ArmResult> {
 			aloneMs.push(await timeRowWrite(ports[0]!, rowId, at));
 		}
 
-		// The write starts once the walks have, on the process running them.
+		// The write starts once the walks have, on the process running them. A
+		// write that started after the last walk ended measured nothing of them,
+		// so it is dropped and another taken, up to three tries per sample.
 		const rowWriteDuringConcurrent = Math.max(...concurrencies);
 		const duringMs: number[] = [];
+		let rowWriteTries = 0;
 
-		for (let at = 0; at < ROW_WRITES; at++) {
+		while (
+			duringMs.length < ROW_WRITES
+			&& rowWriteTries < ROW_WRITES * 3
+		) {
+			rowWriteTries += 1;
 			await seedIndex(ports[0]!, concurrentSets);
 
 			const walks = purge(ports[0]!, 'collection', rowWriteDuringConcurrent);
 			await new Promise((wake) => setTimeout(wake, 100));
-			duringMs.push(await timeRowWrite(ports[0]!, rowId, ROW_WRITES + at));
-			await walks;
+			const writeStartedAtEpochMs = Date.now();
+
+			const writeMs = await timeRowWrite(
+				ports[0]!,
+				rowId,
+				ROW_WRITES + rowWriteTries,
+			);
+
+			const { finishedAtEpochMs } = await walks;
+
+			if (writeStartedAtEpochMs < finishedAtEpochMs) {
+				duringMs.push(writeMs);
+			}
 		}
 
 		return {
@@ -559,6 +580,8 @@ async function measureArm(armName: string, cli: string): Promise<ArmResult> {
 			rowWriteAloneMs: summarise('row write alone', aloneMs).median,
 			rowWriteDuringMs: summarise('row write during', duringMs).median,
 			rowWriteDuringConcurrent,
+			rowWriteOverlapped: duringMs.length,
+			rowWriteTries,
 		};
 	}
 	finally {
@@ -641,6 +664,11 @@ function writeReport(results: ArmResult[]): string[] {
 		? `\`${head.armName}\` only.`
 		: `Each cell \`${head.armName} vs ${baseline.armName}\`.`;
 
+	const overlapped = baseline === undefined
+		? `${head.rowWriteOverlapped} of ${head.rowWriteTries}`
+		: `${head.rowWriteOverlapped} of ${head.rowWriteTries} vs`
+			+ ` ${baseline.rowWriteOverlapped} of ${baseline.rowWriteTries}`;
+
 	const lines = [
 		'### Collection purge walk',
 		'',
@@ -681,7 +709,8 @@ function writeReport(results: ArmResult[]): string[] {
 			head.rowWriteDuringMs,
 			baseline?.rowWriteDuringMs,
 			'ms',
-		)}.`,
+		)}, from the writes that started before the walks ended`
+		+ ` (${overlapped}).`,
 	];
 
 	return lines;

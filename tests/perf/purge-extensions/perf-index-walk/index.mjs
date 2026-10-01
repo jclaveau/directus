@@ -120,8 +120,8 @@ function runPurge(cache, collection, kind, indexPath) {
  *
  * `POST /perf-index-walk/purge` with `{ collection, kind, concurrent }` starts
  * `concurrent` purges of the collection at once, and answers how long each
- * took, the CPU the process spent meanwhile and the longest the event loop was
- * held.
+ * took, when the last ended, the CPU the process spent meanwhile and the longest
+ * the event loop was held.
  */
 export default function registerEndpoint(router, { getSchema }) {
 	router.use((request, response, next) => {
@@ -191,6 +191,7 @@ export default function registerEndpoint(router, { getSchema }) {
 
 			response.json({
 				durationsMs,
+				finishedAtEpochMs: Date.now(),
 				wallMs: performance.now() - startedAt,
 				cpuMs: (cpu.user + cpu.system) / 1000,
 				maxLoopDelayMs: loopDelay.max / 1e6,
