@@ -283,7 +283,7 @@ export function scopedCacheCollectionPinsFromRows(
  * them one by one.
  *
  * Sized from the fill a pin costs, measured by `tests/perf/pin-fanout.perf.test.ts`
- * (#392): a read pinning 200 parents added 435 Redis commands over an uncached
+ * (#392): its read pinning 200 parents added 435 Redis commands over an uncached
  * read at 250, and 8 at 64, where it falls back to the parents' slices or to the
  * bare collection. What that buys back is on the write: over 1600 such reads
  * cached, one parent's update evicted 153 of them pinned by key, 200 through a

@@ -143,7 +143,7 @@ const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ??
 // sending the tag script by hash cut the bytes without touching the count.
 // Down from 500: 446 measured with the fan read's 200 authors pinned by key under
 // the default pin cap of 250. A cap of 64 falls back to their 8 tenant slices and
-// measured 31 (#392).
+// measured 31, both counted in all rather than over an uncached read (#392).
 const maxCommandsPerFanFill =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 460);
 
@@ -161,11 +161,12 @@ const maxWriteCommandScaling =
 const targetMissVsOff = 1.85;
 const targetMissVsFull = 1.45;
 
-// The absolute ceilings, gated on `full` and `scoped`. What the counts would be
-// with the response cache alone paying for itself: two reads on a hit, and on a
-// fill the value and its sidecar around the read. A fan fill is held to the flat
-// fill's: a read's cost to Redis should not grow with the number of rows it
-// returns.
+// The absolute ceilings. What the counts would be with the response cache alone
+// paying for itself: two reads on a hit, and on a fill the value and its sidecar
+// around the read. A fan fill is held to the flat fill's: a read's cost to Redis
+// should not grow with the number of rows it returns. `full` is held to them;
+// `scoped` pays for its filing on top, and its fills are held to their own pair
+// below until the index stops costing a set per pin (#587).
 const maxCommandsAddedPerHit =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_HIT'] ?? 2);
 
@@ -177,11 +178,12 @@ const maxCommandsAddedPerFanFill =
 
 // A scoped fill adds the epoch capture, its re-read, and the filing script: the
 // script plus a TTL, SADD and EXPIRE per index set, and the same three on the
-// set naming them. One set on a flat fill, 11 measured. The fan read pins its
+// set naming them. One set on a flat fill, 10.99 to 11.08 measured over three
+// runs of one build, so the gate sits a command above. The fan read pins its
 // 200 authors by key under the default pin cap, a set each, 446 measured: Redis
 // has no SADD over many keys, so that is the floor of a key pin (#392).
 const maxCommandsAddedPerScopedFill =
-	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FILL'] ?? 11);
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FILL'] ?? 12);
 
 const maxCommandsAddedPerScopedFanFill =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FAN_FILL'] ?? 460);
