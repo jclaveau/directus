@@ -71,6 +71,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7', '8'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toEqual([{
 			collection: 'segment_course',
 			pinnedScope: {
@@ -107,6 +108,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				},
 			],
 			'student_course_id.owner',
+			'segment_course',
 		)).toEqual([
 			{
 				collection: 'segment_course',
@@ -137,6 +139,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				{ collection: 'segment_course', pinnedScope: { status: ['open'] } },
 			],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 
 		expect(snapshot).not.toHaveBeenCalled();
@@ -155,6 +158,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				},
 			],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 
 		expect(snapshot).not.toHaveBeenCalled();
@@ -170,6 +174,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7'] },
 			}],
 			'student_course_id',
+			'segment_course',
 		)).toBeNull();
 
 		expect(snapshot).not.toHaveBeenCalled();
@@ -185,6 +190,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7'] },
 			}],
 			null,
+			'segment_course',
 		)).toBeNull();
 	});
 
@@ -198,6 +204,61 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
+		)).toBeNull();
+
+		expect(snapshot).not.toHaveBeenCalled();
+	});
+
+	it('reads nothing back when the mutation is on the hop collection', async () => {
+		expect(await scopedCacheDeclaredIndexPins(
+			schema,
+			knex,
+			'segment_course',
+			[{
+				collection: 'segment_course',
+				pinnedScope: { student_course_id: ['7'] },
+			}],
+			'student_course_id.owner',
+			'student_courses',
+		)).toBeNull();
+
+		expect(snapshot).not.toHaveBeenCalled();
+	});
+
+	it('reads nothing back when the mutation is further down the path', async () => {
+		snapshot.mockResolvedValue({
+			canResolveSlicesFromRows: true,
+			rows: [{
+				key: 7,
+				row: {},
+				fingerprint: {
+					collection: 'student_courses',
+					pinnedScope: { 'id': ['7'], 'teaching_unit.owner': ['alice'] },
+				},
+			}],
+		});
+
+		expect(await scopedCacheDeclaredIndexPins(
+			{
+				...schema,
+				relations: [
+					...schema.relations,
+					{
+						collection: 'student_courses',
+						field: 'teaching_unit',
+						related_collection: 'teaching_units',
+					},
+				],
+			},
+			knex,
+			'segment_course',
+			[{
+				collection: 'segment_course',
+				pinnedScope: { student_course_id: ['7'] },
+			}],
+			'student_course_id.teaching_unit.owner',
+			'teaching_units',
 		)).toBeNull();
 
 		expect(snapshot).not.toHaveBeenCalled();
@@ -213,6 +274,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7', '\x00null'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 
 		expect(snapshot).not.toHaveBeenCalled();
@@ -230,6 +292,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				},
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 
 		expect(snapshot).not.toHaveBeenCalled();
@@ -247,6 +310,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				},
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		);
 
 		expect(snapshot).toHaveBeenCalledOnce();
@@ -262,6 +326,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7', '9'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 	});
 
@@ -284,6 +349,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 	});
 
@@ -309,6 +375,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 	});
 
@@ -326,6 +393,7 @@ describe('scopedCacheDeclaredIndexPins', () => {
 				pinnedScope: { student_course_id: ['7'] },
 			}],
 			'student_course_id.owner',
+			'segment_course',
 		)).toBeNull();
 
 		expect(warn).toHaveBeenCalledWith(

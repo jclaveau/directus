@@ -39,6 +39,11 @@ function pinnedTokensAt(
  * filed under. A pin on any other field could only be read back through the rows
  * holding it now — which a moved row no longer is.
  *
+ * That function is read after the mutation committed, so a mutation of a
+ * collection the path walks through — `student_courses` or `teaching_units` — may
+ * have just changed it, and the value an entry was filed under is gone: the store
+ * reads the index whole for that one.
+ *
  * What it returns is what the store scans, never what the purge matches: the
  * match still tests the pins as declared. A bare pin is left out of it, since the
  * entries it reaches pin nothing, and every other pin reaches those too.
@@ -49,6 +54,7 @@ export async function scopedCacheDeclaredIndexPins(
 	collection: string,
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
+	mutatedCollection: string,
 ): Promise<ScopedCacheFingerprint[] | null> {
 	const [hopField, ...terminalSegments] = indexPath?.split('.') ?? [];
 
@@ -56,9 +62,23 @@ export async function scopedCacheDeclaredIndexPins(
 		return null;
 	}
 
-	const relatedCollection = schema.relations.find((relation) => {
-		return relation.collection === collection && relation.field === hopField;
-	})?.related_collection;
+	const walkedCollections: string[] = [];
+
+	for (const segment of [hopField, ...terminalSegments.slice(0, -1)]) {
+		const walkedFrom = walkedCollections.at(-1) ?? collection;
+
+		const reachedCollection = schema.relations.find((relation) => {
+			return relation.collection === walkedFrom && relation.field === segment;
+		})?.related_collection;
+
+		if (!reachedCollection || reachedCollection === mutatedCollection) {
+			return null;
+		}
+
+		walkedCollections.push(reachedCollection);
+	}
+
+	const [relatedCollection] = walkedCollections;
 
 	const relatedPrimaryKey = relatedCollection
 		? schema.collections[relatedCollection]?.primary

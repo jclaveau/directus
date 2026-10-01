@@ -458,16 +458,18 @@ async function purgeScopedCacheDeclaredPins(
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
 	context: EventContext | null,
+	mutatedCollection: string | null,
 ): Promise<ScopedCachePurgeSweep> {
 	// What the store reads, narrowed to the index values the pins' relation reaches
 	// when it can be read back. The match below still tests the pins as declared.
-	const scannedPins = context?.schema
+	const scannedPins = context?.schema && mutatedCollection !== null
 		? await scopedCacheDeclaredIndexPins(
 			context.schema,
 			context.database,
 			collection,
 			declared,
 			indexPath,
+			mutatedCollection,
 		)
 		: null;
 
@@ -546,6 +548,7 @@ async function purgeScopedCacheDeclaredFingerprints(
 			declared,
 			declaredIndexPath,
 			context,
+			collection,
 		);
 
 		evicted += sweep.evicted;
@@ -1170,6 +1173,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						cache,
 						declaredCollection,
 						declared,
+						null,
 						null,
 						null,
 					);
