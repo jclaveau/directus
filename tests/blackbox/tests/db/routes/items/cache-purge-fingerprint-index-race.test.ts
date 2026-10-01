@@ -49,13 +49,13 @@ const decoyChunkSize = 4_000;
 const readHoldMs = 400;
 
 // Reads fired at staggered offsets after the purge bumps its counter, which it does
-// right before its pass, so one of them files its fingerprint mid-pass wherever the
-// runner's real pass happens to end. Counted from the bump rather than from the
-// write: a loaded runner can spend over a second on the write before its purge
-// starts, and reads aimed from the write then all land before the pass, which finds
-// every one. Each carries a distinct `limit`, so each is its own cache entry rather
-// than overwriting the last.
-const readLeadsMs = [100, 300, 500, 700, 900];
+// right before its pass. A member filed mid-pass survives only if the pass already
+// went by the slot SSCAN finds it in, so the later in the pass a read files, the
+// likelier it survives: a 4s pass found all five reads fired 300-1100ms in. Spread
+// across 2s, the last reads land late in a long pass, and past the end of a short
+// one. Each carries a distinct `limit`, so each is its own cache entry rather than
+// overwriting the last.
+const readLeadsMs = [300, 700, 1100, 1500, 1900];
 
 const startedAt = Date.now();
 
