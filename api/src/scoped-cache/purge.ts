@@ -458,18 +458,18 @@ async function purgeScopedCacheDeclaredPins(
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
 	context: EventContext | null,
-	mutatedCollection: string | null,
+	mutatedCollections: readonly string[] | null,
 ): Promise<ScopedCachePurgeSweep> {
 	// What the store reads, narrowed to the index values the pins' relation reaches
 	// when it can be read back. The match below still tests the pins as declared.
-	const scannedPins = context?.schema && mutatedCollection !== null
+	const scannedPins = context?.schema && mutatedCollections !== null
 		? await scopedCacheDeclaredIndexPins(
 			context.schema,
 			context.database,
 			collection,
 			declared,
 			indexPath,
-			mutatedCollection,
+			mutatedCollections,
 		)
 		: null;
 
@@ -507,6 +507,7 @@ async function purgeScopedCacheDeclaredFingerprints(
 	declaredFingerprints: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
 	context: EventContext | null,
+	changedCollections: readonly string[],
 ): Promise<number> {
 	const schema = context?.schema ?? null;
 
@@ -548,7 +549,7 @@ async function purgeScopedCacheDeclaredFingerprints(
 			declared,
 			declaredIndexPath,
 			context,
-			collection,
+			[collection, ...changedCollections],
 		);
 
 		evicted += sweep.evicted;
@@ -1501,6 +1502,10 @@ export async function purgeScopedCache(
 		// for — a slice on another collection, a slice the write never touched — so
 		// it is purged by what it pins, not by what was written.
 		declaredFingerprints?: readonly ScopedCacheFingerprint[];
+		// The collections the database changed under the mutation besides this one,
+		// such as a delete's `SET NULL` on another collection's fk. A declared pin
+		// is not read back through any of them.
+		changedCollections?: readonly string[];
 	} = {},
 ): Promise<ScopedCacheFingerprint[] | null> {
 	// Returns what the purge reached so a caller can surface it (dev-only debug
@@ -1661,6 +1666,7 @@ export async function purgeScopedCache(
 					purgedByPin,
 					options.indexPath ?? null,
 					context,
+					options.changedCollections ?? [],
 				),
 			]);
 

@@ -42,7 +42,8 @@ function pinnedTokensAt(
  * That function is read after the mutation committed, so a mutation of a
  * collection the path walks through — `student_courses` or `teaching_units` — may
  * have just changed it, and the value an entry was filed under is gone: the store
- * reads the index whole for that one.
+ * reads the index whole for that one. So does a collection the database changed
+ * under the mutation, as a delete's `SET NULL` rewrites `teaching_units.owner`.
  *
  * What it returns is what the store scans, never what the purge matches: the
  * match still tests the pins as declared. A bare pin is left out of it, since the
@@ -54,7 +55,7 @@ export async function scopedCacheDeclaredIndexPins(
 	collection: string,
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
-	mutatedCollection: string,
+	mutatedCollections: readonly string[],
 ): Promise<ScopedCacheFingerprint[] | null> {
 	const [hopField, ...terminalSegments] = indexPath?.split('.') ?? [];
 
@@ -71,7 +72,7 @@ export async function scopedCacheDeclaredIndexPins(
 			return relation.collection === walkedFrom && relation.field === segment;
 		})?.related_collection;
 
-		if (!reachedCollection || reachedCollection === mutatedCollection) {
+		if (!reachedCollection || mutatedCollections.includes(reachedCollection)) {
 			return null;
 		}
 

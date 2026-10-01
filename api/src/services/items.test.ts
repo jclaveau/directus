@@ -1791,7 +1791,7 @@ describe('Services / Items / purgeScopedCache', () => {
 			// A purge shown no rows carries none of their narrowing and sweeps its
 			// pins whole, as it did before composite pins. The declared list is the
 			// hooks' channel, and this purge answers for no hook.
-			{ declaredFingerprints: [] },
+			{ declaredFingerprints: [], changedCollections: [] },
 		);
 	});
 });

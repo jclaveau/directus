@@ -797,4 +797,71 @@ describe('a purge declaring a pin on its index path\'s first hop', () => {
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alice');
 		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bob');
 	});
+
+	it(oneLine`
+		reads every index set when the database changed a collection on the path
+		under the mutation, since the value its key reached before is gone
+	`, async () => {
+		vi.mocked(ItemScopedCacheService).mockImplementation(function () {
+			return {
+				snapshot: async () => {
+					return {
+						canResolveSlicesFromRows: true,
+						rows: [{
+							key: 7,
+							row: {},
+							fingerprint: {
+								collection: 'student_courses',
+								pinnedScope: { id: ['7'], owner: ['alice'] },
+							},
+						}],
+					};
+				},
+			} as any;
+		});
+
+		members = {
+			['ns:scoped-cache-index:fingerprint:segment_course:'
+				+ 'student_course_id.owner=alice']: [
+				'segment_course:&student_course_id.owner=,alice,&|ns:entry-alice',
+			],
+			['ns:scoped-cache-index:fingerprint:segment_course:'
+				+ 'student_course_id.owner=bob']: [
+				'segment_course:&student_course_id.owner=,bob,&|ns:entry-bob',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'segment_course',
+			[],
+			{
+				schema: {
+					collections: {
+						segment_course: {
+							primary: 'id',
+							scopedCacheFields: ['student_course_id'],
+						},
+						student_courses: { primary: 'id', scopedCacheFields: ['owner'] },
+					},
+					relations: [{
+						collection: 'segment_course',
+						field: 'student_course_id',
+						related_collection: 'student_courses',
+					}],
+				},
+				database: {},
+			} as any,
+			{
+				declaredFingerprints: [{
+					collection: 'segment_course',
+					pinnedScope: { student_course_id: ['7'] },
+				}],
+				changedCollections: ['student_courses'],
+			},
+		);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alice');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-bob');
+	});
 });
