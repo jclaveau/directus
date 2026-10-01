@@ -263,8 +263,9 @@ export interface ScopedCachePurgeHandle {
  * A collection scoped through a relation (a dotted/M2O field) has its terminals
  * read from the database by the rows' keys, as an `ItemsService` write snapshots
  * them. Call it once the write has committed: the read runs outside your
- * transaction. A key it does not find (a deleted row) or a read that fails
- * degrades to a collection-wide purge.
+ * transaction, so before the commit it sees an update's old version. A key it
+ * does not find (a deleted row) or a read that fails degrades to a
+ * collection-wide purge.
  *
  * The rows say only where they are now, never where they were: a write that moves
  * a row to another scope value — a flat field or a relational one — leaves its old

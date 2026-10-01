@@ -10,6 +10,10 @@ Feature: purgeForMutatedRows on a relationally-scoped collection purges the rows
   bypassing the items service, and hands `purgeForMutatedRows` their "id" and
   "account".
 
+  The unreadable write adds the key "not-a-key": the deleted rows already cover a
+  key the read back does not find, while postgres refuses this one in the read
+  itself, so that scenario covers the read back throwing.
+
   Scenario: a raw write to one owner's entries purges that owner's reads only
     Given these rows of rawpurge_account:
       | markers   | id | owner  |

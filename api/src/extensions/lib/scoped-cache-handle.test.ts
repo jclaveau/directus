@@ -14,13 +14,14 @@ const state = vi.hoisted(() => {
 
 const purgeScopedCache = vi.hoisted(() => vi.fn());
 const scopedCacheSnapshot = vi.hoisted(() => vi.fn());
+const loggerWarn = vi.hoisted(() => vi.fn());
 
 vi.mock('../../database/index.js', () => {
 	return { default: () => ({}) };
 });
 
 vi.mock('../../logger/index.js', () => {
-	return { useLogger: () => ({ warn: vi.fn() }) };
+	return { useLogger: () => ({ warn: loggerWarn }) };
 });
 
 vi.mock('../../cache.js', () => {
@@ -322,9 +323,17 @@ describe('createScopedCacheExtensionHandle', () => {
 		const getRelationalSchema = schemaScopedBy(['account.owner']);
 		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
 
-		scopedCacheSnapshot.mockRejectedValueOnce(new Error('pool exhausted'));
+		const snapshotError = new Error('pool exhausted');
+
+		scopedCacheSnapshot.mockRejectedValueOnce(snapshotError);
 
 		await handle.purgeForMutatedRows('articles', [{ id: 1, account: 42 }]);
+
+		expect(loggerWarn).toHaveBeenCalledWith(
+			snapshotError,
+			'[scoped-cache] purgeForMutatedRows could not read back articles, '
+			+ 'purging it whole',
+		);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});

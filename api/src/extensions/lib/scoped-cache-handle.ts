@@ -63,19 +63,22 @@ export function createScopedCacheExtensionHandle(
 			const primaryKeyField = collectionSchema?.primary;
 
 			// A raw row lacks the relational terminals; the snapshot joins them in by key.
-			if (hasRelationalScope && primaryKeyField !== undefined) {
-				const mutatedKeys = mutatedRows.map((mutatedRow) => {
-					return mutatedRow[primaryKeyField] as PrimaryKey | null | undefined;
-				});
+			if (hasRelationalScope) {
+				// No key to read a row back by: even a terminal the row spells out is
+				// not trusted, since the flat path would bind it as given.
+				if (primaryKeyField === undefined || mutatedRows.some((mutatedRow) => {
+					const mutatedKey = mutatedRow[primaryKeyField];
 
-				if (mutatedKeys.some((mutatedKey) => {
 					return mutatedKey === undefined || mutatedKey === null;
 				})) {
 					await purgeScopedCache(cache, collection, null);
 					return;
 				}
 
-				const distinctKeys = [...new Set(mutatedKeys as PrimaryKey[])];
+				const distinctKeys = [...new Set(mutatedRows.map((mutatedRow) => {
+					return mutatedRow[primaryKeyField] as PrimaryKey;
+				}))];
+
 				let scopedCacheSnapshot: ScopedCacheSnapshot;
 
 				// The caller's write has committed already, so a failed read must
@@ -93,7 +96,7 @@ export function createScopedCacheExtensionHandle(
 					useLogger().warn(
 						error,
 						`[scoped-cache] purgeForMutatedRows could not read back `
-						+ `${collection}, purging it whole: ${error}`,
+						+ `${collection}, purging it whole`,
 					);
 
 					await purgeScopedCache(cache, collection, null);
@@ -103,8 +106,8 @@ export function createScopedCacheExtensionHandle(
 				const snapshotFingerprints =
 					scopedCacheMutatedFingerprints(scopedCacheSnapshot);
 
-				// A key the read did not find — a deleted row, or one an uncommitted
-				// transaction holds — has no terminal left to name its old slice by.
+				// A key the read did not find — a deleted row, or an uncommitted insert
+				// — has no terminal left to name its old slice by.
 				if (
 					snapshotFingerprints === null
 					|| scopedCacheSnapshot.rows.length < distinctKeys.length
@@ -118,11 +121,6 @@ export function createScopedCacheExtensionHandle(
 					indexPath: scopedCacheIndexPath(schema, collection),
 				});
 
-				return;
-			}
-
-			if (hasRelationalScope) {
-				await purgeScopedCache(cache, collection, null);
 				return;
 			}
 
