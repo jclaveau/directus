@@ -166,7 +166,7 @@ export async function scopedCacheDeclaredIndexPins(
 			}
 
 			for (const reachedToken of reachedTokens) {
-				terminalTokens.add(reachedToken);
+				terminalTokens.add(`${reachedToken}-broken`);
 			}
 		}
 
