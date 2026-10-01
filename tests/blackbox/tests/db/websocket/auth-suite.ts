@@ -11,6 +11,7 @@ import knex, { Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 const authenticationTimeoutSeconds = 1;
 const slightDelay = 100;
@@ -355,8 +356,6 @@ export function describeAuthPings(authMethod: WebSocketAuthMethod): void {
 							error = err;
 						}
 
-						ws.conn.close();
-
 						// Assert
 						switch (authMethod) {
 							case 'public':
@@ -370,10 +369,16 @@ export function describeAuthPings(authMethod: WebSocketAuthMethod): void {
 
 								break;
 							case 'handshake':
+								// The refusal is an AUTH_FAILED message then a close, and the
+								// read catches the message or the close, whichever lands first.
+								await ws.waitForState(WebSocket.CLOSED);
+								break;
 							case 'strict':
 								expect(error).toBeDefined();
 								break;
 						}
+
+						ws.conn.close();
 					});
 				});
 			});

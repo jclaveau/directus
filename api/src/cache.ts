@@ -42,6 +42,7 @@ let messengerSubscribed = false;
 
 let localSchemaCache: Keyv | null = null;
 let memorySchemaCache: Readonly<SchemaOverview> | null = null;
+let schemaCacheGeneration = 0;
 
 type Store = 'memory' | 'redis';
 
@@ -67,7 +68,7 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 		}
 
 		await localSchemaCache?.clear();
-		memorySchemaCache = null;
+		dropMemorySchemaCache();
 	});
 
 	messenger.subscribe<CacheClearMessage>('cacheCleared', async ({ targets }) => {
@@ -456,7 +457,7 @@ export async function clearSystemCache(opts?: {
 	}
 
 	await localSchemaCache.clear();
-	memorySchemaCache = null;
+	dropMemorySchemaCache();
 
 	// Since a lot of cached permission function rely on the schema it needs to be cleared as well
 	await clearPermissionCache();
@@ -583,6 +584,18 @@ export async function getSystemCache(key: string): Promise<Record<string, any>> 
 	const { systemCache } = getCache();
 
 	return await getCacheValue(systemCache, key);
+}
+
+// A build reads the database in several queries, so a schema write that commits
+// and clears in between leaves it half-old; comparing the generation it started
+// at tells it so.
+function dropMemorySchemaCache() {
+	memorySchemaCache = null;
+	schemaCacheGeneration++;
+}
+
+export function getSchemaCacheGeneration(): number {
+	return schemaCacheGeneration;
 }
 
 export function setMemorySchemaCache(schema: SchemaOverview) {

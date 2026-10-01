@@ -192,6 +192,11 @@ describe(oneLine`
 					await db(PENDING).insert(recorded.map((row) => {
 						return {
 							...row,
+							// pg reads the json column back parsed, and would write an
+							// array back as a Postgres array literal.
+							scoped_cache_fingerprints: JSON.stringify(
+								row.scoped_cache_fingerprints,
+							),
 							failed_at: new Date(),
 							attempts: 0,
 							last_error: 'reseeded after a sibling took the record',
