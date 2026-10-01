@@ -643,6 +643,12 @@ export class ItemScopedCacheService {
 		// on the parent's trx) purges once that transaction commits (#363). Its purged
 		// list is left out of the debug header, which reads only the request's own
 		// service.
+		// Copied now: the list goes on growing with the writes that follow, which
+		// purge their own declarations.
+		const queuedDeclarations = hookDeclarations === undefined
+			? undefined
+			: { purgeFingerprints: [...hookDeclarations.purgeFingerprints] };
+
 		const queuedAfterCommit = queueAfterCommit(this.knex, async (database) => {
 			await new ItemScopedCacheService(
 				this.collection,
@@ -652,7 +658,7 @@ export class ItemScopedCacheService {
 				this.accountability,
 			).purge(
 				scopedCacheFingerprints,
-				hookDeclarations,
+				queuedDeclarations,
 				changedCollections,
 				{ includeBareFingerprint, rows },
 			);

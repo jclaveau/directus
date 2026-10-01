@@ -74,14 +74,25 @@ async function commitAttempt<T>(
 	handler: (knex: Knex) => Promise<T>,
 ): Promise<CommittedAttempt<T>> {
 	const queuedTasks: AfterCommitTask[] = [];
+	const openedTrxs: Knex[] = [];
 
-	const result = await knex.transaction((trx) => {
-		afterCommitTasks.set(trx, queuedTasks);
+	try {
+		const result = await knex.transaction((trx) => {
+			openedTrxs.push(trx);
+			afterCommitTasks.set(trx, queuedTasks);
 
-		return handler(trx);
-	});
+			return handler(trx);
+		});
 
-	return { result, queuedTasks };
+		return { result, queuedTasks };
+	}
+	finally {
+		// Once settled, a straggler queueing on the trx gets false and runs its task
+		// itself: pushed onto a list already drained, it would never run.
+		for (const openedTrx of openedTrxs) {
+			afterCommitTasks.delete(openedTrx);
+		}
+	}
 }
 
 async function commitWithRetries<T>(
@@ -162,15 +173,18 @@ async function drainAfterCommit(
 	knex: Knex,
 	queuedTasks: AfterCommitTask[],
 ): Promise<void> {
-	// Every task runs even when one fails: each covers its own write, and the first
-	// failure must not leave the others' entries stale.
-	const outcomes = await Promise.allSettled(queuedTasks.map((task) => task(knex)));
-
-	for (const outcome of outcomes) {
-		if (outcome.status === 'rejected') {
+	// One after another, as they ran inside the trx: a hook writing per row queues a
+	// purge per row, all on the same index sets, and each purge shrinks the sets
+	// the next one scans. Every task runs even when one fails: each covers its own
+	// write.
+	for (const task of queuedTasks) {
+		try {
+			await task(knex);
+		}
+		catch (error) {
 			useLogger().error(
-				outcome.reason,
-				`[transaction] a task queued after commit failed: ${outcome.reason}`,
+				error,
+				`[transaction] a task queued after commit failed: ${error}`,
 			);
 		}
 	}

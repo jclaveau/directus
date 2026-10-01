@@ -82,6 +82,40 @@ describe('queueAfterCommit', () => {
 		expect(queuedTask).not.toHaveBeenCalled();
 	});
 
+	it('queues nothing on a trx that already committed', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const handler = vi.fn(async (_trx: knex.Knex) => {});
+
+		await transaction(db, handler);
+
+		expect(queueAfterCommit(handler.mock.calls[0]![0], vi.fn())).toBe(false);
+	});
+
+	it('runs the queued tasks one after another', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const taskSteps: string[] = [];
+
+		await transaction(db, async (trx) => {
+			queueAfterCommit(trx, async () => {
+				taskSteps.push('first started');
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				taskSteps.push('first ended');
+			});
+
+			queueAfterCommit(trx, async () => {
+				taskSteps.push('second started');
+			});
+		});
+
+		expect(taskSteps).toEqual(['first started', 'first ended', 'second started']);
+	});
+
 	it('drops the tasks of a rolled-back transaction', async () => {
 		const db = knex.default({ client: MockClient });
 

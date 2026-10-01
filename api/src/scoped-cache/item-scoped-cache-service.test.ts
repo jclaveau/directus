@@ -364,4 +364,43 @@ describe('purge', () => {
 			{ declaredFingerprints: [], changedCollections: [] },
 		);
 	});
+
+	it(oneLine`
+		purges after commit the hook declarations it was handed, not the ones
+		declared after it
+	`, async () => {
+		const cache = {} as Keyv;
+
+		const hookDeclarations = {
+			purgeFingerprints: [{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+		};
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService(
+				'item',
+				schema,
+				trx,
+				cache,
+				null,
+			).purge([], hookDeclarations);
+
+			hookDeclarations.purgeFingerprints.push({
+				collection: 'item',
+				pinnedScope: { owner: ['beta'] },
+			});
+		});
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			cache,
+			'item',
+			[],
+			{ database: db, schema, accountability: null },
+			{
+				declaredFingerprints: [
+					{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+				],
+				changedCollections: [],
+			},
+		);
+	});
 });
