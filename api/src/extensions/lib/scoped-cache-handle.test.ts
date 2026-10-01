@@ -300,6 +300,24 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
+	it(oneLine`
+		relational scope, collection without a primary key: collection-wide purge
+	`, async () => {
+		const keylessSchema = await schemaScopedBy(['account.owner'])();
+		keylessSchema.collections['articles']!.primary = undefined as any;
+
+		const handle = createScopedCacheExtensionHandle(async () => keylessSchema);
+
+		// No key to read the row back by, so even a terminal the row spells out is
+		// not trusted: the flat path would bind it as given.
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42, 'account.owner': 7 },
+		]);
+
+		expect(scopedCacheSnapshot).not.toHaveBeenCalled();
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
 	it('relational scope, snapshot throws: collection-wide purge', async () => {
 		const getRelationalSchema = schemaScopedBy(['account.owner']);
 		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
