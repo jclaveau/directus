@@ -135,10 +135,12 @@ function mergeUpdateGroups<Item extends AnyItem>(
 		}
 		else {
 			targetIndex = mergedGroups.length;
+
 			mergedGroups.push({
 				data: candidateGroup.data,
 				keys: [...candidateGroup.keys],
 			});
+
 			groupIndexByData.set(serializedData, targetIndex);
 		}
 
