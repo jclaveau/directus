@@ -44,6 +44,7 @@ import type {
 	ScopedCacheIndexFiling,
 	ScopedCacheIndexTake,
 	ScopedCacheReapTally,
+	ScopedCacheScanTally,
 	ScopedCacheStore,
 	ScopedCacheUnlinkTally,
 } from './store.js';
@@ -1563,8 +1564,13 @@ interface ScopedCacheMemberLocation {
  */
 async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
+	scanTally?: ScopedCacheScanTally,
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useCacheRedis();
+
+	if (scanTally !== undefined) {
+		scanTally.scannedIndexKeys += indexKeys.length;
+	}
 
 	for (
 		let setAt = 0;
@@ -1598,6 +1604,10 @@ async function* scanScopedCacheIndexKeys(
 
 				if (next !== '0') {
 					unfinishedScans.push({ indexKey, scanCursor: next });
+				}
+
+				if (scanTally !== undefined) {
+					scanTally.scannedMembers += members.length;
 				}
 
 				for (const member of members) {
@@ -1833,7 +1843,10 @@ const redisStore: ScopedCacheStore = {
 		collection: string,
 		rowFingerprints: readonly ScopedCacheFingerprint[],
 		indexPath: string | null,
+		scanTally?: ScopedCacheScanTally,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+		scanTally?.scanArms.add('row');
+
 		// Every set an entry some row can drop is filed in: its index value's, its
 		// home pin's, or the bare one. The bare set also still holds what the
 		// layout before home pins filed there, read whole now.
@@ -1843,13 +1856,14 @@ const redisStore: ScopedCacheStore = {
 				collection,
 				scopedCacheRowHomePinKeys(collection, rowFingerprints),
 			),
-		]);
+		], scanTally);
 	},
 
 	async* scanDeclaredIndexedEntries(
 		collection: string,
 		declared: readonly ScopedCacheFingerprint[],
 		indexPath: string | null,
+		scanTally?: ScopedCacheScanTally,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 		// The declared pins' own sets when the pin IS what the index is split by —
 		// the same two a write of those values would read — plus every home pin's,
@@ -1864,28 +1878,34 @@ const redisStore: ScopedCacheStore = {
 		});
 
 		if (pinsIndexPath) {
+			scanTally?.scanArms.add('declared');
+
 			yield* scanScopedCacheIndexKeys(
 				scopedCacheRowIndexKeys(collection, declared, indexPath),
+				scanTally,
 			);
 
 			for await (const homePinKeys of scanCollectionIndexKeyNames(
 				collection,
 				scopedCacheHomePinIndexGlob(collection),
 			)) {
-				yield* scanScopedCacheIndexKeys(homePinKeys);
+				yield* scanScopedCacheIndexKeys(homePinKeys, scanTally);
 			}
 
 			return;
 		}
 
-		yield* redisStore.scanCollectionIndexedEntries(collection);
+		yield* redisStore.scanCollectionIndexedEntries(collection, scanTally);
 	},
 
 	async* scanCollectionIndexedEntries(
 		collection: string,
+		scanTally?: ScopedCacheScanTally,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+		scanTally?.scanArms.add('collection');
+
 		for await (const indexKeys of scanCollectionIndexKeyNames(collection)) {
-			yield* scanScopedCacheIndexKeys(indexKeys);
+			yield* scanScopedCacheIndexKeys(indexKeys, scanTally);
 		}
 	},
 
