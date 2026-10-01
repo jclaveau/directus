@@ -9,6 +9,7 @@ import {
 	useRedis,
 } from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
+import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 import {
 	listPendingScopedCachePurges,
 	recordPendingScopedCachePurge,
@@ -29,6 +30,7 @@ const env = vi.hoisted(() => {
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('../redis/index.js');
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
+vi.mock('./item-scoped-cache-service.js', () => ({ ItemScopedCacheService: vi.fn() }));
 
 vi.mock('../emitter.js', () => {
 	return {
@@ -723,5 +725,69 @@ describe('a purge shown the rows it wrote', () => {
 			},
 			expect.any(Error),
 		);
+	});
+});
+
+describe('a purge declaring a pin on its index path\'s first hop', () => {
+	it(oneLine`
+		reads only the index set of the value its key reaches, and leaves the entry
+		filed under another
+	`, async () => {
+		vi.mocked(ItemScopedCacheService).mockImplementation(function () {
+			return {
+				snapshot: async () => ({
+					canResolveSlicesFromRows: true,
+					rows: [{
+						key: 7,
+						row: {},
+						fingerprint: {
+							collection: 'student_courses',
+							pinnedScope: { id: ['7'], owner: ['alice'] },
+						},
+					}],
+				}),
+			} as any;
+		});
+
+		members = {
+			'ns:scoped-cache-index:fingerprint:segment_course:student_course_id.owner=alice': [
+				'segment_course:&student_course_id.owner=,alice,&|ns:entry-alice',
+			],
+			'ns:scoped-cache-index:fingerprint:segment_course:student_course_id.owner=bob': [
+				'segment_course:&student_course_id.owner=,bob,&|ns:entry-bob',
+			],
+		};
+
+		await purgeScopedCache(
+			cache,
+			'segment_course',
+			[],
+			{
+				schema: {
+					collections: {
+						segment_course: {
+							primary: 'id',
+							scopedCacheFields: ['student_course_id'],
+						},
+						student_courses: { primary: 'id', scopedCacheFields: ['owner'] },
+					},
+					relations: [{
+						collection: 'segment_course',
+						field: 'student_course_id',
+						related_collection: 'student_courses',
+					}],
+				},
+				database: {},
+			} as any,
+			{
+				declaredFingerprints: [{
+					collection: 'segment_course',
+					pinnedScope: { student_course_id: ['7'] },
+				}],
+			},
+		);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-alice');
+		expect(cache.delete).not.toHaveBeenCalledWith('ns:entry-bob');
 	});
 });

@@ -64,6 +64,7 @@ import {
 } from './fill-guard.js';
 import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
 import { scopedCacheFillPaused } from './fill-pause.js';
+import { scopedCacheDeclaredIndexPins } from './declared-index-pins.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
 import {
 	scopedCacheEpochBumpScript,
@@ -451,17 +452,30 @@ async function purgeScopedCacheFingerprintIndex(
  * pin matches entries by what they do NOT pin as much as by what they do, so what
  * can be narrowed on depends on how the index is split.
  */
-function purgeScopedCacheDeclaredPins(
+async function purgeScopedCacheDeclaredPins(
 	cache: Keyv,
 	collection: string,
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
+	context: EventContext | null,
 ): Promise<ScopedCachePurgeSweep> {
+	// What the store reads, narrowed to the index values the pins' relation reaches
+	// when it can be read back. The match below still tests the pins as declared.
+	const scannedPins = context?.schema
+		? await scopedCacheDeclaredIndexPins(
+			context.schema,
+			context.database,
+			collection,
+			declared,
+			indexPath,
+		)
+		: null;
+
 	return purgeScopedCacheIndexWhere(
 		cache,
 		useScopedCacheStore().scanDeclaredIndexedEntries(
 			collection,
-			declared,
+			scannedPins ?? declared,
 			indexPath,
 		),
 		(fingerprint) => {
@@ -490,8 +504,10 @@ async function purgeScopedCacheDeclaredFingerprints(
 	collection: string,
 	declaredFingerprints: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
-	schema: SchemaOverview | null,
+	context: EventContext | null,
 ): Promise<number> {
+	const schema = context?.schema ?? null;
+
 	if (declaredFingerprints.length === 0) {
 		return 0;
 	}
@@ -516,7 +532,9 @@ async function purgeScopedCacheDeclaredFingerprints(
 	for (const [declaredCollection, declared] of declaredByCollection) {
 		let declaredIndexPath = indexPath;
 
-		if (declaredCollection !== collection) {
+		// A purge shown no rows is handed no index path, yet its fills were filed
+		// under the schema's.
+		if (declaredCollection !== collection || indexPath === null) {
 			declaredIndexPath = schema === null
 				? null
 				: scopedCacheIndexPath(schema, declaredCollection);
@@ -527,6 +545,7 @@ async function purgeScopedCacheDeclaredFingerprints(
 			declaredCollection,
 			declared,
 			declaredIndexPath,
+			context,
 		);
 
 		evicted += sweep.evicted;
@@ -1152,6 +1171,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						declaredCollection,
 						declared,
 						null,
+						null,
 					);
 
 					evicted += sweep.evicted;
@@ -1636,7 +1656,7 @@ export async function purgeScopedCache(
 					collection,
 					purgedByPin,
 					options.indexPath ?? null,
-					context?.schema ?? null,
+					context,
 				),
 			]);
 
