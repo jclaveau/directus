@@ -60,16 +60,22 @@ describe.each(vendors)('%s', (vendor) => {
 
 		// The m2o must exist before `entry` can scope by `account.owner`, so set the
 		// relational scope field only after the field is created.
-		await CreateFieldM2O(vendor, {
+		const { relation } = await CreateFieldM2O(vendor, {
 			collection: ENTRY,
 			field: 'account',
 			otherCollection: ACCOUNT,
 		});
 
-		await request(getUrl(vendor, env))
+		expect(relation).toMatchObject({ related_collection: ACCOUNT });
+
+		// Left key-scoped, the scenarios would never reach the read-back that
+		// resolves `account.owner`.
+		const scoped = await request(getUrl(vendor, env))
 			.patch(`/collections/${ENTRY}`)
 			.send({ meta: { scoped_cache_fields: ['account.owner'] } })
 			.set('Authorization', auth);
+
+		expect(scoped.statusCode).toBe(200);
 
 		env[vendor].PORT = String(await getPort());
 
