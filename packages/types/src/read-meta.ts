@@ -255,12 +255,21 @@ export interface ScopedCachePurgeHandle {
  * trusted server code, matching `purgeBy`.
  *
  * Each row must carry the collection's primary key and its flat scope fields; a row
- * missing one, or a collection scoped through a relation (a dotted/M2O field whose
- * terminal a raw row can't resolve), degrades to a collection-wide purge (this
- * collection's bare fingerprint + every slice, still sparing others) rather than
- * risk a stale slice. The primary key is required because every collection pins
- * that slice, so a read of a single row depends on it even with no scope field
- * declared.
+ * missing one degrades to a collection-wide purge (this collection's bare
+ * fingerprint + every slice, still sparing others) rather than risk a stale slice.
+ * The primary key is required because every collection pins that slice, so a read
+ * of a single row depends on it even with no scope field declared.
+ *
+ * A collection scoped through a relation (a dotted/M2O field) has its terminals
+ * read from the database by the rows' keys, as an `ItemsService` write snapshots
+ * them. Call it once the write has committed: the read runs outside your
+ * transaction, so before the commit it sees an update's old version. A key it
+ * does not find (a deleted row) or a read that fails degrades to a
+ * collection-wide purge.
+ *
+ * The rows say only where they are now, never where they were: a write that moves
+ * a row to another scope value — a flat field or a relational one — leaves its old
+ * slice stale. Such a write belongs in `ItemsService`.
  *
  * Footgun: a manual purge decouples "what changed" from "what's dropped" — they can
  * silently drift into a stale read, the exact poison scoped cache prevents. Prefer

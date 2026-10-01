@@ -1,17 +1,23 @@
 import type {
 	ApiExtensionContext,
+	PrimaryKey,
 	ScopedCacheExtensionHandle,
 	ScopedCacheFingerprint,
 } from '@directus/types';
 import { getCache } from '../../cache.js';
+import getDatabase from '../../database/index.js';
+import { useLogger } from '../../logger/index.js';
 import {
 	composeScopedCachePaths,
 	type FieldTypesByField,
+	ItemScopedCacheService,
 	purgeScopedCache,
+	scopedCacheMutatedFingerprints,
 	scopedCacheFingerprintOf,
 	scopedCacheIndexPath,
 	scopedCachePurgeEnabled,
 	scopedCacheCollectionPinsFromRows,
+	type ScopedCacheSnapshot,
 } from '../../scoped-cache/index.js';
 
 /**
@@ -47,25 +53,76 @@ export function createScopedCacheExtensionHandle(
 			const collectionSchema = schema.collections[collection];
 			const scopeFields = collectionSchema?.scopedCacheFields ?? [];
 
-			// A relational scope — an explicit dotted field, or an M2O field that
-			// composes to a deeper terminal — can't be resolved from the mutated rows:
-			// a raw row carries only the first-hop fk, not the terminal value the read
-			// side pinned, so a flat fk pin would miss the real slice and leave it
-			// stale. Fall back to a collection-wide purge (this collection's bare pin +
-			// every slice, still sparing other collections).
 			const hasRelationalScope =
 				scopeFields.some((field) => field.includes('.'))
 				|| composeScopedCachePaths(schema, collection).length > 0;
-
-			if (hasRelationalScope) {
-				await purgeScopedCache(cache, collection, null);
-				return;
-			}
 
 			// The primary key pins on every collection, declared or not, so a bypassed
 			// write owes its key slices too — a read of that row pinned nothing else.
 			// Deduped, since a project may also list its key as a scope field.
 			const primaryKeyField = collectionSchema?.primary;
+
+			// A raw row lacks the relational terminals; the snapshot joins them in by key.
+			if (hasRelationalScope) {
+				// No key to read a row back by: even a terminal the row spells out is
+				// not trusted, since the flat path would bind it as given.
+				if (primaryKeyField === undefined || mutatedRows.some((mutatedRow) => {
+					const mutatedKey = mutatedRow[primaryKeyField];
+
+					return mutatedKey === undefined || mutatedKey === null;
+				})) {
+					await purgeScopedCache(cache, collection, null);
+					return;
+				}
+
+				const distinctKeys = [...new Set(mutatedRows.map((mutatedRow) => {
+					return mutatedRow[primaryKeyField] as PrimaryKey;
+				}))];
+
+				let scopedCacheSnapshot: ScopedCacheSnapshot;
+
+				// The caller's write has committed already, so a failed read must
+				// still purge rather than throw past it and leave the slices stale.
+				try {
+					scopedCacheSnapshot = await new ItemScopedCacheService(
+						collection,
+						schema,
+						getDatabase(),
+						cache,
+						null,
+					).snapshot(distinctKeys);
+				}
+				catch (error) {
+					useLogger().warn(
+						error,
+						`[scoped-cache] purgeForMutatedRows could not read back `
+						+ `${collection}, purging it whole`,
+					);
+
+					await purgeScopedCache(cache, collection, null);
+					return;
+				}
+
+				const snapshotFingerprints =
+					scopedCacheMutatedFingerprints(scopedCacheSnapshot);
+
+				// A key the read did not find — a deleted row, or an uncommitted insert
+				// — has no terminal left to name its old slice by.
+				if (
+					snapshotFingerprints === null
+					|| scopedCacheSnapshot.rows.length < distinctKeys.length
+				) {
+					await purgeScopedCache(cache, collection, null);
+					return;
+				}
+
+				await purgeScopedCache(cache, collection, [], null, {
+					rowFingerprints: snapshotFingerprints,
+					indexPath: scopedCacheIndexPath(schema, collection),
+				});
+
+				return;
+			}
 
 			const pinnedFields = primaryKeyField === undefined
 				? scopeFields

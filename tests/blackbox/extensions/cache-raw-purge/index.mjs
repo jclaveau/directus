@@ -3,9 +3,12 @@
 // context.scopedCache.purgeForMutatedRows on each. The mutated owner's slices
 // refresh with no whole-cache flush; another owner's slices survive.
 //   POST /           — two flat owner-scoped collections (surgical per-owner purge).
-//   POST /relational — a collection scoped through an M2O; the raw row can't resolve
-//     the terminal, so it degrades to a collection-wide purge (never stale, spares
-//     other collections).
+//   POST /relational — a collection scoped through an M2O; the host reads the rows
+//     back by key to resolve the terminal, so only the written owner's slices go.
+//   POST /relational-delete — raw-deletes an owner's entries: the read back finds
+//     none of them, so it degrades to a collection-wide purge.
+//   POST /relational-unreadable — hands over a key no row can match, and on
+//     postgres one the read back throws on: both degrade to a collection-wide purge.
 
 const DOCUMENT = 'rawpurge_document';
 const LINE = 'rawpurge_document_line';
@@ -59,11 +62,59 @@ export default function registerEndpoint(router, { database, scopedCache }) {
 
 		const entryRows = await database(ENTRY)
 			.whereIn('account', accountIds)
-			.select('account');
+			.select('id', 'account');
 
-		// ENTRY is scoped through account.owner — the raw row carries only the account
-		// fk, not the terminal owner, so the host falls back to a collection-wide purge.
+		// ENTRY is scoped through account.owner: the raw row carries only the account
+		// fk, so the host joins the owner in by the rows' keys.
 		await scopedCache.purgeForMutatedRows(ENTRY, entryRows);
+
+		res.json({ entries: entryRows.length });
+	});
+
+	router.post('/relational-delete', async (req, res) => {
+		const { owner } = req.body;
+
+		const accountIds = (
+			await database(ACCOUNT)
+				.where({ owner })
+				.select('id')
+		).map((row) => row.id);
+
+		const entryRows = await database(ENTRY)
+			.whereIn('account', accountIds)
+			.select('id', 'account');
+
+		await database(ENTRY)
+			.whereIn('account', accountIds)
+			.delete();
+
+		await scopedCache.purgeForMutatedRows(ENTRY, entryRows);
+
+		res.json({ entries: entryRows.length });
+	});
+
+	router.post('/relational-unreadable', async (req, res) => {
+		const { owner } = req.body;
+
+		const accountIds = (
+			await database(ACCOUNT)
+				.where({ owner })
+				.select('id')
+		).map((row) => row.id);
+
+		await database(ENTRY)
+			.whereIn('account', accountIds)
+			.increment('revision', 1);
+
+		const entryRows = await database(ENTRY)
+			.whereIn('account', accountIds)
+			.select('id', 'account');
+
+		// Not an integer: postgres refuses it in the read back's `whereIn`.
+		await scopedCache.purgeForMutatedRows(ENTRY, [
+			...entryRows,
+			{ id: 'not-a-key', account: null },
+		]);
 
 		res.json({ entries: entryRows.length });
 	});

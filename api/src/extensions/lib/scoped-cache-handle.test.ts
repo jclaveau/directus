@@ -13,6 +13,16 @@ const state = vi.hoisted(() => {
 });
 
 const purgeScopedCache = vi.hoisted(() => vi.fn());
+const scopedCacheSnapshot = vi.hoisted(() => vi.fn());
+const loggerWarn = vi.hoisted(() => vi.fn());
+
+vi.mock('../../database/index.js', () => {
+	return { default: () => ({}) };
+});
+
+vi.mock('../../logger/index.js', () => {
+	return { useLogger: () => ({ warn: loggerWarn }) };
+});
 
 vi.mock('../../cache.js', () => {
 	return {
@@ -35,6 +45,9 @@ vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
 
 	return {
 		...actual,
+		ItemScopedCacheService: class {
+			snapshot = scopedCacheSnapshot;
+		},
 		purgeScopedCache,
 		scopedCachePurgeEnabled: () => state.scopedEnabled,
 	};
@@ -171,14 +184,157 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
-	it('relational (dotted) scope field: collection-wide purge', async () => {
+	it(oneLine`
+		relational scope: binds the purge to the snapshot of the rows' keys
+	`, async () => {
 		const getRelationalSchema = schemaScopedBy(['account.owner']);
 		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
 
-		await handle.purgeForMutatedRows('articles', [{ account: 42 }]);
+		scopedCacheSnapshot.mockResolvedValueOnce({
+			canResolveSlicesFromRows: true,
+			rows: [
+				{
+					key: 1,
+					row: { id: 1, 'account.owner': 7 },
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['1'], 'account.owner': ['7'] },
+					},
+				},
+				{
+					key: 2,
+					row: { id: 2, 'account.owner': 9 },
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['2'], 'account.owner': ['9'] },
+					},
+				},
+			],
+		});
 
-		// A raw row carries only the first-hop fk (account=42), not the pinned terminal,
-		// so it must fall back to collection-wide rather than emit a wrong fk pin.
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42 },
+			{ id: 2, account: 43 },
+		]);
+
+		expect(scopedCacheSnapshot).toHaveBeenCalledWith([1, 2]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			state.cache,
+			'articles',
+			[],
+			null,
+			{
+				rowFingerprints: [
+					{
+						collection: 'articles',
+						pinnedScope: { id: ['1'], 'account.owner': ['7'] },
+					},
+					{
+						collection: 'articles',
+						pinnedScope: { id: ['2'], 'account.owner': ['9'] },
+					},
+				],
+				indexPath: null,
+			},
+		);
+	});
+
+	it('relational scope, snapshot unresolvable: collection-wide purge', async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		scopedCacheSnapshot.mockResolvedValueOnce({
+			canResolveSlicesFromRows: false,
+			rows: [],
+		});
+
+		await handle.purgeForMutatedRows('articles', [{ id: 1, account: 42 }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it(oneLine`
+		relational scope, row missing its primary key: collection-wide purge
+	`, async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42 },
+			{ account: 43 },
+		]);
+
+		expect(scopedCacheSnapshot).not.toHaveBeenCalled();
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it(oneLine`
+		relational scope, a key the snapshot does not find: collection-wide purge
+	`, async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		// Row 2 was deleted: the read finds row 1 only, and row 2's old owner is
+		// named nowhere.
+		scopedCacheSnapshot.mockResolvedValueOnce({
+			canResolveSlicesFromRows: true,
+			rows: [
+				{
+					key: 1,
+					row: { id: 1, 'account.owner': 7 },
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['1'], 'account.owner': ['7'] },
+					},
+				},
+			],
+		});
+
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42 },
+			{ id: 2, account: 43 },
+			{ id: 2, account: 43 },
+		]);
+
+		expect(scopedCacheSnapshot).toHaveBeenCalledWith([1, 2]);
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it(oneLine`
+		relational scope, collection without a primary key: collection-wide purge
+	`, async () => {
+		const keylessSchema = await schemaScopedBy(['account.owner'])();
+		keylessSchema.collections['articles']!.primary = undefined as any;
+
+		const handle = createScopedCacheExtensionHandle(async () => keylessSchema);
+
+		// No key to read the row back by, so even a terminal the row spells out is
+		// not trusted: the flat path would bind it as given.
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42, 'account.owner': 7 },
+		]);
+
+		expect(scopedCacheSnapshot).not.toHaveBeenCalled();
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it('relational scope, snapshot throws: collection-wide purge', async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		const snapshotError = new Error('pool exhausted');
+
+		scopedCacheSnapshot.mockRejectedValueOnce(snapshotError);
+
+		await handle.purgeForMutatedRows('articles', [{ id: 1, account: 42 }]);
+
+		expect(loggerWarn).toHaveBeenCalledWith(
+			snapshotError,
+			'[scoped-cache] purgeForMutatedRows could not read back articles, '
+			+ 'purging it whole',
+		);
+
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
