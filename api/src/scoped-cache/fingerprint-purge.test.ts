@@ -30,7 +30,9 @@ const env = vi.hoisted(() => {
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('../redis/index.js');
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
-vi.mock('./item-scoped-cache-service.js', () => ({ ItemScopedCacheService: vi.fn() }));
+vi.mock('./item-scoped-cache-service.js', () => {
+	return { ItemScopedCacheService: vi.fn() };
+});
 
 vi.mock('../emitter.js', () => {
 	return {
@@ -735,25 +737,29 @@ describe('a purge declaring a pin on its index path\'s first hop', () => {
 	`, async () => {
 		vi.mocked(ItemScopedCacheService).mockImplementation(function () {
 			return {
-				snapshot: async () => ({
-					canResolveSlicesFromRows: true,
-					rows: [{
-						key: 7,
-						row: {},
-						fingerprint: {
-							collection: 'student_courses',
-							pinnedScope: { id: ['7'], owner: ['alice'] },
-						},
-					}],
-				}),
+				snapshot: async () => {
+					return {
+						canResolveSlicesFromRows: true,
+						rows: [{
+							key: 7,
+							row: {},
+							fingerprint: {
+								collection: 'student_courses',
+								pinnedScope: { id: ['7'], owner: ['alice'] },
+							},
+						}],
+					};
+				},
 			} as any;
 		});
 
 		members = {
-			'ns:scoped-cache-index:fingerprint:segment_course:student_course_id.owner=alice': [
+			['ns:scoped-cache-index:fingerprint:segment_course:'
+				+ 'student_course_id.owner=alice']: [
 				'segment_course:&student_course_id.owner=,alice,&|ns:entry-alice',
 			],
-			'ns:scoped-cache-index:fingerprint:segment_course:student_course_id.owner=bob': [
+			['ns:scoped-cache-index:fingerprint:segment_course:'
+				+ 'student_course_id.owner=bob']: [
 				'segment_course:&student_course_id.owner=,bob,&|ns:entry-bob',
 			],
 		};
