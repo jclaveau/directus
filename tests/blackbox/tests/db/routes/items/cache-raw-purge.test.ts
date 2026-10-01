@@ -112,10 +112,10 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
-			await Promise.all([
-				DeleteCollection(vendor, { collection: LINE }),
-				DeleteCollection(vendor, { collection: DOCUMENT }),
-			]);
+			// One at a time: run together, a drop can fail, and the helper drops the
+			// error, leaving a collection cache-primary-key-home-pin then collides on.
+			await DeleteCollection(vendor, { collection: LINE });
+			await DeleteCollection(vendor, { collection: DOCUMENT });
 		});
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
