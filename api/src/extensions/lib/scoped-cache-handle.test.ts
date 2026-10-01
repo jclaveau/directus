@@ -19,6 +19,10 @@ vi.mock('../../database/index.js', () => {
 	return { default: () => ({}) };
 });
 
+vi.mock('../../logger/index.js', () => {
+	return { useLogger: () => ({ warn: vi.fn() }) };
+});
+
 vi.mock('../../cache.js', () => {
 	return {
 		getCache: () => {
@@ -179,7 +183,9 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
-	it('relational scope: binds the purge to the snapshot of the rows\' keys', async () => {
+	it(oneLine`
+		relational scope: binds the purge to the snapshot of the rows' keys
+	`, async () => {
 		const getRelationalSchema = schemaScopedBy(['account.owner']);
 		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
 
@@ -247,7 +253,9 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
-	it('relational scope, row missing its primary key: collection-wide purge', async () => {
+	it(oneLine`
+		relational scope, row missing its primary key: collection-wide purge
+	`, async () => {
 		const getRelationalSchema = schemaScopedBy(['account.owner']);
 		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
 
@@ -257,6 +265,49 @@ describe('createScopedCacheExtensionHandle', () => {
 		]);
 
 		expect(scopedCacheSnapshot).not.toHaveBeenCalled();
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it(oneLine`
+		relational scope, a key the snapshot does not find: collection-wide purge
+	`, async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		// Row 2 was deleted: the read finds row 1 only, and row 2's old owner is
+		// named nowhere.
+		scopedCacheSnapshot.mockResolvedValueOnce({
+			canResolveSlicesFromRows: true,
+			rows: [
+				{
+					key: 1,
+					row: { id: 1, 'account.owner': 7 },
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['1'], 'account.owner': ['7'] },
+					},
+				},
+			],
+		});
+
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42 },
+			{ id: 2, account: 43 },
+			{ id: 2, account: 43 },
+		]);
+
+		expect(scopedCacheSnapshot).toHaveBeenCalledWith([1, 2]);
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it('relational scope, snapshot throws: collection-wide purge', async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		scopedCacheSnapshot.mockRejectedValueOnce(new Error('pool exhausted'));
+
+		await handle.purgeForMutatedRows('articles', [{ id: 1, account: 42 }]);
+
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 

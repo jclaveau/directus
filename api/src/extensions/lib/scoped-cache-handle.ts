@@ -6,6 +6,7 @@ import type {
 } from '@directus/types';
 import { getCache } from '../../cache.js';
 import getDatabase from '../../database/index.js';
+import { useLogger } from '../../logger/index.js';
 import {
 	composeScopedCachePaths,
 	type FieldTypesByField,
@@ -16,6 +17,7 @@ import {
 	scopedCacheIndexPath,
 	scopedCachePurgeEnabled,
 	scopedCacheCollectionPinsFromRows,
+	type ScopedCacheSnapshot,
 } from '../../scoped-cache/index.js';
 
 /**
@@ -66,26 +68,47 @@ export function createScopedCacheExtensionHandle(
 					return mutatedRow[primaryKeyField] as PrimaryKey | null | undefined;
 				});
 
-				const hasKeylessRow = mutatedKeys.some((mutatedKey) => {
+				if (mutatedKeys.some((mutatedKey) => {
 					return mutatedKey === undefined || mutatedKey === null;
-				});
-
-				if (hasKeylessRow) {
+				})) {
 					await purgeScopedCache(cache, collection, null);
 					return;
 				}
 
-				const scopedCacheSnapshot = await new ItemScopedCacheService(
-					collection,
-					schema,
-					getDatabase(),
-					cache,
-					null,
-				).snapshot(mutatedKeys as PrimaryKey[]);
+				const distinctKeys = [...new Set(mutatedKeys as PrimaryKey[])];
+				let scopedCacheSnapshot: ScopedCacheSnapshot;
 
-				const snapshotFingerprints = scopedCacheMutatedFingerprints(scopedCacheSnapshot);
+				// The caller's write has committed already, so a failed read must
+				// still purge rather than throw past it and leave the slices stale.
+				try {
+					scopedCacheSnapshot = await new ItemScopedCacheService(
+						collection,
+						schema,
+						getDatabase(),
+						cache,
+						null,
+					).snapshot(distinctKeys);
+				}
+				catch (error) {
+					useLogger().warn(
+						error,
+						`[scoped-cache] purgeForMutatedRows could not read back `
+						+ `${collection}, purging it whole: ${error}`,
+					);
 
-				if (snapshotFingerprints === null) {
+					await purgeScopedCache(cache, collection, null);
+					return;
+				}
+
+				const snapshotFingerprints =
+					scopedCacheMutatedFingerprints(scopedCacheSnapshot);
+
+				// A key the read did not find — a deleted row, or one an uncommitted
+				// transaction holds — has no terminal left to name its old slice by.
+				if (
+					snapshotFingerprints === null
+					|| scopedCacheSnapshot.rows.length < distinctKeys.length
+				) {
 					await purgeScopedCache(cache, collection, null);
 					return;
 				}

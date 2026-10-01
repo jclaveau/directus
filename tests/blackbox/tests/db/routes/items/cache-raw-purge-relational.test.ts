@@ -215,5 +215,107 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 			60_000,
 		);
+
+		scenario(
+			'a raw delete of one owner\'s entries purges that owner\'s reads',
+			({ given, and, when, then }) => {
+				given(
+					`these rows of ${ACCOUNT}:`,
+					(table: Record<string, string>[]) => {
+						return createRows(ACCOUNT, table);
+					},
+				);
+
+				and(
+					`these rows of ${ENTRY}:`,
+					(table: Record<string, string>[]) => {
+						return createRows(ENTRY, table);
+					},
+				);
+
+				and(
+					'these reads are cached:',
+					(table: Record<string, string>[]) => {
+						return expectCached(ENTRY, table);
+					},
+				);
+
+				when(
+					'the endpoint raw-deletes the "deleted_target" entries and purges them:',
+					async (table: Record<string, string>[]) => {
+						const deleted = await request(getUrl(vendor, env))
+							.post('/cache-raw-purge/relational-delete')
+							.send({ owner: table[0]!['owner'] })
+							.set('Authorization', auth);
+
+						expect(deleted.statusCode).toBe(200);
+
+						expect(deleted.body).toEqual({
+							entries: Number(table[0]!['entries']),
+						});
+					},
+				);
+
+				then(
+					'target_2 is purged, though the read back finds none of the deleted '
+						+ 'rows:',
+					(table: Record<string, string>[]) => {
+						return expectAnswer(ENTRY, table, 'MISS');
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a raw write whose keys cannot all be read back purges the collection',
+			({ given, and, when, then }) => {
+				given(
+					`these rows of ${ACCOUNT}:`,
+					(table: Record<string, string>[]) => {
+						return createRows(ACCOUNT, table);
+					},
+				);
+
+				and(
+					`these rows of ${ENTRY}:`,
+					(table: Record<string, string>[]) => {
+						return createRows(ENTRY, table);
+					},
+				);
+
+				and(
+					'these reads are cached:',
+					(table: Record<string, string>[]) => {
+						return expectCached(ENTRY, table);
+					},
+				);
+
+				when(
+					'the endpoint raw-writes the "unreadable_target" entries, adding a key '
+						+ 'no row holds:',
+					async (table: Record<string, string>[]) => {
+						const mutated = await request(getUrl(vendor, env))
+							.post('/cache-raw-purge/relational-unreadable')
+							.send({ owner: table[0]!['owner'] })
+							.set('Authorization', auth);
+
+						expect(mutated.statusCode).toBe(200);
+
+						expect(mutated.body).toEqual({
+							entries: Number(table[0]!['entries']),
+						});
+					},
+				);
+
+				then(
+					'target_3 is purged, as the write could not be bound to its rows:',
+					(table: Record<string, string>[]) => {
+						return expectAnswer(ENTRY, table, 'MISS');
+					},
+				);
+			},
+			60_000,
+		);
 	});
 });

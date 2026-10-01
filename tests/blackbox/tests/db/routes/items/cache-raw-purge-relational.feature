@@ -65,3 +65,70 @@ Feature: purgeForMutatedRows on a relationally-scoped collection purges the rows
       |           |       _eq: other |               |
       |           | sort:            |               |
       |           | - id             |               |
+
+  Scenario: a raw delete of one owner's entries purges that owner's reads
+    Given these rows of rawpurge_account:
+      | markers  | id | owner          |
+      | target_2 | 3  | deleted_target |
+    And these rows of rawpurge_entry:
+      | markers  | id | account | revision |
+      | target_2 | 4  | 3       | 0        |
+      | target_2 | 5  | 3       | 0        |
+    And these reads are cached:
+      | markers  | query                     | response      |
+      | target_2 | fields:                   | - id: 4       |+
+      |          | - id                      |   revision: 0 |
+      |          | - revision                | - id: 5       |
+      |          | filter:                   |   revision: 0 |
+      |          |   account:                |               |
+      |          |     owner:                |               |
+      |          |       _eq: deleted_target |               |
+      |          | sort:                     |               |
+      |          | - id                      |               |
+    When the endpoint raw-deletes the "deleted_target" entries and purges them:
+      | owner          | entries |
+      | deleted_target | 2       |
+    Then target_2 is purged, though the read back finds none of the deleted rows:
+      | markers  | query                     | response |
+      | target_2 | fields:                   | []       |+
+      |          | - id                      |          |
+      |          | - revision                |          |
+      |          | filter:                   |          |
+      |          |   account:                |          |
+      |          |     owner:                |          |
+      |          |       _eq: deleted_target |          |
+      |          | sort:                     |          |
+      |          | - id                      |          |
+
+  Scenario: a raw write whose keys cannot all be read back purges the collection
+    Given these rows of rawpurge_account:
+      | markers  | id | owner             |
+      | target_3 | 4  | unreadable_target |
+    And these rows of rawpurge_entry:
+      | markers  | id | account | revision |
+      | target_3 | 6  | 4       | 0        |
+    And these reads are cached:
+      | markers  | query                        | response      |
+      | target_3 | fields:                      | - id: 6       |+
+      |          | - id                         |   revision: 0 |
+      |          | - revision                   |               |
+      |          | filter:                      |               |
+      |          |   account:                   |               |
+      |          |     owner:                   |               |
+      |          |       _eq: unreadable_target |               |
+      |          | sort:                        |               |
+      |          | - id                         |               |
+    When the endpoint raw-writes the "unreadable_target" entries, adding a key no row holds:
+      | owner             | entries |
+      | unreadable_target | 1       |
+    Then target_3 is purged, as the write could not be bound to its rows:
+      | markers  | query                        | response      |
+      | target_3 | fields:                      | - id: 6       |+
+      |          | - id                         |   revision: 1 |
+      |          | - revision                   |               |
+      |          | filter:                      |               |
+      |          |   account:                   |               |
+      |          |     owner:                   |               |
+      |          |       _eq: unreadable_target |               |
+      |          | sort:                        |               |
+      |          | - id                         |               |
