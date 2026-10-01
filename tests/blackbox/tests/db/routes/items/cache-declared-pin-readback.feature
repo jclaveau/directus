@@ -1,9 +1,10 @@
 Feature: A pin declared on an account key purges the reads of the owner it reaches
 
-  `readback_entry` is scoped by "account.owner", so its cached reads are filed
-  by owner. A hook that declares `purgeBy({ account: [k] })` names the account,
-  not the owner: the purge reads account k back, finds its owner, and reads only
-  that owner's index set. A read of another owner is left cached.
+  `readback_entry` is scoped by its "account", itself scoped by "owner", so its
+  cached reads are indexed by "account.owner". A hook that declares
+  `purgeBy({ account: [k] })` names the account, not the owner: the purge reads
+  account k back, finds its owner, and reads only that owner's index set. A
+  read of another owner is left cached.
 
   Creating a `readback_signal` row rewrites entries by knex, behind the items
   service, or deletes an account with its entries, then declares the pins of its

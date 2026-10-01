@@ -67,7 +67,6 @@ describe.each(vendors)('%s', (vendor) => {
 			],
 		});
 
-		// An entry can scope by `account.owner` only once the m2o exists.
 		const { relation } = await CreateFieldM2O(vendor, {
 			collection: ENTRY,
 			field: 'account',
@@ -76,9 +75,11 @@ describe.each(vendors)('%s', (vendor) => {
 
 		expect(relation).toMatchObject({ related_collection: ACCOUNT });
 
+		// Scoped by the m2o, not by `account.owner`: a composed path is no index
+		// path, so the purge would have no hop to read back.
 		const scoped = await request(getUrl(vendor, env))
 			.patch(`/collections/${ENTRY}`)
-			.send({ meta: { scoped_cache_fields: ['account.owner'] } })
+			.send({ meta: { scoped_cache_fields: ['account'] } })
 			.set('Authorization', auth);
 
 		expect(scoped.statusCode).toBe(200);
