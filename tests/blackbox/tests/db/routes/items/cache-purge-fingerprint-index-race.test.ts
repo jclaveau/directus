@@ -93,6 +93,14 @@ describe(oneLine`
 		let sweeperInstance: ChildProcess;
 		let readerInstance: ChildProcess;
 		const readerEnv = cloneDeep(env);
+
+		// The reader boots second, under a build the sweeper did not record, as a
+		// node of a rolling deploy does: its boot flush asks for a reap of its own,
+		// which runs about a second later — over the decoys, while the first purge
+		// is under way, unless the test waits it out first.
+		const bootedAt = Date.now();
+		env[vendor]['CACHE_BUILD_ID'] = `fingerprint-index-race-sweeper-${bootedAt}`;
+		readerEnv[vendor]['CACHE_BUILD_ID'] = `fingerprint-index-race-reader-${bootedAt}`;
 		let rowId: string;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -126,6 +134,15 @@ describe(oneLine`
 				env: env[vendor],
 			});
 
+			await awaitDirectusConnection(port);
+
+			const seeded = await request(getUrl(vendor, env))
+				.get(`/items/${COLLECTION}`)
+				.query({ 'filter[slot][_eq]': HELD_SLOT })
+				.set('Authorization', auth);
+
+			rowId = seeded.body.data[0].id;
+
 			const readerPort = await getPort();
 			readerEnv[vendor].PORT = String(readerPort);
 
@@ -134,15 +151,7 @@ describe(oneLine`
 				env: readerEnv[vendor],
 			});
 
-			await awaitDirectusConnection(port);
 			await awaitDirectusConnection(readerPort);
-
-			const seeded = await request(getUrl(vendor, env))
-				.get(`/items/${COLLECTION}`)
-				.query({ 'filter[slot][_eq]': HELD_SLOT })
-				.set('Authorization', auth);
-
-			rowId = seeded.body.data[0].id;
 		}, 120_000);
 
 		afterAll(async () => {
