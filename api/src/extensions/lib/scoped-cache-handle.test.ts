@@ -13,6 +13,11 @@ const state = vi.hoisted(() => {
 });
 
 const purgeScopedCache = vi.hoisted(() => vi.fn());
+const scopedCacheSnapshot = vi.hoisted(() => vi.fn());
+
+vi.mock('../../database/index.js', () => {
+	return { default: () => ({}) };
+});
 
 vi.mock('../../cache.js', () => {
 	return {
@@ -35,6 +40,9 @@ vi.mock('../../scoped-cache/index.js', async (importOriginal) => {
 
 	return {
 		...actual,
+		ItemScopedCacheService: class {
+			snapshot = scopedCacheSnapshot;
+		},
 		purgeScopedCache,
 		scopedCachePurgeEnabled: () => state.scopedEnabled,
 	};
@@ -171,14 +179,84 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
-	it('relational (dotted) scope field: collection-wide purge', async () => {
+	it('relational scope: binds the purge to the snapshot of the rows\' keys', async () => {
 		const getRelationalSchema = schemaScopedBy(['account.owner']);
 		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
 
-		await handle.purgeForMutatedRows('articles', [{ account: 42 }]);
+		scopedCacheSnapshot.mockResolvedValueOnce({
+			canResolveSlicesFromRows: true,
+			rows: [
+				{
+					key: 1,
+					row: { id: 1, 'account.owner': 7 },
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['1'], 'account.owner': ['7'] },
+					},
+				},
+				{
+					key: 2,
+					row: { id: 2, 'account.owner': 9 },
+					fingerprint: {
+						collection: 'articles',
+						pinnedScope: { id: ['2'], 'account.owner': ['9'] },
+					},
+				},
+			],
+		});
 
-		// A raw row carries only the first-hop fk (account=42), not the pinned terminal,
-		// so it must fall back to collection-wide rather than emit a wrong fk pin.
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42 },
+			{ id: 2, account: 43 },
+		]);
+
+		expect(scopedCacheSnapshot).toHaveBeenCalledWith([1, 2]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			state.cache,
+			'articles',
+			[],
+			null,
+			{
+				rowFingerprints: [
+					{
+						collection: 'articles',
+						pinnedScope: { id: ['1'], 'account.owner': ['7'] },
+					},
+					{
+						collection: 'articles',
+						pinnedScope: { id: ['2'], 'account.owner': ['9'] },
+					},
+				],
+				indexPath: null,
+			},
+		);
+	});
+
+	it('relational scope, snapshot unresolvable: collection-wide purge', async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		scopedCacheSnapshot.mockResolvedValueOnce({
+			canResolveSlicesFromRows: false,
+			rows: [],
+		});
+
+		await handle.purgeForMutatedRows('articles', [{ id: 1, account: 42 }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it('relational scope, row missing its primary key: collection-wide purge', async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, account: 42 },
+			{ account: 43 },
+		]);
+
+		expect(scopedCacheSnapshot).not.toHaveBeenCalled();
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
