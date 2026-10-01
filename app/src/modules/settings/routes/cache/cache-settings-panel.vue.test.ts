@@ -67,6 +67,11 @@ function answered(sharedSettings: Record<string, unknown> | null) {
 						fallback: 1000,
 					},
 					scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
+					scoped_max_pins_per_collection: {
+						value: 250,
+						source: 'env',
+						fallback: 250,
+					},
 				},
 			},
 		},
@@ -116,6 +121,7 @@ describe('what the panel shows', () => {
 				'CACHE_AUDIT_MAX_DURATION',
 				'CACHE_SCOPED_INDEX_SCAN_COUNT',
 				'CACHE_SCOPED_INDEX_TTL_FACTOR',
+				'CACHE_SCOPED_MAX_PINS_PER_COLLECTION',
 			]);
 	});
 

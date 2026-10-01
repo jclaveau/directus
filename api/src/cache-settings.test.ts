@@ -119,6 +119,8 @@ test.each([
 	{ scoped_index_ttl_factor: 1 },
 	{ scoped_index_ttl_factor: 1.5 },
 	{ scoped_index_ttl_factor: 100 },
+	{ scoped_max_pins_per_collection: 0 },
+	{ scoped_max_pins_per_collection: 64 },
 	{ audit_limit: null },
 	{
 		audit_limit: 40,
@@ -195,6 +197,17 @@ test.each([
 			a number from 1 to 100, or null
 		`,
 	],
+	[
+		{ scoped_max_pins_per_collection: -1 },
+		oneLine`
+			'cache_settings.scoped_max_pins_per_collection' has to be
+			an integer from 0 to 100000, or null
+		`,
+	],
+	[
+		{ scoped_max_pins_per_collection: 1.5 },
+		`'cache_settings.scoped_max_pins_per_collection' has to be`,
+	],
 	[{ ttl: '1h' }, `'cache_settings.ttl' is not a cache setting`],
 	[{ setAt: 7 }, `'cache_settings.setAt' has to be a string`],
 ])('refuses %o', (document, reason) => {
@@ -242,6 +255,10 @@ test.each([
 	[
 		{ scoped_index_ttl_factor: 101 },
 		`'cache_settings.scoped_index_ttl_factor' has to be`,
+	],
+	[
+		{ scoped_max_pins_per_collection: 100001 },
+		`'cache_settings.scoped_max_pins_per_collection' has to be`,
 	],
 	[
 		{ audit_max_duration: '25h' },
@@ -293,6 +310,7 @@ test('resolves every field against the environment', () => {
 		CACHE_AUDIT_MAX_DURATION: '10m',
 		CACHE_SCOPED_INDEX_SCAN_COUNT: 500,
 		CACHE_SCOPED_INDEX_TTL_FACTOR: 3,
+		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 	});
 
 	expect(resolveCacheSettings({ audit_limit: 40, scoped_index_ttl_factor: 0.5 }))
@@ -304,6 +322,11 @@ test('resolves every field against the environment', () => {
 			audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
 			scoped_index_scan_count: { value: 500, source: 'env', fallback: 500 },
 			scoped_index_ttl_factor: { value: 3, source: 'env', fallback: 3 },
+			scoped_max_pins_per_collection: {
+				value: 250,
+				source: 'env',
+				fallback: 250,
+			},
 		});
 });
 

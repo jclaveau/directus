@@ -83,6 +83,12 @@ patch:
               maximum: 100
               nullable: true
               description: Over CACHE_SCOPED_INDEX_TTL_FACTOR.
+            scoped_max_pins_per_collection:
+              type: integer
+              minimum: 0
+              maximum: 100000
+              nullable: true
+              description: Over CACHE_SCOPED_MAX_PINS_PER_COLLECTION.
           example:
             audit_limit: 40
             value_max_size: null
