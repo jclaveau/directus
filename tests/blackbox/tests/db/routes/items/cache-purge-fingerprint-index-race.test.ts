@@ -170,6 +170,23 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		/**
+		 * Clear through both instances, each answering once its own reaps are over.
+		 * A reap still to come in either one would walk the decoys during the purge
+		 * and move the counter the held reads check — the reader's boot flush asks
+		 * for one, and the sweeper's pass alone does not wait it out. Sequential, so
+		 * the reap each clear asks of the other finds the index already marked.
+		 */
+		async function clearAwaitingEveryReap() {
+			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
+				for (const instanceEnv of [env, readerEnv]) {
+					await request(getUrl(vendor, instanceEnv))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+				}
+			});
+		}
+
 		function writeHeldLabel(label: string) {
 			return request(getUrl(vendor, env))
 				.patch(`/items/${COLLECTION}/${rowId}`)
@@ -277,12 +294,7 @@ describe(oneLine`
 			the next purge of the same slice reaches every entry filed during the first
 			one, rather than leaving one indexed by a set that purge dropped
 		`, async () => {
-			// Its pass would reap the decoys, and move the counter the held reads check.
-			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
-				await request(getUrl(vendor, env))
-					.post('/utils/cache/clear')
-					.set('Authorization', auth);
-			});
+			await clearAwaitingEveryReap();
 
 			const limits = await survivorsOf(await fillDuringPurge('v2'));
 
@@ -309,12 +321,7 @@ describe(oneLine`
 			a collection-wide purge reaches them too — it scans for the collection's
 			index sets rather than being handed the one a row names
 		`, async () => {
-			// Its pass would reap the decoys, and move the counter the held reads check.
-			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
-				await request(getUrl(vendor, env))
-					.post('/utils/cache/clear')
-					.set('Authorization', auth);
-			});
+			await clearAwaitingEveryReap();
 
 			const limits = await survivorsOf(await fillDuringPurge('v4'));
 
