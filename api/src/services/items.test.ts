@@ -610,6 +610,44 @@ describe('Integration Tests', () => {
 				]);
 			});
 
+			it(oneLine`
+				emits each written group once when the transaction is retried
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				// The second group fails its first attempt only, after the first group
+				// was written: the retry writes both again.
+				tracker.on.update((query) => query.bindings.includes('second'))
+					.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					}));
+
+				const updateListener = vi.fn();
+
+				emitter.onAction('test.items.update', updateListener);
+
+				try {
+					await service.updateBatch(
+						[{ id: 1, name: 'first' }, { id: 2, name: 'second' }],
+						{ awaitActionHooks: true },
+					);
+
+					expect(updateListener).toHaveBeenCalledWith(
+						expect.objectContaining({
+							payload: [
+								{ data: { name: 'first' }, keys: [1] },
+								{ data: { name: 'second' }, keys: [2] },
+							],
+						}),
+						expect.anything(),
+					);
+				}
+				finally {
+					emitter.offAction('test.items.update', updateListener);
+					vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+				}
+			});
+
 			it('snapshots the same rows before and after the write', async () => {
 				// The pre-update snapshot covers the rows that are actually written; the
 				// post-update one has to cover the same set or it re-reads rows nothing

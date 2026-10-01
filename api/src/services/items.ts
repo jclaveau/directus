@@ -1174,7 +1174,6 @@ implements AbstractService<Item> {
 		opts.mutationTracker = mutationTracker;
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		const nestedActionEvents: ActionEventParams[] = [];
 		const inputKeys = groups.flatMap((group) => group.keys);
 
 		// Checked before any hook runs, so a malformed or oversized update never
@@ -1355,14 +1354,16 @@ implements AbstractService<Item> {
 			return rowKeys;
 		}
 
-		const applied: UpdateGroup<Item>[] = [];
-
 		// One transaction around every group, so a failure anywhere rolls the whole
 		// update back and the integrity check below sees the finished state once
-		// rather than once per group.
-		try {
-			await transaction(this.knex, async (trx) => {
+		// rather than once per group. The arrays are per attempt: sqlite and
+		// cockroach re-run the handler after a retryable error.
+		const { applied, nestedActionEvents } = await transaction(
+			this.knex,
+			async (trx) => {
 				const service = this.fork({ knex: trx });
+				const applied: UpdateGroup<Item>[] = [];
+				const nestedActionEvents: ActionEventParams[] = [];
 
 				let userIntegrityCheckFlags =
 					opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
@@ -1395,14 +1396,16 @@ implements AbstractService<Item> {
 						});
 					}
 				}
-			}, mutationTracker.snapshot());
-		}
-		catch (error) {
+
+				return { applied, nestedActionEvents };
+			},
+			mutationTracker.snapshot(),
+		).catch(async (error) => {
 			// A hook may have written out of band before the update threw.
 			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
 
 			throw error;
-		}
+		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Old slices from the pre-update snapshot, plus the new value re-read from the
