@@ -119,6 +119,8 @@ test.each([
 	{ scoped_index_ttl_factor: 1 },
 	{ scoped_index_ttl_factor: 1.5 },
 	{ scoped_index_ttl_factor: 100 },
+	{ scoped_max_pins_per_collection: 0 },
+	{ scoped_max_pins_per_collection: 64 },
 	{ scoped_purge_retry_max_fingerprints: 0 },
 	{ scoped_purge_retry_max_fingerprints: 100 },
 	{ audit_limit: null },
@@ -198,11 +200,22 @@ test.each([
 		`,
 	],
 	[
+		{ scoped_max_pins_per_collection: -1 },
+		oneLine`
+			'cache_settings.scoped_max_pins_per_collection' has to be
+			an integer from 0 to 100000, or null
+		`,
+	],
+	[
 		{ scoped_purge_retry_max_fingerprints: -1 },
 		oneLine`
 			'cache_settings.scoped_purge_retry_max_fingerprints' has to be
 			an integer from 0 to 100000, or null
 		`,
+	],
+	[
+		{ scoped_max_pins_per_collection: 1.5 },
+		`'cache_settings.scoped_max_pins_per_collection' has to be`,
 	],
 	[
 		{ scoped_purge_retry_max_fingerprints: 1.5 },
@@ -255,6 +268,10 @@ test.each([
 	[
 		{ scoped_index_ttl_factor: 101 },
 		`'cache_settings.scoped_index_ttl_factor' has to be`,
+	],
+	[
+		{ scoped_max_pins_per_collection: 100001 },
+		`'cache_settings.scoped_max_pins_per_collection' has to be`,
 	],
 	[
 		{ scoped_purge_retry_max_fingerprints: 100001 },
@@ -310,6 +327,7 @@ test('resolves every field against the environment', () => {
 		CACHE_AUDIT_MAX_DURATION: '10m',
 		CACHE_SCOPED_INDEX_SCAN_COUNT: 500,
 		CACHE_SCOPED_INDEX_TTL_FACTOR: 3,
+		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 		CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS: 40,
 	});
 
@@ -322,6 +340,11 @@ test('resolves every field against the environment', () => {
 			audit_max_duration: { value: '10m', source: 'env', fallback: '10m' },
 			scoped_index_scan_count: { value: 500, source: 'env', fallback: 500 },
 			scoped_index_ttl_factor: { value: 3, source: 'env', fallback: 3 },
+			scoped_max_pins_per_collection: {
+				value: 250,
+				source: 'env',
+				fallback: 250,
+			},
 			scoped_purge_retry_max_fingerprints: {
 				value: 40,
 				source: 'env',

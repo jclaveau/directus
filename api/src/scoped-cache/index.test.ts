@@ -199,6 +199,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.clearAllMocks();
 	delete cacheLayer['scoped_index_ttl_factor'];
+	delete cacheLayer['scoped_max_pins_per_collection'];
 });
 
 // The one spelling of a pin that the fingerprint index, the purge attribution and
@@ -4711,6 +4712,23 @@ describe('scopedCachePinsFromO2mChildren', () => {
 				{ length: scopedCacheMaxPinsPerCollection() + 1 },
 				(_, at) => ({ id: at + 1, name: `p${at}` }),
 			),
+		).has('child')).toBe(false);
+	});
+
+	// The environment's 250 would keep all three.
+	it('takes its ceiling from the cache layer, over the environment', () => {
+		cacheLayer['scoped_max_pins_per_collection'] = 2;
+
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child']),
+			[{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+		).has('child')).toBe(true);
+
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child']),
+			[{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }],
 		).has('child')).toBe(false);
 	});
 });

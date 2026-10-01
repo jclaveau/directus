@@ -8,8 +8,9 @@
 		"bench:cache": "vitest --watch=false cache.perf",
 		"bench:cache-flush": "vitest --watch=false cache-flush.perf",
 		"bench:purge-scaling": "vitest --watch=false purge-scaling.perf",
-		"bench:pending-retry": "vitest --watch=false pending-retry.perf",
-		"bench:devserver": "vitest --watch=false devserver.perf"
+		"bench:devserver": "vitest --watch=false devserver.perf",
+		"bench:pin-fanout": "vitest --watch=false pin-fanout.perf",
+		"bench:pending-retry": "vitest --watch=false pending-retry.perf"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",

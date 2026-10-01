@@ -148,6 +148,17 @@ export const CACHE_SETTING_FIELDS: CacheSettingField[] = [
 		step: 0.5,
 	},
 	{
+		field: 'scoped_max_pins_per_collection',
+		variable: 'CACHE_SCOPED_MAX_PINS_PER_COLLECTION',
+		kind: 'number',
+		description: 'How many keys one collection may be pinned by on a read. '
+			+ 'Past it the read pins its slices or the whole collection: a cheaper '
+			+ 'fill, a wider purge.',
+		unit: 'keys',
+		min: 0,
+		step: 1,
+	},
+	{
 		field: 'scoped_purge_retry_max_fingerprints',
 		variable: 'CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS',
 		kind: 'number',

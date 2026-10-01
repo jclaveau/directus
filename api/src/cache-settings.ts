@@ -43,6 +43,10 @@ function isIntegerBetween(minimum: number, maximum: number) {
 
 const isScanCount = isIntegerBetween(1, 100000);
 
+// 0 is a cap too: no read is pinned by key, and each falls back to its
+// collection's slices or bare pin.
+const isPinCap = isIntegerBetween(0, 100000);
+
 // 0 retries every recorded purge as its whole collection.
 const isRetryFingerprintCap = isIntegerBetween(0, 100000);
 
@@ -62,6 +66,7 @@ export interface CacheSettingValues {
 	audit_max_duration: string | undefined;
 	scoped_index_scan_count: number;
 	scoped_index_ttl_factor: number;
+	scoped_max_pins_per_collection: number;
 	scoped_purge_retry_max_fingerprints: number;
 }
 
@@ -155,6 +160,17 @@ const CACHE_SETTING_RULES: {
 		expected: 'a number from 1 to 100, or null',
 		fallback: () => {
 			return (useEnv()['CACHE_SCOPED_INDEX_TTL_FACTOR'] ?? 2) as number;
+		},
+	},
+	// A read past the cap falls back to a wider pin, and a purge finds an entry
+	// by the written row's values whatever cap filed it: a change only moves
+	// what later fills cost and how much a later write evicts.
+	scoped_max_pins_per_collection: {
+		variable: 'CACHE_SCOPED_MAX_PINS_PER_COLLECTION',
+		accepts: isPinCap,
+		expected: 'an integer from 0 to 100000, or null',
+		fallback: () => {
+			return (useEnv()['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] ?? 250) as number;
 		},
 	},
 	// Past the cap a retry purges the collection whole rather than one slice at a

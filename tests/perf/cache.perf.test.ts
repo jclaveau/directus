@@ -141,17 +141,15 @@ const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ??
 // set per row. Gated on both counts, because the two moved for different reasons —
 // grouping a collection's slices into one index call halved the commands, and
 // sending the tag script by hash cut the bytes without touching the count.
-// Down from 900 now that one index call files every home pin set of a fill:
-// 446 where trunk ran 809.
+// Down from 500: 446 measured with the fan read's 200 authors pinned by key under
+// the default pin cap of 250. A cap of 64 falls back to their 8 tenant slices and
+// measured 31, both counted in all rather than over an uncached read (#392).
 const maxCommandsPerFanFill =
-	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 500);
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 460);
 
 const maxKilobytesPerFanFill =
-	// Up from 70 for the two key renames that landed after that ceiling was set
-	// (`scoped-cache-index:` over `tag:`, `scoped-cache-epoch:` over `epoch:`):
-	// the fill sends the same 817 commands, each naming a longer key, 70.3 KB
-	// where 62.8 set the previous ceiling.
-	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 78);
+	// Down from 78: 57.1 KB measured, 12.8 under a pin cap of 64 (#392).
+	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 60);
 
 const maxWriteCommandScaling =
 	// Down from 3.2 now that a purge sends one UNLINK per 500 keys rather than one
@@ -163,11 +161,12 @@ const maxWriteCommandScaling =
 const targetMissVsOff = 1.85;
 const targetMissVsFull = 1.45;
 
-// The absolute ceilings, gated on `full` and `scoped`. What the counts would be
-// with the response cache alone paying for itself: two reads on a hit, and on a
-// fill the epoch capture, the tag writes, the value and its sidecar, and the
-// post-fill re-read. A fan fill is held to the flat fill's: a read's cost to Redis
-// should not grow with the number of rows it returns.
+// The absolute ceilings. What the counts would be with the response cache alone
+// paying for itself: two reads on a hit, and on a fill the value and its sidecar
+// around the read. A fan fill is held to the flat fill's: a read's cost to Redis
+// should not grow with the number of rows it returns. `full` is held to them;
+// `scoped` pays for its filing on top, and its fills are held to their own pair
+// below until the index stops costing a set per pin (#587).
 const maxCommandsAddedPerHit =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_HIT'] ?? 2);
 
@@ -176,6 +175,18 @@ const maxCommandsAddedPerFill =
 
 const maxCommandsAddedPerFanFill =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_FAN_FILL'] ?? 7);
+
+// A scoped fill adds the epoch capture, its re-read, and the filing script: the
+// script plus a TTL, SADD and EXPIRE per index set, and the same three on the
+// set naming them. One set on a flat fill, 10.99 to 11.08 measured over three
+// runs of one build, so the gate sits a command above. The fan read pins its
+// 200 authors by key under the default pin cap, a set each, 446 measured: Redis
+// has no SADD over many keys, so that is the floor of a key pin (#392).
+const maxCommandsAddedPerScopedFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FILL'] ?? 12);
+
+const maxCommandsAddedPerScopedFanFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_ADDED_SCOPED_FAN_FILL'] ?? 460);
 
 // A purge that drops one slice should cost the same however much the cache holds.
 const targetWriteCommandScaling = 1.5;
@@ -296,10 +307,10 @@ const readShapes = [
 		// carries a DIFFERENT parent. What separates this from `wide` is the pin
 		// fan-out alone, which is the crossover #392 is about.
 		name: 'fan',
-		// Its own, looser pair: a read that pins one tag per row writes a tag set
-		// per row too, and that is the cost the shape exists to expose rather than
-		// one the ceiling should hide. The target every shape is held to stays in
-		// Headroom.
+		// Its own, looser pair: a read that pins one key per row writes a set per
+		// row too, and that is the cost the shape exists to expose rather than
+		// one the ceiling should hide. The target every shape is held
+		// to stays in Headroom.
 		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.20, missVsFull: 1.75 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
@@ -1492,13 +1503,17 @@ test('the cache costs less than what it replaces', async () => {
 		verdict(
 			`Redis commands a ${armName} fill adds over an uncached read`,
 			commandsPerFill.get(armName)! - commandsPerFill.get('off')!,
-			maxCommandsAddedPerFill,
+			armName === 'scoped'
+				? maxCommandsAddedPerScopedFill
+				: maxCommandsAddedPerFill,
 		);
 
 		verdict(
 			`Redis commands a ${armName} fan fill adds over an uncached read`,
 			commandsPerFanFill.get(armName)! - commandsPerFanFill.get('off')!,
-			maxCommandsAddedPerFanFill,
+			armName === 'scoped'
+				? maxCommandsAddedPerScopedFanFill
+				: maxCommandsAddedPerFanFill,
 		);
 
 		for (const phase of cpuPhases) {
