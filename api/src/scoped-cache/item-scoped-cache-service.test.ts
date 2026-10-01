@@ -4,7 +4,17 @@ import knex from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { scopedCacheIndexPath } from './index-path.js';
+import type Keyv from 'keyv';
+import { transaction } from '../utils/transaction.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
+import { purgeScopedCache } from './purge.js';
+
+vi.mock('./purge.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('./purge.js')>()),
+		purgeScopedCache: vi.fn(async () => []),
+	};
+});
 
 vi.mock('./config.js', async (importOriginal) => {
 	return {
@@ -25,6 +35,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	tracker.reset();
+	vi.mocked(purgeScopedCache).mockClear();
 });
 
 // `item` scopes on two flat columns, and on the owner its `parent` M2O leads to, so
@@ -298,3 +309,98 @@ describe('snapshot', () => {
 	});
 });
 
+describe('purge', () => {
+	it('purges at once on a knex that is no transaction', async () => {
+		const cache = {} as Keyv;
+
+		const scopedCache = new ItemScopedCacheService(
+			'item',
+			schema,
+			db,
+			cache,
+			null,
+		);
+
+		await scopedCache.purge([
+			{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+		]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			cache,
+			'item',
+			[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+			{ database: db, schema, accountability: null },
+			{ declaredFingerprints: [], changedCollections: [] },
+		);
+	});
+
+	it(oneLine`
+		waits for the transaction a nested write runs in to commit, then purges on
+		the connection that transaction was opened on (#363)
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			const scopedCache = new ItemScopedCacheService(
+				'item',
+				schema,
+				trx,
+				cache,
+				null,
+			);
+
+			expect(await scopedCache.purge([
+				{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+			])).toEqual([]);
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		});
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			cache,
+			'item',
+			[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+			{ database: db, schema, accountability: null },
+			{ declaredFingerprints: [], changedCollections: [] },
+		);
+	});
+
+	it(oneLine`
+		purges after commit the hook declarations it was handed, not the ones
+		declared after it
+	`, async () => {
+		const cache = {} as Keyv;
+
+		const hookDeclarations = {
+			purgeFingerprints: [{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+		};
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService(
+				'item',
+				schema,
+				trx,
+				cache,
+				null,
+			).purge([], hookDeclarations);
+
+			hookDeclarations.purgeFingerprints.push({
+				collection: 'item',
+				pinnedScope: { owner: ['beta'] },
+			});
+		});
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			cache,
+			'item',
+			[],
+			{ database: db, schema, accountability: null },
+			{
+				declaredFingerprints: [
+					{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+				],
+				changedCollections: [],
+			},
+		);
+	});
+});

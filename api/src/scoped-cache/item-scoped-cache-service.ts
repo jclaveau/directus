@@ -25,6 +25,7 @@ import {
 	collectionsInFieldMap,
 } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import type { AST } from '../types/ast.js';
+import { queueAfterCommit } from '../utils/transaction.js';
 import {
 	scopedCacheOwnershipInjections,
 	type ScopedCacheOwnershipInjection,
@@ -638,6 +639,35 @@ export class ItemScopedCacheService {
 			rows?: ScopedCacheMutatedWrite | undefined;
 		} = {},
 	): Promise<ScopedCacheFingerprint[] | null> {
+		// A write nested in a transaction it did not open (a hook's own service, built
+		// on the parent's trx) purges once that transaction commits (#363). Its purged
+		// list is left out of the debug header, which reads only the request's own
+		// service.
+		// Copied now: the list goes on growing with the writes that follow, which
+		// purge their own declarations.
+		const queuedDeclarations = hookDeclarations === undefined
+			? undefined
+			: { purgeFingerprints: [...hookDeclarations.purgeFingerprints] };
+
+		const queuedAfterCommit = queueAfterCommit(this.knex, async (database) => {
+			await new ItemScopedCacheService(
+				this.collection,
+				this.schema,
+				database,
+				this.cache,
+				this.accountability,
+			).purge(
+				scopedCacheFingerprints,
+				queuedDeclarations,
+				changedCollections,
+				{ includeBareFingerprint, rows },
+			);
+		});
+
+		if (queuedAfterCommit) {
+			return [];
+		}
+
 		// Callers reach here through `shouldClearCache`, which already rules out a
 		// null cache — but it narrows `this.cache`, and a mutable field does not
 		// carry that narrowing across the awaits below. Read it once. With no cache
