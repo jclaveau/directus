@@ -3,9 +3,8 @@
 // context.scopedCache.purgeForMutatedRows on each. The mutated owner's slices
 // refresh with no whole-cache flush; another owner's slices survive.
 //   POST /           — two flat owner-scoped collections (surgical per-owner purge).
-//   POST /relational — a collection scoped through an M2O; the raw row can't resolve
-//     the terminal, so it degrades to a collection-wide purge (never stale, spares
-//     other collections).
+//   POST /relational — a collection scoped through an M2O; the host reads the rows
+//     back by key to resolve the terminal, so only the written owner's slices go.
 
 const DOCUMENT = 'rawpurge_document';
 const LINE = 'rawpurge_document_line';
@@ -59,10 +58,10 @@ export default function registerEndpoint(router, { database, scopedCache }) {
 
 		const entryRows = await database(ENTRY)
 			.whereIn('account', accountIds)
-			.select('account');
+			.select('id', 'account');
 
-		// ENTRY is scoped through account.owner — the raw row carries only the account
-		// fk, not the terminal owner, so the host falls back to a collection-wide purge.
+		// ENTRY is scoped through account.owner: the raw row carries only the account
+		// fk, so the host joins the owner in by the rows' keys.
 		await scopedCache.purgeForMutatedRows(ENTRY, entryRows);
 
 		res.json({ entries: entryRows.length });
