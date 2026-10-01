@@ -48,13 +48,14 @@ const decoyChunkSize = 4_000;
 // while the pass is still running.
 const readHoldMs = 400;
 
-// Reads fired at staggered offsets into the purge, so one of them files its
-// fingerprint mid-pass wherever the runner's real pass happens to start and end.
-// They start late enough that the counters were already bumped — a read that
-// snapshotted before the bump is undone by the guard and never reaches the assertion
-// anyway. Each carries a distinct `limit`, so each is its own cache entry rather
+// Reads fired at staggered offsets after the purge bumps its counter, which it does
+// right before its pass, so one of them files its fingerprint mid-pass wherever the
+// runner's real pass happens to end. Counted from the bump rather than from the
+// write: a loaded runner can spend over a second on the write before its purge
+// starts, and reads aimed from the write then all land before the pass, which finds
+// every one. Each carries a distinct `limit`, so each is its own cache entry rather
 // than overwriting the last.
-const readLeadsMs = [300, 500, 700, 900, 1100];
+const readLeadsMs = [100, 300, 500, 700, 900];
 
 const startedAt = Date.now();
 
@@ -204,6 +205,17 @@ describe(oneLine`
 		 */
 		const purgeMustOutlastMs = readLeadsMs[0]! + readHoldMs;
 
+		const purgeCounterKey = `${namespace}:scoped-cache-epoch:${COLLECTION}`;
+
+		function readPurgeCounter() {
+			return redisCommand(REDIS_PORT, [
+				'EVAL',
+				"return tonumber(redis.call('GET', KEYS[1]) or '0')",
+				'1',
+				purgeCounterKey,
+			]);
+		}
+
 		async function plantDecoys() {
 			for (let sent = 0; sent < decoyMemberCount; sent += decoyChunkSize) {
 				await redisCommand(REDIS_PORT, ['SADD', heldIndexKey, ...Array.from(
@@ -234,6 +246,21 @@ describe(oneLine`
 		async function fillDuringPurge(label: string): Promise<number[]> {
 			await plantDecoys();
 
+			const counterBefore = await readPurgeCounter();
+			const writeSentAt = Date.now();
+			// A supertest request goes out once it is awaited: `then` sends it now.
+			const purging = writeHeldLabel(label).then((response) => response);
+
+			while (
+				await readPurgeCounter() === counterBefore
+				&& Date.now() - writeSentAt < 30_000
+			) {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+
+			const purgeStartedAt = Date.now();
+			mark(`purge counter moved ${purgeStartedAt - writeSentAt}ms after the write`);
+
 			const held = readLeadsMs.map(async (lead, index) => {
 				await new Promise((resolve) => setTimeout(resolve, lead));
 
@@ -245,17 +272,15 @@ describe(oneLine`
 				return index + 1;
 			});
 
-			const purgeStartedAt = Date.now();
-
 			const [purgeResponse, limits] = await Promise.all([
-				writeHeldLabel(label),
+				purging,
 				Promise.all(held),
 			]);
 
 			const purgeMs = Date.now() - purgeStartedAt;
 
 			expect(purgeResponse.status).toBe(200);
-			mark(`purge answered in ${purgeMs}ms, ${limits.length} reads filled`);
+			mark(`purge ran ${purgeMs}ms past its counter, ${limits.length} reads filled`);
 
 			// Not a timing tolerance — a calibration check. Below this the decoys are
 			// no longer buying a pass the reads can be aimed into, and a green says
