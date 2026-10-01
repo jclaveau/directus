@@ -32,11 +32,15 @@ vi.mock('../../src/database/index', () => {
 // The non-bypass path reads/writes the in-memory schema cache and coordinates via lock+bus. Drive
 // each from the test so both the "cache hit" short-circuit and the "wait for another process" branch
 // are reachable.
-const memoryCache: { schema: any } = { schema: undefined };
+const memoryCache: { schema: any; generation: number } = {
+	schema: undefined,
+	generation: 0,
+};
 
 vi.mock('../cache.js', () => {
 	return {
 		getMemorySchemaCache: () => memoryCache.schema,
+		getSchemaCacheGeneration: () => memoryCache.generation,
 		setMemorySchemaCache: (schema: any) => {
 			memoryCache.schema = schema;
 		},
@@ -365,6 +369,7 @@ describe('getSchema cached (non-bypass) path', () => {
 	beforeEach(() => {
 		env['CACHE_SCHEMA'] = true;
 		memoryCache.schema = undefined;
+		memoryCache.generation = 0;
 		overview.mockReset();
 		readAll.mockClear();
 		lockIncrement.mockReset();
@@ -428,5 +433,66 @@ describe('getSchema cached (non-bypass) path', () => {
 		expect(schema).toBe(published);
 		expect(memoryCache.schema).toBe(published);
 		expect(overview).not.toHaveBeenCalled();
+	});
+
+	it('rebuilds when a schema write clears the cache mid-build', async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview
+			.mockImplementationOnce(async () => {
+				memoryCache.generation++;
+				return overviewFor('stale');
+			})
+			.mockResolvedValueOnce(overviewFor('fresh'));
+
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.keys(schema.collections)).toEqual(['fresh']);
+		expect(memoryCache.schema).toBe(schema);
+		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema });
+	});
+
+	it('caches nothing and publishes null when every build is outdated', async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockImplementation(async () => {
+			memoryCache.generation++;
+			return overviewFor('stale');
+		});
+
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.keys(schema.collections)).toEqual(['stale']);
+		expect(overview).toHaveBeenCalledTimes(3);
+		expect(memoryCache.schema).toBeUndefined();
+		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema: null });
+	});
+
+	it(oneLine`
+		returns but does not cache a schema published after a local clear
+	`, async () => {
+		lockIncrement.mockResolvedValue(2);
+
+		const published = { collections: { fromBus: {} }, relations: [] };
+
+		busSubscribe.mockImplementation(
+			async (_key: string, listener: (opts: { schema: any }) => void) => {
+				memoryCache.generation++;
+				listener({ schema: published });
+			},
+		);
+
+		busUnsubscribe.mockResolvedValue(undefined);
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema).toBe(published);
+		expect(memoryCache.schema).toBeUndefined();
 	});
 });
