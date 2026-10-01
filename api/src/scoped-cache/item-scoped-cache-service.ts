@@ -678,8 +678,12 @@ export class ItemScopedCacheService {
 
 		// What a hook declared rides beside the mutation's own purge rather than in
 		// its own list: it names a query case, not a row, so the rows this mutation
-		// wrote answer for none of it.
-		const declared = { declaredFingerprints: hookFingerprints };
+		// wrote answer for none of it. The collections the database changed under it
+		// ride along, since its read-back cannot trust a path through them.
+		const declared = {
+			declaredFingerprints: hookFingerprints,
+			changedCollections: otherCollections,
+		};
 
 		if (ownFingerprints !== null && otherCollections.length === 0) {
 			// Spelled twice rather than passing `{ includeBareFingerprint }`: the option
