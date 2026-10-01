@@ -8,6 +8,8 @@
 // control endpoint:
 //   name 'cancel-me'  → the per-row filter returns null, cancelling that row.
 //   name 'rewrite-me' → the per-row filter rewrites it, splitting its group.
+//   status 'legacy-shape' → the grouped filter answers with that group's
+//     payload alone, the shape it had before the event carried groups.
 // The name is read back from the row, since the event carries only what is
 // being written.
 
@@ -31,7 +33,13 @@ export default function registerHooks({ filter, action }, { database }) {
 	filter(`${COLLECTION}.items.update`, async (payload) => {
 		await record('items.update', 'filter', payload);
 
-		return payload;
+		const legacyGroup = Array.isArray(payload)
+			? payload.find((group) => group?.data?.status === 'legacy-shape')
+			: undefined;
+
+		return legacyGroup
+			? legacyGroup.data
+			: payload;
 	});
 
 	filter(`${COLLECTION}.items.update.one`, async (payload) => {

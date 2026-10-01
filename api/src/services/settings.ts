@@ -16,9 +16,9 @@ export class SettingsService extends ItemsService {
 
 	// The cache page edits `cache_ttl` through the settings singleton (PATCH
 	// /settings). Both the broadcast and the timeseries marker ride the
-	// `settings.update.one` action instead (see `initCacheConfig`), so they cover writers
-	// that never reach this service. What stays here is the validation, which has to
-	// run BEFORE the write and so cannot live on an after-the-fact action.
+	// `settings.update.one` action instead (see `initCacheConfig`), so they cover
+	// writers that never reach this service. What stays here is the validation, which
+	// has to run BEFORE the write and so cannot live on an after-the-fact action.
 	override async upsertSingleton(
 		data: Partial<Item>,
 		opts?: MutationOptions,

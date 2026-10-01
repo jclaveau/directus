@@ -1503,50 +1503,94 @@ describe(oneLine`
 			}
 		});
 
-	it(oneLine`
-		a per-row cancel that declared its slice purges it too — cancelling every row
-		leaves nothing written, but the declaration still stands
-	`, async () => {
-		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		it(oneLine`
+			a per-row cancel that declared its slice purges it too — cancelling every row
+			leaves nothing written, but the declaration still stands
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-		// The grouped filter passes the update through; the per-row one declares a
-		// slice and then cancels its row. With the only row gone there is nothing to
-		// write, so the drain that runs on the written path never fires — the cancel
-		// path has to honour the declaration itself.
-		const declareThenCancelRow = async (_payload: any, _meta: any, ctx: any) => {
-			ctx.scopedCache.purgeBy({
-				collection: 'authors',
-				pinnedScope: { id: [5] },
-			});
+			// The grouped filter passes the update through; the per-row one declares a
+			// slice and then cancels its row. With the only row gone there is nothing to
+			// write, so the drain that runs on the written path never fires — the cancel
+			// path has to honour the declaration itself.
+			const declareThenCancelRow = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
 
-			return null;
-		};
+				return null;
+			};
 
-		emitter.onFilter('test.items.update.one', declareThenCancelRow);
+			emitter.onFilter('test.items.update.one', declareThenCancelRow);
 
-		try {
-			await service().updateMany([1], { student: 'B' }, { allowFilterCancel: true });
+			try {
+				await service().updateMany([1], { student: 'B' }, {
+					allowFilterCancel: true,
+				});
 
-			expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
-			expect(purgeScopedCache).toHaveBeenCalledWith(
-				expect.anything(),
-				'test',
-				[],
-				expect.anything(),
-				{
-					includeBareFingerprint: false,
-					declaredFingerprints: [{
-						collection: 'authors',
-						pinnedScope: { id: ['5'] },
-					}],
-				},
-			);
-		}
-		finally {
-			emitter.offFilter('test.items.update.one', declareThenCancelRow);
-		}
-	});
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update.one', declareThenCancelRow);
+			}
+		});
+
+		it(oneLine`
+			an update that fails still purges the slice a hook declared — the hook may
+			have written out of band before the update threw
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').simulateError('boom');
+
+			const declareSlice = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('test.items.update', declareSlice);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' })).rejects.toThrow();
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declareSlice);
+			}
+		});
 
 		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only

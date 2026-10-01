@@ -20,6 +20,7 @@ import type {
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { getCache } from '../cache.js';
@@ -86,6 +87,67 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 		// an un-awaited rejection (e.g. from a bypassEmitAction handler) doesn't go unhandled.
 		emitting.catch(() => {});
 	}
+}
+
+/**
+ * Merge the groups carrying the same change, wherever they sit, so one statement
+ * writes them all. A group never joins one written before a later change to one of
+ * its own rows, so two changes to the same row still land in the caller's order.
+ */
+function mergeUpdateGroups<Item extends AnyItem>(
+	candidateGroups: UpdateGroup<Item>[],
+): UpdateGroup<Item>[] {
+	const mergedGroups: UpdateGroup<Item>[] = [];
+	const groupIndexByData = new Map<string, number>();
+	const lastGroupIndexByKey = new Map<string, number>();
+
+	for (const candidateGroup of candidateGroups) {
+		const serializedData = JSON.stringify(candidateGroup.data, (_field, value) => {
+			return typeof value === 'bigint'
+				? value.toString()
+				: value;
+		});
+
+		let latestConflictIndex = -1;
+
+		for (const key of candidateGroup.keys) {
+			latestConflictIndex = Math.max(
+				latestConflictIndex,
+				lastGroupIndexByKey.get(String(key)) ?? -1,
+			);
+		}
+
+		const sameDataIndex = groupIndexByData.get(serializedData);
+		let targetIndex: number;
+
+		if (
+			sameDataIndex !== undefined &&
+			sameDataIndex >= latestConflictIndex &&
+			isEqual(mergedGroups[sameDataIndex]!.data, candidateGroup.data)
+		) {
+			targetIndex = sameDataIndex;
+
+			// A loop, not a spread: one group can carry more keys than a call takes
+			// arguments.
+			for (const key of candidateGroup.keys) {
+				mergedGroups[targetIndex]!.keys.push(key);
+			}
+		}
+		else {
+			targetIndex = mergedGroups.length;
+			mergedGroups.push({
+				data: candidateGroup.data,
+				keys: [...candidateGroup.keys],
+			});
+			groupIndexByData.set(serializedData, targetIndex);
+		}
+
+		for (const key of candidateGroup.keys) {
+			lastGroupIndexByKey.set(String(key), targetIndex);
+		}
+	}
+
+	return mergedGroups;
 }
 
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
@@ -996,19 +1058,23 @@ implements AbstractService<Item> {
 
 		// Each row is its own group: the payloads differ per row, which is
 		// exactly what one `keys`-plus-one-payload update cannot express.
-		const groups = data.map((item) => {
-			const primaryKey = item[primaryKeyField];
+		return await this.updateGroups(
+			data.map((item): UpdateGroup<Item> => {
+				const primaryKey = item[primaryKeyField];
 
-			if (!primaryKey) {
-				throw new InvalidPayloadError({
-					reason: `Item in update misses primary key`,
-				});
-			}
+				if (!primaryKey) {
+					throw new InvalidPayloadError({
+						reason: `Item in update misses primary key`,
+					});
+				}
 
-			return { data: omit(item, primaryKeyField), keys: [primaryKey] };
-		});
-
-		return await this.updateGroups(groups, opts);
+				return {
+					data: omit(item, primaryKeyField) as Partial<Item>,
+					keys: [primaryKey as PrimaryKey],
+				};
+			}),
+			opts,
+		);
 	}
 
 	/**
@@ -1053,11 +1119,9 @@ implements AbstractService<Item> {
 			const alterations = value as Partial<Alterations>;
 
 			// Guard against a JSON column that merely looks like an alterations object.
-			const isNotAlterationsShaped = Object.keys(alterations).some(
+			if (Object.keys(alterations).some(
 				(key) => !ALTERATIONS_KEYS.includes(key as keyof Alterations),
-			);
-
-			if (isNotAlterationsShaped) {
+			)) {
 				return false;
 			}
 
@@ -1077,17 +1141,9 @@ implements AbstractService<Item> {
 			return false;
 		};
 
-		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => {
-			return !changesNothing(field);
-		});
-
-		if (changedFields.length === 0) {
-			// Nothing to write: no transaction, no activity or revision rows, and no
-			// integrity check.
-			return true;
-		}
-
-		return false;
+		// Nothing to write: no transaction, no activity or revision rows, and no
+		// integrity check.
+		return Object.keys(payloadAfterHooks ?? {}).every(changesNothing);
 	}
 
 	async updateGroups(
@@ -1110,13 +1166,36 @@ implements AbstractService<Item> {
 		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) {
-			opts.mutationTracker = this.createMutationTracker();
-		}
+		// Captured, so the transaction callback below still sees it set.
+		const mutationTracker = opts.mutationTracker ?? this.createMutationTracker();
+
+		opts.mutationTracker = mutationTracker;
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const nestedActionEvents: ActionEventParams[] = [];
 		const inputKeys = groups.flatMap((group) => group.keys);
+
+		// Checked before any hook runs, so a malformed or oversized update never
+		// reaches one.
+		if (!opts.bypassLimits) {
+			mutationTracker.trackMutations(inputKeys.length);
+		}
+
+		validateKeys(this.schema, this.collection, primaryKeyField, inputKeys);
+
+		const updateEvent = this.eventScope === 'items'
+			? ['items.update', `${this.collection}.items.update`]
+			: `${this.eventScope}.update`;
+
+		const rowEvent = this.eventScope === 'items'
+			? ['items.update.one', `${this.collection}.items.update.one`]
+			: `${this.eventScope}.update.one`;
+
+		const eventContext = {
+			database: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		};
 
 		// An `items.update` hook can add purge fingerprints via
 		// `context.scopedCache.purgeBy`;
@@ -1133,17 +1212,13 @@ implements AbstractService<Item> {
 		const groupsAfterHooks =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<UpdateGroup<Item>[], null>(
-					this.eventScope === 'items'
-						? ['items.update', `${this.collection}.items.update`]
-						: `${this.eventScope}.update`,
+					updateEvent,
 					payload,
 					{
 						collection: this.collection,
 					},
 					{
-						database: this.knex,
-						schema: this.schema,
-						accountability: this.accountability,
+						...eventContext,
 						scopedCache: scopedCacheHookDeclarations.purge,
 					},
 				)
@@ -1159,93 +1234,102 @@ implements AbstractService<Item> {
 				});
 			}
 
-			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op (the
-			// guard keeps empty declarations from reaching the purge). The cancel purges
-			// only the declared fingerprints — `includeBareFingerprint: false` leaves
-			// this collection's own bare one warm, nothing changed; a declared value
-			// pin still reaches the global reads of the collection it names.
-			if (
-				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
-				shouldClearCache(this.cache, opts, this.collection)
-			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
-					[],
-					scopedCacheHookDeclarations,
-					[],
-					{ includeBareFingerprint: false },
-				);
-			}
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
 
 			// The filter cancelled the update: nothing is written; return a null per key
 			// so the result stays index-aligned with the input keys.
 			return inputKeys.map(() => null);
 		}
 
-		// The guards read the key set the hooks settled on, not the one the caller
-		// sent, so keys a hook added are counted and validated like any other.
+		// A hook written before the event carried groups returns one payload, which
+		// would otherwise reach the write as a list of nothing.
+		const isGroupList = Array.isArray(groupsAfterHooks) && groupsAfterHooks.every(
+			(group) => isPlainObject(group?.data) && Array.isArray(group?.keys),
+		);
+
+		if (!isGroupList) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.update" filter hook must return the
+					{ data, keys }[] it received; a hook that handles one row belongs on
+					"${this.eventScope}.update.one"
+				`,
+			});
+		}
+
 		const keys = groupsAfterHooks.flatMap((group) => group.keys);
 
-		if (!opts.bypassLimits) {
-			opts.mutationTracker.trackMutations(keys.length);
+		// Keys a hook added are counted and validated like the caller's own.
+		if (!opts.bypassLimits && keys.length > inputKeys.length) {
+			mutationTracker.trackMutations(keys.length - inputKeys.length);
 		}
 
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
+		// One entry per row, in the caller's order: its key, or null for a row a
+		// per-row hook cancelled. This is what the update returns.
+		let rowKeys: (PrimaryKey | null)[] = [];
+		let candidateGroups: UpdateGroup<Item>[] = [];
+
 		// Then once per row, so a hook that only ever handled a single item keeps a seam
 		// that fires exactly once per row — which the group event, by design, does not.
-		const rows: { key: PrimaryKey; data: Partial<AnyItem> }[] = [];
+		// With nothing listening, the per-row copies would be built for nobody.
+		if (opts.emitEvents !== false && emitter.hasFilterListeners(rowEvent)) {
+			for (const group of groupsAfterHooks) {
+				for (const key of group.keys) {
+					const rowAfterHooks = await emitter.emitFilter<Partial<AnyItem>, null>(
+						rowEvent,
+						{
+							[primaryKeyField]: key,
+							...cloneDeep(group.data),
+						} as Partial<AnyItem>,
+						{
+							collection: this.collection,
+						},
+						{
+							...eventContext,
+							scopedCache: scopedCacheHookDeclarations.purge,
+						},
+					);
 
-		for (const group of groupsAfterHooks) {
-			for (const key of group.keys) {
-				const rowPayload = {
-					[primaryKeyField]: key,
-					...cloneDeep(group.data),
-				} as Partial<AnyItem>;
+					if (rowAfterHooks === null) {
+						if (!opts.allowFilterCancel) {
+							throw new InvalidPayloadError({
+								reason: oneLine`
+									A filter hook cancelled a row of the update, but this operation
+									requires it
+								`,
+							});
+						}
 
-				const rowAfterHooks =
-					opts.emitEvents !== false
-						? await emitter.emitFilter<Partial<AnyItem>, null>(
-							this.eventScope === 'items'
-								? ['items.update.one', `${this.collection}.items.update.one`]
-								: `${this.eventScope}.update.one`,
-							rowPayload,
-							{
-								collection: this.collection,
-							},
-							{
-								database: this.knex,
-								schema: this.schema,
-								accountability: this.accountability,
-								scopedCache: scopedCacheHookDeclarations.purge,
-							},
-						)
-						: rowPayload;
+						rowKeys.push(null);
+						continue;
+					}
 
-				if (rowAfterHooks === null) {
-					// This row alone is cancelled; its siblings still go through.
-					continue;
+					if (!isPlainObject(rowAfterHooks)) {
+						throw new InvalidPayloadError({
+							reason: oneLine`
+								A "${this.eventScope}.update.one" filter hook must return the row
+								it received, or null to cancel it
+							`,
+						});
+					}
+
+					rowKeys.push(key);
+
+					candidateGroups.push({
+						data: omit(rowAfterHooks, primaryKeyField) as Partial<Item>,
+						keys: [key],
+					});
 				}
-
-				rows.push({ key, data: omit(rowAfterHooks, primaryKeyField) });
 			}
 		}
-
-		// Rebuild the groups from the rows the per-row hooks settled on. Only adjacent
-		// rows carrying the same payload merge, so the caller's order is never disturbed
-		// and, with no rewrite, the groups come back exactly as they went in.
-		const mergedGroups: UpdateGroup<Item>[] = [];
-
-		for (const row of rows) {
-			const previous = mergedGroups[mergedGroups.length - 1];
-
-			if (previous && isEqual(previous.data, row.data)) {
-				previous.keys.push(row.key);
-			}
-			else {
-				mergedGroups.push({ data: row.data as Partial<Item>, keys: [row.key] });
-			}
+		else {
+			rowKeys = keys;
+			candidateGroups = groupsAfterHooks;
 		}
+
+		const mergedGroups = mergeUpdateGroups(candidateGroups);
 
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
@@ -1263,24 +1347,10 @@ implements AbstractService<Item> {
 
 		if (writingGroups.length === 0) {
 			// Nothing is written — every group was a no-op, or the per-row filter
-			// cancelled every row. A hook that declared a purge via `purgeBy` before
-			// cancelling still gets it, since a cancel can touch state out of band;
-			// `includeBareFingerprint: false` leaves this collection's own bare one warm,
-			// because nothing here changed. A plain no-op declares nothing and so
-			// purges nothing.
-			if (
-				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
-				shouldClearCache(this.cache, opts, this.collection)
-			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
-					[],
-					scopedCacheHookDeclarations,
-					[],
-					{ includeBareFingerprint: false },
-				);
-			}
+			// cancelled every row.
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
 
-			return [];
+			return rowKeys;
 		}
 
 		const applied: UpdateGroup<Item>[] = [];
@@ -1288,39 +1358,49 @@ implements AbstractService<Item> {
 		// One transaction around every group, so a failure anywhere rolls the whole
 		// update back and the integrity check below sees the finished state once
 		// rather than once per group.
-		await transaction(this.knex, async (trx) => {
-			const service = this.fork({ knex: trx });
+		try {
+			await transaction(this.knex, async (trx) => {
+				const service = this.fork({ knex: trx });
 
-			let userIntegrityCheckFlags =
-				opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
+				let userIntegrityCheckFlags =
+					opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 
-			for (const group of writingGroups) {
-				const result = await service.applyUpdateGroup(
-					group,
-					{
-						...opts,
-						onRequireUserIntegrityCheck: (flags) => {
-							userIntegrityCheckFlags |= flags;
+				for (const group of writingGroups) {
+					const result = await service.applyUpdateGroup(
+						group,
+						aliases,
+						{
+							...opts,
+							mutationTracker,
+							onRequireUserIntegrityCheck: (flags) => {
+								userIntegrityCheckFlags |= flags;
+							},
 						},
-					},
-					nestedActionEvents,
-				);
+						nestedActionEvents,
+					);
 
-				applied.push(result);
-			}
+					applied.push(result as UpdateGroup<Item>);
+				}
 
-			if (userIntegrityCheckFlags) {
-				if (opts.onRequireUserIntegrityCheck) {
-					opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+				if (userIntegrityCheckFlags) {
+					if (opts.onRequireUserIntegrityCheck) {
+						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+					}
+					else {
+						await validateUserCountIntegrity({
+							flags: userIntegrityCheckFlags,
+							knex: trx,
+						});
+					}
 				}
-				else {
-					await validateUserCountIntegrity({
-						flags: userIntegrityCheckFlags,
-						knex: trx,
-					});
-				}
-			}
-		}, opts.mutationTracker.snapshot());
+			}, mutationTracker.snapshot());
+		}
+		catch (error) {
+			// A hook may have written out of band before the update threw.
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+
+			throw error;
+		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Old slices from the pre-update snapshot, plus the new value re-read from the
@@ -1350,61 +1430,79 @@ implements AbstractService<Item> {
 		}
 
 		if (opts.emitEvents !== false) {
-			const actionEvent = {
-				event:
-					this.eventScope === 'items'
-						? ['items.update', `${this.collection}.items.update`]
-						: `${this.eventScope}.update`,
-				meta: {
-					payload: applied,
-					collection: this.collection,
-				},
-				context: {
-					database: getDatabase(),
-					schema: this.schema,
-					accountability: this.accountability,
-				},
+			const actionContext = {
+				database: getDatabase(),
+				schema: this.schema,
+				accountability: this.accountability,
 			};
 
-			// One per surviving row, after the grouped event, so a per-row consumer sees
+			// One per written row, after the grouped event, so a per-row consumer sees
 			// exactly the rows that were written. Rows a per-row filter cancelled never
 			// reach here. `emitActionEvents` starts them together, so they are not
 			// ordered against the grouped event.
-			const rowActionEvents: ActionEventParams[] = applied.flatMap((group) => {
-				return group.keys.map((key) => {
-					return {
-						event:
-							this.eventScope === 'items'
-								? ['items.update.one', `${this.collection}.items.update.one`]
-								: `${this.eventScope}.update.one`,
-						meta: {
-							payload: { [primaryKeyField]: key, ...group.data },
-							collection: this.collection,
-						},
-						context: {
-							database: getDatabase(),
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					};
-				});
-			});
+			const rowActionEvents = emitter.hasActionListeners(rowEvent)
+				? applied.flatMap((group) => {
+					return group.keys.map((key) => {
+						return {
+							event: rowEvent,
+							meta: {
+								payload: { [primaryKeyField]: key, ...group.data },
+								collection: this.collection,
+							},
+							context: actionContext,
+						};
+					});
+				})
+				: [];
 
 			await emitActionEvents(
-				[actionEvent, ...rowActionEvents, ...nestedActionEvents],
+				[
+					{
+						event: updateEvent,
+						meta: {
+							payload: applied,
+							collection: this.collection,
+						},
+						context: actionContext,
+					},
+					...rowActionEvents,
+					...nestedActionEvents,
+				],
 				opts,
 			);
 		}
 
-		// Every row the per-row filter let through, in the order the caller sent it —
-		// a row whose change turned out to be a no-op included. The REST layer reads
-		// these keys back to build the response body, so dropping a no-op row would
-		// omit an item the caller named from its own PATCH response.
-		//
-		// A row the per-row filter cancelled is absent rather than null: without
-		// `allowFilterCancel` this returns `PrimaryKey[]`, which cannot carry one.
-		// Only the whole-update cancel above is index-aligned with the input.
-		return mergedGroups.flatMap((group) => group.keys);
+		// Every row the caller sent, in its order — a row whose change turned out to be
+		// a no-op included. The REST layer reads these keys back to build the response
+		// body, so dropping a no-op row would omit an item the caller named from its
+		// own PATCH response.
+		return rowKeys;
+	}
+
+	/**
+	 * Purge only what a hook declared via `purgeBy`, for an update that wrote
+	 * nothing of its own: a cancel, a no-op, or a failure. A cancel or a failure can
+	 * follow a hook's out-of-band write, so the declaration stands, while
+	 * `includeBareFingerprint: false` leaves this collection's own bare fingerprint
+	 * warm. A plain no-op declares nothing and so purges nothing.
+	 */
+	private async purgeDeclaredScopedCache(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (
+			declarations.purgeFingerprints.length === 0 ||
+			!shouldClearCache(this.cache, opts, this.collection)
+		) {
+			return;
+		}
+
+		this.scopedCachePurged = await this.scopedCache.purge(
+			[],
+			declarations,
+			[],
+			{ includeBareFingerprint: false },
+		);
 	}
 
 	/**
@@ -1417,7 +1515,8 @@ implements AbstractService<Item> {
 	 */
 	private async applyUpdateGroup(
 		group: UpdateGroup<Item>,
-		opts: MutationOptions,
+		aliases: string[],
+		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
 	): Promise<UpdateGroup<Item>> {
 		const { ActivityService } = await import('./activity.js');
@@ -1426,15 +1525,10 @@ implements AbstractService<Item> {
 		// Sorted for the work below only. `group.keys` stays in the caller's row order,
 		// which is what `updateGroups` returns and what the per-row action events walk.
 		const keys = [...group.keys].sort();
-		const data = group.data;
 		const payloadAfterHooks = group.data as Partial<AnyItem>;
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
-
-		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
-			.filter((field) => field.alias === true)
-			.map((field) => field.field);
 
 		if (this.accountability) {
 			await validateAccess(
@@ -1503,7 +1597,7 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, data, this.knex, {
+					throw await translateDatabaseError(err, payloadAfterHooks, this.knex, {
 						collection: this.collection,
 						operation: 'update',
 					});
