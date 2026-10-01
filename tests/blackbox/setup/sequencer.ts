@@ -95,6 +95,12 @@ export default class CustomSequencer extends BaseSequencer {
 			}
 		}
 
+		// The before entries this shard runs: the first shard alone runs the ones
+		// nothing else reads from, so the others count fewer slots.
+		const beforeFiles = sequentialTestsList[project].before.filter((entry) => {
+			return files.some((spec) => spec.moduleId.endsWith(entry));
+		});
+
 		// The after entries this shard actually runs, in the order sorted above.
 		// `setup/sequential-gate.ts` counts its barrier slots back from the end of THIS
 		// list — the project-wide one would wait on completions that never happen
@@ -106,7 +112,11 @@ export default class CustomSequencer extends BaseSequencer {
 		// Expose sequencer data to setup & tests
 		await fs.writeFile(
 			'sequencer-data.json',
-			JSON.stringify({ totalTestsCount: files.length, afterFiles }),
+			JSON.stringify({
+				totalTestsCount: files.length,
+				beforeFiles,
+				afterFiles,
+			}),
 		);
 
 		return files;

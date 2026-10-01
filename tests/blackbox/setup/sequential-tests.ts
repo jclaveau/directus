@@ -2,6 +2,7 @@
 export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> = {
 	common: {
 		before: ['/common/common.test.ts'],
+		firstShardOnly: [],
 		after: [],
 		// If specified, only run these tests sequentially
 		only: [
@@ -12,6 +13,15 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 		before: [
 			'/tests/db/seed-database.test.ts',
 			'/common/common.test.ts',
+			'/tests/db/routes/schema/schema.test.ts',
+			'/tests/db/routes/collections/crud.test.ts',
+			'/tests/db/routes/fields/change-fields.test.ts',
+			'/tests/db/routes/fields/crud.test.ts',
+		],
+		// `before` files nothing else reads from: they run on the first shard
+		// alone, where they keep their place in the chain. `schema` applies an
+		// empty snapshot and restores it, so no file may run beside it.
+		firstShardOnly: [
 			'/tests/db/routes/schema/schema.test.ts',
 			'/tests/db/routes/collections/crud.test.ts',
 			'/tests/db/routes/fields/change-fields.test.ts',
@@ -115,6 +125,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/app/autoscale-legacy.test.ts',
 			'/tests/db/app/autoscale-redis-outage.test.ts',
 			'/tests/db/app/autoscale-release.test.ts',
+			'/tests/db/app/autoscale-release-proportional.test.ts',
 			'/tests/db/app/autoscale-signal.test.ts',
 			'/tests/db/app/autoscale-churn.test.ts',
 			'/tests/db/app/autoscale-supervisor-restart.test.ts',
@@ -132,6 +143,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// And again, with the pool being what the Directus beside it is
 			// waiting on before it will report itself ready at all.
 			'/tests/db/app/autoscale-prewarm-health.test.ts',
+			'/tests/db/app/autoscale-prewarm-daemon-lost.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 			// Reads the whole schema back against a snapshot taken a moment before:
 			// a sibling creating its collections in between is a drift.
@@ -155,13 +167,14 @@ export function flatAfterList(project: 'db' | 'common'): string[] {
  * waits on: a `before` slot counts up from the first file, an `after` slot counts
  * back from the last, and everything else runs once the `before` chain is done.
  *
- * `shardAfterFiles` is the after chain THIS shard runs, not the project-wide one
- * — a shard runs only its share, so a project-wide index would wait on
- * completions that never happen here.
+ * `shardBeforeFiles` and `shardAfterFiles` are the chains THIS shard runs, not
+ * the project-wide ones — a shard runs only its share, so a project-wide index
+ * would wait on completions that never happen here.
  */
 export function getReversedTestIndex(
 	testFilePath: string,
 	project: 'db' | 'common',
+	shardBeforeFiles: string[],
 	shardAfterFiles: string[],
 ) {
 	const list = sequentialTestsList[project];
@@ -176,8 +189,8 @@ export function getReversedTestIndex(
 		}
 	}
 
-	for (let index = 0; index < list.before.length; index++) {
-		const beforeTest = list.before[index];
+	for (let index = 0; index < shardBeforeFiles.length; index++) {
+		const beforeTest = shardBeforeFiles[index];
 
 		if (beforeTest && testFilePath.includes(beforeTest)) {
 			return index;
@@ -192,7 +205,7 @@ export function getReversedTestIndex(
 		}
 	}
 
-	return list.before.length;
+	return shardBeforeFiles.length;
 }
 
 // An `after` entry is one file, or an ordered chain that has to stay in one
@@ -201,6 +214,8 @@ type AfterEntry = string | string[];
 
 type SequentialTestsList = {
 	before: string[];
+	// The subset of `before` that runs on the first shard only.
+	firstShardOnly: string[];
 	after: AfterEntry[];
 	only: string[];
 };

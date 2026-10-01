@@ -50,6 +50,8 @@ TODO
 /tests/blackbox/uploads/
 /tests/blackbox/server-log-*
 /tests/blackbox/server-logs/
+/tests/blackbox/timings/
+/tests/blackbox/runner-load/
 /tests/blackbox/sequencer-data.json
 /packages/extensions-sdk/temp-extension-*/
 
