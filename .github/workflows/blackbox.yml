@@ -124,6 +124,20 @@ jobs:
         run:
           docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio -d --quiet-pull --wait
 
+      # What the runner itself did while the suite ran, to tell a slow file
+      # from a starved one. The job's end reaps both samplers.
+      - name: Sample runner load
+        working-directory: tests/blackbox
+        run: |
+          mkdir -p runner-load
+          { nproc; free -m; } > runner-load/host.txt
+          nohup vmstat -t 5 > runner-load/vmstat.txt 2>&1 &
+          nohup bash -c 'while true; do
+            date -u +%FT%TZ
+            docker stats --no-stream --format "{{.Name}} {{.CPUPerc}} {{.MemUsage}}"
+            sleep 10
+          done' > runner-load/docker-stats.txt 2>&1 &
+
       - name: Run tests
         run: TEST_DB=sqlite3 pnpm run test:blackbox --project common
 
@@ -139,6 +153,19 @@ jobs:
             tests/blackbox/server-log-*.txt
           if-no-files-found: ignore
           retention-days: 30
+
+      # Per-file, per-hook and per-boot timings plus the runner's load, kept
+      # long enough to re-balance the shards from: `pnpm timings` reads them.
+      - name: Upload timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-timings-common
+          path: |
+            tests/blackbox/timings/
+            tests/blackbox/runner-load/
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Merge + upload blackbox coverage
         if: always()
@@ -229,6 +256,20 @@ jobs:
         run:
           docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio -d --quiet-pull --wait
 
+      # What the runner itself did while the suite ran, to tell a slow file
+      # from a starved one. The job's end reaps both samplers.
+      - name: Sample runner load
+        working-directory: tests/blackbox
+        run: |
+          mkdir -p runner-load
+          { nproc; free -m; } > runner-load/host.txt
+          nohup vmstat -t 5 > runner-load/vmstat.txt 2>&1 &
+          nohup bash -c 'while true; do
+            date -u +%FT%TZ
+            docker stats --no-stream --format "{{.Name}} {{.CPUPerc}} {{.MemUsage}}"
+            sleep 10
+          done' > runner-load/docker-stats.txt 2>&1 &
+
       - name: Run tests
         run: >-
           TEST_DB=${{ matrix.vendor }}
@@ -264,6 +305,19 @@ jobs:
             tests/blackbox/server-log-*.txt
           if-no-files-found: ignore
           retention-days: 30
+
+      # Per-file, per-hook and per-boot timings plus the runner's load, kept
+      # long enough to re-balance the shards from: `pnpm timings` reads them.
+      - name: Upload timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-timings-${{ matrix.vendor }}-${{ matrix.shard }}
+          path: |
+            tests/blackbox/timings/
+            tests/blackbox/runner-load/
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Merge + upload blackbox coverage
         if: always()

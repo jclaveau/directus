@@ -10,7 +10,8 @@
 		"bench:purge-scaling": "vitest --watch=false purge-scaling.perf",
 		"bench:devserver": "vitest --watch=false devserver.perf",
 		"bench:pin-fanout": "vitest --watch=false pin-fanout.perf",
-		"bench:pending-retry": "vitest --watch=false pending-retry.perf"
+		"bench:pending-retry": "vitest --watch=false pending-retry.perf",
+		"bench:purge-walk": "vitest --watch=false purge-walk.perf"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",

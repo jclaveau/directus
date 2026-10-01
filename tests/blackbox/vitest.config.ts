@@ -1,11 +1,14 @@
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { defineConfig } from 'vitest/config';
 import Sequencer from './setup/sequencer';
+import { MAX_WORKERS } from './setup/shard-files';
 
 export default defineConfig({
 	plugins: [tsconfigPaths()],
 	test: {
-		maxWorkers: 6,
+		maxWorkers: MAX_WORKERS,
+		// The timings land in `timings/` for CI to upload with each shard.
+		reporters: ['default', './setup/timings-reporter.ts'],
 		setupFiles: ['./setup/sequential-gate.ts'],
 		sequence: {
 			sequencer: Sequencer,

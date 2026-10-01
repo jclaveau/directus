@@ -29,7 +29,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, startup, cache, pin-fanout, pending-retry]
+        options: [all, startup, cache, pin-fanout, pending-retry, purge-walk]
       baseline:
         description: 'What to measure it against (default: the ref before it)'
         required: false
@@ -83,7 +83,8 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.suite != 'cache'
        && inputs.suite != 'pin-fanout'
-       && inputs.suite != 'pending-retry') ||
+       && inputs.suite != 'pending-retry'
+       && inputs.suite != 'purge-walk') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
@@ -254,7 +255,8 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.suite != 'startup'
        && inputs.suite != 'pin-fanout'
-       && inputs.suite != 'pending-retry') ||
+       && inputs.suite != 'pending-retry'
+       && inputs.suite != 'purge-walk') ||
       (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
@@ -851,5 +853,73 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-pending-retry-${{ github.sha }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  purge-walk:
+    name: Collection purge walk
+    # Dispatch only, and gates nothing: what a collection-wide purge costs per
+    # index set it walks, the dispatched branch against `baseline` when given.
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'purge-walk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: true
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          pnpm install
+
+      # On the bench's own Node and pnpm: a baseline is a recent commit of the
+      # same line.
+      - name: Build the baseline bundle
+        if: inputs.baseline != ''
+        env:
+          BASELINE: ${{ inputs.baseline }}
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+        run: |
+          baseline_sha=$(git rev-parse --verify -q "origin/$BASELINE^{commit}" \
+            || git rev-parse --verify "$BASELINE^{commit}")
+          git worktree add ../baseline "$baseline_sha"
+          cd ../baseline
+          pnpm install
+          pnpm run build
+          pnpm --filter directus deploy --legacy --prod "$GITHUB_WORKSPACE/baseline-dist"
+
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the walk
+        run: pnpm --filter tests-perf bench:purge-walk
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_BASELINE_CLI: ${{ inputs.baseline != '' && format('{0}/baseline-dist/cli', github.workspace) || '' }}
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: cat tests/perf/results/purge-walk.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-purge-walk-${{ github.sha }}
           path: tests/perf/results/
           if-no-files-found: warn

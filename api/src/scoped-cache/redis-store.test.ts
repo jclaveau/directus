@@ -13,6 +13,7 @@ import {
 	scopedCacheIndexCompleteMarkScript,
 	scopedCacheIndexFileScript,
 	scopedCacheIndexGenerationReadScript,
+	scopedCacheIndexMemberKey,
 	scopedCacheIndexReapScript,
 	scopedCacheCollectionIndexKeysRegisterScript,
 	scopedCacheCollectionIndexKeysPruneScript,
@@ -554,6 +555,17 @@ describe('renderScopedCacheIndexMember', () => {
 	it('reads a member holding no key as a fingerprint alone', () => {
 		expect(parseScopedCacheIndexMember('slot:&'))
 			.toEqual({ fingerprint: parseScopedCacheFingerprint('slot:&'), key: '' });
+	});
+});
+
+describe('scopedCacheIndexMemberKey', () => {
+	it('reads the key past the first separator the escapes do not cover', () => {
+		expect(scopedCacheIndexMemberKey('slot:&owner=,a\\|b,&|ns:a|b'))
+			.toBe('ns:a|b');
+	});
+
+	it('reads a member holding no key as no key', () => {
+		expect(scopedCacheIndexMemberKey('slot:&')).toBe('');
 	});
 });
 
@@ -1651,6 +1663,57 @@ describe('takeCollectionIndexedKeys', () => {
 	});
 
 	it(oneLine`
+		reads the sets one move took in the same round, not one set after the
+		other
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		evalScript.mockResolvedValue([
+			'scalabus:scoped-cache-index:swept:slot:a1:1',
+			'scalabus:scoped-cache-index:swept:slot:a1:2',
+		]);
+
+		sscan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:scoped-cache-index:fingerprint:slot:pin:id=1',
+					'scalabus:scoped-cache-index:fingerprint:slot:pin:id=2',
+				],
+			])
+			.mockResolvedValueOnce(['7', ['slot:&id=,1,&|key-1a']])
+			.mockResolvedValueOnce(['0', ['slot:&id=,2,&|key-2']])
+			.mockResolvedValueOnce(['0', ['slot:&id=,1,&|key-1b']]);
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeCollectionIndexedKeys('slot')
+		) {
+			taken.push(take);
+		}
+
+		expect(taken).toEqual([
+			{ indexKeys: 0, keys: [], sweptKeys: [] },
+			{
+				indexKeys: 2,
+				keys: ['key-1a', 'key-2', 'key-1b'],
+				sweptKeys: [
+					'scalabus:scoped-cache-index:swept:slot:a1:1',
+					'scalabus:scoped-cache-index:swept:slot:a1:2',
+				],
+			},
+		]);
+
+		expect(sscan.mock.calls.slice(2)).toEqual([
+			['scalabus:scoped-cache-index:swept:slot:a1:1', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:swept:slot:a1:2', '0', 'COUNT', 1000],
+			['scalabus:scoped-cache-index:swept:slot:a1:1', '7', 'COUNT', 1000],
+		]);
+	});
+
+	it(oneLine`
 		reads the sets an earlier sweep of the collection moved aside and never
 		released, without moving them again
 	`, async () => {
@@ -1941,6 +2004,36 @@ describe('takeStrandedSweptIndexKeys', () => {
 				'scalabus:scoped-cache-index:swept:slot:gone:1',
 			],
 		}]);
+	});
+
+	it(oneLine`
+		counts the sets of a later round in their own place, not over the first
+		round's
+	`, async () => {
+		const sweptKeys = Array.from(
+			{ length: 102 },
+			(_, at) => `scalabus:scoped-cache-index:swept:slot:dead:${at}`,
+		);
+
+		sscan.mockImplementation(async (key: string) => {
+			if (key === 'scalabus:scoped-cache-index:swept-index-keys') {
+				return ['0', sweptKeys];
+			}
+
+			return key === 'scalabus:scoped-cache-index:swept:slot:dead:0'
+				? ['0', []]
+				: ['0', ['slot:&|key']];
+		});
+
+		const taken = [];
+
+		for await (
+			const take of redisScopedCacheStore().takeStrandedSweptIndexKeys()
+		) {
+			taken.push(take.indexKeys);
+		}
+
+		expect(taken).toEqual([101]);
 	});
 });
 

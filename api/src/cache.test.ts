@@ -160,6 +160,7 @@ const {
 	flushCaches,
 	getCache,
 	getRedisConnection,
+	getSchemaCacheGeneration,
 } = await import('./cache.js');
 
 // Snapshotted here: a later case re-imports cache.ts behind `vi.resetModules()`,
@@ -2020,6 +2021,33 @@ describe('a bus that cannot publish', () => {
 	test('does not fail the flush an operator asked for', async () => {
 		await expect(clearCacheTargets(['response'])).resolves.toBeUndefined();
 		expect(logger.warn).toHaveBeenCalled();
+	});
+});
+
+describe('the schema cache generation', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+	});
+
+	test('moves on a local schema change', async () => {
+		const generationBefore = getSchemaCacheGeneration();
+
+		await clearSystemCache();
+
+		expect(getSchemaCacheGeneration()).toBe(generationBefore + 1);
+	});
+
+	test('moves on a peer schema change', async () => {
+		const generationBefore = getSchemaCacheGeneration();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: false });
+
+		expect(getSchemaCacheGeneration()).toBe(generationBefore + 1);
 	});
 });
 

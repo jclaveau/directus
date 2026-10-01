@@ -6,7 +6,8 @@
 	"scripts": {
 		"test": "vitest --watch=false",
 		"typecheck": "tsc --noEmit",
-		"merge-coverage": "node merge-coverage.mjs"
+		"merge-coverage": "node merge-coverage.mjs",
+		"timings": "node setup/timings-summary.mjs"
 	},
 	"devDependencies": {
 		"@directus/env": "workspace:*",

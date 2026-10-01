@@ -70,6 +70,13 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 	let readIndexDefault = 0;
 	const readIndexes: Record<WebSocketUID, number> = {};
 
+	// A closed socket never reopens nor receives, so polling one until the
+	// timeout only costs the run 20s: a server refusing a ping closes it.
+	const isClosedForGood = (awaitedState?: WebSocket['readyState']) => {
+		return conn.readyState === WebSocket.CLOSED
+			&& awaitedState !== WebSocket.CLOSED;
+	};
+
 	const waitForState = (
 		state: WebSocket['readyState'],
 		options?: {
@@ -77,6 +84,9 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 		},
 	) => {
 		const startMs = Date.now();
+
+		const deadlineMs = startMs
+			+ (options?.waitTimeout ?? config?.waitTimeout ?? defaults.waitTimeout);
 
 		const promise = () => {
 			return new Promise(function (resolve, reject) {
@@ -86,7 +96,8 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 						(conn.readyState !== conn.OPEN || !config?.auth || (config.auth && connectionAuthCompleted))
 					) {
 						return resolve(true);
-					} else if (Date.now() < startMs + (options?.waitTimeout ?? config?.waitTimeout ?? defaults.waitTimeout)) {
+					}
+					else if (!isClosedForGood(state) && Date.now() < deadlineMs) {
 						return promise().then(resolve, reject);
 					} else {
 						let stateName = '';
@@ -161,12 +172,16 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 		await waitForState(options?.targetState ?? WebSocket.OPEN);
 		const startMs = Date.now();
 
+		const deadlineMs = startMs
+			+ (options?.waitTimeout ?? config?.waitTimeout ?? defaults.waitTimeout);
+
 		const promise = (): Promise<WebSocketResponse[] | undefined> => {
 			return new Promise(function (resolve, reject) {
 				setTimeout(function () {
 					if (targetMessages.length >= endMessageIndex) {
 						resolve(targetMessages.slice(startMessageIndex, endMessageIndex));
-					} else if (Date.now() < startMs + (options?.waitTimeout ?? config?.waitTimeout ?? defaults.waitTimeout)) {
+					}
+					else if (!isClosedForGood() && Date.now() < deadlineMs) {
 						return promise().then(resolve, reject);
 					} else {
 						conn.terminate();
