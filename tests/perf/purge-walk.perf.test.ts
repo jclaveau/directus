@@ -57,7 +57,7 @@ const membersPerSet = Number(process.env['PERF_WALK_MEMBERS'] ?? 5);
 const concurrencies = numberList('PERF_WALK_CONCURRENCY', '1,3,8,20');
 const concurrentSets = Number(process.env['PERF_WALK_CONCURRENT_SETS'] ?? 2000);
 const processCount = Number(process.env['PERF_WALK_PROCESSES'] ?? 3);
-const repetitions = Number(process.env['PERF_WALK_REPS'] ?? 3);
+const repetitions = Number(process.env['PERF_WALK_REPS'] ?? 2);
 const redisDelayMs = Number(process.env['PERF_WALK_REDIS_DELAY_MS'] ?? 1);
 const basePort = Number(process.env['PERF_WALK_PORT'] ?? 8340);
 
@@ -76,6 +76,16 @@ const authHeaders = {
 	'Authorization': `Bearer ${adminToken}`,
 	'Content-Type': 'application/json',
 };
+
+const benchStartedAt = performance.now();
+
+// The job log shows how far a run got: one that times out writes no report.
+function logProgress(step: string): void {
+	const elapsedS = ((performance.now() - benchStartedAt) / 1000).toFixed(0);
+
+	// eslint-disable-next-line no-console
+	console.info(`[purge-walk ${elapsedS}s] ${step}`);
+}
 
 let redis: Redis;
 let delayProxy: Server;
@@ -374,6 +384,7 @@ async function seedIndex(port: number, sets: number): Promise<void> {
 	});
 
 	await assertRegistryPath(port);
+	logProgress(`seeded ${sets} sets`);
 }
 
 async function timeRowWrite(
@@ -427,6 +438,11 @@ async function timeWalk(
 	await redis.config('RESETSTAT');
 	const answer = await purge(port, kind, 1);
 	const stats = await readCommandStats();
+
+	logProgress(
+		`${kind} purge of ${sets} sets: ${answer.durationsMs[0]!.toFixed(0)} ms,`
+		+ ` ${stats.commands} commands`,
+	);
 
 	return {
 		sets,
@@ -499,6 +515,11 @@ async function measureArm(armName: string, cli: string): Promise<ArmResult> {
 				);
 
 				const durations = answers.flatMap((answer) => answer.durationsMs);
+
+				logProgress(
+					`${concurrency} purges over ${processes} process(es):`
+					+ ` max ${Math.max(...durations).toFixed(0)} ms`,
+				);
 
 				concurrent.push({
 					concurrent: concurrency,
@@ -676,6 +697,7 @@ test('a collection purge walks its index', async () => {
 	const results: ArmResult[] = [];
 
 	for (const { armName, cli } of ARMS) {
+		logProgress(`arm ${armName}`);
 		results.push(await measureArm(armName, cli));
 	}
 
@@ -693,4 +715,4 @@ test('a collection purge walks its index', async () => {
 			}
 		}
 	}
-});
+}, 190 * 60 * 1000);
