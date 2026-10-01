@@ -99,9 +99,9 @@ describe(oneLine`
 		// node of a rolling deploy does: its boot flush asks for a reap of its own,
 		// which runs about a second later — over the decoys, while the first purge
 		// is under way, unless the test waits it out first.
-		const bootedAt = Date.now();
-		env[vendor]['CACHE_BUILD_ID'] = `fingerprint-index-race-sweeper-${bootedAt}`;
-		readerEnv[vendor]['CACHE_BUILD_ID'] = `fingerprint-index-race-reader-${bootedAt}`;
+		const buildId = `fingerprint-index-race-${Date.now()}`;
+		env[vendor]['CACHE_BUILD_ID'] = `${buildId}-sweeper`;
+		readerEnv[vendor]['CACHE_BUILD_ID'] = `${buildId}-reader`;
 		let rowId: string;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -247,37 +247,45 @@ describe(oneLine`
 			await plantDecoys();
 
 			const counterBefore = await readPurgeCounter();
-			const writeSentAt = Date.now();
-			// A supertest request goes out once it is awaited: `then` sends it now.
-			const purging = writeHeldLabel(label).then((response) => response);
+			let purgeStartedAt = 0;
+			let purgeEndedAt = 0;
 
-			while (
-				await readPurgeCounter() === counterBefore
-				&& Date.now() - writeSentAt < 30_000
-			) {
-				await new Promise((resolve) => setTimeout(resolve, 10));
-			}
-
-			const purgeStartedAt = Date.now();
-			mark(`purge counter moved ${purgeStartedAt - writeSentAt}ms after the write`);
-
-			const held = readLeadsMs.map(async (lead, index) => {
-				await new Promise((resolve) => setTimeout(resolve, lead));
-
-				// Fired after the purge bumped the counters, so the guard has nothing
-				// to object to: this read is entitled to cache what it fetched.
-				const response = await readHeld(index + 1);
-				expect(response.headers[cacheStatusHeader]).toBe('MISS');
-
-				return index + 1;
-			});
-
+			// The write is listed first so it is sent first: a supertest request goes
+			// out once `then` is called. Its end is timed apart from the reads, the
+			// last of which starts well after a short pass would be over.
 			const [purgeResponse, limits] = await Promise.all([
-				purging,
-				Promise.all(held),
+				writeHeldLabel(label).then((response) => {
+					purgeEndedAt = Date.now();
+
+					return response;
+				}),
+				(async () => {
+					const writeSentAt = Date.now();
+
+					while (
+						await readPurgeCounter() === counterBefore
+						&& Date.now() - writeSentAt < 30_000
+					) {
+						await new Promise((resolve) => setTimeout(resolve, 10));
+					}
+
+					purgeStartedAt = Date.now();
+					mark(`counter moved after ${purgeStartedAt - writeSentAt}ms`);
+
+					return Promise.all(readLeadsMs.map(async (lead, index) => {
+						await new Promise((resolve) => setTimeout(resolve, lead));
+
+						// Fired after the purge bumped the counters, so the guard has
+						// nothing to object to: this read may cache what it fetched.
+						const response = await readHeld(index + 1);
+						expect(response.headers[cacheStatusHeader]).toBe('MISS');
+
+						return index + 1;
+					}));
+				})(),
 			]);
 
-			const purgeMs = Date.now() - purgeStartedAt;
+			const purgeMs = purgeEndedAt - purgeStartedAt;
 
 			expect(purgeResponse.status).toBe(200);
 			mark(`purge ran ${purgeMs}ms past its counter, ${limits.length} reads filled`);
