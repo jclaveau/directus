@@ -30,6 +30,7 @@ const env = vi.hoisted(() => {
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('../redis/index.js');
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
+
 vi.mock('./item-scoped-cache-service.js', () => {
 	return { ItemScopedCacheService: vi.fn() };
 });

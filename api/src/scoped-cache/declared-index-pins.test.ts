@@ -5,6 +5,7 @@ import { scopedCacheDeclaredIndexPins } from './declared-index-pins.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 
 vi.mock('../logger/index.js', () => ({ useLogger: vi.fn() }));
+
 vi.mock('./item-scoped-cache-service.js', () => {
 	return { ItemScopedCacheService: vi.fn() };
 });
