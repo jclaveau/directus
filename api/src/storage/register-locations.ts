@@ -1,6 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { StorageManager } from '@directus/storage';
-import { toArray } from '@directus/utils';
+import { toArray } from '@directus/utils/values';
 import { RESUMABLE_UPLOADS } from '../constants.js';
 import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 

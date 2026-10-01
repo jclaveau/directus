@@ -1,0 +1,925 @@
+name: Bench
+
+on:
+  # Benchmarks are slow and every run costs several runner-minutes, so the automatic
+  # trigger waits for Check rather than racing it — a machine running two jobs at once
+  # measures neither.
+  workflow_run:
+    workflows: [Check]
+    types: [completed]
+    # `ci-dialect-*` and `*-dist` are regenerated from the trunk on every push to it,
+    # so each trunk commit produced three Check runs and, before this, three identical
+    # benchmarks of the same content. Their branches carry no diff of their own.
+    branches-ignore:
+      - ci-dialect-*
+      - '*-dist'
+
+  # Measure an arbitrary ref on demand: a tag, an old commit, a branch nobody pushed to
+  # today.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: >-
+          Branch, tag, or commit to measure. Cache: measured with the bench of the
+          branch this is dispatched on, so an old commit gets today's gates
+        required: false
+        type: string
+      suite:
+        description: 'Which benchmarks to run'
+        required: false
+        default: all
+        type: choice
+        options: [all, startup, cache, pin-fanout, pending-retry, purge-walk]
+      baseline:
+        description: 'What to measure it against (default: the ref before it)'
+        required: false
+        type: string
+      reps:
+        description: 'Measured boots per arm'
+        required: false
+        default: '7'
+        type: string
+      devserver:
+        description: 'Also measure the admin dev server across vite majors (slow)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  statuses: write
+
+# One measurement per ref at a time — two on the same runner pool would measure each
+# other. Queue rather than cancel: a bench that was asked for was asked for on purpose.
+concurrency:
+  group: bench-${{ inputs.ref || github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: false
+
+env:
+  DB_CLIENT: pg
+  DB_HOST: 127.0.0.1
+  DB_PORT: '6100'
+  DB_DATABASE: directus
+  DB_USER: postgres
+  DB_PASSWORD: secret
+  CACHE_ENABLED: 'true'
+  CACHE_STORE: redis
+  REDIS: redis://127.0.0.1:6108
+  KEY: bench-key
+  SECRET: bench-secret
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: bench
+  # Minted by `cli bootstrap` so a bench reaches the API with no login round trip.
+  ADMIN_TOKEN: bench-admin-token
+  TELEMETRY: 'false'
+  EXTENSIONS_PATH: tests/perf/extensions
+
+jobs:
+  startup:
+    name: Startup
+    # Two workflows in this repo are named Check (check.yml and blackbox-pr.yml) and
+    # `workflows:` matches on the name, so gate on the event that reached the one we
+    # mean. A failed Check means the commit does not run; there is nothing to measure.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.suite != 'cache'
+       && inputs.suite != 'pin-fanout'
+       && inputs.suite != 'pending-retry'
+       && inputs.suite != 'purge-walk') ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # An abbreviated sha is not a ref: actions/checkout looks a bare one up as a
+      # branch and then a tag, and fails with "could not be found". Fetch everything
+      # and resolve it below instead of rejecting it.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          # Deep enough to reach a merge base with the trunk; a shallow clone has no
+          # commit to compare against.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Both arms are measured in the same job, minutes apart on one machine. A shared
+      # runner's absolute numbers belong to the runner — the same bundle has measured
+      # 4.5 s and 6.5 s depending on what else was running — so only the ratio between
+      # two arms taken together says anything about the diff.
+      - name: Choose the commits to compare
+        id: commits
+        env:
+          EXPLICIT_REF: ${{ inputs.ref }}
+          EXPLICIT_BASELINE: ${{ inputs.baseline }}
+        run: |
+          # A branch lands under refs/remotes/origin, where a bare name does not
+          # resolve; a sha or a tag resolves as given.
+          resolve_commit() {
+            git rev-parse --verify -q "origin/$1^{commit}" \
+              || git rev-parse --verify "$1^{commit}"
+          }
+
+          if [ -n "$EXPLICIT_REF" ]; then
+            git checkout --detach "$(resolve_commit "$EXPLICIT_REF")"
+          fi
+
+          head_sha=$(git rev-parse HEAD)
+
+          if [ -n "$EXPLICIT_BASELINE" ]; then
+            baseline_sha=$(resolve_commit "$EXPLICIT_BASELINE")
+          else
+            # On a branch, what the diff is against; on the trunk, the commit before.
+            baseline_sha=$(git merge-base HEAD origin/${{ github.event.repository.default_branch }})
+
+            if [ "$baseline_sha" = "$head_sha" ]; then
+              baseline_sha=$(git rev-parse HEAD~1)
+            fi
+          fi
+
+          {
+            echo "head=$head_sha"
+            echo "head_short=$(git rev-parse --short=10 "$head_sha")"
+            echo "baseline=$baseline_sha"
+            echo "baseline_short=$(git rev-parse --short=10 "$baseline_sha")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      # The bundle `pnpm --filter directus deploy` produces, which the blackbox suite
+      # runs and production starts — not the workspace build. A benchmark of a shape
+      # nobody deploys measures nothing.
+      - name: Build the head bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          mv dist dist-head
+          # The --prod deploy rewrites node_modules/.pnpm-workspace-state-v1.json
+          # with dev: false, so pnpm 12 re-syncs the workspace to that state on the
+          # next `pnpm --filter` command and prunes every devDependency, vitest
+          # included. A plain install puts the lockfile state back.
+          pnpm install
+
+      - name: Build the baseline bundle
+        run: |
+          git worktree add ../baseline ${{ steps.commits.outputs.baseline }}
+          cd ../baseline
+          pnpm install
+          pnpm run build
+          pnpm --filter directus deploy --legacy --prod dist
+        env:
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+
+      # An empty extensions directory rather than none: a missing one makes every boot
+      # log a resolution failure, and the retry is measured time.
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/extensions
+          node dist-head/cli bootstrap
+
+      - name: Measure
+        run: pnpm --filter tests-perf bench
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist-head/cli
+          PERF_CLI_BASELINE: ${{ github.workspace }}/../baseline/dist/cli
+          PERF_REPS: ${{ inputs.reps || '7' }}
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+          PERF_BASELINE_SHA: ${{ steps.commits.outputs.baseline }}
+
+      - name: Write the summary
+        if: always()
+        run: |
+          for bench in startup resident; do
+            if [ -f "tests/perf/results/$bench.md" ]; then
+              cat "tests/perf/results/$bench.md" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "### ${bench^} — no result"
+                echo ""
+                echo "The measurement did not finish. See the job log."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      # A workflow_run job does not appear in the commit's own check list, so without
+      # this the number would exist only inside a run nobody opens.
+      #
+      # Not always(): that fires on cancellation too, and a bench someone stopped would
+      # then mark the commit as failed on its way out.
+      - name: Report on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          report() {
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+              -f state="$2" \
+              -f context="Bench / $1" \
+              -f description="$3" \
+              -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+
+          if [ -f tests/perf/results/startup.status.txt ]; then
+            report startup success "$(cat tests/perf/results/startup.status.txt)"
+          else
+            report startup failure 'the measurement did not finish'
+          fi
+
+          # The resident bench has budgets, so its status carries a verdict: the
+          # numbers are written whether or not they hold.
+          if [ -f tests/perf/results/resident.status.txt ]; then
+            if [ "$(jq -r .withinBudget tests/perf/results/resident.json)" = true ]; then
+              report resident success "$(cat tests/perf/results/resident.status.txt)"
+            else
+              report resident failure "$(cat tests/perf/results/resident.status.txt)"
+            fi
+          else
+            report resident failure 'the measurement did not finish'
+          fi
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-startup-${{ steps.commits.outputs.head_short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  cache:
+    name: Cache
+    # Its own runner rather than a step in `startup`: the two would otherwise
+    # measure each other, and this one needs no baseline bundle — every figure it
+    # reports is a ratio between configurations of ONE build.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.suite != 'startup'
+       && inputs.suite != 'pin-fanout'
+       && inputs.suite != 'pending-retry'
+       && inputs.suite != 'purge-walk') ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The bench always runs from this checkout; only the bundle it measures comes
+      # from `ref`. Measuring an old commit with its own bench would judge it by the
+      # gates of its day, or by none when it predates them.
+      - name: Choose the commit to measure
+        id: commits
+        env:
+          EXPLICIT_REF: ${{ inputs.ref }}
+        run: |
+          bench_sha=$(git rev-parse HEAD)
+          head_sha=$bench_sha
+
+          if [ -n "$EXPLICIT_REF" ]; then
+            # A commit no branch reaches any more (a rebased PR head) is not in the
+            # clone, but the server still hands it out by sha.
+            # A branch lands under refs/remotes/origin, where a bare name does not
+            # resolve, so read what the fetch wrote; a short sha the server refuses
+            # to hand out resolves in the clone.
+            if git fetch --no-tags origin "$EXPLICIT_REF" 2>/dev/null; then
+              head_sha=$(git rev-parse --verify "FETCH_HEAD^{commit}")
+            else
+              head_sha=$(git rev-parse --verify "$EXPLICIT_REF^{commit}")
+            fi
+          fi
+
+          {
+            echo "bench=$bench_sha"
+            echo "bench_short=$(git rev-parse --short=10 "$bench_sha")"
+            echo "head=$head_sha"
+            echo "head_short=$(git rev-parse --short=10 "$head_sha")"
+          } >> "$GITHUB_OUTPUT"
+
+      # The check blocks a merge only when the commit touches what the bench
+      # measures. Elsewhere it still runs, and a breach is reported without failing:
+      # the latency ratios are noisy enough to redden an unrelated change now and
+      # then, and a required check that does that gets bypassed, not read.
+      - name: Decide whether a breach blocks
+        id: scope
+        env:
+          HEAD_SHA: ${{ steps.commits.outputs.head }}
+        # Decided the same way on a dispatch, so dispatching a branch runs this
+        # before it reaches the trunk, whose copy is the one `workflow_run` uses.
+        run: |
+          base=$(git merge-base "$HEAD_SHA" origin/${{ github.event.repository.default_branch }})
+
+          if [ "$base" = "$HEAD_SHA" ]; then
+            base=$(git rev-parse "$HEAD_SHA~1")
+          fi
+
+          # Every source file with `cache` in its path or a folder's, the
+          # response writer that fills it and the Redis clients a flush goes
+          # through. Not their tests: a trunk over a ceiling would otherwise
+          # block a change that only adds a test.
+          touched=$(git diff --name-only "$base" "$HEAD_SHA" -- \
+            ':(glob)api/src/**/*cache*' \
+            ':(glob)api/src/**/*cache*/**' \
+            ':(glob)api/src/redis/**' \
+            ':(exclude,glob)api/src/**/*.test.ts' \
+            'api/src/middleware/respond.ts' \
+            'api/src/utils/compress.ts' \
+            'tests/perf/cache.perf.test.ts' \
+            'tests/perf/cache-flush.perf.test.ts' \
+            'tests/perf/purge-scaling.perf.test.ts' \
+            'tests/perf/purge-extensions/**' \
+            'tests/perf/measure.ts' \
+            '.github/workflows/bench.yml')
+
+          if [ -n "$touched" ]; then
+            echo "blocking=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "blocking=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Measuring another commit, this tree only runs the bench, which needs its
+      # dependencies and no build.
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: ${{ steps.commits.outputs.head == steps.commits.outputs.bench }}
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        if: steps.commits.outputs.head == steps.commits.outputs.bench
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          # The --prod deploy rewrites node_modules/.pnpm-workspace-state-v1.json
+          # with dev: false, so pnpm 12 re-syncs the workspace to that state on the
+          # next `pnpm --filter` command and prunes every devDependency, vitest
+          # included. A plain install puts the lockfile state back.
+          pnpm install
+
+      # An older commit pins an older Node and pnpm in its package.json, and
+      # pnpm refuses to install it on the bench's own.
+      - name: Check out the measured commit
+        id: measured
+        if: steps.commits.outputs.head != steps.commits.outputs.bench
+        run: |
+          git worktree add ../measured ${{ steps.commits.outputs.head }}
+          manifest=../measured/package.json
+          node_version=$(jq -r '.engines.node' "$manifest")
+          pnpm_spec=$(jq -r '.packageManager' "$manifest")
+          echo "node=$node_version" >> "$GITHUB_OUTPUT"
+          echo "pnpm=${pnpm_spec%%+*}" >> "$GITHUB_OUTPUT"
+
+      - name: Install the measured commit's Node.js
+        if: steps.commits.outputs.head != steps.commits.outputs.bench
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ steps.measured.outputs.node }}
+
+      - name: Build the bundle of the measured commit
+        if: steps.commits.outputs.head != steps.commits.outputs.bench
+        working-directory: ../measured
+        # The pnpm a git-hosted dependency's prepare step spawns comes from
+        # PNPM_HOME, so the bench's pnpm leaves PATH and PNPM_HOME both.
+        run: |
+          pnpm_prefix="$RUNNER_TEMP/measured-pnpm"
+          npm install --no-save --prefix "$pnpm_prefix" "$PNPM_SPEC"
+          bench_path=$(tr ':' '\n' <<< "$PATH" | grep -vxF "$PNPM_HOME" | paste -sd:)
+          export PATH="$pnpm_prefix/node_modules/.bin:$bench_path"
+          unset PNPM_HOME
+          pnpm install
+          pnpm run build
+          # deploy resolves a git dependency afresh, at a head the old commit's
+          # onlyBuiltDependencies never listed; pin it to the locked one.
+          locked_sha=$(grep -oE 'rolldown-plugin-istanbul/tar.gz/[0-9a-f]{40}' \
+            pnpm-lock.yaml | head -1 | cut -d/ -f3 || true)
+          if [ -n "$locked_sha" ]; then
+            sed -i -E \
+              "s|^(  rolldown-plugin-istanbul: git\+https://[^#]*\.git)$|\1#$locked_sha|" \
+              pnpm-workspace.yaml
+          fi
+          pnpm --filter directus deploy --legacy --prod "$GITHUB_WORKSPACE/dist"
+        env:
+          PNPM_SPEC: ${{ steps.measured.outputs.pnpm }}
+          npm_config_strict_dep_builds: false
+          pnpm_config_strict_dep_builds: false
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+
+      - name: Restore the bench's Node.js
+        if: steps.commits.outputs.head != steps.commits.outputs.bench
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      # An empty extensions directory rather than none: a missing one makes every
+      # boot log a resolution failure, and four instances pay for it.
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the cache
+        id: measure
+        run: pnpm --filter tests-perf bench:cache
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+          PERF_BENCH_SHA: ${{ steps.commits.outputs.bench }}
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      # After the cache bench, not beside it: both boot instances on the one
+      # Redis, and a flush would empty the other's cache mid-measurement. Past
+      # a breach of the cache bench, never past a build that never produced it.
+      - name: Measure the flush
+        id: measure_flush
+        if: ${{ !cancelled() && steps.measure.outcome != 'skipped' }}
+        run: pnpm --filter tests-perf bench:cache-flush
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      # After the cache and flush benches rather than beside them: all drive the
+      # same Redis, and a purge timed while another instance fills measures the
+      # other instance.
+      - name: Measure purge scaling
+        id: purge
+        if: '!cancelled()'
+        run: pnpm --filter tests-perf bench:purge-scaling
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: |
+          for suite in cache cache-flush; do
+            if [ -f "tests/perf/results/$suite.md" ]; then
+              cat "tests/perf/results/$suite.md" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "### $suite — no result"
+                echo ""
+                echo "The measurement did not finish. See the job log."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          if [ -f tests/perf/results/purge-scaling.md ]; then
+            cat tests/perf/results/purge-scaling.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The status file is written before the gates are judged, so that a breach
+      # still reports its figures — the verdict comes from the step, not the file.
+      - name: Report on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_MEASURED: ${{ steps.measure.outcome }}
+          FLUSH_MEASURED: ${{ steps.measure_flush.outcome }}
+          BLOCKING: ${{ steps.scope.outputs.blocking }}
+        run: |
+          report() {
+            suite=$1 measured=$2 context=$3
+            status_file="tests/perf/results/$suite.status.txt"
+
+            if [ -f "$status_file" ]; then
+              description=$(cat "$status_file")
+            else
+              description='the measurement did not finish'
+            fi
+
+            # Only a breach is advisory outside the cache paths: a measurement
+            # that never wrote its figures fails wherever it ran.
+            if [ "$measured" = success ]; then
+              state=success
+            elif [ "$BLOCKING" = true ] || [ ! -f "$status_file" ]; then
+              state=failure
+            else
+              state=success
+              description="advisory, no cache path touched: $description"
+            fi
+
+            # Another branch's bench judged this commit, by gates that are not
+            # its own: posting that as its check would let a dispatch overwrite
+            # the verdict of the bench the commit carries. The summary has the
+            # figures.
+            if [ "${{ steps.commits.outputs.head }}" != "${{ steps.commits.outputs.bench }}" ]; then
+              echo "$context not posted on the commit, judged by the bench of" \
+                "${{ steps.commits.outputs.bench_short }}: $state, $description"
+              return
+            fi
+
+            # A commit status description is capped at 140 characters.
+            description=${description:0:140}
+
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+              -f state="$state" \
+              -f context="$context" \
+              -f description="$description" \
+              -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+
+          report cache "$CACHE_MEASURED" 'Bench / cache'
+          report cache-flush "$FLUSH_MEASURED" 'Bench / cache flush'
+
+      # Its own status, so a purge that stops scaling is named as that rather than
+      # folded into the cache bench's verdict. Scoped like it.
+      - name: Report purge scaling on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MEASURED: ${{ steps.purge.outcome }}
+          BLOCKING: ${{ steps.scope.outputs.blocking }}
+        run: |
+          status_file=tests/perf/results/purge-scaling.status.txt
+
+          if [ -f "$status_file" ]; then
+            description=$(cat "$status_file")
+          else
+            description='the measurement did not finish'
+          fi
+
+          if [ "$MEASURED" = success ]; then
+            state=success
+          elif [ "$BLOCKING" = true ] || [ ! -f "$status_file" ]; then
+            state=failure
+          else
+            state=success
+            description="advisory, no cache path touched: $description"
+          fi
+
+          if [ "${{ steps.commits.outputs.head }}" != "${{ steps.commits.outputs.bench }}" ]; then
+            echo "Not posted on the commit, judged by the bench of" \
+              "${{ steps.commits.outputs.bench_short }}: $state, $description"
+            exit 0
+          fi
+
+          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+            -f state="$state" \
+            -f context='Bench / purge scaling' \
+            -f description="${description:0:140}" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-cache-${{ steps.commits.outputs.head_short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  pin-fanout:
+    name: Pin fan-out
+    # Dispatch only: the exploratory sweep behind #392, which gates nothing.
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'pin-fanout'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: true
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          pnpm install
+
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the pin fan-out
+        run: pnpm --filter tests-perf bench:pin-fanout
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: cat tests/perf/results/pin-fanout.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-pin-fanout
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  devserver:
+    name: Dev server
+    # Dispatch only, and opt-in even then. Every other job here measures the API,
+    # whose cost each trunk commit can move; this one measures which vite major
+    # the admin is installed with, which changes in one commit and then not again
+    # for a year. Running it per push would buy a flat line for four runner-hours
+    # a month.
+    if: github.event_name == 'workflow_dispatch' && inputs.devserver == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Identify the commit
+        id: commits
+        env:
+          EXPLICIT_REF: ${{ inputs.ref }}
+        run: |
+          # A branch lands under refs/remotes/origin, where a bare name does not
+          # resolve; a sha or a tag resolves as given.
+          if [ -n "$EXPLICIT_REF" ]; then
+            measured_sha=$(git rev-parse --verify -q "origin/$EXPLICIT_REF^{commit}" \
+              || git rev-parse --verify "$EXPLICIT_REF^{commit}")
+            git checkout --detach "$measured_sha"
+          fi
+
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "head_short=$(git rev-parse --short=10 HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      # `build: false` — the admin dev server is the subject, and it compiles what
+      # it serves on demand. A production bundle of the platform would be ten
+      # minutes spent on an artifact nothing here opens.
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: 'false'
+
+      # The admin's vite config imports `@directus/extensions`, so vite cannot even
+      # load the config until that package has a dist — the dev server exits with
+      # `Failed to resolve entry for package` before it opens a port. Only the
+      # packages the app depends on are built, and only once: a dist lives in the
+      # package directory rather than in node_modules, so the per-arm reinstall
+      # below leaves it in place.
+      - name: Build the packages the admin imports
+        env:
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+        run: pnpm --filter '@directus/app^...' build
+
+      # Two vite majors cannot be installed beside each other, so an arm is an
+      # install rather than an environment variable, and the arms cannot be
+      # interleaved rep by rep the way a cheaper comparison would be.
+      #
+      # `vite6-again` is the guard that replaces interleaving: it repeats the
+      # first arm last, so drift on the runner shows up as a gap between two arms
+      # that ran the same code. A local A/B of the same shape drifted 118-178 MB
+      # between identical arms, which is wider than the effect being looked for,
+      # and without the repeat there would be no way to see it had happened.
+      #
+      # `vite7` earns its slot by splitting the jump in two. It is the last major
+      # still built on rollup and esbuild, so a gap between 6 and 7 is a year of
+      # ordinary changes and a gap between 7 and 8 is the rolldown swap alone.
+      # Without it a single 6-to-8 number cannot say which of the two moved.
+      #
+      # `vite8-rwt1-again` runs after `vite6-again` rather than beside its twin.
+      # Two adjacent arms share whatever state the runner is in, so they would
+      # agree for a reason that has nothing to do with the flag; put at the end it
+      # is separated from `vite8-rwt1` by the same span `vite6-again` is separated
+      # from `vite6`, and the two repeats are then measuring the same drift.
+      - name: Measure each arm
+        env:
+          PERF_REPS: ${{ inputs.reps || '5' }}
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+        run: |
+          set -euo pipefail
+
+          arm() {
+            local name=$1 vite=$2 plugin_vue=$3 threads=$4
+
+            echo "::group::arm $name (vite $vite, ROLLDOWN_WORKER_THREADS=${threads:-unset})"
+
+            # Only reinstall when the versions actually move: the two vite 8 arms
+            # differ by an environment variable alone.
+            if [ "$vite" != "$(sed -n 's/^  vite: //p' pnpm-workspace.yaml)" ]; then
+              sed -i "s/^  vite: .*/  vite: $vite/" pnpm-workspace.yaml
+              sed -i "s|^  '@vitejs/plugin-vue': .*|  '@vitejs/plugin-vue': $plugin_vue|" pnpm-workspace.yaml
+              pnpm install --no-frozen-lockfile
+            fi
+
+            if [ -n "$threads" ]; then
+              export ROLLDOWN_WORKER_THREADS="$threads"
+            else
+              unset ROLLDOWN_WORKER_THREADS
+            fi
+
+            PERF_ARM="$name" pnpm --filter tests-perf bench:devserver
+
+            echo "::endgroup::"
+          }
+
+          arm vite6            6.4.3 6.0.1 ''
+          arm vite7            7.3.6 6.0.1 ''
+          arm vite8            8.3.0 6.0.9 ''
+          arm vite8-rwt1       8.3.0 6.0.9 1
+          arm vite6-again      6.4.3 6.0.1 ''
+          arm vite8-rwt1-again 8.3.0 6.0.9 1
+
+      - name: Write the summary
+        if: always()
+        run: |
+          set -euo pipefail
+          results=tests/perf/results
+
+          if [ -z "$(ls $results/devserver.*.json 2>/dev/null)" ]; then
+            {
+              echo "### Dev server — no result"
+              echo ""
+              echo "The measurement did not finish. See the job log."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "### Dev server — peak resident by vite major"
+            echo ""
+            echo "| arm | vite | boot | cold optimize | graph | optimize time | graph time |"
+            echo "| --- | --- | ---: | ---: | ---: | ---: | ---: |"
+            jq -r '"| \(.arm) | \(.vite) | "
+              + ([.phases[] | select(.name != "modules")
+                  | "**\(.median | floor) MB**"] | join(" | "))
+              + " | "
+              + ([.durations[]
+                  | "\((.median / 100 | floor) / 10) s"] | join(" | "))
+              + " |"' $results/devserver.*.json
+            echo ""
+            echo "Median of $(jq -r '.reps | length' $results/devserver.vite6.json) cold boots per arm,"
+            echo "$(jq -r '.modules[0]' $results/devserver.vite6.json) modules crawled each."
+            echo ""
+            echo "\`vite6\` is what the fork installs today. \`vite6-again\` and"
+            echo "\`vite8-rwt1-again\` repeat an earlier arm at the end: the gap between a"
+            echo "pair is the runner's drift, and no difference narrower than that gap is a"
+            echo "result. The times are there because a capped worker pool is a cap on the"
+            echo "transforming, so memory it gives back has a price to read off beside it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          results=tests/perf/results
+
+          if [ -f "$results/devserver.vite8.json" ] && [ -f "$results/devserver.vite6.json" ]; then
+            state=success
+            description=$(jq -rs '
+              (.[0].phases[] | select(.name == "graph") | .median) as $six
+              | (.[1].phases[] | select(.name == "graph") | .median) as $eight
+              | "vite6 \($six | floor) MB · vite8 \($eight | floor) MB"
+                + " · \((($eight - $six) / $six * 100) | round)%"
+            ' "$results/devserver.vite6.json" "$results/devserver.vite8.json")
+          else
+            state=failure
+            description='the measurement did not finish'
+          fi
+
+          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+            -f state="$state" \
+            -f context='Bench / devserver' \
+            -f description="$description" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-devserver-${{ steps.commits.outputs.head_short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  pending-retry:
+    name: Pending purge retry
+    # Dispatch only: the measurement behind #392's retry threshold, which gates
+    # nothing.
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'pending-retry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: true
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          pnpm install
+
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the retry
+        run: pnpm --filter tests-perf bench:pending-retry
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: cat tests/perf/results/pending-retry.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-pending-retry-${{ github.sha }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  purge-walk:
+    name: Collection purge walk
+    # Dispatch only, and gates nothing: what a collection-wide purge costs per
+    # index set it walks, the dispatched branch against `baseline` when given.
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'purge-walk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: true
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          pnpm install
+
+      # On the bench's own Node and pnpm: a baseline is a recent commit of the
+      # same line.
+      - name: Build the baseline bundle
+        if: inputs.baseline != ''
+        env:
+          BASELINE: ${{ inputs.baseline }}
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
+        run: |
+          baseline_sha=$(git rev-parse --verify -q "origin/$BASELINE^{commit}" \
+            || git rev-parse --verify "$BASELINE^{commit}")
+          git worktree add ../baseline "$baseline_sha"
+          cd ../baseline
+          pnpm install
+          pnpm run build
+          pnpm --filter directus deploy --legacy --prod "$GITHUB_WORKSPACE/baseline-dist"
+
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the walk
+        run: pnpm --filter tests-perf bench:purge-walk
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_BASELINE_CLI: ${{ inputs.baseline != '' && format('{0}/baseline-dist/cli', github.workspace) || '' }}
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: cat tests/perf/results/purge-walk.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-purge-walk-${{ github.sha }}
+          path: tests/perf/results/
+          if-no-files-found: warn

@@ -2,6 +2,7 @@
 name: reference_directus_emitfilter_same_ref
 description: directus emitFilter returns the SAME payload ref when no listener; clear-and-refill that ref aliases & wipes the data
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

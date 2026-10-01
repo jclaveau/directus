@@ -2,6 +2,7 @@
 name: project_directus_pr358_accepted_exceptions
 description: PR #358 "pin the primary key implicitly on every collection" — settled review points, do NOT re-raise (scope is one goal, batch fan-out accepted, self-ref collection delete 500)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

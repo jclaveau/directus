@@ -1,5 +1,5 @@
 import type { Permission, Query } from '@directus/types';
-import { omit } from 'lodash-es';
+import { isPlainObject, omit } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
@@ -441,10 +441,25 @@ export async function CreateRelation(vendor: Vendor, options: OptionsCreateRelat
 		return relationResponse.body.data;
 	}
 
-	const response = await request(getUrl(vendor))
+	let response = await request(getUrl(vendor))
 		.post(`/relations`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(options);
+
+	// Same schema-lag as CreateField: the cache server can serve a snapshot from
+	// before the field this relation points at existed, so it reads as "doesn't
+	// exist" here though its POST just returned 200. The no-cache instance recomputes
+	// the schema from the database each request, so it always sees it.
+	const fieldNotYetVisible =
+		response.status === 400 &&
+		response.body?.errors?.[0]?.message?.includes(`doesn't exist`);
+
+	if (fieldNotYetVisible) {
+		response = await request(getNoCacheUrl(vendor))
+			.post(`/relations`)
+			.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
+			.send(options);
+	}
 
 	return dataOrThrow(response, `relation "${options.collection}.${options.field}"`);
 }
@@ -840,7 +855,59 @@ export async function CreateItem(vendor: Vendor, options: OptionsCreateItem) {
 		.set('Authorization', auth)
 		.send(options.item);
 
-	if (response.status === 403) {
+	// Schema lag a 403 does not reveal: the cache server sees the collection but
+	// not a field created moments before, so it drops that key from the payload
+	// and stores NULL there. Only the admin token reads every field back, so only
+	// its rows can tell a dropped key from a hidden one.
+	const sentRows: Record<string, unknown>[] = [options.item].flat();
+	const createdRows: unknown[] = [response.body?.data].flat();
+
+	const droppedField = options.token === undefined &&
+		response.ok &&
+		createdRows.length === sentRows.length &&
+		createdRows.every((createdRow) => isPlainObject(createdRow)) &&
+		sentRows.some((sentRow, index) => {
+			return Object.keys(sentRow).some((field) => {
+				return !(field in (createdRows[index] as object));
+			});
+		});
+
+	if (droppedField) {
+		const fields = await request(getNoCacheUrl(vendor))
+			.get(`/fields/${options.collection}`)
+			.set('Authorization', auth);
+
+		const primaryKeyField: string | undefined = fields.body?.data?.find(
+			(field: { schema?: { is_primary_key?: boolean } }) => {
+				return field.schema?.is_primary_key;
+			},
+		)?.field;
+
+		// Thrown rather than retried past: a retry over rows still there creates
+		// them twice, and every count a seed reads is off with nothing saying why.
+		if (primaryKeyField === undefined) {
+			throw new Error(
+				`Could not read the primary key of "${options.collection}": `
+				+ `${fields.status} ${JSON.stringify(fields.body)}`,
+			);
+		}
+
+		const removed = await request(getNoCacheUrl(vendor))
+			.delete(`/items/${options.collection}`)
+			.set('Authorization', auth)
+			.send(createdRows.map((createdRow) => {
+				return (createdRow as Record<string, unknown>)[primaryKeyField];
+			}));
+
+		if (!removed.ok) {
+			throw new Error(
+				`Could not remove the rows created in "${options.collection}" without `
+				+ `their fields: ${removed.status} ${JSON.stringify(removed.body)}`,
+			);
+		}
+	}
+
+	if (response.status === 403 || droppedField) {
 		response = await request(getNoCacheUrl(vendor))
 			.post(`/items/${options.collection}`)
 			.set('Authorization', auth)

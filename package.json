@@ -9,6 +9,7 @@
 		"lint:style:changes": "node scripts/lint-style-changes.mjs",
 		"lint:rules:test": "node eslint-rules/single-use-rules.test.mjs",
 		"lint:style": "stylelint '**/*.{css,scss,vue}' --ignore-path .gitignore --cache",
+		"bench": "pnpm --filter tests-perf bench",
 		"test": "pnpm --recursive --filter '!tests-blackbox' test",
 		"test:blackbox": "rimraf ./dist && pnpm --filter directus deploy --legacy --prod dist && pnpm --filter tests-blackbox test",
 		"test:coverage": "pnpm --recursive --filter '!tests-blackbox' test:coverage"
@@ -17,6 +18,7 @@
 		"@changesets/cli": "catalog:",
 		"@directus/release-notes-generator": "workspace:*",
 		"@eslint/js": "catalog:",
+		"@oxc-node/core": "catalog:",
 		"eslint": "catalog:",
 		"eslint-config-prettier": "catalog:",
 		"eslint-plugin-vue": "catalog:",
@@ -31,14 +33,9 @@
 		"typescript": "catalog:",
 		"typescript-eslint": "catalog:"
 	},
-	"pnpm": {
-		"overrides": {
-			"tar-fs": "3.1.2"
-		}
-	},
-	"packageManager": "pnpm@10.34.4",
+	"packageManager": "pnpm@12.6.0",
 	"engines": {
-		"node": "22",
-		"pnpm": ">=10 <11"
+		"node": "24",
+		"pnpm": ">=12 <13"
 	}
 }

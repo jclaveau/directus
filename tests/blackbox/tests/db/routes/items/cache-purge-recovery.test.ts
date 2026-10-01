@@ -41,6 +41,7 @@ function mark(phase: string) {
 }
 
 const cacheStatusHeader = 'x-cache-status';
+const cacheTagsHeader = 'x-scoped-cache-tags';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
 // connection dies — what a real Redis blip looks like from the app's side.
@@ -156,6 +157,12 @@ describe(oneLine`
 			env[vendor]['REDIS_HOST'] = 'localhost';
 			env[vendor]['REDIS_PORT'] = String(proxyPort);
 			env[vendor]['CACHE_NAMESPACE'] = `directus-purge-recovery-${vendor}`;
+			env[vendor]['CACHE_TAGS_HEADER'] = cacheTagsHeader;
+
+			// The entries a recovered purge had been serving stale are named through
+			// their descriptors, and both the descriptor and the anomaly it carries
+			// reach Postgres on the stats drain.
+			env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
 			// 20 attempts at the stock 50ms..2000ms backoff take ~30s to give up on a
 			// queued command; this brings the whole outage inside a test's patience,
@@ -262,9 +269,9 @@ describe(oneLine`
 			await assertInstanceAlive();
 			expect(written.status).toBe(200);
 
-			// Recorded by its display label, so the retry can rebuild the key against
-			// whatever CACHE_NAMESPACE is set to when it runs.
-			const pending = await db(PENDING).select('mode', 'scoped_cache_tag');
+			// Recorded as a fingerprint rather than a Redis key, so the retry can rebuild
+			// the key against whatever CACHE_NAMESPACE is set to when it runs.
+			const pending = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 
 			// Every row, not only the one asserted below: `toContainEqual` permits others,
 			// and a `namespace` row drains as `cache.clear()` — which would wipe the
@@ -272,10 +279,18 @@ describe(oneLine`
 			// the wrong culprit.
 			mark(`recorded while down: ${JSON.stringify(pending)}`);
 
-			expect(pending).toContainEqual({
+			// One row for the write, every fingerprint it could not drop in its list.
+			expect(pending).toEqual([{
 				mode: 'slices',
-				scoped_cache_tag: `${NOTE}:id=${readNote}`,
-			});
+				// The serialised form the index holds, with every value comma-wrapped
+				// so a partial fingerprint globs cleanly. Spelled out rather than
+				// imported: what is asserted is the string that reached Postgres, not
+				// the renderer that wrote it.
+				scoped_cache_fingerprints: expect.arrayContaining([
+					`${NOTE}:&`,
+					`${NOTE}:&id=,${readNote},&`,
+				]),
+			}]);
 
 			await proxy.open();
 
@@ -289,7 +304,7 @@ describe(oneLine`
 			let drained: Array<Record<string, unknown>> = [];
 
 			for (let attempt = 0; attempt < 80; attempt++) {
-				drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+				drained = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 
 				if (drained.length === 0) {
 					break;
@@ -300,7 +315,7 @@ describe(oneLine`
 
 			const status = (await get(readNote)).headers[cacheStatusHeader];
 
-			// The recovery retried the recorded tag, not the namespace: a slice that was
+			// The recovery retried the recorded pin, not the namespace: a slice that was
 			// never in doubt is still cached.
 			const sibling = (await get(siblingNote)).headers[cacheStatusHeader];
 
@@ -323,6 +338,254 @@ describe(oneLine`
 		}, 60_000);
 
 		it(oneLine`
+			names the entries a recovered purge had been serving stale, so an outage
+			that outlived a write is visible rather than only over
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await emptyCache();
+			await db(PENDING).delete();
+
+			await cachedRead(readNote);
+
+			// The report resolves each stale key through its descriptor, and a
+			// descriptor reaches Postgres on the stats drain rather than with the fill.
+			// The drain below fires within a poll of the reconnect, so a descriptor
+			// still in the buffer then would leave the entry unnamed and this case
+			// asserting nothing.
+			let described = false;
+
+			for (let attempt = 0; attempt < 45 && described === false; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				described = listed.body.data.some((row: any) => {
+					return row.path === `/items/${NOTE}/${readNote}`;
+				});
+
+				if (described === false) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			expect(described).toBe(true);
+
+			await proxy.cut();
+
+			const written = await request(url)
+				.patch(`/items/${NOTE}/${readNote}`)
+				.send({ subject: `renamed-${Date.now()}` })
+				.set('Authorization', auth)
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
+					throw error;
+				});
+
+			await assertInstanceAlive();
+			expect(written.status).toBe(200);
+
+			await proxy.open();
+
+			for (let attempt = 0; attempt < 80; attempt++) {
+				if ((await db(PENDING).select('id')).length === 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			// The report runs BEFORE the purge it precedes, which is what leaves the
+			// index sets still naming the entry it is about to drop.
+			let outage: any;
+
+			for (let attempt = 0; attempt < 45; attempt++) {
+				const listed = await request(url).get('/utils/cache/anomalies')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				outage = listed.body.data
+					.find((row: any) => row.reason === 'redis_error');
+
+				if (outage !== undefined) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			mark(`outage anomaly: ${JSON.stringify(outage ?? null)}`);
+
+			expect(outage).toBeDefined();
+
+			// Resolved through the descriptor to the read that was being served, not
+			// to the write whose purge failed — the entry is what went stale.
+			expect(outage.path).toBe(`/items/${NOTE}/${readNote}`);
+			expect(outage.count).toBeGreaterThanOrEqual(1);
+		}, 60_000);
+
+		it(oneLine`
+			names an entry once per drain, not once per recorded pin it is a member of —
+			a batch write records one purge per key, and the read spanning both keys is
+			one stale entry, not two (#507)
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await emptyCache();
+			await db(PENDING).delete();
+
+			// Their own rows, so the anomaly count below is this case's alone: the
+			// listing groups by entry over a window that spans the earlier cases.
+			const pair: number[] = (await CreateItem(vendor, {
+				collection: NOTE,
+				item: [{ subject: 'pair-a' }, { subject: 'pair-b' }],
+			})).map((note: { id: number }) => note.id);
+
+			// Inline rather than `.query()`: that encodes the comma, and the
+			// descriptor keeps the query string as sent.
+			function readPair() {
+				return request(url)
+					.get(`/items/${NOTE}?filter[id][_in]=${pair.join(',')}`)
+					.set('Authorization', auth);
+			}
+
+			const miss = await readPair();
+			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readPair()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// What makes the count below mean anything: the entry sits under BOTH key
+			// pins the write records, and not under the bare one, so a per-target
+			// report would have named it twice.
+			const pinned = String(miss.headers[cacheTagsHeader]).split(', ');
+			expect(pinned).toContain(`${NOTE}:id=${pair[0]}`);
+			expect(pinned).toContain(`${NOTE}:id=${pair[1]}`);
+			expect(pinned).not.toContain(NOTE);
+
+			let described = false;
+
+			for (let attempt = 0; attempt < 45 && described === false; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				described = listed.body.data.some((row: any) => {
+					return row.path === `/items/${NOTE}`
+						&& String(row.query).includes(pair.join(','));
+				});
+
+				if (described === false) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			expect(described).toBe(true);
+
+			await proxy.cut();
+
+			// One failed purge, three recorded targets: the bare pin and one per key.
+			// The read above is a member of both key pins.
+			const written = await request(url)
+				.patch(`/items/${NOTE}`)
+				.send({ keys: pair, data: { subject: `renamed-${Date.now()}` } })
+				.set('Authorization', auth)
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
+					throw error;
+				});
+
+			await assertInstanceAlive();
+			expect(written.status).toBe(200);
+
+			// One row for the one write, whatever the number of keys it touched.
+			expect(await db(PENDING).select('mode', 'scoped_cache_fingerprints'))
+				.toEqual([{
+					mode: 'slices',
+					scoped_cache_fingerprints: expect.arrayContaining([
+						`${NOTE}:&`,
+						`${NOTE}:&id=,${pair[0]},&`,
+						`${NOTE}:&id=,${pair[1]},&`,
+					]),
+				}]);
+
+			await proxy.open();
+
+			for (let attempt = 0; attempt < 80; attempt++) {
+				if ((await db(PENDING).select('id')).length === 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			let named: any;
+
+			for (let attempt = 0; attempt < 45; attempt++) {
+				const listed = await request(url).get('/utils/cache/anomalies')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				named = listed.body.data.find((row: any) => {
+					return row.reason === 'redis_error'
+						&& row.path === `/items/${NOTE}`
+						&& String(row.query).includes(pair.join(','));
+				});
+
+				if (named !== undefined) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			mark(`pair anomaly: ${JSON.stringify(named ?? null)}`);
+
+			expect(named).toBeDefined();
+
+			// Once, though two of the drained targets name it. The listing counts
+			// events per entry, so a per-target report would read 2 here.
+			expect(Number(named.count)).toBe(1);
+
+			// What the drain purged is recorded like the purge it finished: one
+			// row per collection under one id, with no latency — no write waited on it
+			// (#507). Polled like the anomaly: it reaches Postgres on the stats
+			// drain too. These pins are this case's own, and the write's purge
+			// recorded nothing (it failed), so the id they name is the drain's.
+			let recordedPins: any[] = [];
+
+			for (let attempt = 0; attempt < 45 && recordedPins.length < 2; attempt++) {
+				recordedPins = await db('directus_cache_stats_scoped_purge_pins')
+					// Labels here, fingerprints in the pending table above: the stats
+					// stream joins its pin list with a comma, which a rendered
+					// fingerprint carries raw.
+					.whereIn('scoped_cache_pin', pair.map((id) => `${NOTE}:id=${id}`))
+					.select('scoped_cache_pin', 'purge_id');
+
+				if (recordedPins.length < 2) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			mark(`recorded purge pins: ${JSON.stringify(recordedPins)}`);
+
+			expect(recordedPins).toHaveLength(2);
+			expect(new Set(recordedPins.map((row) => row.purge_id)).size).toBe(1);
+
+			const purged = await db('directus_cache_stats_purges')
+				.where({ purge_id: recordedPins[0].purge_id })
+				.select('mode', 'scoped_cache_pin_count', 'duration_ms');
+
+			mark(`recorded purges: ${JSON.stringify(purged)}`);
+
+			// The three targets recorded above, the bare pin and one per key, are
+			// slices of one collection: the drain retries them in one scan.
+			expect(purged).toEqual([{
+				mode: 'slices',
+				scoped_cache_pin_count: 3,
+				duration_ms: null,
+			}]);
+		}, 60_000);
+
+		it(oneLine`
 			a purge that succeeds records nothing — the table is written on failure only,
 			so it stays empty on every normal write
 		`, async () => {
@@ -339,6 +602,72 @@ describe(oneLine`
 			expect((await get(readNote)).headers[cacheStatusHeader]).toBe('MISS');
 			expect(await db(PENDING).select('id')).toEqual([]);
 		});
+
+		it(oneLine`
+			records a write touching more keys than a retry replays one by one as a
+			collection purge, so its record stays one small row and the retry drops
+			every entry of the collection
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await emptyCache();
+			await db(PENDING).delete();
+
+			// 100 keys, the most one mutation takes: with the bare fingerprint they
+			// name 101, one past the retry's cap.
+			const batch: number[] = (await CreateItem(vendor, {
+				collection: NOTE,
+				item: Array.from({ length: 100 }, (_, at) => ({ subject: `batch-${at}` })),
+			})).map((note: { id: number }) => note.id);
+
+			// Outside the batch: a precise retry would leave its read cached, so its
+			// MISS below is what tells the collection purge from the precise one.
+			await cachedRead(readNote);
+
+			await proxy.cut();
+
+			const written = await request(url)
+				.patch(`/items/${NOTE}`)
+				.send({ keys: batch, data: { subject: `renamed-${Date.now()}` } })
+				.set('Authorization', auth)
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
+					throw error;
+				});
+
+			await assertInstanceAlive();
+			expect(written.status).toBe(200);
+
+			expect(await db(PENDING)
+				.select('mode', 'collection', 'scoped_cache_fingerprints'))
+				.toEqual([{
+					mode: 'collection',
+					collection: NOTE,
+					scoped_cache_fingerprints: null,
+				}]);
+
+			await proxy.open();
+
+			let drained: Array<Record<string, unknown>> = [];
+
+			for (let attempt = 0; attempt < 80; attempt++) {
+				drained = await db(PENDING).select('id');
+
+				if (drained.length === 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			expect(drained).toEqual([]);
+			expect((await get(readNote)).headers[cacheStatusHeader]).toBe('MISS');
+
+			await request(url)
+				.delete(`/items/${NOTE}`)
+				.send(batch)
+				.set('Authorization', auth);
+		}, 60_000);
 
 		it(oneLine`
 			finishes a recorded purge at BOOT, with nothing having read through the cache
@@ -360,7 +689,7 @@ describe(oneLine`
 
 			await assertInstanceAlive();
 
-			const recorded = await db(PENDING).select('mode', 'scoped_cache_tag');
+			const recorded = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 			mark(`recorded before the boot case: ${JSON.stringify(recorded)}`);
 			expect(recorded.length).toBeGreaterThan(0);
 
@@ -392,7 +721,7 @@ describe(oneLine`
 				let drained: Array<Record<string, unknown>> = [];
 
 				for (let attempt = 0; attempt < 60; attempt++) {
-					drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+					drained = await db(PENDING).select('mode', 'scoped_cache_fingerprints');
 
 					if (drained.length === 0) {
 						break;
@@ -429,9 +758,9 @@ describe(oneLine`
 		}, 90_000);
 
 		it(oneLine`
-			applies a schema diff while Redis is unreachable — the tag index the flush
-			drops lives in raw Redis, and the migration runner calls the same flush right
-			after recording the version it applied, without catching
+			applies a schema diff while Redis is unreachable — the fingerprint index the
+			flush drops lives in raw Redis, and the migration runner calls the same flush
+			right after recording the version it applied, without catching
 		`, async () => {
 			const snapshot = await request(getUrl(vendor, env))
 				.get('/schema/snapshot')

@@ -2,6 +2,7 @@
 name: project_directus_coverage_bb_vs_unit_split
 description: How to tell a coverage line blackbox can still reach from one only a unit test can credit on this fork, and why the blackbox ceiling is far below the 95% patch gate
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

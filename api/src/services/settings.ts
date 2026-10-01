@@ -6,6 +6,7 @@ import type {
 } from '@directus/types';
 import { InvalidPayloadError } from '@directus/errors';
 import { isPositiveDuration } from '../utils/get-milliseconds.js';
+import { validateCron } from '../utils/schedule.js';
 import { ItemsService } from './items.js';
 
 export class SettingsService extends ItemsService {
@@ -15,7 +16,7 @@ export class SettingsService extends ItemsService {
 
 	// The cache page edits `cache_ttl` through the settings singleton (PATCH
 	// /settings). Both the broadcast and the timeseries marker ride the
-	// `settings.update` action instead (see `initCacheConfig`), so they cover writers
+	// `settings.update.one` action instead (see `initCacheConfig`), so they cover writers
 	// that never reach this service. What stays here is the validation, which has to
 	// run BEFORE the write and so cannot live on an after-the-fact action.
 	override async upsertSingleton(
@@ -37,6 +38,23 @@ export class SettingsService extends ItemsService {
 				throw new InvalidPayloadError({
 					reason: `Invalid cache_ttl "${ttl}" — expected a positive `
 						+ `duration like "30s", "5m", "1h"`,
+				});
+			}
+		}
+
+		// Same gate for the audit cron: a rule node-schedule cannot parse would be
+		// stored, then every node would drop its job and schedule nothing.
+		if ('cache_audit_schedule' in data) {
+			const rule = data['cache_audit_schedule'];
+
+			if (
+				typeof rule === 'string'
+				&& rule.trim() !== ''
+				&& !validateCron(rule.trim())
+			) {
+				throw new InvalidPayloadError({
+					reason: `Invalid cache_audit_schedule "${rule}" — expected a cron `
+						+ 'rule like "0 3 * * *"',
 				});
 			}
 		}

@@ -1,0 +1,98 @@
+import vendors from '@common/get-dbs-to-test';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+	closeSharedSettings,
+	countWorkers,
+	decisionAfter,
+	decisionsOf,
+	poolSize,
+	reportOf,
+	restartSupervisor,
+	startAutoscaler,
+	startPool,
+	stopRig,
+	storeSharedSettings,
+	type Rig,
+} from './autoscale/rig';
+
+// A pm2 daemon is not forever: `pm2 update` replaces it, an OOM takes it, and
+// the planner restarts its services on a nightly cron. The autoscaler connects
+// to one once, at boot, and never again — so if that connection did not survive
+// the daemon behind it, every tick after would fail into the loop's catch and
+// the pool would sit unmanaged behind a log line a second, which is the shape of
+// failure this whole component exists to not have.
+describe('The autoscaler outlives its supervisor', () => {
+	const rigs: Rig[] = [];
+
+	// The autoscaler reads the shared layer out of the singleton every other
+	// suite writes to, so a value one of them left behind would sit over the
+	// environment these arms tune. Cleared here rather than trusted, and the
+	// connection closed with the rigs.
+	beforeAll(async () => {
+		await storeSharedSettings(vendors[0]!, 'autoscale_settings', null);
+	});
+
+	afterAll(async () => {
+		for (const rig of rigs) {
+			stopRig(rig);
+		}
+
+		await closeSharedSettings();
+	});
+
+	it('goes on scaling after the daemon is restarted under it', async () => {
+		const rig = startPool({
+			appName: 'autoscale-supervisor',
+			instances: 1,
+			busyMs: 20,
+			idleMs: 80,
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			REDIS_ENABLED: 'false',
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '5',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '4',
+		});
+
+		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
+
+		const decidedBeforeRestart = decisionsOf(rig).length;
+
+		restartSupervisor(rig);
+
+		// The ecosystem declares one worker, so the pool comes back at one
+		// whatever it had grown to. Asserted rather than waited for: without it
+		// the climb below would be satisfied by the two the arm already had.
+		expect(countWorkers(rig), reportOf(rig)).toBe(1);
+
+		// A decision taken over a connection whose daemon has died since it was
+		// made. Asserted as a decision rather than as the pool size below,
+		// because that is where the two outcomes first differ: an autoscaler
+		// that survived says so on the tick after the restart, and one wedged on
+		// a call the dead daemon never answered says nothing at all — for the
+		// whole minute the size below spends failing to name what went wrong.
+		const decided = await decisionAfter(rig, decidedBeforeRestart, 60_000);
+
+		expect(decided, reportOf(rig)).not.toEqual([]);
+		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
+
+		// The other way the reconnect this arm just exercised can end. pm2
+		// nulls whichever client its disconnect finds when that lands, so one
+		// still running while the reconnect connects nulls the fresh client
+		// instead, and pm2's connect handler reads it from inside a socket
+		// callback where the throw ends the process. A deployment gives the
+		// autoscaler `autorestart`, which buys the pool back in about a second
+		// and hides this entirely; nothing restarts it here, so the exit stands
+		// as the evidence it would otherwise never leave.
+		expect(
+			[rig.autoscaler?.exitCode, rig.autoscaler?.signalCode],
+			reportOf(rig),
+		).toEqual([null, null]);
+	}, 150_000);
+});

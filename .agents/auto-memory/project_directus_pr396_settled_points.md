@@ -2,6 +2,7 @@
 name: project_directus_pr396_settled_points
 description: PR #396/#398 (cache-stats eviction ring + table rename) — points jean already ruled on; do NOT re-raise them in a fresh review
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

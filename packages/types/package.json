@@ -12,6 +12,8 @@
 	"license": "MIT",
 	"author": "Rijk van Zanten <rijkvanzanten@me.com>",
 	"type": "module",
+	"//sideEffects": "Nothing here runs at import time. Without this an extension importing a single type keeps websockets.js — and the zod it pulls — alive in its bundle.",
+	"sideEffects": false,
 	"exports": {
 		".": "./dist/index.js",
 		"./package.json": "./package.json"

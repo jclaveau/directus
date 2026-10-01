@@ -2,6 +2,7 @@
 name: project_directus_oas_publishing
 description: "Publishing a path in the Directus OpenAPI: visibility is gated per TAG (x-authentication), /server/specs/oas needs no credential, env-gated routes still appear, and the spec is OAS 3.0.1 (nullable, not type null)"
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

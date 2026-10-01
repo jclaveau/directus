@@ -2,6 +2,7 @@
 name: project_directus_pgbouncer_admin_console
 description: PR #355 Settings → PgBouncer page — how the admin console has to be talked to, what its SHOW output really means, and the settled design decisions
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

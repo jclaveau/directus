@@ -1,5 +1,5 @@
 import type { Knex } from 'knex';
-import { uniq } from 'lodash-es';
+import { uniq } from '../../utils/lodash-es-used.js';
 import { getHelpers } from '../helpers/index.js';
 
 export async function up(knex: Knex): Promise<void> {

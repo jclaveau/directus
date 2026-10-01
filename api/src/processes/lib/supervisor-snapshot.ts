@@ -1,34 +1,10 @@
 import type { ProcessSupervisorStats } from '@directus/types';
-import { promisify } from 'node:util';
-import pm2 from 'pm2';
 import { useLogger } from '../../logger/index.js';
-
-/**
- * PM2 sets `PM2_HOME` in every process it supervises; its absence is how local
- * dev and CI runs — which start the process directly — are told apart from a
- * supervised deployment. Same probe the metrics aggregator uses.
- */
-export function supervisorAvailable(): boolean {
-	return 'PM2_HOME' in process.env;
-}
-
-const listApps = promisify(pm2.list.bind(pm2));
-
-/**
- * PM2's published typings stop at a documented subset of `pm2_env`; the recycling
- * cap and the exec mode — the two fields this page exists to show — are on the
- * runtime object but absent from them.
- */
-interface SupervisedProcessEnv {
-	status?: string;
-	restart_time?: number;
-	unstable_restarts?: number;
-	pm_uptime?: number;
-	max_memory_restart?: number;
-	exec_mode?: string;
-	instances?: number | 'max';
-	NODE_APP_INSTANCE?: string | number;
-}
+import {
+	type SupervisedProcessEnv,
+	listSupervisedApps,
+	supervisorAvailable,
+} from '../supervisor/index.js';
 
 /** One row of `pm2 list`, as this report needs it. */
 export interface SupervisedProcess {
@@ -63,7 +39,7 @@ export async function readSupervisedProcesses(): Promise<
 	}
 
 	try {
-		const apps = await listApps();
+		const apps = await listSupervisedApps();
 
 		return apps.map((app) => {
 			const pm2Env: SupervisedProcessEnv = app.pm2_env ?? {};

@@ -1,27 +1,26 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
+import { toArray } from '@directus/utils/values';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { promisify } from 'node:util';
-import pm2 from 'pm2';
 import type { MetricObjectWithValues, MetricValue } from 'prom-client';
 import { AggregatorRegistry, Counter, Histogram, register } from 'prom-client';
 import { getCache } from '../../cache.js';
 import { hasDatabaseConnection } from '../../database/index.js';
 import { useLogger } from '../../logger/index.js';
+import {
+	listSupervisedApps,
+	sendToSupervisedProcess,
+} from '../../processes/supervisor/index.js';
 import { redisConfigAvailable, useRedis } from '../../redis/index.js';
 import { getStorage } from '../../storage/index.js';
 import type { MetricService } from '../types/metric.js';
+import {
+	cacheEnabled,
+	responseCacheWanted,
+} from '../../cache-settings.js';
 
 const isPM2 = 'PM2_HOME' in process.env;
 const METRICS_SYNC_PACKET = 'directus:metrics---data-sync';
-
-const listApps = promisify(pm2.list.bind(pm2));
-
-// pin to pm2's real (proc_id, packet, cb) runtime form; its new types make promisify mis-infer the overload
-const sendDataToProcessId = promisify(
-	pm2.sendDataToProcessId.bind(pm2) as (procId: number, packet: object, cb: (err: Error | null) => void) => void,
-);
 
 export function createMetrics() {
 	const env = useEnv();
@@ -56,7 +55,7 @@ export function createMetrics() {
 		 */
 		if (isPM2) {
 			try {
-				const apps = await listApps();
+				const apps = await listSupervisedApps();
 
 				const data = await register.getMetricsAsJSON();
 
@@ -68,7 +67,7 @@ export function createMetrics() {
 					}
 
 					syncs.push(
-						sendDataToProcessId(app.pm_id, {
+						sendToSupervisedProcess(app.pm_id, {
 							data: { pid: process.pid, metrics: data },
 							topic: METRICS_SYNC_PACKET,
 						}),
@@ -96,7 +95,7 @@ export function createMetrics() {
 		 * only currently active instances are added to the aggregate
 		 */
 		if (isPM2 && aggregates.size !== 0) {
-			const apps = await listApps();
+			const apps = await listSupervisedApps();
 
 			const aggregate = [];
 
@@ -154,7 +153,7 @@ export function createMetrics() {
 	}
 
 	function getCacheErrorMetric(): Counter | null {
-		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
+		if (services.includes('cache') === false || responseCacheWanted() === false) {
 			return null;
 		}
 
@@ -199,7 +198,7 @@ export function createMetrics() {
 	// counter (result=hit|miss) so hit-ratio is a PromQL rate() away, independent of
 	// the CACHE_STATS opt-in (that's the durable drill-down; this is the live gauge).
 	function getCacheResponseMetric(): Counter | null {
-		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
+		if (services.includes('cache') === false || cacheEnabled() === false) {
 			return null;
 		}
 
@@ -212,6 +211,31 @@ export function createMetrics() {
 				name: 'directus_cache_response_total',
 				help: 'Response-cache lookups by result (hit/miss)',
 				labelNames: ['result'],
+			});
+		}
+
+		return metric;
+	}
+
+	// How a collection-wide purge found the sets its collection is filed in: the
+	// index-key set a reap vouched for, or a keyspace SCAN. `scan` holding up
+	// after a deploy is a changed build that moved the generation past the
+	// marker, with no reap since to write it again.
+	function getScopedCacheIndexReadMetric(): Counter | null {
+		if (services.includes('cache') === false || responseCacheWanted() === false) {
+			return null;
+		}
+
+		let metric = register
+			.getSingleMetric('directus_scoped_cache_index_reads_total') as
+			| Counter
+			| undefined;
+
+		if (!metric) {
+			metric = new Counter({
+				name: 'directus_scoped_cache_index_reads_total',
+				help: 'Collection-wide index reads by mode (registry/scan)',
+				labelNames: ['mode'],
 			});
 		}
 
@@ -365,6 +389,7 @@ export function createMetrics() {
 		getDatabaseResponseMetric,
 		getCacheErrorMetric,
 		getCacheResponseMetric,
+		getScopedCacheIndexReadMetric,
 		getRedisErrorMetric,
 		getUnhandledRejectionMetric,
 		getStorageErrorMetric,

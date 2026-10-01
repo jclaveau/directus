@@ -1,9 +1,18 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { CACHE_AUDIT_VERDICTS } from '../../cache-audit.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
 } from '../../cache-events.js';
+import {
+	autoscaleDrillEnabled,
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+} from '../../processes/autoscale/lib/drill.js';
+import { redisConfigAvailable } from '../../redis/index.js';
 import { UtilsService } from '../../services/utils.js';
+import { CacheAuditOptionsSchema } from '../../utils/cache-audit-options.js';
 import {
 	defineSystemMcpTool,
 	type SystemMcpTool,
@@ -13,6 +22,7 @@ import { systemMcpToolGroups } from './config.js';
 import {
 	processesReportEnabled,
 	reportedProcessDetails,
+	requestedProcessDetails,
 } from '../../processes/lib/processes-config.js';
 
 /**
@@ -69,13 +79,163 @@ const LIST_OUTPUT = {
 } as const;
 
 /**
- * Every tool here reads and nothing more, which is what lets a client call one
+ * A tool that reads and nothing more, which is what lets a client call one
  * without asking the user to approve it first.
  */
 const READ_ONLY = {
 	readOnlyHint: true,
 	destructiveHint: false,
 	openWorldHint: false,
+} as const;
+
+/**
+ * A tool that changes how this deployment runs.
+ *
+ * Not destructive — it stores values, and each of them is reversible by storing
+ * another — but a client is expected to put the call in front of the user
+ * before making it, which is what `readOnlyHint: false` buys. Idempotent: the
+ * same patch written twice leaves the same shared settings.
+ */
+const CHANGES_CONFIG = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: true,
+	openWorldHint: false,
+} as const;
+
+/**
+ * A tool that disturbs the workers currently serving.
+ *
+ * The pool comes back either way — a roll starts each replacement before it
+ * retires the worker it replaces, and a drill runs out on a deadline the
+ * worker holds — but both spend a live deployment to do it, and neither
+ * leaves it where it found it: a second call is a second restart, and a
+ * second drill.
+ */
+const DISTURBS_POOL = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: false,
+	openWorldHint: false,
+} as const;
+
+/**
+ * A tool that spends the deployment on a read: an audit run is one uncached
+ * read of the database per live cache entry. Not destructive — with `purge`
+ * off it changes nothing, and with it on what it evicts is stale — but a
+ * client puts it in front of the user first, and a second run is a second
+ * pass over the cache.
+ */
+const RUNS_AUDIT = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: false,
+	openWorldHint: false,
+} as const;
+
+/** The verdict counts a run answers, one property per verdict. */
+const VERDICT_COUNTS = {
+	type: 'object',
+	description: 'How many entries took each verdict.',
+	properties: Object.fromEntries(
+		CACHE_AUDIT_VERDICTS.map((verdict) => [verdict, { type: 'number' }]),
+	),
+} as const;
+
+/** A run as the history records it: what running one and reading one answer. */
+const RUN_PROPERTIES = {
+	id: { type: 'number', description: 'The run, as `read_cache_audit` takes it.' },
+	startedAt: { type: 'number' },
+	finishedAt: {
+		type: ['number', 'null'],
+		description: 'Null while the run is in flight.',
+	},
+	trigger: {
+		type: 'string',
+		enum: ['rest', 'cli', 'cron', 'mcp'],
+		description: 'What started it.',
+	},
+	options: {
+		type: 'object',
+		description: 'The narrowing it was asked for.',
+	},
+	scanned: { type: 'number', description: 'How many live entries were examined.' },
+	counts: VERDICT_COUNTS,
+	evicted: {
+		type: 'number',
+		description: 'How many stale or drifted entries `purge` dropped.',
+	},
+	durationMs: { type: ['number', 'null'] },
+	timedOut: {
+		type: 'boolean',
+		description: 'Stopped on `CACHE_AUDIT_MAX_DURATION`; what was left waits '
+			+ 'for the next run.',
+	},
+	error: {
+		type: ['string', 'null'],
+		description: 'Why it stopped, where it did not finish.',
+	},
+} as const;
+
+/** The finding rows a run stores: every entry that was not `fresh`. */
+const FINDINGS = {
+	type: 'array',
+	description:
+		'One per entry that was not fresh: its verdict and reason, the request '
+		+ 'that filled it (method, url, query, user, collection), the pins it was '
+		+ 'filled under against the ones the replay pinned, the JSON pointers '
+		+ 'where the stored body and the fresh one differ, and the purges that '
+		+ 'covered it since the fill. The bodies themselves are not answered.',
+	items: { type: 'object' },
+} as const;
+
+const SCHEDULE_PROPERTIES = {
+	rule: {
+		type: ['string', 'null'],
+		description: 'The cron rule in force, or null when no audit is scheduled.',
+	},
+	source: {
+		type: ['string', 'null'],
+		enum: ['settings', 'env', null],
+		description: 'Where the rule comes from: the live setting, or the '
+			+ 'CACHE_AUDIT_SCHEDULE environment variable it overrides.',
+	},
+	envRule: {
+		type: ['string', 'null'],
+		description: 'What the environment says, which a cleared setting falls back to.',
+	},
+	nextRunAt: {
+		type: ['number', 'null'],
+		description: 'When the rule next fires, as a Unix millisecond timestamp.',
+	},
+} as const;
+
+/** What reading and writing the cache settings answer. */
+const CACHE_SETTINGS_OUTPUT = {
+	type: 'object',
+	properties: {
+		key: {
+			type: 'string',
+			description: 'The settings column the cache settings are stored in.',
+		},
+		sharedSettings: {
+			type: ['object', 'null'],
+			description: 'The fields the cache settings set, or null for none. '
+				+ 'Carries `setBy`, `setAt` and `setFrom` beside them: who wrote '
+				+ 'them, when, and through "admin" or "mcp".',
+		},
+		setByEmail: {
+			type: ['string', 'null'],
+			description: 'The address behind `setBy`, or null for none.',
+		},
+		resolved: {
+			type: 'object',
+			description: 'Every field as this node reads it: `value`, '
+				+ '`source` — "settings", or "env" for the environment variable '
+				+ 'it overrides — and `fallback`, what clearing the field would '
+				+ 'leave it on.',
+		},
+	},
 } as const;
 
 /** The lookback a cache read takes, described once for every default. */
@@ -102,7 +262,23 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			group: 'processes',
 			title: 'List running processes',
 			description: processesDescription(),
-			inputSchema: { type: 'object', properties: {} },
+			inputSchema: {
+				type: 'object',
+				properties: {
+					details: {
+						type: 'array',
+						description: 'Which halves to report: "stats", "env", or both.'
+							+ ' Defaults to everything this deployment reports. Asking for'
+							+ ' "stats" alone leaves out the resolved environment, which is'
+							+ ' most of the answer by size and is worth reading only when'
+							+ ' comparing configuration between replicas.',
+						// The halves this deployment reports, not both by rote: an enum
+						// naming one it does not would invite a call that answers with
+						// strictly less than asking for nothing at all.
+						items: { type: 'string', enum: reportedProcessDetails() },
+					},
+				},
+			},
 			outputSchema: {
 				type: 'object',
 				properties: {
@@ -125,7 +301,375 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				},
 			},
 			annotations: READ_ONLY,
-			run: async (_args, context) => utils(context).readProcesses(),
+			run: async (args, context) => {
+				// The deployment's own list still bounds this: a node configured
+				// without env never reports env, however it was asked.
+				const details = requestedProcessDetails(args['details']);
+
+				return utils(context).readProcesses(details);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_autoscale_config',
+			group: 'autoscale',
+			title: 'Read the autoscale configuration',
+			description:
+				'What every process scaling a PM2 pool is running on: the values it '
+				+ 'resolved, which layer supplied each one, the pool it last read and '
+				+ 'the last decision it took — plus the live shared settings those values '
+				+ 'resolved through. Use it before changing anything, and to explain a '
+				+ 'pool that is not the size it should be.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					live: {
+						type: 'boolean',
+						description: 'Whether to ask the running processes what they are '
+							+ 'scaling on, which takes about a second. False answers with '
+							+ 'the stored shared settings alone.',
+					},
+				},
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The settings column the shared settings are stored in.',
+					},
+					sharedSettings: {
+						type: 'object',
+						description: 'The fields the shared settings set, or null for none. '
+							+ 'Carries `setBy`, `setAt`, `setFrom` and `note` beside them.',
+					},
+					setByEmail: {
+						type: 'string',
+						description: 'The address behind `setBy`, or null for none.',
+					},
+					supervisor: {
+						type: 'object',
+						description: 'The pm2 options stored for the next rolling '
+							+ 'restart, under `key`, `sharedSettings` and `setByEmail` of '
+							+ 'their own. They reach the pool through a restart rather '
+							+ 'than on a tick.',
+					},
+					running: {
+						type: 'array',
+						description: 'One entry per process that is scaling a pool.',
+						items: { type: 'object' },
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				const service = utils(context);
+				const stored = await service.readAutoscaleConfig();
+
+				return {
+					...stored,
+					running: args['live'] === false
+						? []
+						: await service.readAutoscaleRunners(),
+				};
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'write_autoscale_config',
+			group: 'autoscale',
+			title: 'Change the autoscale configuration',
+			description:
+				'Lay fields over the live autoscale configuration, which every '
+				+ 'process scaling a pool against this database picks up within a '
+				+ 'second — no redeploy, and no restart of the pool being tuned. '
+				+ 'Pass a field as null to give it back to the environment chain, and '
+				+ '`clear: true` to drop the shared settings entirely. A configuration '
+				+ 'that cannot be run — a floor above its ceiling, a release threshold '
+				+ 'at or above the scale threshold — is refused whole, and the refusal '
+				+ 'names every problem at once.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					config: {
+						type: 'object',
+						description: 'The fields to set: enabled, strategy, appName, '
+							+ 'signal, sampleWindow, scaleCpuThreshold, '
+							+ 'releaseCpuThreshold, minWorkers, maxWorkers, '
+							+ 'prewarmWorkers, minSecondsToScaleUp, '
+							+ 'minSecondsToScaleDown, warmupSeconds. A null value clears '
+							+ 'that field. Setting minWorkers and maxWorkers to the same '
+							+ 'number pins the pool at it whatever the load reads.',
+					},
+					note: {
+						type: 'string',
+						description: 'Why this is being changed, stored with the '
+							+ 'sharedSettings. Shared settings outlive the incident that '
+							+ 'justified them, and this is what says which one that was.',
+					},
+					clear: {
+						type: 'boolean',
+						description: 'Drop the whole shared settings, so every field '
+							+ 'comes from the environment chain again.',
+					},
+				},
+				required: ['note'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The settings column the shared settings are stored in.',
+					},
+					sharedSettings: {
+						type: 'object',
+						description: 'The shared settings as they now stand, or null for none. '
+							+ 'This write stamps it `setFrom: "mcp"`.',
+					},
+					setByEmail: {
+						type: 'string',
+						description: 'The address behind `setBy`, or null for none.',
+					},
+					supervisor: {
+						type: 'object',
+						description: 'The pm2 options stored for the next rolling '
+							+ 'restart, answered here because they are read back with '
+							+ 'the configuration. This tool does not change them.',
+					},
+				},
+			},
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const service = utils(context);
+
+				if (args['clear'] === true) {
+					await service.clearAutoscaleConfig();
+
+					return service.readAutoscaleConfig();
+				}
+
+				const config = args['config'];
+
+				if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+					throw new InvalidPayloadError({
+						reason: '`config` has to be an object of configuration fields',
+					});
+				}
+
+				return service.updateAutoscaleConfig(
+					{
+						...config as Record<string, unknown>,
+						note: args['note'],
+					},
+					'mcp',
+				);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'write_supervisor_config',
+			group: 'autoscale',
+			title: 'Change the pm2 options the pool boots under',
+			description:
+				'Store the pm2 options every worker of the scaled pool boots under. '
+				+ 'pm2 reads them when it starts a worker, so nothing written here '
+				+ 'reaches the pool by itself — `restart_autoscale_pool` is what '
+				+ 'carries it, and until that runs the values are stored and '
+				+ 'unapplied. Pass a field as null to hand it back to the '
+				+ 'environment chain. Nothing is corrected: a value outside its '
+				+ 'bounds is refused, because a supervisor takes what it is handed.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					supervisor: {
+						type: 'object',
+						description: 'The options to store, each a whole number: '
+							+ '`listenTimeout` (1000-600000 ms, how long a replacement '
+							+ 'has to report ready before the roll gives up on it), '
+							+ '`killTimeout` (100-600000 ms), `minUptime` '
+							+ '(100-600000 ms), `restartDelay` (0-600000 ms), '
+							+ '`maxRestarts` (0-1000) and `maxMemoryRestartMegabytes` '
+							+ '(64-65536). A null value clears that one field.',
+					},
+					note: {
+						type: 'string',
+						description: 'Why this is being changed, stored with the '
+							+ 'options. Shared settings outlive the incident that '
+							+ 'justified them, and this is what says which one that was.',
+					},
+				},
+				required: ['note'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The Redis key the options are stored under.',
+					},
+					sharedSettings: {
+						type: 'object',
+						description: 'The options as they now stand, or null for none. '
+							+ 'This write stamps them `setFrom: "mcp"`.',
+					},
+					setByEmail: {
+						type: 'string',
+						description: 'The address behind `setBy`, or null for none.',
+					},
+				},
+			},
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const supervisor = args['supervisor'];
+
+				const usable = typeof supervisor === 'object'
+					&& supervisor !== null
+					&& Array.isArray(supervisor) === false;
+
+				if (usable === false) {
+					throw new InvalidPayloadError({
+						reason: '`supervisor` has to be an object of pm2 options',
+					});
+				}
+
+				return utils(context).updateSupervisorConfig(
+					{
+						...supervisor as Record<string, unknown>,
+						note: args['note'],
+					},
+					'mcp',
+				);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'restart_autoscale_pool',
+			group: 'autoscale',
+			title: 'Restart the scaled pool',
+			description:
+				'Roll every worker of the scaled pool: the supervisor starts a '
+				+ 'replacement, waits for it to report ready, and only then retires '
+				+ 'the worker it replaces — so the pool never drops below the size '
+				+ 'it is holding. This is how anything a worker reads at boot '
+				+ 'reaches a running pool without a deploy, and it is what applies '
+				+ 'the options `write_supervisor_config` stores. Refused, with the '
+				+ 'reason, where nothing reports that it is scaling a pool, where a '
+				+ 'restart is already running, or where the pool is not in cluster '
+				+ 'mode and a worker would be stopped before its replacement starts.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					askedAt: {
+						type: 'number',
+						description: 'When the pool was asked for this one, in '
+							+ 'milliseconds since the epoch.',
+					},
+					running: {
+						type: 'boolean',
+						description: 'Whether the supervisor is replacing workers, '
+							+ 'which it still is when this answers.',
+					},
+					finishedAt: {
+						type: 'number',
+						description: 'When the last restart came back, null while one '
+							+ 'runs. Read it back to watch this one land.',
+					},
+					error: {
+						type: 'string',
+						description: 'Why the last restart failed, or null.',
+					},
+				},
+			},
+			annotations: DISTURBS_POOL,
+			run: async (_args, context) => utils(context).startAutoscaleReload(),
+		}),
+		defineSystemMcpTool({
+			name: 'read_autoscale_drill',
+			group: 'autoscale_drill',
+			title: 'Read the running load drill',
+			description:
+				'Whether the pool is under a drill right now, and until when. Read '
+				+ 'it back after starting one: the deadline that ends a drill is '
+				+ 'the one each burning worker holds, not the one the request '
+				+ 'asked for.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					until: {
+						type: 'number',
+						description: 'When the drill runs out, in milliseconds since '
+							+ 'the epoch, or null where none is running.',
+					},
+					percent: {
+						type: 'number',
+						description: 'The share of its time a drilling worker spends '
+							+ 'holding the processor.',
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readAutoscaleDrill(),
+		}),
+		defineSystemMcpTool({
+			name: 'run_autoscale_drill',
+			group: 'autoscale_drill',
+			title: 'Put the pool under load',
+			description:
+				'Make every worker of the pool spend a share of its time busy, on '
+				+ 'purpose, so a configuration change can be watched deciding '
+				+ 'something instead of waiting for the traffic that would decide '
+				+ 'it. It touches nothing the loop reads except the load itself. '
+				+ 'Refused where the pool is already working, because a drill laid '
+				+ 'over real traffic measures both at once. Pass `stop: true` to '
+				+ 'call one off before its deadline.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					seconds: {
+						type: 'integer',
+						description: 'How long to hold the pool under load, '
+							+ `1-${MAX_DRILL_SECONDS}. Required unless stopping. The `
+							+ 'cap is what makes a lost stop harmless, so a longer '
+							+ 'drill is refused rather than shortened to it.',
+					},
+					percent: {
+						type: 'integer',
+						description: 'The share of its time each worker spends holding '
+							+ `the processor, ${MIN_DRILL_PERCENT}-${MAX_DRILL_PERCENT}. `
+							+ 'Required unless stopping. It stops short of the whole '
+							+ 'slice so the deployment keeps answering while it burns.',
+					},
+					stop: {
+						type: 'boolean',
+						description: 'Call the running drill off now instead of '
+							+ 'starting one.',
+					},
+				},
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					until: {
+						type: 'number',
+						description: 'When the drill runs out, in milliseconds since '
+							+ 'the epoch, or null where none is running.',
+					},
+					percent: {
+						type: 'number',
+						description: 'The share of its time a drilling worker spends '
+							+ 'holding the processor.',
+					},
+				},
+			},
+			annotations: DISTURBS_POOL,
+			run: async (args, context) => {
+				const service = utils(context);
+
+				if (args['stop'] === true) {
+					return service.stopAutoscaleDrill();
+				}
+
+				return service.startAutoscaleDrill(args['seconds'], args['percent']);
+			},
 		}),
 		defineSystemMcpTool({
 			name: 'list_cache_entries',
@@ -148,9 +692,11 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Read one cache entry',
 			description:
 				'The live state of a single response-cache entry: whether its value '
-				+ 'is still held, its scoped-cache tags, when it was written and when '
-				+ 'it expires, its size raw and compressed, any tombstone, and the '
-				+ 'purges that covered it since it was filled. The cached response '
+				+ 'is still held, its scoped-cache pins, when it was written and when '
+				+ 'it expires, its size raw and compressed, any tombstone, when the '
+				+ 'audit last replayed it and when it was last known to answer what '
+				+ 'the database does, and the purges that covered it since it was '
+				+ 'filled. The cached response '
 				+ 'itself is not returned. Use it to follow up a row the entry '
 				+ 'listing returned, whose `redisKey` it takes — not its `key`, which '
 				+ 'is the stats identity the two differ by where the deployment does '
@@ -172,14 +718,14 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'boolean',
 						description: 'Whether the value itself is still held.',
 					},
-					tags: {
+					pins: {
 						type: ['array', 'null'],
-						description: 'Scoped-cache tags, where that sidecar was written.',
+						description: 'Scoped-cache pins, where that sidecar was written.',
 						items: { type: 'string' },
 					},
-					tagCounts: {
+					pinCounts: {
 						type: 'object',
-						description: 'How many entries each of those tags covers.',
+						description: 'How many entries each of those pins covers.',
 					},
 					expiry: {
 						type: ['object', 'null'],
@@ -199,6 +745,19 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							'When it was last written, per its descriptor. Null where it '
 							+ 'was never cached at all — a key known only from an anomaly '
 							+ 'has a descriptor but no fill.',
+					},
+					auditedAt: {
+						type: ['number', 'null'],
+						description:
+							'When the cache audit last replayed it against the database; '
+							+ 'null until it has.',
+					},
+					verifiedAt: {
+						type: ['number', 'null'],
+						description:
+							'When it was last known to answer what the database does: '
+							+ 'the audit, or the fill where that came later — a fill '
+							+ 'reads the database. Null where it was never filled.',
 					},
 					purgesSinceFilled: {
 						type: ['array', 'null'],
@@ -235,12 +794,14 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				// still hands the body to an administrator who asks for it.
 				return {
 					exists: entry.exists,
-					tags: entry.tags,
-					tagCounts: entry.tagCounts,
+					pins: entry.pins,
+					pinCounts: entry.pinCounts,
 					expiry: entry.expiry,
 					sizes: entry.sizes,
 					tombstone: entry.tombstone,
 					filledAt: entry.filledAt,
+					auditedAt: entry.auditedAt,
+					verifiedAt: entry.verifiedAt,
 					purgesSinceFilled: entry.purgesSinceFilled,
 				};
 			},
@@ -349,6 +910,307 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			annotations: READ_ONLY,
 			run: async (_args, context) => utils(context).getCacheStatsState(),
 		}),
+		defineSystemMcpTool({
+			name: 'read_cache_settings',
+			group: 'cache',
+			title: 'Read the cache settings',
+			description:
+				'The cache settings every node reads live, and what each field '
+				+ 'resolves to with where it comes from: the setting, or the '
+				+ 'environment variable it overrides. Read it before changing any of '
+				+ 'them.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readCacheSettings(),
+		}),
+		defineSystemMcpTool({
+			name: 'write_cache_settings',
+			group: 'cache_settings',
+			title: 'Change the cache settings',
+			description:
+				'Lay fields over the cache settings, which every node picks up at '
+				+ 'once — no redeploy. Pass a field as null to give it back to its '
+				+ 'environment variable or default, and `clear: true` alone to drop '
+				+ 'them all. A value outside its rule is refused. Switching `response` '
+				+ 'on where CACHE_RESPONSE, else CACHE_ENABLED, is off first clears the '
+				+ 'response cache, since nodes that held none purged nothing while it '
+				+ 'was off. A write is stamped `setFrom: "mcp"` with its user and time.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					settings: {
+						type: 'object',
+						description: 'The fields to set: response (over CACHE_RESPONSE, '
+							+ 'else CACHE_ENABLED), '
+							+ 'value_max_size (false or a size such as "2mb", over '
+							+ 'CACHE_VALUE_MAX_SIZE), stats_max_bytes (false or a size, '
+							+ 'over CACHE_STATS_MAX_BYTES), audit_limit (an integer from '
+							+ '0, over CACHE_AUDIT_LIMIT), audit_max_duration (a duration '
+							+ 'such as "10m" up to "24h", over CACHE_AUDIT_MAX_DURATION), '
+							+ 'scoped_index_scan_count (an integer from 1 to 100000, over '
+							+ 'CACHE_SCOPED_INDEX_SCAN_COUNT), scoped_index_ttl_factor (a '
+							+ 'number from 1 to 100, over CACHE_SCOPED_INDEX_TTL_FACTOR), '
+							+ 'scoped_max_pins_per_collection (an integer from 0 to 100000, '
+							+ 'over CACHE_SCOPED_MAX_PINS_PER_COLLECTION), '
+							+ 'scoped_purge_retry_max_fingerprints (an integer from 0 to '
+							+ '100000, over CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS). A '
+							+ 'null value clears that field.',
+					},
+					clear: {
+						type: 'boolean',
+						description: 'Drop the whole cache settings, so every field '
+							+ 'comes from its fallback again.',
+					},
+				},
+			},
+			outputSchema: CACHE_SETTINGS_OUTPUT,
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const utilsService = utils(context);
+				const settingsPatch = args['settings'];
+
+				if (args['clear'] === true) {
+					if (settingsPatch !== undefined) {
+						throw new InvalidPayloadError({
+							reason: '`clear` and `settings` cannot be sent together',
+						});
+					}
+
+					return utilsService.clearCacheSettings();
+				}
+
+				if (
+					typeof settingsPatch !== 'object'
+					|| settingsPatch === null
+					|| Array.isArray(settingsPatch)
+				) {
+					throw new InvalidPayloadError({
+						reason: '`settings` has to be an object of cache settings',
+					});
+				}
+
+				return utilsService.updateCacheSettings(
+					settingsPatch as Record<string, unknown>,
+					'mcp',
+				);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'run_cache_audit',
+			group: 'cache_audit',
+			title: 'Audit the cache against the database',
+			description:
+				'Replay every live response-cache entry through the running app, as '
+				+ 'the user it was filled for, and compare the stored body with what '
+				+ 'the database answers now. Each entry comes back fresh, stale (a '
+				+ 'missed invalidation), pin_drift (same body, different scoped-cache '
+				+ 'pins — one write from stale), raced, time_varying, expired or '
+				+ 'unreplayable. Entries are taken least recently verified first (an '
+				+ 'audit, or a fill where that came later), and '
+				+ 'a run with a `limit` stops there while the next resumes behind '
+				+ 'it — every replay is an uncached read, so slice a large cache with '
+				+ '`limit` (`CACHE_AUDIT_LIMIT` when none is given), `user` or '
+				+ '`collection`; a run also stops, `timedOut`, once '
+				+ '`CACHE_AUDIT_MAX_DURATION` is up. One runs at a time: asked '
+				+ 'during another, this is refused. '
+				+ 'The run is answered as the history records it — '
+				+ 'its verdict counts, not its findings; `read_cache_audit` pages '
+				+ 'through those by the `id` answered here.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					limit: {
+						type: 'number',
+						minimum: 1,
+						description: 'Stop after this many entries; the next run resumes '
+							+ 'behind them. Defaults to CACHE_AUDIT_LIMIT.',
+					},
+					user: {
+						type: 'string',
+						description: 'Only the entries filled for this user id.',
+					},
+					collection: {
+						type: 'string',
+						description: 'Only the entries whose root collection is this one.',
+					},
+					purge: {
+						type: 'boolean',
+						description: 'Evict the stale and pin-drifted entries once '
+							+ 'reported. Off by default.',
+					},
+					ignore: {
+						type: 'array',
+						items: { type: 'string' },
+						description: 'JSON-pointer globs to ignore in a diff, such as '
+							+ '"/data/*/served_at", on top of CACHE_AUDIT_IGNORE_PATHS.',
+					},
+				},
+			},
+			outputSchema: { type: 'object', properties: RUN_PROPERTIES },
+			annotations: RUNS_AUDIT,
+			run: async (args, context) => {
+				// Stripped, not passed: the run takes more options than a caller
+				// may set (its time budget, where a replay goes).
+				const { error, value } = CacheAuditOptionsSchema.validate(args, {
+					allowUnknown: true,
+					stripUnknown: true,
+				});
+
+				if (error) {
+					throw new InvalidPayloadError({ reason: error.message });
+				}
+
+				return utils(context).auditCache(value, 'mcp');
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'list_cache_audits',
+			group: 'cache_audit',
+			title: 'List cache audit runs',
+			description:
+				'The audit runs started in the window, newest first, whichever '
+				+ 'surface ran them (the schedule, the CLI, the REST route, this '
+				+ 'tool): when each started and finished, its verdict counts, and its '
+				+ 'error if it failed. A run with no `finishedAt` is still in flight, '
+				+ 'or died with its process. Use it to see whether the scheduled '
+				+ 'audit ran and whether stale entries are trending.',
+			inputSchema: { type: 'object', properties: windowProperty('7d') },
+			outputSchema: LIST_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				return utils(context).getCacheAudits(args['window']);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_audit',
+			group: 'cache_audit',
+			title: 'Read one cache audit run',
+			description:
+				'One audit run with a page of the findings it stored: which entries '
+				+ 'were stale or drifted, the request that filled each, its pins '
+				+ 'against the replay\'s, where the bodies differed, and which purges '
+				+ 'covered it since the fill. Takes the `id` from the run listing; '
+				+ '`findingsTotal` says how many there are, `offset` walks them, '
+				+ '`verdict` keeps one kind.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					id: { type: 'number', description: 'The run, as `id` in the listing.' },
+					limit: {
+						type: 'number',
+						description: 'Findings per page: 100 unless given, at most 1000.',
+					},
+					offset: {
+						type: 'number',
+						description: 'How many findings to skip, in stored order.',
+					},
+					verdict: {
+						type: 'string',
+						enum: CACHE_AUDIT_VERDICTS.filter((verdict) => verdict !== 'fresh'),
+						description: 'Only the findings of this verdict.',
+					},
+				},
+				required: ['id'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					...RUN_PROPERTIES,
+					findings: FINDINGS,
+					findingsTotal: {
+						type: 'number',
+						description: 'How many findings the run stored, of the verdict '
+							+ 'asked for — whatever the page.',
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				const { id, ...page } = args;
+
+				return utils(context).getCacheAudit(id, page);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_audit_schedule',
+			group: 'cache_audit',
+			title: 'Read the cache audit schedule',
+			description:
+				'The cron rule the recurring audit runs on, whether it comes from the '
+				+ 'live setting or the environment, and when it next fires. Read this '
+				+ 'when the run listing is empty: no rule means no scheduled audit.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: { type: 'object', properties: SCHEDULE_PROPERTIES },
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).getCacheAuditSchedule(),
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_audit_queue',
+			group: 'cache_audit',
+			title: 'Read how far round the cache the audit is',
+			description:
+				'The guarantee the audit gives right now: how many described entries '
+				+ 'it works through, how many no run has replayed yet, and the oldest '
+				+ 'moment any of them was last known to answer what the database does '
+				+ '— every entry has been verified since then, by an audit or by the '
+				+ 'fill that wrote it. Read it beside the schedule and '
+				+ '`CACHE_AUDIT_LIMIT` to see how long a full pass takes.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					size: {
+						type: 'number',
+						description: 'Described entries the audit will get to.',
+					},
+					neverAudited: {
+						type: 'number',
+						description: 'Of those, the ones no run has replayed yet.',
+					},
+					verifiedSince: {
+						type: ['number', 'null'],
+						description:
+							'The oldest moment any queued entry was last verified, as a '
+							+ 'Unix millisecond timestamp; null with nothing queued.',
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).getCacheAuditQueue(),
+		}),
+		defineSystemMcpTool({
+			name: 'write_cache_audit_schedule',
+			group: 'cache_audit',
+			title: 'Change the cache audit schedule',
+			description:
+				'Set the cron rule the recurring audit runs on, which every node '
+				+ 'picks up at once — no redeploy. Pass null to clear it, handing the '
+				+ 'schedule back to CACHE_AUDIT_SCHEDULE. A rule that is not a cron is '
+				+ 'refused. Each run is one uncached read per live entry, so schedule '
+				+ 'it off-peak on a busy deployment.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					rule: {
+						type: ['string', 'null'],
+						description: 'A cron rule such as "0 3 * * *", or null to clear.',
+					},
+				},
+				required: ['rule'],
+			},
+			outputSchema: { type: 'object', properties: SCHEDULE_PROPERTIES },
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				if ('rule' in args === false) {
+					throw new InvalidPayloadError({
+						reason: 'A `rule` is required: a cron rule, or null to clear it',
+					});
+				}
+
+				return utils(context).updateCacheAuditSchedule(args['rule']);
+			},
+		}),
 	];
 }
 
@@ -362,7 +1224,21 @@ export function systemMcpTools(): SystemMcpTool[] {
 		// (`initProcessReports` returns early), so the collector would wait out its
 		// window and answer an empty tree. The REST route is absent in that
 		// deployment; the tool it shares a service with has to be too.
-		.filter((group) => group !== 'processes' || processesReportEnabled());
+		.filter((group) => group !== 'processes' || processesReportEnabled())
+		// A change travels to the scaling process over the bus, and the pool these
+		// answer about is found over it — so a deployment with no Redis has a
+		// tool naming a pool nothing can reach. The settings stay reachable as
+		// the columns they are; it is the pool that does not, which is the gate
+		// the REST routes are registered behind.
+		.filter((group) => group !== 'autoscale' || redisConfigAvailable())
+		// The drill holds real workers on the processor, so a deployment opens it
+		// deliberately or not at all, and it reaches them over the bus — which
+		// without Redis is an emitter this worker shares with nobody. Both gates
+		// are the ones the REST routes are registered behind.
+		.filter((group) => {
+			return group !== 'autoscale_drill'
+				|| (autoscaleDrillEnabled() && redisConfigAvailable());
+		});
 
 	return allSystemMcpTools().filter((tool) => groups.includes(tool.group));
 }

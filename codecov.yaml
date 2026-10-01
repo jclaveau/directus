@@ -32,6 +32,9 @@ ignore:
   # falls under the *.config.js rule above.)
   - 'eslint-rules/**'
   - 'scripts/lint-style-changes.mjs'
+  # The extension CLI's commander wiring: it parses process.argv the moment it is
+  # imported, so a test cannot load it without running a command.
+  - 'packages/extensions-sdk/src/cli/run.ts'
   # Migrations are DDL, run against a real DB by the migration runner — never unit-tested.
   - 'api/src/database/migrations/**'
 

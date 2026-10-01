@@ -2,6 +2,7 @@
 name: project_directus_env_type_map
 description: jean wants as many env vars as possible registered in the directus env TYPE_MAP (packages/env/src/constants/type-map.ts) — register every env var you touch/add with its EnvType, prefer parity when siblings are listed
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

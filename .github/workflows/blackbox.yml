@@ -50,7 +50,9 @@ env:
   NODE_OPTIONS: --max_old_space_size=6144
   # setup.ts only writes server-log-<vendor>.txt when this is set, and only on server
   # exit — without it the "Directus server logs" failure step has nothing to print.
-  TEST_SAVE_LOGS: '1'
+  # It also copies every spawned process's output to server-logs/ (uploaded below),
+  # at debug so the scoped cache's fill guard and purge counters show.
+  TEST_SAVE_LOGS: debug
   # Setting COVERAGE_DIR flips api/tsdown.config.ts to instrument with rolldown-plugin-istanbul,
   # and the spawned blackbox servers (which inherit process.env) dump __coverage__ here on shutdown.
   COVERAGE_DIR: ${{ github.workspace }}/coverage/blackbox
@@ -82,14 +84,16 @@ jobs:
             echo "vendors=[\"$VENDOR\"]" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.full }}" = "true" ]; then
             # mysql, mssql, oracle dropped — not supported/maintained on this fork.
-            # Re-add to the array to support: "mysql","mssql","oracle".
-            echo 'vendors=["sqlite3","postgres","maria"]' >> "$GITHUB_OUTPUT"
+            # sqlite3 and maria are disabled until needed, like their standing
+            # dialect PRs (#332, #333, closed). Restore this line to run them again:
+            # echo 'vendors=["sqlite3","postgres","maria"]' >> "$GITHUB_OUTPUT"
+            echo 'vendors=["postgres"]' >> "$GITHUB_OUTPUT"
           else
             # sqlite3 and maria are held out of the smoke set: at 8 shards a vendor the
             # matrices queue behind each other on the runner pool, and the wait cost more
-            # wall clock than the shards saved. This fork runs on postgres. The other two
-            # are covered by their standing dialect branches, which re-run against every
-            # `v11.10.1-hhh-dev` tip. Re-add here to gate a dialect on every PR again.
+            # wall clock than the shards saved. This fork runs on postgres; the other two
+            # are disabled until needed (see the full matrix above). Re-add here to
+            # gate a dialect on every PR again.
             echo 'vendors=["postgres"]' >> "$GITHUB_OUTPUT"
           fi
           SHARD_COUNT="${{ inputs.shards || 3 }}"
@@ -107,12 +111,61 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
 
+      # The suite's fixtures are pulled from the fork's own mirror, so a run must
+      # be able to read its GHCR packages. Harmless once a package is public.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Start services
         run:
-          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio minio-mc -d --quiet-pull --wait
+          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio -d --quiet-pull --wait
+
+      # What the runner itself did while the suite ran, to tell a slow file
+      # from a starved one. The job's end reaps both samplers.
+      - name: Sample runner load
+        working-directory: tests/blackbox
+        run: |
+          mkdir -p runner-load
+          { nproc; free -m; } > runner-load/host.txt
+          nohup vmstat -t 5 > runner-load/vmstat.txt 2>&1 &
+          nohup bash -c 'while true; do
+            date -u +%FT%TZ
+            docker stats --no-stream --format "{{.Name}} {{.CPUPerc}} {{.MemUsage}}"
+            sleep 10
+          done' > runner-load/docker-stats.txt 2>&1 &
 
       - name: Run tests
         run: TEST_DB=sqlite3 pnpm run test:blackbox --project common
+
+      # Every process the suite spawned, one file each, kept whatever the outcome:
+      # a flaky failure is debugged from the run it happened in, not a rerun.
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-server-logs-common
+          path: |
+            tests/blackbox/server-logs/
+            tests/blackbox/server-log-*.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Per-file, per-hook and per-boot timings plus the runner's load, kept
+      # long enough to re-balance the shards from: `pnpm timings` reads them.
+      - name: Upload timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-timings-common
+          path: |
+            tests/blackbox/timings/
+            tests/blackbox/runner-load/
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Merge + upload blackbox coverage
         if: always()
@@ -190,9 +243,32 @@ jobs:
             -l 30
           echo "MSSQL compatibility level set successfully"
 
+      # The suite's fixtures are pulled from the fork's own mirror, so a run must
+      # be able to read its GHCR packages. Harmless once a package is public.
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Start services
         run:
-          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio minio-mc -d --quiet-pull --wait
+          docker compose -f tests/blackbox/docker-compose.yml up auth-saml redis minio -d --quiet-pull --wait
+
+      # What the runner itself did while the suite ran, to tell a slow file
+      # from a starved one. The job's end reaps both samplers.
+      - name: Sample runner load
+        working-directory: tests/blackbox
+        run: |
+          mkdir -p runner-load
+          { nproc; free -m; } > runner-load/host.txt
+          nohup vmstat -t 5 > runner-load/vmstat.txt 2>&1 &
+          nohup bash -c 'while true; do
+            date -u +%FT%TZ
+            docker stats --no-stream --format "{{.Name}} {{.CPUPerc}} {{.MemUsage}}"
+            sleep 10
+          done' > runner-load/docker-stats.txt 2>&1 &
 
       - name: Run tests
         run: >-
@@ -216,6 +292,32 @@ jobs:
             tail -400 "$log"
             echo "::endgroup::"
           done
+
+      # Every process the suite spawned, one file each, kept whatever the outcome:
+      # a flaky failure is debugged from the run it happened in, not a rerun.
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-server-logs-${{ matrix.vendor }}-${{ matrix.shard }}
+          path: |
+            tests/blackbox/server-logs/
+            tests/blackbox/server-log-*.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Per-file, per-hook and per-boot timings plus the runner's load, kept
+      # long enough to re-balance the shards from: `pnpm timings` reads them.
+      - name: Upload timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackbox-timings-${{ matrix.vendor }}-${{ matrix.shard }}
+          path: |
+            tests/blackbox/timings/
+            tests/blackbox/runner-load/
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Merge + upload blackbox coverage
         if: always()

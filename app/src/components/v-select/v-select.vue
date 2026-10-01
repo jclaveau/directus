@@ -43,6 +43,8 @@ const props = withDefaults(
 		placeholder?: string | null;
 		/** Spreads the select element to it's maximal width */
 		fullWidth?: boolean;
+		/** Renders the select at the shorter input height */
+		small?: boolean;
 		/** Disables any interaction */
 		disabled?: boolean;
 		/** Allow to deselect all currently selected items */
@@ -282,6 +284,7 @@ function useDisplayValue() {
 			>
 				<v-input
 					:full-width="fullWidth"
+					:small="small"
 					readonly
 					:model-value="displayValue.text"
 					clickable

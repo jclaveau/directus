@@ -1,6 +1,6 @@
 import { schemaPermissions } from '@directus/system-data';
 import type { Accountability, Filter, Permission, SchemaOverview } from '@directus/types';
-import { set, uniq } from 'lodash-es';
+import { set, uniq } from '../../utils/lodash-es-used.js';
 import { fetchAllowedFieldMap } from '../modules/fetch-allowed-field-map/fetch-allowed-field-map.js';
 import type { Context } from '../types.js';
 import { fetchShareInfo } from './fetch-share-info.js';

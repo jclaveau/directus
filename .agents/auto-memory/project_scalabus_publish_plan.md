@@ -4,6 +4,7 @@ description:
   PARKED plan — publish the directus fork as @scalabus/* to GitHub Packages npm to speed up the hiphiphip planner
   install; locked decisions on registry, rename mechanism, versioning, sequencing
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

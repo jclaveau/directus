@@ -1,9 +1,9 @@
-import { isPlainObject } from 'lodash-es';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { isPlainObject } from './lodash-es-used.js';
 import { readConfigurationFromJavaScript } from './read-configuration-from-javascript.js';
 
-vi.mock('lodash-es');
+vi.mock('lodash-es/isPlainObject.js');
 
 vi.mock('node:module', async (importOriginal) => {
 	const mod = await importOriginal<typeof import('node:module')>();

@@ -18,7 +18,12 @@ const toolNames = [
 	'list_cache_latencies',
 	'read_cache_timeseries',
 	'read_cache_stats_state',
+	'read_cache_settings',
+	'write_cache_settings',
 ];
+
+// The one tool listed here that changes how the deployment runs.
+const writeToolNames = ['write_cache_settings'];
 
 // The reads that look back over a period, as against the ones that answer about
 // right now (`list_processes`, `read_cache_stats_state`) or about a single named
@@ -59,6 +64,9 @@ describe('System MCP Tests', () => {
 			envMcp[vendor]['REDIS_PORT'] = '6108';
 			envMcp[vendor]['CACHE_NAMESPACE'] = `blackbox-mcp-${vendor}`;
 			envMcp[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
+			// The default groups, and the settings write that is not one of them.
+			envMcp[vendor]['SYSTEM_MCP_TOOLS'] = 'processes,cache,cache_settings';
 
 			// One subsystem only: the cache tools must be neither listed nor callable.
 			const envMcpProcessesOnly = cloneDeep(envMcp);
@@ -376,9 +384,13 @@ describe('System MCP Tests', () => {
 
 			for (const tool of tools) {
 				expect(tool.title).toBeTruthy();
+
 				// Read-only is advertised, not merely true, so a client can call
-				// one without asking the user to approve it.
-				expect(tool.annotations.readOnlyHint).toBe(true);
+				// one without asking the user to approve it; the write says it is
+				// one, so the client asks first.
+				expect(tool.annotations.readOnlyHint)
+					.toBe(writeToolNames.includes(tool.name) === false);
+
 				expect(tool.annotations.destructiveHint).toBe(false);
 				expect(tool.outputSchema.type).toBe('object');
 				// The description is what a model chooses on, so it has to say what
@@ -422,6 +434,50 @@ describe('System MCP Tests', () => {
 				.toHaveProperty('purgesSinceFilled');
 
 			expect(entry.outputSchema.properties).toHaveProperty('filledAt');
+		});
+	});
+
+	describe('Answers the processes tool with the halves asked for', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callTool(vendor, 'list_processes', {
+				details: ['stats'],
+			});
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.result.isError).toBeUndefined();
+
+			const report = JSON.parse(response.body.result.content[0].text);
+
+			expect(report.details).toEqual(['stats']);
+
+			// The env is most of this answer by size, and an agent that did not ask
+			// for it should not be made to read it.
+			for (const service of report.services) {
+				for (const replica of service.replicas) {
+					for (const node of replica.processes) {
+						expect(node.env).toBeNull();
+						expect(node.runtime.rssBytes).toBeGreaterThan(0);
+					}
+				}
+			}
+		});
+	});
+
+	describe('Advertises the halves the processes tool takes', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				id: 11,
+				method: 'tools/list',
+			});
+
+			expect(response.statusCode).toBe(200);
+
+			const tool = response.body.result.tools
+				.find((listed: { name: string }) => listed.name === 'list_processes');
+
+			expect(tool.inputSchema.properties.details.items.enum)
+				.toEqual(['stats', 'env']);
 		});
 	});
 
@@ -507,8 +563,8 @@ describe('System MCP Tests', () => {
 
 			expect(missing.body.result.isError).toBeUndefined();
 			expect(entry.exists).toBe(false);
-			expect(entry.tags).toBeNull();
-			expect(entry.tagCounts).toEqual({});
+			expect(entry.pins).toBeNull();
+			expect(entry.pinCounts).toEqual({});
 			expect(entry.expiry).toBeNull();
 			expect(entry.sizes).toBeNull();
 			expect(entry.tombstone).toBeNull();
@@ -528,6 +584,60 @@ describe('System MCP Tests', () => {
 			const state = await callTool(vendor, 'read_cache_stats_state');
 
 			expect(JSON.parse(state.body.result.content[0].text).enabled).toBe(true);
+		});
+	});
+
+	describe('Changes the cache settings every node reads', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			let cleared: request.Response;
+
+			// Cleared whatever fails first: this suite shares the settings
+			// singleton with every instance booting meanwhile.
+			try {
+				// A field that only moves what a purge costs.
+				const written = await callTool(vendor, 'write_cache_settings', {
+					settings: { scoped_index_scan_count: 500 },
+				});
+
+				expect(written.body.result.isError).toBeUndefined();
+
+				expect(written.body.result.structuredContent.sharedSettings)
+					.toEqual({
+						scoped_index_scan_count: 500,
+						setBy: expect.any(String),
+						setAt: expect.any(String),
+						setFrom: 'mcp',
+					});
+
+				const read = await callTool(vendor, 'read_cache_settings');
+
+				expect(
+					read.body.result.structuredContent.resolved.scoped_index_scan_count,
+				).toEqual({ value: 500, source: 'settings', fallback: 1000 });
+
+				// The guard behind PATCH /settings refuses it here too, before
+				// anything is stored, so it answers as an argument the tool would
+				// not take.
+				const refused = await callTool(vendor, 'write_cache_settings', {
+					settings: { scoped_index_ttl_factor: 0.5 },
+				});
+
+				expect(refused.body.error.code).toBe(-32602);
+
+				expect(refused.body.error.message).toContain(
+					"'cache_settings.scoped_index_ttl_factor' has to be a number from 1",
+				);
+			}
+			finally {
+				cleared = await callTool(vendor, 'write_cache_settings', {
+					clear: true,
+				});
+			}
+
+			expect(cleared.body.result.structuredContent.sharedSettings).toBeNull();
+
+			expect(cleared.body.result.structuredContent.resolved.scoped_index_scan_count)
+				.toEqual({ value: 1000, source: 'env', fallback: 1000 });
 		});
 	});
 
@@ -748,6 +858,15 @@ describe('System MCP Tests', () => {
 				.find((parameter: { name: string }) => parameter.name === 'window');
 
 			expect(windowParam.schema.type).toBe('string');
+
+			// Same for the halves parameter: a query parameter absent from the spec
+			// is one no generated client can reach.
+			const detailsParam = paths['/utils/processes'].get.parameters
+				.find((parameter: { name: string }) => parameter.name === 'details');
+
+			expect(detailsParam.in).toBe('query');
+			expect(detailsParam.required).toBe(false);
+			expect(detailsParam.schema.type).toBe('string');
 		});
 	});
 

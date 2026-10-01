@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { logEvent } from 'histoire/client';
+import { logEvent } from 'poveste/client';
 import VEmojiPicker from './v-emoji-picker.vue';
 </script>
 

@@ -1,4 +1,4 @@
-import { isIn } from '@directus/utils';
+import { isIn } from '@directus/utils/values';
 import { ENV_TYPES } from '../constants/env-types.js';
 
 export const getCastFlag = (value: unknown) => {

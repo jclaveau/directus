@@ -1,4 +1,4 @@
-import { getSimpleHash } from '@directus/utils';
+import { getSimpleHash } from '@directus/utils/values';
 
 export type GetDefaultIndexNameOptions = {
 	maxLength?: number;

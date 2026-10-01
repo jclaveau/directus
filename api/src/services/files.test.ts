@@ -13,7 +13,6 @@ import {
 	it,
 	vi,
 	type MockInstance,
-	type MockedFunction,
 } from 'vitest';
 import { getStorage } from '../storage/index.js';
 import { FilesService, ItemsService } from './index.js';
@@ -23,11 +22,11 @@ vi.mock('@directus/storage');
 vi.mock('./files/lib/extract-metadata.js');
 
 describe('Integration Tests', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 

@@ -146,3 +146,81 @@ test('p95 hidden by default; a toggle survives reload', async ({ page }) => {
 
 	await expect(entry('p50', 'Hits')).toHaveClass(/is-muted/, { timeout: 10000 });
 });
+
+// The audit panel against a live instance: the schedule input writes a setting
+// the page reads back after a reload, a refused rule surfaces as a toast, and a
+// run lands in the history with a drawer to open. The unit test drives all of
+// this against a mocked `api`; here the route, the settings service and the
+// audit engine are the real ones (jclaveau/directus#498).
+test('the audit panel moves the schedule and records a run', async ({ page }) => {
+	const panel = page.locator('.cache-audit');
+	await expect(panel).toBeVisible();
+
+	// Nothing schedules an audit on this instance, so the input starts empty
+	// and the line beside it says so.
+	const input = panel.locator('.schedule-input input');
+	await expect(input).toHaveValue('');
+	await expect(panel.locator('.next-run')).toHaveText('No audit scheduled');
+
+	await input.fill('0 3 * * *');
+	await input.press('Enter');
+
+	await expect(panel.locator('.next-run')).toHaveText(/^Next run: /, {
+		timeout: 10000,
+	});
+
+	// Durable: a reload reads the rule back off the settings, not off the page.
+	await page.reload({ waitUntil: 'networkidle' });
+
+	await page.waitForSelector('.cache-audit .schedule-input input', {
+		timeout: 20000,
+	});
+
+	await expect(page.locator('.cache-audit .schedule-input input'))
+		.toHaveValue('0 3 * * *', { timeout: 10000 });
+
+	// A rule that is not a cron is refused by the API and reported, and the
+	// draft stays put for a fix rather than snapping back.
+	await input.fill('hourly');
+	await input.press('Enter');
+
+	await expect(page.locator('.notification-item.error').first())
+		.toBeVisible({ timeout: 10000 });
+
+	await expect(input).toHaveValue('hourly');
+	await expect(panel.locator('.next-run')).toHaveText(/^Next run: /);
+
+	// Clearing the input hands the schedule back to the environment.
+	await input.fill('');
+	await input.press('Enter');
+
+	await expect(panel.locator('.next-run')).toHaveText('No audit scheduled', {
+		timeout: 10000,
+	});
+
+	// The seeded traffic left live entries, so a run scans something and lands
+	// in the history as the newest row, under the surface that ran it.
+	await panel.getByRole('button', { name: 'Audit now' }).click();
+
+	const row = panel.locator('.audit-table .table-row').first();
+	await expect(row).toBeVisible({ timeout: 30000 });
+	await expect(row).toContainText('rest');
+
+	const scanned = await row.locator('.cell')
+		.nth(3)
+		.innerText();
+
+	expect(Number(scanned.trim())).toBeGreaterThan(0);
+
+	// The row opens the run: its fields, and the findings it stored.
+	await row.click();
+
+	const drawer = page.locator('.v-drawer');
+	await expect(drawer).toBeVisible({ timeout: 10000 });
+	await expect(drawer).toContainText(/Cache audit #\d+/);
+
+	await expect(drawer.locator('.field-label').filter({ hasText: 'Scanned' }))
+		.toHaveCount(1);
+
+	await expect(drawer).toContainText('Findings');
+});

@@ -2,6 +2,7 @@
 name: project_directus_issue295_cache_ttl_flush
 description: Issue #295 design (PARKED, not built) — persisted global cache_ttl setting overriding env (live across instances via bus) + per-target flush multiselect on the cache page; settled decisions + the flushCaches scoped-tag orphan gap + the #279 overlap so a fresh session doesn't re-derive or re-litigate
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

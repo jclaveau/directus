@@ -2,6 +2,7 @@
 name: project_directus_pr366_redis_resilience
 description: PR #366 "survive an unreachable Redis" — split out of #358 and merges BEFORE it; carries the 5 listener fixes + log throttling + disableOfflineQueue; settled points and known coverage gaps
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

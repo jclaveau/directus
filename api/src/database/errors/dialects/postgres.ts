@@ -190,7 +190,7 @@ export function extractError(
  */
 export function getPoolExhaustedError(
 	error: unknown,
-): DatabasePoolExhaustedError | null {
+): InstanceType<typeof DatabasePoolExhaustedError> | null {
 	if (!isObject(error)) {
 		return null;
 	}

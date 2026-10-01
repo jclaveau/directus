@@ -4,6 +4,7 @@ description:
   The fork's "Check" workflow rejects PR commits whose author email isn't GitHub-associated — author commits as
   jean's GitHub noreply, not his gmail.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
@@ -16,8 +17,8 @@ import type {
 import { addFieldFlag } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { chunk, groupBy, merge, omit } from 'lodash-es';
 import { clearSystemCache, getCache } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { ALIAS_TYPES } from '../constants.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
@@ -27,6 +28,7 @@ import { fetchAllowedCollections } from '../permissions/modules/fetch-allowed-co
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import type { Collection } from '../types/index.js';
 import { getSchema } from '../utils/get-schema.js';
+import { chunk, groupBy, merge, omit } from '../utils/lodash-es-used.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { FieldsService } from './fields.js';
@@ -219,7 +221,7 @@ export class CollectionsService {
 			return payload.collection;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -269,7 +271,7 @@ export class CollectionsService {
 			return collections;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -301,7 +303,7 @@ export class CollectionsService {
 
 		let tablesInDatabase = await this.schemaInspector.tableInfo();
 
-		let meta = (await collectionsItemsService.readByQuery({
+		let meta = withoutMeta(await collectionsItemsService.readByQuery({
 			limit: -1,
 		})) as BaseCollectionMeta[];
 
@@ -470,7 +472,7 @@ export class CollectionsService {
 			return collectionKey;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -531,7 +533,7 @@ export class CollectionsService {
 			});
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -583,7 +585,7 @@ export class CollectionsService {
 			return collectionKeys;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -771,7 +773,7 @@ export class CollectionsService {
 			return collectionKey;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -821,7 +823,7 @@ export class CollectionsService {
 			return collectionKeys;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {

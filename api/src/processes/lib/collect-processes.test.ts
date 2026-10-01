@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { ProcessRuntimeStats } from '@directus/types';
 import type { ProcessesReportMessage } from '../types/messages.js';
 
 const bus = vi.hoisted(() => {
@@ -24,7 +25,11 @@ vi.mock('./processes-config.js', () => {
 	};
 });
 
-import { buildProcessesTree, collectProcesses } from './collect-processes.js';
+import {
+	buildProcessesTree,
+	collectProcessReports,
+	collectProcesses,
+} from './collect-processes.js';
 
 function reply(
 	overrides: Partial<ProcessesReportMessage> = {},
@@ -43,8 +48,10 @@ function reply(
 			name: 'directus',
 			runtime: null,
 			env: null,
+			autoscale: null,
 		},
 		supervisor: null,
+		capacity: null,
 		...overrides,
 	};
 }
@@ -129,6 +136,37 @@ test('Without a supervisor list the self-reports are all there is', () => {
 		.every((process) => process.supervisor === null);
 
 	expect(unsupervised).toBe(true);
+});
+
+// A deployment being replaced, or the other service still on its own build,
+// answers the same ask; the page reads the flags as a list whichever build
+// reported them.
+test('A runtime reported without a flags list is given an empty one', () => {
+	const runtime = {
+		rssBytes: 1,
+		heapUsedBytes: 2,
+		heapTotalBytes: 3,
+		externalBytes: 4,
+		uptimeMs: 5,
+		nodeVersion: 'v22.0.0',
+	} as ProcessRuntimeStats;
+
+	const [listed] = buildProcessesTree([
+		reply({
+			self: { ...reply().self, runtime },
+			supervisor: [supervised(100, 0)],
+		}),
+	]);
+
+	expect(listed!.replicas[0]!.processes[0]!.runtime)
+		.toEqual({ ...runtime, execArgv: [] });
+
+	const [unlisted] = buildProcessesTree([
+		reply({ self: { ...reply().self, runtime } }),
+	]);
+
+	expect(unlisted!.replicas[0]!.processes[0]!.runtime)
+		.toEqual({ ...runtime, execArgv: [] });
 });
 
 test('A supervised replica that answered nothing is unavailable', () => {
@@ -271,4 +309,63 @@ test('Stops listening even when the ask itself fails', async () => {
 
 	await expect(collectProcesses()).rejects.toThrow('redis is gone');
 	expect(bus.unsubscribe).toHaveBeenCalledOnce();
+});
+
+test('A replica carries what its container may use', () => {
+	const capacity = { memoryBytes: 2_147_483_648, cpuCores: 2 };
+
+	const tree = buildProcessesTree([
+		reply({ self: { ...reply().self, pid: 1 } }),
+		reply({ self: { ...reply().self, pid: 2 }, capacity }),
+	]);
+
+	expect(tree[0]?.replicas[0]?.capacity).toEqual(capacity);
+});
+
+// Every process of a replica reads the same cgroup, so the tree holds one copy
+// rather than a per-process repeat of the same two numbers.
+test('A replica no process measured reports no capacity', () => {
+	const tree = buildProcessesTree([reply()]);
+
+	expect(tree[0]?.replicas[0]?.capacity).toBeNull();
+});
+
+test('A caller asking for one half asks the nodes for that alone', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	const report = await collectProcesses(['stats']);
+
+	// The nodes are asked, not filtered afterwards: the env never crosses the bus,
+	// which is where the size of this report actually comes from.
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: ['stats'],
+	});
+
+	expect(report.details).toEqual(['stats']);
+});
+
+test('A caller asking for nothing gets the configured halves', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	const report = await collectProcesses();
+
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: ['stats', 'env'],
+	});
+
+	expect(report.details).toEqual(['stats', 'env']);
+});
+
+test('The fill pause asks the nodes for their node and build alone', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	await collectProcessReports([], { nodeBuildOnly: true });
+
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: [],
+		nodeBuildOnly: true,
+	});
 });

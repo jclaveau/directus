@@ -1,0 +1,1479 @@
+import { oneLine } from '@directus/utils';
+import { describe, expect, test } from 'vitest';
+import type { Filter, SchemaOverview } from '@directus/types';
+import type {
+	FieldMap,
+} from '../permissions/modules/process-ast/types.js';
+import {
+	canonicalizeScopedCachePinValue,
+	composeScopedCachePaths,
+	pinnedScopedCacheQueryCasesFromFilter,
+	scopedCachePinsFromFilter,
+	scopedCacheNestedRowBindings,
+	scopedCacheCollectionPinsFromRows,
+	scopedCachePinKey,
+} from '../scoped-cache/index.js';
+
+// The read side derives a scope value from a (string-ish) query filter, the purge side from a
+// native DB row. Both feed the same cache key, so a filter value and its stored counterpart must
+// canonicalize identically — otherwise a write leaves the read's slice stale.
+describe('canonicalizeScopedCachePinValue', () => {
+	test(oneLine`
+		null and undefined share the null-byte sentinel, distinct from the literal "null"
+	`, () => {
+		expect(canonicalizeScopedCachePinValue(null, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue(undefined, 'string')).toBe('\x00null');
+		expect(canonicalizeScopedCachePinValue('null', 'string')).toBe('null');
+	});
+
+	test(oneLine`
+		boolean: filter \`true\`/\`false\` and driver \`1\`/\`0\`/\`t\` collapse to one token
+	`, () => {
+		for (const truthy of [true, 1, '1', 't', 'true']) {
+			expect(canonicalizeScopedCachePinValue(truthy, 'boolean')).toBe('true');
+		}
+
+		for (const falsy of [false, 0, '0', 'f', 'false']) {
+			expect(canonicalizeScopedCachePinValue(falsy, 'boolean')).toBe('false');
+		}
+	});
+
+	test(oneLine`
+		datetime: an ISO string and a \`Date\` for the same instant collapse to epoch ms
+	`, () => {
+		const iso = '2026-01-02T03:04:05.000Z';
+
+		for (const type of ['date', 'dateTime', 'timestamp'] as const) {
+			expect(canonicalizeScopedCachePinValue(iso, type))
+				.toBe(canonicalizeScopedCachePinValue(new Date(iso), type));
+		}
+
+		// Unparseable value falls back to its string form rather than NaN.
+		expect(canonicalizeScopedCachePinValue('not-a-date', 'dateTime'))
+			.toBe('not-a-date');
+	});
+
+	test('decimal/float: fixed-scale `"1.50"` and numeric `1.5` collapse', () => {
+		expect(canonicalizeScopedCachePinValue('1.50', 'decimal'))
+			.toBe(canonicalizeScopedCachePinValue(1.5, 'decimal'));
+
+		expect(canonicalizeScopedCachePinValue('2.0', 'float'))
+			.toBe(canonicalizeScopedCachePinValue(2, 'float'));
+	});
+
+	test(oneLine`
+		integer/bigInteger keep \`String\` — \`7\` and \`"7"\` collapse, precision preserved
+	`, () => {
+		expect(canonicalizeScopedCachePinValue(7, 'integer')).toBe('7');
+		expect(canonicalizeScopedCachePinValue('7', 'integer')).toBe('7');
+
+		// Beyond Number.MAX_SAFE_INTEGER a numeric pass would corrupt; String keeps it exact.
+		expect(canonicalizeScopedCachePinValue('9007199254740993', 'bigInteger'))
+			.toBe('9007199254740993');
+	});
+
+	test(oneLine`
+		uuid: an uppercase spelling and a lowercase one collapse — the DB compares uuid
+		case-insensitively, so both name the same row and must name one slice
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+
+		expect(canonicalizeScopedCachePinValue(upper, 'uuid'))
+			.toBe(canonicalizeScopedCachePinValue(upper.toLowerCase(), 'uuid'));
+
+		expect(canonicalizeScopedCachePinValue(upper, 'uuid')).toBe(upper.toLowerCase());
+	});
+
+	test(oneLine`
+		integer: a leading zero, a leading plus and a driver number all collapse — the DB
+		reads them as one key, so they cannot resolve different slices
+	`, () => {
+		for (const spelling of [1, '1', '01', '+1', '0001']) {
+			expect(canonicalizeScopedCachePinValue(spelling, 'integer')).toBe('1');
+		}
+
+		// A signed zero is still zero, and a zero must not be stripped to empty.
+		expect(canonicalizeScopedCachePinValue('-0', 'integer')).toBe('0');
+		expect(canonicalizeScopedCachePinValue('000', 'integer')).toBe('0');
+		expect(canonicalizeScopedCachePinValue('-007', 'integer')).toBe('-7');
+	});
+
+	test(oneLine`
+		bigInteger: a leading-zero spelling collapses without a numeric pass, so
+		precision past MAX_SAFE_INTEGER survives
+	`, () => {
+		expect(canonicalizeScopedCachePinValue('00009007199254740993', 'bigInteger'))
+			.toBe('9007199254740993');
+	});
+
+	test(oneLine`
+		integer: every spelling \`validateKeys\` lets through collapses — it only asks
+		\`Number.isInteger(Number(key))\`, so whitespace, exponent and hex forms reach a
+		pin, and postgres trims whitespace casting text to int, so \` 1\` really is row 1
+	`, () => {
+		for (const spelling of [' 1', '1 ', '1.0']) {
+			expect(canonicalizeScopedCachePinValue(spelling, 'integer')).toBe('1');
+		}
+
+		expect(canonicalizeScopedCachePinValue('1e3', 'integer')).toBe('1000');
+		expect(canonicalizeScopedCachePinValue('0x10', 'integer')).toBe('16');
+	});
+
+	test(oneLine`
+		a non-numeric value on an integer field keeps its string form rather than
+		becoming an empty token
+	`, () => {
+		expect(canonicalizeScopedCachePinValue('', 'integer')).toBe('');
+		expect(canonicalizeScopedCachePinValue('7a', 'integer')).toBe('7a');
+
+		// Not an integer at all: no token can be right, so don't invent one.
+		expect(canonicalizeScopedCachePinValue('1.5', 'integer')).toBe('1.5');
+	});
+
+	test(oneLine`
+		bigInteger past MAX_SAFE_INTEGER keeps its raw spelling — no numeric token can
+		round-trip it, and such a key cannot have matched a row either
+	`, () => {
+		expect(canonicalizeScopedCachePinValue('1e30', 'bigInteger')).toBe('1e30');
+	});
+
+	test(oneLine`
+		string and text: digits keep their spelling, since a varchar 01 is a value and
+		not the number 1 — but letters fold to one case, because a case-insensitive
+		collation matches both spellings to the same row
+	`, () => {
+		expect(canonicalizeScopedCachePinValue('01', 'string')).toBe('01');
+		expect(canonicalizeScopedCachePinValue('ABC', 'string')).toBe('abc');
+		expect(canonicalizeScopedCachePinValue('AbC', 'text')).toBe('abc');
+	});
+
+	test('unknown/undefined type falls back to `String` (owner-id path)', () => {
+		expect(canonicalizeScopedCachePinValue(42, undefined)).toBe('42');
+
+		expect(canonicalizeScopedCachePinValue('7c9e-uuid', undefined))
+			.toBe('7c9e-uuid');
+	});
+});
+
+// The field type must ride onto derived pins so key canonicalization sees it on
+// both sides.
+describe('scope-pin type propagation', () => {
+	test(oneLine`
+		scopedCacheCollectionPinsFromRows stamps each pin with its field type
+	`, () => {
+		const pins = scopedCacheCollectionPinsFromRows(
+			'slots',
+			['active'],
+			[{ active: 1 }],
+			'coarse',
+			{ active: 'boolean' },
+		);
+
+		expect(pins).toEqual([
+			{ collection: 'slots', field: 'active', value: 1, type: 'boolean' },
+		]);
+	});
+
+	test(oneLine`
+		scopedCachePinsFromFilter stamps the pin with its field type
+	`, () => {
+		const pins = scopedCachePinsFromFilter(
+			'slots',
+			['active'],
+			{ active: { _eq: true } },
+			{ active: 'boolean' },
+		);
+
+		expect(pins).toEqual([
+			{ collection: 'slots', field: 'active', value: true, type: 'boolean' },
+		]);
+	});
+});
+
+// Pure scope-pin derivation behind update-payload / create pinning
+// (onUnresolvable picks coarse-fallback vs skip on a missing field).
+describe('scopedCacheCollectionPinsFromRows', () => {
+	test('one pin per distinct value per field', () => {
+		const rows = [
+			{ student: 'A', course: 'math' },
+			{ student: 'B', course: 'math' },
+			{ student: 'A', course: 'art' },
+		];
+
+		expect(
+			scopedCacheCollectionPinsFromRows(
+				'slots',
+				['student', 'course'],
+				rows,
+				'coarse',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+			{ collection: 'slots', field: 'course', value: 'math' },
+			{ collection: 'slots', field: 'course', value: 'art' },
+		]);
+	});
+
+	test('dedups on the canonical token, so 7 and "7" collapse to one pin', () => {
+		const rows = [{ student: 7 }, { student: '7' }];
+
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'coarse', {
+				student: 'integer',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 7, type: 'integer' },
+		]);
+	});
+
+	test('null and numeric values are kept distinct', () => {
+		const rows = [{ student: null }, { student: 0 }, { student: null }];
+
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'coarse'),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: null },
+			{ collection: 'slots', field: 'student', value: 0 },
+		]);
+	});
+
+	test(oneLine`
+		'coarse' returns null when a field is not present on a row (unprojected read /
+		omitted create)
+	`, () => {
+		const rows = [{ student: 'A' }, { course: 'math' }];
+
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'coarse'),
+		).toBeNull();
+	});
+
+	test(oneLine`
+		'skip' skips a missing field instead of failing (update payload that leaves it
+		unchanged)
+	`, () => {
+		const rows = [{ student: 'A' }, { course: 'math' }];
+
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], rows, 'skip'),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		a field present but holding null is resolvable (distinct from being absent)
+	`, () => {
+		expect(
+			scopedCacheCollectionPinsFromRows(
+				'slots',
+				['student'],
+				[{ student: null }],
+				'coarse',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: null },
+		]);
+	});
+
+	test(oneLine`
+		empty rows resolve to an empty pin list, not null (caller falls back to a
+		collection-level pin)
+	`, () => {
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', ['student'], [], 'coarse'),
+		).toEqual([]);
+	});
+
+	test('no configured fields yields no scoped cache pins', () => {
+		expect(
+			scopedCacheCollectionPinsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
+		).toEqual([]);
+	});
+});
+
+// Read-side scoping: only a filter that BOUNDS the read to a scope value may scope it
+// (else an insert of a new value would silently miss the cached read). An empty result
+// means "not bounded → bare pin".
+describe('scopedCachePinsFromFilter', () => {
+	test('_eq on a scope field pins that value', () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _eq: 'A' } }),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		_eq: null pins the null slice — the read↔purge symmetry witness for a null-valued
+		scope (matches the null-value purge pin)
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _eq: null } }),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: null },
+		]);
+	});
+
+	test(oneLine`
+		_in on a scope field pins every listed value (even those with no rows yet)
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], {
+				student: { _in: ['A', 'B'] },
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('constraints reached through _and pin', () => {
+		const filter = { _and: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'course', value: 'math' },
+		]);
+	});
+
+	test(oneLine`
+		an _or whose every branch binds the field pins the UNION of their values — a row
+		matches one branch, so its value is in the union
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
+
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		an _or branch that leaves the field unbound drops the pin — a row matching that
+		branch carries a value outside the union
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([]);
+	});
+
+	test('an _or unions the fk value for a relational branch', () => {
+		const filter = {
+			_or: [
+				{ owner: { id: { _eq: 'A' } } },
+				{ owner: { id: { _in: ['B', 'C'] } } },
+			],
+		};
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['owner'], filter, {}, { owner: 'id' }),
+		).toEqual([
+			{ collection: 'slots', field: 'owner', value: 'A' },
+			{ collection: 'slots', field: 'owner', value: 'B' },
+			{ collection: 'slots', field: 'owner', value: 'C' },
+		]);
+	});
+
+	test('a field bound by an outer _and AND every _or branch pins both sources', () => {
+		const filter = {
+			_and: [
+				{ course: { _eq: 'math' } },
+				{ _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] },
+			],
+		};
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'course', value: 'math' },
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('an empty _or pins nothing', () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], { _or: [] }),
+		).toEqual([]);
+	});
+
+	test('an _or dedups a value bound by more than one branch', () => {
+		const filter = {
+			_or: [{ student: { _eq: 'A' } }, { student: { _in: ['A', 'B'] } }],
+		};
+
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		_and binding the same field twice unions both values — the over-approximation of the
+		intersection (student=A AND student=B is empty, but a union over-purges, never stale)
+	`, () => {
+		const filter = { _and: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
+
+		expect(scopedCachePinsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		an empty _in bounds the field to no value, so nothing pins — the read stays bare (a
+		later insert of any value is caught by the bare collection pin)
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _in: [] } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		an _or whose branches bind DIFFERENT scope fields pins each — the read is purged if a
+		write touches either, since every branch covers its own rows
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'course', value: 'math' },
+		]);
+	});
+
+	test(oneLine`
+		an _or with one branch binding no pinnable field is bare even when the others bind
+		different scope fields — that branch's rows carry no pinned value
+	`, () => {
+		const filter = {
+			_or: [
+				{ student: { _eq: 'A' } },
+				{ course: { _eq: 'math' } },
+				{ note: { _contains: 'x' } },
+			],
+		};
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		a date-ish scope field is not pin-safe (filter↔row canonical can diverge), so an _eq
+		on it yields no pin — the read falls back to the bare collection pin
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['starts_at'],
+				{ starts_at: { _eq: '2026-01-01T00:00:00Z' } },
+				{ starts_at: 'dateTime' },
+			),
+		).toEqual([]);
+	});
+
+	test('a pin-safe field still pins alongside a skipped date field', () => {
+		const filter = {
+			_and: [{ student: { _eq: 'A' } }, { starts_at: { _eq: '2026-01-01' } }],
+		};
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student', 'starts_at'], filter, {
+				student: 'string',
+				starts_at: 'date',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A', type: 'string' },
+		]);
+	});
+
+	test('a non-equality operator (_gt) does not bound the read', () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], { student: { _gt: 'A' } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		a filter on a non-scope field yields no pin (read falls back to the bare collection
+		pin)
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		a relation filtered by its related primary key pins the fk value — the relational
+		form queries and permission rules use, e.g. { user_created: { id: { _eq } } }
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['student'],
+				{ student: { id: { _eq: 'A' } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test('a relational _in on the related primary key pins every value', () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['student'],
+				{ student: { id: { _in: ['A', 'B'] } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('a relational pin is reached through _and (permission-rule form)', () => {
+		const filter = { _and: [{ student: { id: { _eq: 'A' } } }] };
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], filter, {}, {
+				student: 'id',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		a relation filtered by a non-primary-key attribute does not pin — the fk value is
+		undetermined, so the read falls back to the bare collection pin
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['student'],
+				{ student: { email: { _eq: 'a@b.c' } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		without a related-primary-key entry (a scalar scope field), a relational filter
+		shape does not pin
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], {
+				student: { id: { _eq: 'A' } },
+			}),
+		).toEqual([]);
+	});
+
+	test('a relational pin nested through several _and levels still pins', () => {
+		const filter = { _and: [{ _and: [{ student: { id: { _eq: 'A' } } }] }] };
+
+		expect(
+			scopedCachePinsFromFilter('slots', ['student'], filter, {}, {
+				student: 'id',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		a two-hop relation path ({ fk: { rel: { pk: { _eq } } } }) does not pin — it
+		bounds the hop, not the fk value, so the read falls back to the bare pin
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['student'],
+				{ student: { school: { id: { _eq: 'A' } } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([]);
+	});
+
+	test('a non-id related primary key is unwrapped by the passed key', () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['student'],
+				{ student: { code: { _eq: 'A' } } },
+				{},
+				{ student: 'code' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test('empty / null filter yields no pin', () => {
+		expect(scopedCachePinsFromFilter('slots', ['student'], null)).toEqual([]);
+		expect(scopedCachePinsFromFilter('slots', ['student'], {})).toEqual([]);
+	});
+});
+
+// The primary key is a pinning axis on every collection, taking no config and no
+// query: `readOne` bounds the read to one key, and only that row's own write can
+// change it. An inserted row carries a different key, so the insert-blindness that
+// bars a value slice elsewhere cannot apply here.
+describe('scopedCachePinsFromFilter — implicit primary key', () => {
+	// `slots` declares no scope field here: the pin comes from the key alone.
+	const unscoped = (filter: Filter) => {
+		return scopedCachePinsFromFilter(
+			'slots',
+			[],
+			filter,
+			{ id: 'integer' },
+			{},
+			[],
+			'id',
+		);
+	};
+
+	test('_eq on the primary key pins that row, with no scope field declared', () => {
+		expect(unscoped({ id: { _eq: 7 } })).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	test('_in on the primary key pins every listed key (the readMany shape)', () => {
+		expect(unscoped({ _and: [{ id: { _in: [7, 8] } }, {}] })).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'slots', field: 'id', value: 8, type: 'integer' },
+		]);
+	});
+
+	test(oneLine`
+		a filter leaving the key unbound still pins nothing — a list read has no key to
+		pin, so it stays on the bare collection pin
+	`, () => {
+		expect(unscoped({ name: { _eq: 'a' } })).toEqual([]);
+		expect(unscoped({ id: { _gt: 7 } })).toEqual([]);
+		expect(unscoped({})).toEqual([]);
+	});
+
+	test(oneLine`
+		an _or branch that leaves the key unbound drops the pin — a row matching that
+		branch carries a key outside the union
+	`, () => {
+		const filter = { _or: [{ id: { _eq: 7 } }, { name: { _eq: 'a' } }] };
+		expect(unscoped(filter)).toEqual([]);
+	});
+
+	test(oneLine`
+		the key pins alongside a declared scope field bound by the same filter
+	`, () => {
+		const filter = { _and: [{ id: { _eq: 7 } }, { student: { _eq: 'A' } }] };
+
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['student'],
+				filter,
+				{ id: 'integer', student: 'string' },
+				{},
+				[],
+				'id',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'slots', field: 'student', value: 'A', type: 'string' },
+		]);
+	});
+
+	test(oneLine`
+		a project that also lists its key as a scope field gets one pin, not two — the
+		purge side dedups its projection for the same reason
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				['id'],
+				{ id: { _eq: 7 } },
+				{ id: 'integer' },
+				{},
+				[],
+				'id',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	test(oneLine`
+		a caller passing no primary key pins nothing on an unscoped collection — the axis
+		reaches only callers that opt in, so no other pinner gains it silently
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter('slots', [], { id: { _eq: 7 } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		read↔purge symmetry on a uuid key: the URL's uppercase spelling and the driver's
+		lowercase row resolve ONE slice, or a write never purges the read it changed
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+
+		const pinned = scopedCachePinsFromFilter(
+			'notes',
+			[],
+			{ id: { _eq: upper } },
+			{ id: 'uuid' },
+			{},
+			[],
+			'id',
+		);
+
+		const purged = scopedCacheCollectionPinsFromRows(
+			'notes',
+			['id'],
+			[{ id: upper.toLowerCase() }],
+			'coarse',
+			{ id: 'uuid' },
+		);
+
+		expect(pinned.map(scopedCachePinKey))
+			.toEqual(['notes:id=07d1af3c-4b4e-4d6e-9c2a-2f1e0b8a5c31']);
+
+		expect((purged ?? []).map(scopedCachePinKey))
+			.toEqual(['notes:id=07d1af3c-4b4e-4d6e-9c2a-2f1e0b8a5c31']);
+	});
+
+	test(oneLine`
+		read↔purge symmetry on an integer key: a padded URL key and the driver's number
+		resolve ONE slice
+	`, () => {
+		const pinned = scopedCachePinsFromFilter(
+			'notes',
+			[],
+			{ id: { _eq: '007' } },
+			{ id: 'integer' },
+			{},
+			[],
+			'id',
+		);
+
+		const purged = scopedCacheCollectionPinsFromRows(
+			'notes',
+			['id'],
+			[{ id: 7 }],
+			'coarse',
+			{ id: 'integer' },
+		);
+
+		expect(pinned.map(scopedCachePinKey)).toEqual(['notes:id=7']);
+		expect((purged ?? []).map(scopedCachePinKey)).toEqual(['notes:id=7']);
+	});
+
+	test(oneLine`
+		a date-typed key is refused like any other unpinnable type — it goes through the
+		same PIN_UNSAFE_SCOPE_TYPES gate
+	`, () => {
+		expect(
+			scopedCachePinsFromFilter(
+				'slots',
+				[],
+				{ stamped_at: { _eq: '2026-01-02T03:04:05.000Z' } },
+				{ stamped_at: 'dateTime' },
+				{},
+				[],
+				'stamped_at',
+			),
+		).toEqual([]);
+	});
+});
+
+describe('scopedCachePinsFromFilter — relational paths (multi-hop)', () => {
+	const enrollmentPath = [
+		{
+			field: 'enrollment.student.user',
+			segments: ['enrollment', 'student', 'user'],
+		},
+	];
+
+	test('pins the terminal _eq of a two-hop path (was bare before)', () => {
+		const filter = { enrollment: { student: { _eq: 'S1' } } };
+
+		const paths = [
+			{ field: 'enrollment.student', segments: ['enrollment', 'student'] },
+		];
+
+		expect(
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, paths),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student', value: 'S1' },
+		]);
+	});
+
+	test('pins the terminal _eq of a three-hop path', () => {
+		const filter = { enrollment: { student: { user: { _eq: 'U1' } } } };
+
+		expect(
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+		]);
+	});
+
+	test('pins the terminal _in of a path', () => {
+		const filter = { enrollment: { student: { user: { _in: ['U1', 'U2'] } } } };
+
+		expect(
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U2' },
+		]);
+	});
+
+	test('unwraps a PK-nested terminal (`user: { id: { _eq } }`)', () => {
+		const filter = { enrollment: { student: { user: { id: { _eq: 'U1' } } } } };
+
+		expect(
+			scopedCachePinsFromFilter(
+				'disc',
+				[],
+				filter,
+				{},
+				{ 'enrollment.student.user': 'id' },
+				enrollmentPath,
+			),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+		]);
+	});
+
+	test('a filter that stops short of the terminal does not pin (bare)', () => {
+		const filter = { enrollment: { student: { _eq: 'S1' } } };
+
+		expect(
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([]);
+	});
+
+	test('a non-eq terminal op (`_gt`) does not bound the path', () => {
+		const filter = { enrollment: { student: { user: { _gt: 'U1' } } } };
+
+		expect(
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([]);
+	});
+
+	test('a pin-unsafe terminal type (dateTime) falls back to bare', () => {
+		const filter = { enrollment: { student: { joined_at: { _eq: '2026-01-01' } } } };
+
+		const paths = [
+			{
+				field: 'enrollment.student.joined_at',
+				segments: ['enrollment', 'student', 'joined_at'],
+			},
+		];
+
+		expect(
+			scopedCachePinsFromFilter(
+				'disc',
+				[],
+				filter,
+				{ 'enrollment.student.joined_at': 'dateTime' },
+				{},
+				paths,
+			),
+		).toEqual([]);
+	});
+
+	test('a path inside an _or pins when the branch binds it, unioned', () => {
+		const filter = {
+			_or: [
+				{ enrollment: { student: { user: { _eq: 'U1' } } } },
+				{ enrollment: { student: { user: { _eq: 'U2' } } } },
+			],
+		};
+
+		expect(
+			scopedCachePinsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U2' },
+		]);
+	});
+
+	test('a path and a flat field both pin from one filter', () => {
+		const filter = {
+			term: { _eq: 'fall' },
+			enrollment: { student: { user: { _eq: 'U1' } } },
+		};
+
+		expect(
+			scopedCachePinsFromFilter(
+				'disc',
+				['term'],
+				filter,
+				{},
+				{},
+				enrollmentPath,
+			),
+		).toEqual([
+			{ collection: 'disc', field: 'term', value: 'fall' },
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+		]);
+	});
+});
+
+// A pin's key is what the fingerprint index, the dev `X-Scoped-Cache-*` headers
+// and the stored pin lists all spell it as — the collection alone, or the slice it
+// pins, with the value canonicalized exactly as the index writes it.
+describe('scopedCachePinKey', () => {
+	test(oneLine`
+		a pin naming no field renders as just the collection
+	`, () => {
+		expect(scopedCachePinKey({ collection: 'article' })).toBe('article');
+	});
+
+	test(oneLine`
+		a pinned slice renders as collection:field=value
+	`, () => {
+		expect(scopedCachePinKey({
+			collection: 'article',
+			field: 'author',
+			value: 'U1',
+		})).toBe('article:author=U1');
+	});
+
+	test(oneLine`
+		the value is canonicalized like the index key (boolean 1 collapses to true)
+	`, () => {
+		expect(scopedCachePinKey({
+			collection: 'a',
+			field: 'live',
+			value: 1,
+			type: 'boolean',
+		})).toBe('a:live=true');
+	});
+});
+
+describe('composeScopedCachePaths — auto-derived multi-hop paths', () => {
+	// Minimal schema: each collection's local scope fields + the M2O relations.
+	function schemaOf(
+		scoped: Record<string, string[]>,
+		relations: { collection: string; field: string; related_collection: string }[],
+	): Pick<SchemaOverview, 'collections' | 'relations'> {
+		const collections = Object.fromEntries(
+			Object.entries(scoped).map(([name, scopedCacheFields]) => {
+				return [name, { scopedCacheFields }];
+			}),
+		);
+
+		return { collections, relations } as unknown as Pick<
+			SchemaOverview,
+			'collections' | 'relations'
+		>;
+	}
+
+	test('composes a 2-hop grand-owner path from two local declarations', () => {
+		const schema = schemaOf(
+			{ sub: ['item'], item: ['owner_ref'] },
+			[
+				{ collection: 'sub', field: 'item', related_collection: 'item' },
+				{ collection: 'item', field: 'owner_ref', related_collection: 'owner' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'sub')).toEqual([
+			{ field: 'item.owner_ref', segments: ['item', 'owner_ref'] },
+		]);
+	});
+
+	test('composes every level of a 3-hop chain', () => {
+		const schema = schemaOf(
+			{ a: ['b'], b: ['c'], c: ['owner_ref'] },
+			[
+				{ collection: 'a', field: 'b', related_collection: 'b' },
+				{ collection: 'b', field: 'c', related_collection: 'c' },
+				{ collection: 'c', field: 'owner_ref', related_collection: 'owner' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([
+			{ field: 'b.c', segments: ['b', 'c'] },
+			{ field: 'b.c.owner_ref', segments: ['b', 'c', 'owner_ref'] },
+		]);
+	});
+
+	test('composes both arms of a diamond to the same owner', () => {
+		const schema = schemaOf(
+			{ a: ['x', 'y'], x_col: ['owner_ref'], y_col: ['owner_ref'] },
+			[
+				{ collection: 'a', field: 'x', related_collection: 'x_col' },
+				{ collection: 'a', field: 'y', related_collection: 'y_col' },
+				{ collection: 'x_col', field: 'owner_ref', related_collection: 'owner' },
+				{ collection: 'y_col', field: 'owner_ref', related_collection: 'owner' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([
+			{ field: 'x.owner_ref', segments: ['x', 'owner_ref'] },
+			{ field: 'y.owner_ref', segments: ['y', 'owner_ref'] },
+		]);
+	});
+
+	test('terminates on a self/mutual reference cycle', () => {
+		const schema = schemaOf(
+			{ a: ['b'], b: ['a'] },
+			[
+				{ collection: 'a', field: 'b', related_collection: 'b' },
+				{ collection: 'b', field: 'a', related_collection: 'a' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([
+			{ field: 'b.a', segments: ['b', 'a'] },
+			{ field: 'b.a.b', segments: ['b', 'a', 'b'] },
+		]);
+	});
+
+	test('a scalar scope field composes nothing (no relation to follow)', () => {
+		const schema = schemaOf({ a: ['name'] }, []);
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
+	});
+
+	test('a target with no scope fields composes nothing', () => {
+		const schema = schemaOf(
+			{ a: ['owner_ref'] },
+			[{ collection: 'a', field: 'owner_ref', related_collection: 'owner' }],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
+	});
+
+	test('an explicit dotted local field is not used as a compose head', () => {
+		const schema = schemaOf(
+			{ a: ['owned_item.owner_ref'] },
+			[{ collection: 'a', field: 'owned_item', related_collection: 'owned_item' }],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
+	});
+});
+
+describe('pinnedScopedCacheQueryCasesFromFilter', () => {
+	test('an _and of two fields is one way to match, holding both', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{ student: { _eq: 'A' }, course: { _eq: 'math' } },
+		)).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+		]);
+	});
+
+	// The multi-policy case: a row carrying either value is in the read's result
+	// set, so reading the two as one conjunction would match neither's write.
+	test('an _or over two fields is two ways, one per branch', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{ _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] },
+		)).toEqual([
+			[{ collection: 'slots', field: 'student', value: 'A' }],
+			[{ collection: 'slots', field: 'course', value: 'math' }],
+		]);
+	});
+
+	test('an _and over an _or distributes, one way per branch', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				_and: [
+					{ student: { _eq: 'A' } },
+					{ _or: [{ course: { _eq: 'math' } }, { course: { _eq: 'art' } }] },
+				],
+			},
+		)).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'art' },
+			],
+		]);
+	});
+
+	test(oneLine`
+		carries the two sides side by side past the cap, rather than every pairing
+	`, () => {
+		const values = Array.from({ length: 5 }, (_, at) => `s${at}`);
+
+		const queryCases = pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				_and: [
+					{ _or: values.map((value) => ({ student: { _eq: value } })) },
+					{ _or: values.map((value) => ({ course: { _eq: value } })) },
+				],
+			},
+		);
+
+		expect(queryCases.length).toBe(10);
+		expect(queryCases.every((queryCase) => queryCase.length === 1)).toBe(true);
+	});
+
+	test('an _and of two _or is every pairing of their branches', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				_and: [
+					{ _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] },
+					{ _or: [{ course: { _eq: 'math' } }, { course: { _eq: 'art' } }] },
+				],
+			},
+		)).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'art' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'B' },
+				{ collection: 'slots', field: 'course', value: 'math' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'B' },
+				{ collection: 'slots', field: 'course', value: 'art' },
+			],
+		]);
+	});
+
+	test('keeps every pairing when they number exactly the cap', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				student: { _eq: 'A' },
+				_or: [
+					{ course: { _eq: 'c1' } },
+					{ course: { _eq: 'c2' } },
+					{ course: { _eq: 'c3' } },
+					{ course: { _eq: 'c4' } },
+					{ course: { _eq: 'c5' } },
+					{ course: { _eq: 'c6' } },
+					{ course: { _eq: 'c7' } },
+					{ course: { _eq: 'c8' } },
+					{ course: { _eq: 'c9' } },
+					{ course: { _eq: 'c10' } },
+					{ course: { _eq: 'c11' } },
+					{ course: { _eq: 'c12' } },
+					{ course: { _eq: 'c13' } },
+					{ course: { _eq: 'c14' } },
+					{ course: { _eq: 'c15' } },
+					{ course: { _eq: 'c16' } },
+				],
+			},
+		)).toEqual([
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c1' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c2' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c3' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c4' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c5' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c6' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c7' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c8' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c9' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c10' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c11' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c12' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c13' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c14' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c15' },
+			],
+			[
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'course', value: 'c16' },
+			],
+		]);
+	});
+
+	test(oneLine`
+		carries the pin beside every _or branch, each standing alone, one branch
+		past the cap
+	`, () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student', 'course'],
+			{
+				student: { _eq: 'A' },
+				_or: [
+					{ course: { _eq: 'c1' } },
+					{ course: { _eq: 'c2' } },
+					{ course: { _eq: 'c3' } },
+					{ course: { _eq: 'c4' } },
+					{ course: { _eq: 'c5' } },
+					{ course: { _eq: 'c6' } },
+					{ course: { _eq: 'c7' } },
+					{ course: { _eq: 'c8' } },
+					{ course: { _eq: 'c9' } },
+					{ course: { _eq: 'c10' } },
+					{ course: { _eq: 'c11' } },
+					{ course: { _eq: 'c12' } },
+					{ course: { _eq: 'c13' } },
+					{ course: { _eq: 'c14' } },
+					{ course: { _eq: 'c15' } },
+					{ course: { _eq: 'c16' } },
+					{ course: { _eq: 'c17' } },
+				],
+			},
+		)).toEqual([
+			[{ collection: 'slots', field: 'student', value: 'A' }],
+			[{ collection: 'slots', field: 'course', value: 'c1' }],
+			[{ collection: 'slots', field: 'course', value: 'c2' }],
+			[{ collection: 'slots', field: 'course', value: 'c3' }],
+			[{ collection: 'slots', field: 'course', value: 'c4' }],
+			[{ collection: 'slots', field: 'course', value: 'c5' }],
+			[{ collection: 'slots', field: 'course', value: 'c6' }],
+			[{ collection: 'slots', field: 'course', value: 'c7' }],
+			[{ collection: 'slots', field: 'course', value: 'c8' }],
+			[{ collection: 'slots', field: 'course', value: 'c9' }],
+			[{ collection: 'slots', field: 'course', value: 'c10' }],
+			[{ collection: 'slots', field: 'course', value: 'c11' }],
+			[{ collection: 'slots', field: 'course', value: 'c12' }],
+			[{ collection: 'slots', field: 'course', value: 'c13' }],
+			[{ collection: 'slots', field: 'course', value: 'c14' }],
+			[{ collection: 'slots', field: 'course', value: 'c15' }],
+			[{ collection: 'slots', field: 'course', value: 'c16' }],
+			[{ collection: 'slots', field: 'course', value: 'c17' }],
+		]);
+	});
+
+	test('an unbound branch drops the pin, as it does for pins', () => {
+		expect(pinnedScopedCacheQueryCasesFromFilter(
+			'slots',
+			['student'],
+			{ _or: [{ student: { _eq: 'A' } }, { note: { _eq: 'x' } }] },
+		)).toEqual([]);
+	});
+});
+
+describe('scopedCacheNestedRowBindings', () => {
+	const schema = {
+		collections: {
+			course: { collection: 'course', primary: 'id', fields: {} },
+			part: { collection: 'part', primary: 'id', fields: {} },
+		},
+		relations: [
+			{
+				collection: 'part',
+				field: 'course',
+				related_collection: 'course',
+				meta: { one_field: 'parts' },
+			},
+		],
+	} as unknown as SchemaOverview;
+
+	test('binds a nested child by the fk the to-many reads it back through', () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					['parts', { collection: 'part', fields: new Set(['id']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['part', new Set(['course'])]]));
+	});
+
+	test(oneLine`
+		binds nothing through an M2O: the fk is a field of the collection holding it,
+		and the row it names is reached by its own key
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'part',
+			{
+				read: new Map([
+					['course', { collection: 'course', fields: new Set(['title']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map());
+	});
+
+	test('reads the path through the alias the read named it by', () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					['chapters', { collection: 'part', fields: new Set(['id']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map([['chapters', 'parts']]),
+		)).toEqual(new Map([['part', new Set(['course'])]]));
+	});
+
+	test('binds the rows a count() reads by the fk of the to-many it counts', () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map(),
+				other: new Map([
+					['count(parts)', { collection: 'part', fields: new Set() }],
+				]),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['part', new Set(['course'])]]));
+	});
+
+	test(oneLine`
+		binds the rows a three-argument $FOLLOW reaches by its item column and
+		its collection column
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					[
+						'$FOLLOW(note,item,collection)',
+						{ collection: 'note', fields: new Set(['text']) },
+					],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['note', new Set(['item', 'collection'])]]));
+	});
+
+	test(oneLine`
+		binds the junction a filter reaches an A2O item through by its collection
+		column too
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			{
+				collections: {
+					page: { collection: 'page', primary: 'id', fields: {} },
+					page_block: { collection: 'page_block', primary: 'id', fields: {} },
+					heading: { collection: 'heading', primary: 'id', fields: {} },
+				},
+				relations: [
+					{
+						collection: 'page_block',
+						field: 'page',
+						related_collection: 'page',
+						meta: { one_field: 'blocks' },
+					},
+					{
+						collection: 'page_block',
+						field: 'item',
+						related_collection: null,
+						meta: {
+							one_collection_field: 'collection',
+							one_allowed_collections: ['heading'],
+						},
+					},
+				],
+			} as unknown as SchemaOverview,
+			'page',
+			{
+				read: new Map([
+					['blocks', { collection: 'page_block', fields: new Set(['item']) }],
+					[
+						'blocks.item:heading',
+						{ collection: 'heading', fields: new Set(['title']) },
+					],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([
+			['page_block', new Set(['page', 'item', 'collection'])],
+		]));
+	});
+
+	test(oneLine`
+		binds a collection reached through a hop it cannot resolve to any field
+	`, () => {
+		expect(scopedCacheNestedRowBindings(
+			schema,
+			'course',
+			{
+				read: new Map([
+					['chapters', { collection: 'part', fields: new Set(['id']) }],
+				]),
+				other: new Map(),
+			} as unknown as FieldMap,
+			new Map(),
+		)).toEqual(new Map([['part', new Set(['*'])]]));
+	});
+});

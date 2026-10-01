@@ -13,10 +13,10 @@ import { getSimpleHash, toArray, validatePayload } from '@directus/utils';
 import { FailedValidationError, joiValidationErrorItemToErrorExtensions } from '@directus/validation';
 import Joi from 'joi';
 import jwt from 'jsonwebtoken';
-import { isEmpty } from 'lodash-es';
 import type { StringValue } from 'ms';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { clearSystemCache } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
@@ -24,6 +24,7 @@ import { createDefaultAccountability } from '../permissions/utils/create-default
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
+import { isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
@@ -666,7 +667,7 @@ export class UsersService extends ItemsService {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
 		if (this.cache && opts?.autoPurgeCache !== false) {
-			await this.cache.clear();
+			await flushResponseCache(this.cache);
 		}
 	}
 }

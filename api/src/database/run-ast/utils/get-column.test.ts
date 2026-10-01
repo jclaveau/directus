@@ -18,7 +18,7 @@ test('column for simple field', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 
 	const rawQuery = getColumn(db, 'articles', 'id', undefined, schema).toSQL();
 
@@ -33,7 +33,7 @@ test('column for alias', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 
 	const rawQuery = getColumn(db, 'articles', 'id', 'alias', schema).toSQL();
 
@@ -49,7 +49,7 @@ test('column for count function', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	aliasFn.mockReturnValueOnce('alias');
 
 	const rawQuery = getColumn(db, 'articles', 'count(links)', undefined, schema).toSQL();
@@ -69,7 +69,7 @@ test('column for date function', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 
 	const rawQuery = getColumn(db, 'articles', 'day(created)', undefined, schema).toSQL();
 
@@ -88,7 +88,7 @@ test('column for invalid function', async () => {
 		})
 		.build();
 
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 
 	expect(() => {
 		getColumn(db, 'articles', 'invalid(created)', undefined, schema).toSQL();

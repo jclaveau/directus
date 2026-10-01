@@ -2,6 +2,7 @@
 name: reference_api_typecheck_blocked
 description: Why vitest typecheck (*.test-d.ts) can't be turned on in the api package without a cleanup PR
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

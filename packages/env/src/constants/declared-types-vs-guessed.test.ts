@@ -24,11 +24,17 @@ const CHANGED_BY_DECLARING: Record<string, string> = {
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: 'string("") -> array([])',
 	SYSTEM_MCP_ALLOWED_ORIGINS: 'string("") -> array([])',
 	PGBOUNCER_CONNECTIONS: 'string("") -> array([])',
+	// Spread into the audit's ignore list: a string would spread its characters.
+	CACHE_AUDIT_IGNORE_PATHS: 'string("") -> array([])',
 	FILES_MIME_TYPE_ALLOW_LIST: 'string("*/*") -> array(["*/*"])',
 	// cors documents string or array for this option.
 	CORS_EXPOSED_HEADERS: 'string("Content-Range") -> array(["Content-Range"])',
 	// bytes.parse() reads either.
 	TUS_CHUNK_SIZE: 'number(8388608) -> string("8388608")',
+	// The migration runner hands it to set_config, which takes text, and tells an
+	// unset value by an explicit empty string rather than by truthiness.
+	MIGRATIONS_STATEMENT_TIMEOUT: 'number(0) -> string("0")',
+	MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: 'number(0) -> string("0")',
 };
 
 function shapeOf(value: unknown): string {

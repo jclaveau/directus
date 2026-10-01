@@ -1,6 +1,7 @@
 import type { ProcessDetail, ProcessRuntimeStats } from '@directus/types';
 import { hostname } from 'node:os';
 import { useBus } from '../../bus/index.js';
+import { resolveCoreBuildId } from '../../core-build-id.js';
 import { useLogger } from '../../logger/index.js';
 import { nodeId } from '../../utils/node-id.js';
 import {
@@ -16,10 +17,10 @@ import {
 	reportedProcessDetails,
 } from './processes-config.js';
 import { resolveReportedEnv } from './redact-env.js';
-import {
-	readSupervisedProcesses,
-	supervisorAvailable,
-} from './supervisor-snapshot.js';
+import { autoscaleState } from '../autoscale/lib/state.js';
+import { hostCapacity } from './host-capacity.js';
+import { readSupervisedProcesses } from './supervisor-snapshot.js';
+import { supervisorAvailable } from '../supervisor/index.js';
 
 function instanceNumber(): number | null {
 	const parsed = Number(process.env['NODE_APP_INSTANCE']);
@@ -39,17 +40,8 @@ function runtimeStats(): ProcessRuntimeStats {
 		externalBytes: memory.external,
 		uptimeMs: Math.round(process.uptime() * 1000),
 		nodeVersion: process.version,
+		execArgv: process.execArgv,
 	};
-}
-
-/**
- * One process per replica attaches the container-wide `pm2 list`; the others would
- * only publish a copy of it. Instance 0 is the deterministic choice, and when it
- * is the one that is down the collector falls back to the self-reports rather
- * than claiming the replica has no supervisor.
- */
-function shouldReportSupervisor(): boolean {
-	return supervisorAvailable() && instanceNumber() === 0;
 }
 
 async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
@@ -58,6 +50,16 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 	const allowed = reportedProcessDetails();
 	const details = query.details.filter((detail) => allowed.includes(detail));
 	const carries = (detail: ProcessDetail) => details.includes(detail);
+
+	// The supervisor's list is how a replica is enumerated, not a half of one
+	// process: without it a worker crash-looping too fast to answer disappears
+	// from the tree, and a healthy PM2 replica reports itself `unavailable`. So it
+	// follows what this node is configured to report and not what one request
+	// asked for — a caller narrows what is said about each process, it cannot
+	// remove the spine they are listed on. The size this parameter exists to save
+	// is the env, which is per process and stays narrowable.
+	const reportsSupervisor = allowed.includes('stats')
+		&& query.nodeBuildOnly !== true;
 
 	const message: ProcessesReportMessage = {
 		requestId: query.requestId,
@@ -79,9 +81,23 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 			env: carries('env')
 				? resolveReportedEnv()
 				: null,
+			// Answered whatever was asked for: it is one small object, and it is
+			// the only channel the process that resizes the pool has.
+			autoscale: autoscaleState(),
+			coreBuildId: resolveCoreBuildId(),
 		},
-		supervisor: carries('stats') && shouldReportSupervisor()
+		// Every supervised process attaches the container-wide `pm2 list` and the
+		// collector keeps one copy per replica. Electing a single reporter by
+		// instance number looked cheaper, but PM2 keeps counting up as the
+		// autoscaler releases and adds workers: a pool that has scaled even once
+		// can hold instances 2 and 3 and no 0, and the elected reporter then never
+		// exists. That lost the CPU readings for good on exactly the services that
+		// autoscale — the ones the page is for.
+		supervisor: reportsSupervisor
 			? await readSupervisedProcesses()
+			: null,
+		capacity: reportsSupervisor
+			? await hostCapacity()
 			: null,
 	};
 

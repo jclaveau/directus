@@ -1,0 +1,90 @@
+Feature: A response cache kept in its own Redis database is flushed with one FLUSHDB
+
+  `CACHE_REDIS_DB` moves the response cache and the scoped-cache index into a
+  Redis database of their own, and a flush empties it with one FLUSHDB instead of
+  a scan of every key Redis holds. Locks, synchronization clocks and cache stats
+  stay in the database `REDIS` selects, the shared one.
+
+  - Database 7 is this feature's alone: every other spec shares database 0 of the
+    same Redis, and a FLUSHDB there would wipe them mid-run.
+  - A key outside every namespace is the witness: a namespaced clear leaves it,
+    only a FLUSHDB takes it.
+  - Every instance boots on a build no instance booted on before, so its boot
+    flushes the cache.
+  - The recorded build, the index generation, the completeness marker and a
+    deploy's fill pause say how far the index can be trusted, not what it holds:
+    they stay in the shared database, and a FLUSHDB leaves them. A FLUSHDB takes
+    every entry with the index-key sets naming them, so the marker still tells
+    the truth after it. An instance with its process reports off
+    hears no answer it can trust, so only a FLUSHDB taking the pause ends it
+    before its ceiling.
+  - `directus cache flush` runs in a process of its own, the way a deploy step
+    runs it, and builds its Redis stores in the tick it clears them in: a clear
+    sent before a store's client is ready is refused, and used to be refused
+    silently.
+
+  Scenario: a boot on a new build empties the cache database
+    Given the cache database holds a key outside every namespace
+    When an instance keeping its cache in database 7 boots on a new build
+    Then the cache database no longer holds that key
+    And the instance logs "FLUSHDB on redis db 7"
+    And the shared database holds the build fingerprint
+    And the cache database holds no lock
+
+  Scenario: the flush command empties the system cache and the cache database
+    Given the cache database holds a key outside every namespace
+    And the system cache holds an entry
+    When `directus cache flush` runs with its cache in database 7
+    Then it exits 0
+    And the system cache no longer holds that entry
+    And the cache database no longer holds that key
+    And the flush logs "FLUSHDB on redis db 7, the scoped-cache index with it"
+    And the flush logs nothing saying "The client is offline"
+
+  Scenario: the flush command empties a response cache sharing its database
+    Given the system cache holds an entry
+    And the response cache holds an entry
+    When `directus cache flush` runs with its cache in the shared database
+    Then it exits 0
+    And the system cache no longer holds that entry
+    And the response cache no longer holds that entry
+    And the flush logs nothing saying "The client is offline"
+
+  Scenario: a cached read and its index are filed in the cache database
+    Given an instance keeping its cache in database 7
+    When a note read is cached
+    Then the cache database holds the note's cached read and its index
+    And the shared database holds neither
+
+  Scenario: clearing the cache empties the cache database
+    Given an instance keeping its cache in database 7
+    And a note read is cached
+    And the shared database marks the index-key sets complete
+    And a key outside every namespace is set in the cache database
+    When the cache is cleared
+    Then the cache database no longer holds that key
+    And the next note read is a "MISS"
+    And the shared database holds the build fingerprint
+    And the shared database still marks the index-key sets complete
+
+  Scenario: a write after the boot flush purges its slice
+    Given an instance keeping its cache in database 7
+    And a note read is cached
+    When the note's label is changed to "v2"
+    Then the next note read is a "MISS" showing "v2"
+
+  Scenario: a cache database equal to the one REDIS selects is ignored
+    Given an instance keeping its cache in database 0
+    And a note read is cached
+    And a key outside every namespace is set in the shared database
+    When the cache is cleared
+    Then the shared database still holds that key
+    And the instance logs "CACHE_REDIS_DB=0 is not apart from the database"
+    And the next note read is a "MISS"
+
+  Scenario: clearing the cache leaves a deploy's fill pause running
+    Given an instance keeping its cache in database 7 boots on a new build pausing its fills for at most 2m, its process reports off
+    And the instance logs "fills paused after a deploy"
+    When the cache is cleared
+    Then a note read is not cached, a look at the fill pause later
+    And the shared database holds the recorded build, the index generation and the fill pause

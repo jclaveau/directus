@@ -2,6 +2,7 @@
 name: feedback_directus_pg_only_dialect_focus
 description: on jclaveau/directus, do NOT spend effort on MariaDB or SQLite in the main workflow — postgres is the only dialect that matters for now; they may be revisited in several months
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

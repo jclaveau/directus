@@ -2,6 +2,7 @@
 name: project_directus_pr387_update_groups
 description: PR #387 updateGroups — the settled shape of the grouped items.update / items.update.one events, what migrating a hook looks like, and the points already ruled on (do NOT re-raise)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

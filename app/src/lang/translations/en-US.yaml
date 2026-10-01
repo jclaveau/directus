@@ -574,6 +574,23 @@ crop_tool: Crop Tool
 focal_point_tool: Focal Point Tool
 cancel_crop: Cancel Crop
 cancel_selection: Cancel Selection
+cache_settings: Cache settings
+cache_settings_field: Field
+cache_settings_value: Value
+cache_settings_source_settings: shared settings
+cache_settings_source_env: environment
+cache_settings_cancel: Discard this change
+cache_settings_apply: Apply this change
+cache_settings_reset_env: 'Reset to the environment:'
+cache_settings_apply_all: Apply all changes
+cache_settings_reset_all: Reset all changes
+cache_settings_reset_fallbacks: Reset to the environment
+cache_settings_key: Stored in
+cache_settings_set_by: Configured
+cache_settings_by: by {writer}
+cache_settings_from_admin: from the admin
+cache_settings_from_mcp: from the system MCP
+cache_settings_days_ago: '{days}d ago'
 original: Original
 url: URL
 import_label: Import
@@ -1281,8 +1298,10 @@ directus_collection:
   directus_cache_stats_anomalies: Uncacheable / not-cached anomalies (telemetry)
   directus_cache_stats_config_events: Cache TTL-change and flush events (telemetry)
   directus_cache_stats_purges: Cache purge operations and their reach (telemetry)
-  directus_cache_stats_scoped_entry_tags: Tags each cache entry was filled under (telemetry)
-  directus_cache_stats_scoped_purge_tags: Tags each purge dropped, for attribution (telemetry)
+  directus_cache_stats_scoped_entry_pins: Pins each cache entry was filled under (telemetry)
+  directus_cache_stats_scoped_purge_pins: Pins each purge named, for attribution (telemetry)
+  directus_cache_audits: Cache audit runs, one row per replay of the live cache against the database
+  directus_cache_audit_findings: The entries a cache audit found stale, drifted or unreplayable
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

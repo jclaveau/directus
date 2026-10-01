@@ -2,6 +2,7 @@
 name: project_directus_pr377_accepted_exceptions
 description: PR #377 "perf(cache-stats) group the entries listing on the cache key alone" — MERGED 2026-08-21; settled points a fresh review must not re-raise, plus the two follow-ups jean has NOT decided
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

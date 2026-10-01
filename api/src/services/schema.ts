@@ -8,6 +8,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
+import { readScopedCacheEpochs } from '../scoped-cache/index.js';
 import { ForbiddenError } from '@directus/errors';
 import { applyDiff } from '../utils/apply-diff.js';
 import { getSnapshotDiff } from '../utils/get-snapshot-diff.js';
@@ -30,16 +31,25 @@ export class SchemaService {
 		if (this.accountability?.admin !== true)
 			throw new ForbiddenError({ reason: 'Only administrators can read a schema snapshot.' });
 
+		// A snapshot is the whole SCHEMA. Pin by the system collections it derives from,
+		// so a schema mutation purges the response, not a business-row write. Their
+		// purge counters are read first, so a schema change landing mid-read refuses
+		// the fill (`fill-guard.ts`).
+		const snapshotCollections = [
+			'directus_collections',
+			'directus_fields',
+			'directus_relations',
+		];
+
+		const scopedCacheEpochs = await readScopedCacheEpochs(snapshotCollections);
+
 		const currentSnapshot = await getSnapshot({ database: this.knex });
 
-		// A snapshot is the whole SCHEMA. Tag by the system collections it derives from,
-		// so a schema mutation purges the response, not a business-row write.
 		return withMeta(currentSnapshot, {
-			scopedCacheTags: [
-				{ collection: 'directus_collections' },
-				{ collection: 'directus_fields' },
-				{ collection: 'directus_relations' },
-			],
+			scopedCacheFingerprints: snapshotCollections.map((collection) => {
+				return { collection };
+			}),
+			scopedCacheEpochs,
 		});
 	}
 

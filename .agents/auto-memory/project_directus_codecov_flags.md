@@ -4,6 +4,7 @@ description:
   This fork's codecov runs per-package patch flags; blackbox coverage is NOT in the api unit flag, so blackbox-only code
   fails codecov/patch/api
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

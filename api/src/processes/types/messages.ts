@@ -1,5 +1,7 @@
 import type {
+	AutoscaleNodeState,
 	ProcessDetail,
+	ProcessHostCapacity,
 	ProcessRuntimeStats,
 	ResolvedEnvVariable,
 } from '@directus/types';
@@ -14,6 +16,12 @@ export const PROCESSES_REPORT_CHANNEL = 'processes:report';
 export interface ProcessesQueryMessage {
 	requestId: string;
 	details: ProcessDetail[];
+	/**
+	 * Set by the fill pause after a deploy, which reads only each process's node
+	 * and build: a node leaves out the supervisor's list and its capacity. A node
+	 * of a build older than the field ignores it and answers in full.
+	 */
+	nodeBuildOnly?: boolean;
 }
 
 /** What one process answers with about itself. */
@@ -25,6 +33,14 @@ export interface ReportedProcess {
 	name: string;
 	runtime: ProcessRuntimeStats | null;
 	env: ResolvedEnvVariable[] | null;
+	/** What this process is scaling, `null` from every process that scales nothing. */
+	autoscale: AutoscaleNodeState | null;
+	/**
+	 * The core build this process runs (`resolveCoreBuildId`). Absent from a
+	 * process of a build older than the field, which is how the fill pause after
+	 * a deploy tells a node of the build before (`onlyThisBuildAnswers`).
+	 */
+	coreBuildId?: string;
 }
 
 export interface ProcessesReportMessage {
@@ -36,9 +52,26 @@ export interface ProcessesReportMessage {
 	supervised: boolean;
 	self: ReportedProcess;
 	/**
-	 * The whole container's `pm2 list`, attached by one process per replica so N
-	 * workers don't each publish the same list. `null` from every other process,
-	 * and from an unsupervised one.
+	 * The whole container's `pm2 list`. Every supervised process attaches it and
+	 * the collector keeps one copy per replica — electing a single reporter meant
+	 * losing the list entirely once its instance was recycled. `null` from an
+	 * unsupervised process, and where stats were not asked for.
 	 */
 	supervisor: SupervisedProcess[] | null;
+	/** What this process's container may use, for the totals to be shares of. */
+	capacity: ProcessHostCapacity | null;
+}
+
+/**
+ * Marks a worker's in-flight report on pm2's channel.
+ *
+ * pm2 gives every worker message the same bus event, so the listener has to
+ * recognise its own by what is inside them.
+ */
+export const IN_FLIGHT_REPORT_TOPIC = 'processes:in-flight';
+
+export interface InFlightReport {
+	topic: typeof IN_FLIGHT_REPORT_TOPIC;
+	/** Requests the worker had open when it sent this. */
+	inFlight: number;
 }

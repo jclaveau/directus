@@ -2,6 +2,7 @@
 name: project_directus_pr292_cache_hook_scopedcache
 description: PR #292 (v11.10.1-feat/cache-hook-add-tag) state — the context.scopedCache hook channel bb+unit witness matrix, two source fixes (delete double-emit, cancel-parity), and accepted-deferred points so a fresh review doesn't re-open them
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

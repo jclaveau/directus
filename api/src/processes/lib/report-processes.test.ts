@@ -35,10 +35,19 @@ const supervisor = vi.hoisted(() => {
 });
 
 vi.mock('./supervisor-snapshot.js', () => {
-	return {
-		supervisorAvailable: supervisor.available,
-		readSupervisedProcesses: supervisor.read,
-	};
+	return { readSupervisedProcesses: supervisor.read };
+});
+
+vi.mock('../supervisor/index.js', () => {
+	return { supervisorAvailable: supervisor.available };
+});
+
+const host = vi.hoisted(() => {
+	return { capacity: vi.fn() };
+});
+
+vi.mock('./host-capacity.js', () => {
+	return { hostCapacity: host.capacity };
 });
 
 vi.mock('./redact-env.js', () => {
@@ -59,6 +68,18 @@ vi.mock('./redact-env.js', () => {
 
 vi.mock('../../utils/node-id.js', () => {
 	return { nodeId: 'node-1' };
+});
+
+const autoscale = vi.hoisted(() => {
+	return { autoscaleState: vi.fn() };
+});
+
+vi.mock('../autoscale/lib/state.js', () => {
+	return { autoscaleState: autoscale.autoscaleState };
+});
+
+vi.mock('../../core-build-id.js', () => {
+	return { resolveCoreBuildId: () => 'build-b' };
 });
 
 import { initProcessReports } from './report-processes.js';
@@ -82,9 +103,11 @@ beforeEach(() => {
 	config.details.mockReturnValue(['stats', 'env']);
 	supervisor.available.mockReturnValue(false);
 	supervisor.read.mockResolvedValue(null);
+	host.capacity.mockResolvedValue({ memoryBytes: 1024, cpuCores: 2 });
 	bus.publish.mockReset();
 	bus.subscribe.mockReset();
 	logger.warn.mockReset();
+	autoscale.autoscaleState.mockReturnValue(null);
 	delete process.env['NODE_APP_INSTANCE'];
 	delete process.env['pm_id'];
 	delete process.env['name'];
@@ -129,7 +152,54 @@ test('Answers with what this process is and what it measured', async () => {
 
 	expect(message.self.runtime?.rssBytes).toBeGreaterThan(0);
 	expect(message.self.runtime?.nodeVersion).toBe(process.version);
+
+	// Reported so a flag pm2's `node_args` hands Node can be confirmed live,
+	// rather than inferred from what the memory figures look like.
+	expect(message.self.runtime?.execArgv).toEqual(process.execArgv);
 	expect(message.self.env).toHaveLength(1);
+});
+
+// What the fill pause after a deploy reads to tell a node of the build before.
+test('Answers with the core build it runs', async () => {
+	expect((await query()).self.coreBuildId).toBe('build-b');
+});
+
+// The process that scales the pool answers no HTTP of its own, so what it is
+// scaling on reaches the admin page on this report or not at all.
+test('The process scaling a pool answers with what it is scaling on', async () => {
+	autoscale.autoscaleState.mockReturnValue({ workers: 3 });
+
+	expect((await query()).self.autoscale).toEqual({ workers: 3 });
+});
+
+// Every other process is asked the same question and has no pool behind it.
+test('A process scaling nothing says so rather than leaving it out', async () => {
+	expect((await query()).self.autoscale).toBeNull();
+});
+
+// The block is small enough that narrowing the query is not worth losing it:
+// a page asking for the env alone still has a pool to describe.
+test('The pool is answered however the query was narrowed', async () => {
+	autoscale.autoscaleState.mockReturnValue({ workers: 3 });
+
+	expect((await query(['env'])).self.autoscale).toEqual({ workers: 3 });
+});
+
+test('Reports the Node options it was started with', async () => {
+	// The point of carrying them: a flag pm2's `node_args` hands Node can be
+	// confirmed live, instead of being inferred from what the memory figures
+	// happen to look like.
+	const platform = process.execArgv;
+	process.execArgv = ['--max-semi-space-size=2'];
+
+	try {
+		const message = await query();
+
+		expect(message.self.runtime?.execArgv).toEqual(['--max-semi-space-size=2']);
+	}
+	finally {
+		process.execArgv = platform;
+	}
 });
 
 test('Carries the identity PM2 gave it', async () => {
@@ -163,7 +233,7 @@ test('A node configured for neither half still says where it is', async () => {
 	expect(message.self.pid).toBe(process.pid);
 });
 
-test('Instance zero is the one that attaches the container-wide list', async () => {
+test('A supervised process attaches the container-wide list', async () => {
 	supervisor.available.mockReturnValue(true);
 	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
 	process.env['NODE_APP_INSTANCE'] = '0';
@@ -174,21 +244,35 @@ test('Instance zero is the one that attaches the container-wide list', async () 
 	expect(message.supervisor).toHaveLength(1);
 });
 
-test('Every other instance answers for itself alone', async () => {
+// The list used to come from instance 0 alone. PM2 keeps counting up as the
+// autoscaler releases and adds workers, so a pool can hold instances 2 and 3 and
+// no 0 — and the elected reporter then never existed, which lost every CPU
+// reading for good on the services that autoscale.
+test('A pool whose instance zero is gone still reports its list', async () => {
 	supervisor.available.mockReturnValue(true);
-	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
-	process.env['NODE_APP_INSTANCE'] = '1';
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 3, name: 'directus' }]);
+	process.env['NODE_APP_INSTANCE'] = '2';
 
 	const message = await query();
 
 	expect(message.supervised).toBe(true);
+	expect(message.supervisor).toHaveLength(1);
+});
+
+test('An unsupervised process has no list to attach', async () => {
+	supervisor.available.mockReturnValue(false);
+	supervisor.read.mockResolvedValue(null);
+	process.env['NODE_APP_INSTANCE'] = '1';
+
+	const message = await query();
+
+	expect(message.supervised).toBe(false);
 	expect(message.supervisor).toBeNull();
-	expect(supervisor.read).not.toHaveBeenCalled();
 });
 
 test('The list is not read where stats were not asked for', async () => {
 	supervisor.available.mockReturnValue(true);
-	process.env['NODE_APP_INSTANCE'] = '0';
+	process.env['NODE_APP_INSTANCE'] = '2';
 	config.details.mockReturnValue(['env']);
 
 	const message = await query();
@@ -206,4 +290,70 @@ test('A node that cannot answer says so in the log, not on the bus', async () =>
 	await vi.waitFor(() => expect(logger.warn).toHaveBeenCalled());
 
 	expect(logger.warn.mock.calls[0]![1]).toContain('Could not report this process');
+});
+
+// A caller narrowing to the env half must not be able to take the supervisor's
+// list with it: without that list the replica reports itself `unavailable` and a
+// process too dead to answer is dropped from the tree entirely — a caller would
+// be manufacturing an outage that is not there.
+test('A request for the env half alone still carries the supervisor', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 3, name: 'directus' }]);
+	config.details.mockReturnValue(['stats', 'env']);
+
+	const message = await query(['env']);
+
+	expect(message.supervisor).toHaveLength(1);
+	expect(message.capacity).not.toBeNull();
+
+	// The half that was narrowed away is the one that goes, and only it.
+	expect(message.self.runtime).toBeNull();
+	expect(message.self.env).not.toBeNull();
+});
+
+test('A node not reporting stats attaches no list, however asked', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
+	config.details.mockReturnValue(['env']);
+
+	const message = await query(['stats', 'env']);
+
+	expect(message.supervisor).toBeNull();
+	expect(message.capacity).toBeNull();
+});
+
+test('A query for node and build alone reads no list and no capacity', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
+	await initProcessReports();
+
+	bus.subscribe.mock.calls[0]![1]({
+		requestId: 'r1',
+		details: [],
+		nodeBuildOnly: true,
+	});
+
+	await vi.waitFor(() => expect(bus.publish).toHaveBeenCalled());
+	const message = bus.publish.mock.calls[0]![1] as ProcessesReportMessage;
+
+	expect(message.supervisor).toBeNull();
+	expect(message.capacity).toBeNull();
+	expect(message.self.nodeId).toBe('node-1');
+	expect(message.self.coreBuildId).toBe('build-b');
+	expect(supervisor.read).not.toHaveBeenCalled();
+	expect(host.capacity).not.toHaveBeenCalled();
+});
+
+// `/utils/processes?details=env` on a deployment reporting stats alone narrows
+// to no detail at all, and still lists its processes on the supervisor's list.
+test('A query narrowed to no detail still reads the list and capacity', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
+
+	const message = await query([]);
+
+	expect(message.supervisor).toEqual([{ pid: 1, pmId: 0, name: 'directus' }]);
+	expect(message.capacity).toEqual({ memoryBytes: 1024, cpuCores: 2 });
+	expect(supervisor.read).toHaveBeenCalledOnce();
+	expect(host.capacity).toHaveBeenCalledOnce();
 });

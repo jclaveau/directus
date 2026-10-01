@@ -2,6 +2,7 @@
 name: project_scalabus_derived_branches
 description: jclaveau/directus derived branches — *-dist (release-fork.yml) and ci-dialect-* (refresh-dialect-ci.yml) are regenerated from the trunk on every push, so never rewrite or hand-edit them; -dist is what the planner installs
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

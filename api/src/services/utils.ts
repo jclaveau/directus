@@ -3,17 +3,49 @@ import { systemCollectionRows } from '@directus/system-data';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	AutoscaleDrill,
+	AutoscaleNodeState,
+	AutoscaleReload,
+	AutoscaleRunner,
+	AutoscaleWriteSurface,
 	CacheFlushTarget,
 	PgBouncerDetail,
 	PgBouncerReport,
 	PrimaryKey,
+	ProcessDetail,
 	ProcessesReport,
 	SchemaOverview,
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	assertUsableCacheSettingsPatch,
+	flushBeforeEnabling,
+	markEnablingFlushed,
+	refreshCacheSettings,
+	resolveCacheSettings,
+	usableCacheSettings,
+	type CacheSettingField,
+	type ResolvedCacheSetting,
+} from '../cache-settings.js';
+import {
+	cacheExpiresAtKey,
+	cachePinsKey,
+	storedScopedCachePinLabels,
+} from '../cache-sidecars.js';
+import type { CacheAuditOptions } from '../cache-audit.js';
+import {
+	type CacheAuditRun,
+	type CacheAuditRunWithFindings,
+	type CacheAuditTrigger,
+	listCacheAuditRuns,
+	readCacheAuditFindings,
+	readCacheAuditRun,
+	runCacheAudit,
+} from '../cache-audit-runs.js';
+import {
 	type CacheAnomalyRecord,
+	type CacheAuditQueueState,
 	type CacheEntryRecord,
 	type CacheGroupLatencyRecord,
 	type CacheStatsState,
@@ -28,6 +60,7 @@ import {
 	type CacheEntryPurgeRecord,
 	listCacheGroupLatencies,
 	listPurgesCoveringEntry,
+	readCacheAuditQueueState,
 	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
@@ -40,12 +73,84 @@ import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { collectPgBouncer } from '../pgbouncer/index.js';
-import { collectProcesses } from '../processes/index.js';
-import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import {
+	applySharedSettingsPatch,
+	parseSharedSettingsPatch,
+	type AutoscaleSharedSettings,
+} from '../processes/autoscale/lib/shared-settings.js';
+import {
+	loadedWorker,
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+	startDrill,
+	stopDrill,
+	drillState,
+} from '../processes/autoscale/lib/drill.js';
+import {
+	askForReload,
+	reloadRefusal,
+} from '../processes/autoscale/lib/reload.js';
+import {
+	configWithSharedSettings,
+} from '../processes/autoscale/lib/resolve-config.js';
+import {
+	applySupervisorPatch,
+	parseSupervisorPatch,
+	type SupervisorSharedSettings,
+} from '../processes/autoscale/lib/supervisor-shared-settings.js';
+import {
+	SHARED_SETTINGS_COLUMNS,
+	announceSharedSettings,
+	readAllSharedSettings,
+	readSharedSettings,
+	writeSharedSettings,
+	type SharedSettings,
+} from '../processes/lib/shared-settings.js';
+import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
+import {
+	collectProcesses,
+	processesReportEnabled,
+} from '../processes/index.js';
+import {
+	type CacheAuditScheduleState,
+	cacheAuditScheduleState,
+	refreshCacheAuditScheduleOverride,
+} from '../schedules/cache-audit.js';
+import {
+	countScopedCachePinMembers,
+	flushResponseCache,
+} from '../scoped-cache/index.js';
+import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+
+/**
+ * A whole number inside the range the field accepts, or the answer saying it
+ * is not one.
+ *
+ * Both drill inputs reach here off a query string, where every value is a
+ * string and `'abc'` and `''` are the same `NaN` — so the check is one place
+ * and the message names the field and the range it missed.
+ */
+function wholeNumberWithin(
+	value: unknown,
+	low: number,
+	high: number,
+	field: string,
+): number {
+	const parsed = Number(value);
+
+	if (Number.isInteger(parsed) === false || parsed < low || parsed > high) {
+		throw new InvalidPayloadError({
+			reason: `'${field}' has to be a whole number between ${low} and ${high}`,
+		});
+	}
+
+	return parsed;
+}
 
 /**
  * How far back a cache read was asked to look, as milliseconds.
@@ -112,6 +217,38 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	}
 
 	return parsed;
+}
+
+/**
+ * What an autoscale read answers with: the stored shared settings, plus who
+ * left it.
+ */
+export interface AutoscaleSharedSettingsAnswer {
+	key: string;
+	sharedSettings: AutoscaleSharedSettings | null;
+	/** The address behind the shared settings' `setBy`, `null` where there is none. */
+	setByEmail: string | null;
+}
+
+export interface AutoscaleConfigAnswer extends AutoscaleSharedSettingsAnswer {
+	/**
+	 * The pm2 options a restart would carry, answered beside the configuration
+	 * because a page showing one without the other cannot say which of the two
+	 * a value it displays came from.
+	 */
+	supervisor: AutoscaleSharedSettingsAnswer;
+}
+
+/**
+ * What a cache settings read answers with: the stored layer, who left it, and
+ * every field as it resolves on the node answering.
+ */
+export interface CacheSettingsAnswer {
+	key: string;
+	sharedSettings: SharedSettings | null;
+	/** The address behind the stored layer's `setBy`, `null` where there is none. */
+	setByEmail: string | null;
+	resolved: Record<CacheSettingField, ResolvedCacheSetting>;
 }
 
 export class UtilsService {
@@ -245,7 +382,7 @@ export class UtilsService {
 		const { cache } = getCache();
 
 		if (shouldClearCache(cache, undefined, collection)) {
-			await cache.clear();
+			await flushResponseCache(cache);
 		}
 
 		emitter.emitAction(
@@ -325,7 +462,7 @@ export class UtilsService {
 	}
 
 	// The live Redis state for a single key — the cached response plus its
-	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
+	// sidecars (scoped-cache pins, expiry metadata) — none of which the Postgres
 	// descriptor holds. All may be gone: the descriptor outlives the value.
 	/**
 	 * Takes the REDIS key — the same string `evictCacheEntry` takes, and what the
@@ -336,12 +473,14 @@ export class UtilsService {
 	async readCacheEntry(redisKey: string): Promise<{
 		exists: boolean;
 		value: unknown;
-		tags: string[] | null;
-		tagCounts: Record<string, number>;
+		pins: string[] | null;
+		pinCounts: Record<string, number>;
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
 		filledAt: number | null;
+		auditedAt: number | null;
+		verifiedAt: number | null;
 		purgesSinceFilled: CacheEntryPurgeRecord[] | null;
 	}> {
 		this.assertAdmin('inspect a cache entry');
@@ -356,6 +495,13 @@ export class UtilsService {
 			: await listPurgesCoveringEntry(descriptor.cacheKey, descriptor.lastFilled);
 
 		const filledAt = descriptor?.lastFilled.getTime() ?? null;
+		const auditedAt = descriptor?.auditedAt?.getTime() ?? null;
+
+		// Known good as of the audit, or the fill where that came later: a fill
+		// reads the database, so the body it wrote matched it then.
+		const verifiedAt = filledAt === null
+			? null
+			: Math.max(filledAt, auditedAt ?? 0);
 
 		const { cache } = getCache();
 
@@ -363,25 +509,28 @@ export class UtilsService {
 			return {
 				exists: false,
 				value: null,
-				tags: null,
-				tagCounts: {},
+				pins: null,
+				pinCounts: {},
 				expiry: null,
 				sizes: null,
 				tombstone: null,
 				filledAt,
+				auditedAt,
+				verifiedAt,
 				purgesSinceFilled,
 			};
 		}
 
 		const value = await getCacheValue(cache, redisKey);
-		const expiry = (await getCacheValue(cache, `${redisKey}__expires_at`)) ?? null;
-		const tagged = await getCacheValue(cache, `${redisKey}__tags`);
 
-		// `__tags` stores the comma-joined scoped-cache tags (only when the
-		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).
-		const tags = typeof tagged?.tags === 'string'
-			? tagged.tags.split(', ').filter(Boolean)
-			: null;
+		const expiry =
+			(await getCacheValue(cache, cacheExpiresAtKey(redisKey))) ?? null;
+
+		const storedPins = await getCacheValue(cache, cachePinsKey(redisKey));
+
+		// `__pins` lists the scoped-cache pin labels (only when the dev-only
+		// CACHE_TAGS_HEADER is on, which is what writes this sidecar).
+		const pinLabels = storedScopedCachePinLabels(storedPins);
 
 		// Re-compress the payload to size its Redis footprint against the raw response.
 		let sizes: { uncompressed: number; compressed: number } | null = null;
@@ -400,18 +549,130 @@ export class UtilsService {
 		return {
 			exists: value !== undefined,
 			value: value ?? null,
-			tags,
-			// Blast radius: how many entries each tag would purge.
-			tagCounts: tags
-				? await countScopedCacheTagMembers(tags)
+			pins: pinLabels,
+			// Blast radius: how many entries each pin would purge.
+			pinCounts: pinLabels
+				? await countScopedCachePinMembers(pinLabels)
 				: {},
 			expiry,
 			sizes,
 			// When this key last expired, if a miss-gap tombstone still lives.
 			tombstone: await readCacheTombstone(redisKey),
 			filledAt,
+			auditedAt,
+			verifiedAt,
 			purgesSinceFilled,
 		};
+	}
+
+	/**
+	 * Replay the entries due an audit against the database — see
+	 * `cache-audit.ts`. Every replay is an uncached read, so this is a dev,
+	 * preview and e2e instrument, not a production one. The run lands in the
+	 * audit history under `trigger`, and is answered as the history carries
+	 * it: the findings are read from there, a page at a time, by `getCacheAudit`.
+	 */
+	async auditCache(
+		options: CacheAuditOptions = {},
+		trigger: Extract<CacheAuditTrigger, 'rest' | 'mcp'> = 'rest',
+	): Promise<CacheAuditRun> {
+		this.assertAdmin('audit the cache');
+
+		const { id } = await runCacheAudit(trigger, options);
+		const run = await readCacheAuditRun(id);
+
+		// Recorded by the run that just ended; only the reaper takes a run row,
+		// and it takes none younger than the retention window.
+		if (run === null) {
+			throw new Error(`Cache audit run ${id} was not recorded`);
+		}
+
+		return run;
+	}
+
+	/** The audit runs started in the window, newest first, without their findings. */
+	async getCacheAudits(window?: unknown): Promise<CacheAuditRun[]> {
+		this.assertAdmin('inspect the cache audits');
+
+		return listCacheAuditRuns(requestedStatsWindow(window));
+	}
+
+	/** One audit run with a page of the findings it stored. */
+	async getCacheAudit(
+		id: unknown,
+		page: unknown = {},
+	): Promise<CacheAuditRunWithFindings> {
+		this.assertAdmin('inspect the cache audits');
+
+		const parsed = typeof id === 'number' || typeof id === 'string'
+			? Number(id)
+			: Number.NaN;
+
+		if (!Number.isInteger(parsed) || parsed < 1) {
+			throw new InvalidPayloadError({
+				reason: `'${String(id)}' is not an audit id`,
+			});
+		}
+
+		const { error, value } = CacheAuditFindingsPageSchema.validate(page, {
+			allowUnknown: true,
+			stripUnknown: true,
+		});
+
+		if (error) {
+			throw new InvalidPayloadError({ reason: error.message });
+		}
+
+		const run = await readCacheAuditRun(parsed);
+
+		if (run === null) {
+			throw new ForbiddenError();
+		}
+
+		return { ...run, ...await readCacheAuditFindings(parsed, value) };
+	}
+
+	/** The cron in force for the audit, where it came from, and when it next fires. */
+	async getCacheAuditSchedule(): Promise<CacheAuditScheduleState> {
+		this.assertAdmin('inspect the cache audit schedule');
+
+		return cacheAuditScheduleState();
+	}
+
+	/** How far round the cache the audit has got: its size, never seen, horizon. */
+	async getCacheAuditQueue(): Promise<CacheAuditQueueState> {
+		this.assertAdmin('inspect the cache audit queue');
+
+		return readCacheAuditQueueState();
+	}
+
+	/**
+	 * Lay a cron over `CACHE_AUDIT_SCHEDULE`, or clear it with null. Through the
+	 * settings singleton, which validates the rule, revisions the change and
+	 * fires the action every node reschedules on.
+	 */
+	async updateCacheAuditSchedule(rule: unknown): Promise<CacheAuditScheduleState> {
+		this.assertAdmin('change the cache audit schedule');
+
+		if (rule !== null && typeof rule !== 'string') {
+			throw new InvalidPayloadError({
+				reason: '`rule` has to be a cron rule, or null to clear the override',
+			});
+		}
+
+		const { SettingsService } = await import('./settings.js');
+
+		await new SettingsService({
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		}).upsertSingleton({ cache_audit_schedule: rule });
+
+		// The reschedule rides the bus and has not necessarily landed here yet;
+		// the answer reads the durable value it just wrote.
+		await refreshCacheAuditScheduleOverride();
+
+		return cacheAuditScheduleState();
 	}
 
 	async evictCacheEntry(redisKey: string): Promise<void> {
@@ -454,10 +715,421 @@ export class UtilsService {
 		await truncateCacheEvents();
 	}
 
-	async readProcesses(): Promise<ProcessesReport> {
+	async readCacheSettings(): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('inspect the cache settings');
+
+		return this.cacheSettingsAnswer(
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache),
+		);
+	}
+
+	private async cacheSettingsAnswer(
+		sharedSettings: SharedSettings | null,
+	): Promise<CacheSettingsAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.cache}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+			resolved: resolveCacheSettings(sharedSettings),
+		};
+	}
+
+	/**
+	 * Lay a patch over the cache settings, `null` giving a field back to its
+	 * fallback.
+	 *
+	 * Through the settings singleton, whose guard refuses a value outside its
+	 * rule, and whose filter clears the response cache before a write switches
+	 * it on where the environment leaves it off. The row is read and written
+	 * under one lock, so two patches never both lay a field over the same read.
+	 * A stored field the mirror would not apply is dropped rather than left to
+	 * refuse every patch of the others. The layer is stamped with who wrote it,
+	 * when and through which surface, as the autoscale settings are.
+	 */
+	async updateCacheSettings(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('change the cache settings');
+
+		if (Object.keys(patch).length === 0) {
+			throw new InvalidPayloadError({
+				reason: 'The patch names no cache setting',
+			});
+		}
+
+		assertUsableCacheSettingsPatch(patch);
+
+		// A clear can outlast the database's idle-in-transaction timeout, and it
+		// would hold the row lock every other settings write waits on.
+		const clearedAhead = await flushBeforeEnabling(
+			{ [SHARED_SETTINGS_COLUMNS.cache]: patch },
+			{ accountability: this.accountability },
+		);
+
+		const sharedSettings = await this.knex.transaction(async (settingsTrx) => {
+			// Skipped ahead because the row said on, the check runs again under the
+			// lock: a write switching it off in between is now in the row.
+			if (clearedAhead) {
+				markEnablingFlushed(settingsTrx);
+			}
+
+			const mergedSettings = usableCacheSettings(
+				await readSharedSettings(SHARED_SETTINGS_COLUMNS.cache, settingsTrx),
+			);
+
+			for (const [field, value] of Object.entries(patch)) {
+				if (value === null) {
+					delete mergedSettings[field];
+				}
+				else {
+					mergedSettings[field] = value;
+				}
+			}
+
+			const patchedSettings = Object.keys(mergedSettings).length === 0
+				? null
+				: {
+					...mergedSettings,
+					setBy: this.accountability?.user ?? null,
+					setAt: new Date().toISOString(),
+					setFrom: surface,
+				};
+
+			await writeSharedSettings(
+				SHARED_SETTINGS_COLUMNS.cache,
+				patchedSettings,
+				{ ...this.settingsOptions, knex: settingsTrx },
+			);
+
+			return patchedSettings;
+		});
+
+		// The announcement the write fired went out before the commit, so the
+		// other nodes re-read on this one; this node answers from what it just
+		// wrote rather than waiting on its own announcement.
+		announceSharedSettings(SHARED_SETTINGS_COLUMNS.cache);
+		await refreshCacheSettings();
+
+		return this.cacheSettingsAnswer(sharedSettings);
+	}
+
+	/**
+	 * Drop the cache settings, so every field comes from its fallback again.
+	 * Nothing is left to stamp, as with the autoscale settings.
+	 */
+	async clearCacheSettings(): Promise<CacheSettingsAnswer> {
+		this.assertAdmin('clear the cache settings');
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.cache,
+			null,
+			this.settingsOptions,
+		);
+
+		await refreshCacheSettings();
+
+		return this.cacheSettingsAnswer(null);
+	}
+
+	async readProcesses(details?: ProcessDetail[]): Promise<ProcessesReport> {
 		this.assertAdmin('inspect the running processes');
 
-		return collectProcesses();
+		return collectProcesses(details);
+	}
+
+	/**
+	 * The shared settings, and the key they are stored under.
+	 *
+	 * Only the shared settings: what the pool is actually being scaled on is the
+	 * environment of the process that scales it laid under this, and that
+	 * process reports it with `readProcesses` rather than answering a request.
+	 */
+	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		const stored = await readAllSharedSettings();
+
+		return this.answerWith(
+			stored[SHARED_SETTINGS_COLUMNS.autoscale],
+			stored[SHARED_SETTINGS_COLUMNS.supervisor],
+		);
+	}
+
+	/**
+	 * Lay a patch over the shared settings, `null` giving one field back to the
+	 * environment chain.
+	 *
+	 * Field by field on purpose: a write of the whole object would pin every
+	 * value a form happened to render, and the next deployment's environment
+	 * would stop reaching the pool without anyone having asked for that.
+	 */
+	async updateAutoscaleConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleConfigAnswer> {
+		this.assertAdmin('change the autoscale configuration');
+
+		const parsed = parseSharedSettingsPatch(patch);
+
+		// Stamped by the writer rather than taken from them: shared settings
+		// outlive the incident that justified them, and the questions they are then
+		// asked are who left them, when, and through what.
+		const stamped = {
+			...parsed,
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const stored = await readAllSharedSettings();
+
+		const sharedSettings = applySharedSettingsPatch(
+			stored[SHARED_SETTINGS_COLUMNS.autoscale],
+			stamped,
+		);
+
+		// Judged whole rather than field by field: a floor is only too high
+		// against the ceiling it will sit under, and that ceiling is usually a
+		// field this patch never mentions.
+		assertUsableConfig(configWithSharedSettings(sharedSettings ?? {}));
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.autoscale,
+			sharedSettings,
+			this.settingsOptions,
+		);
+
+		return this.answerWith(
+			sharedSettings,
+			stored[SHARED_SETTINGS_COLUMNS.supervisor],
+		);
+	}
+
+	/**
+	 * The shared settings with the writer named rather than identified.
+	 *
+	 * The stamp keeps the user's id, which survives a rename and a changed
+	 * address; a page reading it back wants the address, and only the database
+	 * turns one into the other.
+	 */
+	private async answerWith(
+		sharedSettings: AutoscaleSharedSettings | null,
+		supervisorSettings: SupervisorSharedSettings | null,
+	): Promise<AutoscaleConfigAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.autoscale}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+			supervisor: await this.supervisorAnswer(supervisorSettings),
+		};
+	}
+
+	private async supervisorAnswer(
+		sharedSettings: SupervisorSharedSettings | null,
+	): Promise<AutoscaleSharedSettingsAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.supervisor}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+		};
+	}
+
+	/**
+	 * Change the pm2 options the next rolling restart will carry.
+	 *
+	 * Stored rather than applied: pm2 reads these when it starts a worker, so
+	 * the write lands on the pool through the restart below it and the page
+	 * says so. Nothing is clamped — a supervisor takes what it is handed.
+	 */
+	async updateSupervisorConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleSharedSettingsAnswer> {
+		this.assertAdmin('change the supervisor configuration');
+
+		const stamped = {
+			...parseSupervisorPatch(patch),
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const sharedSettings = applySupervisorPatch(
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.supervisor),
+			stamped,
+		);
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.supervisor,
+			sharedSettings,
+			this.settingsOptions,
+		);
+
+		return this.supervisorAnswer(sharedSettings);
+	}
+
+	/**
+	 * What a write to the settings singleton runs as.
+	 *
+	 * The accountability travels with it because that is what puts a row in
+	 * `directus_revisions`: the stamp says who changed a threshold, and the
+	 * revision is what survives the stamp being overwritten by the next change.
+	 */
+	private get settingsOptions(): AbstractServiceOptions {
+		return {
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		};
+	}
+
+	private async emailOf(user: unknown): Promise<string | null> {
+		if (typeof user !== 'string') {
+			return null;
+		}
+
+		try {
+			const row = await this.knex
+				.select('email')
+				.from('directus_users')
+				.where({ id: user })
+				.first();
+
+			return row?.email ?? null;
+		}
+		catch {
+			// The key is editable by hand, and a database asked to match a uuid
+			// against whatever was typed there refuses the comparison.
+			return null;
+		}
+	}
+
+	/**
+	 * Every process that is scaling a pool, with what it last decided on.
+	 *
+	 * Read from the same report the processes page collects, because the values
+	 * a pool is actually scaled on are the ones resolved in the process that
+	 * scales it — an api worker resolving them again would answer for its own
+	 * environment, which is a different process's.
+	 */
+	async readAutoscaleRunners(): Promise<AutoscaleRunner[]> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		// With the report off every responder is gone, so collecting one would
+		// wait out its window to answer the empty tree it already knows about.
+		if (processesReportEnabled() === false) {
+			return [];
+		}
+
+		const report = await collectProcesses(['stats']);
+
+		return report.services.flatMap((service) => {
+			return service.replicas.flatMap((replica) => {
+				return replica.processes
+					.filter((node) => node.autoscale !== null)
+					.map((node) => {
+						return {
+							service: service.service,
+							replicaId: replica.replicaId,
+							nodeId: node.nodeId,
+							name: node.name,
+							state: node.autoscale as AutoscaleNodeState,
+						};
+					});
+			});
+		});
+	}
+
+	/** What the worker answering this is burning, and until when. */
+	async readAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('inspect the autoscale load drill');
+
+		return drillState();
+	}
+
+	/**
+	 * Put the whole pool under load for a while.
+	 *
+	 * A configuration change is judged by what the loop does with it, and a
+	 * quiet pool does nothing with any of it: the thresholds are never reached,
+	 * the cooldowns never start, and a ceiling that is wrong stays wrong until
+	 * the traffic that proves it arrives at the worst possible time. This
+	 * produces that traffic's effect on demand, and nothing else — it never
+	 * touches the bounds it is being used to test.
+	 */
+	async startAutoscaleDrill(
+		seconds: unknown,
+		percent: unknown,
+	): Promise<AutoscaleDrill> {
+		this.assertAdmin('run an autoscale load drill');
+
+		const duration = wholeNumberWithin(
+			seconds,
+			1,
+			MAX_DRILL_SECONDS,
+			'seconds',
+		);
+
+		const share = wholeNumberWithin(
+			percent,
+			MIN_DRILL_PERCENT,
+			MAX_DRILL_PERCENT,
+			'percent',
+		);
+
+		// Refused here and not only greyed out in the page: a drill laid over real
+		// traffic buys workers for load nobody asked to serve and measures the two
+		// together, which is worth refusing whatever surface asked for it.
+		const hottest = loadedWorker(await this.readAutoscaleRunners());
+
+		if (hottest !== null) {
+			throw new InvalidPayloadError({
+				reason: `the pool is already working — a worker is at ${hottest}% `
+					+ 'CPU, so a drill would measure that as well as itself',
+			});
+		}
+
+		return startDrill(duration, share);
+	}
+
+	/**
+	 * Restart every worker of the pool without dropping below its size.
+	 *
+	 * The supervisor starts a replacement, waits for it to report ready, and
+	 * only then retires the worker it replaces — which is how a change to
+	 * something the pool reads at boot reaches it without a deploy and without
+	 * a gap in service. Asked for over the bus rather than run here: this
+	 * worker is one of the ones being replaced.
+	 */
+	async startAutoscaleReload(): Promise<AutoscaleReload> {
+		this.assertAdmin('restart the autoscaled pool');
+
+		const refusal = reloadRefusal(await this.readAutoscaleRunners());
+
+		if (refusal !== null) {
+			throw new InvalidPayloadError({ reason: refusal });
+		}
+
+		return askForReload();
+	}
+
+	/** Call the drill off before its deadline. */
+	async stopAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('stop the autoscale load drill');
+
+		return stopDrill();
+	}
+
+	/** Drop the shared settings, so every field comes from the environment again. */
+	async clearAutoscaleConfig(): Promise<void> {
+		this.assertAdmin('clear the autoscale configuration');
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.autoscale,
+			null,
+			this.settingsOptions,
+		);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {

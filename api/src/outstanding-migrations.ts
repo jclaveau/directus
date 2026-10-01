@@ -24,6 +24,18 @@ export function outstandingMigrationsHoldingHealth(): string[] | undefined {
 }
 
 /**
+ * Whether the database may not have recorded every migration this build ships.
+ *
+ * The state before the first reading counts as outstanding, for the reason it
+ * holds health down: an instance that cannot tell must not write through a
+ * schema it may not match any more than it may report ready.
+ */
+// eslint-disable-next-line local/no-single-caller-function -- schedule.ts calls it
+export function migrationsAreOutstanding(): boolean {
+	return outstanding === undefined || outstanding.length > 0;
+}
+
+/**
  * Holds health down until a reading comes in, without touching the database.
  *
  * Separate from the watch so the server can be pessimistic from its very first

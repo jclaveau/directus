@@ -6,6 +6,8 @@
  * Shared here so the API producer and the app view can't drift.
  */
 
+import type { AutoscaleNodeState } from './autoscale.js';
+
 /** Which halves of a node the report carries, per `PROCESSES_REPORT_DETAILS`. */
 export type ProcessDetail = 'stats' | 'env';
 
@@ -52,6 +54,14 @@ export interface ProcessRuntimeStats {
 	externalBytes: number;
 	uptimeMs: number;
 	nodeVersion: string;
+	/**
+	 * The flags Node itself was started with — what pm2's `node_args` hands it —
+	 * so one can be confirmed live rather than inferred from what the memory
+	 * figures look like. Script arguments are not here, and neither is
+	 * `NODE_OPTIONS`: Node keeps it out of `execArgv`, and being an environment
+	 * variable it reaches the report with the rest of the env.
+	 */
+	execArgv: string[];
 }
 
 /** One process: a PM2 app instance, or the lone process when unsupervised. */
@@ -68,6 +78,11 @@ export interface ProcessNode {
 	runtime: ProcessRuntimeStats | null;
 	supervisor: ProcessSupervisorStats | null;
 	env: ResolvedEnvVariable[] | null;
+	/**
+	 * What this process is scaling, `null` from every process that scales
+	 * nothing — which is all of them but the autoscaler.
+	 */
+	autoscale: AutoscaleNodeState | null;
 }
 
 /**
@@ -79,11 +94,26 @@ export interface ProcessNode {
  */
 export type ProcessSupervisorState = 'pm2' | 'unavailable' | 'none';
 
+/**
+ * What the container a replica runs in is allowed to use. Read from the cgroup
+ * rather than from `os`, which reports the whole machine however small a slice
+ * the container was given — a usage bar against the host's 64 GB says nothing
+ * about a process 200 MB from its own limit.
+ */
+export interface ProcessHostCapacity {
+	/** Bytes the cgroup caps memory at, or the machine's where it is uncapped. */
+	memoryBytes: number | null;
+	/** Cores the CPU quota allows, fractional where the quota is. */
+	cpuCores: number | null;
+}
+
 /** One replica: a container, holding one supervisor and its processes. */
 export interface ProcessReplica {
 	replicaId: string;
 	hostname: string;
 	supervisor: ProcessSupervisorState;
+	/** `null` where no process answered with what its container may use. */
+	capacity: ProcessHostCapacity | null;
 	processes: ProcessNode[];
 }
 

@@ -1,0 +1,109 @@
+import { describe, expect, test } from 'vitest';
+import {
+	cacheSettingRows,
+	cacheSettingsStamp,
+	parseCacheSettingValue,
+} from './cache-settings-panel';
+
+describe('cacheSettingRows', () => {
+	test('a row carries the value, its layer, the stored one and the fallback', () => {
+		const rows = cacheSettingRows({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: { audit_limit: 40 },
+			resolved: {
+				audit_limit: { value: 40, source: 'settings', fallback: 0 },
+				scoped_index_ttl_factor: { value: 2, source: 'env', fallback: 2 },
+			},
+		});
+
+		expect(rows[3]).toMatchObject({
+			field: 'audit_limit',
+			variable: 'CACHE_AUDIT_LIMIT',
+			value: 40,
+			source: 'settings',
+			sharedSettings: 40,
+			fallback: 0,
+		});
+
+		expect(rows[6]).toMatchObject({
+			field: 'scoped_index_ttl_factor',
+			variable: 'CACHE_SCOPED_INDEX_TTL_FACTOR',
+			value: 2,
+			source: 'env',
+			sharedSettings: null,
+			fallback: 2,
+		});
+	});
+
+	test('nothing read yet leaves every row without a value or a layer', () => {
+		expect(cacheSettingRows(null)[0]).toMatchObject({
+			field: 'response',
+			value: null,
+			source: null,
+			sharedSettings: null,
+			fallback: null,
+		});
+	});
+});
+
+describe('parseCacheSettingValue', () => {
+	test.each([
+		['number', '1.5', 1.5],
+		['number', 'many', null],
+		['boolean', 'false', false],
+		['boolean', 'true', true],
+		['size', 'false', false],
+		['size', '2mb', '2mb'],
+		['text', '10m', '10m'],
+		['text', 'false', 'false'],
+		['number', '', null],
+		['size', null, null],
+	] as const)('%s %j is %j', (kind, raw, parsed) => {
+		expect(parseCacheSettingValue(kind, raw)).toBe(parsed);
+	});
+});
+
+describe('cacheSettingsStamp', () => {
+	test('names the writer by address, with its surface and age', () => {
+		expect(cacheSettingsStamp({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: {
+				audit_limit: 40,
+				setBy: 'writer-id',
+				setAt: '2026-09-27T08:00:00.000Z',
+				setFrom: 'mcp',
+			},
+			setByEmail: 'ann@example.com',
+			resolved: {},
+		}, Date.parse('2026-09-30T09:00:00.000Z'))).toEqual({
+			setBy: 'ann@example.com',
+			setFrom: 'mcp',
+			days: 3,
+		});
+	});
+
+	test('names the writer by id where no address answers it', () => {
+		expect(cacheSettingsStamp({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: {
+				setBy: 'deleted-id',
+				setAt: '2026-09-30T08:00:00.000Z',
+				setFrom: 'elsewhere',
+			},
+			setByEmail: null,
+			resolved: {},
+		}, Date.parse('2026-09-30T09:00:00.000Z'))).toEqual({
+			setBy: 'deleted-id',
+			setFrom: null,
+			days: 0,
+		});
+	});
+
+	test('is none where no write stamped the settings', () => {
+		expect(cacheSettingsStamp({
+			key: 'directus_settings.cache_settings',
+			sharedSettings: { audit_limit: 40 },
+			resolved: {},
+		}, Date.parse('2026-09-30T09:00:00.000Z'))).toBeNull();
+	});
+});

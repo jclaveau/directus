@@ -2,6 +2,7 @@
 name: project_directus_codecov_stale_flag
 description: A codecov patch status can be wrong two ways on this repo — a conflicting PR stops pull_request CI entirely, and a carried-forward flag reports a stale number; check both before writing tests.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 
@@ -21,6 +22,13 @@ flag's percentage is *byte-identical* to the previous commit's despite new tests
 per-file query returns the same misses as before. Fix: re-run the uploading job
 (`gh run rerun <run-id> --job <job-id>`), then re-read. On #350 this moved
 `codecov/patch` 93.22% → 99.72% with no code change at all.
+
+**Failure 3 — the status simply fired before the upload landed.** Same tell as
+failure 2 (identical percentage, same per-file misses), but nothing is wrong: the
+`codecov/patch` check ran while `Unit Tests (api)` was still uploading. Told apart
+from failure 2 by measuring locally first — on #465 the line codecov called a miss
+read `hits= 1` in a local `--coverage.reporter=json` run, and the status flipped to
+100% on its own minutes later. Measure before rerunning anything.
 
 **How to check, in order:**
 - `gh api repos/<o>/<r>/pulls/<n> --jq '.mergeable, .mergeable_state'` — dirty ⇒ failure 1.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import VCard from './v-card.vue';
-import { logEvent } from 'histoire/client';
+import { logEvent } from 'poveste/client';
 </script>
 
 <template>

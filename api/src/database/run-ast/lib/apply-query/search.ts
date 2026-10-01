@@ -1,6 +1,6 @@
 import { NUMERIC_TYPES } from '@directus/constants';
 import type { FieldOverview, NumericType, Permission, SchemaOverview } from '@directus/types';
-import { isIn } from '@directus/utils';
+import { isIn } from '@directus/utils/values';
 import type { Knex } from 'knex';
 import { getCases } from '../../../../permissions/modules/process-ast/lib/get-cases.js';
 import type { AliasMap } from '../../../../utils/get-column-path.js';

@@ -2,6 +2,7 @@
 name: reference_directus_takeover_cache_scoping
 description: create-takeover scoped-cache purge is COARSE by default and narrows only when the hook declares its footprint via scopedCache.purgeBy — narrowing a takeover unconditionally poisons the old slice of an upsert-move
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

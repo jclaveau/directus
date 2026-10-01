@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 const env: Record<string, any> = {
 	CACHE_STATS_ENABLED: true,
@@ -22,8 +22,8 @@ import {
 // Rows the mock builder resolves, keyed by table — so the three queries inside
 // readCacheTimeseries (config-events / events / anomalies) each get their own reply.
 let rowsByTable: Record<string, any[]>;
-let insertSpy: ReturnType<typeof vi.fn>;
-let deleteSpy: ReturnType<typeof vi.fn>;
+let insertSpy: Mock<(table: string, row: unknown) => Promise<number[]>>;
+let deleteSpy: Mock<(table: string) => Promise<number>>;
 
 function makeBuilder(source: string | { sourceTable: string }) {
 	// A subquery can stand in for a table name: the purge passes read DISTINCT

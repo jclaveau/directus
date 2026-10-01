@@ -1,8 +1,8 @@
-import { parseJSON } from '@directus/utils';
+import { parseJSON } from '@directus/utils/values';
 import { afterEach, expect, test, vi } from 'vitest';
 import { tryJson } from './try-json.js';
 
-vi.mock('@directus/utils');
+vi.mock('@directus/utils/values');
 
 afterEach(() => {
 	vi.clearAllMocks();

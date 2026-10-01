@@ -10,8 +10,15 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
+import {
+	AutoIncrementHelperPostgres,
+} from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
-import { readMeta } from '../utils/read-meta.js';
+import {
+	purgeScopedCache,
+	scopedCachePinKeys,
+} from '../scoped-cache/index.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
@@ -30,6 +37,7 @@ const env = vi.hoisted<Record<string, any>>(() => {
 		CACHE_NAMESPACE: 'scalabus',
 		// `useEnv` merges defaults.ts, so the real one always carries this.
 		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+		CACHE_SCOPED_MAX_QUERY_CASES: 16,
 		MAX_BATCH_MUTATION: 100000,
 		// The Integration Tests' nested-relation path dynamically loads notifications -> mail, which
 		// resolves this at import time.
@@ -55,10 +63,18 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
+// The owning modules, not the barrel: the collaborator imports its siblings
+// directly, so a stand-in on the re-export would leave the real ones in its graph.
+vi.mock('../scoped-cache/purge.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/purge.js')>()),
 		purgeScopedCache: vi.fn(),
+	};
+});
+
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache/config.js')>()),
 		scopedCachePurgeEnabled: () => {
 			return true;
 		},
@@ -135,11 +151,11 @@ const schema = new SchemaBuilder()
 	.build();
 
 describe('Integration Tests', () => {
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(async () => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 
 		// PayloadService reaches for `get-service.js` lazily — a static import would be
@@ -176,7 +192,9 @@ describe('Integration Tests', () => {
 
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
-				service.readByQuery = vi.fn(async () => []);
+				service.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheFingerprints: [] });
+				});
 
 				const error = await service.readOne(999).catch((err) => err);
 
@@ -409,6 +427,35 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 			});
 
+			it(oneLine`
+				raises the sequence past the provided keys before a mixed batch is inserted
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const raiseSpy = vi
+					.spyOn(AutoIncrementHelperPostgres.prototype, 'raiseAutoIncrementSequence')
+					.mockResolvedValue(undefined);
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				// The end-of-transaction reset runs raw SQL the spread
+				// transaction does not carry.
+				const raw = vi.fn();
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) =>
+						callback({ ...db, batchInsert, raw } as any));
+
+				await batchService().createMany([{ id: 10, name: 'a' }, { name: 'b' }]);
+
+				expect(raiseSpy).toHaveBeenCalledWith('test', 'id', 10);
+				expect(batchInsert).toHaveBeenCalledTimes(1);
+
+				raiseSpy.mockRestore();
+				transactionSpy.mockRestore();
+			});
+
 			it('falls back to a per-row insert loop when the dialect does not preserve RETURNING order', async () => {
 				// mysql has no order-preserving RETURNING -> each row is inserted individually
 				vi.mocked(getDatabaseClient).mockReturnValue('mysql');
@@ -513,11 +560,11 @@ describe('Integration Tests', () => {
 			});
 
 			it('snapshots the same rows before and after the write', async () => {
-				// The pre-update capture covers the rows that are actually written; the
+				// The pre-update snapshot covers the rows that are actually written; the
 				// post-update one has to cover the same set or it re-reads rows nothing
 				// touched and purges their slices — the exact scope-path query the batch
 				// paths are trying to shed.
-				const snapshot = vi.spyOn(service as never, 'snapshotScopedCacheTags');
+				const snapshot = vi.spyOn(service.scopedCache, 'snapshot');
 
 				await service.updateBatch([
 					{ id: 1 },
@@ -991,11 +1038,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	shapesSchema.collections['settings']!.singleton = true;
 	shapesSchema.collections['settings']!.fields['theme']!.defaultValue = 'auto';
 
-	let db: MockedFunction<Knex>;
+	let db: Knex;
 	let tracker: Tracker;
 
 	beforeAll(() => {
-		db = vi.mocked(knex.default({ client: MockClient }));
+		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
 	});
 
@@ -1495,7 +1542,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const record = await service.readSingleton({ fields: ['*'] });
 
 			expect(record).toEqual({ id: null, theme: 'auto' });
-			expect(readMeta(record)?.scopedCacheTags).toBeDefined();
+			expect(readMeta(record)?.scopedCacheFingerprints).toBeDefined();
 		});
 
 		it('readSingleton returns the existing record when present', async () => {
@@ -1729,7 +1776,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		// SchemaBuilder can't set scoped_cache_fields, so inject them. `item` is an M2O
 		// whose target scopes `owner`, so a 2-hop `item.owner` path auto-composes; the
 		// explicit `item.owner` dedups against it; `name.foo` has a scalar head so it
-		// resolves to null and drops to the bare tag.
+		// resolves to null and drops to the bare pin.
 		pathSchema.collections['sub']!.scopedCacheFields = [
 			'item',
 			'item.owner',
@@ -1744,7 +1791,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const service = new ItemsService('sub', { knex: db, schema: pathSchema });
 			const result = await service.readByQuery({ fields: ['*'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toBeDefined();
+			expect(readMeta(result)?.scopedCacheFingerprints).toBeDefined();
 		});
 	});
 
@@ -1766,7 +1813,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			})
 			.build();
 
-		// The read path only builds tags — writing them is respond.ts's job — so naming
+		// The read path only builds pins — writing them is respond.ts's job — so naming
 		// a Redis config is enough to reach it, with no client involved.
 		beforeEach(() => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
@@ -1784,7 +1831,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			delete env['RELATIONAL_BATCH_SIZE'];
 		});
 
-		it('tags every collection it read, even when no row came back', async () => {
+		it('pins every collection it read, even when no row came back', async () => {
 			// `run-ast` returns early on an empty result, before the hook the pins are
 			// read from. The field map does not come from that hook — it is derived
 			// from the AST — and a read matching nothing must still be purgeable.
@@ -1799,12 +1846,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(result).toEqual([]);
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
 			// Nothing was nested, so nothing is pinned — but both collections the read
-			// touched have to carry the tag a write to them drops.
-			expect(tags).toContainEqual({ collection: 'owned_item' });
-			expect(tags).toContainEqual({ collection: 'owner' });
+			// touched have to carry the bare slice a write to them drops.
+			expect(pinned).toContain('owned_item');
+			expect(pinned).toContain('owner');
 		});
 
 		it('pins an M2O parent by the key the response nested', async () => {
@@ -1821,21 +1870,18 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owner.id', 'owner.space'],
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({
-				collection: 'owner',
-				field: 'id',
-				value: 100,
-				type: 'integer',
-			});
+			expect(pinned).toContain('owner:id=100');
 
-			// The regression this exists for: a bare tag beside the pin would make any
+			// The regression this exists for: a bare slice beside the pin would make any
 			// write to any owner drop the read, which is what the pin is here to stop.
-			expect(tags).not.toContainEqual({ collection: 'owner' });
+			expect(pinned).not.toContain('owner');
 
-			// The root keeps its bare tag — its filter bounds nothing.
-			expect(tags).toContainEqual({ collection: 'owned_item' });
+			// The root keeps its bare slice — its filter bounds nothing.
+			expect(pinned).toContain('owned_item');
 		});
 
 		it(oneLine`
@@ -1856,18 +1902,15 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				schema: nestedSchema,
 			}).readByQuery({ fields: ['label', 'owner.space'] });
 
-			expect(readMeta(result)?.scopedCacheTags).toContainEqual({
-				collection: 'owner',
-				field: 'id',
-				value: 100,
-				type: 'integer',
-			});
+			expect(scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			)).toContain('owner:id=100');
 
 			expect(result).toEqual([{ label: 'a', owner: { space: 's' } }]);
 		});
 
-		it('leaves a value-pinned root without its bare tag', async () => {
-			// The bare tag is what any write to the collection drops, so emitting it
+		it('leaves a value-pinned root without its bare slice', async () => {
+			// The bare slice is what any write to the collection drops, so emitting it
 			// beside the root's own slices would undo the root pin entirely.
 			tracker.on.select('owned_item').response([{ id: 1, label: 'a' }]);
 
@@ -1879,16 +1922,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				filter: { id: { _eq: 1 } },
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({
-				collection: 'owned_item',
-				field: 'id',
-				value: 1,
-				type: 'integer',
-			});
-
-			expect(tags).not.toContainEqual({ collection: 'owned_item' });
+			expect(pinned).toContain('owned_item:id=1');
+			expect(pinned).not.toContain('owned_item');
 		});
 
 		it('keeps a collection it reached across a to-many hop bare', async () => {
@@ -1909,16 +1948,58 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				fields: ['id', 'label', 'owned_sub_items.id'],
 			});
 
-			const tags = readMeta(result)?.scopedCacheTags;
+			const pinned = scopedCachePinKeys(
+				readMeta(result)?.scopedCacheFingerprints ?? [],
+			);
 
-			expect(tags).toContainEqual({ collection: 'owned_sub_item' });
-
-			expect(tags).not.toContainEqual({
-				collection: 'owned_sub_item',
-				field: 'id',
-				value: 7,
-				type: 'integer',
-			});
+			expect(pinned).toContain('owned_sub_item');
+			expect(pinned).not.toContain('owned_sub_item:id=7');
 		});
+	});
+});
+
+
+describe('Services / Items / purgeScopedCache', () => {
+	let db: Knex;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+	});
+
+	// Public callers reach the purge through `shouldClearCache`, which already rules a
+	// null cache out — so the guard below it is only reachable from the method itself.
+	it('skips the purge when the service has no cache', async () => {
+		const service = new ItemsService('test', { knex: db, schema });
+
+		service.scopedCache['cache'] = null;
+
+		await service.scopedCache.purge([
+			{ collection: 'test' },
+		]);
+
+		expect(purgeScopedCache).not.toHaveBeenCalled();
+	});
+
+	it('purges the collection when the service has a cache', async () => {
+		const service = new ItemsService('test', { knex: db, schema });
+
+		await service.scopedCache.purge([
+			{ collection: 'test' },
+		]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			service.cache,
+			'test',
+			[{ collection: 'test' }],
+			expect.anything(),
+			// A purge shown no rows carries none of their narrowing and sweeps its
+			// pins whole, as it did before composite pins. The declared list is the
+			// hooks' channel, and this purge answers for no hook.
+			{ declaredFingerprints: [] },
+		);
 	});
 });

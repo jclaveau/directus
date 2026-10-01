@@ -78,6 +78,14 @@ export const DEFAULTS = {
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
 	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
+	CACHE_SCOPED_MAX_QUERY_CASES: 16,
+	CACHE_SCOPED_INDEX_SCAN_COUNT: 1000,
+	CACHE_SCOPED_INDEX_TTL_FACTOR: 2,
+	CACHE_SCOPED_PURGE_RETRY_INTERVAL: '1m',
+	CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS: 100,
+	CACHE_SCOPED_EPOCH_TTL: '24h',
+	CACHE_SCOPED_INDEX_REAP_SCHEDULE: '0 * * * *',
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '5m',
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
 	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in
@@ -90,6 +98,15 @@ export const DEFAULTS = {
 	// platform-specific per-request headers here; globs allowed.
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: '',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
+	// How long a boot waits on the flush a changed build starts before it listens
+	// with the flush still running. The flush walks the whole response cache, and
+	// every worker of a deployment waits behind the one doing it.
+	CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT: '30s',
+	// How long `directus cache flush` waits before giving up. A command issued
+	// while Redis is unreachable waits on the next reconnect, and the retry policy
+	// spaces those out — the serverless recipe puts them 15 minutes apart — so
+	// without a deadline the deploy step calling it hangs instead of failing.
+	CACHE_FLUSH_TIMEOUT: '30s',
 	CACHE_CONTROL_S_MAXAGE: '0',
 	CACHE_SCHEMA: true,
 	CACHE_SCHEMA_MAX_ITERATIONS: 100,
@@ -98,6 +115,10 @@ export const DEFAULTS = {
 	// Dual-typed: `false` (disabled) or a size string like `8kb` — respond.ts keys off
 	// `!== false`. No single type-map entry fits, so it stays on per-value guessType.
 	CACHE_VALUE_MAX_SIZE: false,
+	// Node's fetch refuses a response past 16kb of headers in total, a batch write
+	// carries one pin per row and answers with both tag headers. `0` or an
+	// unparseable size emits every pin.
+	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly
 	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded
@@ -110,6 +131,13 @@ export const DEFAULTS = {
 	CACHE_STATS_MAX_BYTES: '2gb',
 	CACHE_STATS_MAX_BUFFER: 1_000_000,
 	CACHE_STATS_GAP_LOOKBACK: '1h',
+	CACHE_AUDIT_ENABLED: true,
+	// Unscheduled: a run replays every live entry uncached, a dev/preview cost.
+	CACHE_AUDIT_SCHEDULE: '',
+	CACHE_AUDIT_LIMIT: 0,
+	CACHE_AUDIT_MAX_DURATION: '10m',
+	CACHE_AUDIT_IGNORE_PATHS: '',
+	CACHE_AUDIT_RETENTION: '30d',
 
 	AUTH_PROVIDERS: '',
 	AUTH_DISABLE_DEFAULT: false,
@@ -125,6 +153,9 @@ export const DEFAULTS = {
 	MIGRATIONS_PATH: './migrations',
 	MIGRATIONS_WAIT_TIMEOUT: '5m',
 	MIGRATIONS_WAIT_INTERVAL: '2s',
+	MIGRATIONS_STATEMENT_TIMEOUT: '0',
+	MIGRATIONS_LOCK_TIMEOUT: '10s',
+	MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: '0',
 
 	EMAIL_FROM: 'no-reply@example.com',
 	EMAIL_VERIFY_SETUP: true,
@@ -135,7 +166,7 @@ export const DEFAULTS = {
 
 	MARKETPLACE_TRUST: 'sandbox',
 
-	TELEMETRY: true,
+	TELEMETRY: false,
 	TELEMETRY_URL: 'https://telemetry.directus.io',
 
 	ASSETS_CACHE_TTL: '30d',

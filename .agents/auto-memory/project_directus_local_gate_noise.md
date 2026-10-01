@@ -2,6 +2,7 @@
 name: project_directus_local_gate_noise
 description: on this directus fork `pnpm lint:style` (stylelint) fails locally with 6 pre-existing upstream errors while CI's Stylelint check is green — don't chase them; the gates that actually mean something are eslint + lint-style-changes
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

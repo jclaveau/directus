@@ -1,6 +1,6 @@
 import { FUNCTIONS } from '@directus/constants';
 import type { Filter } from '@directus/types';
-import { transform } from 'lodash-es';
+import { transform } from '../../../utils/lodash-es-used.js';
 
 /**
  * Replace functions from GraphQL format to Directus-Filter format

@@ -18,7 +18,10 @@ module.exports = [
 
 		// Control flow
 		min_uptime: process.env.PM2_MIN_UPTIME,
-		listen_timeout: process.env.PM2_LISTEN_TIMEOUT,
+		// PM2 gives a worker three seconds to report ready and then counts it
+		// as up regardless. A Directus worker takes longer than that to boot,
+		// so a reload would retire the old worker before the new one serves.
+		listen_timeout: process.env.PM2_LISTEN_TIMEOUT ?? 15000,
 		kill_timeout: process.env.PM2_KILL_TIMEOUT,
 		wait_ready: true,
 		max_restarts: process.env.PM2_MAX_RESTARTS,

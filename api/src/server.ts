@@ -4,12 +4,11 @@ import { getNodeEnv } from '@directus/utils/node';
 import type { TerminusOptions } from '@godaddy/terminus';
 import { createTerminus } from '@godaddy/terminus';
 import type { Request } from 'express';
-import type { ListenOptions } from 'net';
-import * as http from 'http';
-import * as https from 'https';
-import { once } from 'lodash-es';
+import type { ListenOptions } from 'node:net';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import qs from 'qs';
-import url from 'url';
+import url from 'node:url';
 import createApp from './app.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
@@ -19,11 +18,13 @@ import {
 	stopWatchingOutstandingMigrations,
 	watchOutstandingMigrations,
 } from './outstanding-migrations.js';
+import { reportInFlightRequests } from './processes/lib/report-in-flight.js';
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
-import { reportUnhandledRejection } from './utils/report-unhandled-rejection.js';
+import { guardUnhandledRejections } from './utils/report-unhandled-rejection.js';
 import { getAddress } from './utils/get-address.js';
+import { once } from './utils/lodash-es-used.js';
 import {
 	createLogsController,
 	createSubscriptionController,
@@ -106,6 +107,12 @@ export async function createServer(): Promise<http.Server> {
 		res.once('close', complete.bind(null, false));
 	});
 
+	// So a release can tell a worker with requests open from an idle one. The
+	// supervisor is handed a worker to stop rather than a size to stop at, and
+	// without this it would pick the pool's oldest worker, which under
+	// keep-alive is where the live requests are.
+	reportInFlightRequests(server);
+
 	if (toBoolean(env['WEBSOCKETS_ENABLED']) === true) {
 		createSubscriptionController(server);
 		createWebSocketController(server);
@@ -169,12 +176,14 @@ export async function createServer(): Promise<http.Server> {
 }
 
 export async function startServer(): Promise<void> {
-	// Registered here rather than in `createApp`, so it covers the server process and
-	// not the unit suite or a CLI command, where swallowing a rejection would hide a
-	// failure from the run that should have reported it. `uncaughtException` is
+	// Registered here rather than in `createApp`, so it covers the process that
+	// serves and not the unit suite or a command that runs once, where swallowing a
+	// rejection would hide a failure from the run that should have reported it. The
+	// autoscaler registers it too: what earns the guard is outliving a background
+	// dependency, not being a server. `uncaughtException` is
 	// deliberately NOT handled — by then the state that threw is unknown, and Node's
 	// own guidance is to exit.
-	process.on('unhandledRejection', reportUnhandledRejection);
+	guardUnhandledRejections();
 
 	// Held before anything can serve; the polling only starts once `createServer`
 	// has validated the connection, so a database that is simply down reports its

@@ -49,7 +49,7 @@ const schema = new SchemaBuilder()
 	.build();
 
 function sqlFor(filter: any) {
-	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	applyFilter(db, schema, queryBuilder, filter, 'article', {}, [], []);
 	const raw = queryBuilder.toSQL();

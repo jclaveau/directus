@@ -2,6 +2,7 @@
 name: reference_port_audit_check_new_baseline
 description: when auditing "which fork patches are unported", also diff against the NEW upstream baseline — upstream-merged patches get absorbed into the newer base tag and look falsely MISSING
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

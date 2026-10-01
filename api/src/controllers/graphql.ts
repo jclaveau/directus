@@ -19,10 +19,12 @@ router.use(
 
 		res.locals['payload'] = await service.execute(res.locals['graphqlParams']);
 		const gqlMeta = readMeta(res.locals['payload']);
-		res.locals['scopedCacheTags'] = gqlMeta?.scopedCacheTags;
+		res.locals['scopedCacheFingerprints'] = gqlMeta?.scopedCacheFingerprints;
 
-		res.locals['scopedCacheUnautopurgeableTags'] =
-			gqlMeta?.scopedCacheUnautopurgeableTags;
+		res.locals['scopedCacheUnautopurgeableFingerprints'] =
+			gqlMeta?.scopedCacheUnautopurgeableFingerprints;
+
+		res.locals['scopedCacheEpochs'] = gqlMeta?.scopedCacheEpochs;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;
@@ -45,10 +47,12 @@ router.use(
 
 		res.locals['payload'] = await service.execute(res.locals['graphqlParams']);
 		const gqlMeta = readMeta(res.locals['payload']);
-		res.locals['scopedCacheTags'] = gqlMeta?.scopedCacheTags;
+		res.locals['scopedCacheFingerprints'] = gqlMeta?.scopedCacheFingerprints;
 
-		res.locals['scopedCacheUnautopurgeableTags'] =
-			gqlMeta?.scopedCacheUnautopurgeableTags;
+		res.locals['scopedCacheUnautopurgeableFingerprints'] =
+			gqlMeta?.scopedCacheUnautopurgeableFingerprints;
+
+		res.locals['scopedCacheEpochs'] = gqlMeta?.scopedCacheEpochs;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;

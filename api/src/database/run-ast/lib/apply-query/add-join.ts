@@ -1,9 +1,9 @@
 import { InvalidQueryError } from '@directus/errors';
 import type { SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { clone } from 'lodash-es';
 import type { AliasMap } from '../../../../utils/get-column-path.js';
 import { getRelationInfo } from '../../../../utils/get-relation-info.js';
+import { clone } from '../../../../utils/lodash-es-used.js';
 import { getHelpers } from '../../../helpers/index.js';
 import { generateAlias } from './index.js';
 

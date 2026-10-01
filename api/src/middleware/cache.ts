@@ -1,7 +1,12 @@
 import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
-import { getCache, getCacheValue } from '../cache.js';
+import { getCache, getCacheValue, getCacheValues } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
+import {
+	cacheExpiresAtKey,
+	cachePinsKey,
+	storedScopedCachePinLabels,
+} from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -13,10 +18,12 @@ import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
-import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { setScopedCachePinsHeader } from '../utils/scoped-cache-pins-header.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
+import { cacheEnabled } from '../cache-settings.js';
 
 const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next) => {
 	const env = useEnv();
@@ -24,12 +31,23 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 	const logger = useLogger();
 
 	if (req.method.toLowerCase() !== 'get' && req.originalUrl?.startsWith('/graphql') === false) return next();
-	if (env['CACHE_ENABLED'] !== true) return next();
+
+	if (cacheEnabled() === false) {
+		return next();
+	}
+
 	if (!cache) return next();
 
 	// Reference point for the request→response duration telemetry: cache-serve
 	// latency on a HIT, response compute time (read by respond.ts) on a MISS.
 	res.locals['requestStart'] = Date.now();
+
+	// A cache-audit replay computes the answer the cache would be compared with,
+	// so it must neither be served from it nor be written back into it.
+	if (isCacheAuditReplay(req)) {
+		res.locals['cache'] = false;
+		return next();
+	}
 
 	if (shouldSkipCache(req)) {
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
@@ -38,10 +56,23 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 	const { redisKey, cacheKey } = await getCacheKey(req);
 
-	let cachedData;
+	// `respond` needs the same key on a miss, and building it re-runs the policy
+	// ip-access lookup. `sanitizeQuery` runs before this middleware, so nothing the
+	// key is derived from moves between here and there. One identity, spelled twice:
+	// what Redis is keyed by, and the fixed-length one the stats tables carry.
+	res.locals['httpRequestCacheKey'] = { redisKey, cacheKey };
 
+	let cachedData;
+	let expiresMeta;
+
+	// Together, so a HIT costs one round trip rather than two: the sidecar is read
+	// on every hit anyway, and asking for it alongside a payload that turns out to
+	// be absent costs one more key in the same MGET, not another trip.
 	try {
-		cachedData = await getCacheValue(cache, redisKey);
+		[cachedData, expiresMeta] = await getCacheValues(cache, [
+			redisKey,
+			cacheExpiresAtKey(redisKey),
+		]);
 	} catch (err: any) {
 		logger.warn(err, `[cache] Couldn't read key ${redisKey}. ${err.message}`);
 
@@ -58,30 +89,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 	}
 
 	if (cachedData) {
-		let cacheExpiryDate;
-		let expiresMeta;
-
-		try {
-			expiresMeta = await getCacheValue(cache, `${redisKey}__expires_at`);
-			cacheExpiryDate = expiresMeta?.exp;
-		} catch (err: any) {
-			logger.warn(
-				err,
-				`[cache] Couldn't read key ${redisKey}__expires_at. ${err.message}`,
-			);
-
-			if (cacheStatsActive()) {
-				void reportCacheAnomaly(
-					req,
-					'redis_error',
-					err?.message ?? String(err),
-				).catch(() => {});
-			}
-
-			if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
-			return next();
-		}
-
+		const cacheExpiryDate = expiresMeta?.exp;
 		const cacheTTL = cacheExpiryDate ? cacheExpiryDate - Date.now() : undefined;
 
 		res.setHeader('Cache-Control', getCacheControlHeader(req, cacheTTL, true, true));
@@ -109,22 +117,21 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		}
 
 		if (env['CACHE_TAGS_HEADER']) {
-			// Dev-only: pins were persisted to a `${redisKey}__tags` sibling at write
+			// Dev-only: pins were persisted to a `${redisKey}__pins` sibling at write
 			// time (respond.ts); the read that builds them is skipped on a HIT.
 			try {
-				const stored = await getCacheValue(cache, `${redisKey}__tags`);
+				const stored = await getCacheValue(cache, cachePinsKey(redisKey));
 
 				// Same guard utils.ts puts on this sidecar: anything else flattens into
 				// a garbled header instead of being skipped.
-				if (typeof stored?.tags === 'string' && stored.tags !== '') {
-					res.setHeader(
-						`${env['CACHE_TAGS_HEADER']}`,
-						printableScopedCacheTags(stored.tags),
-					);
+				const labels = storedScopedCachePinLabels(stored);
+
+				if (labels) {
+					setScopedCachePinsHeader(res, `${env['CACHE_TAGS_HEADER']}`, labels);
 				}
 			}
 			catch (err: any) {
-				logger.warn(err, `[cache] __tags read failed: ${err.message}`);
+				logger.warn(err, `[cache] __pins read failed: ${err.message}`);
 			}
 		}
 

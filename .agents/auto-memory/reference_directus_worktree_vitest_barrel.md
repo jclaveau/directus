@@ -2,6 +2,7 @@
 name: reference_directus_worktree_vitest_barrel
 description: vitest in a git-worktree with symlinked node_modules can't resolve stream-json's ESM subpath via the services barrel — mock the barrel-reaching import or import the concrete module
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

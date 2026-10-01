@@ -2,6 +2,7 @@
 name: project_directus_dist_release_label
 description: The `dist-release` PR label builds a `<branch>-dist` for a PR head via release-fork.yml, what the PR path needed that the push path did not, and the race it exposed
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

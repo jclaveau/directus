@@ -40,6 +40,8 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		createdAt: 0,
 		expiresAt: null,
 		lastHitAt: null,
+		auditedAt: null,
+		verifiedAt: 0,
 		size: 0,
 		hits: 0,
 		misses: 0,
@@ -217,6 +219,17 @@ describe('sortEntries', () => {
 
 		expect(sortEntries(rows, { field: 'expiresAt', dir: -1 }).map((r) => r.key))
 			.toEqual(['a', 'c', 'b']);
+	});
+
+	it('sorts by when an entry was last verified', () => {
+		const rows = [
+			entry({ key: 'a', verifiedAt: 2000 }),
+			entry({ key: 'b', verifiedAt: 3000 }),
+			entry({ key: 'c', verifiedAt: 1000 }),
+		];
+
+		expect(sortEntries(rows, { field: 'verifiedAt', dir: 1 }).map((r) => r.key))
+			.toEqual(['c', 'a', 'b']);
 	});
 });
 

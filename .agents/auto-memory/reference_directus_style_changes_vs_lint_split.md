@@ -2,6 +2,7 @@
 name: reference_directus_style_changes_vs_lint_split
 description: Directus CI "Style (changes)" gate checks line WIDTH only; full-lint rules (padding-line-between-statements etc.) fire in the separate "Lint" job — a width-motivated wrap can pass one and fail the other
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

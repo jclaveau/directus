@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		mockCache: {},
 		getCacheValue: vi.fn(),
+		getCacheValues: vi.fn(),
 		warn: vi.fn(),
 		shouldSkipCache: vi.fn(),
 		getCacheKey: vi.fn(),
@@ -23,12 +25,14 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-const { getCacheValue, warn, shouldSkipCache, getCacheKey } = mocks;
+const { getCacheValue, getCacheValues, warn, shouldSkipCache, getCacheKey }
+	= mocks;
 
 vi.mock('../cache.js', () => {
 	return {
 		getCache: () => ({ cache: mocks.mockCache }),
 		getCacheValue: mocks.getCacheValue,
+		getCacheValues: mocks.getCacheValues,
 	};
 });
 
@@ -73,7 +77,12 @@ vi.mock('../utils/report-cache-anomaly.js', () => {
 	return { reportCacheAnomaly: vi.fn(() => Promise.resolve()) };
 });
 
+vi.mock('../utils/cache-audit-replay.js', () => {
+	return { isCacheAuditReplay: vi.fn(() => false) };
+});
+
 import checkCacheMiddleware from './cache.js';
+import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -99,9 +108,9 @@ function makeReq() {
 	} as unknown as Request;
 }
 
-// A cache HIT: payload + expiry sibling exist; `tags` seeds the `__tags` sibling
-// (undefined = absent). `tagsThrows` makes the sibling read reject (hits the catch).
-function primeHit(tags?: unknown, tagsThrows = false) {
+// A cache HIT: payload + expiry sibling exist; `pins` seeds the `__pins` sibling
+// (undefined = absent). `pinsThrows` makes the sibling read reject (hits the catch).
+function primeHit(pins?: unknown, pinsThrows = false) {
 	getCacheValue.mockImplementation(async (_cache: unknown, key: string) => {
 		if (key === 'cache-key') {
 			return { data: [1] };
@@ -111,16 +120,16 @@ function primeHit(tags?: unknown, tagsThrows = false) {
 			return { exp: Date.now() + 1000 };
 		}
 
-		if (key === 'cache-key__tags') {
-			if (tagsThrows) {
+		if (key === 'cache-key__pins') {
+			if (pinsThrows) {
 				throw new Error('boom');
 			}
 
-			if (tags === undefined) {
+			if (pins === undefined) {
 				return undefined;
 			}
 
-			return { tags };
+			return { pins };
 		}
 
 		return undefined;
@@ -146,6 +155,7 @@ function primeEnrichedHit() {
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	delete env['CACHE_TAGS_HEADER'];
+	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
 	shouldSkipCache.mockReturnValue(false);
 
 	getCacheKey.mockResolvedValue({
@@ -155,6 +165,14 @@ beforeEach(() => {
 
 	vi.mocked(cacheStatsActive).mockReturnValue(false);
 	vi.mocked(readCacheMissGap).mockResolvedValue(null);
+	vi.mocked(isCacheAuditReplay).mockReturnValue(false);
+
+	// Answered from the per-key mock every fixture below already sets, so a batched
+	// read means exactly what the same keys read one at a time meant — including
+	// rejecting when any one of them does.
+	getCacheValues.mockImplementation((cache: unknown, keys: string[]) => {
+		return Promise.all(keys.map((key) => getCacheValue(cache, key)));
+	});
 });
 
 afterEach(() => {
@@ -162,9 +180,26 @@ afterEach(() => {
 });
 
 describe('checkCacheMiddleware', () => {
-	test('HIT emits the __tags sibling under CACHE_TAGS_HEADER', async () => {
+	test(oneLine`
+		a cache-audit replay is neither served from the cache nor stored
+	`, async () => {
+		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
+		primeHit(['articles:owner=U1']);
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		expect(next).toHaveBeenCalled();
+		expect(res.locals['cache']).toBe(false);
+		expect(res.json).not.toHaveBeenCalled();
+		expect(getCacheValue).not.toHaveBeenCalled();
+		expect(res.setHeader).not.toHaveBeenCalled();
+	});
+
+	test('HIT emits the __pins sibling under CACHE_TAGS_HEADER', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
-		primeHit('articles:owner=U1');
+		primeHit(['articles:owner=U1']);
 
 		const res = makeRes();
 
@@ -178,7 +213,21 @@ describe('checkCacheMiddleware', () => {
 		expect(res.json).toHaveBeenCalledWith({ data: [1] });
 	});
 
-	test('HIT emits no tags header when the __tags sibling is empty', async () => {
+	test('HIT clamps the re-emitted sibling to the header size cap', async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
+		primeHit(['a:b=1', 'a:b=2']);
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags', 'a:b=1');
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags-omitted', '1');
+		expect(res.json).toHaveBeenCalledWith({ data: [1] });
+	});
+
+	test('HIT emits no tags header when the __pins sibling is empty', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(undefined);
 
@@ -190,11 +239,12 @@ describe('checkCacheMiddleware', () => {
 		expect(names).not.toContain('X-Scoped-Cache-Tags');
 	});
 
-	// utils.ts reads this sidecar behind `typeof tagged?.tags === 'string'`; without
-	// the same guard a non-string flattens into a garbled header instead of skipping.
-	test('HIT skips the tags header when the sibling is not a string', async () => {
+	// The same reader utils.ts puts on this sidecar: an entry written before the
+	// sidecar listed its labels, or anything else, is skipped rather than
+	// flattened into a garbled header.
+	test('HIT skips the tags header when the sibling lists no labels', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
-		primeHit(['articles:owner=U1']);
+		primeHit('articles:owner=U1');
 
 		const res = makeRes();
 
@@ -204,7 +254,7 @@ describe('checkCacheMiddleware', () => {
 		expect(names).not.toContain('X-Scoped-Cache-Tags');
 	});
 
-	test('a __tags read failure is caught and logged, not thrown', async () => {
+	test('a __pins read failure is caught and logged, not thrown', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(undefined, true);
 
@@ -237,6 +287,20 @@ describe('checkCacheMiddleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith('x-cache-status', 'MISS');
 		expect(next).toHaveBeenCalled();
+	});
+
+	test('reads the payload and its expiry sibling in one call', async () => {
+		primeHit();
+
+		await checkCacheMiddleware(makeReq(), makeRes(), next);
+
+		// The round trip the batch saves. Two awaited reads satisfy every other
+		// assertion in this file and cost twice as much on every hit, so nothing
+		// else here would notice them coming back.
+		expect(getCacheValues).toHaveBeenCalledWith(
+			expect.anything(),
+			['cache-key', 'cache-key__expires_at'],
+		);
 	});
 
 	test('a value read failure is logged and falls through as a MISS', async () => {

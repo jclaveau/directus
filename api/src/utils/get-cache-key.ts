@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { Request } from 'express';
 import hash from 'object-hash';
-import url from 'url';
+import url from 'node:url';
 import getDatabase from '../database/index.js';
 import { fetchPoliciesIpAccess } from '../permissions/modules/fetch-policies-ip-access/fetch-policies-ip-access.js';
 import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.js';

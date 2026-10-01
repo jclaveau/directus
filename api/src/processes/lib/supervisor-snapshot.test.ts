@@ -16,15 +16,13 @@ vi.mock('../../logger/index.js', () => {
 	return { useLogger: () => logger };
 });
 
-import {
-	readSupervisedProcesses,
-	supervisorAvailable,
-} from './supervisor-snapshot.js';
+import { readSupervisedProcesses } from './supervisor-snapshot.js';
 
 const platform = { ...process.env };
 
 beforeEach(() => {
 	process.env['PM2_HOME'] = '/tmp/pm2';
+	process.env['pm_id'] = '0';
 	pm2.list.mockReset();
 	logger.warn.mockReset();
 });
@@ -42,15 +40,9 @@ function listing(apps: unknown[]) {
 	);
 }
 
-test('PM2_HOME is how a supervised process knows it is supervised', () => {
-	expect(supervisorAvailable()).toBe(true);
-
-	delete process.env['PM2_HOME'];
-	expect(supervisorAvailable()).toBe(false);
-});
-
 test('There is no list to read where there is no supervisor', async () => {
 	delete process.env['PM2_HOME'];
+	delete process.env['pm_id'];
 
 	await expect(readSupervisedProcesses()).resolves.toBeNull();
 	expect(pm2.list).not.toHaveBeenCalled();

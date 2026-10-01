@@ -4,8 +4,8 @@
 
 import type { Accountability, Query, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { cloneDeep, uniq } from 'lodash-es';
 import type { AST } from '../../types/index.js';
+import { cloneDeep, uniq } from '../../utils/lodash-es-used.js';
 import { parseFields } from './lib/parse-fields.js';
 import { getAllowedSort } from './utils/get-allowed-sort.js';
 

@@ -2,6 +2,7 @@
 name: project_directus_cache_entries_query_perf
 description: Measured prod truth about listCacheEntries — never hit the statement timeout, the wide GROUP BY is NOT what spills, and the entries window default never reaches the admin page (refutes PR #377's diagnosis)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

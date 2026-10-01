@@ -2,6 +2,7 @@
 name: reference_directus_share_auth
 description: how Directus public shares authenticate & resolve permissions — token hardcodes role:null, permissions resolve at consume from directus_shares.role, routing accountability ≠ permission accountability
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

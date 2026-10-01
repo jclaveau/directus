@@ -1,7 +1,7 @@
 import type { Item, SchemaOverview } from '@directus/types';
 import { toArray } from '@directus/utils';
-import { cloneDeep, pick } from 'lodash-es';
 import type { AST, NestedCollectionNode } from '../../../types/ast.js';
+import { cloneDeep, pick } from '../../../utils/lodash-es-used.js';
 import { applyFunctionToColumnName } from './apply-function-to-column-name.js';
 
 export function removeTemporaryFields(

@@ -2,6 +2,7 @@
 name: feedback_directus_ci_watch_skip_preview
 description: When watching CI on this repo, the Preview Admin run is not a CI check — never wait on it and never mention it in a CI report, whatever state it is in.
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

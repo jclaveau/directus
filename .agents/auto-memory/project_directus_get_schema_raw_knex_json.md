@@ -2,6 +2,7 @@
 name: project_directus_get_schema_raw_knex_json
 description: api get-schema reads directus_collections via RAW knex.select (bypasses the cast-json items pipeline), so JSON meta columns come back dialect-native — parse with @directus/utils parseJSON + handle the already-array PG case
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

@@ -5,9 +5,12 @@ import { systemCollectionRows } from '@directus/system-data';
 import type { Filter, SchemaOverview } from '@directus/types';
 import { parseJSON, toArray } from '@directus/utils';
 import type { Knex } from 'knex';
-import { mapValues } from 'lodash-es';
 import { useBus } from '../bus/index.js';
-import { getMemorySchemaCache, setMemorySchemaCache } from '../cache.js';
+import {
+	getMemorySchemaCache,
+	getSchemaCacheGeneration,
+	setMemorySchemaCache,
+} from '../cache.js';
 import { ALIAS_TYPES } from '../constants.js';
 import getDatabase from '../database/index.js';
 import { useLock } from '../lock/index.js';
@@ -16,6 +19,7 @@ import { RelationsService } from '../services/relations.js';
 import getDefaultValue from './get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from './get-field-system-rows.js';
 import getLocalType from './get-local-type.js';
+import { mapValues } from './lodash-es-used.js';
 import { parseJsonFieldList } from './parse-json-field-list.js';
 
 const logger = useLogger();
@@ -72,6 +76,8 @@ export async function getSchema(
 		const timeout: Promise<any> = new Promise((_, reject) =>
 			setTimeout(reject, env['CACHE_SCHEMA_SYNC_TIMEOUT'] as number),);
 
+		const waitGeneration = getSchemaCacheGeneration();
+
 		const subscription = new Promise<SchemaOverview>((resolve, reject) => {
 			bus.subscribe(messageKey, busListener).catch(reject);
 
@@ -83,7 +89,11 @@ export async function getSchema(
 				}
 
 				try {
-					setMemorySchemaCache(options.schema);
+					// Built by a process that may have read before this node's last clear.
+					if (waitGeneration === getSchemaCacheGeneration()) {
+						setMemorySchemaCache(options.schema);
+					}
+
 					resolve(options.schema);
 				}
 				catch (e) {
@@ -105,7 +115,26 @@ export async function getSchema(
 		const database = options?.database || getDatabase();
 		const schemaInspector = createInspector(database);
 
-		schema = await getDatabaseSchema(database, schemaInspector);
+		let buildGeneration: number;
+		let builtSchema: SchemaOverview;
+		let buildCount = 0;
+
+		do {
+			buildGeneration = getSchemaCacheGeneration();
+			builtSchema = await getDatabaseSchema(database, schemaInspector);
+			buildCount++;
+		} while (
+			buildGeneration !== getSchemaCacheGeneration()
+			&& buildCount < MAX_ATTEMPTS
+		);
+
+		// Publishing null makes the waiters retry rather than take a schema a newer
+		// write already outdated.
+		if (buildGeneration !== getSchemaCacheGeneration()) {
+			return builtSchema;
+		}
+
+		schema = builtSchema;
 		setMemorySchemaCache(schema);
 		return schema;
 	}

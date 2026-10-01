@@ -2,6 +2,7 @@
 name: project_directus_issue392_purge_fanout
 description: Issue #392 — a purge emits one tag per key since #358, so a large failed purge cannot even be recorded; my reco is a bound at tag PRODUCTION, N measured from the redis crossover, awaiting jean's call
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

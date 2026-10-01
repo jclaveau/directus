@@ -2,6 +2,7 @@
 name: project_directus_blackbox_single_file_locally
 description: how to run ONE blackbox file locally without the run hanging forever — the completion barrier, the --shard flag the sequencer needs, and why the before-files must run
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

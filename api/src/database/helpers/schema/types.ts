@@ -182,6 +182,21 @@ export abstract class SchemaHelper extends DatabaseHelper {
 	}
 
 	/**
+	 * Scope a migration's timeouts to the transaction it runs in.
+	 *
+	 * A migration inherits the session settings of a database that, where it is
+	 * shared with an API, is tuned for requests: a bounded statement, a short
+	 * lock wait, a session not left idle in a transaction. Schema work is none of
+	 * those things, and connects as the same role, so only the transaction can
+	 * tell the two apart.
+	 *
+	 * A dialect that can scope a setting to a transaction does it here. One that
+	 * cannot leaves the migration with whatever the server gave it, which is how
+	 * every dialect behaved before any of them could.
+	 */
+	async relaxMigrationTimeouts(_trx: Knex.Transaction): Promise<void> {}
+
+	/**
 	 * What `tables` occupy together, in bytes, or null where there is no cheap
 	 * measure to be had. Null rather than zero: a caller sizing them against a
 	 * budget must be able to tell "nothing there" from "cannot see".

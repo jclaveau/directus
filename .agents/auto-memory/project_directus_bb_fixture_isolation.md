@@ -2,6 +2,7 @@
 name: project_directus_bb_fixture_isolation
 description: Adding a relation field to a collection an existing blackbox test reads with fields=* joins it into EVERY read in that file — put new fixtures on their own collections
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

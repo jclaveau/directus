@@ -7,7 +7,7 @@ node_modules/
 # Builds / Caches
 dist/
 coverage/
-.histoire/
+.poveste/
 *.tsbuildinfo
 **/.vitepress/cache/
 **/.vitepress/.temp/
@@ -49,5 +49,13 @@ TODO
 /api/extensions/
 /tests/blackbox/uploads/
 /tests/blackbox/server-log-*
+/tests/blackbox/server-logs/
+/tests/blackbox/timings/
+/tests/blackbox/runner-load/
 /tests/blackbox/sequencer-data.json
 /packages/extensions-sdk/temp-extension-*/
+
+# Benchmark output and its throwaway extensions dir
+tests/perf/results/
+tests/perf/extensions/
+tests/perf/cache-extensions/

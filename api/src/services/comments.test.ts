@@ -3,6 +3,7 @@ import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
+import { withMeta } from '../utils/read-meta.js';
 import { CommentsService } from './comments.js';
 import { ItemsService } from './items.js';
 import { NotificationsService } from './notifications.js';
@@ -40,7 +41,10 @@ vi.mock('../permissions/modules/validate-access/validate-access.js', () => ({
 
 vi.mock('./notifications.js', () => {
 	const NotificationsService = vi.fn();
-	NotificationsService.prototype.createOne = vi.fn().mockResolvedValue('notification-id');
+
+	NotificationsService.prototype.createOne = vi.fn()
+		.mockResolvedValue('notification-id');
+
 	return { NotificationsService };
 });
 
@@ -66,7 +70,7 @@ const accountability: Accountability = {
 };
 
 describe('Services / Comments', () => {
-	const db = vi.mocked(knex.default({ client: MockClient }));
+	const db = knex.default({ client: MockClient });
 
 	beforeEach(() => {
 		vi.mocked(getCache).mockReturnValue({
@@ -79,31 +83,35 @@ describe('Services / Comments', () => {
 
 	afterEach(() => {
 		vi.restoreAllMocks();
+		// Restoring only unpatches the spies since vitest 4 — the module mocks keep
+		// their calls until they are reset.
+		vi.resetAllMocks();
 	});
 
 	it('should expand a valid @mention into its user preview in the notification message (line 137)', async () => {
-		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['comment-pk-1']);
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-1']);
 
 		const service = new CommentsService({ knex: db, schema, accountability });
 
 		vi.mocked(UsersService.prototype.readOne)
-			.mockResolvedValueOnce({
+			.mockResolvedValueOnce(withMeta({
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
 				email: 'sam@x.com',
-			})
-			.mockResolvedValueOnce({
+			}, { scopedCacheFingerprints: [] }))
+			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
 				role: { id: null },
-			});
+			}, { scopedCacheFingerprints: [] }));
 
-		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue([
+		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([
 			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
-		]);
+		], { scopedCacheFingerprints: [] }));
 
 		const result = await service.createMany([
 			{
@@ -131,7 +139,8 @@ describe('Services / Comments', () => {
 	});
 
 	it('should early-continue without sending a notification when there are no mentions (lines 68-70)', async () => {
-		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['comment-pk-2']);
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-2']);
 
 		const service = new CommentsService({ knex: db, schema, accountability });
 

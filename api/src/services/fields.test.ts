@@ -6,7 +6,7 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Knex } from 'knex';
 import type { Tracker } from 'knex-mock-client';
-import { readMeta } from '../utils/read-meta.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
 
@@ -97,17 +97,38 @@ describe('Services / Fields', () => {
 	// Last, since the spies below survive clearAllMocks and would otherwise leak the
 	// stubbed columnInfo into readOne (which needs the real one to throw).
 	describe('readAll', () => {
-		it('tags the result with directus_fields', async () => {
-			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
+		it('pins the result with directus_fields', async () => {
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
+
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+
 			tracker.on.select('directus_fields').response([]);
 
 			const service = new FieldsService({ knex: db, schema });
 			const result = await service.readAll();
 
-			expect(readMeta(result)?.scopedCacheTags).toEqual([
+			expect(readMeta(result)?.scopedCacheFingerprints).toEqual([
 				{ collection: 'directus_fields' },
 			]);
+		});
+
+		it('reads only the field rows of the given collection', async () => {
+			const readByQuery = vi
+				.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(withMeta([], { scopedCacheFingerprints: [] }));
+
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+
+			tracker.on.select('directus_fields').response([]);
+
+			const service = new FieldsService({ knex: db, schema });
+			await service.readAll('test');
+
+			expect(readByQuery).toHaveBeenCalledWith({
+				filter: { collection: { _eq: 'test' } },
+				limit: -1,
+			});
 		});
 	});
 });

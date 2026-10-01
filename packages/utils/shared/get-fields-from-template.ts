@@ -1,4 +1,4 @@
-import { isNil } from 'lodash-es';
+import { isNil } from './lodash-es-used.js';
 
 export function getFieldsFromTemplate(template?: string | null): string[] {
 	if (isNil(template)) return [];

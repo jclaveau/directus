@@ -85,6 +85,24 @@ vi.mock('../outstanding-migrations.js', () => {
 	return { outstandingMigrationsHoldingHealth: () => holding.value };
 });
 
+interface PoolReading {
+	failedWorkers: number;
+	onlineWorkers: number;
+	targetWorkers: number;
+}
+
+const pool: { value: PoolReading | null; cameUp: boolean } = {
+	value: null,
+	cameUp: true,
+};
+
+vi.mock('../processes/lib/pool-health.js', () => {
+	return {
+		poolHealthReading: () => pool.value,
+		poolHasComeUp: () => pool.cameUp,
+	};
+});
+
 async function healthOf(accountability: { admin: boolean } | null) {
 	vi.resetModules();
 	const { ServerService } = await import('./server.js');
@@ -105,6 +123,8 @@ describe('ServerService health', () => {
 		mockEnv['EMAIL_TRANSPORT'] = 'sendmail';
 		mockEnv['PUBLIC_URL'] = 'http://localhost:8055';
 		holding.value = [];
+		pool.value = null;
+		pool.cameUp = true;
 	});
 
 	afterEach(() => {
@@ -148,6 +168,85 @@ describe('ServerService health', () => {
 
 		expect(data['status']).toBe('error');
 		expect(data['checks']['migrations'][0].observedValue).toBe('unknown');
+	});
+
+	it('says nothing about the pool while nothing has reported one', async () => {
+		const data = await healthOf({ admin: true });
+
+		expect(data['checks']['processes:pool']).toBeUndefined();
+		expect(data['status']).toBe('ok');
+	});
+
+	it('says nothing about a pool the supervisor is keeping whole', async () => {
+		pool.value = { failedWorkers: 0, onlineWorkers: 4, targetWorkers: 4 };
+
+		const data = await healthOf({ admin: true });
+
+		expect(data['checks']['processes:pool']).toBeUndefined();
+		expect(data['status']).toBe('ok');
+	});
+
+	it('warns for the workers the supervisor could not keep running', async () => {
+		pool.value = { failedWorkers: 2, onlineWorkers: 3, targetWorkers: 5 };
+
+		const data = await healthOf({ admin: true });
+
+		// A warning, so the 200 stands: the workers this one answers for are
+		// serving, and a platform reading an error takes them out with it.
+		expect(data['status']).toBe('warn');
+
+		expect(data['checks']['processes:pool']).toEqual([
+			{
+				componentType: 'system',
+				status: 'warn',
+				observedValue: 2,
+				observedUnit: 'workers',
+				output: 'The supervisor could not keep every worker running',
+			},
+		]);
+	});
+
+	it('holds a deployment whose pool has not come up', async () => {
+		pool.cameUp = false;
+		pool.value = { failedWorkers: 0, onlineWorkers: 1, targetWorkers: 4 };
+
+		const data = await healthOf({ admin: true });
+
+		// An error, so a platform gating its switchover on this leaves the
+		// previous deployment serving rather than moving traffic onto a
+		// fraction of the pool that was asked for.
+		expect(data['status']).toBe('error');
+
+		expect(data['checks']['processes:pool']).toEqual([
+			{
+				componentType: 'system',
+				status: 'error',
+				observedValue: 1,
+				observedUnit: 'workers',
+				output: 'The pool has not reached the size it serves with',
+			},
+		]);
+	});
+
+	it('holds a pool it has not heard anything about at all', async () => {
+		pool.cameUp = false;
+
+		const data = await healthOf({ admin: true });
+
+		// A deployment that asked for a prewarm and has heard nothing knows
+		// less than one that has: it cannot report itself ready on that.
+		expect(data['status']).toBe('error');
+		expect(data['checks']['processes:pool'][0].observedValue).toBe(0);
+	});
+
+	it('leaves an outstanding migration the error it is', async () => {
+		holding.value = ['20990101A'];
+		pool.value = { failedWorkers: 2, onlineWorkers: 3, targetWorkers: 5 };
+
+		const data = await healthOf({ admin: true });
+
+		expect(data['status']).toBe('error');
+		expect(data['checks']['processes:pool']).toHaveLength(1);
 	});
 
 	it('tells a non-admin only the status', async () => {

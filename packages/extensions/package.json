@@ -12,6 +12,8 @@
 	"license": "MIT",
 	"author": "Rijk van Zanten <rijkvanzanten@me.com>",
 	"type": "module",
+	"//sideEffects": "None of the modules here do anything at import time. Without this an api extension bundling `defineHook` keeps every zod schema alive with it — 125 KB for an identity function.",
+	"sideEffects": false,
 	"exports": {
 		".": "./dist/index.js",
 		"./node": "./dist/node.js",
@@ -27,7 +29,8 @@
 		"//build-no-clean": "build:node and build:shared both emit into dist/. When pnpm runs them sequentially (e.g. workspace-concurrency=1), the second tsdown cleans the first's output (index.js/node.js) before writing its own. --no-clean disables that step so both sets of outputs coexist.",
 		"build": "pnpm run '/^build:.*/'",
 		"build:node": "tsdown src/node.ts --tsconfig src/node/tsconfig.json --out-dir dist --dts --no-clean",
-		"build:shared": "tsdown src/index.ts --tsconfig src/tsconfig.json --out-dir dist --dts --no-clean",
+		"//build-unbundle": "The shared entry ships to extension bundlers. Emitting one module per source file is what lets them drop the zod-backed schemas when only the define* helpers are imported; a single bundled file keeps the two inseparable.",
+		"build:shared": "tsdown src/index.ts --tsconfig src/tsconfig.json --out-dir dist --dts --no-clean --unbundle",
 		"dev": "pnpm run '/^build:.*/' --watch",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"

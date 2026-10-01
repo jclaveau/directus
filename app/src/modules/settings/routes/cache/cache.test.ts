@@ -13,7 +13,11 @@ vi.mock('@/api', () => {
 // Capture the options the component hands ApexCharts so a test can drive its
 // callbacks (tooltip renderer, axis formatters) without a real SVG chart.
 const chartMock = vi.hoisted(() => {
-	return { configs: [] as any[], hidden: [] as string[] };
+	return {
+		configs: [] as any[],
+		hidden: [] as string[],
+		updatedElements: [] as unknown[],
+	};
 });
 
 // The page mounts two charts (counts + latency); record every config so a test can
@@ -21,7 +25,10 @@ const chartMock = vi.hoisted(() => {
 vi.mock('apexcharts', () => {
 	return {
 		default: class {
-			constructor(_el: unknown, config: any) {
+			chartElement: unknown;
+
+			constructor(chartElement: unknown, config: any) {
+				this.chartElement = chartElement;
 				chartMock.configs.push(config);
 			}
 
@@ -31,6 +38,7 @@ vi.mock('apexcharts', () => {
 
 			updateOptions(config: any) {
 				chartMock.configs.push(config);
+				chartMock.updatedElements.push(this.chartElement);
 
 				return Promise.resolve();
 			}
@@ -63,6 +71,7 @@ vi.mock('@/utils/notify', () => {
 import api from '@/api';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import CachePage from './cache.vue';
+import CacheSettingsPanel from './cache-settings-panel.vue';
 
 const ENTRIES = [
 	{
@@ -86,6 +95,8 @@ const ENTRIES = [
 		createdAt: Date.now() - 5000,
 		expiresAt: Date.now() + 60000,
 		lastHitAt: Date.now() - 1000,
+		auditedAt: Date.now() - 3000,
+		verifiedAt: Date.now() - 3000,
 	},
 	{
 		key: 'bob-key-000000000000',
@@ -108,6 +119,8 @@ const ENTRIES = [
 		createdAt: Date.now() - 8000,
 		expiresAt: Date.now() + 30000,
 		lastHitAt: Date.now() - 2000,
+		auditedAt: null,
+		verifiedAt: Date.now() - 8000,
 	},
 	{
 		key: 'sys-key-000000000000',
@@ -130,6 +143,8 @@ const ENTRIES = [
 		createdAt: Date.now(),
 		expiresAt: null,
 		lastHitAt: null,
+		auditedAt: null,
+		verifiedAt: Date.now(),
 	},
 ];
 
@@ -201,6 +216,10 @@ const global = {
 		},
 	},
 	components: { SearchInput, PrivateView, VPagination, VSelect },
+	// The audit and settings panels read their own routes and have their own
+	// tests; here they would only be handed this file's answers for the page's
+	// routes.
+	stubs: { CacheAuditPanel: true, CacheSettingsPanel: true },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
@@ -252,6 +271,7 @@ describe('CachePage', () => {
 		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
 		chartMock.configs = [];
 		chartMock.hidden = [];
+		chartMock.updatedElements = [];
 
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
@@ -821,8 +841,8 @@ describe('CachePage', () => {
 				const data = {
 					exists: true,
 					value: { hello: 'world' },
-					tags: ['articles', 'articles:id=5'],
-					tagCounts: { 'articles': 4, 'articles:id=5': 12 },
+					pins: ['articles', 'articles:id=5'],
+					pinCounts: { 'articles': 4, 'articles:id=5': 12 },
 					expiry: { exp: 0, createdAt: 0, ttlMs: 300000 },
 					sizes: { uncompressed: 2048, compressed: 512 },
 					tombstone: null,
@@ -847,15 +867,34 @@ describe('CachePage', () => {
 		});
 
 		const text = wrapper.text();
-		// descriptor rows + Redis metadata + tags (with blast-radius) + value
+		// descriptor rows + Redis metadata + pins (with blast-radius) + value
 		expect(text).toContain('ann@corp.io');
 		expect(text).toContain('articles:id=5');
-		expect(text).toContain('(12)'); // tag member count
+		expect(text).toContain('(12)'); // pin member count
 		expect(text).toContain('512 B / 2.0 kB raw (25%)'); // compressed vs raw
 		expect(text).toContain('240 ms'); // miss compute cost
 		expect(text).toContain('90s (lengthen)'); // recommended TTL + verdict
 		expect(text).toContain('Key varies on');
 		expect(text).toContain('"hello": "world"');
+		// Last known good by the audit's replay, which came after the fill.
+		expect(text).toContain('(audit)');
+		expect(text).not.toContain('(fill)');
+	});
+
+	it('dates an unaudited entry as verified by its fill', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const comments = wrapper.findAll('.endpoint-header')
+			.find((header) => header.text().includes('/items/comments'));
+
+		await comments!.trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+
+		expect(wrapper.text()).toContain('(fill)');
+		expect(wrapper.text()).not.toContain('(audit)');
 	});
 
 	it('names a coarse-scope purge for an evicted coarse entry', async () => {
@@ -997,6 +1036,8 @@ describe('CachePage', () => {
 				createdAt: Date.now(),
 				expiresAt: null,
 				lastHitAt: null,
+				auditedAt: null,
+				verifiedAt: Date.now(),
 			};
 		});
 
@@ -1037,6 +1078,8 @@ describe('CachePage', () => {
 				createdAt: Date.now(),
 				expiresAt: null,
 				lastHitAt: null,
+				auditedAt: null,
+				verifiedAt: Date.now(),
 			};
 		});
 
@@ -1257,8 +1300,8 @@ describe('CachePage', () => {
 				const data = {
 					exists: true,
 					value: { x: 1 },
-					tags: null,
-					tagCounts: {},
+					pins: null,
+					pinCounts: {},
 					// ttlMs null → ∞; uncompressed 0 → 0% ratio; tombstone set.
 					expiry: { exp: 111, createdAt: 222, ttlMs: null },
 					sizes: { uncompressed: 0, compressed: 0 },
@@ -1471,6 +1514,37 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
+	});
+
+	it('reloads the page once the drawer changed a cache setting', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+		vi.mocked(api.get).mockClear();
+
+		wrapper.findComponent(CacheSettingsPanel).vm.$emit('changed');
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '24h' },
+		});
+	});
+
+	it('hands the settings panel every refresh of the page', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const keyBeforeRefresh = wrapper.findComponent(CacheSettingsPanel)
+			.props('refreshKey');
+
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		expect(wrapper.findComponent(CacheSettingsPanel).props('refreshKey'))
+			.not.toBe(keyBeforeRefresh);
 	});
 
 	it('builds a compact tooltip + human TTL axis from the chart config', async () => {
@@ -1873,5 +1947,30 @@ describe('CachePage', () => {
 
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.not.toContain('Misses');
+	});
+
+	// ApexCharts rebuilds its tooltip on every update, so a refresh would wipe
+	// the reading a user is taking under the pointer.
+	it('holds the redraw of the chart the pointer is over', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const [countsChart, latencyChart] = wrapper.findAll('.chart');
+		chartMock.updatedElements = [];
+
+		await countsChart!.trigger('pointerenter');
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		// Only the latency chart, which nobody is reading, redraws.
+		expect(chartMock.updatedElements).toContain(latencyChart!.element);
+		expect(chartMock.updatedElements).not.toContain(countsChart!.element);
+
+		await countsChart!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(chartMock.updatedElements).toContain(countsChart!.element);
 	});
 });

@@ -5,6 +5,7 @@ import {
 	REGEX_BETWEEN_PARENS,
 } from '@directus/constants';
 import { useEnv } from '@directus/env';
+import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import type { Column, SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
@@ -22,8 +23,8 @@ import type {
 import { addFieldFlag, getRelations, toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { isEqual, isNil, merge } from 'lodash-es';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache/index.js';
 import { ALIAS_TYPES, ALLOWED_DB_DEFAULT_FUNCTIONS } from '../constants.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import type { Helpers } from '../database/helpers/index.js';
@@ -37,6 +38,7 @@ import getDefaultValue from '../utils/get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-rows.js';
 import getLocalType from '../utils/get-local-type.js';
 import { getSchema } from '../utils/get-schema.js';
+import { isEqual, isNil, merge } from '../utils/lodash-es-used.js';
 import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
@@ -79,8 +81,8 @@ export class FieldsService {
 		this.schemaCache = localSchemaCache;
 	}
 
-	async columnInfo(collection?: string): Promise<Column[]>;
 	async columnInfo(collection: string, field: string): Promise<Column>;
+	async columnInfo(collection?: string): Promise<Column[]>;
 	async columnInfo(collection?: string, field?: string): Promise<Column | Column[]> {
 		const schemaCacheIsEnabled = Boolean(env['CACHE_SCHEMA']);
 
@@ -132,14 +134,17 @@ export class FieldsService {
 		});
 
 		if (collection) {
-			fields = (await nonAuthorizedItemsService.readByQuery({
+			fields = withoutMeta(await nonAuthorizedItemsService.readByQuery({
 				filter: { collection: { _eq: collection } },
 				limit: -1,
 			})) as FieldMeta[];
 
 			fields.push(...systemFieldRows.filter((fieldMeta) => fieldMeta.collection === collection));
 		} else {
-			fields = (await nonAuthorizedItemsService.readByQuery({ limit: -1 })) as FieldMeta[];
+			fields = withoutMeta(
+				await nonAuthorizedItemsService.readByQuery({ limit: -1 }),
+			) as FieldMeta[];
+
 			fields.push(...systemFieldRows);
 		}
 
@@ -266,7 +271,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(result, {
-			scopedCacheTags: [{ collection: 'directus_fields' }],
+			scopedCacheFingerprints: [{ collection: 'directus_fields' }],
 		});
 	}
 
@@ -352,7 +357,7 @@ export class FieldsService {
 
 		// TODO scope by the related collection's scoped_cache_fields
 		return withMeta(data, {
-			scopedCacheTags: [{ collection: 'directus_fields' }],
+			scopedCacheFingerprints: [{ collection: 'directus_fields' }],
 		});
 	}
 
@@ -470,7 +475,7 @@ export class FieldsService {
 			}
 
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -623,7 +628,7 @@ export class FieldsService {
 			}
 
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -660,7 +665,7 @@ export class FieldsService {
 			return fieldNames;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -851,7 +856,7 @@ export class FieldsService {
 			}
 
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {

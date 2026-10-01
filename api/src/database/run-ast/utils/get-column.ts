@@ -1,6 +1,6 @@
 import { REGEX_BETWEEN_PARENS } from '@directus/constants';
 import type { FieldFunction, Filter, Permission, Query, SchemaOverview } from '@directus/types';
-import { getFunctionsForType } from '@directus/utils';
+import { getFunctionsForType } from '@directus/utils/values';
 import type { Knex } from 'knex';
 import { getFunctions } from '../../helpers/index.js';
 import { InvalidQueryError } from '@directus/errors';

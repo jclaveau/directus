@@ -2,6 +2,7 @@
 name: project_directus_preview_infra
 description: jclaveau/directus preview environments — Preview Admin (runner-hosted ephemeral, cloudflared tunnel) vs the dropped Northflank Preview Deployment webhook; both gated on the `Preview` label; default branch is pr-controle
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -8,7 +8,7 @@ import { DataStore, ERRORS, Upload } from '@tus/utils';
 import { ItemsService } from '../items.js';
 import { useLogger } from '../../logger/index.js';
 import getDatabase from '../../database/index.js';
-import { omit } from 'lodash-es';
+import { omit } from '../../utils/lodash-es-used.js';
 
 export type TusDataStoreConfig = {
 	constants: {

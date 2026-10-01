@@ -1,22 +1,40 @@
 <script setup lang="ts">
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
+import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { formatDuration } from '@/utils/format-duration';
 import { formatFilesize } from '@/utils/format-filesize';
 import { getStringifiedValue } from '@/utils/get-stringified-value';
+import VChart from '@/components/v-chart.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import type { HeaderRaw, Sort } from '@/components/v-table/types';
-import type { ProcessNode, ProcessReplica, ProcessesReport, ResolvedEnvVariable }
-	from '@directus/types';
+import type {
+	AutoscaleRunner,
+	ProcessNode,
+	ProcessReplica,
+	ProcessesReport,
+	ResolvedEnvVariable,
+} from '@directus/types';
 import { useLocalStorage } from '@vueuse/core';
+import type { ApexOptions } from 'apexcharts';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
+import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
+import AutoscalePanel from './autoscale-panel.vue';
 import {
+	appendProcessSample,
+	capacitySeries,
+	chartSeries,
+	cpuPercent,
 	filterEnvVariables,
+	hasMetric,
 	isNearMemoryCap,
+	latestSample,
 	memoryCapRatio,
 	processTotals,
+	shareOfCapacity,
+	type ProcessSample,
 } from './processes-view';
 
 defineOptions({ name: 'SettingsProcesses' });
@@ -27,9 +45,10 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const report = ref<ProcessesReport | null>(null);
-const refreshInterval = ref<number | null>(null);
+const refreshInterval = useRefreshInterval('settings-processes-refresh-interval');
 const expanded = ref<Record<string, boolean>>({});
 const envSearch = ref<Record<string, string>>({});
+const samples = ref<ProcessSample[]>([]);
 
 // How the resolved env reads: a resizable table, or the two shapes it is
 // actually pasted into — a .env file and JSON. Kept per user, like the cache
@@ -173,6 +192,20 @@ function formatMemory(node: ProcessNode): string {
 		: `${formatFilesize(used)} / ${formatFilesize(cap)}`;
 }
 
+/**
+ * PM2 measures CPU as a share of one core, so a worker saturating a core reads
+ * 100 however many cores the container has. Only the supervisor sees it — a
+ * process cannot time its own scheduling — so it is absent wherever the daemon
+ * did not answer.
+ */
+function formatCpu(node: ProcessNode): string {
+	const cpu = cpuPercent(node);
+
+	return cpu === null
+		? '—'
+		: `${Math.round(cpu)}%`;
+}
+
 function memoryPercent(node: ProcessNode): string | null {
 	const ratio = memoryCapRatio(node);
 
@@ -204,6 +237,180 @@ function copyRaw(key: string, node: ProcessNode): void {
 	});
 }
 
+const autoscaleActionsEl = ref<HTMLElement | null>(null);
+const autoscaleSummaryEl = ref<HTMLElement | null>(null);
+
+/** The latest totals, as the figures a percentage on its own does not carry. */
+const usage = computed(() => {
+	const sample = latestSample(samples.value);
+
+	if (sample === null) {
+		return null;
+	}
+
+	return {
+		memory: sample.memory,
+		cpu: sample.cpu,
+		memoryShare: shareOfCapacity(sample.memory),
+		cpuShare: shareOfCapacity(sample.cpu),
+	};
+});
+
+const chartsCarryCpu = computed(() => hasMetric(samples.value, 'cpuPercent'));
+
+function themeVar(name: string, fallback: string): string {
+	const value = getComputedStyle(document.documentElement)
+		.getPropertyValue(name)
+		.trim();
+
+	return value || fallback;
+}
+
+/**
+ * One line per process, over the samples taken while the page was open. The
+ * series are built from every sample rather than from the latest report, so a
+ * worker the autoscaler has since released keeps the history it earned instead
+ * of vanishing from the chart it is the explanation for.
+ */
+function chartOptions(
+	metric: 'cpuPercent' | 'memoryBytes',
+	axis: string,
+	format: (value: number) => string,
+): ApexOptions {
+	return {
+		chart: {
+			type: 'line',
+			height: 220,
+			animations: { enabled: false },
+			toolbar: { show: false },
+			fontFamily: 'var(--theme--fonts--sans--font-family)',
+		},
+		stroke: { width: 2, curve: 'straight' },
+		markers: { size: 0 },
+		dataLabels: { enabled: false },
+		legend: { show: true, position: 'top', horizontalAlign: 'left' },
+		grid: { borderColor: themeVar('--theme--border-color-subdued', '#e4eaf1') },
+		xaxis: {
+			type: 'datetime',
+			categories: samples.value.map((sample) => sample.at),
+			labels: { datetimeUTC: false },
+		},
+		yaxis: {
+			title: { text: axis },
+			min: 0,
+			forceNiceScale: true,
+			labels: { formatter: format },
+		},
+		tooltip: { y: { formatter: format } },
+		series: chartSeries(samples.value, metric),
+	};
+}
+
+/**
+ * The deployment against what it is allowed to use. Both lines are percentages
+ * of their own ceiling — the cgroup's memory cap and CPU quota — so the axis is
+ * pinned to 100 rather than scaled to the data: a chart that rescales to the
+ * peak hides how much headroom is left, which is the one thing it is for.
+ */
+function usageChartConfig(): ApexOptions {
+	return {
+		chart: {
+			type: 'area',
+			height: 220,
+			animations: { enabled: false },
+			toolbar: { show: false },
+			fontFamily: 'var(--theme--fonts--sans--font-family)',
+		},
+		colors: [
+			themeVar('--theme--primary', '#6644ff'),
+			themeVar('--theme--warning', '#ffa439'),
+		],
+		fill: { type: 'solid', opacity: 0.12 },
+		stroke: { width: 2, curve: 'straight' },
+		markers: { size: 0 },
+		dataLabels: { enabled: false },
+		legend: { show: true, position: 'top', horizontalAlign: 'left' },
+		grid: { borderColor: themeVar('--theme--border-color-subdued', '#e4eaf1') },
+		xaxis: {
+			type: 'datetime',
+			categories: samples.value.map((sample) => sample.at),
+			labels: { datetimeUTC: false },
+		},
+		yaxis: {
+			title: { text: t('processes_of_capacity', '% of what is allowed') },
+			min: 0,
+			max: 100,
+			tickAmount: 4,
+			labels: { formatter: (value: number) => `${Math.round(value)}%` },
+		},
+		tooltip: { y: { formatter: (value: number) => `${value.toFixed(1)}%` } },
+		series: capacitySeries(samples.value),
+	};
+}
+
+function cpuChartConfig(): ApexOptions {
+	return chartOptions(
+		'cpuPercent',
+		t('processes_cpu_axis', 'CPU (% of a core)'),
+		(value) => `${Math.round(value)}%`,
+	);
+}
+
+function memoryChartConfig(): ApexOptions {
+	return chartOptions(
+		'memoryBytes',
+		t('processes_memory_axis', 'Memory'),
+		(value) => formatFilesize(value),
+	);
+}
+
+// Null until the first report answers, so each chart is built from it rather
+// than drawn as an empty axis first.
+const usageChartOptions = computed((): ApexOptions | null => {
+	return samples.value.length === 0
+		? null
+		: usageChartConfig();
+});
+
+const cpuChartOptions = computed((): ApexOptions | null => {
+	return samples.value.length === 0
+		? null
+		: cpuChartConfig();
+});
+
+const memoryChartOptions = computed((): ApexOptions | null => {
+	return samples.value.length === 0
+		? null
+		: memoryChartConfig();
+});
+
+// The processes that are scaling a pool, plucked from the tree the page already
+// holds: the values a pool is scaled on are resolved in the process that scales
+// it, so they arrive on its own report rather than from a second read.
+const autoscaleRunners = computed((): AutoscaleRunner[] => {
+	return (report.value?.services ?? []).flatMap((service) => {
+		return service.replicas.flatMap((replica) => {
+			return replica.processes.flatMap((node) => {
+				// A replica that answered the bus from an older build reports no
+				// autoscale state at all, and its report is carried as it came.
+				const state = node.autoscale ?? null;
+
+				if (state === null) {
+					return [];
+				}
+
+				return [{
+					service: service.service,
+					replicaId: replica.replicaId,
+					nodeId: node.nodeId,
+					name: node.name,
+					state,
+				}];
+			});
+		});
+	});
+});
+
 async function load(): Promise<void> {
 	loading.value = true;
 	error.value = null;
@@ -211,6 +418,7 @@ async function load(): Promise<void> {
 	try {
 		const response = await api.get('/utils/processes');
 		report.value = response.data.data;
+		samples.value = appendProcessSample(samples.value, response.data.data);
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
@@ -225,7 +433,7 @@ onMounted(load);
 </script>
 
 <template>
-	<private-view :title="t('processes', 'Processes')">
+	<private-view :title="t('processes', 'Processes')" :sidebar-width="720">
 		<template #headline>
 			<v-breadcrumb :items="[{ name: t('settings'), to: '/settings' }]" />
 		</template>
@@ -234,6 +442,12 @@ onMounted(load);
 			<v-button class="header-icon" rounded icon exact disabled>
 				<v-icon name="account_tree" />
 			</v-button>
+		</template>
+
+		<!-- The levers land here from the panel in the drawer, so the pool can be
+			 paused, pinned or restarted whether or not the drawer is open. -->
+		<template #actions:prepend>
+			<div ref="autoscaleActionsEl" class="autoscale-actions" />
 		</template>
 
 		<template #actions>
@@ -253,9 +467,22 @@ onMounted(load);
 		</template>
 
 		<template #sidebar>
+			<sidebar-detail icon="speed" :title="t('autoscale', 'Autoscaling')">
+				<autoscale-panel
+					:runners="autoscaleRunners"
+					:actions-target="autoscaleActionsEl"
+					:summary-target="autoscaleSummaryEl"
+					@changed="load"
+				/>
+			</sidebar-detail>
+
+			<!-- The same intervals the cache page offers. The charts need a second
+				 sample before they draw anything, so the short ones are what make
+				 them fill while you watch: the report is a live snapshot with no
+				 history behind it. -->
 			<auto-refresh
 				v-model="refreshInterval"
-				:intervals="[null, 5, 10, 30, 60, 300]"
+				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"
 				@refresh="load"
 			/>
 		</template>
@@ -282,6 +509,84 @@ onMounted(load);
 				<span>{{ totals.processes }} processes</span>
 				<span>{{ totals.responding }} responding</span>
 				<span>{{ totals.replicas }} replicas</span>
+			</div>
+
+			<!-- The pool the autoscaler reports lands here from the panel in the
+				 drawer: what the deployment is doing belongs beside the totals
+				 counting it, not behind a drawer. -->
+			<div ref="autoscaleSummaryEl" class="autoscale-summary" />
+
+			<div v-show="samples.length > 1" class="charts">
+				<div class="chart">
+					<div v-if="usage" class="usage-figures">
+						<span>
+							{{ t('processes_usage_memory', 'Memory') }}
+							{{ usage.memory.used === null
+								? '—'
+								: formatFilesize(usage.memory.used) }}
+							<template v-if="usage.memory.capacity">
+								/ {{ formatFilesize(usage.memory.capacity) }}
+							</template>
+							<template v-if="usage.memoryShare !== null">
+								({{ usage.memoryShare.toFixed(1) }}%)
+							</template>
+						</span>
+
+						<span>
+							{{ t('processes_usage_cpu', 'CPU') }}
+							{{ usage.cpu.used === null
+								? '—'
+								: usage.cpu.used.toFixed(2) }}
+							<template v-if="usage.cpu.capacity">
+								/ {{ usage.cpu.capacity }}
+								{{ t('processes_cores', 'cores') }}
+							</template>
+							<template v-if="usage.cpuShare !== null">
+								({{ usage.cpuShare.toFixed(1) }}%)
+							</template>
+						</span>
+					</div>
+
+					<v-notice
+						v-if="usage && usage.memory.capacity === null"
+						type="info"
+					>
+						{{ t(
+							'processes_no_capacity',
+							'No replica reported what its container may use, so usage is '
+								+ 'shown without a ceiling to be a share of.',
+						) }}
+					</v-notice>
+
+					<v-chart class="canvas" :options="usageChartOptions" />
+				</div>
+
+				<div class="chart">
+					<h3 class="chart-title">
+						{{ t('processes_cpu_chart', 'CPU per process') }}
+					</h3>
+
+					<v-notice v-if="!chartsCarryCpu" type="info">
+						{{ t(
+							'processes_cpu_needs_supervisor',
+							'CPU is measured by the PM2 daemon; no replica reporting one has '
+								+ 'answered, so only memory is plotted.',
+						) }}
+					</v-notice>
+
+					<v-chart
+						v-show="chartsCarryCpu"
+						class="canvas"
+						:options="cpuChartOptions"
+					/>
+				</div>
+
+				<div class="chart">
+					<h3 class="chart-title">
+						{{ t('processes_memory_chart', 'Memory per process') }}
+					</h3>
+					<v-chart class="canvas" :options="memoryChartOptions" />
+				</div>
 			</div>
 
 			<v-progress-linear v-if="loading && !report" indeterminate />
@@ -330,6 +635,9 @@ onMounted(load);
 							</span>
 							<span class="status">{{ statusLabel(node) }}</span>
 							<span class="pid">pid {{ node.pid ?? '—' }}</span>
+							<span class="cpu">
+								{{ t('processes_cpu', 'cpu') }} {{ formatCpu(node) }}
+							</span>
 							<span class="memory">
 								{{ formatMemory(node) }}
 								<template v-if="memoryPercent(node)">
@@ -357,6 +665,9 @@ onMounted(load);
 								<span>rss {{ formatFilesize(node.runtime.rssBytes) }}</span>
 								<span>heap {{ formatFilesize(node.runtime.heapUsedBytes) }}</span>
 								<span>node {{ node.runtime.nodeVersion }}</span>
+								<span v-if="node.runtime.execArgv.length">
+									flags {{ node.runtime.execArgv.join(' ') }}
+								</span>
 								<span v-if="node.nodeId">id {{ node.nodeId }}</span>
 							</div>
 
@@ -523,8 +834,57 @@ onMounted(load);
 	flex-shrink: 0;
 }
 
-.process-row .memory {
+.process-row .memory,
+.process-row .cpu {
 	flex-shrink: 0;
+}
+
+.autoscale-summary {
+	margin-block-end: 8px;
+}
+
+.autoscale-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
+.charts {
+	margin-block-end: 24px;
+}
+
+.chart {
+	margin-block-end: 20px;
+}
+
+.chart-title {
+	font-weight: 600;
+	margin-block-end: 8px;
+}
+
+/*
+ * The dot beside a series is a text glyph drawn ten points larger than the box
+ * holding it, so it rides above the label it belongs to. Drawn as a shape it
+ * sits on the line instead, in the colour the series is already given.
+ */
+.chart :deep(.apexcharts-tooltip-marker) {
+	inline-size: 10px;
+	block-size: 10px;
+	border-radius: 50%;
+	background: currentcolor;
+}
+
+.chart :deep(.apexcharts-tooltip-marker::before) {
+	content: none;
+}
+
+.usage-figures {
+	display: flex;
+	gap: 20px;
+	color: var(--theme--foreground-subdued);
+	margin-block-end: 8px;
+	font-family: var(--theme--fonts--monospace--font-family);
 }
 
 .detail {
@@ -535,6 +895,7 @@ onMounted(load);
 
 .runtime {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 16px;
 	color: var(--theme--foreground-subdued);
 	margin-block-end: 8px;

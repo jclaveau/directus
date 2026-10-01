@@ -7,7 +7,11 @@ import { withMeta } from '../utils/read-meta.js';
 const execute = vi.fn();
 
 vi.mock('../services/graphql/index.js', () => {
-	return { GraphQLService: vi.fn(() => ({ execute })) };
+	return {
+		GraphQLService: vi.fn(function () {
+			return { execute };
+		}),
+	};
 });
 
 vi.mock('../middleware/graphql.js', () => ({ parseGraphQL: vi.fn() }));
@@ -33,19 +37,24 @@ function itemsHandler() {
 	)!.handle;
 }
 
-describe('graphql controller scopedCacheTags', () => {
+describe('graphql controller scopedCacheFingerprints', () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	test.each([
 		['system', systemHandler],
 		['items', itemsHandler],
 	])(oneLine`
-		%s handler stamps scopedCacheTags from the payload meta
+		%s handler stamps scopedCacheFingerprints from the payload meta
 	`, async (_scope, getHandler) => {
-		const tags = [{ collection: 'articles' }];
+		const fingerprints = [
+			{ collection: 'articles' },
+		];
 
 		execute.mockResolvedValueOnce(
-			withMeta({ data: { ok: true } }, { scopedCacheTags: tags }),
+			withMeta(
+				{ data: { ok: true } },
+				{ scopedCacheFingerprints: fingerprints },
+			),
 		);
 
 		const req = { accountability: null, schema: {} } as any;
@@ -54,7 +63,7 @@ describe('graphql controller scopedCacheTags', () => {
 
 		await getHandler()(req, res, next);
 
-		expect(res.locals['scopedCacheTags']).toEqual(tags);
+		expect(res.locals['scopedCacheFingerprints']).toEqual(fingerprints);
 		expect(res.locals['cache']).toBeUndefined();
 		expect(next).toHaveBeenCalledOnce();
 	});
@@ -66,7 +75,7 @@ describe('graphql controller scopedCacheTags', () => {
 		%s handler disables cache when the payload has errors
 	`, async (_scope, getHandler) => {
 		execute.mockResolvedValueOnce(
-			withMeta({ errors: [{ message: 'x' }] }, { scopedCacheTags: [] }),
+			withMeta({ errors: [{ message: 'x' }] }, { scopedCacheFingerprints: [] }),
 		);
 
 		const req = { accountability: null, schema: {} } as any;

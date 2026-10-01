@@ -97,7 +97,7 @@ for (const { field, operator, value, sql, bindings } of [
 			})
 			.build();
 
-		const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+		const db = knex.default({ client: Client_SQLite3 });
 		const queryBuilder = db.queryBuilder();
 		aliasCount = 0;
 

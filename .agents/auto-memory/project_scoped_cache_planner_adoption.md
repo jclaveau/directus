@@ -2,6 +2,7 @@
 name: project_scoped_cache_planner_adoption
 description: Long-term goal — enable PR#205 scoped cache in the planner, scope field = student (user_created as interim), later multi-owner (sharing/teachers)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

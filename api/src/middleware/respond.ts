@@ -1,28 +1,47 @@
 import { useEnv } from '@directus/env';
-import type { ScopedCacheTag } from '@directus/types';
+import type { ScopedCacheFingerprint } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
+import { cacheExpiresAtKey, cachePinsKey } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
+	evictCacheEntry,
 	queueCacheDescriptor,
 	queueMissLatency,
 	writeCacheTombstone,
 } from '../cache-events.js';
 import getDatabase from '../database/index.js';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import {
+	indexScopedCacheEntry,
+	mergedScopedCacheEpochs,
+	renderScopedCacheFingerprint,
+	scopedCacheCollectionsWithoutGuard,
+	scopedCacheFillPaused,
+	scopedCacheFingerprintIsBare,
 	scopedCachePurgeEnabled,
-	serializeScopedCacheTags,
-	scopedCacheTagLabel,
-	tagScopedCacheKeys,
-} from '../scoped-cache.js';
+	scopedCachePinKeys,
+	scopedCacheSweptDuringFill,
+	type ScopedCacheEpochs,
+} from '../scoped-cache/index.js';
+import { readWhileServingOff } from '../scoped-cache/fill-guard.js';
+import {
+	recordPendingScopedCachePurge,
+} from '../scoped-cache-pending-purges.js';
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import {
+	CACHE_AUDIT_PINS_HEADER,
+	isCacheAuditReplay,
+} from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
-import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { storedScopedCachePin } from '../utils/printable-scoped-cache-pins.js';
+import { setScopedCachePinsHeader } from '../utils/scoped-cache-pins-header.js';
+import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
@@ -33,6 +52,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { queryCachable } from '../utils/query-cachable.js';
+import { cacheEnabled, cacheSetting } from '../cache-settings.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -40,19 +60,38 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const { cache } = getCache();
 
-	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
-	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
-	// smoke test can assert per-user scoping with no redis client. Never set in prod
-	// — tags carry owner ids. Raw pins are emitted, so a regression pinning nothing
-	// shows an absent header, not a masked one. A cache HIT skips this middleware —
-	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
-	if (env['CACHE_TAGS_HEADER']) {
-		const pins = res.locals['scopedCacheTags'];
+	// A read service rides its pins, its unautopurgeable ones and its before-query
+	// epoch reading on what it returns (`withMeta`). The items controller copies
+	// them into `res.locals`; a system controller hands the result over as the
+	// payload and nothing else, so they are read off the payload here. Only a
+	// payload that never went through a read (a hand-rolled /settings, GraphQL)
+	// carries no meta.
+	const payloadMeta = readMeta(res.locals['payload']?.data);
 
-		if (Array.isArray(pins) && pins.length) {
-			res.setHeader(
+	const readFingerprints: readonly ScopedCacheFingerprint[] =
+		res.locals['scopedCacheFingerprints']
+		?? payloadMeta?.scopedCacheFingerprints
+		?? [];
+
+	// The same dependency spelled one pinned value at a time: the legacy pin form
+	// the dev headers, the audit header and the stored pin lists speak. Rendered
+	// here, at the last moment, so the AND a fingerprint holds survives everywhere
+	// that can hold it.
+	const readPinKeys = scopedCachePinKeys(readFingerprints);
+
+	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
+	// CACHE_STATUS_HEADER) exposing the scope pins a request pinned / purged, so a
+	// smoke test can assert per-user scoping with no redis client. Never set in prod
+	// — pins carry owner ids. Raw pins are emitted, so a regression pinning nothing
+	// shows an absent header, not a masked one. A cache HIT skips this middleware —
+	// pins are also written to a __pins sibling (below), re-emitted from cache.ts.
+	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
+	if (env['CACHE_TAGS_HEADER']) {
+		if (readPinKeys.length > 0) {
+			setScopedCachePinsHeader(
+				res,
 				`${env['CACHE_TAGS_HEADER']}`,
-				printableScopedCacheTags(serializeScopedCacheTags(pins)),
+				readPinKeys,
 			);
 		}
 	}
@@ -61,9 +100,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		const purged = res.locals['scopedCachePurged'];
 
 		if (Array.isArray(purged) && purged.length) {
-			res.setHeader(
+			setScopedCachePinsHeader(
+				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				printableScopedCacheTags(serializeScopedCacheTags(purged)),
+				scopedCachePinKeys(purged),
 			);
 		}
 	}
@@ -71,55 +111,83 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	let exceedsMaxSize = false;
 	let valueSize = 0;
 
-	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
+	const valueMaxSize = cacheSetting('value_max_size');
+
+	if (valueMaxSize !== false) {
 		valueSize = res.locals['payload']
 			? stringByteSize(JSON.stringify(res.locals['payload']))
 			: 0;
 
-		const maxSize = parseBytesConfiguration(env['CACHE_VALUE_MAX_SIZE'] as string);
+		const maxSize = parseBytesConfiguration(valueMaxSize);
 
 		if (maxSize !== null) {
 			exceedsMaxSize = valueSize > maxSize;
 		}
 	}
 
-	// A custom read controller (e.g. /settings) may set `payload` with no tags
-	// (ItemsService reads set them; a hand-written one often does not). Fall back to
-	// the bare collection tag so a mutation there still purges it (settings reask).
-	const collectionFallbackTags = req.collection
+	// A response with no pin at all (a hand-rolled /settings) falls back to the bare
+	// collection fingerprint so a mutation there still purges it (settings reask).
+	const collectionFallbackFingerprints: ScopedCacheFingerprint[] = req.collection
 		? [{ collection: req.collection }]
 		: [];
-
-	const controllerTags = res.locals['scopedCacheTags'];
 
 	// `total_count` drops the query filter and counts the whole collection
 	// (`MetaService.totalCount`), so a response carrying it depends on every row —
 	// including rows the read's own pins never bounded. An insert into another key
-	// slice moves the number, and no pinned tag can express that. Such a response
-	// keeps the bare collection tag beside its pins so any write drops it.
+	// slice moves the number, and no pin can express that.
 	const countsWholeCollection =
 		req.sanitizedQuery.meta?.includes(Meta.TOTAL_COUNT) === true;
 
-	const scopedCacheTags = controllerTags?.length && countsWholeCollection === false
-		? controllerTags
-		: [...(controllerTags ?? []), ...collectionFallbackTags];
+	// Such a response is bound to nothing of that collection, so its fingerprint has
+	// to carry no pair and no field — any write drops the entry. The bare one says
+	// exactly that, so it REPLACES this read's pins on the collection rather than
+	// joining them: kept beside it they would narrow nothing and read as a
+	// dependency the count does not have.
+	const pinnedFingerprints = readFingerprints.length > 0
+		? readFingerprints
+		: collectionFallbackFingerprints;
 
-	// No tags AND no collection (/server, /schema, a GraphQL query hitting nothing): a
+	const scopedCacheFingerprints = countsWholeCollection && req.collection
+		? [
+			...readFingerprints.filter((readFingerprint) => {
+				return readFingerprint.collection !== req.collection;
+			}),
+			...collectionFallbackFingerprints,
+		]
+		: pinnedFingerprints;
+
+	const indexedPinKeys = scopedCachePinKeys(scopedCacheFingerprints);
+
+	// The pins a fill of this request would be indexed under, in the form the
+	// entry-pins table records — what the audit diffs against the pins the entry
+	// was filled under. JSON, because a pin holds a scope value and a value can
+	// hold the comma a joined list is split on. Always set on a replay, even
+	// empty: its presence is how the audit knows the response came through this
+	// stack at all.
+	if (isCacheAuditReplay(req)) {
+		res.setHeader(
+			CACHE_AUDIT_PINS_HEADER,
+			JSON.stringify(indexedPinKeys.map(storedScopedCachePin)),
+		);
+	}
+
+	// No pins AND no collection (/server, /schema, a GraphQL query hitting nothing): a
 	// scoped purge can never target it; caching would orphan a stale entry. Skip it.
 	// Full mode's cache.clear() can't orphan, so it still caches.
 	const orphansInScopedMode =
-		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
+		scopedCacheFingerprints.length === 0 && scopedCachePurgeEnabled();
 
-	// A read hook scoped this response to unautopurgeable tags (value slices on fields
-	// the target collection isn't scoped on) without `manuallyPurged`: no write can
-	// auto-purge them, so caching would serve stale. Skip caching + surface them.
-	const unautopurgeableScopeTags = res.locals['scopedCacheUnautopurgeableTags'] as
-		| ScopedCacheTag[]
-		| undefined;
+	// A read hook scoped this response to unautopurgeable fingerprints (value slices
+	// on fields the target collection isn't scoped on) without `manuallyPurged`: no
+	// write can auto-purge them, so caching would serve stale. Skip caching + surface.
+	const unautopurgeableFingerprints:
+		readonly ScopedCacheFingerprint[] | undefined =
+		res.locals['scopedCacheUnautopurgeableFingerprints']
+		?? payloadMeta?.scopedCacheUnautopurgeableFingerprints;
 
 	const unautopurgeableScope =
-		Array.isArray(unautopurgeableScopeTags) &&
-		unautopurgeableScopeTags.length > 0 &&
+		Array.isArray(unautopurgeableFingerprints) &&
+		unautopurgeableFingerprints.length > 0 &&
 		scopedCachePurgeEnabled();
 
 	// `$NOW` (in filter/deep) resolves to a Date in `sanitizeQuery` before the key is
@@ -135,10 +203,28 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const cacheableRequest =
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
-		env['CACHE_ENABLED'] === true &&
+		cacheEnabled() &&
 		!!cache &&
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
+
+	// Taken before the read's query; what it guards against, and why it is compared
+	// after the fill rather than before, is in `fill-guard.ts`. A read service hands
+	// its reading over through the controller or on the payload; a system route's
+	// also comes from `useCollection`, taken for the collection its fallback pin
+	// names. Where both exist the earlier reading wins per collection.
+	const epochsBeforeQuery = mergedScopedCacheEpochs(
+		res.locals['scopedCacheEpochsBeforeQuery'] as ScopedCacheEpochs | undefined,
+		res.locals['scopedCacheEpochs'] ?? payloadMeta?.scopedCacheEpochs,
+	);
+
+	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
+		epochsBeforeQuery,
+		scopedCacheFingerprints,
+	);
+
+	const unguardedScope = unguardedScopeCollections.length > 0;
+	const epochsReadWhileOff = readWhileServingOff(epochsBeforeQuery);
 
 	let filled = false;
 
@@ -148,7 +234,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
+		unguardedScope === false &&
+		epochsReadWhileOff === false &&
 		dynamicQueryFilter === false &&
+		scopedCacheFillPaused() === false &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -160,48 +249,136 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	) {
 		filled = true;
 
-		const { redisKey, cacheKey } = await getCacheKey(req);
+		// Built by the cache middleware for the lookup that missed. It returns early
+		// without one for a request it never looks up (a skip rule, the cache off),
+		// which is the only path that still pays for its own.
+		const { redisKey, cacheKey } = res.locals['httpRequestCacheKey']
+			?? await getCacheKey(req);
 
 		try {
 			const now = Date.now();
-			const ttlMs = getMilliseconds(resolvedCacheTtl());
-			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
+			const cacheTtl = resolvedCacheTtl();
+			const ttlMs = getMilliseconds(cacheTtl);
+			const expiresAt = now + getMilliseconds(cacheTtl, 0);
 
-			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
+			// Index BEFORE the value exists. The two writes are not atomic, and the
+			// failure modes are not symmetric: a pin naming a key that was never
+			// written costs one miss on the purge's `del`, while a value written
+			// under no pin is unreachable to every purge and serves stale for its
+			// whole TTL. So pin first and let a throw here skip the value entirely.
+			await indexScopedCacheEntry(
+				redisKey,
+				scopedCacheFingerprints,
+				env['CACHE_TAGS_HEADER']
+					? [cachePinsKey(redisKey)]
+					: [],
+				req.schema,
+				cacheTtl,
+			);
 
-			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
-			// `ttlMs` explicitly so it tracks the live override, not the Keyv default
-			// TTL frozen at the response cache's construction.
-			await setCacheValue(cache, `${redisKey}__expires_at`, {
-				exp: expiresAt,
-				createdAt: now,
-				ttlMs: ttlMs ?? null,
-			}, ttlMs);
+			// Awaited: a hook holding it opens the window between the index and the
+			// value, where a reap finds the entry's members naming nothing.
+			await emitter.emitAction('cache.indexed', {
+				redisKey,
+				fingerprints: scopedCacheFingerprints,
+			});
+
+			// Handed over together rather than awaited in turn: node-redis corks its
+			// socket and drains the whole queue per tick, so the pair costs one round
+			// trip. Neither reads the other's answer, and a sidecar left behind by a
+			// failed payload write is an orphan its own TTL collects.
+			await Promise.all([
+				setCacheValue(cache, redisKey, res.locals['payload'], ttlMs),
+
+				// Enriched so a HIT reads age/TTL off this sibling — no extra read.
+				// Pass `ttlMs` explicitly so it tracks the live override, not the Keyv
+				// default TTL frozen at the response cache's construction. Stored raw:
+				// three numbers do not repay a snappy pass on every fill and a second
+				// one on every hit, and `decompress` sniffs the Buffer rather than the
+				// setting, so a reader takes it either way.
+				cache.set(cacheExpiresAtKey(redisKey), {
+					exp: expiresAt,
+					createdAt: now,
+					ttlMs: ttlMs ?? null,
+				}, ttlMs),
+			]);
+
+			// The fill is done once the entry is written, not once the payload is
+			// ready: the SET is part of what a miss costs, and on a large entry the
+			// serialization before it is most of it.
+			const filledAt = Date.now();
+
+			let sweptDuringFill: string | undefined;
+
+			if (epochsBeforeQuery) {
+				sweptDuringFill = await scopedCacheSweptDuringFill(epochsBeforeQuery);
+
+				if (sweptDuringFill !== undefined) {
+					// The one trace of an entry that was filled and dropped at once: the
+					// next read of it is a MISS with nothing else to say why.
+					logger.debug(
+						`[scoped-cache] ${redisKey} evicted after its fill: the `
+						+ `${sweptDuringFill} purge counter moved during it`,
+					);
+
+					// This is the one purge that knows precisely which key is stale, and
+					// everywhere else a purge that could not run is recorded for a retry.
+					// A store that swallowed the delete answers `undefined` rather than
+					// throwing, so without reading the eviction back the entry would serve
+					// rows a purge already superseded for its whole TTL — the failure the
+					// guard exists to prevent, one step later.
+					if (await evictCacheEntry(cache, redisKey) === false) {
+						const error = new Error(
+							`in-flight purge of ${sweptDuringFill} left ${redisKey} cached`,
+						);
+
+						// Logged like a failed mutation purge is (`purgeOrRecord`): the
+						// recorded rows are gone once drained, so this line is the only
+						// trace of what the drain will purge, and why.
+						logger.warn(
+							error,
+							`[scoped-cache] eviction failed and was recorded for retry: `
+							+ `${error}`,
+						);
+
+						await recordPendingScopedCachePurge(
+							{
+								mode: 'slices',
+								collection: req.collection ?? null,
+								scopedCacheFingerprints: scopedCacheFingerprints
+									.map(renderScopedCacheFingerprint),
+							},
+							error,
+						);
+					}
+
+					if (cacheStatsActive()) {
+						void reportCacheAnomaly(
+							req,
+							'inflight_purge',
+							sweptDuringFill,
+						).catch(() => {});
+					}
+				}
+			}
 
 			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
 			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
 
-			await tagScopedCacheKeys(
-				redisKey,
-				scopedCacheTags,
-				env['CACHE_TAGS_HEADER']
-					? [`${redisKey}__tags`]
-					: [],
-			);
-
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
-			// the read that builds them) can still emit them, via cache.ts.
-			if (env['CACHE_TAGS_HEADER']) {
-				const pins = res.locals['scopedCacheTags'];
-
-				if (Array.isArray(pins) && pins.length) {
-					// Object, not a bare string: setCacheValue's compress expects
-					// a CacheValue (object) — a raw string won't round-trip.
+			// the read that builds them) can still emit them, via cache.ts. Not for
+			// an entry a purge swept during the fill: the eviction above already
+			// dropped its sidecar, and one written now outlives the entry.
+			if (env['CACHE_TAGS_HEADER'] && sweptDuringFill === undefined) {
+				if (readPinKeys.length > 0) {
+					// An object: setCacheValue's compress expects a CacheValue. The
+					// pins as a list, so a value holding the separator reads back as
+					// the one pin it is.
 					await setCacheValue(
 						cache,
-						`${redisKey}__tags`,
-						{ tags: serializeScopedCacheTags(pins) },
-						getMilliseconds(resolvedCacheTtl()),
+						cachePinsKey(redisKey),
+						{ pins: readPinKeys },
+						ttlMs,
 					);
 				}
 			}
@@ -217,13 +394,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// payload); only serialize again when that gate is off.
 					let size = valueSize;
 
-					if (env['CACHE_VALUE_MAX_SIZE'] === false) {
+					if (valueMaxSize === false) {
 						size = res.locals['payload']
 							? stringByteSize(JSON.stringify(res.locals['payload']))
 							: 0;
 					}
 
-					// Coarse: a scoped collection read tagged bare (no value slice) caches
+					// Coarse: a scoped collection read pinned bare (no value slice) caches
 					// fine but over-purges — a tuning signal, on the descriptor.
 					const scopedFields = req.collection
 						? req.schema?.collections?.[req.collection]?.scopedCacheFields ?? []
@@ -232,13 +409,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					const coarse =
 						scopedCachePurgeEnabled() &&
 						scopedFields.length > 0 &&
-						scopedCacheTags.some(
-							(tag) => tag.collection === req.collection && tag.field === undefined,
-						);
+						scopedCacheFingerprints.some((fingerprint) => {
+							return fingerprint.collection === req.collection
+								&& scopedCacheFingerprintIsBare(fingerprint);
+						});
 
-					// Compute cost of this miss: request entry (cache mw) → response ready.
+					// Compute cost of this miss: request entry (cache mw) → entry written.
 					const fillMs = Math.max(
-						now - Number(res.locals['requestStart'] ?? now),
+						filledAt - Number(res.locals['requestStart'] ?? filledAt),
 						0,
 					);
 
@@ -262,10 +440,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							: req.originalUrl.split('?')[1] ?? '',
 						bytes: size,
 						fillMs,
-						// The scoped cache tags the key was just indexed under, so a
+						// The scoped cache pins the key was just indexed under, so a
 						// later purge of any of them is attributable back to this
 						// request.
-						scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
+						scopedCachePins: indexedPinKeys,
 					}).catch(() => {});
 
 					// The same fill latency as a timestamped event (kind 'f') so the
@@ -316,16 +494,25 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
 		else if (unautopurgeableScope) {
-			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same tag.
+			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same pin.
 			const detail = [
 				...new Set(
-					(unautopurgeableScopeTags ?? []).map(
-						(tag) => `${tag.collection}:${tag.field}`,
-					),
+					(unautopurgeableFingerprints ?? []).flatMap((fingerprint) => {
+						return Object.keys(fingerprint.pinnedScope ?? {}).map((field) => {
+							return `${fingerprint.collection}:${field}`;
+						});
+					}),
 				),
 			].join(', ');
 
 			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
+		}
+		else if (unguardedScope) {
+			void reportCacheAnomaly(
+				req,
+				'unguarded_scope',
+				unguardedScopeCollections.join(', '),
+			).catch(() => {});
 		}
 	}
 
@@ -340,7 +527,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		);
 
 		const anomalous =
-			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope;
+			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope
+			|| unguardedScope;
 
 		queueMissLatency(
 			missMs,

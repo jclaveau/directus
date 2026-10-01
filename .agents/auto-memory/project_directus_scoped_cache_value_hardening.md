@@ -2,6 +2,7 @@
 name: project_directus_scoped_cache_value_hardening
 description: PR #205 scoped-cache value-scoping hardening — snapshot-committed-rows principle, collection-scoped fallback, self-ref guard, null sentinel, PK-strip
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

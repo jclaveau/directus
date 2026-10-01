@@ -2,6 +2,7 @@
 name: feedback_directus_redispatch_preview_freely
 description: on this fork, re-dispatch the admin preview after every push without asking — even though it kills the live tunnel
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

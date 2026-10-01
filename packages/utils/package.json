@@ -16,6 +16,7 @@
 	"exports": {
 		".": "./dist/shared/index.js",
 		"./node": "./dist/node/index.js",
+		"./values": "./dist/values/index.js",
 		"./browser": "./dist/browser/index.js",
 		"./package.json": "./package.json"
 	},
@@ -28,6 +29,7 @@
 		"build:browser": "tsdown browser/index.ts --tsconfig browser/tsconfig.json --out-dir dist/browser --dts",
 		"build:node": "tsdown node/index.ts --tsconfig node/tsconfig.json --out-dir dist/node --dts",
 		"build:shared": "tsdown shared/index.ts --tsconfig shared/tsconfig.json --out-dir dist/shared --dts",
+		"build:values": "tsdown shared/values/index.ts --tsconfig shared/tsconfig.json --out-dir dist/values --dts",
 		"dev": "pnpm run '/^build:.*/' --watch",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"

@@ -1,4 +1,4 @@
-import { isObjectLike, isPlainObject } from 'lodash-es';
+import { isObjectLike, isPlainObject } from './lodash-es-used.js';
 
 /**
  * Maps over all values in an array or object recursively and calls the callback on primitive values.

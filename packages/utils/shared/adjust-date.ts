@@ -1,22 +1,22 @@
 import {
+	addDays,
+	addHours,
+	addMilliseconds,
+	addMinutes,
+	addMonths,
+	addSeconds,
+	addWeeks,
 	addYears,
+	subDays,
+	subHours,
+	subMilliseconds,
+	subMinutes,
+	subMonths,
+	subSeconds,
 	subWeeks,
 	subYears,
-	addWeeks,
-	subMonths,
-	addMonths,
-	subDays,
-	addDays,
-	subHours,
-	addHours,
-	subMinutes,
-	addMinutes,
-	subSeconds,
-	addSeconds,
-	addMilliseconds,
-	subMilliseconds,
-} from 'date-fns';
-import { clone } from 'lodash-es';
+} from './date-fns-used.js';
+import { clone } from './lodash-es-used.js';
 
 /**
  * Adjust a given date by a given change in duration. The adjustment value uses the exact same syntax

@@ -1,5 +1,5 @@
 import type { SchemaOverview } from '@directus/types';
-import { cloneDeep } from 'lodash-es';
+import { cloneDeep } from './lodash-es-used.js';
 
 export function freezeSchema(schema: SchemaOverview): Readonly<SchemaOverview> {
 	// freeze collections

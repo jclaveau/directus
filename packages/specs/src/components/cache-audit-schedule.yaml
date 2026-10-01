@@ -1,0 +1,24 @@
+type: object
+description: The cron rule the recurring cache audit runs on.
+properties:
+  rule:
+    type: string
+    nullable: true
+    description: The rule in force, or null when no audit is scheduled.
+  source:
+    type: string
+    nullable: true
+    enum:
+      - settings
+      - env
+    description: >
+      Where the rule comes from: the live `cache_audit_schedule` setting, or
+      the `CACHE_AUDIT_SCHEDULE` environment variable it overrides.
+  envRule:
+    type: string
+    nullable: true
+    description: What the environment says, which a cleared setting falls back to.
+  nextRunAt:
+    type: integer
+    nullable: true
+    description: When the rule next fires, in milliseconds since the epoch.

@@ -7,7 +7,7 @@ import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { without } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { beforeAll, describe, expect, it, test } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { CheckQueryFilters, type CachedTestsSchema, type TestsSchemaVendorValues } from '../../query/filter';
 import {
 	collectionCities,
@@ -1298,9 +1298,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 			});
 		});
 
-		test('Auto Increment Tests', (ctx) => {
-			if (pkType !== 'integer') ctx.skip();
-
+		describe.skipIf(pkType !== 'integer')('Auto Increment Tests', () => {
 			describe('updates the auto increment value correctly', () => {
 				it.each(without(vendors, 'cockroachdb', 'mssql', 'oracle'))('%s', async (vendor) => {
 					// Setup

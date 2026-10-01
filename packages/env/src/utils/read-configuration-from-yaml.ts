@@ -1,5 +1,5 @@
 import { requireYaml } from '@directus/utils/node';
-import { isPlainObject } from 'lodash-es';
+import { isPlainObject } from './lodash-es-used.js';
 
 export const readConfigurationFromYaml = (path: string) => {
 	const config = requireYaml(path);

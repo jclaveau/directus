@@ -1,6 +1,6 @@
-import type { User } from '@directus/types';
+import type { MaybeWithMeta, User } from '@directus/types';
 
-export function userName(user: Partial<User>): string {
+export function userName(user: MaybeWithMeta<Partial<User>>): string {
 	if (!user) {
 		return 'Unknown User';
 	}

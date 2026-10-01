@@ -4,6 +4,7 @@ description:
   Service-level read-through cache in ItemsService.readByQuery (PR #207 on v11.10.1-feat/read-through-cache) +
   CACHE_TYPES env; architecture, guards, and settled design decisions so a fresh review doesn't re-litigate them
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

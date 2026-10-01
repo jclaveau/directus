@@ -144,14 +144,26 @@ data:
     note: $t:directus_collection.directus_cache_stats_purges
     accountability: null
 
-  - collection: directus_cache_stats_scoped_entry_tags
+  - collection: directus_cache_stats_scoped_entry_pins
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_stats_scoped_entry_tags
+    note: $t:directus_collection.directus_cache_stats_scoped_entry_pins
     accountability: null
 
-  - collection: directus_cache_stats_scoped_purge_tags
+  - collection: directus_cache_stats_scoped_purge_pins
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_stats_scoped_purge_tags
+    note: $t:directus_collection.directus_cache_stats_scoped_purge_pins
+    accountability: null
+
+  - collection: directus_cache_audits
+    hidden: true
+    icon: fact_check
+    note: $t:directus_collection.directus_cache_audits
+    accountability: null
+
+  - collection: directus_cache_audit_findings
+    hidden: true
+    icon: fact_check
+    note: $t:directus_collection.directus_cache_audit_findings
     accountability: null

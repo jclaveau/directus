@@ -1,10 +1,10 @@
 import { useEnv } from '@directus/env';
 import type { Accountability, Filter, Item, Permission, Query, SchemaOverview } from '@directus/types';
-import { cloneDeep, merge } from 'lodash-es';
 import { fetchPermissions } from '../../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../../permissions/lib/fetch-policies.js';
 import { PayloadService } from '../../services/payload.js';
 import type { AST, FieldNode, FunctionFieldNode, NestedCollectionNode, O2MNode } from '../../types/ast.js';
+import { cloneDeep, merge } from '../../utils/lodash-es-used.js';
 import getDatabase from '../index.js';
 import { getDBQuery } from './lib/get-db-query.js';
 import { parseCurrentLevel } from './lib/parse-current-level.js';

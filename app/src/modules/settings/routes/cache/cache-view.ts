@@ -14,11 +14,17 @@ export interface CacheEntry {
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
+	// When the audit last replayed it; null until it has.
+	auditedAt: number | null;
+	// When it was last known to answer what the database does: the audit, or
+	// the fill where that came later. The audit works through the cache in
+	// this order.
+	verifiedAt: number;
 	size: number;
 	hits: number;
 	misses: number;
 	fills: number;
-	// Purges that covered this entry's tags in the window. Read beside `hits`:
+	// Purges that covered this entry's pins in the window. Read beside `hits`:
 	// more purges than hits means the cache is filling this response more often
 	// than it serves it.
 	purges: number;
@@ -26,7 +32,7 @@ export interface CacheEntry {
 	hitMs: number | null;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
-	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
+	coarse: boolean; // scoped collection pinned bare — over-purges (a tuning signal)
 }
 
 export type LatencyPercentile = 'p50' | 'p95' | 'p99';
@@ -81,7 +87,7 @@ export interface QueryGroup {
 	entries: CacheEntry[];
 	anomalies: CacheAnomaly[];
 	anomalyCount: number; // total not-cached/error anomaly occurrences
-	coarseCount: number; // cached entries here that over-purge (bare-tagged scoped reads)
+	coarseCount: number; // cached entries here that over-purge (bare-pinned scoped reads)
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
@@ -97,8 +103,11 @@ export interface QueryGroup {
 
 export type CacheAnomalyReason =
 	| 'missing_scope'
+	| 'unautopurgeable_scope'
 	| 'value_too_large'
-	| 'redis_error';
+	| 'redis_error'
+	| 'stale_entry'
+	| 'pin_drift';
 
 // Normalised to its descriptor: path/method/query come from the referenced
 // directus_cache_stats_descriptors row, so it drops into the tree at the same node.
@@ -298,6 +307,7 @@ export type EntrySortField =
 	| 'ratio'
 	| 'createdAt'
 	| 'lastHitAt'
+	| 'verifiedAt'
 	| 'expiresAt'
 	| 'size'
 	| 'key';
@@ -354,6 +364,7 @@ export function sortEntries(entries: CacheEntry[], sort: EntrySort): CacheEntry[
 		},
 		createdAt: (entry) => entry.createdAt,
 		lastHitAt: (entry) => entry.lastHitAt,
+		verifiedAt: (entry) => entry.verifiedAt,
 		expiresAt: (entry) => entry.expiresAt,
 		size: (entry) => entry.size,
 		key: (entry) => entry.redisKey,
@@ -464,7 +475,7 @@ function countAnomalies(anomalies: CacheAnomaly[]): number {
 	return anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
 }
 
-// Cached entries here that over-purge — a scoped read that fell back to a bare tag.
+// Cached entries here that over-purge — a scoped read that fell back to a bare pin.
 function countCoarse(entries: CacheEntry[]): number {
 	return entries.filter((entry) => entry.coarse).length;
 }

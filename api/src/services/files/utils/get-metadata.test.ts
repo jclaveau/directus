@@ -13,7 +13,7 @@ test('Resolves empty object on unexpected error in transformation', async () => 
 	stream._read = vi.fn();
 
 	vi.mocked(getSharpInstance).mockImplementation(
-		() =>
+		async () =>
 			({
 				metadata: vi.fn().mockImplementation((fn: (err: Error) => void) => {
 					fn(new Error('test'));

@@ -11,6 +11,18 @@ export function withMeta<T extends object>(value: T, meta: ReadMeta): WithMeta<T
 }
 
 /**
+ * The same value, without the meta rider in its type.
+ *
+ * Identity at runtime — the rider is still attached and `readMeta` still finds
+ * it. This is how a consumer that converts a read result into a domain type says
+ * it is done with the meta: `WithMeta<Item[]>` does not convert to `Permission[]`
+ * on its own, because the intersection carries a `getMeta` the target lacks.
+ */
+export function withoutMeta<T>(value: WithMeta<T>): T {
+	return value;
+}
+
+/**
  * Read the `ReadMeta` off a value previously tagged by `withMeta`, or `undefined` if absent (e.g. a
  * hook returned a fresh object that dropped the rider, or the value never went through a read).
  */

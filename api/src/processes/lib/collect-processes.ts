@@ -1,6 +1,8 @@
 import type {
+	ProcessDetail,
 	ProcessNode,
 	ProcessReplica,
+	ProcessRuntimeStats,
 	ProcessService,
 	ProcessSupervisorState,
 	ProcessesReport,
@@ -19,6 +21,24 @@ import {
 	reportedProcessDetails,
 } from './processes-config.js';
 
+/**
+ * The bus carries the reports of every build running beside this one — the
+ * deployment being replaced, the other service still on its own build — and
+ * one of those may describe its runtime without the flags list. The page reads
+ * the list as a list, so it is filled here rather than guarded there.
+ */
+function runtimeOf(
+	report: ProcessesReportMessage | undefined,
+): ProcessRuntimeStats | null {
+	const runtime = report?.self.runtime;
+
+	if (!runtime) {
+		return null;
+	}
+
+	return { ...runtime, execArgv: runtime.execArgv ?? [] };
+}
+
 function nodeFromReport(report: ProcessesReportMessage): ProcessNode {
 	return {
 		nodeId: report.self.nodeId,
@@ -27,9 +47,10 @@ function nodeFromReport(report: ProcessesReportMessage): ProcessNode {
 		name: report.self.name,
 		instance: report.self.instance,
 		responding: true,
-		runtime: report.self.runtime,
+		runtime: runtimeOf(report),
 		supervisor: null,
 		env: report.self.env,
+		autoscale: report.self.autoscale,
 	};
 }
 
@@ -74,9 +95,10 @@ function replicaProcesses(reports: ProcessesReportMessage[]): ProcessNode[] {
 			name: supervised.name,
 			instance: supervised.instance,
 			responding: report !== undefined,
-			runtime: report?.self.runtime ?? null,
+			runtime: runtimeOf(report),
 			supervisor: supervised.stats,
 			env: report?.self.env ?? null,
+			autoscale: report?.self.autoscale ?? null,
 		};
 	});
 
@@ -132,6 +154,10 @@ export function buildProcessesTree(
 				replicaId,
 				hostname: ofReplica[0]!.hostname,
 				supervisor: supervisorState(ofReplica),
+				// One container, one set of limits: every process of a replica reads
+				// the same cgroup, so the first answer is the replica's.
+				capacity: ofReplica.find((report) => report.capacity !== null)
+					?.capacity ?? null,
 				processes: replicaProcesses(ofReplica),
 			});
 		}
@@ -146,17 +172,15 @@ export function buildProcessesTree(
 }
 
 /**
- * Ask every node on the bus to describe itself and fold the answers into a tree.
- *
- * PM2's API only reaches the daemon in its own container, so a single process can
- * only ever enumerate its own replica; the bus is what makes the other replicas
- * answerable at all. Without Redis the bus is local, and the report says so
- * instead of presenting one replica as the whole deployment.
+ * Ask every node on the bus to describe itself, and answer with what arrived
+ * within `PROCESSES_COLLECT_TIMEOUT`. A node that did not answer in time is
+ * missing from the list, as a node that is gone is.
  */
-export async function collectProcesses(): Promise<ProcessesReport> {
+export async function collectProcessReports(
+	details: ProcessDetail[],
+	{ nodeBuildOnly = false }: { nodeBuildOnly?: boolean } = {},
+): Promise<ProcessesReportMessage[]> {
 	const bus = useBus();
-	const details = reportedProcessDetails();
-	const collectedForMs = processesCollectTimeoutMs();
 	const requestId = randomUUID();
 	const reports: ProcessesReportMessage[] = [];
 
@@ -169,20 +193,42 @@ export async function collectProcesses(): Promise<ProcessesReport> {
 	await bus.subscribe<ProcessesReportMessage>(PROCESSES_REPORT_CHANNEL, collect);
 
 	try {
-		const query: ProcessesQueryMessage = { requestId, details };
+		const query: ProcessesQueryMessage = nodeBuildOnly
+			? { requestId, details, nodeBuildOnly }
+			: { requestId, details };
 
 		await bus.publish(PROCESSES_QUERY_CHANNEL, query);
-		await new Promise((resolve) => setTimeout(resolve, collectedForMs));
+
+		await new Promise((resolve) => {
+			setTimeout(resolve, processesCollectTimeoutMs());
+		});
 	}
 	finally {
 		await bus.unsubscribe(PROCESSES_REPORT_CHANNEL, collect);
 	}
 
+	return reports;
+}
+
+/**
+ * Ask every node on the bus to describe itself and fold the answers into a tree.
+ *
+ * PM2's API only reaches the daemon in its own container, so a single process can
+ * only ever enumerate its own replica; the bus is what makes the other replicas
+ * answerable at all. Without Redis the bus is local, and the report says so
+ * instead of presenting one replica as the whole deployment.
+ */
+export async function collectProcesses(
+	requested?: ProcessDetail[],
+): Promise<ProcessesReport> {
+	const details = requested ?? reportedProcessDetails();
+	const reports = await collectProcessReports(details);
+
 	const services = buildProcessesTree(reports);
 
 	return {
 		collectedAt: Date.now(),
-		collectedForMs,
+		collectedForMs: processesCollectTimeoutMs(),
 		details,
 		services,
 		degraded: {

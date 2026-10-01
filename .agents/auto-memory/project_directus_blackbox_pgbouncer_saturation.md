@@ -2,6 +2,7 @@
 name: project_directus_blackbox_pgbouncer_saturation
 description: how to observe a saturated pgbouncer pool from a blackbox test — the probe extension answers before its queries finish, and supertest never sends a request you don't await
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: reference_directus_generatejoi_not_filter
 description: @directus/utils generateJoi is a VALIDATION-schema builder, not a filter matcher — don't reuse it for client-side row filtering; absent-field + _null polarity diverge
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

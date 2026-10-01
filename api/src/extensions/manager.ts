@@ -22,19 +22,16 @@ import type {
 } from '@directus/types';
 import { isTypeIn, toBoolean } from '@directus/utils';
 import { pathToRelativeUrl, processId } from '@directus/utils/node';
-import aliasDefault from '@rollup/plugin-alias';
-import nodeResolveDefault from '@rollup/plugin-node-resolve';
-import virtualDefault from '@rollup/plugin-virtual';
+import alias from '@rollup/plugin-alias';
+import nodeResolve from '@rollup/plugin-node-resolve';
+import virtual from '@rollup/plugin-virtual';
 import chokidar, { FSWatcher } from 'chokidar';
 import express, { Router } from 'express';
-import ivm from 'isolated-vm';
-import { clone, debounce, isPlainObject } from 'lodash-es';
 import { readFile, readdir } from 'node:fs/promises';
 import os from 'node:os';
-import { dirname, join } from 'node:path';
+import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ReadStream } from 'node:fs';
-import path from 'path';
 import { rolldown } from 'rolldown';
 import { rollup } from 'rollup';
 import { useBus } from '../bus/index.js';
@@ -48,6 +45,8 @@ import getModuleDefault from '../utils/get-module-default.js';
 import { getSchema } from '../utils/get-schema.js';
 import { importFileUrl } from '../utils/import-file-url.js';
 import { JobQueue } from '../utils/job-queue.js';
+import { loadIsolatedVm } from '../utils/load-isolated-vm.js';
+import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import { getExtensionsPath } from './lib/get-extensions-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
@@ -61,12 +60,6 @@ import { createScopedCacheExtensionHandle } from './lib/scoped-cache-handle.js';
 import { syncExtensions } from './lib/sync-extensions.js';
 import { wrapEmbeds } from './lib/wrap-embeds.js';
 import DriverLocal from '@directus/storage-driver-local';
-
-// Workaround for https://github.com/rollup/plugins/issues/1329
-const virtual = virtualDefault as unknown as typeof virtualDefault.default;
-// @rollup/plugin-alias v6 is pure ESM with a callable default export, no .default interop
-const alias = aliasDefault;
-const nodeResolve = nodeResolveDefault as unknown as typeof nodeResolveDefault.default;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -84,6 +77,14 @@ export class ExtensionManager {
 	 * Whether or not the extensions have been read from disk and registered into the system
 	 */
 	private isLoaded = false;
+
+	/**
+	 * Whether a load has already happened in this process. A reload has to bypass
+	 * the ESM module cache to pick a changed file up, but the very first load has
+	 * nothing to bypass — and the cache-busting query it would use also makes
+	 * Node's own compile cache miss every time.
+	 */
+	private hasLoadedBefore = false;
 
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
@@ -286,6 +287,8 @@ export class ExtensionManager {
 		}
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
+
+		this.hasLoadedBefore = true;
 
 		if (env['SERVE_APP']) {
 			await this.generateExtensionBundle();
@@ -561,6 +564,8 @@ export class ExtensionManager {
 
 		const extensionCode = await readFile(entrypointPath, 'utf-8');
 
+		const ivm = await loadIsolatedVm();
+
 		const isolate = new ivm.Isolate({
 			memoryLimit: sandboxMemory,
 			onCatastrophicError: (error) => {
@@ -655,7 +660,7 @@ export class ExtensionManager {
 				const hookPath = path.resolve(hook.path, hook.entrypoint);
 
 				const hookInstance: HookConfig | { default: HookConfig } = await importFileUrl(hookPath, import.meta.url, {
-					fresh: true,
+					fresh: this.hasLoadedBefore,
 				});
 
 				const config = getModuleDefault(hookInstance);
@@ -684,7 +689,7 @@ export class ExtensionManager {
 					endpointPath,
 					import.meta.url,
 					{
-						fresh: true,
+						fresh: this.hasLoadedBefore,
 					},
 				);
 
@@ -714,7 +719,7 @@ export class ExtensionManager {
 					operationPath,
 					import.meta.url,
 					{
-						fresh: true,
+						fresh: this.hasLoadedBefore,
 					},
 				);
 
@@ -754,7 +759,7 @@ export class ExtensionManager {
 				bundlePath,
 				import.meta.url,
 				{
-					fresh: true,
+					fresh: this.hasLoadedBefore,
 				},
 			);
 
@@ -825,7 +830,12 @@ export class ExtensionManager {
 		const unregisterFunctions: PromiseCallback[] = [];
 
 		const hookRegistrationContext = {
-			filter: <TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>) => {
+			// `any` for the context: the overloads on `RegisterFilter` decide what a
+			// handler sees from the event name, this one implementation serves them all.
+			filter: <TIn = unknown, TOut = TIn>(
+				event: string,
+				handler: FilterHandler<TIn, TOut, any>,
+			) => {
 				emitter.onFilter(event, handler);
 
 				unregisterFunctions.push(() => {

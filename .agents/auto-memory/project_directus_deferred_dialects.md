@@ -2,6 +2,7 @@
 name: project_directus_deferred_dialects
 description: Only postgres gates a PR on this fork — sqlite3 and maria are "deferred dialects" covered by standing ci-dialect-* branches/PRs plus tracker issues #330/#331; settled decisions behind PR #328
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

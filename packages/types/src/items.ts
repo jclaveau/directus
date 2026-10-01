@@ -2,7 +2,7 @@ import type { EventContext } from './events.js';
 import type { UserIntegrityCheckFlag } from './users.js';
 import type { PermissionsAction } from './permissions.js';
 import type { DirectusError } from './error.js';
-import type { ScopedCacheCollector } from './read-meta.js';
+import type { ScopedCacheHookDeclarations } from './read-meta.js';
 
 export type Item = Record<string, any>;
 
@@ -45,6 +45,13 @@ export type QueryOptions = {
 	stripNonRequested?: boolean;
 	permissionsAction?: PermissionsAction;
 	emitEvents?: boolean;
+	/**
+	 * Skip capturing the scoped cache purge counters this read would be guarded by.
+	 * Only for a read whose rows can never become a cached response — the counters
+	 * are what stops a fill from storing rows a concurrent write already replaced,
+	 * so a read that does reach `respond` must keep capturing them.
+	 */
+	skipScopedCacheEpochs?: boolean;
 };
 
 export type MutationOptions = {
@@ -55,8 +62,18 @@ export type MutationOptions = {
 
 	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.
+	 * `true` is the default, so a caller deciding at runtime passes its answer as is.
 	 */
-	autoPurgeCache?: false | undefined;
+	autoPurgeCache?: boolean | undefined;
+
+	/**
+	 * `false` keeps the collection's bare fingerprint out of the scoped purge: the
+	 * mutated rows' own slices drop, the reads the bare fingerprint names (unpinned
+	 * listings, relational hops) keep serving the pre-write rows. For a write whose
+	 * column no such read decides on, issued at a rate that would otherwise drain
+	 * them.
+	 */
+	purgeBareFingerprint?: boolean | undefined;
 
 	/**
 	 * Flag to disable the auto purging of the system cache.
@@ -103,10 +120,10 @@ export type MutationOptions = {
 	allowFilterCancel?: boolean | undefined;
 
 	/**
-	 * A shared scoped-cache tag collector injected by a batch/upsert parent so child
-	 * mutations' `purgeBy` tags survive to the parent's single deferred purge.
+	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so
+	 * child mutations' `purgeBy` survives to the parent's single deferred purge.
 	 */
-	scopedCacheCollector?: ScopedCacheCollector | undefined;
+	scopedCacheHookDeclarations?: ScopedCacheHookDeclarations | undefined;
 
 	bypassAutoIncrementSequenceReset?: boolean;
 

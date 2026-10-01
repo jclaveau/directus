@@ -2,6 +2,7 @@
 name: project_directus_blackbox_spawn_own_instance
 description: A blackbox spec can spawn its own Directus on a free port with a custom env — the only way to test boot-state behaviour, and readiness is /server/ping not /server/health
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

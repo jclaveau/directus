@@ -165,11 +165,18 @@ RATE_LIMITER_DURATION=1
 # Whether or not caching is enabled. [false]
 CACHE_ENABLED=false
 
+# Whether the response cache serves and fills, over CACHE_ENABLED [CACHE_ENABLED]
+# CACHE_RESPONSE=true
+
 # How long the cache is persisted ["5m"]
 # CACHE_TTL="30m"
 
 # How to scope the cache data ["scalabus"]
 # CACHE_NAMESPACE="scalabus"
+
+# The channel prefix the processes of this deployment message each other on, for a
+# Redis shared with other deployments [CACHE_NAMESPACE + ":bus"]
+# BUS_NAMESPACE="scalabus:bus"
 
 # Automatically purge the cache on create, update, and delete actions. [false]
 # CACHE_AUTO_PURGE=true
@@ -184,9 +191,76 @@ CACHE_ENABLED=false
 
 # How many keys one collection may be pinned by on a single scoped read. Over it
 # the read falls back to that collection's declared scope slices, then to its bare
-# tag — more purging, never staler. Each pin costs a Redis set and a member of the
-# collection's slice index, so raise it for hit ratio and lower it for memory. [250]
+# pin — more purging, never staler. Each pin costs a Redis set and a member of the
+# collection's fingerprint index, so raise it for fewer evictions and lower it for
+# cheaper fills. From 0 to 100000; a value outside ends the boot. The cache page
+# can set it live for every node. [250]
 # CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
+
+# How many ways to satisfy one filter are carried apart before they are carried
+# side by side instead. A filter ANDing two `_in`s of ten values each has a
+# hundred pairings, and an entry filed under a hundred index members costs a
+# hundred writes to file and a hundred compares to purge. Over it the read is
+# pinned to each value on its own — wider purges, never staler. [16]
+# CACHE_SCOPED_MAX_QUERY_CASES=16
+
+# How many members one SSCAN of a scoped index set asks Redis for per round trip.
+# Higher is fewer round trips per purge, lower holds Redis for less per command.
+# From 1 to 100000; a value outside ends the boot. The cache page can set it
+# live for every node. [1000]
+# CACHE_SCOPED_INDEX_SCAN_COUNT=1000
+
+# How many cache TTLs a scoped index set outlives the entries it lists by, as a
+# net for filings a crashed fill left behind. From 1 to 100: below 1 the index
+# would expire before its entries and a purge would miss them, so a value outside
+# ends the boot. The cache page can set it live for every node. [2]
+# CACHE_SCOPED_INDEX_TTL_FACTOR=2
+
+# How often a purge that failed with Redis still reachable (OOM under noeviction,
+# a LOADING replica) is retried from its recorded row; a reconnect retries it
+# too. 0 leaves the reconnect as the only retry. [1m]
+# CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
+
+# How many fingerprints of one collection a failed purge's retry drops one by
+# one. Past it the retry purges the whole collection: every cached entry is
+# matched against every fingerprint, so a long list costs more than the
+# collection. From 0 to 100000; a value outside ends the boot. The cache page can
+# set it live for every node. [100]
+# CACHE_SCOPED_PURGE_RETRY_MAX_FINGERPRINTS=100
+
+# How long a collection's purge counter is held. A read takes it before its query
+# and again after the fill, and a purge recreating an expired counter starts it
+# at Redis's clock, never at a value it held — so this only has to outlive the
+# slowest read, and shorter means a collection nobody writes to stops costing a
+# key sooner. 0 or less is read as the default: a counter expired as it is
+# bumped guards nothing. Anything below 5m is raised to 5m, so a counter never
+# expires under a read still between its two readings. [24h]
+# CACHE_SCOPED_EPOCH_TTL=24h
+
+# When the scoped cache's index drops the members naming entries that expired. An
+# index set outlives its entries, and every read filed into it pushes its expiry
+# out, so the set of a collection read all day never expires: without this it
+# keeps a member for every entry ever cached, and every write to the collection
+# tests them all again. The same pass prunes the names of sets that are gone,
+# releases the swept sets a stranded sweep left, and writes the completeness
+# marker a collection-wide purge needs to skip its keyspace SCAN. A flush and a
+# boot run one pass too, whatever this says; left off or invalid, only those
+# reap. Cron syntax, run on one node per tick. [0 * * * *]
+# CACHE_SCOPED_INDEX_REAP_SCHEDULE="0 * * * *"
+
+# The longest a boot of a build other than the last one recorded holds every
+# node of it from filling the scoped cache. The nodes of the build before keep
+# serving and filling through a rolling deploy, and file their entries where
+# this build's purges find them only by scanning the keyspace; entries this
+# build filed where theirs cannot reach would be served stale after their
+# purges. So this build serves every read uncached and writes no completeness
+# marker until no process of another build has answered the processes query
+# three looks in a row (5s apart), or this ceiling passes, then asks for a
+# reap, which names what the old build filed and writes the marker. Needs
+# PROCESSES_REPORT_ENABLED: without it the pause always runs to the ceiling.
+# A replica booting on the recorded build joins the pause running. 0 turns it
+# off. [5m]
+# CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX=5m
 
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,
@@ -212,6 +286,10 @@ CACHE_ENABLED=false
 # build's response shape until CACHE_TTL expires. Only acts with CACHE_STORE=redis. [true]
 # CACHE_AUTO_FLUSH_ON_DEPLOY=false
 
+# How long a boot waits on that flush before it listens with the flush still running;
+# the flush finishes on its own and records the build it flushed for. [30s]
+# CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT="30s"
+
 # Overrides the core build identity used by `CACHE_AUTO_FLUSH_ON_DEPLOY`. Set it to a per-build value
 # (e.g. the git commit SHA) when directus/version is pinned; unset, it falls back to the commit baked
 # in at build time, then `RAILWAY_GIT_COMMIT_SHA`, then the directus version string. Required for a
@@ -220,6 +298,12 @@ CACHE_ENABLED=false
 
 # memory | redis
 CACHE_STORE=memory
+
+# Keep the response cache and the scoped-cache index in their own Redis database,
+# so a flush is one FLUSHDB instead of a scan of every key Redis holds. Must differ
+# from the database REDIS selects: locks, synchronization clocks and cache stats
+# stay there. [unset]
+# CACHE_REDIS_DB=1
 
 # Opt-in: track cache hit/miss telemetry in Redis (needs CACHE_STORE=redis) to power the admin cache page. [false]
 # CACHE_STATS_ENABLED=true
@@ -232,7 +316,7 @@ CACHE_STORE=memory
 # CACHE_STATS_DRAIN_SCHEDULE="*/10 * * * * *"
 
 # When rows past CACHE_STATS_RETENTION are pruned, along with the descriptors
-# and entry tags left behind. Runs often: those two have no time axis to drop
+# and entry pins left behind. Runs often: those two have no time axis to drop
 # by, so their size is their peak live row count. ["*/10 * * * *"]
 # CACHE_STATS_RETENTION_SCHEDULE="*/10 * * * *"
 
@@ -248,22 +332,64 @@ CACHE_STORE=memory
 # How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
 # CACHE_STATS_GAP_LOOKBACK="1h"
 
+# Whether this node audits the cache at all: the schedule below, `POST
+# /utils/cache/audit`, `directus cache audit` and the `cache_audit` MCP group.
+# Off, none of them exists here. Every replay is an uncached read against the
+# shared database, so a fleet keeps it on one node (the back-office) and off on
+# the ones serving traffic. [true]
+CACHE_AUDIT_ENABLED=true
+
+# When to replay the live cache entries against the database and report the
+# ones they no longer match (`POST /utils/cache/audit`, `directus cache audit`).
+# Every replay is an uncached read. Off when empty. The rule is shared
+# (`directus_settings` overrides it live), so every node with
+# CACHE_AUDIT_ENABLED runs it. [""]
+# CACHE_AUDIT_SCHEDULE="0 */10 * * * *"
+
+# How many entries one audit examines before stopping, when the run asks for no
+# limit of its own: the next run resumes behind them, least recently verified
+# first, so a schedule works through the whole cache in slices and the database
+# never sees more than one slice of uncached reads per tick. 0 is no limit. [0]
+CACHE_AUDIT_LIMIT=0
+
+# How long one audit may run before it stops and leaves the rest to the next
+# one, whatever CACHE_AUDIT_LIMIT says: a cron tick never outlives its interval,
+# and "Audit now" answers. A run stopped this way is recorded as timed out. One
+# audit runs at a time; a run asked for while another is in flight is refused
+# (503). Up to 24h; a value outside ends the boot. ["10m"]
+CACHE_AUDIT_MAX_DURATION="10m"
+
+# JSON-pointer globs a cache audit ignores when comparing a stored body with a
+# fresh one: `*` is one segment, `**` the rest. For bodies a hook stamps with a
+# clock. Comma-separated. [""]
+# CACHE_AUDIT_IGNORE_PATHS="/data/*/served_at"
+
+# How long the audit history (`directus_cache_audits` and its findings) is kept.
+# Pruned after each run. ["30d"]
+CACHE_AUDIT_RETENTION="30d"
+
 # How long assets will be cached for in the browser. Sets the max-age value of the Cache-Control header ["30d"]
 ASSETS_CACHE_TTL="30d"
 
 #####################################################################################
 ### System MCP
 
-# Serve a read-only MCP endpoint at /system-mcp exposing the diagnostic
-# reads as tools an LLM agent can call, over the Streamable HTTP transport of
-# MCP revision 2025-06-18. Off by default. [false]
+# Serve an MCP endpoint at /system-mcp exposing the diagnostic reads as tools
+# an LLM agent can call, over the Streamable HTTP transport of MCP revision
+# 2025-06-18. Off by default. [false]
 # SYSTEM_MCP_ENABLED=false
 
-# Which subsystems to expose tools for: "processes" (the process tree) and
+# Which subsystems to expose tools for: "processes" (the process tree),
+# "autoscale" (what each pool is being scaled on, changing it, the pm2 options
+# a restart carries, and asking for that restart), "autoscale_drill" (loading
+# the pool on purpose, gated on PM2_AUTOSCALE_DRILL_ENABLED as well),
 # "cache" (listings, one entry by key, anomalies, latencies, timeseries,
-# telemetry state). A group left out is neither listed nor callable.
+# telemetry state) and "cache_audit" (run an audit, its history, its
+# schedule). A group left out is neither listed nor callable. The autoscale
+# and cache_audit groups are the ones whose tools write; the drill and the
+# audit are their own groups because each spends the deployment it describes.
 # ["processes,cache"]
-# SYSTEM_MCP_TOOLS="processes,cache"
+# SYSTEM_MCP_TOOLS="processes,autoscale,autoscale_drill,cache,cache_audit"
 
 # Browser origins allowed to call the endpoint. Empty by default, so no browser
 # reaches it: the transport spec requires the Origin header to be validated,

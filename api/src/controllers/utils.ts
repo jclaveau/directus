@@ -1,20 +1,32 @@
-import { InvalidPayloadError, InvalidQueryError, UnsupportedMediaTypeError } from '@directus/errors';
+import {
+	InvalidPayloadError,
+	InvalidQueryError,
+	RouteNotFoundError,
+	UnsupportedMediaTypeError,
+} from '@directus/errors';
 import type { CacheFlushTarget } from '@directus/types';
 import argon2 from 'argon2';
 import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
+import { autoscaleDrillEnabled } from '../processes/autoscale/lib/drill.js';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
 import {
 	pgbouncerReportEnabled,
 	requestedPgBouncerDetails,
 } from '../pgbouncer/index.js';
-import { processesReportEnabled } from '../processes/index.js';
+import {
+	processesReportEnabled,
+	requestedProcessDetails,
+} from '../processes/index.js';
 import { ExportService, ImportService } from '../services/import-export.js';
+import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
+import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
+import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -320,6 +332,127 @@ router.get(
 	}),
 );
 
+// The audit surface is absent, not forbidden, on a node with
+// CACHE_AUDIT_ENABLED off: like `/system-mcp` on one that never opened it.
+router.use(['/cache/audit', '/cache/audits'], (req, _res, next) => {
+	if (cacheAuditEnabled()) {
+		return next();
+	}
+
+	return next(new RouteNotFoundError({ path: req.originalUrl }));
+});
+
+router.post(
+	'/cache/audit',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		// Stripped, not passed: the run takes more options than a caller may
+		// set (its time budget, where a replay goes).
+		const { error, value } = CacheAuditOptionsSchema.validate(
+			{ ...req.query, ...req.body },
+			{ allowUnknown: true, stripUnknown: true },
+		);
+
+		if (error) {
+			throw new InvalidQueryError({ reason: error.message });
+		}
+
+		res.json({ data: await service.auditCache(value) });
+	}),
+);
+
+router.get(
+	'/cache/audits',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: await service.getCacheAudits(req.query['window']),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audits/:id',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: await service.getCacheAudit(req.params['id'], req.query),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audit/schedule',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAuditSchedule() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audit/queue',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAuditQueue() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/audit/schedule',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		if (!req.body || 'rule' in req.body === false) {
+			throw new InvalidPayloadError({
+				reason: 'A `rule` is required: a cron rule, or null to clear the override',
+			});
+		}
+
+		res.json({ data: await service.updateCacheAuditSchedule(req.body.rule) });
+	}),
+);
+
 router.delete(
 	'/cache',
 	asyncHandler(async (req, res) => {
@@ -401,6 +534,231 @@ router.post(
 	}),
 );
 
+router.get(
+	'/cache/settings',
+	asyncHandler(async (req, res, next) => {
+		const utilsService = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await utilsService.readCacheSettings() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/settings',
+	asyncHandler(async (req, res) => {
+		const utilsService = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const settingsPatch: unknown = req.body;
+
+		if (
+			typeof settingsPatch !== 'object'
+			|| settingsPatch === null
+			|| Array.isArray(settingsPatch)
+		) {
+			throw new InvalidPayloadError({
+				reason: 'An object of cache settings is required',
+			});
+		}
+
+		const updatedSettings = await utilsService.updateCacheSettings(
+			settingsPatch as Record<string, unknown>,
+			'admin',
+		);
+
+		res.status(200).json({ data: updatedSettings });
+		return;
+	}),
+);
+
+router.delete(
+	'/cache/settings',
+	asyncHandler(async (req, res) => {
+		const utilsService = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.status(200).json({ data: await utilsService.clearCacheSettings() });
+		return;
+	}),
+);
+
+// These serve one panel, and its subject is a pool this worker reaches only
+// over the bus — which without Redis is an emitter it shares with nobody. The
+// process that scales is found over it and the restart below is asked for over
+// it, so a deployment without Redis carries no panel rather than a page showing
+// a form where the pool it describes should be.
+//
+// Not the only door onto what the panel writes: these settings are columns of
+// `directus_settings`, so a settings write reaches them in any deployment, and
+// the guard on that write is what holds the two doors to the same answer.
+if (redisConfigAvailable()) {
+	router.get(
+		'/autoscale',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readAutoscaleConfig() };
+
+			return next();
+		}),
+		respond,
+	);
+
+	router.patch(
+		'/autoscale',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const patch: unknown = req.body;
+
+			if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+				throw new InvalidPayloadError({
+					reason: 'An object of autoscale configuration fields is required',
+				});
+			}
+
+			const updated = await service.updateAutoscaleConfig(
+				patch as Record<string, unknown>,
+				'admin',
+			);
+
+			res.status(200).json({ data: updated });
+			return;
+		}),
+	);
+
+	router.patch(
+		'/autoscale/supervisor',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const patch: unknown = req.body;
+
+			if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+				throw new InvalidPayloadError({
+					reason: 'An object of supervisor options is required',
+				});
+			}
+
+			const updated = await service.updateSupervisorConfig(
+				patch as Record<string, unknown>,
+				'admin',
+			);
+
+			res.status(200).json({ data: updated });
+			return;
+		}),
+	);
+
+	router.delete(
+		'/autoscale',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			await service.clearAutoscaleConfig();
+			res.status(200).json({ data: { sharedSettings: null } });
+			return;
+		}),
+	);
+
+	// The restart reaches the process that scales the pool over the bus, which
+	// without Redis is an emitter this worker shares with nobody.
+	router.post(
+		'/autoscale/reload',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.status(200).json({ data: await service.startAutoscaleReload() });
+			return;
+		}),
+	);
+}
+
+// The drill reaches the pool over the bus, which without Redis is an emitter this
+// worker shares with nobody: a deployment lacking either the flag or Redis has no
+// drill to offer rather than one that would load a single worker.
+if (autoscaleDrillEnabled() && redisConfigAvailable()) {
+	router.get(
+		'/autoscale/drill',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readAutoscaleDrill() };
+
+			return next();
+		}),
+		respond,
+	);
+
+	router.post(
+		'/autoscale/drill',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const body: Record<string, unknown> = typeof req.body === 'object'
+				&& req.body !== null
+				&& Array.isArray(req.body) === false
+				? req.body as Record<string, unknown>
+				: {};
+
+			const drill = await service.startAutoscaleDrill(
+				body['seconds'],
+				body['percent'],
+			);
+
+			res.status(200).json({ data: drill });
+			return;
+		}),
+	);
+
+	router.delete(
+		'/autoscale/drill',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.status(200).json({ data: await service.stopAutoscaleDrill() });
+			return;
+		}),
+	);
+}
+
 // Registered only where the report is turned on, so a deployment that disabled it
 // answers a plain 404 — the endpoint is absent, not merely refusing.
 if (processesReportEnabled()) {
@@ -412,9 +770,11 @@ if (processesReportEnabled()) {
 				schema: req.schema,
 			});
 
+			const details = requestedProcessDetails(req.query['details']);
+
 			// Live supervisor state; a cached copy would be worse than none.
 			res.locals['cache'] = false;
-			res.locals['payload'] = { data: await service.readProcesses() };
+			res.locals['payload'] = { data: await service.readProcesses(details) };
 
 			return next();
 		}),

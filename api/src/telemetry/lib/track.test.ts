@@ -1,5 +1,5 @@
 import { getNodeEnv } from '@directus/utils/node';
-import { setTimeout } from 'timers/promises';
+import { setTimeout } from 'node:timers/promises';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { useLogger } from '../../logger/index.js';
 import type { TelemetryReport } from '../types/report.js';

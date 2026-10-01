@@ -16,17 +16,24 @@ import type {
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { parseJSON, toArray } from '@directus/utils';
-import { format, isValid, parseISO } from 'date-fns';
 import { unflatten } from 'flat';
 import Joi from 'joi';
 import type { Knex } from 'knex';
-import { clone, cloneDeep, isNil, isObject, isPlainObject, pick } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import { parse as wktToGeoJSON } from 'wellknown';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
+import { format, isValid, parseISO } from '../utils/date-fns-used.js';
 import { generateHash } from '../utils/generate-hash.js';
+import {
+	clone,
+	cloneDeep,
+	isNil,
+	isObject,
+	isPlainObject,
+	pick,
+} from '../utils/lodash-es-used.js';
 
 type Transformers = {
 	[type: string]: (context: {

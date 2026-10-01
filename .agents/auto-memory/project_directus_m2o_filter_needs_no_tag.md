@@ -2,6 +2,7 @@
 name: project_directus_m2o_filter_needs_no_tag
 description: A filter through an M2O terminating on the related primary key needs NO scoped-cache tag at all behind an enforced FK — the widest radius win, gated on relation.schema
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

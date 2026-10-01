@@ -1,0 +1,322 @@
+import { useEnv } from '@directus/env';
+import type {
+	CanonicalScopedCachePinValue,
+	PrimaryKey,
+	ScopedCacheCollectionPin,
+	ScopedCachePin,
+	Type,
+} from '@directus/types';
+import { cacheSetting } from '../cache-settings.js';
+
+const env = useEnv();
+
+/**
+ * Of two readings of one collection's purge counter, the one taken EARLIER.
+ *
+ * Merging snapshots cannot be "whichever arrived first". Reads that contribute them
+ * run concurrently — GraphQL resolves its root fields in parallel, and a hook can
+ * fan its dependency lookups out with `allSettled` — so arrival order is not
+ * snapshot order. Keep the later of two and a purge that landed between them
+ * compares equal at fill time and the response is cached already stale, which is
+ * the whole thing the counters exist to catch.
+ *
+ * Absent beats every count: a counter that did not exist yet is the earliest reading
+ * there is, and any number later on proves a purge created it in between. A value
+ * that will not parse is treated the same way — `INCR` cannot produce one, so it
+ * means something is wrong, and the direction that fails toward not caching is the
+ * one to take.
+ */
+export function earlierScopedCacheEpoch(
+	left: string | null | undefined,
+	right: string | null | undefined,
+): string | null {
+	if (left === null || left === undefined || right === null || right === undefined) {
+		return null;
+	}
+
+	const leftCount = Number(left);
+	const rightCount = Number(right);
+
+	if (Number.isNaN(leftCount) || Number.isNaN(rightCount)) {
+		return null;
+	}
+
+	return leftCount <= rightCount
+		? left
+		: right;
+}
+
+// Canonicalize a pin's value to a driver-stable token so a REST/GraphQL filter value
+// and the native DB row value resolve the SAME slice. `String()` alone collapses the
+// common case (number 7 vs string "7"), but diverges for non-string scalars — a
+// boolean is `true` from a parsed filter but `1`/`0` (mysql/sqlite) or `'t'` (pg)
+// from a stored row; a datetime is an ISO string from a filter but a `Date` from the
+// driver; a decimal is `1.5` vs `'1.50'`. NULL gets a null-byte sentinel rather than
+// String(null)='null', so it can't collide with a literal "null" value.
+export function canonicalizeScopedCachePinValue(
+	value: ScopedCachePin['value'],
+	type: ScopedCachePin['type'],
+): CanonicalScopedCachePinValue {
+	if (value === null || value === undefined) {
+		return '\x00null';
+	}
+
+	if (type === 'boolean') {
+		// Every spelling a boolean column accepts, folded — `TRUE` from a filter and
+		// `t` from a postgres row are one value to the database, so they must be one
+		// slice. Matched case-insensitively for the same reason `uuid` folds below:
+		// unfolded, a read filtered `flag=TRUE` pins `flag=false` while the write
+		// emits `flag=true`, and no purge ever reaches that entry.
+		const spelling = String(value).toLowerCase();
+
+		const truthy = value === true || value === 1
+			|| ['1', 't', 'true', 'y', 'yes', 'on'].includes(spelling);
+
+		return truthy
+			? 'true'
+			: 'false';
+	}
+
+	// `time` has no date component, so it stays a plain string (both sides give
+	// `HH:MM:SS`).
+	if (type === 'date' || type === 'dateTime' || type === 'timestamp') {
+		const ms = value instanceof Date
+			? value.getTime()
+			: Date.parse(String(value));
+
+		return Number.isNaN(ms)
+			? String(value)
+			: String(ms);
+	}
+
+	// A uuid is compared case-insensitively by the DB, so both spellings name one row
+	// and must name one slice. Neither side normalizes for us — `validateKeys` accepts
+	// either case without rewriting it — so the token would otherwise be whatever the
+	// caller sent: an iOS client reading `UUID().uuidString` (uppercase) against a
+	// web client writing lowercase would pin and purge different keys → stale HIT.
+	if (type === 'uuid') {
+		return String(value).toLowerCase();
+	}
+
+	// A `_ci` collation — MySQL/MariaDB's default, MSSQL's default — matches `Acme`
+	// to a stored `acme`, so the two spellings name one row and must name one slice,
+	// for the same reason `uuid` folds above: the read would pin `tenant=Acme` while
+	// the write emits `tenant=acme`, and the purge would miss. On a case-SENSITIVE
+	// vendor this merges two real slices into one instead — an over-purge, never a
+	// stale hit. Locale-invariant so the token cannot depend on the server's locale.
+	if (type === 'string' || type === 'text') {
+		return String(value).toLowerCase();
+	}
+
+	// integer/bigInteger normalize the SPELLING but never go through `Number`: past
+	// MAX_SAFE_INTEGER a numeric pass corrupts the value, so leading zeros and a
+	// leading `+` are stripped as string surgery. `01`, `+1`, `0001` and a driver's
+	// `1` are one key to the DB, so they must not resolve different slices. Anything
+	// that isn't a plain integer keeps its string form rather than becoming empty.
+	if (type === 'integer' || type === 'bigInteger') {
+		const raw = String(value).trim();
+		const digits = /^([+-]?)0*(\d+)$/.exec(raw);
+
+		if (digits === null) {
+			// Spellings `validateKeys` still lets through, since it only asks
+			// `Number.isInteger(Number(key))`: `1e3`, `0x10`, `1.0`. Normalize through
+			// `Number` when it round-trips safely; past MAX_SAFE_INTEGER no token can be
+			// right, and such a key cannot have matched a row either, so keep it raw.
+			const num = Number(raw);
+
+			return raw !== '' && Number.isSafeInteger(num)
+				? String(num)
+				: raw;
+		}
+
+		// `-0` is zero; only a non-zero magnitude keeps the sign.
+		const sign = digits[1] === '-' && digits[2] !== '0'
+			? '-'
+			: '';
+
+		return `${sign}${digits[2]}`;
+	}
+
+	// Only fixed-scale types need the numeric pass (`'1.50'` vs `1.5`).
+	if (type === 'decimal' || type === 'float') {
+		const num = Number(value);
+
+		return Number.isFinite(num)
+			? String(num)
+			: String(value);
+	}
+
+	return String(value);
+}
+
+/** Each field of a collection mapped to its schema type, or undefined when the
+ * schema does not carry it. What canonicalizes a pin value on both sides. */
+export type FieldTypesByField = Record<string, Type | undefined>;
+
+// Types whose filter value and stored row value are NOT guaranteed to canonicalize
+// to the same token across drivers/timezones: a naive `dateTime`/`timestamp` column
+// comes back as a local `Date` from the driver but as an ISO string (possibly with
+// an explicit `Z`) from a filter, so the epoch-ms canonical can diverge. The read
+// side never pins these — it falls back to the bare collection fingerprint so any
+// write to the collection invalidates the read (over-purge, never stale).
+export const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>([
+	'date',
+	'dateTime',
+	'timestamp',
+]);
+
+export function isPinnableScopeType(type: Type | undefined): boolean {
+	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
+}
+
+/**
+ * How a row a create hook took over is named in the hook declarations' set. Recorded
+ * where the take-over happens and read back in another method entirely, so the
+ * two spellings have to come from one place or the lookup silently misses.
+ */
+export function takenOverScopedCacheKey(
+	collection: string,
+	key: PrimaryKey,
+): string {
+	return `${collection}:${String(key)}`;
+}
+
+/**
+ * What identifies a pin: its collection, its field, and the value canonicalized —
+ * so `7` and `'7'`, `TRUE` and `t` key one slice. Every set that dedups pins keys
+ * on this, and nothing else, so two spellings of one slice cannot both be carried.
+ *
+ * No Redis prefix on it: the index is keyed by fingerprint, and a pin is only ever
+ * an identity in memory.
+ */
+export function scopedCachePinKey(pin: ScopedCacheCollectionPin): string {
+	if (pin.field === undefined) {
+		return pin.collection;
+	}
+
+	return `${pin.collection}:${pin.field}=${
+		canonicalizeScopedCachePinValue(pin.value, pin.type)
+	}`;
+}
+
+/**
+ * One `ScopedCacheCollectionPin` per distinct scope value across `rows` — the
+ * purge side.
+ *
+ * Pins, not fingerprints: each is ONE axis of the collection, and the caller
+ * composes the pins of ONE row into that row's fingerprint
+ * (`scopedCacheFingerprintOf`). Feeding a whole page of rows in therefore yields
+ * the axes those rows touch with the AND between them lost, which is what the
+ * callers wanting a per-row query case avoid by passing `[row]`.
+ *
+ * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*.
+ * `'coarse'` returns `null` so the caller can fall back to a collection-wide purge
+ * rather than leave a slice stale; `'skip'` best-effort skips just that row's
+ * contribution. - The `'coarse'` path triggers for a caller feeding *unprojected*
+ * rows. The purge side (`snapshotScopedCachePins`) reads rows via an explicit
+ * projected `select`, so every field key is always present and it never returns
+ * `null` there — an update/delete/create snapshot always resolves. A create whose
+ * committed rows can't be trusted is caught upstream by the row-count check
+ * (`someRowTakenOver`), not here. - The read side
+ * (`scopedCachePinsFromM2oParents`) is the caller that depends on the `null`:
+ * one parent row missing its key has to take its whole collection down to the bare
+ * fingerprint, since pinning the rest would leave that row covered by nothing. -
+ * `fieldTypes`: each field's schema type, so the pin value canonicalizes the same
+ * way the read side's filter value does.
+ */
+export function scopedCacheCollectionPinsFromRows(
+	collection: string,
+	fields: string[],
+	rows: Record<string, any>[],
+	onUnresolvable: 'skip',
+	fieldTypes?: FieldTypesByField,
+): ScopedCacheCollectionPin[];
+export function scopedCacheCollectionPinsFromRows(
+	collection: string,
+	fields: string[],
+	rows: Record<string, any>[],
+	onUnresolvable: 'coarse',
+	fieldTypes?: FieldTypesByField,
+): ScopedCacheCollectionPin[] | null;
+export function scopedCacheCollectionPinsFromRows(
+	collection: string,
+	fields: string[],
+	rows: Record<string, any>[],
+	onUnresolvable: 'coarse' | 'skip',
+	fieldTypes: FieldTypesByField = {},
+): ScopedCacheCollectionPin[] | null {
+	const pins: ScopedCacheCollectionPin[] = [];
+
+	for (const field of fields) {
+		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a
+		// boolean stored as `1`/`'t'`) collapse to one pin instead of emitting redundant
+		// slices.
+		const seen = new Set<string>();
+
+		for (const row of rows) {
+			if (!(field in row)) {
+				if (onUnresolvable === 'coarse') {
+					return null;
+				}
+
+				continue;
+			}
+
+			const value = row[field];
+			const token = canonicalizeScopedCachePinValue(value, fieldTypes[field]);
+
+			if (seen.has(token)) {
+				continue;
+			}
+
+			seen.add(token);
+			pins.push({ collection, field, value, type: fieldTypes[field] });
+		}
+	}
+
+	return pins;
+}
+
+/**
+ * How many slices one nested collection may pin on a single read. Every pin costs
+ * a set in the store plus a fingerprint index member, and the write side deletes
+ * them one by one.
+ *
+ * Sized from the fill a pin costs, measured by `tests/perf/pin-fanout.perf.test.ts`
+ * (#392): its read pinning 200 parents added 435 Redis commands over an uncached
+ * read at 250, and 8 at 64, where it falls back to the parents' slices or to the
+ * bare collection. What that buys back is on the write: over 1600 such reads
+ * cached, one parent's update evicted 153 of them pinned by key, 200 through a
+ * slice, and all 1600 through the bare collection. Every cap from 4 to 64
+ * measured the same fill. Which side is worth paying depends on the traffic, so
+ * the default keeps the key pins of a 200-row page and the cache page moves it.
+ *
+ * NOT the bound a purge's record is held to, though both coarsen rather than fan
+ * out and both fail toward over-purge: that one is forced by Postgres's 65 535
+ * bind parameters and wipes a whole collection's cache above it. This one only
+ * costs the one response its pin, which is still cached.
+ *
+ * Operator-tunable, live from the cache page for every node, because the right
+ * number is deployment-specific: it weighs what a fill costs Redis against how
+ * many entries a write evicts, and a pin costs one set plus a member of the
+ * collection's fingerprint index (130 B measured, on a TTL every write
+ * refreshes). No setting of it can serve a stale row.
+ */
+export function scopedCacheMaxPinsPerCollection(): number {
+	return cacheSetting('scoped_max_pins_per_collection');
+}
+
+/**
+ * How many ways to satisfy one filter are carried apart before they are carried
+ * side by side instead. A filter ANDing two `_in`s of ten values each has a
+ * hundred pairings, and an entry filed under a hundred index members costs a
+ * hundred writes to file and a hundred compares to purge — for a precision no
+ * read of that shape needs.
+ *
+ * Operator-tunable beside the pin ceiling above, and weighing the same two
+ * things: over it the read is pinned to each value on its own, which purges
+ * wider and never staler. Raise it for hit ratio, lower it for memory.
+ */
+export function scopedCacheMaxQueryCases(): number {
+	return env['CACHE_SCOPED_MAX_QUERY_CASES'] as number;
+}

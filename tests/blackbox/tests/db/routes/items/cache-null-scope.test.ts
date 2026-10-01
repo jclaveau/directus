@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // The NULL scope token opens with a raw NUL so it can never collide with a
 // literal 'null' in a Redis key. That byte is illegal in an HTTP header, so
-// rendering the tag into `CACHE_PURGED_TAGS_HEADER` made `res.setHeader` throw
+// rendering the pin into `CACHE_PURGED_TAGS_HEADER` made `res.setHeader` throw
 // ERR_INVALID_CHAR — AFTER the row had committed. Every write to a collection
 // whose scope field was null came back 500 with the item created, and only
 // while the debug header was on. A unit test on the display form cannot see
@@ -43,10 +43,13 @@ describe(oneLine`
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-null-scope-${vendor}`;
-		// The trigger: without it the tags are never rendered and the write survives.
+		// The trigger: without it the pins are never rendered and the write survives.
 		env[vendor]['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 		env[vendor]['CACHE_TAGS_HEADER'] = tagsHeader;
 		env[vendor]['CACHE_STATUS_HEADER'] = statusHeader;
+		// The admin cache tree resolves an entry through its descriptor, which is
+		// written by the stats pipeline rather than by the fill.
+		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
 		let instance: ChildProcess;
 
@@ -105,7 +108,7 @@ describe(oneLine`
 			expect(header.split(', ')).toContain(`${COLLECTION}:owner=%00null`);
 		});
 
-		// A read pinned to `_eq: null` stores the raw token in the __tags sidecar, so
+		// A read pinned to `_eq: null` stores the raw token in the __pins sidecar, so
 		// the HIT re-emits it from cache.ts — the escaping site the MISS never reaches.
 		it(oneLine`
 			escapes the null scope again when the read is served from cache
@@ -135,6 +138,65 @@ describe(oneLine`
 			expect(carriesControlByte(header)).toBe(false);
 			expect(header.split(', ')).toContain(`${COLLECTION}:owner=%00null`);
 		});
+
+		// The other place the raw token has to survive: the blast radius the admin
+		// tree shows is an SCARD of the pin's own Redis key, rebuilt from the display
+		// label. A label spelled `null` where the key holds `\x00null` scards a key
+		// that does not exist and reports 0 — a slice indexing entries would read as
+		// reaching none of them.
+		it(oneLine`
+			counts the members of a null scope slice, whose Redis key the display label
+			has to be turned back into
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const miss = await request(url)
+				.get(`/items/${COLLECTION}`)
+				.query({ filter: JSON.stringify({ owner: { _eq: null } }) })
+				.set('Authorization', auth);
+
+			expect(miss.headers[statusHeader]).toBe('MISS');
+
+			// The descriptor drains on the stats cron, so the entry is listable a few
+			// ticks after the fill that created it.
+			let filled: any;
+
+			for (let attempt = 0; attempt < 45 && filled === undefined; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				filled = listed.body.data.find((row: any) => {
+					return row.path === `/items/${COLLECTION}` && row.redisKey;
+				});
+
+				if (filled === undefined) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			expect(filled).toBeDefined();
+
+			const entry = await request(url).get('/utils/cache/entry')
+				.query({ key: filled.redisKey })
+				.set('Authorization', auth);
+
+			expect(entry.statusCode).toBe(200);
+			expect(entry.body.data.exists).toBe(true);
+
+			const nullPin = `${COLLECTION}:owner=\u0000null`;
+
+			expect(entry.body.data.pins).toContain(nullPin);
+
+			// Zero is exactly what a mis-spelled key returns, so this is the whole
+			// assertion — the entry and its sidecars are all filed under the slice.
+			expect(entry.body.data.pinCounts[nullPin]).toBeGreaterThan(0);
+		}, 60_000);
 
 		// The control: a present scope value was never affected, so a regression that
 		// broke escaping wholesale would still show up here.

@@ -1,6 +1,6 @@
 import { Knex } from 'knex';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { allVendors, type Vendor } from './get-dbs-to-test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,18 @@ if (process.env['TEST_SAVE_LOGS']) {
 	logLevel = allowedLogLevels.includes(process.env['TEST_SAVE_LOGS']) ? process.env['TEST_SAVE_LOGS'] : 'info';
 }
 
+// Copies each spawned process's output to server-logs/, so an instance a suite
+// starts for itself leaves a trace too (see setup/server-log-tee.mjs).
+const serverLogConfig: Record<string, string> = process.env['TEST_SAVE_LOGS']
+	? {
+		NODE_OPTIONS: [
+			process.env['NODE_OPTIONS'],
+			`--import=${pathToFileURL(join(paths.cwd, 'setup', 'server-log-tee.mjs'))}`,
+		].filter(Boolean).join(' '),
+		BLACKBOX_SERVER_LOG_DIR: join(paths.cwd, 'server-logs'),
+	}
+	: {};
+
 const directusAuthConfig = {
 	AUTH_PROVIDERS: 'saml',
 	AUTH_SAML_DRIVER: 'saml',
@@ -78,6 +90,9 @@ const directusConfig = {
 	CACHE_SCHEMA: 'true',
 	CACHE_SCHEMA_MAX_ITERATIONS: '100',
 	CACHE_ENABLED: 'false',
+	// Every suite boots in a namespace no build recorded, which a deploy's fill
+	// pause would serve uncached for its whole run.
+	CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 	RATE_LIMITER_ENABLED: 'false',
 	PRESSURE_LIMITER_ENABLED: 'false',
 	LOG_LEVEL: logLevel,
@@ -91,8 +106,14 @@ const directusConfig = {
 	QUERY_LIMIT_DEFAULT: '90', // Must be less than MAX_BATCH_MUTATION by at least 3
 	ACCESS_TOKEN_TTL: '25d', // should be larger than 24.86 days to test Expires value larger than 32-bit signed integer
 	WEBSOCKETS_ENABLED: 'true',
+	// A day, so a server re-reads a shared setting only when it hears it
+	// announced: the suites writing one announce it on a bus of their own, and a
+	// re-read landing in their window would switch every other server's cache.
+	// A suite that needs the re-read sets its own.
+	SHARED_SETTINGS_POLL_SECONDS: '86400',
 	...directusAuthConfig,
 	...directusStorageConfig,
+	...serverLogConfig,
 };
 
 const config: Config = {

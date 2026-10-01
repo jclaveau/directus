@@ -2,6 +2,7 @@
 name: project_directus_pr326_latency_percentiles
 description: PR #326 cache-tree response-latency percentiles — design decisions and the points jean already settled, so a fresh review doesn't re-litigate them
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

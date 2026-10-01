@@ -2,6 +2,7 @@
 name: reference_directus_blackbox_port_flake
 description: bb shard failing with "Port NNNNN is already in use" at server bootstrap = runner port-collision flake, not a code bug; rerun the failed jobs
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

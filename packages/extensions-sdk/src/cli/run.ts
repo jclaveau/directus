@@ -3,6 +3,7 @@ import add from './commands/add.js';
 import build from './commands/build.js';
 import create from './commands/create.js';
 import link from './commands/link.js';
+import unbundle from './commands/unbundle.js';
 import validate from './commands/validate.js';
 import getSdkVersion from './utils/get-sdk-version.js';
 
@@ -33,10 +34,25 @@ program
 	.option('-o, --output <file>', 'specify the output file instead of reading from package manifest')
 	.option('-l, --language <language>', '[DEPRECATED]')
 	.option('-f, --force', '[DEPRECATED]')
+	.option(
+		'-e, --external <deps>',
+		'comma-separated dependencies the api entry resolves at runtime, not bundled',
+	)
+	.option(
+		'--preserve-modules',
+		'emit the api entrypoint as one file per module, to read rather than to run',
+	)
 	.option('-w, --watch', 'watch and rebuild on changes')
 	.option('--no-minify', 'disable minification')
 	.option('--sourcemap', 'include source maps in output')
 	.action(build);
+
+program
+	.command('unbundle')
+	.description("Write a built extension's original sources out of its source map")
+	.argument('<bundle>', 'path to the built file, or to its .map')
+	.argument('<directory>', 'directory to write the sources into')
+	.action(unbundle);
 
 program
 	.command('link')

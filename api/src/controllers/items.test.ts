@@ -1,4 +1,6 @@
 import { ForbiddenError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
+import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 
@@ -21,7 +23,7 @@ const getMetaForQuery = vi.fn();
 
 vi.mock('../services/items.js', () => {
 	return {
-		ItemsService: vi.fn(() => {
+		ItemsService: vi.fn(function () {
 			return {
 				createOne,
 				createMany,
@@ -43,7 +45,11 @@ vi.mock('../services/items.js', () => {
 });
 
 vi.mock('../services/meta.js', () => {
-	return { MetaService: vi.fn(() => ({ getMetaForQuery })) };
+	return {
+		MetaService: vi.fn(function () {
+			return { getMetaForQuery };
+		}),
+	};
 });
 
 vi.mock('../middleware/collection-exists.js', () => ({ default: vi.fn() }));
@@ -74,7 +80,7 @@ function handlerFor(method: string, path: string) {
 		(l: any) => l.route && l.route.path === path && l.route.methods[method],
 	);
 
-	const sub = layer!.route.stack;
+	const sub = layer!.route!.stack;
 	// collectionExists / validateBatch / mergeContentVersions / respond are stubbed vi.fn()s; only the
 	// asyncHandler-wrapped route handler stringifies to the `Promise.resolve(fn(...))` wrapper.
 	return sub.find((s: any) => /Promise\.resolve\(fn/.test(s.handle.toString()))!.handle;
@@ -152,7 +158,7 @@ describe('items controller', () => {
 			readOne.mockRejectedValueOnce(new ForbiddenError());
 			const req = makeReq({ body: { a: 1 } });
 			const next = vi.fn();
-			await handler()(req, { locals: {} }, next);
+			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
 		});
 
@@ -174,9 +180,13 @@ describe('items controller', () => {
 			expect(await nextError(handler(), req)).toBeInstanceOf(ForbiddenError);
 		});
 
-		test('singleton read + stamps scopedCacheTags', async () => {
+		test('singleton read + stamps scopedCacheFingerprints', async () => {
 			readSingleton.mockResolvedValueOnce(
-				withMeta({ id: 1 }, { scopedCacheTags: [{ collection: 'articles' }] }),
+				withMeta({ id: 1 }, {
+					scopedCacheFingerprints: [
+						{ collection: 'articles' },
+					],
+				}),
 			);
 
 			getMetaForQuery.mockResolvedValueOnce({ total_count: 1 });
@@ -185,7 +195,11 @@ describe('items controller', () => {
 			const next = vi.fn();
 			await handler()(req, res, next);
 			expect(res.locals['payload'].data).toBeDefined();
-			expect(res.locals['scopedCacheTags']).toEqual([{ collection: 'articles' }]);
+
+			expect(res.locals['scopedCacheFingerprints']).toEqual([
+				{ collection: 'articles' },
+			]);
+
 			expect(next).toHaveBeenCalledOnce();
 		});
 
@@ -230,24 +244,39 @@ describe('items controller', () => {
 		});
 
 		// Without this the pin never reaches respond.ts, which then falls back to the
-		// bare collection tag — so the key slice a single-item read pinned would be
+		// bare collection pin — so the key slice a single-item read pinned would be
 		// indexed under nothing, and any write to the collection would drop the entry.
-		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
-			const pin = { collection: 'articles', field: 'id', value: 1 };
-			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };
-
+		test(oneLine`
+			stamps the read's pins and its unautopurgeable fingerprints
+		`, async () => {
 			readOne.mockResolvedValueOnce(
 				withMeta(
 					{ id: 1 },
-					{ scopedCacheTags: [pin], scopedCacheUnautopurgeableTags: [orphan] },
+					{
+						scopedCacheFingerprints: [{
+							collection: 'articles',
+							pinnedScope: { id: ['1'] },
+						}],
+						scopedCacheUnautopurgeableFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { ghost: ['g'] },
+						}],
+					},
 				),
 			);
 
 			const res = { locals: {} } as any;
 			await handler()(makeReq(), res, vi.fn());
 
-			expect(res.locals['scopedCacheTags']).toEqual([pin]);
-			expect(res.locals['scopedCacheUnautopurgeableTags']).toEqual([orphan]);
+			expect(res.locals['scopedCacheFingerprints']).toEqual([{
+				collection: 'articles',
+				pinnedScope: { id: ['1'] },
+			}]);
+
+			expect(res.locals['scopedCacheUnautopurgeableFingerprints']).toEqual([{
+				collection: 'authors',
+				pinnedScope: { ghost: ['g'] },
+			}]);
 		});
 	});
 
@@ -305,7 +334,7 @@ describe('items controller', () => {
 			readMany.mockRejectedValueOnce(new ForbiddenError());
 			const req = makeReq({ body: [{ a: 1 }] });
 			const next = vi.fn();
-			await handler()(req, { locals: {} }, next);
+			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
 		});
 
@@ -348,7 +377,7 @@ describe('items controller', () => {
 			readOne.mockRejectedValueOnce(new ForbiddenError());
 			const req = makeReq({ body: { x: 1 } });
 			const next = vi.fn();
-			await handler()(req, { locals: {} }, next);
+			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
 		});
 
@@ -374,7 +403,7 @@ describe('items controller', () => {
 			deleteMany.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: [1, 2] });
 			const next = vi.fn();
-			await handler()(req, undefined, next);
+			await handler()(req, undefined as unknown as Response, next);
 			expect(deleteMany).toHaveBeenCalledWith([1, 2], { allowFilterCancel: true });
 			expect(next).toHaveBeenCalledOnce();
 		});
@@ -382,14 +411,14 @@ describe('items controller', () => {
 		test('deleteMany via body.keys', async () => {
 			deleteMany.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: { keys: [3] } });
-			await handler()(req, undefined, vi.fn());
+			await handler()(req, undefined as unknown as Response, vi.fn());
 			expect(deleteMany).toHaveBeenCalledWith([3], { allowFilterCancel: true });
 		});
 
 		test('deleteByQuery default branch', async () => {
 			deleteByQuery.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: { query: {} } });
-			await handler()(req, undefined, vi.fn());
+			await handler()(req, undefined as unknown as Response, vi.fn());
 			expect(deleteByQuery).toHaveBeenCalledOnce();
 		});
 	});
@@ -406,7 +435,7 @@ describe('items controller', () => {
 			deleteOne.mockResolvedValueOnce(undefined);
 			const req = makeReq();
 			const next = vi.fn();
-			await handler()(req, undefined, next);
+			await handler()(req, undefined as unknown as Response, next);
 			expect(deleteOne).toHaveBeenCalledWith('1', { allowFilterCancel: true });
 			expect(next).toHaveBeenCalledOnce();
 		});

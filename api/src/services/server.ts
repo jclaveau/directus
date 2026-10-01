@@ -3,9 +3,8 @@ import type { AbstractServiceOptions, Accountability, SchemaOverview } from '@di
 import { toArray, toBoolean } from '@directus/utils';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
-import { merge } from 'lodash-es';
 import { Readable } from 'node:stream';
-import { performance } from 'perf_hooks';
+import { performance } from 'node:perf_hooks';
 import { getCache } from '../cache.js';
 import { RESUMABLE_UPLOADS } from '../constants.js';
 import getDatabase, { hasDatabaseConnection } from '../database/index.js';
@@ -14,10 +13,16 @@ import getMailer from '../mailer.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
 import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';
+import {
+	poolHasComeUp,
+	poolHealthReading,
+} from '../processes/lib/pool-health.js';
 import { SERVER_ONLINE } from '../server.js';
 import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
+import { merge } from '../utils/lodash-es-used.js';
 import { SettingsService } from './settings.js';
+import { responseCacheWanted } from '../cache-settings.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -200,6 +205,49 @@ export class ServerService {
 			if (data.status === 'error') break;
 		}
 
+		// After the logging loop, like the migrations below: a probe answers on
+		// whatever interval a platform polls at, and the autoscaler already says
+		// this once per change in the log of the process that measured it.
+		const pool = poolHealthReading();
+
+		if (poolHasComeUp() === false) {
+			// An error, so a platform gating a switchover on this holds the
+			// deployment back and leaves the previous one serving. A deployment
+			// that asked for a prewarm and cannot reach it is answering its
+			// first requests with a fraction of the pool it was told to have,
+			// which is the failure prewarm was added to prevent.
+			data.status = 'error';
+
+			data.checks['processes:pool'] = [
+				{
+					componentType: 'system',
+					status: 'error',
+					observedValue: pool?.onlineWorkers ?? 0,
+					observedUnit: 'workers',
+					output: 'The pool has not reached the size it serves with',
+				},
+			];
+		}
+		else if (pool !== null && pool.failedWorkers > 0) {
+			// A warning rather than an error, so the 200 stands. The workers
+			// this one is answering for are serving: taking the service out of
+			// rotation for the ones that are not would answer a pool that lost
+			// a worker by dropping the rest of it.
+			if (data.status === 'ok') {
+				data.status = 'warn';
+			}
+
+			data.checks['processes:pool'] = [
+				{
+					componentType: 'system',
+					status: 'warn',
+					observedValue: pool.failedWorkers,
+					observedUnit: 'workers',
+					output: 'The supervisor could not keep every worker running',
+				},
+			];
+		}
+
 		// After the logging loop so a red health poll does not re-log the same line on
 		// every probe; the watch logs the reading once per check instead.
 		const outstanding = outstandingMigrationsHoldingHealth();
@@ -281,7 +329,7 @@ export class ServerService {
 		}
 
 		async function testCache(): Promise<Record<string, HealthCheck[]>> {
-			if (env['CACHE_ENABLED'] !== true) {
+			if (responseCacheWanted() === false) {
 				return {};
 			}
 

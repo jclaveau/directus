@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import FormData from 'form-data';
-import { PassThrough } from 'stream';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { InvalidPayloadError } from '@directus/errors';
 import { multipartHandler } from './files.js';

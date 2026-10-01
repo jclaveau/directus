@@ -1,5 +1,5 @@
 import type { Filter } from '@directus/types';
-import { isObject } from '@directus/utils';
+import { isObject } from '@directus/utils/values';
 
 /**
  * Normalizes a filter so that each relational path segment has at most one

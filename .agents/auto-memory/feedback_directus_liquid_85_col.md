@@ -2,6 +2,7 @@
 name: feedback_directus_liquid_85_col
 description: jean wants the 85-col style cap applied to .liquid files too; now enforced (not manual) via a no-op-parser block in eslint.style.config.js + the gate glob
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

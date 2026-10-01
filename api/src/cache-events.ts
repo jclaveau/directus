@@ -1,23 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import { useEnv } from '@directus/env';
 import { parse as parseBytes } from 'bytes';
-import type { Knex } from 'knex';
-import type Keyv from 'keyv';
-import { useBus } from './bus/index.js';
-import { resolvedCacheTtl } from './cache-config.js';
-import getDatabase from './database/index.js';
-import { useLogger } from './logger/index.js';
-import { redisConfigAvailable, useRedis } from './redis/index.js';
-import { getMilliseconds } from './utils/get-milliseconds.js';
-import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
-
-// The timeseries wire types live in @directus/types so the app chart shares them.
-export type {
+import type {
 	CacheConfigEvent,
 	CachePurgeMode,
 	CacheTimeseries,
 	CacheTimeseriesBucket,
 } from '@directus/types';
+import type { Knex } from 'knex';
+import type Keyv from 'keyv';
+import { useBus } from './bus/index.js';
+import { resolvedCacheTtl } from './cache-config.js';
+import { cacheSetting } from './cache-settings.js';
+import { cacheExpiresAtKey, cachePinsKey } from './cache-sidecars.js';
+import { cacheStoreDropsEntries } from './cache-store-probe.js';
+import getDatabase from './database/index.js';
+import { useLogger } from './logger/index.js';
+import { redisConfigAvailable, useRedis } from './redis/index.js';
+import { CACHE_ENTRY_VERIFIED_AT } from './utils/cache-entry-verified-at.js';
+import { getMilliseconds } from './utils/get-milliseconds.js';
+import { storedScopedCachePin } from './utils/printable-scoped-cache-pins.js';
+
+// The timeseries wire types live in @directus/types so the app chart shares them.
+// Re-exported for consumers; the import above is what binds them in this file.
+export type {
+	CacheConfigEvent,
+	CachePurgeMode,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+};
 
 /**
  * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
@@ -63,28 +74,29 @@ export interface CachePurge {
 	 * Correlates the operations of ONE purge. Omitted, each operation gets its own
 	 * id — right when it is its own purge. Passed, several share it: a mutation
 	 * whose scope was unresolvable runs the coarse collection fallback AND a second
-	 * pass for the tags a hook declared, and an entry both reach must count one
+	 * pass for the pins a hook declared, and an entry both reach must count one
 	 * purge, not two.
 	 */
-	purgeId?: string;
+	purgeId?: string | undefined;
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
-	// The scoped cache tags this purge actually dropped, in the display form
-	// `collection[:field=value]`, so a purge joins against an entry's own tags.
+	// The scoped cache pins this purge actually dropped, in the display form
+	// `collection[:field=value]`, so a purge joins against an entry's own pins.
 	// Null where the list is derived rather than chosen (`collection`,
 	// `namespace`) and `collection` plus `mode` already state the reach.
-	scopedCacheTags: string[] | null;
-	scopedCacheTagCount: number; // that reach as a number, for every mode
+	scopedCachePins: string[] | null;
+	scopedCachePinCount: number; // that reach as a number, for every mode
 	evicted: number | null; // entries those sets held; null = whole-namespace clear
 	// Wall-clock of the purge itself. It is awaited inside the mutation, so this
-	// is time added to the write, not a background cost.
-	durationMs: number;
+	// is time added to the write, not a background cost — and null where no write
+	// waited on it (a retried purge), so the latency percentiles stay the write's.
+	durationMs: number | null;
 }
 
 export interface CacheDescriptor {
 	cacheKey: string; // stats identity (getCacheKey().hash) — always fixed-length
 	redisKey: string; // the actual Redis key, for inspection + eviction
-	coarse: boolean; // scoped collection tagged bare (no value slice) — over-purges
+	coarse: boolean; // scoped collection pinned bare (no value slice) — over-purges
 	method: string;
 	path: string;
 	collection: string | null;
@@ -93,10 +105,10 @@ export interface CacheDescriptor {
 	query: string;
 	bytes: number;
 	fillMs: number;
-	// The scoped cache tags this entry was filled under, in the display form the
+	// The scoped cache pins this entry was filled under, in the display form the
 	// purge side records — the join that answers "was this entry covered by that
 	// purge?".
-	scopedCacheTags: string[];
+	scopedCachePins: string[];
 	// null = an anomaly locator, never filled (bytes/fillMs 0). It stamps last_filled
 	// NULL, which alone marks it: never clobbers a real fill, hidden from the listing.
 	lastFilled?: Date | null;
@@ -104,16 +116,29 @@ export interface CacheDescriptor {
 
 // A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
 // rather than dropped. Coarse scope is a descriptor flag, not an anomaly.
-//   - missing_scope: scoped mode, response has no scope tag (can't be purged).
-//   - unautopurgeable_scope: a read hook scoped TO a tag no write auto-purges (a
+//   - missing_scope: scoped mode, response has no scope pin (can't be purged).
+//   - unautopurgeable_scope: a read hook scoped TO a pin no write auto-purges (a
 //     value slice on a non-scoped field) without `manuallyPurged` — left uncached.
+//   - unguarded_scope: a read hook scoped TO a collection whose purge counter the
+//     read never captured, so an in-flight purge of it cannot be detected — left
+//     uncached rather than stored with no way to notice it went stale.
 //   - value_too_large: payload over CACHE_VALUE_MAX_SIZE.
 //   - redis_error: a Redis write failed.
+//   - stale_entry: the cache audit replayed the entry and the database answered
+//     something else (cache-audit.ts).
+//   - pin_drift: the audit's replay pinned other pins than the entry was filled
+//     under — same body today, one write to the uncovered pin from stale.
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'unautopurgeable_scope'
+	| 'unguarded_scope'
 	| 'value_too_large'
-	| 'redis_error';
+	// A purge landed between this read's query and its fill, so the rows it holds
+	// are already superseded and its pins missed that purge's sweep.
+	| 'inflight_purge'
+	| 'redis_error'
+	| 'stale_entry'
+	| 'pin_drift';
 
 export interface CacheAnomaly {
 	cacheKey: string;
@@ -137,14 +162,14 @@ export interface CacheAnomalyRecord {
 
 export interface CacheEntryRecord {
 	/**
-	 * Purges that covered this entry's tags in the window. Read beside `hits`:
+	 * Purges that covered this entry's pins in the window. Read beside `hits`:
 	 * more purges than hits means the cache is filling this response more often
 	 * than it serves it, which is negative work.
 	 */
 	purges: number;
 	key: string; // stats identity (the hash)
 	redisKey: string; // the actual Redis key, for inspect + evict
-	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
+	coarse: boolean; // scoped collection pinned bare — over-purges (a tuning signal)
 	method: string;
 	path: string;
 	collection: string | null;
@@ -162,6 +187,13 @@ export interface CacheEntryRecord {
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
+	/** When the audit last replayed it; null until it has. */
+	auditedAt: number | null;
+	/**
+	 * When it was last known to answer what the database does: the audit, or
+	 * the fill where that came later. The audit queue orders on this.
+	 */
+	verifiedAt: number;
 }
 
 // What a latency percentile is measured over, in the funnel order the cache page
@@ -266,7 +298,7 @@ const DIMENSION_REAP_PASSES = 4;
 const CACHE_STATS_FACTS = [
 	'directus_cache_stats_events',
 	'directus_cache_stats_purges',
-	'directus_cache_stats_scoped_purge_tags',
+	'directus_cache_stats_scoped_purge_pins',
 ];
 
 // Everything the subsystem writes, which is what the budget measures: the facts
@@ -274,7 +306,7 @@ const CACHE_STATS_FACTS = [
 const CACHE_STATS_TABLES = [
 	...CACHE_STATS_FACTS,
 	'directus_cache_stats_descriptors',
-	'directus_cache_stats_scoped_entry_tags',
+	'directus_cache_stats_scoped_entry_pins',
 	'directus_cache_stats_anomalies',
 	'directus_cache_stats_config_events',
 ];
@@ -578,18 +610,22 @@ export function queueCachePurge(entry: CachePurge): void {
 		kind: 'p',
 		collection: entry.collection ?? '',
 		mode: entry.mode,
-		// One id per purge, so an entry covered by two of its tags counts it once —
+		// One id per purge, so an entry covered by two of its pins counts it once —
 		// and, where the caller supplies one, an entry covered by two operations of
 		// the same purge counts it once too.
 		purgeId: entry.purgeId ?? randomUUID(),
-		scopedCacheTags: (entry.scopedCacheTags ?? []).join(','),
-		scopedCacheTagCount: String(entry.scopedCacheTagCount),
+		scopedCachePins: JSON.stringify(entry.scopedCachePins ?? []),
+		scopedCachePinCount: String(entry.scopedCachePinCount),
 		// Empty = unknown, which is not the same as none. Only a namespace clear
 		// sends it: it has no member list to count.
 		evicted: entry.evicted === null
 			? ''
 			: String(entry.evicted),
-		durationMs: String(entry.durationMs),
+		// Empty = no write waited on it, which the reader keeps out of the
+		// percentiles (a retried purge).
+		durationMs: entry.durationMs === null
+			? ''
+			: String(entry.durationMs),
 		ts: String(Date.now()),
 	});
 }
@@ -614,7 +650,7 @@ export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void
 		query: entry.query,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
-		scopedCacheTags: entry.scopedCacheTags.join(','),
+		scopedCachePins: JSON.stringify(entry.scopedCachePins),
 		// Empty ts = no fill time = a locator; the drain reads last_filled off it.
 		ts: entry.lastFilled === null
 			? ''
@@ -703,6 +739,9 @@ interface CacheDescriptorRow {
 	bytes: number;
 	fill_ms: number;
 	last_filled: Date | null; // null = anomaly locator, never filled
+	// Written null on every fill: a refill puts the entry back where the audit
+	// found it gone (see `retireCacheAuditQueue`).
+	gone_at: null;
 }
 
 interface CacheAnomalyRow {
@@ -717,22 +756,22 @@ interface CachePurgeRow {
 	purge_id: string;
 	collection: string | null;
 	mode: CachePurgeMode;
-	scoped_cache_tag_count: number;
+	scoped_cache_pin_count: number;
 	evicted: number | null; // null = a namespace clear, whose size is unknowable
 	duration_ms: number | null;
 }
 
 /**
- * The collection a display-form scoped cache tag belongs to: `articles`, or the
- * head of `articles:owner=7`. Taken off the tag rather than off the descriptor,
- * since one entry can read across collections and carry a tag from each.
+ * The collection a display-form scoped cache pin belongs to: `articles`, or the
+ * head of `articles:owner=7`. Taken off the pin rather than off the descriptor,
+ * since one entry can read across collections and carry a pin from each.
  */
-function collectionOfScopedCacheTag(scopedCacheTag: string): string {
-	const slice = scopedCacheTag.indexOf(':');
+function collectionOfScopedCachePin(scopedCachePin: string): string {
+	const slice = scopedCachePin.indexOf(':');
 
 	return slice === -1
-		? scopedCacheTag
-		: scopedCacheTag.slice(0, slice);
+		? scopedCachePin
+		: scopedCachePin.slice(0, slice);
 }
 
 function parseFields(flat: string[]): Record<string, string> {
@@ -889,6 +928,35 @@ async function reclaimStalePending(
 
 // Demux one stream batch into the three tables, then ack + delete its entries.
 // Shared by the new-entry drain and the crashed-consumer reclaim.
+/**
+ * The pins a stream entry carries, `collection[:field=value]` each.
+ *
+ * JSON rather than a joined list: a pin holds a scope VALUE, and a value holding
+ * a comma would otherwise arrive as two pins naming neither. An entry queued by
+ * the build before this one is still in the stream while a deploy rolls, and
+ * comes back under the key and the joining it was written with.
+ */
+function streamScopedCachePins(fields: Record<string, string>): string[] {
+	const encoded = fields['scopedCachePins'];
+
+	if (encoded === undefined || encoded === '') {
+		return (fields['scopedCacheTags'] ?? '').split(',').filter(Boolean);
+	}
+
+	// A malformed field costs this entry's pins, never the batch: the drain that
+	// threw here would stall every later event behind one unparseable purge.
+	try {
+		const parsed: unknown = JSON.parse(encoded);
+
+		return Array.isArray(parsed)
+			? parsed.filter((pin): pin is string => typeof pin === 'string')
+			: [];
+	}
+	catch {
+		return [];
+	}
+}
+
 async function persistStreamBatch(
 	redis: ReturnType<typeof useRedis>,
 	db: Knex,
@@ -901,17 +969,17 @@ async function persistStreamBatch(
 	const anomalies: CacheAnomalyRow[] = [];
 	const purges: CachePurgeRow[] = [];
 
-	const purgedScopedCacheTags: {
+	const purgedScopedCachePins: {
 		purge_id: string;
 		time: Date;
-		scoped_cache_tag: string;
+		scoped_cache_pin: string;
 		collection: string;
 	}[] = [];
 
 	// Keyed so the last fill in a batch wins, matching the descriptor upsert: an
-	// entry's tags are replaced wholesale on refill, never merged with the old set.
-	const entryScopedCacheTags = new Map<string, {
-		scoped_cache_tag: string;
+	// entry's pins are replaced wholesale on refill, never merged with the old set.
+	const entryScopedCachePins = new Map<string, {
+		scoped_cache_pin: string;
 		collection: string;
 	}[]>();
 
@@ -927,7 +995,10 @@ async function persistStreamBatch(
 					: null,
 				purge_id: f['purgeId'] ?? '',
 				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
-				scoped_cache_tag_count: Number(f['scopedCacheTagCount'] ?? 0),
+				// Under its old name when the build before this one queued it.
+				scoped_cache_pin_count: Number(
+					f['scopedCachePinCount'] ?? f['scopedCacheTagCount'] ?? 0,
+				),
 				// Empty came off a namespace clear: unknown, not none.
 				evicted: f['evicted']
 					? Number(f['evicted'])
@@ -938,31 +1009,29 @@ async function persistStreamBatch(
 					: null,
 			});
 
-			// One row per tag the purge dropped, carrying the purge's own id so an
+			// One row per pin the purge dropped, carrying the purge's own id so an
 			// entry covered by two of them still counts the purge once.
-			for (const scopedCacheTag of (f['scopedCacheTags'] ?? '')
-				.split(',')
-				.filter(Boolean)) {
-				purgedScopedCacheTags.push({
+			for (const scopedCachePin of streamScopedCachePins(f)) {
+				purgedScopedCachePins.push({
 					purge_id: f['purgeId'] ?? '',
 					time: at,
 					// Escaped on the way into the column, not at the producer, so any
 					// caller queueing a purge is covered — a raw NUL fails the whole tick.
-					scoped_cache_tag: printableScopedCacheTags(scopedCacheTag),
-					collection: collectionOfScopedCacheTag(scopedCacheTag),
+					scoped_cache_pin: storedScopedCachePin(scopedCachePin),
+					collection: collectionOfScopedCachePin(scopedCachePin),
 				});
 			}
 
-			// A collection-wide purge names no tag: it dropped the bare tag AND
-			// every slice, and a pinned entry carries only its slice tag. Recording
-			// the bare tag alone would attribute it to global reads and miss every
+			// A collection-wide purge names no pin: it dropped the bare pin AND
+			// every slice, and a pinned entry carries only its slice pin. Recording
+			// the bare pin alone would attribute it to global reads and miss every
 			// pinned entry, which is most of what it destroyed — so it is recorded
 			// against the collection, in one row rather than one per derived slice.
 			if (f['mode'] === 'collection' && f['collection']) {
-				purgedScopedCacheTags.push({
+				purgedScopedCachePins.push({
 					purge_id: f['purgeId'] ?? '',
 					time: at,
-					scoped_cache_tag: '',
+					scoped_cache_pin: '',
 					collection: f['collection'],
 				});
 			}
@@ -1001,6 +1070,7 @@ async function persistStreamBatch(
 				last_filled: f['ts']
 					? at
 					: null,
+				gone_at: null,
 			};
 
 			// Last write in the batch wins — a re-conflicting insert would throw.
@@ -1009,20 +1079,18 @@ async function persistStreamBatch(
 				? locators
 				: descriptors).set(row.cache_key, row);
 
-			// Only a real fill knows the tags; a locator is written at an anomaly
+			// Only a real fill knows the pins; a locator is written at an anomaly
 			// site where the read never got far enough to resolve them.
 			if (row.last_filled !== null) {
-				const filledUnder = [...new Set(
-					(f['scopedCacheTags'] ?? '').split(',').filter(Boolean),
-				)];
+				const filledUnder = [...new Set(streamScopedCachePins(f))];
 
-				entryScopedCacheTags.set(
+				entryScopedCachePins.set(
 					row.cache_key,
-					filledUnder.map((scopedCacheTag) => {
+					filledUnder.map((scopedCachePin) => {
 						return {
 							// Same escaping as the purge side, or the two stop joining.
-							scoped_cache_tag: printableScopedCacheTags(scopedCacheTag),
-							collection: collectionOfScopedCacheTag(scopedCacheTag),
+							scoped_cache_pin: storedScopedCachePin(scopedCachePin),
+							collection: collectionOfScopedCachePin(scopedCachePin),
 						};
 					}),
 				);
@@ -1078,31 +1146,31 @@ async function persistStreamBatch(
 				await trx.batchInsert('directus_cache_stats_purges', purges, FLUSH_BATCH);
 			}
 
-			if (purgedScopedCacheTags.length > 0) {
+			if (purgedScopedCachePins.length > 0) {
 				await trx.batchInsert(
-					'directus_cache_stats_scoped_purge_tags',
-					purgedScopedCacheTags,
+					'directus_cache_stats_scoped_purge_pins',
+					purgedScopedCachePins,
 					FLUSH_BATCH,
 				);
 			}
 
 			// Replaced, not merged: a refill under a narrower scope must not leave
-			// the old tags behind claiming coverage the entry no longer has.
-			if (entryScopedCacheTags.size > 0) {
-				await trx('directus_cache_stats_scoped_entry_tags')
-					.whereIn('cache_key', [...entryScopedCacheTags.keys()])
+			// the old pins behind claiming coverage the entry no longer has.
+			if (entryScopedCachePins.size > 0) {
+				await trx('directus_cache_stats_scoped_entry_pins')
+					.whereIn('cache_key', [...entryScopedCachePins.keys()])
 					.delete();
 
-				const rows = [...entryScopedCacheTags]
+				const rows = [...entryScopedCachePins]
 					.flatMap(([cacheKey, filledUnder]) => {
-						return filledUnder.map((tagged) => {
-							return { cache_key: cacheKey, ...tagged };
+						return filledUnder.map((pinned) => {
+							return { cache_key: cacheKey, ...pinned };
 						});
 					});
 
 				if (rows.length > 0) {
 					await trx.batchInsert(
-						'directus_cache_stats_scoped_entry_tags',
+						'directus_cache_stats_scoped_entry_pins',
 						rows,
 						FLUSH_BATCH,
 					);
@@ -1128,7 +1196,7 @@ async function persistStreamBatch(
 }
 
 /** How far a purge reached, which decides what it can be matched against. */
-const SCOPED_CACHE_PURGE_REACHES = ['tag', 'collection'] as const;
+const SCOPED_CACHE_PURGE_REACHES = ['pin', 'collection'] as const;
 
 type ScopedCachePurgeReach = (typeof SCOPED_CACHE_PURGE_REACHES)[number];
 
@@ -1136,10 +1204,10 @@ type ScopedCachePurgeReach = (typeof SCOPED_CACHE_PURGE_REACHES)[number];
  * The join that answers "did this purge cover that entry", as a builder the
  * caller projects. One reach per call, because the two are asked in turn.
  *
- *  - `tag` — the purge named a tag the entry was filled under.
- *  - `collection` — the purge named no tag at all (the coarse fallback dropped
- *    the bare tag AND every slice, so no single tag states its reach), and a
- *    pinned entry carries only its slice tag, so the tag reach never sees it.
+ *  - `pin` — the purge named a pin the entry was filled under.
+ *  - `collection` — the purge named no pin at all (the coarse fallback dropped
+ *    the bare pin AND every slice, so no single pin states its reach), and a
+ *    pinned entry carries only its slice pin, so the pin reach never sees it.
  *
  * Shared rather than written per caller because it is the join CONDITION the two
  * readers must agree on: a count saying an entry was purged, beside a listing
@@ -1151,25 +1219,25 @@ function scopedCachePurgeCoverage(
 	cacheKeys: string[],
 	since: Date,
 ): Knex.QueryBuilder {
-	if (reach === 'tag') {
-		return db('directus_cache_stats_scoped_entry_tags as et')
+	if (reach === 'pin') {
+		return db('directus_cache_stats_scoped_entry_pins as et')
 			.join(
-				'directus_cache_stats_scoped_purge_tags as pt',
-				'pt.scoped_cache_tag',
-				'et.scoped_cache_tag',
+				'directus_cache_stats_scoped_purge_pins as pt',
+				'pt.scoped_cache_pin',
+				'et.scoped_cache_pin',
 			)
 			.where('pt.time', '>', since)
 			.whereIn('et.cache_key', cacheKeys);
 	}
 
-	return db('directus_cache_stats_scoped_purge_tags as pt')
+	return db('directus_cache_stats_scoped_purge_pins as pt')
 		.join(
-			'directus_cache_stats_scoped_entry_tags as et',
+			'directus_cache_stats_scoped_entry_pins as et',
 			'et.collection',
 			'pt.collection',
 		)
 		.where('pt.time', '>', since)
-		.where('pt.scoped_cache_tag', '')
+		.where('pt.scoped_cache_pin', '')
 		.whereIn('et.cache_key', cacheKeys);
 }
 
@@ -1178,8 +1246,8 @@ export interface CacheEntryPurgeRecord {
 	time: number;
 	mode: CachePurgeMode;
 	collection: string | null;
-	/** The tag both sides matched on, or null where the purge named none. */
-	scopedCacheTag: string | null;
+	/** The pin both sides matched on, or null where the purge named none. */
+	scopedCachePin: string | null;
 	evicted: number | null;
 }
 
@@ -1214,18 +1282,18 @@ export async function listPurgesCoveringEntry(
 				'p.time',
 				'p.mode',
 				'p.collection',
-				'pt.scoped_cache_tag',
+				'pt.scoped_cache_pin',
 				'p.evicted',
 			)
-			// Ordered by tag as well so that where a purge covered several of the
-			// entry's tags, which of them the deduplication below keeps is the same
+			// Ordered by pin as well so that where a purge covered several of the
+			// entry's pins, which of them the deduplication below keeps is the same
 			// answer on every read rather than whichever the DB happened to emit.
 			.orderBy('p.time', 'desc')
-			.orderBy('pt.scoped_cache_tag', 'asc')
+			.orderBy('pt.scoped_cache_pin', 'asc')
 			.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[]);
 	}
 
-	// A namespace clear names neither a tag nor a collection, so neither reach
+	// A namespace clear names neither a pin nor a collection, so neither reach
 	// above can join it — and it took every entry, this one included. Read
 	// straight from the purges table, which is the only trace it leaves. Not
 	// counted in the listing's `purges`: that column attributes a purge to the
@@ -1237,8 +1305,8 @@ export async function listPurgesCoveringEntry(
 		.orderBy('p.time', 'desc')
 		.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[]);
 
-	// One purge is one record however many of the entry's tags it covered: the
-	// rows differ only in which tag matched, which `DISTINCT` keeps apart, and
+	// One purge is one record however many of the entry's pins it covered: the
+	// rows differ only in which pin matched, which `DISTINCT` keeps apart, and
 	// the listing counts the same purge once (`COUNT(DISTINCT purge_id)`).
 	const byPurgeId = new Map<string, CacheEntryPurgeRecord>();
 
@@ -1253,9 +1321,9 @@ export async function listPurgesCoveringEntry(
 			time: new Date(row['time'] as string).getTime(),
 			mode: row['mode'] as CachePurgeMode,
 			collection: (row['collection'] as string | null) ?? null,
-			// Empty is how the collection reach spells "named no tag"; null says
-			// it outward, so a reader cannot mistake it for a tag called ''.
-			scopedCacheTag: (row['scoped_cache_tag'] as string) || null,
+			// Empty is how the collection reach spells "named no pin"; null says
+			// it outward, so a reader cannot mistake it for a pin called ''.
+			scopedCachePin: (row['scoped_cache_pin'] as string) || null,
 			evicted: row['evicted'] === null
 				? null
 				: Number(row['evicted']),
@@ -1288,7 +1356,7 @@ export async function listPurgesCoveringEntry(
  */
 export async function readCacheDescriptorForRedisKey(
 	redisKey: string,
-): Promise<{ cacheKey: string; lastFilled: Date } | null> {
+): Promise<{ cacheKey: string; lastFilled: Date; auditedAt: Date | null } | null> {
 	if (!cacheStatsConfigured() || redisKey === '') {
 		return null;
 	}
@@ -1297,11 +1365,11 @@ export async function readCacheDescriptorForRedisKey(
 
 	const byIdentity = await db('directus_cache_stats_descriptors')
 		.where('cache_key', redisKey)
-		.first('cache_key', 'last_filled');
+		.first('cache_key', 'last_filled', 'audited_at');
 
 	const found = byIdentity ?? await db('directus_cache_stats_descriptors')
 		.where('redis_key', redisKey)
-		.first('cache_key', 'last_filled');
+		.first('cache_key', 'last_filled', 'audited_at');
 
 	// `new Date(null)` is the epoch, so a locator would otherwise report having
 	// been filled on 1970-01-01 and take every purge recorded since with it.
@@ -1312,7 +1380,234 @@ export async function readCacheDescriptorForRedisKey(
 	return {
 		cacheKey: found['cache_key'] as string,
 		lastFilled: new Date(found['last_filled'] as string),
+		auditedAt: found['audited_at'] === null
+			? null
+			: new Date(found['audited_at'] as string),
 	};
+}
+
+/** What the audit needs to replay one entry: its request, as sent, and its pins. */
+export interface CacheAuditDescriptor extends CacheAuditQueueRow {
+	/** The pins it was filled under, in the printable form the purge side joins on. */
+	scopedCachePins: string[];
+}
+
+/** A descriptor as the queue hands it out: the pins come once it is known live. */
+export interface CacheAuditQueueRow {
+	cacheKey: string;
+	redisKey: string;
+	method: string;
+	path: string;
+	collection: string | null;
+	userId: string | null;
+	query: string;
+	lastFilled: Date;
+}
+
+/** The narrowing a queue read is asked for; both name a descriptor column. */
+export interface CacheAuditQueueFilter {
+	user?: string | undefined;
+	collection?: string | undefined;
+}
+
+/**
+ * The next descriptors due an audit, least recently verified first: never
+ * audited and filled longest ago ahead, a refill counting as verified as of
+ * its fill. The descriptor table is the audit's index rather than Redis: an
+ * entry is only replayable from its descriptor, and a dimension row sorts
+ * and pages where a `SCAN` neither orders nor promises to yield a key once.
+ *
+ * `before` — when the run began — bounds the queue to what it has not
+ * stamped: a row it advanced past sorts to the end, and reading the queue
+ * again without the bound would wrap around into it. A row a concurrent run
+ * stamped meanwhile falls out the same way, so two runs share the queue
+ * rather than replay it twice; so does one refilled since the run began.
+ *
+ * Read by `redis_key`, which is what the cache is asked for: it differs from
+ * `cache_key` once `CACHE_KEY_HASH_ENABLED` is off, and is `''` on a row
+ * written before the column existed — nothing to fetch by, so left out.
+ *
+ * Without pins: a page can describe entries the cache has dropped since,
+ * and the pins are for the replay of the ones it still holds — the audit
+ * asks `readScopedCacheEntryPins` for those once the cache has said which.
+ * A descriptor the audit already found gone is out of the queue until its
+ * next fill (`retireCacheAuditQueue`): on a cache whose entries live hours
+ * and whose stats live weeks, most descriptors are that, and each would
+ * otherwise cost every round an `EXISTS` and a stamp.
+ */
+export async function readCacheAuditQueue(
+	count: number,
+	before: Date,
+	filter: CacheAuditQueueFilter = {},
+): Promise<CacheAuditQueueRow[]> {
+	if (!cacheStatsConfigured() || count <= 0) {
+		return [];
+	}
+
+	const db = getDatabase();
+
+	const query = db('directus_cache_stats_descriptors')
+		.whereNotNull('last_filled')
+		.whereNot('redis_key', '')
+		.whereNull('gone_at')
+		.whereRaw(`${CACHE_ENTRY_VERIFIED_AT} < ?`, [before])
+		.orderByRaw(CACHE_ENTRY_VERIFIED_AT)
+		// One run stamps a page at one instant: the older fill goes first among them.
+		.orderBy('last_filled', 'asc')
+		.limit(count)
+		.select(
+			'cache_key',
+			'redis_key',
+			'method',
+			'path',
+			'collection',
+			'user_id',
+			'query',
+			'last_filled',
+		);
+
+	if (filter.user !== undefined) {
+		query.where('user_id', filter.user);
+	}
+
+	if (filter.collection !== undefined) {
+		query.where('collection', filter.collection);
+	}
+
+	const rows: Record<string, unknown>[] = await query;
+
+	return rows.map((row) => {
+		return {
+			cacheKey: row['cache_key'] as string,
+			redisKey: row['redis_key'] as string,
+			method: row['method'] as string,
+			path: row['path'] as string,
+			collection: (row['collection'] as string | null) ?? null,
+			userId: (row['user_id'] as string | null) ?? null,
+			query: row['query'] as string,
+			lastFilled: new Date(row['last_filled'] as string),
+		};
+	});
+}
+
+/**
+ * The pins these entries were filled under, by cache key; a key with none
+ * recorded is absent. One query for a batch, sized by the caller.
+ */
+export async function readScopedCacheEntryPins(
+	cacheKeys: string[],
+): Promise<Map<string, string[]>> {
+	const pinsByCacheKey = new Map<string, string[]>();
+
+	if (!cacheStatsConfigured() || cacheKeys.length === 0) {
+		return pinsByCacheKey;
+	}
+
+	const pinRows: Record<string, unknown>[] = await getDatabase()(
+		'directus_cache_stats_scoped_entry_pins',
+	)
+		.whereIn('cache_key', cacheKeys)
+		.select('cache_key', 'scoped_cache_pin');
+
+	for (const pinRow of pinRows) {
+		const cacheKey = pinRow['cache_key'] as string;
+		const pins = pinsByCacheKey.get(cacheKey) ?? [];
+		pins.push(pinRow['scoped_cache_pin'] as string);
+		pinsByCacheKey.set(cacheKey, pins);
+	}
+
+	return pinsByCacheKey;
+}
+
+/** How far the audit has got round the cache, as the panel reports it. */
+export interface CacheAuditQueueState {
+	/** Described entries the audit will get to: filled, with a key to fetch by. */
+	size: number;
+	/** Of those, the ones no run has replayed yet. */
+	neverAudited: number;
+	/**
+	 * The oldest moment any of them was last known to answer what the database
+	 * does: every entry has been verified since. Null with nothing queued.
+	 */
+	verifiedSince: number | null;
+}
+
+/**
+ * The guarantee the audit gives right now: everything it will get to, how much
+ * of it no run has seen, and how far back the least recently verified entry
+ * is — the same rows and the same expression the queue orders on, so the
+ * horizon is exactly what the next run takes first. A descriptor whose entry
+ * went since the audit last saw it is counted along: only the cache tells,
+ * and the next run retires it.
+ */
+export async function readCacheAuditQueueState(): Promise<CacheAuditQueueState> {
+	if (!cacheStatsConfigured()) {
+		return { size: 0, neverAudited: 0, verifiedSince: null };
+	}
+
+	const db = getDatabase();
+
+	const row: Record<string, unknown> | undefined = await db(
+		'directus_cache_stats_descriptors',
+	)
+		.whereNotNull('last_filled')
+		.whereNot('redis_key', '')
+		.whereNull('gone_at')
+		.first(
+			db.raw('COUNT(*) AS size'),
+			db.raw('SUM(CASE WHEN audited_at IS NULL THEN 1 ELSE 0 END) AS never_audited'),
+			db.raw(`MIN(${CACHE_ENTRY_VERIFIED_AT}) AS verified_since`),
+		);
+
+	return {
+		size: Number(row?.['size'] ?? 0),
+		neverAudited: Number(row?.['never_audited'] ?? 0),
+		verifiedSince: row?.['verified_since'] == null
+			? null
+			: new Date(row['verified_since'] as string).getTime(),
+	};
+}
+
+/**
+ * Move the queue past these descriptors: stamped `audited_at`, they sort
+ * behind everything verified earlier.
+ * Stamped before the replay, not after, so a run examines what it claimed
+ * and a concurrent one takes the rest — and a run that dies mid-page costs
+ * those entries one turn, not the queue a second replay of them.
+ */
+export async function advanceCacheAuditQueue(
+	cacheKeys: string[],
+	at: Date,
+): Promise<void> {
+	if (cacheKeys.length === 0) {
+		return;
+	}
+
+	await getDatabase()('directus_cache_stats_descriptors')
+		.whereIn('cache_key', cacheKeys)
+		.update({ audited_at: at });
+}
+
+/**
+ * Take the descriptors whose entry the cache no longer holds out of the
+ * queue, as of when the cache was asked: they describe nothing to replay
+ * until the next fill, and the fill's own write clears the stamp.
+ * A fill drained between the ask and this stamp is left alone — its
+ * `last_filled` is past the ask — so an entry back in the cache is never
+ * retired on the strength of a look that predates it.
+ */
+export async function retireCacheAuditQueue(
+	cacheKeys: string[],
+	askedAt: Date,
+): Promise<void> {
+	if (cacheKeys.length === 0) {
+		return;
+	}
+
+	await getDatabase()('directus_cache_stats_descriptors')
+		.whereIn('cache_key', cacheKeys)
+		.where('last_filled', '<=', askedAt)
+		.update({ gone_at: askedAt });
 }
 
 /**
@@ -1422,6 +1717,7 @@ export async function listCacheEntries(
 				'd.bytes',
 				'd.fill_ms',
 				'd.last_filled',
+				'd.audited_at',
 			);
 
 	const descriptorsByKey = new Map<string, Record<string, unknown>>(
@@ -1440,14 +1736,14 @@ export async function listCacheEntries(
 			: [{ ...descriptor, ...row }];
 	});
 
-	// Counted in its own pass rather than joined in above: entry_tags × purge_tags
+	// Counted in its own pass rather than joined in above: entry_pins × purge_pins
 	// multiplies the descriptor's rows, which would inflate the hit/miss/fill SUMs
 	// beside it. DISTINCT on the purge id so a purge covering two of an entry's
-	// tags counts once.
+	// pins counts once.
 	const purgesByKey = new Map<string, number>();
 
 	if (listedKeys.length > 0) {
-		// Summed rather than merged: a purge names a tag or names a collection and
+		// Summed rather than merged: a purge names a pin or names a collection and
 		// never both, so the two reaches cannot double-count one of them.
 		for (const reach of SCOPED_CACHE_PURGE_REACHES) {
 			const counted = await scopedCachePurgeCoverage(db, reach, listedKeys, since)
@@ -1474,6 +1770,10 @@ export async function listCacheEntries(
 
 		const lastHit = row['last_hit_at'] as string | null;
 		const userId = (row['user_id'] as string | null) || null;
+
+		const auditedAt = row['audited_at'] == null
+			? null
+			: new Date(row['audited_at'] as string).getTime();
 
 		return {
 			key: row['cache_key'] as string,
@@ -1512,6 +1812,8 @@ export async function listCacheEntries(
 			lastHitAt: lastHit
 				? new Date(lastHit).getTime()
 				: null,
+			auditedAt,
+			verifiedAt: Math.max(createdAt, auditedAt ?? 0),
 		};
 	});
 }
@@ -1623,17 +1925,32 @@ export async function listCacheGroupLatencies(
 }
 
 /**
- * Evict a single cached response: the value + its `__expires_at`/`__tags`
+ * Evict a single cached response: the value + its `__expires_at`/`__pins`
  * siblings. Best-effort — a no-op if it already expired. The descriptor lingers
  * until the reaper prunes it.
  */
 export async function evictCacheEntry(
 	cache: Keyv,
 	redisKey: string,
-): Promise<void> {
-	await cache.delete(redisKey);
-	await cache.delete(`${redisKey}__expires_at`);
-	await cache.delete(`${redisKey}__tags`);
+): Promise<boolean> {
+	// Proven rather than trusted. Keyv reports a store error by emitting `error`
+	// and answering `undefined`, so a swallowed delete is indistinguishable from a
+	// successful one at the call site — which is exactly what the in-flight purge
+	// guard must not assume, its whole job being to leave nothing stale behind.
+	// The proof is a probe of the store, not a read-back of the key: two
+	// identical reads fill the same key, so the one evicting can find the other's
+	// fill where its own was — a live entry, not a swallowed delete — and
+	// recording that would have the drain purge every pin it carries (#507).
+	try {
+		await cache.delete(redisKey);
+		await cache.delete(cacheExpiresAtKey(redisKey));
+		await cache.delete(cachePinsKey(redisKey));
+
+		return await cacheStoreDropsEntries(cache);
+	}
+	catch {
+		return false;
+	}
 }
 
 // Evict every currently-described entry on a path. Returns the count attempted.
@@ -1711,7 +2028,7 @@ async function reapDimensionOrphans(
 			return reaped;
 		}
 
-		// A tag table holds a row per key per tag, so a slate names fewer keys than
+		// A pin table holds a row per key per pin, so a slate names fewer keys than
 		// it read; the delete then takes every row each of those keys owns.
 		const keys = [...new Set(narrowSlate
 			? await narrowSlate(rows)
@@ -1821,33 +2138,33 @@ export async function reapCacheEvents(): Promise<number> {
 }
 
 /**
- * Prune purge-tag rows past the retention window, alongside the purges they
+ * Prune purge-pin rows past the retention window, alongside the purges they
  * belong to — the join half ages out with the fact half or it would outlive it
  * and keep claiming coverage for purges nothing remembers.
  */
-export async function reapScopedCachePurgeTags(): Promise<number> {
+export async function reapScopedCachePurgePins(): Promise<number> {
 	if (!cacheStatsConfigured()) {
 		return 0;
 	}
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_stats_scoped_purge_tags')
+	return getDatabase()('directus_cache_stats_scoped_purge_pins')
 		.where('time', '<', cutoff)
 		.delete();
 }
 
 /**
- * Drop tag rows whose entry no longer has a descriptor. The tags are a dimension
+ * Drop pin rows whose entry no longer has a descriptor. The pins are a dimension
  * of the entry, so they follow it out rather than accumulating for keys that
  * stopped appearing.
  */
-export async function reapScopedCacheEntryTags(): Promise<number> {
+export async function reapScopedCacheEntryPins(): Promise<number> {
 	if (!cacheStatsConfigured()) {
 		return 0;
 	}
 
-	const dimensionTable = 'directus_cache_stats_scoped_entry_tags';
+	const dimensionTable = 'directus_cache_stats_scoped_entry_pins';
 
 	return reapDimensionOrphans(dimensionTable, (query) => {
 		whereUnreferencedBy(query, 'directus_cache_stats_descriptors', dimensionTable);
@@ -1911,7 +2228,11 @@ export async function listCacheAnomalies(
 	return rows.map((row: Record<string, unknown>) => {
 		return {
 			cacheKey: row['cache_key'] as string,
-			reason: row['reason'] as CacheAnomalyReason,
+			// A node still on the build before 20260924B queues its drift under
+			// the old name, and the drain stores the reason as it came.
+			reason: (row['reason'] === 'tag_drift'
+				? 'pin_drift'
+				: row['reason']) as CacheAnomalyReason,
 			path: row['path'] as string,
 			method: row['method'] as string,
 			query: (row['query'] as string) ?? '',
@@ -2348,7 +2669,7 @@ export async function reapCacheConfigEvents(): Promise<number> {
  */
 export async function enforceCacheStatsBudget(): Promise<void> {
 	const maxBytes = parseBytes(
-		String(useEnv()['CACHE_STATS_MAX_BYTES'] ?? ''),
+		String(cacheSetting('stats_max_bytes') ?? ''),
 	);
 
 	// Dynamic because the helper index pulls every dialect, and each of those
@@ -2357,9 +2678,13 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 	const { getHelpers } = await import('./database/helpers/index.js');
 	const { schema } = getHelpers(getDatabase());
 
-	let bytes = maxBytes
-		? await schema.getTablesSize(CACHE_STATS_TABLES)
-		: null;
+	// No budget configured, or one that does not parse: nothing to enforce.
+	if (!maxBytes) {
+		await clearCacheStatsBudgetAlert();
+		return;
+	}
+
+	let bytes = await schema.getTablesSize(CACHE_STATS_TABLES);
 
 	if (bytes === null || bytes <= maxBytes) {
 		await clearCacheStatsBudgetAlert();
@@ -2498,8 +2823,8 @@ export async function truncateCacheEvents(): Promise<void> {
 	// they would count against entries whose own history was just cleared —
 	// purges without hits, on a window that reports no traffic at all.
 	await db('directus_cache_stats_purges').truncate();
-	await db('directus_cache_stats_scoped_purge_tags').truncate();
-	await db('directus_cache_stats_scoped_entry_tags').truncate();
+	await db('directus_cache_stats_scoped_purge_pins').truncate();
+	await db('directus_cache_stats_scoped_entry_pins').truncate();
 
 	// Full reset: also drop the Redis transients tied to those rows — else buffered
 	// events drain back in and a held throttle slot suppresses the next sample.

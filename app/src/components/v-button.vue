@@ -61,6 +61,8 @@ interface Props {
 	xLarge?: boolean;
 	/** Tooltip text to show on hover */
 	tooltip?: string;
+	/** Names the button for a screen reader, which reads no icon nor tooltip */
+	ariaLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -160,6 +162,7 @@ async function onClick(event: MouseEvent) {
 			]"
 			:type="type"
 			:disabled="disabled"
+			:aria-label="ariaLabel"
 			v-bind="additionalProps"
 			@click="onClick"
 		>

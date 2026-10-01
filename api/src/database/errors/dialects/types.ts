@@ -26,9 +26,11 @@ export type PostgresError = {
 	detail: string;
 	schema: string;
 	table: string;
-	column?: string;
-	dataType?: string;
-	constraint?: string;
+	// pg sets these on every error and leaves them undefined when it names no
+	// column, type or constraint — the key is always there.
+	column: string | undefined;
+	dataType: string | undefined;
+	constraint: string | undefined;
 };
 
 export type OracleError = {

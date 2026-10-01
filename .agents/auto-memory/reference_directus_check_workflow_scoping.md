@@ -2,6 +2,7 @@
 name: reference_directus_check_workflow_scoping
 description: check.yml (Unit/Format/Lint/Style) fires only on prepare/feat** base PRs — NOT hhh-dev; two workflows named "Check"; cancelled≠failed
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

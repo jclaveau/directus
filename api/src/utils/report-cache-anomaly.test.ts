@@ -61,14 +61,13 @@ describe('reportCacheAnomaly', () => {
 				collection: 'articles',
 				userId: 'u1',
 				query: JSON.stringify({ limit: 5 }),
-				url: '/items/articles?limit=5',
 				bytes: 0,
 				fillMs: 0,
-				// A locator resolved no scope, so it carries no tags. Asserted
+				// A locator resolved no scope, so it carries no pins. Asserted
 				// rather than assumed: the descriptor emitter joins this array, so
 				// omitting it throws and the locator is never written at all —
 				// which reads downstream as an anomaly with no descriptor.
-				scopedCacheTags: [],
+				scopedCachePins: [],
 				lastFilled: null,
 			}),
 		);
@@ -80,7 +79,7 @@ describe('reportCacheAnomaly', () => {
 		});
 	});
 
-	it('records a graphql request with a blank url + the graphql query', async () => {
+	it('records a graphql request by its document and variables', async () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ redisKey: 'rk2', cacheKey: 'h2' });
 
 		const req = makeReq({ method: 'POST', originalUrl: '/graphql' });
@@ -90,7 +89,7 @@ describe('reportCacheAnomaly', () => {
 			expect.objectContaining({
 				cacheKey: 'h2',
 				redisKey: 'rk2',
-				url: '',
+				path: '/graphql',
 				query: JSON.stringify({ query: '{ me }', variables: {} }),
 			}),
 		);

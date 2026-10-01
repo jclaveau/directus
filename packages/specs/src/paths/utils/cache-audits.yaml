@@ -1,0 +1,37 @@
+get:
+  summary: List cache audit runs
+  description: >
+    The audit runs started in the window, newest first, whichever surface ran
+    them (the schedule, the CLI, `POST /utils/cache/audit`, the system MCP):
+    when each started and finished, what it was narrowed to, its verdict
+    counts, and its error where it failed. A run with no `finishedAt` is still
+    in flight, or died with its process. Findings are read per run at
+    `/utils/cache/audits/{id}`. Admin only.
+  operationId: list-cache-audits
+  parameters:
+    - name: window
+      in: query
+      required: false
+      description: >
+        How far back to look, as a duration such as "6h" or "30d". Defaults to
+        7d, and is clamped to CACHE_AUDIT_RETENTION.
+      schema:
+        type: string
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '../../openapi.yaml#/components/schemas/CacheAuditRun'
+      description: Successful request
+    '400':
+      description: The `window` is not a duration such as "15m"
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
+  tags:
+    - System Diagnostics

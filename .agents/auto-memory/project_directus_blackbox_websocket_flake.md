@@ -2,6 +2,7 @@
 name: project_directus_blackbox_websocket_flake
 description: The shard-8 m2o-max-batch websocket flake — root cause was graphql-ws closing its own socket (lazy:true), NOT shard placement; plus the postgres 42703 race from concurrent server-spawning suites
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

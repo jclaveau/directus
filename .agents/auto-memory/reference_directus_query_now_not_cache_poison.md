@@ -2,6 +2,7 @@
 name: reference_directus_query_now_not_cache_poison
 description: query-filter $NOW does NOT poison the response cache — sanitizeQuery resolves it to a Date before the key is built; only permission-side $NOW is a staleness vector
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

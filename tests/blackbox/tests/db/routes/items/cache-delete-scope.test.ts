@@ -65,7 +65,7 @@ describe(oneLine`
 				}),
 			});
 
-			// Independent seeds → one round-trip. Capture the charge PKs to delete later.
+			// Independent seeds → one round-trip. Snapshot the charge PKs to delete later.
 			const [charges] = await Promise.all([
 				CreateItem(vendor, {
 					collection: CHARGE,

@@ -103,7 +103,7 @@ describe('handleWebSocketError', () => {
 		const client = mockClient();
 
 		const error = new ZodError([
-			{ message: 'test', code: 'invalid_type', path: ['path'], expected: 'array', received: 'string' },
+			{ message: 'test', code: 'invalid_type', path: ['path'], expected: 'array' },
 		]);
 
 		const expected = WebSocketError.fromZodError(error, type).toMessage();

@@ -1,5 +1,5 @@
+import { parseISO } from '../../../../utils/date-fns-used.js';
 import { DateHelper } from '../types.js';
-import { parseISO } from 'date-fns';
 
 export class DateHelperMSSQL extends DateHelper {
 	override writeTimestamp(date: string): Date {

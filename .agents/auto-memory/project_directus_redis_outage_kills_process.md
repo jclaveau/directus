@@ -2,6 +2,7 @@
 name: project_directus_redis_outage_kills_process
 description: An unreachable Redis exits the Directus API process — five independent unhandled emitters/rejections found in v11.10.1, all upstream-shaped, each fixed on the pk-pin branch
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

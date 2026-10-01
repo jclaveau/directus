@@ -2,6 +2,7 @@
 name: project_directus_server_info_cache_mode
 description: /server/info opts out of the response cache in SCOPED purge mode only — it stays cacheable under full purge; so it can no longer provoke missing_scope, use GET /graphql?query={__typename} instead
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

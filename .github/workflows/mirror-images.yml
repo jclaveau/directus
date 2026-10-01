@@ -1,0 +1,61 @@
+# The blackbox suite's fixtures are third-party images, and a registry that stops
+# serving one takes every shard down at `Start services` before a test runs —
+# `minio/minio` did it on Docker Hub, then `quay.io/minio/minio` did it again. This
+# mirrors each fixture into the fork's own GHCR namespace, which nobody else can
+# withdraw, and the compose file pulls from there.
+name: Mirror Images
+
+on:
+  # `workflow_dispatch` only lists a workflow once it is on the default branch,
+  # so the push trigger is what runs the mirror the first time and again
+  # whenever the list of mirrored images changes.
+  push:
+    paths:
+      - .github/workflows/mirror-images.yml
+  workflow_dispatch:
+  schedule:
+    # Monthly, so a mirrored tag that was pushed once keeps its manifest alive
+    # against GHCR's untagged-cleanup and the source is re-read while it exists.
+    - cron: '0 4 1 * *'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Bitnami's frozen archive of MinIO: the last registry still serving it
+          # to an unauthenticated puller. A frozen tag is what a fixture wants —
+          # it cannot drift under the suite between two runs.
+          - source: docker.io/bitnamilegacy/minio:2025.4.22
+            target: minio:2025.4.22
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # imagetools copies the manifest list as it stands, so every architecture
+      # the source publishes arrives without this runner pulling any layer.
+      - name: Copy ${{ matrix.source }}
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository_owner }}/${{ matrix.target }} \
+            ${{ matrix.source }}
+
+      - name: Report the mirrored digest
+        run: |
+          docker buildx imagetools inspect \
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.target }} \
+            --format '{{ .Manifest.Digest }}'

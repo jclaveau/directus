@@ -7,6 +7,7 @@ import {
 	processesReportEnabled,
 	processesServiceName,
 	reportedProcessDetails,
+	requestedProcessDetails,
 } from './processes-config.js';
 
 vi.mock('@directus/env');
@@ -92,4 +93,45 @@ test('The collection window is a duration, and 750ms by default', () => {
 
 	vi.mocked(useEnv).mockReturnValue({});
 	expect(processesCollectTimeoutMs()).toBe(750);
+});
+
+test('A request asking for nothing gets what the node reports', () => {
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+
+	expect(requestedProcessDetails(undefined)).toEqual(['stats', 'env']);
+	expect(requestedProcessDetails('')).toEqual(['stats', 'env']);
+	expect(requestedProcessDetails([])).toEqual(['stats', 'env']);
+});
+
+test('A request narrows the halves, in a list or comma-separated', () => {
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+
+	expect(requestedProcessDetails(['stats'])).toEqual(['stats']);
+	expect(requestedProcessDetails('stats')).toEqual(['stats']);
+	expect(requestedProcessDetails(' env , stats ')).toEqual(['stats', 'env']);
+});
+
+// The env is most of the report by size, but it is also the half that carries
+// configuration: a caller must not be able to ask for more than the deployment
+// chose to expose.
+test('A request cannot widen what the node reports', () => {
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats'] });
+
+	expect(requestedProcessDetails(['stats', 'env'])).toEqual(['stats']);
+	expect(requestedProcessDetails(['env'])).toEqual([]);
+});
+
+test('A half that is not a half is dropped, not passed on', () => {
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
+
+	// nothing recognisable left, so the request reads as "no preference"
+	expect(requestedProcessDetails(['secrets'])).toEqual(['stats', 'env']);
+	expect(requestedProcessDetails(['secrets', 'env'])).toEqual(['env']);
+});
+
+test('A node that reports nothing answers nothing, however it is asked', () => {
+	vi.mocked(useEnv).mockReturnValue({});
+
+	expect(requestedProcessDetails(['stats', 'env'])).toEqual([]);
+	expect(requestedProcessDetails(undefined)).toEqual([]);
 });

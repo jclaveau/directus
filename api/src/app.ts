@@ -1,14 +1,12 @@
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
-import { handlePressure } from '@directus/pressure';
 import cookieParser from 'cookie-parser';
-import type { Request, RequestHandler, Response } from 'express';
+import type { Request, RequestHandler, Response, Router } from 'express';
 import express from 'express';
-import type { ServerResponse } from 'http';
-import { merge } from 'lodash-es';
+import type { ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import path from 'path';
+import path from 'node:path';
 import qs from 'qs';
 import { registerAuthProviders } from './auth.js';
 import accessRouter from './controllers/access.js';
@@ -53,8 +51,20 @@ import {
 	validateDatabaseExtensions,
 	outstandingMigrationsOrExit,
 } from './database/index.js';
+import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
+import { type CoreMountPath, coreMountPaths } from './core-mounts.js';
 import { initCacheConfig } from './cache-config.js';
+import {
+	initCacheSettings,
+	seedCacheSettings,
+	validateCacheSettingsEnv,
+} from './cache-settings.js';
+import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
+import { validateBooleanEnv, validateDurationEnv } from './utils/validate-env.js';
+import { initSharedSettings } from './processes/lib/shared-settings.js';
+import { initPoolHealthMirror } from './processes/lib/pool-health.js';
+import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -71,19 +81,25 @@ import rateLimiter, {
 } from './middleware/rate-limiter-ip.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
+import {
+	shedUnderPressure,
+	UNDER_PRESSURE_REASON,
+} from './middleware/shed-under-pressure.js';
 import { assertPgBouncerConnections } from './pgbouncer/index.js';
 import { initProcessReports } from './processes/index.js';
+import cacheAuditSchedule from './schedules/cache-audit.js';
 import cacheStatsSchedule from './schedules/cache-stats.js';
 import metricsSchedule from './schedules/metrics.js';
 import retentionSchedule from './schedules/retention.js';
+import scopedCacheReapSchedule from './schedules/scoped-cache-reap.js';
 import telemetrySchedule from './schedules/telemetry.js';
 import tusSchedule from './schedules/tus.js';
 import {
-	assertScopedCacheRedisSupported,
+	assertScopedCacheStoreSupported,
 	startScopedCachePurgeRecovery,
-} from './scoped-cache.js';
-import { systemMcpEnabled } from './system-mcp/index.js';
+} from './scoped-cache/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
+import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
 import { validateStorage } from './utils/validate-storage.js';
 
@@ -93,6 +109,16 @@ export default async function createApp(): Promise<express.Application> {
 	const env = useEnv();
 	const logger = useLogger();
 	const helmet = await import('helmet');
+
+	// Before anything is built on the value: a variable this reads as false
+	// turns its feature off silently, and every line after here would run as
+	// though the deployment had asked for that.
+	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
+
+	// Ending the process after the listen would pass the deployment's healthcheck
+	// and crash-loop behind it.
+	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
+	validateCacheSettingsEnv();
 
 	await validateDatabaseConnection();
 
@@ -122,7 +148,7 @@ export default async function createApp(): Promise<express.Application> {
 	await validateDatabaseExtensions();
 	await validateStorage();
 
-	assertScopedCacheRedisSupported();
+	assertScopedCacheStoreSupported();
 
 	await registerAuthProviders();
 
@@ -133,6 +159,8 @@ export default async function createApp(): Promise<express.Application> {
 	await flowManager.initialize();
 
 	// Extensions + core loaded; heal a redis cache left stale by a code-only deploy.
+	// Before the deploy flush, which asks whether this node holds a response cache.
+	await seedCacheSettings();
 	await flushCachesIfBuildChanged(extensionManager);
 
 	// And finish any purge that failed after its mutation committed — a previous
@@ -153,13 +181,16 @@ export default async function createApp(): Promise<express.Application> {
 		}
 
 		app.use(
-			handlePressure({
+			shedUnderPressure({
 				sampleInterval,
 				maxEventLoopUtilization: env['PRESSURE_LIMITER_MAX_EVENT_LOOP_UTILIZATION'] as number,
 				maxEventLoopDelay: env['PRESSURE_LIMITER_MAX_EVENT_LOOP_DELAY'] as number,
 				maxMemoryRss: env['PRESSURE_LIMITER_MAX_MEMORY_RSS'] as number,
 				maxMemoryHeapUsed: env['PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED'] as number,
-				error: new ServiceUnavailableError({ service: 'api', reason: 'Under pressure' }),
+				error: new ServiceUnavailableError({
+					service: 'api',
+					reason: UNDER_PRESSURE_REASON,
+				}),
 				retryAfter: env['PRESSURE_LIMITER_RETRY_AFTER'] as string,
 			}),
 		);
@@ -336,57 +367,47 @@ export default async function createApp(): Promise<express.Application> {
 
 	await emitter.emitInit('routes.before', { app });
 
-	app.use('/auth', authRouter);
+	const coreRouters: Record<CoreMountPath, Router> = {
+		'/auth': authRouter,
+		'/graphql': graphqlRouter,
+		'/activity': activityRouter,
+		'/access': accessRouter,
+		'/assets': assetsRouter,
+		'/collections': collectionsRouter,
+		'/comments': commentsRouter,
+		'/dashboards': dashboardsRouter,
+		'/extensions': extensionsRouter,
+		'/fields': fieldsRouter,
+		'/files/tus': tusRouter,
+		'/files': filesRouter,
+		'/flows': flowsRouter,
+		'/folders': foldersRouter,
+		'/items': itemsRouter,
+		'/system-mcp': systemMcpRouter,
+		'/metrics': metricsRouter,
+		'/notifications': notificationsRouter,
+		'/operations': operationsRouter,
+		'/panels': panelsRouter,
+		'/permissions': permissionsRouter,
+		'/policies': policiesRouter,
+		'/presets': presetsRouter,
+		'/translations': translationsRouter,
+		'/relations': relationsRouter,
+		'/revisions': revisionsRouter,
+		'/roles': rolesRouter,
+		'/schema': schemaRouter,
+		'/server': serverRouter,
+		'/settings': settingsRouter,
+		'/shares': sharesRouter,
+		'/users': usersRouter,
+		'/utils': utilsRouter,
+		'/versions': versionsRouter,
+		'/webhooks': webhooksRouter,
+	};
 
-	app.use('/graphql', graphqlRouter);
-
-	app.use('/activity', activityRouter);
-	app.use('/access', accessRouter);
-	app.use('/assets', assetsRouter);
-	app.use('/collections', collectionsRouter);
-	app.use('/comments', commentsRouter);
-	app.use('/dashboards', dashboardsRouter);
-	app.use('/extensions', extensionsRouter);
-	app.use('/fields', fieldsRouter);
-
-	if (env['TUS_ENABLED'] === true) {
-		app.use('/files/tus', tusRouter);
+	for (const path of coreMountPaths()) {
+		app.use(path, coreRouters[path]);
 	}
-
-	app.use('/files', filesRouter);
-	app.use('/flows', flowsRouter);
-	app.use('/folders', foldersRouter);
-	app.use('/items', itemsRouter);
-
-	// Not `/mcp`: upstream Directus serves its own MCP there, over the content
-	// API. Its own top-level path rather than under `/admin`, which the Data
-	// Studio's `/admin/*` catch-all would answer before any router here.
-	if (systemMcpEnabled()) {
-		app.use('/system-mcp', systemMcpRouter);
-	}
-
-	if (env['METRICS_ENABLED'] === true) {
-		app.use('/metrics', metricsRouter);
-	}
-
-	app.use('/notifications', notificationsRouter);
-	app.use('/operations', operationsRouter);
-	app.use('/panels', panelsRouter);
-	app.use('/permissions', permissionsRouter);
-	app.use('/policies', policiesRouter);
-	app.use('/presets', presetsRouter);
-	app.use('/translations', translationsRouter);
-	app.use('/relations', relationsRouter);
-	app.use('/revisions', revisionsRouter);
-	app.use('/roles', rolesRouter);
-	app.use('/schema', schemaRouter);
-	app.use('/server', serverRouter);
-	app.use('/settings', settingsRouter);
-	app.use('/shares', sharesRouter);
-	app.use('/users', usersRouter);
-	app.use('/utils', utilsRouter);
-	app.use('/versions', versionsRouter);
-	app.use('/webhooks', webhooksRouter);
 
 	// Register custom endpoints
 	await emitter.emitInit('routes.custom.before', { app });
@@ -403,8 +424,15 @@ export default async function createApp(): Promise<express.Application> {
 	await tusSchedule();
 	await metricsSchedule();
 	await cacheStatsSchedule();
+	await cacheAuditSchedule();
+	await scopedCacheReapSchedule();
 	await initCacheConfig();
+	await initCacheSettings();
+	await initSharedSettings();
+	initPoolHealthMirror();
+	await initSharedSettingsGuard();
 	await initProcessReports();
+	initAutoscaleDrill();
 	assertPgBouncerConnections();
 
 	await emitter.emitInit('app.after', { app });
