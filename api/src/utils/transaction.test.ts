@@ -120,6 +120,22 @@ describe('queueAfterCommit', () => {
 		expect(committedTask).toHaveBeenCalledOnce();
 	});
 
+	it('runs no task when every attempt failed', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await expect(transaction(db, async (trx) => {
+			queueAfterCommit(trx, queuedTask);
+
+			throw Object.assign(new Error('busy'), { code: 'SQLITE_BUSY' });
+		})).rejects.toThrow('Transaction failed after 4 attempts');
+
+		expect(queuedTask).not.toHaveBeenCalled();
+	});
+
 	it(oneLine`
 		runs every task, logs a failure and returns the committed result, without
 		re-running the write even when the failure carries a retry code
