@@ -40,6 +40,7 @@ import {
 	scopedCachePurgeEnabled,
 } from './config.js';
 import {
+	renderScopedCacheFingerprint,
 	scopedCacheFingerprintOf,
 	scopedCacheFingerprintsByCollection,
 } from './fingerprint.js';
@@ -100,6 +101,27 @@ type ScopedCachePurgeRequest = {
 };
 
 /**
+ * Each fingerprint of both lists once. Writes sharing one declarations sink each
+ * queue every fingerprint declared so far, so concatenated, N writes would hand
+ * the purge N² of them to test against every entry it scans.
+ */
+function uniqueScopedCacheFingerprints(
+	queuedFingerprints: readonly ScopedCacheFingerprint[],
+	incomingFingerprints: readonly ScopedCacheFingerprint[],
+): ScopedCacheFingerprint[] {
+	const fingerprintsByRendering = new Map<string, ScopedCacheFingerprint>();
+
+	for (const fingerprint of [...queuedFingerprints, ...incomingFingerprints]) {
+		fingerprintsByRendering.set(
+			renderScopedCacheFingerprint(fingerprint),
+			fingerprint,
+		);
+	}
+
+	return [...fingerprintsByRendering.values()];
+}
+
+/**
  * One purge reaching every entry either of two purges of a collection reaches. It
  * may drop more than both would have — an entry one request pins, matched by a row
  * of the other — and never fewer: a `null` or a missing side widens the merge to
@@ -116,18 +138,18 @@ function mergeScopedCachePurgeRequests(
 		scopedCacheFingerprints: queuedRequest.scopedCacheFingerprints === null
 			|| incomingRequest.scopedCacheFingerprints === null
 			? null
-			: [
-				...queuedRequest.scopedCacheFingerprints,
-				...incomingRequest.scopedCacheFingerprints,
-			],
+			: uniqueScopedCacheFingerprints(
+				queuedRequest.scopedCacheFingerprints,
+				incomingRequest.scopedCacheFingerprints,
+			),
 		hookDeclarations: queuedRequest.hookDeclarations === undefined
 			&& incomingRequest.hookDeclarations === undefined
 			? undefined
 			: {
-				purgeFingerprints: [
-					...queuedRequest.hookDeclarations?.purgeFingerprints ?? [],
-					...incomingRequest.hookDeclarations?.purgeFingerprints ?? [],
-				],
+				purgeFingerprints: uniqueScopedCacheFingerprints(
+					queuedRequest.hookDeclarations?.purgeFingerprints ?? [],
+					incomingRequest.hookDeclarations?.purgeFingerprints ?? [],
+				),
 			},
 		changedCollections: [...new Set([
 			...queuedRequest.changedCollections,
@@ -136,7 +158,10 @@ function mergeScopedCachePurgeRequests(
 		rows: queuedRows === undefined || incomingRows === undefined
 			? undefined
 			: {
-				fingerprints: [...queuedRows.fingerprints, ...incomingRows.fingerprints],
+				fingerprints: uniqueScopedCacheFingerprints(
+					queuedRows.fingerprints,
+					incomingRows.fingerprints,
+				),
 				changed: queuedRows.changed === null || incomingRows.changed === null
 					? null
 					: [...new Set([...queuedRows.changed, ...incomingRows.changed])],

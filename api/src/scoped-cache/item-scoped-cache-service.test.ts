@@ -461,6 +461,71 @@ describe('purge', () => {
 	});
 
 	it(oneLine`
+		merges the fingerprints two writes of one row both hold into one of each, as
+		writes sharing a declarations sink each hold all declared so far
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				{
+					purgeFingerprints: [
+						{ collection: 'zone', pinnedScope: { area: ['north'] } },
+					],
+				},
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+						],
+						changed: ['method'],
+					},
+				},
+			);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				{
+					purgeFingerprints: [
+						{ collection: 'zone', pinnedScope: { area: ['north'] } },
+						{ collection: 'zone', pinnedScope: { area: ['south'] } },
+					],
+				},
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+						],
+						changed: ['method'],
+					},
+				},
+			);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([[
+			cache,
+			'item',
+			[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+			{ database: db, schema, accountability: null },
+			{
+				rowFingerprints: [
+					{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+				],
+				changed: ['method'],
+				indexPath: 'owner',
+				declaredFingerprints: [
+					{ collection: 'zone', pinnedScope: { area: ['north'] } },
+					{ collection: 'zone', pinnedScope: { area: ['south'] } },
+				],
+				changedCollections: [],
+			},
+		]]);
+	});
+
+	it(oneLine`
 		merges a purge without rows into one that has rows as a purge without rows,
 		which drops every entry its fingerprints reach
 	`, async () => {
