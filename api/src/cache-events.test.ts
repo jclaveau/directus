@@ -956,6 +956,10 @@ describe('drainCacheEvents', () => {
 				scopedCachePinCount: '4',
 				evicted: '11',
 				durationMs: '7',
+				scanArms: 'collection',
+				scannedIndexKeys: '4',
+				scannedMembers: '23',
+				scanMs: '5',
 				ts: '6000',
 			}),
 			// A namespace clear: no collection, and a size that was never knowable.
@@ -970,6 +974,10 @@ describe('drainCacheEvents', () => {
 				scopedCachePinCount: '0',
 				evicted: '',
 				durationMs: '3',
+				scanArms: '',
+				scannedIndexKeys: '',
+				scannedMembers: '',
+				scanMs: '',
 				ts: '7000',
 			}),
 		];
@@ -987,6 +995,10 @@ describe('drainCacheEvents', () => {
 					scoped_cache_pin_count: 4,
 					evicted: 11,
 					duration_ms: 7,
+					scan_arms: 'collection',
+					scanned_index_keys: 4,
+					scanned_members: 23,
+					scan_ms: 5,
 				},
 				{
 					time: new Date(7000),
@@ -996,6 +1008,11 @@ describe('drainCacheEvents', () => {
 					scoped_cache_pin_count: 0,
 					evicted: null,
 					duration_ms: 3,
+					// A clear reads no index: unknown, not a scan of nothing.
+					scan_arms: null,
+					scanned_index_keys: null,
+					scanned_members: null,
+					scan_ms: null,
 				},
 			],
 			expect.any(Number),
@@ -1232,6 +1249,11 @@ describe('drainCacheEvents', () => {
 				scoped_cache_pin_count: 2,
 				evicted: 5,
 				duration_ms: 4,
+				// Queued before the scan was measured, so never measured.
+				scan_arms: null,
+				scanned_index_keys: null,
+				scanned_members: null,
+				scan_ms: null,
 			}],
 			expect.any(Number),
 		);
@@ -2947,6 +2969,37 @@ describe('queueCachePurge', () => {
 		expect(fieldAfter(call, 'mode')).toBe('namespace');
 		expect(fieldAfter(call, 'collection')).toBe('');
 		expect(fieldAfter(call, 'evicted')).toBe('');
+		expect(fieldAfter(call, 'scanArms')).toBe('');
+		expect(fieldAfter(call, 'scannedIndexKeys')).toBe('');
+		expect(fieldAfter(call, 'scannedMembers')).toBe('');
+		expect(fieldAfter(call, 'scanMs')).toBe('');
+	});
+
+	it('emits which scan arms ran and how much they read', async () => {
+		await armFlag(null);
+
+		queueCachePurge({
+			collection: 'articles',
+			mode: 'slices',
+			scopedCachePins: ['articles:id=1'],
+			scopedCachePinCount: 1,
+			evicted: 2,
+			durationMs: 12,
+			scopedCacheScan: {
+				scanArms: 'row+collection',
+				scannedIndexKeys: 41,
+				scannedMembers: 182344,
+				scanMs: 9.6,
+			},
+		});
+
+		await flushCacheEventBuffer();
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(fieldAfter(call, 'scanArms')).toBe('row+collection');
+		expect(fieldAfter(call, 'scannedIndexKeys')).toBe('41');
+		expect(fieldAfter(call, 'scannedMembers')).toBe('182344');
+		// Whole milliseconds: the column is an integer.
+		expect(fieldAfter(call, 'scanMs')).toBe('10');
 	});
 
 	// `recordCacheConfigEvent` is deliberately ungated so a flush made while

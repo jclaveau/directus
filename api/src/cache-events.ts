@@ -91,6 +91,26 @@ export interface CachePurge {
 	// is time added to the write, not a background cost — and null where no write
 	// waited on it (a retried purge), so the latency percentiles stay the write's.
 	durationMs: number | null;
+	// Which index scans the purge took and how much they read, so a slow purge
+	// says whether it walked the whole collection. Null where it read no index —
+	// a namespace clear, or a purge with nothing to scan for.
+	scopedCacheScan?: CachePurgeScan | null;
+}
+
+/**
+ * What a purge's index scans read. `scanArms` names the arms that ran, `+`-joined
+ * in a fixed order (`row`, `row+declared`, `row+collection`, `collection`), so a
+ * bucket groups on it as written.
+ *
+ * `scanMs` is the time spent waiting on the scans' pages, summed over the arms:
+ * the row and declared arms run side by side, so it can exceed `durationMs`, and
+ * it holds Redis queueing and event-loop stalls as much as Redis's own work.
+ */
+export interface CachePurgeScan {
+	scanArms: string;
+	scannedIndexKeys: number;
+	scannedMembers: number;
+	scanMs: number;
 }
 
 export interface CacheDescriptor {
@@ -626,8 +646,19 @@ export function queueCachePurge(entry: CachePurge): void {
 		durationMs: entry.durationMs === null
 			? ''
 			: String(entry.durationMs),
+		// Empty = no index was read, which the reader stores as unknown.
+		scanArms: entry.scopedCacheScan?.scanArms ?? '',
+		scannedIndexKeys: streamCount(entry.scopedCacheScan?.scannedIndexKeys),
+		scannedMembers: streamCount(entry.scopedCacheScan?.scannedMembers),
+		scanMs: streamCount(entry.scopedCacheScan?.scanMs),
 		ts: String(Date.now()),
 	});
+}
+
+function streamCount(count: number | undefined): string {
+	return count === undefined
+		? ''
+		: String(Math.round(count));
 }
 
 // The per-key descriptor, emitted on a fill where every field is populated.
@@ -759,6 +790,11 @@ interface CachePurgeRow {
 	scoped_cache_pin_count: number;
 	evicted: number | null; // null = a namespace clear, whose size is unknowable
 	duration_ms: number | null;
+	// Null = no index read, or queued by a build before these columns.
+	scan_arms: string | null;
+	scanned_index_keys: number | null;
+	scanned_members: number | null;
+	scan_ms: number | null;
 }
 
 /**
@@ -957,6 +993,13 @@ function streamScopedCachePins(fields: Record<string, string>): string[] {
 	}
 }
 
+/** A stream count, or null where the producer sent none — never a made-up 0. */
+function storedCount(streamed: string | undefined): number | null {
+	return streamed
+		? Number(streamed)
+		: null;
+}
+
 async function persistStreamBatch(
 	redis: ReturnType<typeof useRedis>,
 	db: Knex,
@@ -1004,9 +1047,11 @@ async function persistStreamBatch(
 					? Number(f['evicted'])
 					: null,
 				// Absent = never measured; 0 would be an instant purge.
-				duration_ms: f['durationMs']
-					? Number(f['durationMs'])
-					: null,
+				duration_ms: storedCount(f['durationMs']),
+				scan_arms: f['scanArms'] || null,
+				scanned_index_keys: storedCount(f['scannedIndexKeys']),
+				scanned_members: storedCount(f['scannedMembers']),
+				scan_ms: storedCount(f['scanMs']),
 			});
 
 			// One row per pin the purge dropped, carrying the purge's own id so an
