@@ -9,8 +9,9 @@ Feature: The purges a transaction queues for one collection run as one
   its `updated_ids` one by one, each with its `updated_values`, through an
   items service on the signal's transaction. Each purge moves the collection's
   purge counter, so a signal updating five rows moves it as much as a signal
-  updating one, and sends Redis the same reads: one per index set the rows
-  reach. A command spelled in capitals ran in a script.
+  updating one, and sends Redis the same index reads: one per index set the
+  rows reach. Only the reads of the purge counter, one per row updated, grow
+  with the rows. A command spelled in capitals ran in a script.
 
   Scenario: five rows updated one by one purge their collection once
     Given these rows of merged_purge_row:
@@ -89,10 +90,10 @@ Feature: The purges a transaction queues for one collection run as one
       | evalsha    | scoped-cache-epoch:                         | 1     |       |+
       |            | merged_purge_signal                         |       |       |
       | mget       | scoped-cache-collection-index-keys-complete | 2     | 4     |+
-      | mget       | scoped-cache-epoch:merged_purge_row         | 1     | 2     |+
+      | mget       | scoped-cache-epoch:merged_purge_row         | 5     | 10    |+
       | mget       | scoped-cache-epoch:                         | 1     | 2     |+
       |            | merged_purge_signal                         |       |       |
-      | publish    | bus:websocket.event                         | 14    |       |+
+      | publish    | bus:websocket.event                         | 18    |       |+
       | smismember | scoped-cache-index:                         | 1     | 6     |+
       |            | collection-index-keys:                      |       |       |
       |            | merged_purge_row                            |       |       |
