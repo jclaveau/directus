@@ -358,8 +358,9 @@ describe.each(vendors)('%s', (vendor) => {
 	// Every SCAN and SSCAN of the slot's index `signalsSent` caused — of its sets,
 	// or of the index-key set naming them — as the key it read past
 	// `scoped-cache-index:`, with the MATCH pattern an SSCAN narrowed its names by,
-	// past the slot's own sets, and how many times it was sent. Along with every
-	// command the instance sent meanwhile, counted.
+	// past the slot's own sets, and how many times it was sent. A script reading
+	// sets whole reads each by `SCARD`, then `SMEMBERS` when it holds anything.
+	// Along with every command the instance sent meanwhile, counted.
 	async function recordIndexReads(signalsSent: () => Promise<void>): Promise<{
 		indexReads: Record<string, string>[];
 		sentCommands: Record<string, string>[];
@@ -381,7 +382,9 @@ describe.each(vendors)('%s', (vendor) => {
 			const slotRead = readSet?.startsWith(slotPrefix)
 				|| (command === 'sscan' && readSet === collectionIndexKeysKey);
 
-			if ((command !== 'scan' && command !== 'sscan') || !slotRead) {
+			const indexRead = ['scan', 'sscan', 'scard', 'smembers'].includes(command);
+
+			if (!indexRead || !slotRead) {
 				continue;
 			}
 

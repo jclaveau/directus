@@ -96,6 +96,19 @@ function scopedCacheIndexScanCount(): number {
  */
 const SCOPED_CACHE_INDEX_SCAN_SETS = 100;
 
+/**
+ * How many sets, and how many members, one `scopedCacheIndexSetsRead` call reads
+ * at most.
+ *
+ * A purge walking a collection reads every set it owns, tens of thousands of
+ * them holding a few members each: one `SSCAN` per set is that many commands for
+ * Redis to run and this process to parse. The script reads hundreds per call,
+ * and the member bound keeps its reply, and the time it holds Redis, near what a
+ * few `SSCAN` pages take.
+ */
+const SCOPED_CACHE_INDEX_READ_SETS = 500;
+const SCOPED_CACHE_INDEX_READ_MEMBERS = 5000;
+
 // How many keys a SCAN is asked to look at per round trip. `@keyv/redis` uses 1000
 // for the namespace clears that run beside these, and the 250 this replaced bought
 // nothing for 4x the round trips: SCAN filters server-side, so the pass costs the
@@ -339,6 +352,37 @@ return live
 `;
 
 /**
+ * The members of each set in KEYS, in order: a list per set read whole, or `0`
+ * for a set over ARGV[1] members, left for the caller to page with `SSCAN`.
+ * Reading stops before a set that would take the reply past ARGV[2] members, so
+ * the reply can be shorter than KEYS and the caller sends the rest again. A gone
+ * set reads as an empty list.
+ */
+export const scopedCacheIndexSetsReadScript = `
+local largestWholeSet = tonumber(ARGV[1])
+local memberBudget = tonumber(ARGV[2])
+local readSets = {}
+local membersRead = 0
+
+for i = 1, #KEYS do
+	local setSize = redis.call('SCARD', KEYS[i])
+
+	if setSize > largestWholeSet then
+		readSets[i] = 0
+	elseif setSize == 0 then
+		readSets[i] = {}
+	elseif membersRead > 0 and membersRead + setSize > memberBudget then
+		break
+	else
+		readSets[i] = redis.call('SMEMBERS', KEYS[i])
+		membersRead = membersRead + setSize
+	end
+end
+
+return readSets
+`;
+
+/**
  * The index generation as a reap reads it before its SCAN, seeded from `TIME` the
  * way the purge counters are when there is none yet: a reap with no generation to
  * name could never mark anything complete, and one seeded again never repeats a
@@ -499,6 +543,13 @@ type ScopedCacheCollectionIndexKeysPruneCommand = {
 	): Promise<string[]>;
 };
 
+type ScopedCacheIndexSetsReadCommand = {
+	scopedCacheIndexSetsRead(
+		keyCount: number,
+		...indexKeysThenBounds: Array<string | number>
+	): Promise<Array<string[] | number>>;
+};
+
 type ScopedCacheEpochBumpCommand = {
 	scopedCacheEpochBump(
 		epochKeyCount: number,
@@ -560,6 +611,7 @@ type ScopedCacheScriptedRedis = Redis
 	& ScopedCacheEpochBumpCommand
 	& ScopedCacheIndexReapCommand
 	& ScopedCacheCollectionIndexKeysPruneCommand
+	& ScopedCacheIndexSetsReadCommand
 	& ScopedCacheCollectionIndexKeysRegisterCommand
 	& ScopedCacheIndexGenerationReadCommand
 	& ScopedCacheIndexCompleteMarkCommand
@@ -600,6 +652,10 @@ function withScopedCacheScripts(redis: Redis): ScopedCacheScriptedRedis {
 
 		redis.defineCommand('scopedCacheCollectionIndexKeysPrune', {
 			lua: scopedCacheCollectionIndexKeysPruneScript,
+		});
+
+		redis.defineCommand('scopedCacheIndexSetsRead', {
+			lua: scopedCacheIndexSetsReadScript,
 		});
 
 		redis.defineCommand('scopedCacheIndexGenerationRead', {
@@ -1624,6 +1680,69 @@ async function* scanScopedCacheIndexKeys(
 }
 
 /**
+ * What `scanScopedCacheIndexKeys` yields for the same sets, in fewer commands:
+ * a set no larger than one `SSCAN` page is read whole by a script reading many
+ * at once, and only the larger ones are paged.
+ */
+async function* readScopedCacheIndexSets(
+	indexKeys: readonly string[],
+): AsyncGenerator<ScopedCacheIndexedEntry[]> {
+	const redis = useScriptedRedis();
+	const largestWholeSet = scopedCacheIndexScanCount();
+	const pagedKeys: string[] = [];
+
+	for (
+		let setAt = 0;
+		setAt < indexKeys.length;
+		setAt += SCOPED_CACHE_INDEX_READ_SETS
+	) {
+		let unreadKeys = indexKeys.slice(setAt, setAt + SCOPED_CACHE_INDEX_READ_SETS);
+
+		while (unreadKeys.length > 0) {
+			const readSets = await redis.scopedCacheIndexSetsRead(
+				unreadKeys.length,
+				...unreadKeys,
+				largestWholeSet,
+				SCOPED_CACHE_INDEX_READ_MEMBERS,
+			);
+
+			const entries: ScopedCacheIndexedEntry[] = [];
+			const readMembers = new Set<string>();
+
+			for (const [setRead, members] of readSets.entries()) {
+				const indexKey = unreadKeys[setRead]!;
+
+				if (typeof members === 'number') {
+					pagedKeys.push(indexKey);
+					continue;
+				}
+
+				for (const member of members) {
+					if (readMembers.has(member)) {
+						continue;
+					}
+
+					readMembers.add(member);
+
+					const { fingerprint, key } = parseScopedCacheIndexMember(member);
+
+					entries.push({
+						fingerprint,
+						key,
+						location: { indexKey, member } satisfies ScopedCacheMemberLocation,
+					});
+				}
+			}
+
+			yield entries;
+			unreadKeys = unreadKeys.slice(readSets.length);
+		}
+	}
+
+	yield* scanScopedCacheIndexKeys(pagedKeys);
+}
+
+/**
  * The keys under `globPattern`, a page at a time.
  *
  * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the whole
@@ -1872,7 +1991,7 @@ const redisStore: ScopedCacheStore = {
 				collection,
 				scopedCacheHomePinIndexGlob(collection),
 			)) {
-				yield* scanScopedCacheIndexKeys(homePinKeys);
+				yield* readScopedCacheIndexSets(homePinKeys);
 			}
 
 			return;
@@ -1885,7 +2004,7 @@ const redisStore: ScopedCacheStore = {
 		collection: string,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 		for await (const indexKeys of scanCollectionIndexKeyNames(collection)) {
-			yield* scanScopedCacheIndexKeys(indexKeys);
+			yield* readScopedCacheIndexSets(indexKeys);
 		}
 	},
 

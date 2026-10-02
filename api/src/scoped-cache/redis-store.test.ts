@@ -55,6 +55,7 @@ const scopedCacheFillPauseWatch = vi.fn();
 const scopedCacheFillPauseEnd = vi.fn();
 const scan = vi.fn();
 const sscan = vi.fn();
+const scopedCacheIndexSetsRead = vi.fn();
 const sadd = vi.fn();
 
 const mget = vi.fn();
@@ -83,6 +84,7 @@ vi.mock('../redis/index.js', () => {
 			pttl,
 			scan,
 			sscan,
+			scopedCacheIndexSetsRead,
 			sadd,
 			mget,
 			get,
@@ -1254,6 +1256,7 @@ describe('scanCollectionIndexedEntries', () => {
 		for (const command of [
 			scan,
 			sscan,
+			scopedCacheIndexSetsRead,
 			scopedCacheCollectionIndexKeysPrune,
 			mget,
 		]) {
@@ -1274,8 +1277,9 @@ describe('scanCollectionIndexedEntries', () => {
 					'scalabus:scoped-cache-index:fingerprint:slot:',
 					'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 				],
-			])
-			.mockResolvedValueOnce(['0', ['slot:&|key-a']]);
+			]);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([['slot:&|key-a']]);
 
 		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
 			'scalabus:scoped-cache-index:fingerprint:slot:',
@@ -1305,15 +1309,19 @@ describe('scanCollectionIndexedEntries', () => {
 			'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
 		]]);
 
-		expect(sscan.mock.calls).toEqual([
-			[
-				'scalabus:scoped-cache-index:collection-index-keys:slot',
-				'0',
-				'COUNT',
-				1000,
-			],
-			['scalabus:scoped-cache-index:fingerprint:slot:', '0', 'COUNT', 1000],
-		]);
+		expect(sscan.mock.calls).toEqual([[
+			'scalabus:scoped-cache-index:collection-index-keys:slot',
+			'0',
+			'COUNT',
+			1000,
+		]]);
+
+		expect(scopedCacheIndexSetsRead.mock.calls).toEqual([[
+			1,
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+			1000,
+			5000,
+		]]);
 
 		expect(mget.mock.calls).toEqual([[[
 			'scalabus:scoped-cache-collection-index-keys-complete',
@@ -1339,7 +1347,7 @@ describe('scanCollectionIndexedEntries', () => {
 			['scalabus:scoped-cache-index:fingerprint:slot:name=ada'],
 		]);
 
-		sscan.mockResolvedValueOnce(['0', ['slot:&name=,ada,&|key-a']]);
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([['slot:&name=,ada,&|key-a']]);
 
 		const scanned = [];
 
@@ -1366,14 +1374,191 @@ describe('scanCollectionIndexedEntries', () => {
 			1000,
 		]]);
 
-		expect(sscan.mock.calls).toEqual([[
+		expect(scopedCacheIndexSetsRead.mock.calls).toEqual([[
+			1,
 			'scalabus:scoped-cache-index:fingerprint:slot:name=ada',
+			1000,
+			5000,
+		]]);
+
+		expect(scopedCacheCollectionIndexKeysPrune).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		pages a set the whole-set read left alone for being larger than one page,
+		and yields its entries after the whole ones
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan
+			.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:scoped-cache-index:fingerprint:slot:owner=big',
+					'scalabus:scoped-cache-index:fingerprint:slot:owner=small',
+				],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&owner=,big,&|key-big']]);
+
+		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(
+			async (_keyCount: number, _collectionIndexKeysKey: string, ...keys: string[]) => keys,
+		);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([
+			0,
+			['slot:&owner=,small,&|key-small'],
+		]);
+
+		const scanned = [];
+
+		for await (
+			const page of redisScopedCacheStore().scanCollectionIndexedEntries('slot')
+		) {
+			scanned.push(page);
+		}
+
+		expect(scanned).toEqual([
+			[{
+				fingerprint: { collection: 'slot', pinnedScope: { owner: ['small'] } },
+				key: 'key-small',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=small',
+					member: 'slot:&owner=,small,&|key-small',
+				},
+			}],
+			[{
+				fingerprint: { collection: 'slot', pinnedScope: { owner: ['big'] } },
+				key: 'key-big',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=big',
+					member: 'slot:&owner=,big,&|key-big',
+				},
+			}],
+		]);
+
+		expect(sscan.mock.calls.slice(1)).toEqual([[
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=big',
 			'0',
 			'COUNT',
 			1000,
 		]]);
+	});
 
-		expect(scopedCacheCollectionIndexKeysPrune).not.toHaveBeenCalled();
+	it(oneLine`
+		sends the sets again that a reply cut short by the member budget left
+		unread
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan.mockResolvedValueOnce([
+			'0',
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=a',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
+			],
+		]);
+
+		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(
+			async (_keyCount: number, _collectionIndexKeysKey: string, ...keys: string[]) => keys,
+		);
+
+		scopedCacheIndexSetsRead
+			.mockResolvedValueOnce([['slot:&owner=,a,&|key-a']])
+			.mockResolvedValueOnce([['slot:&owner=,b,&|key-b']]);
+
+		const scanned = [];
+
+		for await (
+			const page of redisScopedCacheStore().scanCollectionIndexedEntries('slot')
+		) {
+			scanned.push(page);
+		}
+
+		expect(scopedCacheIndexSetsRead.mock.calls).toEqual([
+			[
+				2,
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=a',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
+				1000,
+				5000,
+			],
+			[
+				1,
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
+				1000,
+				5000,
+			],
+		]);
+
+		expect(scanned).toEqual([
+			[{
+				fingerprint: { collection: 'slot', pinnedScope: { owner: ['a'] } },
+				key: 'key-a',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=a',
+					member: 'slot:&owner=,a,&|key-a',
+				},
+			}],
+			[{
+				fingerprint: { collection: 'slot', pinnedScope: { owner: ['b'] } },
+				key: 'key-b',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
+					member: 'slot:&owner=,b,&|key-b',
+				},
+			}],
+		]);
+	});
+
+	it(oneLine`
+		yields a member once when two sets of the same reply hold it, filed under
+		the first
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan.mockResolvedValueOnce([
+			'0',
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=a',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
+			],
+		]);
+
+		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(
+			async (_keyCount: number, _collectionIndexKeysKey: string, ...keys: string[]) => keys,
+		);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([
+			['slot:&|key-shared'],
+			['slot:&|key-shared', 'slot:&|key-only-b'],
+		]);
+
+		const scanned = [];
+
+		for await (
+			const page of redisScopedCacheStore().scanCollectionIndexedEntries('slot')
+		) {
+			scanned.push(page);
+		}
+
+		expect(scanned).toEqual([[
+			{
+				fingerprint: { collection: 'slot' },
+				key: 'key-shared',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=a',
+					member: 'slot:&|key-shared',
+				},
+			},
+			{
+				fingerprint: { collection: 'slot' },
+				key: 'key-only-b',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
+					member: 'slot:&|key-only-b',
+				},
+			},
+		]]);
 	});
 
 	// Checked and removed in two steps, a fill recreating the set in between is
@@ -1397,6 +1582,7 @@ describe('scanDeclaredIndexedEntries', () => {
 		for (const command of [
 			scan,
 			sscan,
+			scopedCacheIndexSetsRead,
 			scopedCacheCollectionIndexKeysPrune,
 			mget,
 		]) {
@@ -1416,8 +1602,9 @@ describe('scanDeclaredIndexedEntries', () => {
 			.mockResolvedValueOnce([
 				'0',
 				['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7'],
-			])
-			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
+			]);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([['slot:&id=,7,&|key-home']]);
 
 		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
@@ -1458,13 +1645,14 @@ describe('scanDeclaredIndexedEntries', () => {
 				'COUNT',
 				1000,
 			],
-			[
-				'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
-				'0',
-				'COUNT',
-				1000,
-			],
 		]);
+
+		expect(scopedCacheIndexSetsRead.mock.calls).toEqual([[
+			1,
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+			1000,
+			5000,
+		]]);
 
 		expect(scan).not.toHaveBeenCalled();
 	});
@@ -1477,8 +1665,9 @@ describe('scanDeclaredIndexedEntries', () => {
 
 		sscan
 			.mockResolvedValueOnce(['0', []])
-			.mockResolvedValueOnce(['0', []])
-			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
+			.mockResolvedValueOnce(['0', []]);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([['slot:&id=,7,&|key-home']]);
 
 		scan.mockResolvedValueOnce([
 			'0',

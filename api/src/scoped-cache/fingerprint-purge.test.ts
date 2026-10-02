@@ -93,6 +93,15 @@ const sscan = vi.fn(async (key: string, _cursor: string, ...options: unknown[]) 
 	return ['0', members[key] ?? []];
 });
 
+// The whole-set read the walks make instead of one `sscan` per set: every set it
+// is handed answers with the members `sscan` would page out of it.
+const scopedCacheIndexSetsRead = vi.fn(async (
+	keyCount: number,
+	...args: (string | number)[]
+) => {
+	return args.slice(0, keyCount).map((key) => members[key as string] ?? []);
+});
+
 const scan = vi.fn(async () => ['0', []]);
 
 const scopedCacheCollectionIndexKeysPrune = vi.fn(async (
@@ -124,6 +133,7 @@ beforeEach(() => {
 
 	vi.mocked(useRedis).mockReturnValue({
 		sscan,
+		scopedCacheIndexSetsRead,
 		scan,
 		// A reap has marked the index-key sets complete since the last flush.
 		mget: async () => ['1', '1'],
@@ -565,6 +575,13 @@ describe('a purge shown the rows it wrote', () => {
 			'0',
 			'COUNT',
 			1000,
+		);
+
+		expect(scopedCacheIndexSetsRead).toHaveBeenCalledWith(
+			1,
+			'ns:scoped-cache-index:fingerprint:other:pin:id=3',
+			1000,
+			5000,
 		);
 
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-x');
