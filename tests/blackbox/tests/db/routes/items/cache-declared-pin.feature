@@ -244,10 +244,17 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |                       |                |     - note          |
       |                       |                |     - owner         |
     And the declaration read the home pin sets and only the index sets it names:
-      | command | index set                                 | matching |
-      | sscan   | collection-index-keys:declared_pin_slot   | pin:*    |
-      | sscan   | fingerprint:declared_pin_slot:            |          |
-      | sscan   | fingerprint:declared_pin_slot:owner=alpha |          |
+      | command | index set                                 | matching | calls |
+      | sscan   | collection-index-keys:declared_pin_slot   | pin:*    | 1     |
+      | sscan   | fingerprint:declared_pin_slot:            |          | 1     |
+      | sscan   | fingerprint:declared_pin_slot:owner=alpha |          | 1     |
+    And the declaration sent these Redis commands:
+      | command | key                                                      | calls | items |
+      | evalsha | scoped-cache-epoch:declared_pin_slot                     | 1     |       |
+      | sscan   | scoped-cache-index:collection-index-keys:declared_pin_slot | 1     |       |
+      | sscan   | scoped-cache-index:fingerprint:declared_pin_slot:        | 1     |       |
+      | sscan   | scoped-cache-index:fingerprint:declared_pin_slot:owner=alpha | 1     |       |
+      | unlink  | <entry>                                                  | 1     | 1     |
     Then the read is purged, its own set among the index sets read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+

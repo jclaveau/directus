@@ -4,8 +4,8 @@ import { CreateCollections, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { monitorRedisCommands } from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
-import { randomUUID } from 'crypto';
 import { once } from 'events';
 import getPort from 'get-port';
 import Redis from 'ioredis';
@@ -170,70 +170,45 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// The reads the purge sends to this collection's index sets, as MONITOR sees
-	// them. A moved set's key carries a fresh uuid, spelled `<sweep>` here.
+	// them, once per key read: a scan of the keyspace takes several pages. A moved
+	// set's key carries a fresh uuid, spelled `<sweep>` here.
 	async function purgeEveryReadOf(collection: string) {
 		const purgeReads: Record<string, string>[] = [];
 
-		const monitor = redisClient.duplicate({
-			monitor: true,
-			lazyConnect: false,
+		const monitoredCommands = await monitorRedisCommands(redisClient, async () => {
+			const purged = await request(getUrl(vendor, env))
+				.post(`/cache-collection-purge/${collection}`)
+				.set('Authorization', auth);
+
+			expect(purged.statusCode).toBe(200);
 		});
 
-		await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
-			monitor.once('monitoring', resolveMonitoring);
+		for (const { commandArgs } of monitoredCommands) {
+			const command = commandArgs[0]!.toLowerCase();
 
-			// ioredis flips to monitoring only after the OK resolves, so a
-			// line landing in the same chunk finds an empty command queue.
-			monitor.on('error', (monitorError: Error) => {
-				if (!monitorError.message.startsWith('Command queue state error')) {
-					rejectMonitoring(monitorError);
-				}
+			const indexKeys = commandArgs.slice(1).filter((key) => {
+				return key.startsWith(indexPrefix);
 			});
-		});
 
-		const endSentinel = `${namespace}:monitor-sentinel:${randomUUID()}`;
+			const indexRead = {
+				command,
+				keys: indexKeys.map((key) => {
+					return key.slice(indexPrefix.length)
+						.replace(/[0-9a-f-]{36}/, '<sweep>');
+				}).join(' '),
+			};
 
-		const endSeen = new Promise<void>((resolveEnd) => {
-			monitor.on('monitor', (_time: string, commandArgs: string[]) => {
-				const command = commandArgs[0]!.toLowerCase();
-
-				const indexKeys = commandArgs.slice(1).filter((key) => {
-					return key.startsWith(indexPrefix);
-				});
-
-				const indexRead = {
-					command,
-					keys: indexKeys.map((key) => {
-						return key.slice(indexPrefix.length)
-							.replace(/[0-9a-f-]{36}/, '<sweep>');
-					}).join(' '),
-				};
-
-				if (commandArgs[1] === endSentinel) {
-					resolveEnd();
-				}
-				// Once per key read: a scan of the keyspace takes several pages.
-				else if (
-					['scan', 'sscan'].includes(command)
-					&& indexKeys.some((key) => key.includes(collection))
-					&& !purgeReads.some((purgeRead) => {
-						return purgeRead['command'] === command
-							&& purgeRead['keys'] === indexRead.keys;
-					})
-				) {
-					purgeReads.push(indexRead);
-				}
-			});
-		});
-
-		const purged = await request(getUrl(vendor, env))
-			.post(`/cache-collection-purge/${collection}`)
-			.set('Authorization', auth);
-
-		expect(purged.statusCode).toBe(200);
-
-		await Promise.all([endSeen, redisClient.get(endSentinel)]);
-		monitor.disconnect();
+			if (
+				['scan', 'sscan'].includes(command)
+				&& indexKeys.some((key) => key.includes(collection))
+				&& !purgeReads.some((purgeRead) => {
+					return purgeRead['command'] === command
+						&& purgeRead['keys'] === indexRead.keys;
+				})
+			) {
+				purgeReads.push(indexRead);
+			}
+		}
 
 		return purgeReads;
 	}

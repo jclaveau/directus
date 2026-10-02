@@ -8,6 +8,10 @@ import { CreateCollections, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import {
+	countRedisCommands,
+	monitorRedisCommands,
+} from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import Redis from 'ioredis';
@@ -45,8 +49,10 @@ describe.each(vendors)('%s', (vendor) => {
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess;
 
-	// How far each signal moved the rows' purge counter, in the order they ran.
+	// How far each signal moved the rows' purge counter, and the Redis commands it
+	// sent, in the order the signals ran.
 	const counterMoves: number[] = [];
+	const signalCommands: Record<string, string>[][] = [];
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
@@ -128,14 +134,20 @@ describe.each(vendors)('%s', (vendor) => {
 	async function createSignal(table: Record<string, string>[]) {
 		const counterBefore = Number(await redis.get(rowEpochKey));
 
-		const created = await request(spawnedServerUrl())
-			.post(`/items/${SIGNAL}`)
-			.send(parseGherkinTable(table)[0])
-			.set('Authorization', auth);
+		const monitoredCommands = await monitorRedisCommands(redis, async () => {
+			const created = await request(spawnedServerUrl())
+				.post(`/items/${SIGNAL}`)
+				.send(parseGherkinTable(table)[0])
+				.set('Authorization', auth);
 
-		expect(created.statusCode).toBe(200);
+			expect(created.statusCode).toBe(200);
+		});
 
 		counterMoves.push(Number(await redis.get(rowEpochKey)) - counterBefore);
+
+		signalCommands.push(
+			countRedisCommands(monitoredCommands, env[vendor]['CACHE_NAMESPACE']!),
+		);
 	}
 
 	async function expectCached(table: Record<string, string>[]) {
@@ -191,6 +203,30 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(counterMoves[0]).toBeGreaterThan(0);
 					},
 				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'five rows updated one by one send Redis the commands of one purge',
+			({ given, when, and, then }) => {
+				given(`these rows of ${ROW}:`, createRows);
+
+				when('a signal updates these rows one by one:', (table) => {
+					signalCommands.length = 0;
+
+					return createSignal(table);
+				});
+
+				and('a signal updates these rows one by one:', createSignal);
+
+				then('the first signal sent these Redis commands:', (table) => {
+					expect(signalCommands[0]).toEqual(table);
+				});
+
+				and('the second signal sent these Redis commands:', (table) => {
+					expect(signalCommands[1]).toEqual(table);
+				});
 			},
 			60_000,
 		);
