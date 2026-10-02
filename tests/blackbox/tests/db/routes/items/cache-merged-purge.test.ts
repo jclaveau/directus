@@ -1,4 +1,4 @@
-import config, { getUrl, paths } from '@common/config';
+import config, { paths } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
@@ -89,6 +89,12 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: ROW });
 	});
 
+	// Not `getUrl`: under TEST_LOCAL or TEST_NO_CACHE it points at another server,
+	// one without this test's cache.
+	function spawnedServerUrl() {
+		return `http://127.0.0.1:${env[vendor].PORT}`;
+	}
+
 	// As in `cache-declared-pin-readback.test.ts`: `fields` and `sort` go as lists,
 	// anything nested as JSON.
 	function readRows(query: string) {
@@ -104,14 +110,14 @@ describe.each(vendors)('%s', (vendor) => {
 			}
 		}
 
-		return request(getUrl(vendor, env))
+		return request(spawnedServerUrl())
 			.get(`/items/${ROW}`)
 			.query(parameters)
 			.set('Authorization', auth);
 	}
 
 	async function createRows(table: Record<string, string>[]) {
-		const created = await request(getUrl(vendor, env))
+		const created = await request(spawnedServerUrl())
 			.post(`/items/${ROW}`)
 			.send(parseGherkinTable(table).map((row) => omit(row, 'markers')))
 			.set('Authorization', auth);
@@ -122,7 +128,7 @@ describe.each(vendors)('%s', (vendor) => {
 	async function createSignal(table: Record<string, string>[]) {
 		const counterBefore = Number(await redis.get(rowEpochKey));
 
-		const created = await request(getUrl(vendor, env))
+		const created = await request(spawnedServerUrl())
 			.post(`/items/${SIGNAL}`)
 			.send(parseGherkinTable(table)[0])
 			.set('Authorization', auth);
