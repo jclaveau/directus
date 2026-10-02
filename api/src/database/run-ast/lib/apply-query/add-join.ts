@@ -81,7 +81,8 @@ export function addJoin({ path, collection, aliasMap, rootQuery, schema, knex }:
 			: aliasMap[pathParts[0]!]?.alias;
 
 		if (!existingAlias) {
-			// Two joins sharing an alias fail with "table name specified more than once" (42712)
+			// Two joins sharing an alias fail with
+			// "table name specified more than once" (42712)
 			let alias = generateAlias();
 
 			while (
