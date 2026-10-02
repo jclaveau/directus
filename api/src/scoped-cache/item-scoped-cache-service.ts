@@ -698,10 +698,16 @@ export class ItemScopedCacheService {
 		// on the parent's trx) purges once that transaction commits (#363). Its purged
 		// list is left out of the debug header, which reads only the request's own
 		// service. The purges queued on one trx for the same collection merge into one
-		// (#594).
+		// (#594), unless their accountability differs: the `cache.purge` filter is
+		// handed one, and may resolve other slices for another.
 		const queuedAfterCommit = queueMergedAfterCommit(
 			this.knex,
-			`scoped-cache-purge:${this.collection}:${includeBareFingerprint}`,
+			[
+				'scoped-cache-purge',
+				this.collection,
+				includeBareFingerprint,
+				JSON.stringify(this.accountability),
+			].join(':'),
 			{
 				scopedCacheFingerprints,
 				// Copied now: the list goes on growing with the writes that follow,

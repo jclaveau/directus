@@ -1,3 +1,4 @@
+import type { Accountability } from '@directus/types';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
@@ -564,6 +565,43 @@ describe('purge', () => {
 					changedCollections: [],
 					includeBareFingerprint: false,
 				},
+			],
+		]);
+	});
+
+	it(oneLine`
+		purges apart after commit the writes of one collection made under different
+		accountabilities, each handed its own
+	`, async () => {
+		const cache = {} as Keyv;
+		const editor = { user: 'editor', role: 'editor-role' } as Accountability;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null)
+				.purge([{ collection: 'item', pinnedScope: { owner: ['alpha'] } }]);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, editor)
+				.purge([{ collection: 'item', pinnedScope: { owner: ['beta'] } }]);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([
+			[
+				cache,
+				'item',
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				{ database: db, schema, accountability: null },
+				{ declaredFingerprints: [], changedCollections: [] },
+			],
+			[
+				cache,
+				'item',
+				[{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+				{
+					database: db,
+					schema,
+					accountability: { user: 'editor', role: 'editor-role' },
+				},
+				{ declaredFingerprints: [], changedCollections: [] },
 			],
 		]);
 	});
