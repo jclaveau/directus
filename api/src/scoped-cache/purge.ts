@@ -67,6 +67,7 @@ import {
 } from './fill-guard.js';
 import { scopedCacheHomePinFields, scopedCacheIndexPath } from './index-path.js';
 import { scopedCacheFillPaused } from './fill-pause.js';
+import { scopedCacheDeclaredIndexPins } from './declared-index-pins.js';
 import { requestScopedCacheIndexReap } from './reap-requests.js';
 import {
 	scopedCacheEpochBumpScript,
@@ -457,18 +458,33 @@ async function purgeScopedCacheFingerprintIndex(
  * pin matches entries by what they do NOT pin as much as by what they do, so what
  * can be narrowed on depends on how the index is split.
  */
-function purgeScopedCacheDeclaredPins(
+async function purgeScopedCacheDeclaredPins(
 	cache: Keyv,
 	collection: string,
 	declared: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
+	context: EventContext | null,
+	mutatedCollections: readonly string[] | null,
 	scanTally: ScopedCacheScanTally,
 ): Promise<ScopedCachePurgeSweep> {
+	// What the store reads, narrowed to the index values the pins' relation reaches
+	// when it can be read back. The match below still tests the pins as declared.
+	const scannedPins = context?.schema && mutatedCollections !== null
+		? await scopedCacheDeclaredIndexPins(
+			context.schema,
+			context.database,
+			collection,
+			declared,
+			indexPath,
+			mutatedCollections,
+		)
+		: null;
+
 	return purgeScopedCacheIndexWhere(
 		cache,
 		useScopedCacheStore().scanDeclaredIndexedEntries(
 			collection,
-			declared,
+			scannedPins ?? declared,
 			indexPath,
 			scanTally,
 		),
@@ -499,9 +515,12 @@ async function purgeScopedCacheDeclaredFingerprints(
 	collection: string,
 	declaredFingerprints: readonly ScopedCacheFingerprint[],
 	indexPath: string | null,
-	schema: SchemaOverview | null,
+	context: EventContext | null,
+	changedCollections: readonly string[],
 	scanTally: ScopedCacheScanTally,
 ): Promise<number> {
+	const schema = context?.schema ?? null;
+
 	if (declaredFingerprints.length === 0) {
 		return 0;
 	}
@@ -526,7 +545,9 @@ async function purgeScopedCacheDeclaredFingerprints(
 	for (const [declaredCollection, declared] of declaredByCollection) {
 		let declaredIndexPath = indexPath;
 
-		if (declaredCollection !== collection) {
+		// A purge shown no rows is handed no index path, yet its fills were filed
+		// under the schema's.
+		if (declaredCollection !== collection || indexPath === null) {
 			declaredIndexPath = schema === null
 				? null
 				: scopedCacheIndexPath(schema, declaredCollection);
@@ -537,6 +558,8 @@ async function purgeScopedCacheDeclaredFingerprints(
 			declaredCollection,
 			declared,
 			declaredIndexPath,
+			context,
+			[collection, ...changedCollections],
 			scanTally,
 		);
 
@@ -1239,6 +1262,8 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						declaredCollection,
 						declared,
 						null,
+						null,
+						null,
 						scanTally,
 					);
 
@@ -1566,6 +1591,10 @@ export async function purgeScopedCache(
 		// for — a slice on another collection, a slice the write never touched — so
 		// it is purged by what it pins, not by what was written.
 		declaredFingerprints?: readonly ScopedCacheFingerprint[];
+		// The collections the database changed under the mutation besides this one,
+		// such as a delete's `SET NULL` on another collection's fk. A declared pin
+		// is not read back through any of them.
+		changedCollections?: readonly string[];
 	} = {},
 ): Promise<ScopedCacheFingerprint[] | null> {
 	// Returns what the purge reached so a caller can surface it (dev-only debug
@@ -1729,7 +1758,8 @@ export async function purgeScopedCache(
 					collection,
 					purgedByPin,
 					options.indexPath ?? null,
-					context?.schema ?? null,
+					context,
+					options.changedCollections ?? [],
 					scanTally,
 				),
 			]);

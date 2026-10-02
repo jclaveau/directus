@@ -5,6 +5,104 @@ import { useLogger } from '../logger/index.js';
 import type { DatabaseClient } from '@directus/types';
 
 /**
+ * Work held back until a transaction commits. It is handed the connection the
+ * transaction was opened on, the trx being gone by then.
+ */
+type AfterCommitTask = (database: Knex) => Promise<void>;
+
+/**
+ * The work each open transaction holds back, keyed by the trx `transaction()`
+ * opened. A trx it did not open has no entry, so work queued on it runs at once,
+ * as before.
+ */
+const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
+
+/**
+ * Hold `task` until the transaction `knex` belongs to commits, when `transaction()`
+ * opened it. Returns false when nothing will run it later: `knex` is no
+ * transaction, or one opened elsewhere, and the caller runs the task itself.
+ *
+ * A rolled-back transaction drops its tasks: nothing it wrote landed, so nothing
+ * needs them. A retried one drops the aborted attempt's tasks with that attempt.
+ */
+export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
+	const queuedTasks = afterCommitTasks.get(knex);
+
+	if (queuedTasks === undefined) {
+		return false;
+	}
+
+	queuedTasks.push(task);
+
+	return true;
+}
+
+/**
+ * The requests queued under each merge key, per list of held-back tasks: a retried
+ * attempt gets a new list, so it never merges into the aborted attempt's requests.
+ * Filed under the merge function too: requests one function merges share its type,
+ * so a caller reusing another's key never has its requests handed to the other's.
+ */
+const mergedRequests = new WeakMap<
+	AfterCommitTask[],
+	Map<object, Map<string, unknown>>
+>();
+
+/**
+ * `queueAfterCommit` for work that merges: a request queued under a key this
+ * transaction already holds is merged into it, and the merge runs as one task in
+ * the place of the first. Returns false, as `queueAfterCommit` does, when nothing
+ * will run it.
+ *
+ * `mergeRequests` names the kind of request as much as the key does: requests
+ * merge only when handed the same function, so it is defined once, not inline.
+ *
+ * A hook writing per row on its parent's trx queues one purge per row, each
+ * scanning the same index sets: merged, they scan once (#594).
+ */
+export function queueMergedAfterCommit<Request>(
+	knex: Knex,
+	mergeKey: string,
+	request: Request,
+	{
+		mergeRequests,
+		runRequest,
+	}: {
+		mergeRequests: (queued: Request, incoming: Request) => Request;
+		runRequest: (database: Knex, request: Request) => Promise<void>;
+	},
+): boolean {
+	const queuedTasks = afterCommitTasks.get(knex);
+
+	if (queuedTasks === undefined) {
+		return false;
+	}
+
+	const requestsByMerger = mergedRequests.get(queuedTasks) ?? new Map();
+
+	mergedRequests.set(queuedTasks, requestsByMerger);
+
+	const queuedRequests: Map<string, Request> =
+		requestsByMerger.get(mergeRequests) ?? new Map();
+
+	requestsByMerger.set(mergeRequests, queuedRequests);
+
+	const queuedRequest = queuedRequests.get(mergeKey);
+
+	if (queuedRequest !== undefined) {
+		queuedRequests.set(mergeKey, mergeRequests(queuedRequest, request));
+
+		return true;
+	}
+
+	queuedRequests.set(mergeKey, request);
+
+	return queueAfterCommit(knex, (database) => {
+		return runRequest(database, queuedRequests.get(mergeKey)!);
+	});
+}
+
+/**
  * Execute the given handler within the current transaction or a newly created one
  * if the current knex state isn't a transaction yet.
  *
@@ -18,56 +116,144 @@ export const transaction = async <T = unknown>(
 ): Promise<T> => {
 	if (knex.isTransaction) {
 		// Reusing the caller's trx means this returns BEFORE any commit, so anything a
-		// nested caller runs "after the transaction" actually runs inside it. That is
-		// what makes a hook-invoked `ItemsService` write purge the scoped cache
-		// pre-commit — a reader in that window re-indexes uncommitted rows under the
-		// tag just dropped, and a slow Redis holds the connection `idle in transaction`.
-		// The deferred drain belongs here:
-		// https://github.com/jclaveau/directus/issues/363
+		// nested caller runs "after the transaction" actually runs inside it. Work
+		// that must follow the commit goes through `queueAfterCommit`.
 		return handler(knex);
-	} else {
-		try {
-			return await knex.transaction((trx) => handler(trx));
-		} catch (error) {
-			const client = getDatabaseClient(knex);
+	}
 
-			// Only sqlite / cockroach reach the retry loop: both hand an aborted
-			// transaction back and require the CLIENT to re-run it (no server-side
-			// recovery). cockroach's optimistic SERIALIZABLE aborts a txn that lost
-			// a write race at commit (40001); sqlite's single writer rejects a
-			// concurrent write with SQLITE_BUSY. postgres blocks on locks instead
-			// of returning a retry code, so it never lands here.
-			if (!shouldRetryTransaction(client, error)) throw error;
+	const { result, queuedTasks } = await commitWithRetries(knex, handler, onRetry);
 
-			const MAX_ATTEMPTS = 3;
-			const BASE_DELAY = 100;
+	await drainAfterCommit(knex, queuedTasks);
 
-			const logger = useLogger();
+	return result;
+};
 
-			for (let attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
-				const delay = 2 ** attempt * BASE_DELAY;
+type CommittedAttempt<T> = { result: T; queuedTasks: AfterCommitTask[] };
 
-				await new Promise((resolve) => setTimeout(resolve, delay));
+/**
+ * One attempt: the handler in a new trx, with the list it queues work on, which
+ * a failed attempt drops with its trx.
+ */
+async function commitAttempt<T>(
+	knex: Knex,
+	handler: (knex: Knex) => Promise<T>,
+): Promise<CommittedAttempt<T>> {
+	const queuedTasks: AfterCommitTask[] = [];
+	const openedTrxs: Knex[] = [];
 
-				logger.trace(`Restarting failed transaction (attempt ${attempt + 1}/${MAX_ATTEMPTS})`);
+	try {
+		const result = await knex.transaction((trx) => {
+			openedTrxs.push(trx);
+			afterCommitTasks.set(trx, queuedTasks);
 
-				// Roll back caller state (e.g. the mutation counter) so a re-run of the
-				// handler doesn't accumulate its side effects onto the previous attempt.
-				onRetry?.();
+			return handler(trx);
+		});
 
-				try {
-					return await knex.transaction((trx) => handler(trx));
-				} catch (error) {
-					if (!shouldRetryTransaction(client, error)) throw error;
-				}
-			}
-
-			/** Initial execution + additional attempts */
-			const attempts = 1 + MAX_ATTEMPTS;
-			throw new Error(`Transaction failed after ${attempts} attempts`, { cause: error });
+		return { result, queuedTasks };
+	}
+	finally {
+		// Once settled, a straggler queueing on the trx gets false and runs its task
+		// itself: pushed onto a list already drained, it would never run.
+		for (const openedTrx of openedTrxs) {
+			afterCommitTasks.delete(openedTrx);
 		}
 	}
-};
+}
+
+async function commitWithRetries<T>(
+	knex: Knex,
+	handler: (knex: Knex) => Promise<T>,
+	onRetry?: () => void,
+): Promise<CommittedAttempt<T>> {
+	try {
+		return await commitAttempt(knex, handler);
+	}
+	catch (error) {
+		const client = getDatabaseClient(knex);
+
+		// Only sqlite / cockroach reach the retry loop: both hand an aborted
+		// transaction back and require the CLIENT to re-run it (no server-side
+		// recovery). cockroach's optimistic SERIALIZABLE aborts a txn that lost
+		// a write race at commit (40001); sqlite's single writer rejects a
+		// concurrent write with SQLITE_BUSY. postgres blocks on locks instead
+		// of returning a retry code, so it never lands here.
+		if (!shouldRetryTransaction(client, error)) {
+			throw error;
+		}
+
+		const MAX_ATTEMPTS = 3;
+		const BASE_DELAY = 100;
+
+		const logger = useLogger();
+
+		for (let attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
+			const delay = 2 ** attempt * BASE_DELAY;
+
+			await new Promise((resolve) => setTimeout(resolve, delay));
+
+			const attemptLabel = `attempt ${attempt + 1}/${MAX_ATTEMPTS}`;
+
+			logger.trace(`Restarting failed transaction (${attemptLabel})`);
+
+			// Roll back caller state (e.g. the mutation counter) so a re-run of the
+			// handler doesn't accumulate its side effects onto the previous attempt.
+			onRetry?.();
+
+			try {
+				return await commitAttempt(knex, handler);
+			}
+			catch (error) {
+				if (!shouldRetryTransaction(client, error)) {
+					throw error;
+				}
+			}
+		}
+
+		/** Initial execution + additional attempts */
+		const attempts = 1 + MAX_ATTEMPTS;
+		throw new Error(
+			`Transaction failed after ${attempts} attempts`,
+			{ cause: error },
+		);
+	}
+}
+
+/**
+ * Run what the committed transaction queued. Outside the retry loop: a task
+ * failing with a retryable code must not re-run a write that already landed.
+ * Awaited, not left floating: a task lost on process death leaves what it was for
+ * undone with nothing coming to redo it.
+ *
+ * A purge drained here opens a window of its own: between COMMIT and its DEL a
+ * reader can still HIT the old entry. That window is one round trip and it closes;
+ * the one it replaces let a reader re-index pre-commit rows under the tag just
+ * dropped, stale until TTL, and held the connection `idle in transaction` for as
+ * long as Redis took to answer (#363).
+ *
+ * A failure is logged, not thrown: the write is durable by now, and a 500 for it
+ * invites a client retry that duplicates a non-idempotent write. Same rule as the
+ * purge's own `purgeOrRecord`.
+ */
+async function drainAfterCommit(
+	knex: Knex,
+	queuedTasks: AfterCommitTask[],
+): Promise<void> {
+	// One after another, as they ran inside the trx: purges of different collections
+	// can share index sets, and each shrinks what the next one scans. A hook's
+	// purges per row on one collection reach here merged (#594). Every task runs
+	// even when one fails: each covers its own write.
+	for (const task of queuedTasks) {
+		try {
+			await task(knex);
+		}
+		catch (error) {
+			useLogger().error(
+				error,
+				`[transaction] a task queued after commit failed: ${error}`,
+			);
+		}
+	}
+}
 
 function shouldRetryTransaction(client: DatabaseClient, error: unknown): boolean {
 	/**
