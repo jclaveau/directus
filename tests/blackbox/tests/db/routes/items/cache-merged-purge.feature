@@ -1,0 +1,80 @@
+Feature: The purges a transaction queues for one collection run as one
+
+  A hook writing per row on its parent's transaction queues one purge per row,
+  run after COMMIT. Each purge scans the same index sets, so they are merged
+  into one purge of every row they name: it scans once, and drops every entry
+  the separate purges would have dropped.
+
+  Creating a `merged_purge_signal` row updates the `merged_purge_row` rows of
+  its `updated_ids` one by one, each with its `updated_values`, through an
+  items service on the signal's transaction. Each purge moves the collection's
+  purge counter, so a signal updating five rows moves it as much as a signal
+  updating one.
+
+  Scenario: five rows updated one by one purge their collection once
+    Given these rows of merged_purge_row:
+      | markers | id | owner | revision |
+      | batch_1 | 1  | alpha | 0        |
+      | batch_1 | 2  | alpha | 0        |
+      | batch_1 | 3  | alpha | 0        |
+      | batch_1 | 4  | alpha | 0        |
+      | batch_1 | 5  | alpha | 0        |
+    When a signal updates these rows one by one:
+      | updated_ids | updated_values  |
+      | [1]         | {"revision": 1} |
+    And a signal updates these rows one by one:
+      | updated_ids     | updated_values  |
+      | [1, 2, 3, 4, 5] | {"revision": 2} |
+    Then the second signal moved the rows' purge counter as much as the first
+
+  Scenario: the merged purge drops the reads of every row it names and spares the others
+    Given these rows of merged_purge_row:
+      | markers   | id | owner   | revision |
+      | north_2   | 6  | north   | 0        |
+      | south_2   | 7  | south   | 0        |
+      | witness_2 | 8  | witness | 0        |
+    And these reads are cached:
+      | markers   | query            | response      |
+      | north_2   | fields:          | - id: 6       |+
+      |           | - id             |   revision: 0 |
+      |           | - revision       |               |
+      |           | filter:          |               |
+      |           |   owner:         |               |
+      |           |     _eq: north   |               |
+      | south_2   | fields:          | - id: 7       |+
+      |           | - id             |   revision: 0 |
+      |           | - revision       |               |
+      |           | filter:          |               |
+      |           |   owner:         |               |
+      |           |     _eq: south   |               |
+      | witness_2 | fields:          | - id: 8       |+
+      |           | - id             |   revision: 0 |
+      |           | - revision       |               |
+      |           | filter:          |               |
+      |           |   owner:         |               |
+      |           |     _eq: witness |               |
+    When a signal updates these rows one by one:
+      | updated_ids | updated_values  |
+      | [6, 7]      | {"revision": 1} |
+    Then north_2 and south_2 are purged, as each names a row the signal updated:
+      | markers | query          | response      |
+      | north_2 | fields:        | - id: 6       |+
+      |         | - id           |   revision: 1 |
+      |         | - revision     |               |
+      |         | filter:        |               |
+      |         |   owner:       |               |
+      |         |     _eq: north |               |
+      | south_2 | fields:        | - id: 7       |+
+      |         | - id           |   revision: 1 |
+      |         | - revision     |               |
+      |         | filter:        |               |
+      |         |   owner:       |               |
+      |         |     _eq: south |               |
+    And witness_2 is still cached, as no row the signal updated reaches it:
+      | markers   | query            | response      |
+      | witness_2 | fields:          | - id: 8       |+
+      |           | - id             |   revision: 0 |
+      |           | - revision       |               |
+      |           | filter:          |               |
+      |           |   owner:         |               |
+      |           |     _eq: witness |               |
