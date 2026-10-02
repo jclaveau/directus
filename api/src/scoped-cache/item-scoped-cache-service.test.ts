@@ -567,4 +567,95 @@ describe('purge', () => {
 			],
 		]);
 	});
+
+	it(oneLine`
+		merges a purge of the whole collection into a row-bound one as a purge of the
+		whole collection
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				undefined,
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+						],
+						changed: ['method'],
+					},
+				},
+			);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, null)
+				.purge(null);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([[
+			cache,
+			'item',
+			null,
+			{ database: db, schema, accountability: null },
+			{ scopedCachePurgeId: expect.any(String) },
+		]]);
+	});
+
+	it(oneLine`
+		merges a row that entered or left the result set as one changing every
+		field
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				undefined,
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+						],
+						changed: ['method'],
+					},
+				},
+			);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+				undefined,
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['beta'] } },
+						],
+						changed: null,
+					},
+				},
+			);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([[
+			cache,
+			'item',
+			[
+				{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+				{ collection: 'item', pinnedScope: { owner: ['beta'] } },
+			],
+			{ database: db, schema, accountability: null },
+			{
+				rowFingerprints: [
+					{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+					{ collection: 'item', pinnedScope: { owner: ['beta'] } },
+				],
+				changed: null,
+				indexPath: 'owner',
+				declaredFingerprints: [],
+				changedCollections: [],
+			},
+		]]);
+	});
 });
