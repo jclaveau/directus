@@ -649,7 +649,7 @@ function cachePurgeScanOf(scanTally: ScopedCacheScanTally): CachePurgeScan | nul
  * Closes the store's generator on the way out, as a `for await` over it would,
  * so a consumer that throws mid-scan leaves no scan open behind it.
  */
-async function* timedScanPages<ScanPage>(
+export async function* timedScanPages<ScanPage>(
 	scanPages: AsyncGenerator<ScanPage>,
 	scanTally: ScopedCacheScanTally,
 ): AsyncGenerator<ScanPage> {

@@ -1047,9 +1047,7 @@ async function persistStreamBatch(
 					? Number(f['evicted'])
 					: null,
 				// Absent = never measured; 0 would be an instant purge.
-				duration_ms: f['durationMs']
-					? Number(f['durationMs'])
-					: null,
+				duration_ms: storedCount(f['durationMs']),
 				scan_arms: f['scanArms'] || null,
 				scanned_index_keys: storedCount(f['scannedIndexKeys']),
 				scanned_members: storedCount(f['scannedMembers']),

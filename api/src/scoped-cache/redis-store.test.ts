@@ -2913,4 +2913,43 @@ describe('the scan tally', () => {
 			scanMs: 0,
 		});
 	});
+
+	it(oneLine`
+		counts only the sets of the rounds a reader got to, when it stops before
+		the last
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		// 101 sets: one round of 100, then one of 1 the reader never asks for.
+		const indexKeys = Array.from({ length: 101 }, (_unused, setAt) => {
+			return `scalabus:scoped-cache-index:fingerprint:slot:owner=${setAt}`;
+		});
+
+		sscan
+			.mockResolvedValueOnce(['0', indexKeys])
+			.mockResolvedValue(['0', []]);
+
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce(indexKeys);
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		for await (const _page of redisScopedCacheStore().scanCollectionIndexedEntries(
+			'slot',
+			scanTally,
+		)) {
+			break;
+		}
+
+		expect(scanTally).toEqual({
+			scanArms: new Set(['collection']),
+			scannedIndexKeys: 100,
+			scannedMembers: 0,
+			scanMs: 0,
+		});
+	});
 });

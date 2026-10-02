@@ -1568,10 +1568,6 @@ async function* scanScopedCacheIndexKeys(
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useCacheRedis();
 
-	if (scanTally !== undefined) {
-		scanTally.scannedIndexKeys += indexKeys.length;
-	}
-
 	for (
 		let setAt = 0;
 		setAt < indexKeys.length;
@@ -1582,6 +1578,12 @@ async function* scanScopedCacheIndexKeys(
 			.map((indexKey) => {
 				return { indexKey, scanCursor: '0' };
 			});
+
+		// Counted as each round starts, so a purge thrown out mid-scan does
+		// not count the sets it never reached.
+		if (scanTally !== undefined) {
+			scanTally.scannedIndexKeys += pendingScans.length;
+		}
 
 		while (pendingScans.length > 0) {
 			const scanReplies = await Promise.all(
