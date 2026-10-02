@@ -48,13 +48,14 @@ const decoyChunkSize = 4_000;
 // while the pass is still running.
 const readHoldMs = 400;
 
-// Reads fired at staggered offsets into the purge, so one of them files its
-// fingerprint mid-pass wherever the runner's real pass happens to start and end.
-// They start late enough that the counters were already bumped — a read that
-// snapshotted before the bump is undone by the guard and never reaches the assertion
-// anyway. Each carries a distinct `limit`, so each is its own cache entry rather
-// than overwriting the last.
-const readLeadsMs = [300, 500, 700, 900, 1100];
+// Reads fired at staggered offsets after the purge bumps its counter, which it does
+// right before its pass. A member filed mid-pass survives only if the pass already
+// went by the slot SSCAN finds it in, so the later in the pass a read files, the
+// likelier it survives: a 4s pass found all five reads fired 300-1100ms in. Spread
+// across 2s, the last reads land late in a long pass, and past the end of a short
+// one. Each carries a distinct `limit`, so each is its own cache entry rather than
+// overwriting the last.
+const readLeadsMs = [300, 700, 1100, 1500, 1900];
 
 const startedAt = Date.now();
 
@@ -93,6 +94,14 @@ describe(oneLine`
 		let sweeperInstance: ChildProcess;
 		let readerInstance: ChildProcess;
 		const readerEnv = cloneDeep(env);
+
+		// The reader boots second, under a build the sweeper did not record, as a
+		// node of a rolling deploy does: its boot flush asks for a reap of its own,
+		// which runs about a second later — over the decoys, while the first purge
+		// is under way, unless the test waits it out first.
+		const buildId = `fingerprint-index-race-${Date.now()}`;
+		env[vendor]['CACHE_BUILD_ID'] = `${buildId}-sweeper`;
+		readerEnv[vendor]['CACHE_BUILD_ID'] = `${buildId}-reader`;
 		let rowId: string;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -126,6 +135,15 @@ describe(oneLine`
 				env: env[vendor],
 			});
 
+			await awaitDirectusConnection(port);
+
+			const seeded = await request(getUrl(vendor, env))
+				.get(`/items/${COLLECTION}`)
+				.query({ 'filter[slot][_eq]': HELD_SLOT })
+				.set('Authorization', auth);
+
+			rowId = seeded.body.data[0].id;
+
 			const readerPort = await getPort();
 			readerEnv[vendor].PORT = String(readerPort);
 
@@ -134,15 +152,7 @@ describe(oneLine`
 				env: readerEnv[vendor],
 			});
 
-			await awaitDirectusConnection(port);
 			await awaitDirectusConnection(readerPort);
-
-			const seeded = await request(getUrl(vendor, env))
-				.get(`/items/${COLLECTION}`)
-				.query({ 'filter[slot][_eq]': HELD_SLOT })
-				.set('Authorization', auth);
-
-			rowId = seeded.body.data[0].id;
 		}, 120_000);
 
 		afterAll(async () => {
@@ -161,6 +171,23 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		/**
+		 * Clear through both instances, each answering once its own reaps are over.
+		 * A reap still to come in either one would walk the decoys during the purge
+		 * and move the counter the held reads check — the reader's boot flush asks
+		 * for one, and the sweeper's pass alone does not wait it out. Sequential, so
+		 * the reap each clear asks of the other finds the index already marked.
+		 */
+		async function clearAwaitingEveryReap() {
+			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
+				for (const instanceEnv of [env, readerEnv]) {
+					await request(getUrl(vendor, instanceEnv))
+						.post('/utils/cache/clear')
+						.set('Authorization', auth);
+				}
+			});
+		}
+
 		function writeHeldLabel(label: string) {
 			return request(getUrl(vendor, env))
 				.patch(`/items/${COLLECTION}/${rowId}`)
@@ -177,6 +204,17 @@ describe(oneLine`
 		 * the purge's own duration is asserted, not just measured.
 		 */
 		const purgeMustOutlastMs = readLeadsMs[0]! + readHoldMs;
+
+		const purgeCounterKey = `${namespace}:scoped-cache-epoch:${COLLECTION}`;
+
+		function readPurgeCounter() {
+			return redisCommand(REDIS_PORT, [
+				'EVAL',
+				"return tonumber(redis.call('GET', KEYS[1]) or '0')",
+				'1',
+				purgeCounterKey,
+			]);
+		}
 
 		async function plantDecoys() {
 			for (let sent = 0; sent < decoyMemberCount; sent += decoyChunkSize) {
@@ -208,28 +246,49 @@ describe(oneLine`
 		async function fillDuringPurge(label: string): Promise<number[]> {
 			await plantDecoys();
 
-			const held = readLeadsMs.map(async (lead, index) => {
-				await new Promise((resolve) => setTimeout(resolve, lead));
+			const counterBefore = await readPurgeCounter();
+			let purgeStartedAt = 0;
+			let purgeEndedAt = 0;
 
-				// Fired after the purge bumped the counters, so the guard has nothing
-				// to object to: this read is entitled to cache what it fetched.
-				const response = await readHeld(index + 1);
-				expect(response.headers[cacheStatusHeader]).toBe('MISS');
-
-				return index + 1;
-			});
-
-			const purgeStartedAt = Date.now();
-
+			// The write is listed first so it is sent first: a supertest request goes
+			// out once `then` is called. Its end is timed apart from the reads, the
+			// last of which starts well after a short pass would be over.
 			const [purgeResponse, limits] = await Promise.all([
-				writeHeldLabel(label),
-				Promise.all(held),
+				writeHeldLabel(label).then((response) => {
+					purgeEndedAt = Date.now();
+
+					return response;
+				}),
+				(async () => {
+					const writeSentAt = Date.now();
+
+					while (
+						await readPurgeCounter() === counterBefore
+						&& Date.now() - writeSentAt < 30_000
+					) {
+						await new Promise((resolve) => setTimeout(resolve, 10));
+					}
+
+					purgeStartedAt = Date.now();
+					mark(`counter moved after ${purgeStartedAt - writeSentAt}ms`);
+
+					return Promise.all(readLeadsMs.map(async (lead, index) => {
+						await new Promise((resolve) => setTimeout(resolve, lead));
+
+						// Fired after the purge bumped the counters, so the guard has
+						// nothing to object to: this read may cache what it fetched.
+						const response = await readHeld(index + 1);
+						expect(response.headers[cacheStatusHeader]).toBe('MISS');
+
+						return index + 1;
+					}));
+				})(),
 			]);
 
-			const purgeMs = Date.now() - purgeStartedAt;
+			const purgeMs = purgeEndedAt - purgeStartedAt;
 
 			expect(purgeResponse.status).toBe(200);
-			mark(`purge answered in ${purgeMs}ms, ${limits.length} reads filled`);
+			mark(`purge ran ${purgeMs}ms past its counter, ${limits.length} reads filled`);
 
 			// Not a timing tolerance — a calibration check. Below this the decoys are
 			// no longer buying a pass the reads can be aimed into, and a green says
@@ -268,12 +327,7 @@ describe(oneLine`
 			the next purge of the same slice reaches every entry filed during the first
 			one, rather than leaving one indexed by a set that purge dropped
 		`, async () => {
-			// Its pass would reap the decoys, and move the counter the held reads check.
-			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
-				await request(getUrl(vendor, env))
-					.post('/utils/cache/clear')
-					.set('Authorization', auth);
-			});
+			await clearAwaitingEveryReap();
 
 			const limits = await survivorsOf(await fillDuringPurge('v2'));
 
@@ -300,12 +354,7 @@ describe(oneLine`
 			a collection-wide purge reaches them too — it scans for the collection's
 			index sets rather than being handed the one a row names
 		`, async () => {
-			// Its pass would reap the decoys, and move the counter the held reads check.
-			await awaitRequestedReap(REDIS_PORT, namespace, async () => {
-				await request(getUrl(vendor, env))
-					.post('/utils/cache/clear')
-					.set('Authorization', auth);
-			});
+			await clearAwaitingEveryReap();
 
 			const limits = await survivorsOf(await fillDuringPurge('v4'));
 

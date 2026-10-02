@@ -1438,6 +1438,46 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an items.delete hook's declared fingerprint carries the collections the
+			delete changed under it, so its read-back does not trust a path through them
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.delete('test').response(1);
+
+			const declare = async (keys: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return keys;
+			};
+
+			emitter.onFilter('test.items.delete', declare);
+
+			try {
+				await service(cascadeChildSchema).deleteMany([1]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					expect.anything(),
+					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+						changedCollections: ['test_child'],
+					}),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.delete', declare);
+			}
+		});
+
+		it(oneLine`
 			a take-over that DECLARES its footprint narrows to a precise purge — the
 			declaration opts out of the safe coarse fallback
 		`, async () => {
@@ -1533,6 +1573,7 @@ describe(oneLine`
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
 						}],
+						changedCollections: [],
 					},
 				);
 			}
@@ -1665,6 +1706,7 @@ describe(oneLine`
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
 						}],
+						changedCollections: [],
 					},
 				);
 			}
@@ -1728,6 +1770,7 @@ describe(oneLine`
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
 						}],
+						changedCollections: [],
 						scopedCachePurgeId: expect.any(String),
 					},
 				);
