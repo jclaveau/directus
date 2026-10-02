@@ -96,9 +96,11 @@ const MULTI_MEMBER_COMMANDS = ['sadd', 'smismember', 'srem'];
  * order they reach Redis in is not theirs to keep.
  *
  * A client sent them when it sent anything naming the namespace: this way its
- * MULTI, EXEC and EVALSHA are counted too. A script's own commands are counted
- * when they name it. `command` keeps the case it was sent in, which tells the
- * ones a script ran apart: scripts send theirs in capitals.
+ * MULTI, EXEC and EVALSHA are counted too. An argument names it at its start or
+ * past a `:`, the way the response cache's store prefixes the keys it writes. A
+ * script's own commands are counted when they name it. `command` keeps the case
+ * it was sent in, which tells the ones a script ran apart: scripts send theirs in
+ * capitals. What reaches the log bus is left out: any log line lands there.
  *
  * `key` is the first argument naming the namespace, past it: the key a command
  * reads or writes, the pattern of a SCAN. A uuid is spelled `<uuid>`, a cache
@@ -110,10 +112,23 @@ export function countRedisCommands(
 	namespace: string,
 ): Record<string, string>[] {
 	const namespacePrefix = `${namespace}:`;
+	const logBusKey = `${namespacePrefix}bus:logs`;
+
+	const pastNamespace = (commandArg: string) => {
+		if (commandArg.startsWith(namespacePrefix)) {
+			return commandArg.slice(namespacePrefix.length);
+		}
+
+		const namespaceAt = commandArg.indexOf(`:${namespacePrefix}`);
+
+		return namespaceAt === -1
+			? null
+			: commandArg.slice(namespaceAt + namespacePrefix.length + 1);
+	};
 
 	const namesNamespace = (commandArgs: string[]) => {
 		return commandArgs.some((commandArg) => {
-			return commandArg.startsWith(namespacePrefix);
+			return pastNamespace(commandArg) !== null;
 		});
 	};
 
@@ -136,15 +151,18 @@ export function countRedisCommands(
 			continue;
 		}
 
+		if (commandArgs[1] === logBusKey) {
+			continue;
+		}
+
 		const command = commandArgs[0]!;
 		const lowerCommand = command.toLowerCase();
 
 		const commandKey = (
-			commandArgs.slice(1).find((commandArg) => {
-				return commandArg.startsWith(namespacePrefix);
-			}) ?? ''
+			commandArgs.slice(1)
+				.map(pastNamespace)
+				.find((keyPastNamespace) => keyPastNamespace !== null) ?? ''
 		)
-			.slice(namespacePrefix.length)
 			.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g, '<uuid>')
 			.replace(/[0-9a-f]{32,}$/, '<entry>');
 

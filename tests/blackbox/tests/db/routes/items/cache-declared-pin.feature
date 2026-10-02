@@ -249,12 +249,25 @@ Feature: A purge a hook declares reaches every read its slice could answer
       | sscan   | fingerprint:declared_pin_slot:            |          | 1     |
       | sscan   | fingerprint:declared_pin_slot:owner=alpha |          | 1     |
     And the declaration sent these Redis commands:
-      | command | key                                                      | calls | items |
-      | evalsha | scoped-cache-epoch:declared_pin_slot                     | 1     |       |
-      | sscan   | scoped-cache-index:collection-index-keys:declared_pin_slot | 1     |       |
-      | sscan   | scoped-cache-index:fingerprint:declared_pin_slot:        | 1     |       |
-      | sscan   | scoped-cache-index:fingerprint:declared_pin_slot:owner=alpha | 1     |       |
-      | unlink  | <entry>                                                  | 1     | 1     |
+      | command    | key                                                          | calls | items |
+      | EXPIRE     | scoped-cache-epoch:declared_pin_signal                       | 1     |       |
+      | EXPIRE     | scoped-cache-epoch:declared_pin_slot                         | 1     |       |
+      | INCR       | scoped-cache-epoch:declared_pin_signal                       | 1     |       |
+      | INCR       | scoped-cache-epoch:declared_pin_slot                         | 1     |       |
+      | SET        | scoped-cache-epoch:declared_pin_signal                       | 1     |       |
+      | SET        | scoped-cache-epoch:declared_pin_slot                         | 1     |       |
+      | evalsha    | scoped-cache-epoch:declared_pin_signal                       | 1     |       |
+      | evalsha    | scoped-cache-epoch:declared_pin_slot                         | 1     |       |
+      | mget       | scoped-cache-collection-index-keys-complete                  | 2     | 4     |
+      | mget       | scoped-cache-epoch:declared_pin_signal                       | 1     | 2     |
+      | publish    | bus:websocket.event                                          | 3     |       |
+      | smismember | scoped-cache-index:collection-index-keys:declared_pin_signal | 1     | 1     |
+      | srem       | scoped-cache-index:fingerprint:declared_pin_slot:owner=alpha | 1     | 2     |
+      | sscan      | scoped-cache-index:collection-index-keys:declared_pin_slot   | 1     |       |
+      | sscan      | scoped-cache-index:fingerprint:declared_pin_signal:          | 1     |       |
+      | sscan      | scoped-cache-index:fingerprint:declared_pin_slot:            | 1     |       |
+      | sscan      | scoped-cache-index:fingerprint:declared_pin_slot:owner=alpha | 1     |       |
+      | unlink     | <entry>                                                      | 1     | 1     |
     Then the read is purged, its own set among the index sets read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
