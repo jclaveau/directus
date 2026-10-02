@@ -8,6 +8,7 @@ import type {
 	Accountability,
 	ActionEventParams,
 	Alterations,
+	CreateEntry,
 	Item as AnyItem,
 	MutationTracker,
 	MutationOptions,
@@ -87,6 +88,42 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 		// an un-awaited rejection (e.g. from a bypassEmitAction handler) doesn't go unhandled.
 		emitting.catch(() => {});
 	}
+}
+
+/**
+ * Whether a grouped `items.create` filter answered one entry per row it received,
+ * each a `CreateEntry` or `null`, a `sameRowAs` pointing at an earlier position.
+ */
+function isCreateEntryList(
+	entriesAfterHooks: unknown,
+	rowCount: number,
+): entriesAfterHooks is (CreateEntry | null)[] {
+	if (!Array.isArray(entriesAfterHooks) || entriesAfterHooks.length !== rowCount) {
+		return false;
+	}
+
+	return entriesAfterHooks.every((entry, index) => {
+		if (entry === null) {
+			return true;
+		}
+
+		if (!isPlainObject(entry) || Object.keys(entry).length !== 1) {
+			return false;
+		}
+
+		if ('data' in entry) {
+			return isPlainObject(entry.data);
+		}
+
+		if ('key' in entry) {
+			return isPrimaryKey(entry.key);
+		}
+
+		return 'sameRowAs' in entry
+			&& Number.isInteger(entry.sameRowAs)
+			&& entry.sameRowAs >= 0
+			&& entry.sameRowAs < index;
+	});
 }
 
 /**
@@ -321,6 +358,14 @@ implements AbstractService<Item> {
 		// it (returns null), in which case that row is never inserted but still occupies its slot.
 		const results: (PrimaryKey | null)[] = new Array(data.length);
 
+		const createEvent = this.eventScope === 'items'
+			? ['items.create', `${this.collection}.items.create`]
+			: `${this.eventScope}.create`;
+
+		const rowEvent = this.eventScope === 'items'
+			? ['items.create.one', `${this.collection}.items.create.one`]
+			: `${this.eventScope}.create.one`;
+
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
 		// An `items.create` hook can declare its own purge via
@@ -357,27 +402,73 @@ implements AbstractService<Item> {
 
 			const prepared: PreparedRow[] = [];
 
-			for (const [index, payloadInput] of data.entries()) {
-				const payload: AnyItem = cloneDeep(payloadInput);
+			// Resolved once every other row has its key.
+			const sameRowPositions: { index: number; sameRowAs: number }[] = [];
 
-				// Run all hooks that are attached to this event so the end user has the chance to augment the
-				// item that is about to be saved
-				const payloadAfterHooks =
-					opts.emitEvents !== false
+			const filterContext = {
+				database: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				scopedCache: scopedCacheHookDeclarations.purge,
+			};
+
+			const entries = data.map((row): CreateEntry<Item> => {
+				return { data: cloneDeep(row) };
+			});
+
+			// Once for the whole create, so a hook sees every row it is about to insert,
+			// stored duplicates and same-request twins alike.
+			const entriesAfterHooks =
+				opts.emitEvents !== false
+					? await emitter.emitFilter<CreateEntry<Item>[], null>(
+						createEvent,
+						entries,
+						{ collection: this.collection },
+						filterContext,
+					)
+					: entries;
+
+			const createEntries = entriesAfterHooks === null
+				? data.map(() => null)
+				: entriesAfterHooks;
+
+			if (!isCreateEntryList(createEntries, data.length)) {
+				throw new InvalidPayloadError({
+					reason: oneLine`
+						A "${this.eventScope}.create" filter hook must return one
+						{ data } | { key } | { sameRowAs } | null per row it received, a
+						sameRowAs pointing at an earlier row; a hook that handles one row
+						belongs on "${this.eventScope}.create.one"
+					`,
+				});
+			}
+
+			for (const [index, entry] of createEntries.entries()) {
+				if (entry !== null && 'sameRowAs' in entry) {
+					sameRowPositions.push({ index, sameRowAs: entry.sameRowAs });
+					continue;
+				}
+
+				let payloadAfterHooks: AnyItem | PrimaryKey | null = null;
+
+				if (entry !== null && 'key' in entry) {
+					payloadAfterHooks = entry.key;
+				}
+				// Then once per row, the seam a hook written for a single item keeps, with
+				// its own takeover and cancel.
+				else if (entry !== null) {
+					const hasRowFilters = opts.emitEvents !== false
+						&& emitter.hasFilterListeners(rowEvent);
+
+					payloadAfterHooks = hasRowFilters
 						? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
-							this.eventScope === 'items'
-								? ['items.create', `${this.collection}.items.create`]
-								: `${this.eventScope}.create`,
-							payload,
+							rowEvent,
+							entry.data,
 							{ collection: this.collection },
-							{
-								database: trx,
-								schema: this.schema,
-								accountability: this.accountability,
-								scopedCache: scopedCacheHookDeclarations.purge,
-							},
+							filterContext,
 						)
-						: payload;
+						: entry.data;
+				}
 
 				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
 					// A filter hook returned a primary key instead of a payload: it has taken over the
@@ -707,6 +798,11 @@ implements AbstractService<Item> {
 				results[p.index] = p.primaryKey;
 			}
 
+			// Ascending, so a position pointing at another `sameRowAs` finds it resolved.
+			for (const { index, sameRowAs } of sameRowPositions) {
+				results[index] = results[sameRowAs]!;
+			}
+
 			return {
 				nestedActionEvents,
 				actionPayloads: postPrepared.map(
@@ -715,29 +811,48 @@ implements AbstractService<Item> {
 			};
 		}, opts.mutationTracker.snapshot());
 
-		if (opts.emitEvents !== false) {
-			const eventName =
-				this.eventScope === 'items'
-					? ['items.create', `${this.collection}.items.create`]
-					: `${this.eventScope}.create`;
+		if (opts.emitEvents !== false && actionPayloads.length > 0) {
+			const actionContext = {
+				database: getDatabase(),
+				schema: this.schema,
+				accountability: this.accountability,
+			};
 
-			const actionEvents: ActionEventParams[] = actionPayloads.map(({ primaryKey, actionHookPayload }) => ({
-				event: eventName,
-				meta: {
-					payload: actionHookPayload,
-					key: primaryKey,
-					collection: this.collection,
-				},
-				context: {
-					database: getDatabase(),
-					schema: this.schema,
-					accountability: this.accountability,
-				},
-			}));
+			const rowActionEvents: ActionEventParams[] = emitter
+				.hasActionListeners(rowEvent)
+				? actionPayloads.map(({ primaryKey, actionHookPayload }) => {
+					return {
+						event: rowEvent,
+						meta: {
+							payload: actionHookPayload,
+							key: primaryKey,
+							collection: this.collection,
+						},
+						context: actionContext,
+					};
+				})
+				: [];
 
 			// Route through emitActionEvents so the create path honours `awaitActionHooks` (#58) and
 			// `bypassEmitAction` (nested mutations), instead of an un-awaited raw emit.
-			await emitActionEvents([...actionEvents, ...nestedActionEvents], opts);
+			await emitActionEvents(
+				[
+					{
+						event: createEvent,
+						meta: {
+							payload: actionPayloads.map(({ actionHookPayload }) => {
+								return actionHookPayload;
+							}),
+							keys: actionPayloads.map(({ primaryKey }) => primaryKey),
+							collection: this.collection,
+						},
+						context: actionContext,
+					},
+					...rowActionEvents,
+					...nestedActionEvents,
+				],
+				opts,
+			);
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
@@ -762,7 +877,11 @@ implements AbstractService<Item> {
 			// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
 			// them stale. Before the key axis the bare fingerprint covered them by
 			// accident.
-			const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
+			// A `sameRowAs` position repeats its row's key; counted twice it would read
+			// as a takeover.
+			const liveKeys = [
+				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
+			];
 
 			const changedKeys = liveKeys.filter((key) => {
 				// A take-over the hook declared inert wrote nothing, so it neither

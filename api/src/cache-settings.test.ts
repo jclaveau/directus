@@ -753,7 +753,7 @@ test('clears ahead of the create as well as the update', async () => {
 	await initCacheSettings();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create', 'settings.update.one']);
+		.toEqual(['settings.create.one', 'settings.update.one']);
 
 	const write = { cache_settings: { response: true } };
 

@@ -7,7 +7,7 @@
 const SIGNAL = 'declared_pin_signal';
 
 export default function registerHooks({ filter }) {
-	filter(`${SIGNAL}.items.create`, async (payload, _meta, context) => {
+	filter(`${SIGNAL}.items.create.one`, async (payload, _meta, context) => {
 		await context.database(payload.rewritten_collection)
 			.where({ id: payload.rewritten_id })
 			.update({ note: payload.rewritten_note });

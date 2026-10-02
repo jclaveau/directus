@@ -352,7 +352,7 @@ test('announces the create as well as the update', async () => {
 	await initSharedSettings();
 
 	expect(vi.mocked(emitter.onAction).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create', 'settings.update.one']);
+		.toEqual(['settings.create.one', 'settings.update.one']);
 
 	const written = { payload: { autoscale_settings: { maxWorkers: 8 } } };
 

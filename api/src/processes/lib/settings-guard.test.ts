@@ -131,7 +131,7 @@ test('checks the create as well as the update', async () => {
 	await initSharedSettingsGuard();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create', 'settings.update.one']);
+		.toEqual(['settings.create.one', 'settings.update.one']);
 
 	const write = { autoscale_settings: { enabled: 'TRUE' } };
 

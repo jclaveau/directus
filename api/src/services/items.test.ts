@@ -221,7 +221,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('should short-circuit and return the key when a create filter returns a primary key', async () => {
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue(5);
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{ key: 5 }]);
 
 				const insert = vi.fn().mockReturnThis();
 
@@ -1792,6 +1792,218 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			]);
 
 			filterSpy.mockRestore();
+		});
+	});
+
+	describe('items.create fires once per create', () => {
+		const trackedService = () => {
+			return new ItemsService('test', { knex: db, schema: shapesSchema });
+		};
+
+		it('emits only the grouped events with nothing listening per row', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			tracker.on.insert('test').response([{ id: 1 }, { id: 2 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await trackedService().createMany([{ name: 'a' }, { name: 'b' }]);
+
+			expect(updateEvents(filterSpy, 'items.create')).toHaveLength(1);
+			expect(updateEvents(filterSpy, 'items.create.one')).toHaveLength(0);
+			expect(updateEvents(actionSpy, 'items.create')).toHaveLength(1);
+			expect(updateEvents(actionSpy, 'items.create.one')).toHaveLength(0);
+		});
+
+		it('hands the grouped filter one { data } per row', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			tracker.on.insert('test').response([{ id: 1 }, { id: 2 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+			await trackedService().createMany([{ name: 'a' }, { name: 'b' }]);
+
+			// The insert writes each row's key into the data afterwards.
+			expect(updateEvents(filterSpy, 'items.create')[0]![1]).toEqual([
+				{ data: { id: 1, name: 'a' } },
+				{ data: { id: 2, name: 'b' } },
+			]);
+		});
+
+		it('hands the grouped action every inserted row and its key', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			tracker.on.insert('test').response([{ id: 1 }, { id: 2 }]);
+
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await trackedService().createMany([{ name: 'a' }, { name: 'b' }]);
+
+			expect(updateEvents(actionSpy, 'items.create')[0]![1]).toEqual({
+				payload: [{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+				keys: [1, 2],
+				collection: 'test',
+			});
+		});
+
+		it('inserts once for a row pointed sameRowAs an earlier one', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const collapseTwin = async (entries: any) => {
+				return [entries[0], { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', collapseTwin);
+
+			try {
+				const keys = await trackedService().createMany([
+					{ name: 'a' },
+					{ name: 'a' },
+				]);
+
+				expect(keys).toEqual([1, 1]);
+				expect(tracker.history.insert).toHaveLength(1);
+			}
+			finally {
+				emitter.offFilter('test.items.create', collapseTwin);
+			}
+		});
+
+		it('answers a { key } entry with that key and inserts the others', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const answerStored = async (entries: any) => {
+				return [{ key: 9 }, entries[1]];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			try {
+				const keys = await trackedService().createMany([
+					{ name: 'a' },
+					{ name: 'b' },
+				]);
+
+				expect(keys).toEqual([9, 1]);
+				expect(tracker.history.insert).toHaveLength(1);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it('answers null for a row pointed sameRowAs a cancelled one', async () => {
+			const cancelBoth = async () => {
+				return [null, { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', cancelBoth);
+
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			try {
+				const keys = await trackedService().createMany(
+					[{ name: 'a' }, { name: 'a' }],
+					{ allowFilterCancel: true },
+				);
+
+				expect(keys).toEqual([null, null]);
+				expect(tracker.history.insert).toHaveLength(0);
+				expect(updateEvents(actionSpy, 'items.create')).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', cancelBoth);
+			}
+		});
+
+		it.each([
+			['a single payload', { data: { name: 'a' } }],
+			['one entry short', [{ data: { name: 'a' } }]],
+			['a sameRowAs pointing forward', [{ sameRowAs: 1 }, { sameRowAs: 0 }]],
+			['a sameRowAs pointing at itself', [{ data: {} }, { sameRowAs: 1 }]],
+			['an entry with two answers', [{ data: { name: 'a' }, key: 9 }, { key: 8 }]],
+			['a bare primary key', [9, { key: 8 }]],
+		])('refuses a grouped answer that is %s', async (_label, answer) => {
+			const answerBadly = async () => {
+				return answer;
+			};
+
+			emitter.onFilter('test.items.create', answerBadly);
+
+			try {
+				await expect(
+					trackedService().createMany([{ name: 'a' }, { name: 'b' }]),
+				).rejects.toThrow(InvalidPayloadError);
+
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerBadly);
+			}
+		});
+	});
+
+	describe('items.create.one fires per inserted row', () => {
+		const trackedService = () => {
+			return new ItemsService('test', { knex: db, schema: shapesSchema });
+		};
+
+		// The per-row events fire only when something listens to them.
+		const rowListener = (payload: unknown) => payload;
+
+		beforeEach(() => {
+			emitter.onFilter('items.create.one', rowListener);
+			emitter.onAction('items.create.one', rowListener);
+		});
+
+		afterEach(() => {
+			emitter.offFilter('items.create.one', rowListener);
+			emitter.offAction('items.create.one', rowListener);
+		});
+
+		it('emits the per-row events for inserted rows only', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const answerStored = async (entries: any) => {
+				return [entries[0], { key: 9 }];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			try {
+				await trackedService().createMany([{ name: 'a' }, { name: 'b' }]);
+
+				expect(updateEvents(filterSpy, 'items.create.one')
+					.map((call: unknown[]) => call[1]))
+					.toEqual([expect.objectContaining({ name: 'a' })]);
+
+				expect(updateEvents(actionSpy, 'items.create.one')
+					.map((call: unknown[]) => call[1]))
+					.toEqual([
+						{ payload: { id: 1, name: 'a' }, key: 1, collection: 'test' },
+					]);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it('keeps the per-row takeover a hook returns as a primary key', async () => {
+			const takeOver = async () => 7;
+
+			emitter.onFilter('test.items.create.one', takeOver);
+
+			try {
+				const keys = await trackedService().createMany([{ name: 'a' }]);
+
+				expect(keys).toEqual([7]);
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create.one', takeOver);
+			}
 		});
 	});
 

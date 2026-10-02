@@ -628,7 +628,7 @@ describe(oneLine`
 		tracker.on.select('test').response([{ id: 1, student: 'B' }]);
 
 		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
-		emitter.onFilter('test.items.create', rewrite);
+		emitter.onFilter('test.items.create.one', rewrite);
 
 		try {
 			await service().createOne({ name: 'x', student: 'A' });
@@ -647,7 +647,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create', rewrite);
+			emitter.offFilter('test.items.create.one', rewrite);
 		}
 	});
 
@@ -712,7 +712,7 @@ describe(oneLine`
 		// between slices (an upsert), and createMany has no old∪new snapshot → the old
 		// slice would leak. So without a declaration the purge is coarse (null).
 		const takeOver = async () => 99;
-		emitter.onFilter('test.items.create', takeOver);
+		emitter.onFilter('test.items.create.one', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -726,7 +726,7 @@ describe(oneLine`
 		);
 		}
 		finally {
-			emitter.offFilter('test.items.create', takeOver);
+			emitter.offFilter('test.items.create.one', takeOver);
 		}
 	});
 
@@ -740,7 +740,7 @@ describe(oneLine`
 			return 99;
 		};
 
-		emitter.onFilter('test.items.create', takeOver);
+		emitter.onFilter('test.items.create.one', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -748,7 +748,7 @@ describe(oneLine`
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		}
 		finally {
-			emitter.offFilter('test.items.create', takeOver);
+			emitter.offFilter('test.items.create.one', takeOver);
 		}
 	});
 
@@ -767,7 +767,7 @@ describe(oneLine`
 			return 99;
 		};
 
-		emitter.onFilter('test.items.create', takeOverDuplicate);
+		emitter.onFilter('test.items.create.one', takeOverDuplicate);
 
 		try {
 			await service().createMany([
@@ -792,7 +792,45 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create', takeOverDuplicate);
+			emitter.offFilter('test.items.create.one', takeOverDuplicate);
+		}
+	});
+
+	it(oneLine`
+		a row pointed sameRowAs an earlier one still purges the created row's slice
+	`, async () => {
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+		const collapseTwin = async (entries: any) => {
+			return [entries[0], { sameRowAs: 0 }];
+		};
+
+		emitter.onFilter('test.items.create', collapseTwin);
+
+		try {
+			const keys = await service().createMany([
+				{ name: 'x', student: 'A' },
+				{ name: 'x', student: 'A' },
+			]);
+
+			expect(keys).toEqual([1, 1]);
+
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+				],
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create', collapseTwin);
 		}
 	});
 
@@ -1278,7 +1316,7 @@ describe(oneLine`
 				return payload;
 			};
 
-			emitter.onFilter('test.items.create', declare);
+			emitter.onFilter('test.items.create.one', declare);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1302,7 +1340,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', declare);
+				emitter.offFilter('test.items.create.one', declare);
 			}
 		});
 
@@ -1418,7 +1456,7 @@ describe(oneLine`
 				return 99;
 			};
 
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1450,7 +1488,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 
@@ -1731,7 +1769,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async () => 99; // takes over a row, declares nothing new
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 
 			try {
 				await service().createMany(
@@ -1761,7 +1799,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 	});
@@ -1852,7 +1890,7 @@ describe(oneLine`
 				return 99;
 			};
 
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 			tracker.on.update('test').response(1);
 
 			try {
@@ -1867,7 +1905,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 
@@ -1884,7 +1922,7 @@ describe(oneLine`
 				return 99;
 			};
 
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 
 			try {
 				await unscopedService().createMany([{ name: 'x' }]);
@@ -1908,7 +1946,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 	});

@@ -55,12 +55,15 @@ function updateEvent(
 function registerActionHooks(modules: string[]) {
 	// register event hooks that can be handled in an uniform manner
 	for (const module of modules) {
-		registerAction(module + '.create', ({ key, collection, payload = {} }) => ({
-			collection,
-			action: 'create',
-			key,
-			payload,
-		}));
+		// One message per row, as before `items.create` carried the whole create.
+		registerAction(`${module}.create.one`, ({ key, collection, payload = {} }) => {
+			return {
+				collection,
+				action: 'create',
+				key,
+				payload,
+			};
+		});
 
 		registerAction(`${module}.update`, updateEvent);
 

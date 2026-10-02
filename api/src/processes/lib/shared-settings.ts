@@ -305,7 +305,7 @@ export function onSharedSettingsChanged(
 export async function initSharedSettings(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
 
-	for (const event of ['settings.create', 'settings.update.one']) {
+	for (const event of ['settings.create.one', 'settings.update.one']) {
 		emitter.onAction(event, ({ payload }) => {
 			if (!payload) {
 				return;

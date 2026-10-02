@@ -1,9 +1,20 @@
 export default function registerHooks({ action }, { services }) {
 	const logsCollection = 'tests_extensions_log';
 
-	action('test_items_no_relations_artists_integer.items.create', collectionsCallback);
-	action('test_items_no_relations_artists_string.items.create', collectionsCallback);
-	action('test_items_no_relations_artists_uuid.items.create', collectionsCallback);
+	action(
+		'test_items_no_relations_artists_integer.items.create.one',
+		collectionsCallback,
+	);
+
+	action(
+		'test_items_no_relations_artists_string.items.create.one',
+		collectionsCallback,
+	);
+
+	action(
+		'test_items_no_relations_artists_uuid.items.create.one',
+		collectionsCallback,
+	);
 
 	async function collectionsCallback(data, { database, schema, accountability }) {
 		let key = `action-verify-create/${data.collection}`;
