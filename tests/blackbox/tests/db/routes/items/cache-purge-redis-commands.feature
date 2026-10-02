@@ -43,6 +43,8 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | UNLINK     | _response:<entry>                           | 1     | 3     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 3     |+
       | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
       | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
@@ -62,7 +64,6 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:owner=alpha               |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:pin:team=red              |       |       |
-      | unlink     | _response:<entry>                           | 1     | 3     |+
     And these reads answer:
       | markers | query          | cache |
       | owner_1 | fields:        | MISS  |+
@@ -135,6 +136,8 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | UNLINK     | _response:<entry>                           | 1     | 3     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 3     |+
       | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
       | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
@@ -154,7 +157,6 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:owner=alpha               |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:pin:team=red              |       |       |
-      | unlink     | _response:<entry>                           | 1     | 3     |+
     And these reads answer:
       | markers | query          | cache |
       | owner_4 | fields:        | HIT   |+
@@ -195,6 +197,8 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | UNLINK     | _response:<entry>                           | 1     | 2     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 2     |+
       | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
       | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
@@ -210,7 +214,6 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:                          |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:owner=alpha               |       |       |
-      | unlink     | _response:<entry>                           | 1     | 2     |+
 
   Scenario: a row moved to another owner reads the sets of both owners
     Given these rows of purge_command_row:
@@ -238,6 +241,8 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | UNLINK     | _response:<entry>                           | 1     | 2     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 2     |+
       | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
       | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
       | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
@@ -255,4 +260,3 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:owner=alpha               |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:owner=beta                |       |       |
-      | unlink     | _response:<entry>                           | 1     | 2     |+

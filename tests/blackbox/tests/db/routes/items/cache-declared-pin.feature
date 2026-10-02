@@ -259,6 +259,8 @@ Feature: A purge a hook declares reaches every read its slice could answer
       | SET        | scoped-cache-epoch:                         | 1     |       |+
       |            | declared_pin_signal                         |       |       |
       | SET        | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | UNLINK     | _response:<entry>                           | 1     | 1     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 1     |+
       | evalsha    | scoped-cache-epoch:                         | 1     |       |+
       |            | declared_pin_signal                         |       |       |
       | evalsha    | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
@@ -280,7 +282,6 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |            | declared_pin_slot:                          |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | declared_pin_slot:owner=alpha               |       |       |
-      | unlink     | _response:<entry>                           | 1     | 1     |+
     Then the read is purged, its own set among the index sets read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+

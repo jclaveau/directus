@@ -8,6 +8,7 @@ import { CreateCollections, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { awaitRequestedReap } from '@utils/await-requested-reap';
 import {
 	countRedisCommands,
 	joinBrokenKeys,
@@ -211,7 +212,21 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'five rows updated one by one send Redis the commands of one purge',
 			({ given, when, and, then }) => {
-				given(`these rows of ${ROW}:`, createRows);
+				// Without the reap the clear asks for done, whether the purge reads the
+				// collection's index-key set hangs on the one the boot asked for.
+				given('the cache is cleared', async () => {
+					await awaitRequestedReap(
+						Number(env[vendor]['REDIS_PORT']),
+						env[vendor]['CACHE_NAMESPACE']!,
+						async () => {
+							await request(spawnedServerUrl())
+								.post('/utils/cache/clear')
+								.set('Authorization', auth);
+						},
+					);
+				});
+
+				and(`these rows of ${ROW}:`, createRows);
 
 				when('a signal updates these rows one by one:', (table) => {
 					signalCommands.length = 0;
