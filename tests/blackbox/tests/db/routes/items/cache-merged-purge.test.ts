@@ -10,6 +10,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import {
 	countRedisCommands,
+	joinBrokenKeys,
 	monitorRedisCommands,
 } from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
@@ -221,11 +222,11 @@ describe.each(vendors)('%s', (vendor) => {
 				and('a signal updates these rows one by one:', createSignal);
 
 				then('the first signal sent these Redis commands:', (table) => {
-					expect(signalCommands[0]).toEqual(table);
+					expect(signalCommands[0]).toEqual(joinBrokenKeys(table));
 				});
 
 				and('the second signal sent these Redis commands:', (table) => {
-					expect(signalCommands[1]).toEqual(table);
+					expect(signalCommands[1]).toEqual(joinBrokenKeys(table));
 				});
 			},
 			60_000,

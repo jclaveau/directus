@@ -197,3 +197,16 @@ export function countRedisCommands(
 		return countedCommands.get(countKey)!;
 	});
 }
+
+/**
+ * A table of counted commands as a feature file writes it: a key too long for its
+ * column is broken after a `:` over the lines of a multiline cell, which the cell
+ * joins with newlines.
+ */
+export function joinBrokenKeys(
+	table: Record<string, string>[],
+): Record<string, string>[] {
+	return table.map((row) => {
+		return { ...row, key: row['key']!.replaceAll('\n', '') };
+	});
+}

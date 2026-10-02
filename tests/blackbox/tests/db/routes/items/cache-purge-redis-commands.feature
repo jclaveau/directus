@@ -39,22 +39,30 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | ids | values          |
       | [1] | {"revision": 1} |
     Then the write sent these Redis commands:
-      | command    | key                                                           | calls | items |
-      | EXPIRE     | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | INCR       | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | SET        | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | evalsha    | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | mget       | scoped-cache-collection-index-keys-complete                   | 1     | 2     |
-      | mget       | scoped-cache-epoch:purge_command_row                          | 2     | 4     |
-      | publish    | bus:websocket.event                                           | 3     |       |
-      | smismember | scoped-cache-index:collection-index-keys:purge_command_row    | 1     | 3     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:             | 1     | 2     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:owner=alpha  | 1     | 2     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:pin:team=red | 1     | 2     |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:             | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:owner=alpha  | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:pin:team=red | 1     |       |
-      | unlink     | <entry>                                                       | 1     | 3     |
+      | command    | key                                         | calls | items |
+      | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
+      | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
+      | publish    | bus:websocket.event                         | 3     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 3     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | purge_command_row                           |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:                          |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:pin:team=red              |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:                          |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:pin:team=red              |       |       |
+      | unlink     | <entry>                                     | 1     | 3     |+
     And these reads answer:
       | markers | query          | cache |
       | owner_1 | fields:        | MISS  |+
@@ -123,22 +131,30 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | ids | values          |
       | [3] | {"revision": 1} |
     Then the write sent these Redis commands:
-      | command    | key                                                           | calls | items |
-      | EXPIRE     | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | INCR       | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | SET        | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | evalsha    | scoped-cache-epoch:purge_command_row                          | 1     |       |
-      | mget       | scoped-cache-collection-index-keys-complete                   | 1     | 2     |
-      | mget       | scoped-cache-epoch:purge_command_row                          | 2     | 4     |
-      | publish    | bus:websocket.event                                           | 3     |       |
-      | smismember | scoped-cache-index:collection-index-keys:purge_command_row    | 1     | 3     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:             | 1     | 2     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:owner=alpha  | 1     | 2     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:pin:team=red | 1     | 2     |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:             | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:owner=alpha  | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:pin:team=red | 1     |       |
-      | unlink     | <entry>                                                       | 1     | 3     |
+      | command    | key                                         | calls | items |
+      | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
+      | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
+      | publish    | bus:websocket.event                         | 3     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 3     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | purge_command_row                           |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:                          |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:pin:team=red              |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:                          |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:pin:team=red              |       |       |
+      | unlink     | <entry>                                     | 1     | 3     |+
     And these reads answer:
       | markers | query          | cache |
       | owner_4 | fields:        | HIT   |+
@@ -175,20 +191,26 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | ids       | values          |
       | [5, 6, 7] | {"revision": 1} |
     Then the write sent these Redis commands:
-      | command    | key                                                          | calls | items |
-      | EXPIRE     | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | INCR       | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | SET        | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | evalsha    | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | mget       | scoped-cache-collection-index-keys-complete                  | 1     | 2     |
-      | mget       | scoped-cache-epoch:purge_command_row                         | 2     | 4     |
-      | publish    | bus:websocket.event                                          | 7     |       |
-      | smismember | scoped-cache-index:collection-index-keys:purge_command_row   | 1     | 5     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:            | 1     | 2     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:owner=alpha | 1     | 2     |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:            | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:owner=alpha | 1     |       |
-      | unlink     | <entry>                                                      | 1     | 2     |
+      | command    | key                                         | calls | items |
+      | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
+      | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
+      | publish    | bus:websocket.event                         | 7     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 5     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | purge_command_row                           |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:                          |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:                          |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | unlink     | <entry>                                     | 1     | 2     |+
 
   Scenario: a row moved to another owner reads the sets of both owners
     Given these rows of purge_command_row:
@@ -212,18 +234,25 @@ Feature: A write sends Redis the commands of the sets its rows reach
       | ids | values           |
       | [8] | {"owner": "beta"} |
     Then the write sent these Redis commands:
-      | command    | key                                                          | calls | items |
-      | EXPIRE     | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | INCR       | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | SET        | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | evalsha    | scoped-cache-epoch:purge_command_row                         | 1     |       |
-      | mget       | scoped-cache-collection-index-keys-complete                  | 1     | 2     |
-      | mget       | scoped-cache-epoch:purge_command_row                         | 2     | 4     |
-      | publish    | bus:websocket.event                                          | 3     |       |
-      | smismember | scoped-cache-index:collection-index-keys:purge_command_row   | 1     | 4     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:owner=alpha | 1     | 2     |
-      | srem       | scoped-cache-index:fingerprint:purge_command_row:owner=beta  | 1     | 2     |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:            | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:owner=alpha | 1     |       |
-      | sscan      | scoped-cache-index:fingerprint:purge_command_row:owner=beta  | 1     |       |
-      | unlink     | <entry>                                                      | 1     | 2     |
+      | command    | key                                         | calls | items |
+      | EXPIRE     | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | INCR       | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | SET        | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | evalsha    | scoped-cache-epoch:purge_command_row        | 1     |       |+
+      | mget       | scoped-cache-collection-index-keys-complete | 1     | 2     |+
+      | mget       | scoped-cache-epoch:purge_command_row        | 2     | 4     |+
+      | publish    | bus:websocket.event                         | 3     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 4     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | purge_command_row                           |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | purge_command_row:owner=beta                |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:                          |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:owner=alpha               |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | purge_command_row:owner=beta                |       |       |
+      | unlink     | <entry>                                     | 1     | 2     |+

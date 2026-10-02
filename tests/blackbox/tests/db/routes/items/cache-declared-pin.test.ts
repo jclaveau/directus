@@ -16,6 +16,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { awaitRequestedReap } from '@utils/await-requested-reap';
 import {
 	countRedisCommands,
+	joinBrokenKeys,
 	monitorRedisCommands,
 } from '@utils/monitor-redis-commands';
 import { oneLine } from '@directus/utils';
@@ -609,7 +610,7 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(
 			'the declaration sent these Redis commands:',
 			(table: Record<string, string>[]) => {
-				expect(sentCommands).toEqual(table);
+				expect(sentCommands).toEqual(joinBrokenKeys(table));
 			},
 		);
 	}
