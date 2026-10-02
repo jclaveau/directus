@@ -1400,9 +1400,11 @@ describe('scanCollectionIndexedEntries', () => {
 			])
 			.mockResolvedValueOnce(['0', ['slot:&owner=,big,&|key-big']]);
 
-		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(
-			async (_keyCount: number, _collectionIndexKeysKey: string, ...keys: string[]) => keys,
-		);
+		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(async (
+			_keyCount: number,
+			_collectionIndexKeysKey: string,
+			...keys: string[]
+		) => keys);
 
 		scopedCacheIndexSetsRead.mockResolvedValueOnce([
 			0,
@@ -1458,9 +1460,11 @@ describe('scanCollectionIndexedEntries', () => {
 			],
 		]);
 
-		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(
-			async (_keyCount: number, _collectionIndexKeysKey: string, ...keys: string[]) => keys,
-		);
+		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(async (
+			_keyCount: number,
+			_collectionIndexKeysKey: string,
+			...keys: string[]
+		) => keys);
 
 		scopedCacheIndexSetsRead
 			.mockResolvedValueOnce([['slot:&owner=,a,&|key-a']])
@@ -1524,9 +1528,11 @@ describe('scanCollectionIndexedEntries', () => {
 			],
 		]);
 
-		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(
-			async (_keyCount: number, _collectionIndexKeysKey: string, ...keys: string[]) => keys,
-		);
+		scopedCacheCollectionIndexKeysPrune.mockImplementationOnce(async (
+			_keyCount: number,
+			_collectionIndexKeysKey: string,
+			...keys: string[]
+		) => keys);
 
 		scopedCacheIndexSetsRead.mockResolvedValueOnce([
 			['slot:&|key-shared'],
