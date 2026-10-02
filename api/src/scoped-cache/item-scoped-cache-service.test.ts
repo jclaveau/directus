@@ -403,4 +403,168 @@ describe('purge', () => {
 			},
 		);
 	});
+
+	it(oneLine`
+		purges once after commit for every write a hook made per row on one
+		collection, with their rows merged (#594)
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				undefined,
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+						],
+						changed: ['method'],
+					},
+				},
+			);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+				undefined,
+				[],
+				{
+					rows: {
+						fingerprints: [{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+						changed: ['owner', 'method'],
+					},
+				},
+			);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([[
+			cache,
+			'item',
+			[
+				{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+				{ collection: 'item', pinnedScope: { owner: ['beta'] } },
+			],
+			{ database: db, schema, accountability: null },
+			{
+				rowFingerprints: [
+					{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+					{ collection: 'item', pinnedScope: { owner: ['beta'] } },
+				],
+				changed: ['method', 'owner'],
+				indexPath: 'owner',
+				declaredFingerprints: [],
+				changedCollections: [],
+			},
+		]]);
+	});
+
+	it(oneLine`
+		merges a purge without rows into one that has rows as a purge without rows,
+		which drops every entry its fingerprints reach
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				undefined,
+				[],
+				{
+					rows: {
+						fingerprints: [
+							{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+						],
+						changed: null,
+					},
+				},
+			);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+				{
+					purgeFingerprints: [
+						{ collection: 'zone', pinnedScope: { area: ['north'] } },
+					],
+				},
+				['zone'],
+			);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([
+			[
+				cache,
+				'item',
+				[
+					{ collection: 'item', pinnedScope: { owner: ['alpha'] } },
+					{ collection: 'item', pinnedScope: { owner: ['beta'] } },
+				],
+				{ database: db, schema, accountability: null },
+				{
+					declaredFingerprints: [
+						{ collection: 'zone', pinnedScope: { area: ['north'] } },
+					],
+					changedCollections: ['zone'],
+					scopedCachePurgeId: expect.any(String),
+				},
+			],
+			[
+				cache,
+				'zone',
+				null,
+				{ database: db, schema, accountability: null },
+				{ scopedCachePurgeId: expect.any(String) },
+			],
+		]);
+	});
+
+	it(oneLine`
+		purges apart after commit the writes of different collections, and those
+		keeping the bare fingerprint warm
+	`, async () => {
+		const cache = {} as Keyv;
+
+		await transaction(db, async (trx) => {
+			await new ItemScopedCacheService('item', schema, trx, cache, null)
+				.purge([{ collection: 'item', pinnedScope: { owner: ['alpha'] } }]);
+
+			await new ItemScopedCacheService('zone', schema, trx, cache, null)
+				.purge([{ collection: 'zone', pinnedScope: { area: ['north'] } }]);
+
+			await new ItemScopedCacheService('item', schema, trx, cache, null).purge(
+				[{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+				undefined,
+				[],
+				{ includeBareFingerprint: false },
+			);
+		});
+
+		expect(vi.mocked(purgeScopedCache).mock.calls).toEqual([
+			[
+				cache,
+				'item',
+				[{ collection: 'item', pinnedScope: { owner: ['alpha'] } }],
+				{ database: db, schema, accountability: null },
+				{ declaredFingerprints: [], changedCollections: [] },
+			],
+			[
+				cache,
+				'zone',
+				[{ collection: 'zone', pinnedScope: { area: ['north'] } }],
+				{ database: db, schema, accountability: null },
+				{ declaredFingerprints: [], changedCollections: [] },
+			],
+			[
+				cache,
+				'item',
+				[{ collection: 'item', pinnedScope: { owner: ['beta'] } }],
+				{ database: db, schema, accountability: null },
+				{
+					declaredFingerprints: [],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			],
+		]);
+	});
 });

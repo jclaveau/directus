@@ -25,7 +25,7 @@ import {
 	collectionsInFieldMap,
 } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import type { AST } from '../types/ast.js';
-import { queueAfterCommit } from '../utils/transaction.js';
+import { queueMergedAfterCommit } from '../utils/transaction.js';
 import {
 	scopedCacheOwnershipInjections,
 	type ScopedCacheOwnershipInjection,
@@ -88,6 +88,61 @@ export type ScopedCacheReadInputs = {
  * projects every column and a plain `value0` could be one of them.
  */
 const PATH_ALIAS = '#path';
+
+/** A purge held back until its transaction commits. */
+type ScopedCachePurgeRequest = {
+	scopedCacheFingerprints: ScopedCacheFingerprint[] | null;
+	hookDeclarations:
+		| Pick<ScopedCacheHookDeclarations, 'purgeFingerprints'>
+		| undefined;
+	changedCollections: string[];
+	rows: ScopedCacheMutatedWrite | undefined;
+};
+
+/**
+ * One purge reaching every entry either of two purges of a collection reaches. It
+ * may drop more than both would have — an entry one request pins, matched by a row
+ * of the other — and never fewer: a `null` or a missing side widens the merge to
+ * what that side alone would sweep.
+ */
+function mergeScopedCachePurgeRequests(
+	queuedRequest: ScopedCachePurgeRequest,
+	incomingRequest: ScopedCachePurgeRequest,
+): ScopedCachePurgeRequest {
+	const queuedRows = queuedRequest.rows;
+	const incomingRows = incomingRequest.rows;
+
+	return {
+		scopedCacheFingerprints: queuedRequest.scopedCacheFingerprints === null
+			|| incomingRequest.scopedCacheFingerprints === null
+			? null
+			: [
+				...queuedRequest.scopedCacheFingerprints,
+				...incomingRequest.scopedCacheFingerprints,
+			],
+		hookDeclarations: queuedRequest.hookDeclarations === undefined
+			&& incomingRequest.hookDeclarations === undefined
+			? undefined
+			: {
+				purgeFingerprints: [
+					...queuedRequest.hookDeclarations?.purgeFingerprints ?? [],
+					...incomingRequest.hookDeclarations?.purgeFingerprints ?? [],
+				],
+			},
+		changedCollections: [...new Set([
+			...queuedRequest.changedCollections,
+			...incomingRequest.changedCollections,
+		])],
+		rows: queuedRows === undefined || incomingRows === undefined
+			? undefined
+			: {
+				fingerprints: [...queuedRows.fingerprints, ...incomingRows.fingerprints],
+				changed: queuedRows.changed === null || incomingRows.changed === null
+					? null
+					: [...new Set([...queuedRows.changed, ...incomingRows.changed])],
+			},
+	};
+}
 
 export class ItemScopedCacheService {
 	private collection: string;
@@ -642,27 +697,39 @@ export class ItemScopedCacheService {
 		// A write nested in a transaction it did not open (a hook's own service, built
 		// on the parent's trx) purges once that transaction commits (#363). Its purged
 		// list is left out of the debug header, which reads only the request's own
-		// service.
-		// Copied now: the list goes on growing with the writes that follow, which
-		// purge their own declarations.
-		const queuedDeclarations = hookDeclarations === undefined
-			? undefined
-			: { purgeFingerprints: [...hookDeclarations.purgeFingerprints] };
-
-		const queuedAfterCommit = queueAfterCommit(this.knex, async (database) => {
-			await new ItemScopedCacheService(
-				this.collection,
-				this.schema,
-				database,
-				this.cache,
-				this.accountability,
-			).purge(
+		// service. The purges queued on one trx for the same collection merge into one
+		// (#594).
+		const queuedAfterCommit = queueMergedAfterCommit(
+			this.knex,
+			`scoped-cache-purge:${this.collection}:${includeBareFingerprint}`,
+			{
 				scopedCacheFingerprints,
-				queuedDeclarations,
+				// Copied now: the list goes on growing with the writes that follow,
+				// which purge their own declarations.
+				hookDeclarations: hookDeclarations === undefined
+					? undefined
+					: { purgeFingerprints: [...hookDeclarations.purgeFingerprints] },
 				changedCollections,
-				{ includeBareFingerprint, rows },
-			);
-		});
+				rows,
+			},
+			{
+				mergeRequests: mergeScopedCachePurgeRequests,
+				runRequest: async (database, mergedRequest) => {
+					await new ItemScopedCacheService(
+						this.collection,
+						this.schema,
+						database,
+						this.cache,
+						this.accountability,
+					).purge(
+						mergedRequest.scopedCacheFingerprints,
+						mergedRequest.hookDeclarations,
+						mergedRequest.changedCollections,
+						{ includeBareFingerprint, rows: mergedRequest.rows },
+					);
+				},
+			},
+		);
 
 		if (queuedAfterCommit) {
 			return [];

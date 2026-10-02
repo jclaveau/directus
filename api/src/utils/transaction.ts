@@ -38,6 +38,59 @@ export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
 }
 
 /**
+ * The requests queued under each merge key, per list of held-back tasks: a retried
+ * attempt gets a new list, so it never merges into the aborted attempt's requests.
+ */
+const mergedRequests = new WeakMap<AfterCommitTask[], Map<string, unknown>>();
+
+/**
+ * `queueAfterCommit` for work that merges: a request queued under a key this
+ * transaction already holds is merged into it, and the merge runs as one task in
+ * the place of the first. Returns false, as `queueAfterCommit` does, when nothing
+ * will run it.
+ *
+ * A hook writing per row on its parent's trx queues one purge per row, each
+ * scanning the same index sets: merged, they scan once (#594).
+ */
+export function queueMergedAfterCommit<Request>(
+	knex: Knex,
+	mergeKey: string,
+	request: Request,
+	{
+		mergeRequests,
+		runRequest,
+	}: {
+		mergeRequests: (queued: Request, incoming: Request) => Request;
+		runRequest: (database: Knex, request: Request) => Promise<void>;
+	},
+): boolean {
+	const queuedTasks = afterCommitTasks.get(knex);
+
+	if (queuedTasks === undefined) {
+		return false;
+	}
+
+	const queuedRequests = mergedRequests.get(queuedTasks) ?? new Map();
+
+	mergedRequests.set(queuedTasks, queuedRequests);
+
+	if (queuedRequests.has(mergeKey)) {
+		queuedRequests.set(
+			mergeKey,
+			mergeRequests(queuedRequests.get(mergeKey), request),
+		);
+
+		return true;
+	}
+
+	queuedRequests.set(mergeKey, request);
+
+	return queueAfterCommit(knex, (database) => {
+		return runRequest(database, queuedRequests.get(mergeKey));
+	});
+}
+
+/**
  * Execute the given handler within the current transaction or a newly created one
  * if the current knex state isn't a transaction yet.
  *
