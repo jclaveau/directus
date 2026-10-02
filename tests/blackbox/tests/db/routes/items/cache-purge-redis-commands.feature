@@ -3,7 +3,7 @@ Feature: A write sends Redis the commands of the sets its rows reach
   Each scenario counts the Redis commands one write sends, from the request to
   its answer, its purge included: per command and key, the calls, and the keys
   or members a command carries when it carries several. A command spelled in
-  capitals ran in a script. A cache entry's key is spelled `<entry>`.
+  capitals ran in a script. A cache entry's key is spelled `_response:<entry>`.
 
   `purge_command_row` is scoped by `owner`, its index path, then `team`. A write
   reads the bare set, the set of each owner its rows carry, and the home pin set
@@ -62,7 +62,7 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:owner=alpha               |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:pin:team=red              |       |       |
-      | unlink     | <entry>                                     | 1     | 3     |+
+      | unlink     | _response:<entry>                           | 1     | 3     |+
     And these reads answer:
       | markers | query          | cache |
       | owner_1 | fields:        | MISS  |+
@@ -154,7 +154,7 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:owner=alpha               |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:pin:team=red              |       |       |
-      | unlink     | <entry>                                     | 1     | 3     |+
+      | unlink     | _response:<entry>                           | 1     | 3     |+
     And these reads answer:
       | markers | query          | cache |
       | owner_4 | fields:        | HIT   |+
@@ -210,7 +210,7 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:                          |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:owner=alpha               |       |       |
-      | unlink     | <entry>                                     | 1     | 2     |+
+      | unlink     | _response:<entry>                           | 1     | 2     |+
 
   Scenario: a row moved to another owner reads the sets of both owners
     Given these rows of purge_command_row:
@@ -255,4 +255,4 @@ Feature: A write sends Redis the commands of the sets its rows reach
       |            | purge_command_row:owner=alpha               |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | purge_command_row:owner=beta                |       |       |
-      | unlink     | <entry>                                     | 1     | 2     |+
+      | unlink     | _response:<entry>                           | 1     | 2     |+

@@ -79,6 +79,10 @@ describe.each(vendors)('%s', (vendor) => {
 	afterAll(async () => {
 		instance?.kill();
 
+		for (const key of await redis.keys(`${namespace}*`)) {
+			await redis.del(key);
+		}
+
 		await redis.quit();
 
 		await DeleteCollection(vendor, { collection: ROW });

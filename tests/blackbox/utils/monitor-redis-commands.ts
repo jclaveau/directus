@@ -46,13 +46,27 @@ export async function monitorRedisCommands(
 
 	let endSeen = () => {};
 
-	const windowOpened = new Promise<void>((resolveStart) => {
+	// Without the `end` listeners a dropped monitor leaves the waits below to the
+	// test timeout. Once a sentinel has landed, rejecting is a no-op.
+	const windowOpened = new Promise<void>((resolveStart, rejectStart) => {
 		startSeen = resolveStart;
+
+		monitor.once('end', () => {
+			rejectStart(new Error('MONITOR connection ended before its start sentinel'));
+		});
 	});
 
-	const windowClosed = new Promise<void>((resolveEnd) => {
+	const windowClosed = new Promise<void>((resolveEnd, rejectEnd) => {
 		endSeen = resolveEnd;
+
+		monitor.once('end', () => {
+			rejectEnd(new Error('MONITOR connection ended before its end sentinel'));
+		});
 	});
+
+	// The rejection is read by the `await` below, which `commandsSent` may still be
+	// keeping from attaching when it fires.
+	windowClosed.catch(() => {});
 
 	// One listener, so the window opens on the very line of its sentinel: a line
 	// parsed in the same chunk lands before any promise callback runs.
@@ -96,15 +110,16 @@ const MULTI_MEMBER_COMMANDS = ['sadd', 'smismember', 'srem'];
  * order they reach Redis in is not theirs to keep.
  *
  * A client sent them when it sent anything naming the namespace: this way its
- * MULTI, EXEC and EVALSHA are counted too. An argument names it at its start or
- * past a `:`, the way the response cache's store prefixes the keys it writes. A
+ * MULTI, EXEC and EVALSHA are counted too. An argument names it at its start, or
+ * as `<namespace>_<store>:`, the way a cache store prefixes the keys it writes. A
  * script's own commands are counted when they name it. `command` keeps the case
  * it was sent in, which tells the ones a script ran apart: scripts send theirs in
  * capitals. What reaches the log bus is left out: any log line lands there.
  *
  * `key` is the first argument naming the namespace, past it: the key a command
- * reads or writes, the pattern of a SCAN. A uuid is spelled `<uuid>`, a cache
- * entry's hash `<entry>`. `items` sums the keys, or the members, a command
+ * reads or writes, the pattern of a SCAN; a store's key keeps its `_<store>:`. A
+ * uuid is spelled `<uuid>`, a cache entry's hash `<entry>`, its sidecar's suffix
+ * kept. `items` sums the keys, or the members, a command
  * carries when it carries several, and is empty otherwise.
  */
 export function countRedisCommands(
@@ -113,17 +128,23 @@ export function countRedisCommands(
 ): Record<string, string>[] {
 	const namespacePrefix = `${namespace}:`;
 	const logBusKey = `${namespacePrefix}bus:logs`;
+	const escapedNamespace = namespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+	// A Keyv store prefixes its own namespace once more, past a `::`.
+	const storeKeyPattern = new RegExp(
+		`^${escapedNamespace}(_[a-z]+):(?::${escapedNamespace}\\1:)?`,
+	);
 
 	const pastNamespace = (commandArg: string) => {
 		if (commandArg.startsWith(namespacePrefix)) {
 			return commandArg.slice(namespacePrefix.length);
 		}
 
-		const namespaceAt = commandArg.indexOf(`:${namespacePrefix}`);
+		const storeKey = storeKeyPattern.exec(commandArg);
 
-		return namespaceAt === -1
+		return storeKey === null
 			? null
-			: commandArg.slice(namespaceAt + namespacePrefix.length + 1);
+			: `${storeKey[1]}:${commandArg.slice(storeKey[0].length)}`;
 	};
 
 	const namesNamespace = (commandArgs: string[]) => {
@@ -164,7 +185,7 @@ export function countRedisCommands(
 				.find((keyPastNamespace) => keyPastNamespace !== null) ?? ''
 		)
 			.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g, '<uuid>')
-			.replace(/[0-9a-f]{32,}$/, '<entry>');
+			.replace(/[0-9a-f]{32,}(?=(?:__\w+)?$)/, '<entry>');
 
 		let carriedItems = 0;
 

@@ -280,7 +280,7 @@ Feature: A purge a hook declares reaches every read its slice could answer
       |            | declared_pin_slot:                          |       |       |
       | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
       |            | declared_pin_slot:owner=alpha               |       |       |
-      | unlink     | <entry>                                     | 1     | 1     |+
+      | unlink     | _response:<entry>                           | 1     | 1     |+
     Then the read is purged, its own set among the index sets read:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+

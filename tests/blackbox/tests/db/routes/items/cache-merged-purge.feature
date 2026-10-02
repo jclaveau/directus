@@ -37,11 +37,11 @@ Feature: The purges a transaction queues for one collection run as one
       | batch_3 | 12 | gamma | 0        |
       | batch_3 | 13 | gamma | 0        |
     When a signal updates these rows one by one:
-      | updated_ids | updated_values  |
-      | [9]         | {"revision": 1} |
+      | id  | updated_ids | updated_values  |
+      | 901 | [9]         | {"revision": 1} |
     And a signal updates these rows one by one:
-      | updated_ids         | updated_values  |
-      | [9, 10, 11, 12, 13] | {"revision": 2} |
+      | id  | updated_ids         | updated_values  |
+      | 902 | [9, 10, 11, 12, 13] | {"revision": 2} |
     Then the first signal sent these Redis commands:
       | command | key                                         | calls | items |
       | EXPIRE  | scoped-cache-epoch:merged_purge_row         | 1     |       |+
@@ -70,7 +70,7 @@ Feature: The purges a transaction queues for one collection run as one
       | sscan   | scoped-cache-index:fingerprint:             | 1     |       |+
       |         | merged_purge_signal:                        |       |       |
       | sscan   | scoped-cache-index:fingerprint:             | 1     |       |+
-      |         | merged_purge_signal:pin:id=3                |       |       |
+      |         | merged_purge_signal:pin:id=901              |       |       |
     And the second signal sent these Redis commands:
       | command | key                                         | calls | items |
       | EXPIRE  | scoped-cache-epoch:merged_purge_row         | 1     |       |+
@@ -107,7 +107,7 @@ Feature: The purges a transaction queues for one collection run as one
       | sscan   | scoped-cache-index:fingerprint:             | 1     |       |+
       |         | merged_purge_signal:                        |       |       |
       | sscan   | scoped-cache-index:fingerprint:             | 1     |       |+
-      |         | merged_purge_signal:pin:id=4                |       |       |
+      |         | merged_purge_signal:pin:id=902              |       |       |
 
   Scenario: the merged purge drops the reads of every row it names and spares the others
     Given these rows of merged_purge_row:
