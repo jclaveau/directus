@@ -1,5 +1,5 @@
 import { oneLine } from '@directus/utils';
-import knex from 'knex';
+import knex, { type Knex } from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
@@ -221,6 +221,38 @@ describe('queueMergedAfterCommit', () => {
 
 		const taskSteps: string[] = [];
 
+		const rowsMerger = {
+			mergeRequests: (queued: string[], incoming: string[]) => {
+				return [...queued, ...incoming];
+			},
+			runRequest: async (_database: Knex, request: string[]) => {
+				taskSteps.push(`purge ${request.join(', ')}`);
+			},
+		};
+
+		await transaction(db, async (trx) => {
+			queueMergedAfterCommit(trx, 'rows', ['row 1'], rowsMerger);
+
+			queueAfterCommit(trx, async () => {
+				taskSteps.push('other task');
+			});
+
+			queueMergedAfterCommit(trx, 'rows', ['row 2'], rowsMerger);
+		});
+
+		expect(taskSteps).toEqual(['purge row 1, row 2', 'other task']);
+	});
+
+	it(oneLine`
+		runs apart the requests two callers queue under one key, each merged by its
+		own function
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const taskSteps: string[] = [];
+
 		await transaction(db, async (trx) => {
 			queueMergedAfterCommit(trx, 'rows', ['row 1'], {
 				mergeRequests: (queued, incoming) => [...queued, ...incoming],
@@ -229,19 +261,15 @@ describe('queueMergedAfterCommit', () => {
 				},
 			});
 
-			queueAfterCommit(trx, async () => {
-				taskSteps.push('other task');
-			});
-
-			queueMergedAfterCommit(trx, 'rows', ['row 2'], {
-				mergeRequests: (queued, incoming) => [...queued, ...incoming],
+			queueMergedAfterCommit(trx, 'rows', 1, {
+				mergeRequests: (queued, incoming) => queued + incoming,
 				runRequest: async (_database, request) => {
-					taskSteps.push(`purge ${request.join(', ')}`);
+					taskSteps.push(`count ${request}`);
 				},
 			});
 		});
 
-		expect(taskSteps).toEqual(['purge row 1, row 2', 'other task']);
+		expect(taskSteps).toEqual(['purge row 1', 'count 1']);
 	});
 
 	it('runs the requests queued under different keys apart', async () => {

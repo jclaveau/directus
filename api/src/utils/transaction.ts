@@ -40,14 +40,22 @@ export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
 /**
  * The requests queued under each merge key, per list of held-back tasks: a retried
  * attempt gets a new list, so it never merges into the aborted attempt's requests.
+ * Filed under the merge function too: requests one function merges share its type,
+ * so a caller reusing another's key never has its requests handed to the other's.
  */
-const mergedRequests = new WeakMap<AfterCommitTask[], Map<string, unknown>>();
+const mergedRequests = new WeakMap<
+	AfterCommitTask[],
+	Map<object, Map<string, unknown>>
+>();
 
 /**
  * `queueAfterCommit` for work that merges: a request queued under a key this
  * transaction already holds is merged into it, and the merge runs as one task in
  * the place of the first. Returns false, as `queueAfterCommit` does, when nothing
  * will run it.
+ *
+ * `mergeRequests` names the kind of request as much as the key does: requests
+ * merge only when handed the same function, so it is defined once, not inline.
  *
  * A hook writing per row on its parent's trx queues one purge per row, each
  * scanning the same index sets: merged, they scan once (#594).
@@ -70,15 +78,19 @@ export function queueMergedAfterCommit<Request>(
 		return false;
 	}
 
-	const queuedRequests = mergedRequests.get(queuedTasks) ?? new Map();
+	const requestsByMerger = mergedRequests.get(queuedTasks) ?? new Map();
 
-	mergedRequests.set(queuedTasks, queuedRequests);
+	mergedRequests.set(queuedTasks, requestsByMerger);
 
-	if (queuedRequests.has(mergeKey)) {
-		queuedRequests.set(
-			mergeKey,
-			mergeRequests(queuedRequests.get(mergeKey), request),
-		);
+	const queuedRequests: Map<string, Request> =
+		requestsByMerger.get(mergeRequests) ?? new Map();
+
+	requestsByMerger.set(mergeRequests, queuedRequests);
+
+	const queuedRequest = queuedRequests.get(mergeKey);
+
+	if (queuedRequest !== undefined) {
+		queuedRequests.set(mergeKey, mergeRequests(queuedRequest, request));
 
 		return true;
 	}
@@ -86,7 +98,7 @@ export function queueMergedAfterCommit<Request>(
 	queuedRequests.set(mergeKey, request);
 
 	return queueAfterCommit(knex, (database) => {
-		return runRequest(database, queuedRequests.get(mergeKey));
+		return runRequest(database, queuedRequests.get(mergeKey)!);
 	});
 }
 
@@ -226,10 +238,10 @@ async function drainAfterCommit(
 	knex: Knex,
 	queuedTasks: AfterCommitTask[],
 ): Promise<void> {
-	// One after another, as they ran inside the trx: a hook writing per row queues a
-	// purge per row, all on the same index sets, and each purge shrinks the sets
-	// the next one scans. Every task runs even when one fails: each covers its own
-	// write.
+	// One after another, as they ran inside the trx: purges of different collections
+	// can share index sets, and each shrinks what the next one scans. A hook's
+	// purges per row on one collection reach here merged (#594). Every task runs
+	// even when one fails: each covers its own write.
 	for (const task of queuedTasks) {
 		try {
 			await task(knex);
