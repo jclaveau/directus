@@ -1,4 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from './mock.js';
@@ -211,16 +212,6 @@ test('dont overwrite already aliased relations', async () => {
 });
 
 test('draw a new alias when a join of the same path already took it', async () => {
-	const schema = new SchemaBuilder()
-		.collection('articles', (c) => {
-			c.field('id').id();
-			c.field('tags').m2m('tags_list');
-		})
-		.collection('tags_list', (c) => {
-			c.field('id').id();
-		})
-		.build();
-
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('alias');
@@ -233,27 +224,26 @@ test('draw a new alias when a join of the same path already took it', async () =
 		knex: db,
 		path: ['tags', 'tags_list_id'],
 		rootQuery: queryBuilder,
-		schema,
+		schema: new SchemaBuilder()
+			.collection('articles', (c) => {
+				c.field('id').id();
+				c.field('tags').m2m('tags_list');
+			})
+			.collection('tags_list', (c) => {
+				c.field('id').id();
+			})
+			.build(),
 	});
 
-	const rawQuery = queryBuilder.toSQL();
-
-	expect(rawQuery.sql).toEqual(
-		'select * left join "articles_tags_list_junction" as "alias"' +
-			' on "articles"."id" = "alias"."articles_id"' +
-			' left join "tags_list" as "alias2"' +
-			' on "alias"."tags_list_id" = "alias2"."id"',
-	);
+	expect(queryBuilder.toSQL().sql).toEqual(oneLine`
+		select * left join "articles_tags_list_junction" as "alias"
+		on "articles"."id" = "alias"."articles_id"
+		left join "tags_list" as "alias2"
+		on "alias"."tags_list_id" = "alias2"."id"
+	`);
 });
 
-test('draw a new alias when an earlier join of the query already took it', async () => {
-	const schema = new SchemaBuilder()
-		.collection('articles', (c) => {
-			c.field('id').id();
-			c.field('author').m2o('users');
-		})
-		.build();
-
+test('draw a new alias when an earlier join already took it', async () => {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 	aliasFn.mockReturnValueOnce('taken');
@@ -270,12 +260,15 @@ test('draw a new alias when an earlier join of the query already took it', async
 		knex: db,
 		path: ['author'],
 		rootQuery: queryBuilder,
-		schema,
+		schema: new SchemaBuilder()
+			.collection('articles', (c) => {
+				c.field('id').id();
+				c.field('author').m2o('users');
+			})
+			.build(),
 	});
 
-	const rawQuery = queryBuilder.toSQL();
-
-	expect(rawQuery.sql).toEqual(
+	expect(queryBuilder.toSQL().sql).toEqual(
 		'select * left join "users" as "fresh" on "articles"."author" = "fresh"."id"',
 	);
 });
