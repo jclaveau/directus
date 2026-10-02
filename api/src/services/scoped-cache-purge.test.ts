@@ -1621,6 +1621,7 @@ describe(oneLine`
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
 						}],
+						changedCollections: [],
 					},
 				);
 			}
@@ -1663,6 +1664,7 @@ describe(oneLine`
 							collection: 'authors',
 							pinnedScope: { id: ['5'] },
 						}],
+						changedCollections: [],
 					},
 				);
 			}

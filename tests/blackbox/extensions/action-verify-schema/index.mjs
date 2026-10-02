@@ -1,7 +1,7 @@
 export default function registerHooks({ action }) {
 	const logsCollection = 'tests_extensions_log';
 
-	action('collections.create', collectionsCallback);
+	action('collections.create.one', collectionsCallback);
 	action('collections.update.one', collectionsCallback);
 	action('collections.delete', collectionsCallback);
 	action('fields.create', fieldsCallback);
@@ -12,7 +12,7 @@ export default function registerHooks({ action }) {
 		let key = 'action-verify-schema';
 
 		switch (data.event) {
-			case 'collections.create':
+			case 'collections.create.one':
 				if (!data.key.startsWith('test_collections_crud')) break;
 				if (data.key.includes('folder')) break;
 
