@@ -743,8 +743,26 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			oneLine`
-				a purge declared on the index path purges a read filed under a home
-				pin
+				a purge declared on the index path reads the home pin sets in one
+				script call
+			`,
+			(steps) => {
+				const ids = new Map<string, number>();
+				const filedMembers = new Map<string, string[]>();
+
+				defineGivenSteps(steps, ids, filedMembers);
+
+				defineWhenSteps(steps, ids);
+
+				defineThenSteps(steps, ids, filedMembers);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a purge declared off the index path reads every set the collection
+				owns in one script call
 			`,
 			(steps) => {
 				const ids = new Map<string, number>();
