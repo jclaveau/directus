@@ -22,6 +22,7 @@ import {
 	scopedCacheSweepMoveScript,
 } from './redis-store.js';
 import { parseScopedCacheFingerprint } from './fingerprint.js';
+import type { ScopedCacheScanTally } from './store.js';
 import { _cache } from '../metrics/lib/instance.js';
 
 const env = vi.hoisted((): Record<string, string> => {
@@ -2979,5 +2980,171 @@ describe('onStoreReady', () => {
 
 		expect(listener).not.toHaveBeenCalled();
 		expect(onEvent).toHaveBeenCalledWith('ready', listener);
+	});
+});
+
+describe('the scan tally', () => {
+	beforeEach(() => {
+		for (const command of [
+			scan,
+			sscan,
+			scopedCacheCollectionIndexKeysPrune,
+			mget,
+		]) {
+			command.mockReset();
+		}
+	});
+
+	it('counts the sets and members the row scan read, as the row arm', async () => {
+		sscan
+			.mockResolvedValueOnce([
+				'7',
+				['slot:&|key-a', 'slot:&|key-a__expires_at'],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&|key-b']]);
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		for await (const _page of redisScopedCacheStore().scanRowIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: {} }],
+			null,
+			scanTally,
+		)) { /* drained */ }
+
+		expect(scanTally).toEqual({
+			scanArms: new Set(['row']),
+			scannedIndexKeys: 1,
+			scannedMembers: 3,
+			// The store counts; its caller times the pages.
+			scanMs: 0,
+		});
+	});
+
+	it(oneLine`
+		counts a declared pin on the index path as the declared arm: its own sets
+		and the home pins' sets, not the names walked to find them
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce(['0', []])
+			.mockResolvedValueOnce([
+				'0',
+				['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7'],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
+
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
+			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
+		]);
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		for await (const _page of redisScopedCacheStore().scanDeclaredIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: { name: ['ada'] } }],
+			'name',
+			scanTally,
+		)) { /* drained */ }
+
+		expect(scanTally).toEqual({
+			scanArms: new Set(['declared']),
+			scannedIndexKeys: 3,
+			scannedMembers: 1,
+			scanMs: 0,
+		});
+	});
+
+	it(oneLine`
+		counts a declared pin off the index path as the collection arm, the walk of
+		every set the collection owns
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan
+			.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:scoped-cache-index:fingerprint:slot:',
+					'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
+				],
+			])
+			.mockResolvedValueOnce(['0', ['slot:&|key-a', 'slot:&|key-a__pins']]);
+
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
+			'scalabus:scoped-cache-index:fingerprint:slot:',
+		]);
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		for await (const _page of redisScopedCacheStore().scanDeclaredIndexedEntries(
+			'slot',
+			[{ collection: 'slot', pinnedScope: { name: ['ada'] } }],
+			null,
+			scanTally,
+		)) { /* drained */ }
+
+		expect(scanTally).toEqual({
+			scanArms: new Set(['collection']),
+			scannedIndexKeys: 1,
+			scannedMembers: 2,
+			scanMs: 0,
+		});
+	});
+
+	it(oneLine`
+		counts only the sets of the rounds a reader got to, when it stops before
+		the last
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		// 101 sets: one round of 100, then one of 1 the reader never asks for.
+		const indexKeys = Array.from({ length: 101 }, (_unused, setAt) => {
+			return `scalabus:scoped-cache-index:fingerprint:slot:owner=${setAt}`;
+		});
+
+		sscan
+			.mockResolvedValueOnce(['0', indexKeys])
+			.mockResolvedValue(['0', []]);
+
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce(indexKeys);
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		for await (const _page of redisScopedCacheStore().scanCollectionIndexedEntries(
+			'slot',
+			scanTally,
+		)) {
+			break;
+		}
+
+		expect(scanTally).toEqual({
+			scanArms: new Set(['collection']),
+			scannedIndexKeys: 100,
+			scannedMembers: 0,
+			scanMs: 0,
+		});
 	});
 });
