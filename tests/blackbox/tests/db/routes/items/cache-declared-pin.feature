@@ -385,7 +385,65 @@ Feature: A purge a hook declares reaches every read its slice could answer
       | sscan    | fingerprint:declared_pin_slot:owner=alpha              |          | 1     |
     And the declaration sent these Redis commands:
       | command    | key                                         | calls | items |
+      | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
+      |            | declared_pin_slot:pin:zone.label=east       |       |       |
+      | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
+      |            | declared_pin_slot:pin:zone.label=north      |       |       |
+      | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | EXPIRE     | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
+      | EXPIRE     | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | INCR       | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
+      | INCR       | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | SCARD      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=east       |       |       |
+      | SCARD      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=north      |       |       |
+      | SCARD      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | SET        | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
+      | SET        | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | SMEMBERS   | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=east       |       |       |
+      | SMEMBERS   | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=north      |       |       |
+      | SMEMBERS   | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | UNLINK     | _response:<entry>                           | 1     | 3     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 3     |+
+      | evalsha    | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
       | evalsha    | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | evalsha    | scoped-cache-index:                         | 1     |       |+
+      |            | collection-index-keys:                      |       |       |
+      |            | declared_pin_slot                           |       |       |
+      | evalsha    | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=north      |       |       |
+      | mget       | scoped-cache-collection-index-keys-complete | 2     | 4     |+
+      | mget       | scoped-cache-epoch:                         | 1     | 2     |+
+      |            | declared_pin_signal                         |       |       |
+      | publish    | bus:websocket.event                         | 3     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 1     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | declared_pin_signal                         |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | declared_pin_slot:pin:zone.label=east       |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | declared_pin_slot:pin:zone.label=north      |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | sscan      | scoped-cache-index:                         | 1     |       |+
+      |            | collection-index-keys:                      |       |       |
+      |            | declared_pin_slot                           |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_signal:                        |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:                          |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:owner=alpha               |       |       |
     Then the read is purged, filed under "pin:zone.label=north" and pinning no owner:
       | query          | response              | fingerprints    |
       | fields:        | - marker: target_slot | - pinnedScope:  |+
@@ -483,7 +541,59 @@ Feature: A purge a hook declares reaches every read its slice could answer
       | sscan    | collection-index-keys:declared_pin_slot            |          | 1     |
     And the declaration sent these Redis commands:
       | command    | key                                         | calls | items |
+      | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
+      |            | declared_pin_slot:owner=alpha               |       |       |
+      | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
+      |            | declared_pin_slot:owner=beta                |       |       |
+      | EXISTS     | scoped-cache-index:fingerprint:             | 1     | 1     |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | EXPIRE     | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
+      | EXPIRE     | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | INCR       | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
+      | INCR       | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | SCARD      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:owner=alpha               |       |       |
+      | SCARD      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:owner=beta                |       |       |
+      | SCARD      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | SET        | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
+      | SET        | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | SMEMBERS   | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:owner=alpha               |       |       |
+      | SMEMBERS   | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:owner=beta                |       |       |
+      | SMEMBERS   | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:pin:zone.label=south      |       |       |
+      | UNLINK     | _response:<entry>                           | 1     | 2     |+
+      | UNLINK     | _response:<entry>__expires_at               | 1     | 2     |+
+      | evalsha    | scoped-cache-epoch:                         | 1     |       |+
+      |            | declared_pin_signal                         |       |       |
       | evalsha    | scoped-cache-epoch:declared_pin_slot        | 1     |       |+
+      | evalsha    | scoped-cache-index:                         | 1     |       |+
+      |            | collection-index-keys:                      |       |       |
+      |            | declared_pin_slot                           |       |       |
+      | evalsha    | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_slot:owner=alpha               |       |       |
+      | mget       | scoped-cache-collection-index-keys-complete | 2     | 4     |+
+      | mget       | scoped-cache-epoch:                         | 1     | 2     |+
+      |            | declared_pin_signal                         |       |       |
+      | publish    | bus:websocket.event                         | 3     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 1     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | declared_pin_signal                         |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | declared_pin_slot:owner=alpha               |       |       |
+      | srem       | scoped-cache-index:fingerprint:             | 1     | 2     |+
+      |            | declared_pin_slot:owner=beta                |       |       |
+      | sscan      | scoped-cache-index:                         | 1     |       |+
+      |            | collection-index-keys:                      |       |       |
+      |            | declared_pin_slot                           |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | declared_pin_signal:                        |       |       |
     Then the read is purged, filed under "owner=alpha" and pinning no zone:
       | query          | response              | fingerprints   |
       | fields:        | - marker: target_slot | - pinnedScope: |+
