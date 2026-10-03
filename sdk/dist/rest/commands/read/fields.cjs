@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=()=>()=>({path:`/fields`,method:`GET`}),n=t=>()=>(e.throwIfEmpty(t,`Collection cannot be empty`),{path:`/fields/${t}`,method:`GET`}),r=(t,n)=>()=>(e.throwIfEmpty(t,`Collection cannot be empty`),e.throwIfEmpty(n,`Field cannot be empty`),{path:`/fields/${t}/${n}`,method:`GET`});exports.readField=r,exports.readFields=t,exports.readFieldsByCollection=n;
+//# sourceMappingURL=fields.cjs.map

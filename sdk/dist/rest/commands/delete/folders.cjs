@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/folders`,body:JSON.stringify(t),method:`DELETE`}),n=t=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/folders/${t}`,method:`DELETE`});exports.deleteFolder=n,exports.deleteFolders=t;
+//# sourceMappingURL=folders.cjs.map

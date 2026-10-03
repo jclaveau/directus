@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/webhooks`,body:JSON.stringify(t),method:`DELETE`}),n=t=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/webhooks/${t}`,method:`DELETE`});exports.deleteWebhook=n,exports.deleteWebhooks=t;
+//# sourceMappingURL=webhooks.cjs.map
