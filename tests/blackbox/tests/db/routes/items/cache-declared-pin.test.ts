@@ -14,9 +14,13 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { awaitRequestedReap } from '@utils/await-requested-reap';
+import {
+	countRedisCommands,
+	joinBrokenKeys,
+	monitorRedisCommands,
+} from '@utils/monitor-redis-commands';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import { randomUUID } from 'crypto';
 import getPort from 'get-port';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
@@ -354,33 +358,20 @@ describe.each(vendors)('%s', (vendor) => {
 	// Every SCAN and SSCAN of the slot's index `signalsSent` caused — of its sets,
 	// or of the index-key set naming them — as the key it read past
 	// `scoped-cache-index:`, with the MATCH pattern an SSCAN narrowed its names by,
-	// past the slot's own sets. MONITOR streams commands in the order Redis ran
-	// them, so the two sentinel GETs bracket what the signals sent.
-	async function recordIndexReads(
-		signalsSent: () => Promise<void>,
-	): Promise<Record<string, string>[]> {
-		const indexPrefix = `${env[vendor]['CACHE_NAMESPACE']}`
-			+ ':scoped-cache-index:';
-
+	// past the slot's own sets, and how many times it was sent. Along with every
+	// command the instance sent meanwhile, counted.
+	async function recordIndexReads(signalsSent: () => Promise<void>): Promise<{
+		indexReads: Record<string, string>[];
+		sentCommands: Record<string, string>[];
+	}> {
+		const namespace = env[vendor]['CACHE_NAMESPACE']!;
+		const indexPrefix = `${namespace}:scoped-cache-index:`;
 		const slotPrefix = `${indexPrefix}fingerprint:${SLOT}:`;
 		const collectionIndexKeysKey = `${indexPrefix}collection-index-keys:${SLOT}`;
-		const monitor = redis.duplicate({ monitor: true, lazyConnect: false });
-
-		await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
-			monitor.once('monitoring', resolveMonitoring);
-
-			// ioredis flips to monitoring only after the OK resolves, so a
-			// line landing in the same chunk finds an empty command queue.
-			monitor.on('error', (monitorError: Error) => {
-				if (!monitorError.message.startsWith('Command queue state error')) {
-					rejectMonitoring(monitorError);
-				}
-			});
-		});
-
+		const monitoredCommands = await monitorRedisCommands(redis, signalsSent);
 		const recordedReads = new Map<string, Record<string, string>>();
 
-		monitor.on('monitor', (_time: string, commandArgs: string[]) => {
+		for (const { commandArgs } of monitoredCommands) {
 			const command = commandArgs[0]!.toLowerCase();
 
 			const readSet = command === 'scan'
@@ -390,57 +381,39 @@ describe.each(vendors)('%s', (vendor) => {
 			const slotRead = readSet?.startsWith(slotPrefix)
 				|| (command === 'sscan' && readSet === collectionIndexKeysKey);
 
-			if ((command === 'scan' || command === 'sscan') && slotRead) {
-				const indexSet = readSet!.slice(indexPrefix.length);
-
-				const matchAt = commandArgs.findIndex((commandArg) => {
-					return commandArg.toUpperCase() === 'MATCH';
-				});
-
-				const matching = command === 'sscan' && matchAt !== -1
-					? commandArgs[matchAt + 1]!.replace(slotPrefix, '')
-					: '';
-
-				recordedReads.set(`${command} ${indexSet} ${matching}`, {
-					'command': command,
-					'index set': indexSet,
-					'matching': matching,
-				});
+			if ((command !== 'scan' && command !== 'sscan') || !slotRead) {
+				continue;
 			}
-		});
 
-		const sentinelSeen = (sentinelKey: string) => {
-			return new Promise<void>((resolveSentinel) => {
-				monitor.on('monitor', (_time: string, commandArgs: string[]) => {
-					if (commandArgs[1] === sentinelKey) {
-						resolveSentinel();
-					}
-				});
+			const indexSet = readSet!.slice(indexPrefix.length);
+
+			const matchAt = commandArgs.findIndex((commandArg) => {
+				return commandArg.toUpperCase() === 'MATCH';
 			});
+
+			const matching = command === 'sscan' && matchAt !== -1
+				? commandArgs[matchAt + 1]!.replace(slotPrefix, '')
+				: '';
+
+			const readKey = `${command} ${indexSet} ${matching}`;
+
+			const recordedRead = recordedReads.get(readKey) ?? {
+				'command': command,
+				'index set': indexSet,
+				'matching': matching,
+				'calls': '0',
+			};
+
+			recordedRead['calls'] = String(Number(recordedRead['calls']) + 1);
+			recordedReads.set(readKey, recordedRead);
+		}
+
+		return {
+			indexReads: [...recordedReads.keys()].sort().map((readKey) => {
+				return recordedReads.get(readKey)!;
+			}),
+			sentCommands: countRedisCommands(monitoredCommands, namespace),
 		};
-
-		const sentinelPrefix = `${env[vendor]['CACHE_NAMESPACE']}:monitor-sentinel`;
-		const startSentinel = `${sentinelPrefix}:${randomUUID()}`;
-		const endSentinel = `${sentinelPrefix}:${randomUUID()}`;
-
-		await Promise.all([
-			sentinelSeen(startSentinel),
-			redis.get(startSentinel),
-		]);
-
-		recordedReads.clear();
-		await signalsSent();
-
-		await Promise.all([
-			sentinelSeen(endSentinel),
-			redis.get(endSentinel),
-		]);
-
-		monitor.disconnect();
-
-		return [...recordedReads.keys()].sort().map((readKey) => {
-			return recordedReads.get(readKey)!;
-		});
 	}
 
 	const queryKey = (query: Record<string, string | string[]>) =>
@@ -590,6 +563,7 @@ describe.each(vendors)('%s', (vendor) => {
 		ids: Map<string, number>,
 	) {
 		let indexReads: Record<string, string>[] = [];
+		let sentCommands: Record<string, string>[] = [];
 
 		when(
 			'the signal rewrites the slots and declares:',
@@ -600,7 +574,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				const filedBefore = await indexedMembers();
 
-				indexReads = await recordIndexReads(async () => {
+				({ indexReads, sentCommands } = await recordIndexReads(async () => {
 					for (const { marker, note } of cellRows(table[0]!['query']!)) {
 						const response = await request(getUrl(vendor, env))
 							.post(`/items/${SIGNAL}`)
@@ -614,7 +588,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 						expect(response.statusCode).toBe(200);
 					}
-				});
+				}));
 
 				await expectPurgedFingerprints(
 					filedBefore,
@@ -630,6 +604,13 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			(table: Record<string, string>[]) => {
 				expect(indexReads).toEqual(table);
+			},
+		);
+
+		and.optional(
+			'the declaration sent these Redis commands:',
+			(table: Record<string, string>[]) => {
+				expect(sentCommands).toEqual(joinBrokenKeys(table));
 			},
 		);
 	}
