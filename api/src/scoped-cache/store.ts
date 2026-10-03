@@ -57,6 +57,29 @@ export interface ScopedCacheIndexedEntry {
 }
 
 /**
+ * Which scan a purge's index read took: the sets a written row's values name
+ * (`row`), the sets a declared pin names (`declared`), or every set the
+ * collection owns (`collection`) — a declared pin off the index path, or the
+ * coarse fallback's take.
+ */
+export type ScopedCacheScanArm = 'row' | 'declared' | 'collection';
+
+/**
+ * What a purge's index scans read, so its telemetry can say which arm ran and how
+ * much it walked. The store adds its arm and counts the sets and members; the
+ * caller times the pages.
+ *
+ * Members are counted as the store read them, a member met in two sets twice:
+ * the figure is the work the scan did, not the entries it found.
+ */
+export interface ScopedCacheScanTally {
+	scanArms: Set<ScopedCacheScanArm>;
+	scannedIndexKeys: number;
+	scannedMembers: number;
+	scanMs: number;
+}
+
+/**
  * One batch of a whole-collection take: how many index sets it took, the keys
  * they held, and the moved sets the caller releases once those keys are gone. A
  * name whose set was already gone is not a set taken.
@@ -144,6 +167,7 @@ export interface ScopedCacheStore {
 		collection: string,
 		rowFingerprints: readonly ScopedCacheFingerprint[],
 		indexPath: string | null,
+		scanTally?: ScopedCacheScanTally,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
 
 	/**
@@ -158,11 +182,13 @@ export interface ScopedCacheStore {
 		collection: string,
 		declared: readonly ScopedCacheFingerprint[],
 		indexPath: string | null,
+		scanTally?: ScopedCacheScanTally,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
 
 	/** Every entry the collection holds, a page at a time, narrowed by nothing. */
 	scanCollectionIndexedEntries(
 		collection: string,
+		scanTally?: ScopedCacheScanTally,
 	): AsyncGenerator<ScopedCacheIndexedEntry[]>;
 
 	/**

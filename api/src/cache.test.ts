@@ -731,6 +731,14 @@ describe('scoped cache purging', () => {
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
+				// No index path, so the declared pins walk every set the collection
+				// owns: both sets, and all five members they hold.
+				scopedCacheScan: {
+					scanArms: 'collection',
+					scannedIndexKeys: 2,
+					scannedMembers: 5,
+					scanMs: expect.any(Number),
+				},
 			});
 
 			// The sidecars are still deleted — only the count excludes them.
@@ -757,6 +765,12 @@ describe('scoped cache purging', () => {
 				scopedCachePinCount: 3,
 				evicted: 0,
 				durationMs: expect.any(Number),
+				scopedCacheScan: {
+					scanArms: 'collection',
+					scannedIndexKeys: 0,
+					scannedMembers: 0,
+					scanMs: expect.any(Number),
+				},
 			});
 		});
 
@@ -884,6 +898,13 @@ describe('scoped cache purging', () => {
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
+				// The take reads every set, and every member of each.
+				scopedCacheScan: {
+					scanArms: 'collection',
+					scannedIndexKeys: 3,
+					scannedMembers: 4,
+					scanMs: expect.any(Number),
+				},
 			});
 		});
 
@@ -913,6 +934,12 @@ describe('scoped cache purging', () => {
 				evicted: 0,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
+				scopedCacheScan: {
+					scanArms: 'collection',
+					scannedIndexKeys: 3,
+					scannedMembers: 0,
+					scanMs: expect.any(Number),
+				},
 			});
 		});
 
@@ -937,6 +964,8 @@ describe('scoped cache purging', () => {
 				evicted: null,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
+				// A clear reads no index, so it scanned nothing rather than zero.
+				scopedCacheScan: null,
 			});
 		});
 

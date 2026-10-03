@@ -1,14 +1,16 @@
 import { oneLine } from '@directus/utils';
 import type { Keyv } from 'keyv';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { purgeScopedCache } from './purge.js';
+import { purgeScopedCache, timedScanPages } from './purge.js';
 import { scopedCacheFingerprintOf } from './fingerprint.js';
+import type { ScopedCacheScanTally } from './store.js';
 import {
 	redisConfigAvailable,
 	useCacheRedis,
 	useRedis,
 } from '../redis/index.js';
 import { useLogger } from '../logger/index.js';
+import { queueCachePurge } from '../cache-events.js';
 import { ItemScopedCacheService } from './item-scoped-cache-service.js';
 import {
 	listPendingScopedCachePurges,
@@ -728,6 +730,192 @@ describe('a purge shown the rows it wrote', () => {
 			},
 			expect.any(Error),
 		);
+	});
+});
+
+describe('what a purge records about its scans', () => {
+	it(oneLine`
+		names the row arm, and counts the sets the rows' values name and the members
+		they held
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&|ns:entry-alpha',
+				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], owner: ['alpha'] },
+			}],
+			changed: null,
+			indexPath: 'owner',
+		});
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			scopedCacheScan: {
+				scanArms: 'row',
+				scannedIndexKeys: 2,
+				scannedMembers: 3,
+				scanMs: expect.any(Number),
+			},
+		}));
+	});
+
+	it(oneLine`
+		names the declared arm beside the row arm when the declared pin is on the
+		index path, and adds what each read
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&|ns:entry-alpha',
+				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], owner: ['alpha'] },
+			}],
+			changed: null,
+			indexPath: 'owner',
+			declaredFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { owner: ['beta'] },
+			}],
+		});
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			scopedCacheScan: {
+				scanArms: 'row+declared',
+				scannedIndexKeys: 4,
+				scannedMembers: 4,
+				scanMs: expect.any(Number),
+			},
+		}));
+	});
+
+	it(oneLine`
+		names the collection arm when a declared pin off the index path walks every
+		set the collection owns
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&|ns:entry-alpha',
+				'slot:&method=,slow,&owner=,alpha,&|ns:entry-alpha-slow',
+			],
+		};
+
+		await purgeScopedCache(cache, 'slot', [], null, {
+			rowFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { id: ['1'], owner: ['alpha'] },
+			}],
+			changed: null,
+			indexPath: 'owner',
+			declaredFingerprints: [{
+				collection: 'slot',
+				pinnedScope: { method: ['slow'] },
+			}],
+		});
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			scopedCacheScan: {
+				scanArms: 'row+collection',
+				scannedIndexKeys: 4,
+				scannedMembers: 6,
+				scanMs: expect.any(Number),
+			},
+		}));
+	});
+
+	it(oneLine`
+		times the waits on the index's pages, not the drop of the entries they
+		named
+	`, async () => {
+		members = {
+			'ns:scoped-cache-index:fingerprint:slot:': ['slot:&|ns:entry-bare'],
+			'ns:scoped-cache-index:fingerprint:slot:owner=alpha': [
+				'slot:&owner=,alpha,&|ns:entry-alpha',
+			],
+		};
+
+		// A clock that moves only when Redis is waited on or an entry dropped.
+		let clockMs = 0;
+		const answerScan = sscan.getMockImplementation()!;
+		const now = vi.spyOn(performance, 'now').mockImplementation(() => clockMs);
+
+		sscan.mockImplementation(async (...scanArgs) => {
+			clockMs += 7;
+			return answerScan(...scanArgs);
+		});
+
+		vi.mocked(cache.delete).mockImplementation(async () => {
+			clockMs += 1000;
+			return true;
+		});
+
+		try {
+			await purgeScopedCache(cache, 'slot', [], null, {
+				rowFingerprints: [{
+					collection: 'slot',
+					pinnedScope: { id: ['1'], owner: ['alpha'] },
+				}],
+				changed: null,
+				indexPath: 'owner',
+			});
+		}
+		finally {
+			now.mockRestore();
+			sscan.mockImplementation(answerScan);
+			vi.mocked(cache.delete).mockReset();
+		}
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			scopedCacheScan: {
+				scanArms: 'row',
+				scannedIndexKeys: 2,
+				scannedMembers: 2,
+				scanMs: 14,
+			},
+		}));
+	});
+});
+
+describe('timing a scan\'s pages', () => {
+	it('closes the scan when its reader throws mid-scan', async () => {
+		const closed = vi.fn();
+
+		async function* scanPages() {
+			try {
+				yield ['page-1'];
+				yield ['page-2'];
+			}
+			finally {
+				closed();
+			}
+		}
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		await expect(async () => {
+			for await (const _page of timedScanPages(scanPages(), scanTally)) {
+				throw new Error('the reader failed');
+			}
+		}).rejects.toThrow('the reader failed');
+
+		expect(closed).toHaveBeenCalledTimes(1);
 	});
 });
 

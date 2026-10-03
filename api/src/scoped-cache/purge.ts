@@ -12,6 +12,7 @@ import {
 import {
 	queueCacheAnomaly,
 	queueCachePurge,
+	type CachePurgeScan,
 } from '../cache-events.js';
 import { cacheStoreDropsEntries } from '../cache-store-probe.js';
 import { flushCacheRedisDatabase } from '../redis/index.js';
@@ -44,6 +45,8 @@ import {
 	useScopedCacheStore,
 	type ScopedCacheIndexedEntry,
 	type ScopedCacheIndexFiling,
+	type ScopedCacheScanArm,
+	type ScopedCacheScanTally,
 	type ScopedCacheUnlinkTally,
 } from './store.js';
 import {
@@ -398,6 +401,7 @@ async function purgeScopedCacheFingerprintIndex(
 	changed: readonly string[] | null,
 	indexPath: string | null,
 	includeBareFingerprint: boolean,
+	scanTally: ScopedCacheScanTally,
 ): Promise<number> {
 	if (rowFingerprints.length === 0) {
 		return 0;
@@ -416,6 +420,7 @@ async function purgeScopedCacheFingerprintIndex(
 			collection,
 			rowFingerprints,
 			indexPath,
+			scanTally,
 		),
 		(fingerprint) => {
 			// A fingerprint pinning nothing is what the bare collection fingerprint
@@ -436,6 +441,7 @@ async function purgeScopedCacheFingerprintIndex(
 			);
 		},
 		indexPath,
+		scanTally,
 	);
 
 	return evicted;
@@ -459,6 +465,7 @@ async function purgeScopedCacheDeclaredPins(
 	indexPath: string | null,
 	context: EventContext | null,
 	mutatedCollections: readonly string[] | null,
+	scanTally: ScopedCacheScanTally,
 ): Promise<ScopedCachePurgeSweep> {
 	// What the store reads, narrowed to the index values the pins' relation reaches
 	// when it can be read back. The match below still tests the pins as declared.
@@ -479,6 +486,7 @@ async function purgeScopedCacheDeclaredPins(
 			collection,
 			scannedPins ?? declared,
 			indexPath,
+			scanTally,
 		),
 		(fingerprint) => {
 			return declared.some((declaredFingerprint) => {
@@ -489,6 +497,7 @@ async function purgeScopedCacheDeclaredPins(
 			});
 		},
 		indexPath,
+		scanTally,
 	);
 }
 
@@ -508,6 +517,7 @@ async function purgeScopedCacheDeclaredFingerprints(
 	indexPath: string | null,
 	context: EventContext | null,
 	changedCollections: readonly string[],
+	scanTally: ScopedCacheScanTally,
 ): Promise<number> {
 	const schema = context?.schema ?? null;
 
@@ -550,6 +560,7 @@ async function purgeScopedCacheDeclaredFingerprints(
 			declaredIndexPath,
 			context,
 			[collection, ...changedCollections],
+			scanTally,
 		);
 
 		evicted += sweep.evicted;
@@ -583,12 +594,13 @@ async function purgeScopedCacheIndexWhere(
 	indexedEntries: AsyncGenerator<ScopedCacheIndexedEntry[]>,
 	purges: (fingerprint: ScopedCacheFingerprint) => boolean,
 	indexPath: string | null,
+	scanTally: ScopedCacheScanTally,
 ): Promise<ScopedCachePurgeSweep> {
 	const matched: ScopedCacheIndexedEntry[] = [];
 	const matchedKeys: string[] = [];
 	const seenKeys = new Set<string>();
 
-	for await (const indexedBatch of indexedEntries) {
+	for await (const indexedBatch of timedScanPages(indexedEntries, scanTally)) {
 		for (const indexedEntry of indexedBatch) {
 			if (purges(indexedEntry.fingerprint) === false) {
 				continue;
@@ -617,6 +629,70 @@ async function purgeScopedCacheIndexWhere(
 	await useScopedCacheStore().removeIndexedEntries(matched, indexPath);
 
 	return { evicted, matchedKeys };
+}
+
+/** A purge's scan tally before any arm has read anything. */
+function emptyScopedCacheScanTally(): ScopedCacheScanTally {
+	return {
+		scanArms: new Set(),
+		scannedIndexKeys: 0,
+		scannedMembers: 0,
+		scanMs: 0,
+	};
+}
+
+const SCOPED_CACHE_SCAN_ARM_ORDER: readonly ScopedCacheScanArm[] = [
+	'row',
+	'declared',
+	'collection',
+];
+
+/** What the purge record says its scans read, or null when none ran. */
+function cachePurgeScanOf(scanTally: ScopedCacheScanTally): CachePurgeScan | null {
+	if (scanTally.scanArms.size === 0) {
+		return null;
+	}
+
+	const scanArms = SCOPED_CACHE_SCAN_ARM_ORDER.filter((scanArm) => {
+		return scanTally.scanArms.has(scanArm);
+	});
+
+	return {
+		scanArms: scanArms.join('+'),
+		scannedIndexKeys: scanTally.scannedIndexKeys,
+		scannedMembers: scanTally.scannedMembers,
+		scanMs: scanTally.scanMs,
+	};
+}
+
+/**
+ * The store's pages as they come, adding the time spent waiting on each to the
+ * tally: the Redis round trips, and whatever held the event loop meanwhile.
+ *
+ * Closes the store's generator on the way out, as a `for await` over it would,
+ * so a consumer that throws mid-scan leaves no scan open behind it.
+ */
+export async function* timedScanPages<ScanPage>(
+	scanPages: AsyncGenerator<ScanPage>,
+	scanTally: ScopedCacheScanTally,
+): AsyncGenerator<ScanPage> {
+	try {
+		for (;;) {
+			const startedAt = performance.now();
+			const scanPage = await scanPages.next();
+
+			scanTally.scanMs += performance.now() - startedAt;
+
+			if (scanPage.done === true) {
+				return;
+			}
+
+			yield scanPage.value;
+		}
+	}
+	finally {
+		await scanPages.return(undefined);
+	}
 }
 
 
@@ -769,6 +845,7 @@ export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 async function purgeScopedCacheCollectionIndex(
 	cache: Keyv,
 	collection: string,
+	scanTally: ScopedCacheScanTally,
 ): Promise<{ evicted: number; indexKeys: number }> {
 	const keys: string[] = [];
 	const seenKeys = new Set<string>();
@@ -777,10 +854,15 @@ async function purgeScopedCacheCollectionIndex(
 
 	// Taken rather than read then dropped: a read filing its key in between would
 	// otherwise have its filing deleted underneath it.
-	for await (
-		const taken of useScopedCacheStore().takeCollectionIndexedKeys(collection)
-	) {
+	scanTally.scanArms.add('collection');
+
+	for await (const taken of timedScanPages(
+		useScopedCacheStore().takeCollectionIndexedKeys(collection),
+		scanTally,
+	)) {
 		indexKeys += taken.indexKeys;
+		scanTally.scannedIndexKeys += taken.indexKeys;
+		scanTally.scannedMembers += taken.keys.length;
 
 		for (const sweptKey of taken.sweptKeys) {
 			sweptKeys.push(sweptKey);
@@ -855,10 +937,12 @@ export async function purgeCollectionScopedCache(
 	await bumpScopedCacheEpochs([collection]);
 
 	const startedAt = Date.now();
+	const scanTally = emptyScopedCacheScanTally();
 
 	const { evicted, indexKeys } = await purgeScopedCacheCollectionIndex(
 		cache,
 		collection,
+		scanTally,
 	);
 
 	// The expensive mode, and the one nothing else records: every slice of the
@@ -875,6 +959,7 @@ export async function purgeCollectionScopedCache(
 		durationMs: options.retried === true
 			? null
 			: Date.now() - startedAt,
+		scopedCacheScan: cachePurgeScanOf(scanTally),
 	});
 }
 
@@ -1133,6 +1218,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					scopedCachePinCount: 0,
 					evicted: null,
 					durationMs: null,
+					scopedCacheScan: null,
 				});
 			}
 			else if (target.mode === 'collection') {
@@ -1166,6 +1252,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 				let evicted = 0;
 				const staleKeys: string[] = [];
+				const scanTally = emptyScopedCacheScanTally();
 
 				for (const [declaredCollection, declared] of declaredByCollection) {
 					// No index path: the schema the record was written under is not this
@@ -1177,6 +1264,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						null,
 						null,
 						null,
+						scanTally,
 					);
 
 					evicted += sweep.evicted;
@@ -1230,6 +1318,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 						scopedCachePinCount: declaredPinKeys.length,
 						evicted,
 						durationMs: null,
+						scopedCacheScan: cachePurgeScanOf(scanTally),
 					});
 				}
 			}
@@ -1541,6 +1630,7 @@ export async function purgeScopedCache(
 			scopedCachePinCount: 0,
 			evicted: null,
 			durationMs: Date.now() - startedAt,
+			scopedCacheScan: null,
 		});
 
 		return null;
@@ -1647,6 +1737,8 @@ export async function purgeScopedCache(
 		...purgedByPin,
 	].map(renderScopedCacheFingerprint);
 
+	const scanTally = emptyScopedCacheScanTally();
+
 	const purged = await purgeOrRecord(
 		async () => {
 			const [bound, swept] = await Promise.all([
@@ -1659,6 +1751,7 @@ export async function purgeScopedCache(
 						options.changed ?? null,
 						options.indexPath ?? null,
 						options.includeBareFingerprint !== false,
+						scanTally,
 					),
 				purgeScopedCacheDeclaredFingerprints(
 					cache,
@@ -1667,6 +1760,7 @@ export async function purgeScopedCache(
 					options.indexPath ?? null,
 					context,
 					options.changedCollections ?? [],
+					scanTally,
 				),
 			]);
 
@@ -1698,6 +1792,7 @@ export async function purgeScopedCache(
 		// Awaited inside the mutation, so this time is ADDED to the write's own
 		// latency — a slow purge slows the request that triggered it.
 		durationMs: Date.now() - startedAt,
+		scopedCacheScan: cachePurgeScanOf(scanTally),
 	});
 
 	return purgedScopedCacheFingerprints;
