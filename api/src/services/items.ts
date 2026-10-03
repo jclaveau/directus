@@ -8,6 +8,7 @@ import type {
 	Accountability,
 	ActionEventParams,
 	Alterations,
+	CreateEntry,
 	Item as AnyItem,
 	MutationTracker,
 	MutationOptions,
@@ -16,9 +17,11 @@ import type {
 	QueryOptions,
 	SchemaOverview,
 	ScopedCacheFingerprint,
+	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { getCache } from '../cache.js';
@@ -52,6 +55,7 @@ import {
 	assign,
 	clone,
 	cloneDeep,
+	isEqual,
 	isPlainObject,
 	omit,
 	pick,
@@ -84,6 +88,105 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 		// an un-awaited rejection (e.g. from a bypassEmitAction handler) doesn't go unhandled.
 		emitting.catch(() => {});
 	}
+}
+
+/**
+ * Whether a grouped `items.create` filter answered one entry per row it received,
+ * each a `CreateEntry` or `null`, a `sameRowAs` pointing at an earlier position.
+ */
+function isCreateEntryList(
+	entriesAfterHooks: unknown,
+	rowCount: number,
+): entriesAfterHooks is (CreateEntry | null)[] {
+	if (!Array.isArray(entriesAfterHooks) || entriesAfterHooks.length !== rowCount) {
+		return false;
+	}
+
+	return entriesAfterHooks.every((entry, index) => {
+		if (entry === null) {
+			return true;
+		}
+
+		if (!isPlainObject(entry) || Object.keys(entry).length !== 1) {
+			return false;
+		}
+
+		if ('data' in entry) {
+			return isPlainObject(entry.data);
+		}
+
+		if ('key' in entry) {
+			return isPrimaryKey(entry.key);
+		}
+
+		return 'sameRowAs' in entry
+			&& Number.isInteger(entry.sameRowAs)
+			&& entry.sameRowAs >= 0
+			&& entry.sameRowAs < index;
+	});
+}
+
+/**
+ * Merge the groups carrying the same change, wherever they sit, so one statement
+ * writes them all. A group never joins one written before a later change to one of
+ * its own rows, so two changes to the same row still land in the caller's order.
+ */
+function mergeUpdateGroups<Item extends AnyItem>(
+	candidateGroups: UpdateGroup<Item>[],
+): UpdateGroup<Item>[] {
+	const mergedGroups: UpdateGroup<Item>[] = [];
+	const groupIndexByData = new Map<string, number>();
+	const lastGroupIndexByKey = new Map<string, number>();
+
+	for (const candidateGroup of candidateGroups) {
+		const serializedData = JSON.stringify(candidateGroup.data, (_field, value) => {
+			return typeof value === 'bigint'
+				? value.toString()
+				: value;
+		});
+
+		let latestConflictIndex = -1;
+
+		for (const key of candidateGroup.keys) {
+			latestConflictIndex = Math.max(
+				latestConflictIndex,
+				lastGroupIndexByKey.get(String(key)) ?? -1,
+			);
+		}
+
+		const sameDataIndex = groupIndexByData.get(serializedData);
+		let targetIndex: number;
+
+		if (
+			sameDataIndex !== undefined &&
+			sameDataIndex >= latestConflictIndex &&
+			isEqual(mergedGroups[sameDataIndex]!.data, candidateGroup.data)
+		) {
+			targetIndex = sameDataIndex;
+
+			// A loop, not a spread: one group can carry more keys than a call takes
+			// arguments.
+			for (const key of candidateGroup.keys) {
+				mergedGroups[targetIndex]!.keys.push(key);
+			}
+		}
+		else {
+			targetIndex = mergedGroups.length;
+
+			mergedGroups.push({
+				data: candidateGroup.data,
+				keys: [...candidateGroup.keys],
+			});
+
+			groupIndexByData.set(serializedData, targetIndex);
+		}
+
+		for (const key of candidateGroup.keys) {
+			lastGroupIndexByKey.set(String(key), targetIndex);
+		}
+	}
+
+	return mergedGroups;
 }
 
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
@@ -255,6 +358,14 @@ implements AbstractService<Item> {
 		// it (returns null), in which case that row is never inserted but still occupies its slot.
 		const results: (PrimaryKey | null)[] = new Array(data.length);
 
+		const createEvent = this.eventScope === 'items'
+			? ['items.create', `${this.collection}.items.create`]
+			: `${this.eventScope}.create`;
+
+		const rowEvent = this.eventScope === 'items'
+			? ['items.create.one', `${this.collection}.items.create.one`]
+			: `${this.eventScope}.create.one`;
+
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
 		// An `items.create` hook can declare its own purge via
@@ -291,27 +402,73 @@ implements AbstractService<Item> {
 
 			const prepared: PreparedRow[] = [];
 
-			for (const [index, payloadInput] of data.entries()) {
-				const payload: AnyItem = cloneDeep(payloadInput);
+			// Resolved once every other row has its key.
+			const sameRowPositions: { index: number; sameRowAs: number }[] = [];
 
-				// Run all hooks that are attached to this event so the end user has the chance to augment the
-				// item that is about to be saved
-				const payloadAfterHooks =
-					opts.emitEvents !== false
+			const filterContext = {
+				database: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				scopedCache: scopedCacheHookDeclarations.purge,
+			};
+
+			const entries = data.map((row): CreateEntry<Item> => {
+				return { data: cloneDeep(row) };
+			});
+
+			// Once for the whole create, so a hook sees every row it is about to insert,
+			// stored duplicates and same-request twins alike.
+			const entriesAfterHooks =
+				opts.emitEvents !== false
+					? await emitter.emitFilter<CreateEntry<Item>[], null>(
+						createEvent,
+						entries,
+						{ collection: this.collection },
+						filterContext,
+					)
+					: entries;
+
+			const createEntries = entriesAfterHooks === null
+				? data.map(() => null)
+				: entriesAfterHooks;
+
+			if (!isCreateEntryList(createEntries, data.length)) {
+				throw new InvalidPayloadError({
+					reason: oneLine`
+						A "${this.eventScope}.create" filter hook must return one
+						{ data } | { key } | { sameRowAs } | null per row it received, a
+						sameRowAs pointing at an earlier row; a hook that handles one row
+						belongs on "${this.eventScope}.create.one"
+					`,
+				});
+			}
+
+			for (const [index, entry] of createEntries.entries()) {
+				if (entry !== null && 'sameRowAs' in entry) {
+					sameRowPositions.push({ index, sameRowAs: entry.sameRowAs });
+					continue;
+				}
+
+				let payloadAfterHooks: AnyItem | PrimaryKey | null = null;
+
+				if (entry !== null && 'key' in entry) {
+					payloadAfterHooks = entry.key;
+				}
+				// Then once per row, the seam a hook written for a single item keeps, with
+				// its own takeover and cancel.
+				else if (entry !== null) {
+					const hasRowFilters = opts.emitEvents !== false
+						&& emitter.hasFilterListeners(rowEvent);
+
+					payloadAfterHooks = hasRowFilters
 						? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
-							this.eventScope === 'items'
-								? ['items.create', `${this.collection}.items.create`]
-								: `${this.eventScope}.create`,
-							payload,
+							rowEvent,
+							entry.data,
 							{ collection: this.collection },
-							{
-								database: trx,
-								schema: this.schema,
-								accountability: this.accountability,
-								scopedCache: scopedCacheHookDeclarations.purge,
-							},
+							filterContext,
 						)
-						: payload;
+						: entry.data;
+				}
 
 				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
 					// A filter hook returned a primary key instead of a payload: it has taken over the
@@ -641,6 +798,11 @@ implements AbstractService<Item> {
 				results[p.index] = p.primaryKey;
 			}
 
+			// Ascending, so a position pointing at another `sameRowAs` finds it resolved.
+			for (const { index, sameRowAs } of sameRowPositions) {
+				results[index] = results[sameRowAs]!;
+			}
+
 			return {
 				nestedActionEvents,
 				actionPayloads: postPrepared.map(
@@ -649,29 +811,48 @@ implements AbstractService<Item> {
 			};
 		}, opts.mutationTracker.snapshot());
 
-		if (opts.emitEvents !== false) {
-			const eventName =
-				this.eventScope === 'items'
-					? ['items.create', `${this.collection}.items.create`]
-					: `${this.eventScope}.create`;
+		if (opts.emitEvents !== false && actionPayloads.length > 0) {
+			const actionContext = {
+				database: getDatabase(),
+				schema: this.schema,
+				accountability: this.accountability,
+			};
 
-			const actionEvents: ActionEventParams[] = actionPayloads.map(({ primaryKey, actionHookPayload }) => ({
-				event: eventName,
-				meta: {
-					payload: actionHookPayload,
-					key: primaryKey,
-					collection: this.collection,
-				},
-				context: {
-					database: getDatabase(),
-					schema: this.schema,
-					accountability: this.accountability,
-				},
-			}));
+			const rowActionEvents: ActionEventParams[] = emitter
+				.hasActionListeners(rowEvent)
+				? actionPayloads.map(({ primaryKey, actionHookPayload }) => {
+					return {
+						event: rowEvent,
+						meta: {
+							payload: actionHookPayload,
+							key: primaryKey,
+							collection: this.collection,
+						},
+						context: actionContext,
+					};
+				})
+				: [];
 
 			// Route through emitActionEvents so the create path honours `awaitActionHooks` (#58) and
 			// `bypassEmitAction` (nested mutations), instead of an un-awaited raw emit.
-			await emitActionEvents([...actionEvents, ...nestedActionEvents], opts);
+			await emitActionEvents(
+				[
+					{
+						event: createEvent,
+						meta: {
+							payload: actionPayloads.map(({ actionHookPayload }) => {
+								return actionHookPayload;
+							}),
+							keys: actionPayloads.map(({ primaryKey }) => primaryKey),
+							collection: this.collection,
+						},
+						context: actionContext,
+					},
+					...rowActionEvents,
+					...nestedActionEvents,
+				],
+				opts,
+			);
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
@@ -696,7 +877,11 @@ implements AbstractService<Item> {
 			// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
 			// them stale. Before the key axis the bare fingerprint covered them by
 			// accident.
-			const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
+			// A `sameRowAs` position repeats its row's key; counted twice it would read
+			// as a takeover.
+			const liveKeys = [
+				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
+			];
 
 			const changedKeys = liveKeys.filter((key) => {
 				// A take-over the hook declared inert wrote nothing, so it neither
@@ -990,96 +1175,27 @@ implements AbstractService<Item> {
 			throw new InvalidPayloadError({ reason: 'Input should be an array of items' });
 		}
 
-		if (!opts.mutationTracker) {
-			opts.mutationTracker = this.createMutationTracker();
-		}
-
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
-		const keys: PrimaryKey[] = [];
+		// Each row is its own group: the payloads differ per row, which is
+		// exactly what one `keys`-plus-one-payload update cannot express.
+		return await this.updateGroups(
+			data.map((item): UpdateGroup<Item> => {
+				const primaryKey = item[primaryKeyField];
 
-		// Pre-update scope values for every row this batch touches (old ∪ new on purge,
-		// like updateMany).
-		const batchKeys = data.flatMap((item) => {
-			const key = item[primaryKeyField];
-
-			return isPrimaryKey(key)
-				? [key]
-				: [];
-		});
-
-		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(batchKeys);
-
-		// Hook declarations shared across the forked child updates so an `items.update`
-		// hook's `purgeBy` survives to the single deferred purge below (children run
-		// with autoPurgeCache off, so their own drain is suppressed).
-		const scopedCacheHookDeclarations =
-			createScopedCacheHookDeclarations(this.schema);
-
-		try {
-			await transaction(this.knex, async (knex) => {
-				const service = this.fork({ knex });
-
-				let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
-
-				for (const item of data) {
-					const primaryKey = item[primaryKeyField];
-
-					if (!primaryKey) {
-						throw new InvalidPayloadError({
-							reason: `Item in update misses primary key`,
-						});
-					}
-
-					const combinedOpts: MutationOptions = {
-						...opts,
-						autoPurgeCache: false,
-						scopedCacheHookDeclarations,
-						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-					};
-
-					keys.push(await service.updateOne(primaryKey, omit(item, primaryKeyField), combinedOpts));
+				if (!primaryKey) {
+					throw new InvalidPayloadError({
+						reason: `Item in update misses primary key`,
+					});
 				}
 
-				if (userIntegrityCheckFlags) {
-					if (opts.onRequireUserIntegrityCheck) {
-						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-					}
-					else {
-						await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex });
-					}
-				}
-			}, opts.mutationTracker.snapshot());
-		}
-		finally {
-			if (shouldClearCache(this.cache, opts, this.collection)) {
-				// Per-item hooks can rewrite scope fields inside each forked updateOne, so
-				// the raw `data` may not be what's stored. Re-snapshot the now-committed
-				// rows for the new values (old ∪ new). Committed only when THIS call owns
-				// the transaction: invoked from a hook it shares the caller's, so the
-				// purge below lands pre-commit —
-				// https://github.com/jclaveau/directus/issues/363
-				const newScopedCacheSnapshot = await this.scopedCache.snapshot(batchKeys);
-
-				this.scopedCachePurged = await this.scopedCache.purge(
-					scopedCacheMutatedFingerprints(
-						oldScopedCacheSnapshot,
-						newScopedCacheSnapshot,
-					),
-					scopedCacheHookDeclarations,
-					[],
-					{
-						includeBareFingerprint: opts.purgeBareFingerprint !== false,
-						rows: scopedCacheUpdatedRows(
-							oldScopedCacheSnapshot,
-							newScopedCacheSnapshot,
-						),
-					},
-				);
-			}
-		}
-
-		return keys;
+				return {
+					data: omit(item, primaryKeyField) as Partial<Item>,
+					keys: [primaryKey as PrimaryKey],
+				};
+			}),
+			opts,
+		);
 	}
 
 	/**
@@ -1092,103 +1208,31 @@ implements AbstractService<Item> {
 	): Promise<(PrimaryKey | null)[]>;
 
 	async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]>;
+
 	async updateMany(
 		keys: PrimaryKey[],
 		data: Partial<Item>,
 		opts: MutationOptions = {},
 	): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) {
-			opts.mutationTracker = this.createMutationTracker();
-		}
+		return await this.updateGroups(
+			[{ data, keys }],
+			opts as MutationOptions & { allowFilterCancel: true },
+		);
+	}
 
-		if (!opts.bypassLimits) {
-			opts.mutationTracker.trackMutations(keys.length);
-		}
-
-		const { ActivityService } = await import('./activity.js');
-		const { RevisionsService } = await import('./revisions.js');
-
+	/**
+	 * Whether a group would write nothing: an empty payload, a primary-key-only one,
+	 * or one whose every field is an alterations object carrying no item. Decided
+	 * before the transaction opens, so a no-op update costs no round trip.
+	 */
+	private groupChangesNothing(group: UpdateGroup<Item>, aliases: string[]): boolean {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		validateKeys(this.schema, this.collection, primaryKeyField, keys);
-
-		// Snapshot the scope values these rows hold before the update so an update that
-		// moves a row to a new scope value purges both slices (old ∪ new). Empty when the
-		// collection isn't scoped.
-		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(keys);
-
-		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
-
-		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
-			.filter((field) => field.alias === true)
-			.map((field) => field.field);
-
-		const payload: Partial<AnyItem> = cloneDeep(data);
-		const nestedActionEvents: ActionEventParams[] = [];
-
-		// An `items.update` hook can add purge fingerprints via
-		// `context.scopedCache.purgeBy`;
-		// drained into the purge below.
-		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
-			?? createScopedCacheHookDeclarations(this.schema);
-
-		// Run all hooks that are attached to this event so the end user has the chance to augment the
-		// item that is about to be saved
-		const payloadAfterHooks =
-			opts.emitEvents !== false
-				? await emitter.emitFilter<Partial<AnyItem>, null>(
-					this.eventScope === 'items'
-						? ['items.update', `${this.collection}.items.update`]
-						: `${this.eventScope}.update`,
-					payload,
-					{
-						keys,
-						collection: this.collection,
-					},
-					{
-						database: this.knex,
-						schema: this.schema,
-						accountability: this.accountability,
-						scopedCache: scopedCacheHookDeclarations.purge,
-					},
-				)
-				: payload;
-
-		if (payloadAfterHooks === null) {
-			if (!opts.allowFilterCancel) {
-				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
-				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
-				// option; on its own a null payload is invalid rather than a silent no-op.
-				throw new InvalidPayloadError({
-					reason: `A filter hook cancelled the update, but this operation requires it`,
-				});
-			}
-
-			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op (the
-			// guard keeps empty declarations from reaching the purge). The cancel purges
-			// only the declared fingerprints — `includeBareFingerprint: false` leaves
-			// this collection's own bare one warm, nothing changed; a declared value
-			// pin still reaches the global reads of the collection it names.
-			if (
-				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
-				shouldClearCache(this.cache, opts, this.collection)
-			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
-					[],
-					scopedCacheHookDeclarations,
-					[],
-					{ includeBareFingerprint: false },
-				);
-			}
-
-			// The filter cancelled the update: nothing is written; return a null per key
-			// so the result stays index-aligned with the input keys.
-			return keys.map(() => null);
-		}
+		const payloadAfterHooks = group.data as Partial<AnyItem>;
 
 		const isEmptyAlterations = (value: unknown): boolean => {
-			// A bare `[]` is not empty here: for o2m it removes every existing child (see processO2M),
-			// so only the `{ create, update, delete }` object form can count as no change.
+			// A bare `[]` is not empty here: for o2m it removes every existing
+			// child (see processO2M), so only the `{ create, update, delete }`
+			// object form can count as no change.
 			if (!isPlainObject(value)) {
 				return false;
 			}
@@ -1196,11 +1240,9 @@ implements AbstractService<Item> {
 			const alterations = value as Partial<Alterations>;
 
 			// Guard against a JSON column that merely looks like an alterations object.
-			const isNotAlterationsShaped = Object.keys(alterations).some(
+			if (Object.keys(alterations).some(
 				(key) => !ALTERATIONS_KEYS.includes(key as keyof Alterations),
-			);
-
-			if (isNotAlterationsShaped) {
+			)) {
 				return false;
 			}
 
@@ -1220,31 +1262,397 @@ implements AbstractService<Item> {
 			return false;
 		};
 
-		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => !changesNothing(field));
+		// Nothing to write: no transaction, no activity or revision rows, and no
+		// integrity check.
+		return Object.keys(payloadAfterHooks ?? {}).every(changesNothing);
+	}
 
-		if (changedFields.length === 0) {
-			// A hook declared a purge for this update; the declaration stands even though
-			// nothing changes, so drain it here as the cancel path does.
-			if (
-				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
-				shouldClearCache(this.cache, opts, this.collection)
-			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
-					[],
-					scopedCacheHookDeclarations,
-					[],
-					{ includeBareFingerprint: false },
-				);
-			}
+	async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
 
-			// An empty payload, a PK-only update, or a filter hook that cleared every field to an
-			// empty alterations object leaves nothing to change — skip the transaction,
-			// activity/revision rows and integrity checks.
-			return [];
+	async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]>;
+
+	/**
+	 * Update rows in groups, each group one change applied to the keys it names.
+	 *
+	 * Every update entrypoint funnels through here so the `items.update` events fire
+	 * once for the whole update, carrying every group, rather than once per row.
+	 */
+	async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions = {},
+	): Promise<(PrimaryKey | null)[]> {
+		// Captured, so the transaction callback below still sees it set.
+		const mutationTracker = opts.mutationTracker ?? this.createMutationTracker();
+
+		opts.mutationTracker = mutationTracker;
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const inputKeys = groups.flatMap((group) => group.keys);
+
+		// Checked before any hook runs, so a malformed or oversized update never
+		// reaches one.
+		if (!opts.bypassLimits) {
+			mutationTracker.trackMutations(inputKeys.length);
 		}
 
-		// Sort keys to ensure that the order is maintained
-		keys.sort();
+		validateKeys(this.schema, this.collection, primaryKeyField, inputKeys);
+
+		const updateEvent = this.eventScope === 'items'
+			? ['items.update', `${this.collection}.items.update`]
+			: `${this.eventScope}.update`;
+
+		const rowEvent = this.eventScope === 'items'
+			? ['items.update.one', `${this.collection}.items.update.one`]
+			: `${this.eventScope}.update.one`;
+
+		const eventContext = {
+			database: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		};
+
+		// An `items.update` hook can add purge fingerprints via
+		// `context.scopedCache.purgeBy`;
+		// drained into the purge below.
+		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+			?? createScopedCacheHookDeclarations(this.schema);
+
+		// Run all hooks that are attached to this event so the end user has the chance to augment the
+		// items that are about to be saved
+		const payload = groups.map((group) => {
+			return { data: cloneDeep(group.data), keys: [...group.keys] };
+		});
+
+		const groupsAfterHooks =
+			opts.emitEvents !== false
+				? await emitter.emitFilter<UpdateGroup<Item>[], null>(
+					updateEvent,
+					payload,
+					{
+						collection: this.collection,
+					},
+					{
+						...eventContext,
+						scopedCache: scopedCacheHookDeclarations.purge,
+					},
+				)
+				: payload;
+
+		if (groupsAfterHooks === null) {
+			if (!opts.allowFilterCancel) {
+				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
+				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
+				// option; on its own a null payload is invalid rather than a silent no-op.
+				throw new InvalidPayloadError({
+					reason: `A filter hook cancelled the update, but this operation requires it`,
+				});
+			}
+
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+
+			// The filter cancelled the update: nothing is written; return a null per key
+			// so the result stays index-aligned with the input keys.
+			return inputKeys.map(() => null);
+		}
+
+		// A hook written before the event carried groups returns one payload, which
+		// would otherwise reach the write as a list of nothing.
+		const isGroupList = Array.isArray(groupsAfterHooks) && groupsAfterHooks.every(
+			(group) => isPlainObject(group?.data) && Array.isArray(group?.keys),
+		);
+
+		if (!isGroupList) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.update" filter hook must return the
+					{ data, keys }[] it received; a hook that handles one row belongs on
+					"${this.eventScope}.update.one"
+				`,
+			});
+		}
+
+		const keys = groupsAfterHooks.flatMap((group) => group.keys);
+
+		// Keys a hook added are counted and validated like the caller's own.
+		if (!opts.bypassLimits && keys.length > inputKeys.length) {
+			mutationTracker.trackMutations(keys.length - inputKeys.length);
+		}
+
+		validateKeys(this.schema, this.collection, primaryKeyField, keys);
+
+		// One entry per row, in the caller's order: its key, or null for a row a
+		// per-row hook cancelled. This is what the update returns.
+		let rowKeys: (PrimaryKey | null)[] = [];
+		let candidateGroups: UpdateGroup<Item>[] = [];
+
+		// Then once per row, so a hook that only ever handled a single item keeps a seam
+		// that fires exactly once per row — which the group event, by design, does not.
+		// With nothing listening, the per-row copies would be built for nobody.
+		if (opts.emitEvents !== false && emitter.hasFilterListeners(rowEvent)) {
+			for (const group of groupsAfterHooks) {
+				for (const key of group.keys) {
+					const rowAfterHooks = await emitter.emitFilter<Partial<AnyItem>, null>(
+						rowEvent,
+						{
+							[primaryKeyField]: key,
+							...cloneDeep(group.data),
+						} as Partial<AnyItem>,
+						{
+							collection: this.collection,
+						},
+						{
+							...eventContext,
+							scopedCache: scopedCacheHookDeclarations.purge,
+						},
+					);
+
+					if (rowAfterHooks === null) {
+						if (!opts.allowFilterCancel) {
+							throw new InvalidPayloadError({
+								reason: oneLine`
+									A filter hook cancelled a row of the update, but this operation
+									requires it
+								`,
+							});
+						}
+
+						rowKeys.push(null);
+						continue;
+					}
+
+					if (!isPlainObject(rowAfterHooks)) {
+						throw new InvalidPayloadError({
+							reason: oneLine`
+								A "${this.eventScope}.update.one" filter hook must return the row
+								it received, or null to cancel it
+							`,
+						});
+					}
+
+					rowKeys.push(key);
+
+					candidateGroups.push({
+						data: omit(rowAfterHooks, primaryKeyField) as Partial<Item>,
+						keys: [key],
+					});
+				}
+			}
+		}
+		else {
+			rowKeys = keys;
+			candidateGroups = groupsAfterHooks;
+		}
+
+		const mergedGroups = mergeUpdateGroups(candidateGroups);
+
+		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
+			.filter((field) => field.alias === true)
+			.map((field) => field.field);
+
+		const writingGroups = mergedGroups.filter((group) => {
+			return !this.groupChangesNothing(group, aliases);
+		});
+
+		// Snapshot the scope values these rows hold before the update so an update that
+		// moves a row to a new scope value purges both slices (old ∪ new).
+		// Empty when the collection isn't scoped.
+		const writtenKeys = writingGroups.flatMap((group) => group.keys);
+		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
+
+		if (writingGroups.length === 0) {
+			// Nothing is written — every group was a no-op, or the per-row filter
+			// cancelled every row.
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+
+			return rowKeys;
+		}
+
+		// One transaction around every group, so a failure anywhere rolls the whole
+		// update back and the integrity check below sees the finished state once
+		// rather than once per group. The arrays are per attempt: sqlite and
+		// cockroach re-run the handler after a retryable error.
+		const { applied, nestedActionEvents } = await transaction(
+			this.knex,
+			async (trx) => {
+				const service = this.fork({ knex: trx });
+				const applied: UpdateGroup<Item>[] = [];
+				const nestedActionEvents: ActionEventParams[] = [];
+
+				let userIntegrityCheckFlags =
+					opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
+
+				for (const group of writingGroups) {
+					const result = await service.applyUpdateGroup(
+						group,
+						aliases,
+						{
+							...opts,
+							mutationTracker,
+							onRequireUserIntegrityCheck: (flags) => {
+								userIntegrityCheckFlags |= flags;
+							},
+						},
+						nestedActionEvents,
+					);
+
+					applied.push(result as UpdateGroup<Item>);
+				}
+
+				if (userIntegrityCheckFlags) {
+					if (opts.onRequireUserIntegrityCheck) {
+						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+					}
+					else {
+						await validateUserCountIntegrity({
+							flags: userIntegrityCheckFlags,
+							knex: trx,
+						});
+					}
+				}
+
+				return { applied, nestedActionEvents };
+			},
+			mutationTracker.snapshot(),
+		).catch(async (error) => {
+			// A hook may have written out of band before the update threw.
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+
+			throw error;
+		});
+
+		if (shouldClearCache(this.cache, opts, this.collection)) {
+			// Old slices from the pre-update snapshot, plus the new value re-read from the
+			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
+			// type coercion can rewrite the scope column on write, so the stored row is
+			// authoritative, the payload isn't (same rule as createMany). "Committed"
+			// holds only when this call owns the transaction; from a hook it shares the
+			// caller's and this purge runs pre-commit —
+			// https://github.com/jclaveau/directus/issues/363
+			const newScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
+
+			this.scopedCachePurged = await this.scopedCache.purge(
+				scopedCacheMutatedFingerprints(
+					oldScopedCacheSnapshot,
+					newScopedCacheSnapshot,
+				),
+				scopedCacheHookDeclarations,
+				[],
+				{
+					includeBareFingerprint: opts.purgeBareFingerprint !== false,
+					rows: scopedCacheUpdatedRows(
+						oldScopedCacheSnapshot,
+						newScopedCacheSnapshot,
+					),
+				},
+			);
+		}
+
+		if (opts.emitEvents !== false) {
+			const actionContext = {
+				database: getDatabase(),
+				schema: this.schema,
+				accountability: this.accountability,
+			};
+
+			// One per written row, after the grouped event, so a per-row consumer sees
+			// exactly the rows that were written. Rows a per-row filter cancelled never
+			// reach here. `emitActionEvents` starts them together, so they are not
+			// ordered against the grouped event.
+			const rowActionEvents = emitter.hasActionListeners(rowEvent)
+				? applied.flatMap((group) => {
+					return group.keys.map((key) => {
+						return {
+							event: rowEvent,
+							meta: {
+								payload: { [primaryKeyField]: key, ...group.data },
+								collection: this.collection,
+							},
+							context: actionContext,
+						};
+					});
+				})
+				: [];
+
+			await emitActionEvents(
+				[
+					{
+						event: updateEvent,
+						meta: {
+							payload: applied,
+							collection: this.collection,
+						},
+						context: actionContext,
+					},
+					...rowActionEvents,
+					...nestedActionEvents,
+				],
+				opts,
+			);
+		}
+
+		// Every row the caller sent, in its order — a row whose change turned out to be
+		// a no-op included. The REST layer reads these keys back to build the response
+		// body, so dropping a no-op row would omit an item the caller named from its
+		// own PATCH response.
+		return rowKeys;
+	}
+
+	/**
+	 * Purge only what a hook declared via `purgeBy`, for an update that wrote
+	 * nothing of its own: a cancel, a no-op, or a failure. A cancel or a failure can
+	 * follow a hook's out-of-band write, so the declaration stands, while
+	 * `includeBareFingerprint: false` leaves this collection's own bare fingerprint
+	 * warm. A plain no-op declares nothing and so purges nothing.
+	 */
+	private async purgeDeclaredScopedCache(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (
+			declarations.purgeFingerprints.length === 0 ||
+			!shouldClearCache(this.cache, opts, this.collection)
+		) {
+			return;
+		}
+
+		this.scopedCachePurged = await this.scopedCache.purge(
+			[],
+			declarations,
+			[],
+			{ includeBareFingerprint: false },
+		);
+	}
+
+	/**
+	 * Apply one group's change to the rows it names, in its own transaction.
+	 *
+	 * The `items.update` events belong to the whole update and are emitted by
+	 * `updateGroups` around the loop, never here. Returns what was written: the
+	 * payload after presets, and the keys it reached. A group that changes nothing
+	 * never gets here — `updateGroups` filters those out before the transaction.
+	 */
+	private async applyUpdateGroup(
+		group: UpdateGroup<Item>,
+		aliases: string[],
+		opts: MutationOptions & { mutationTracker: MutationTracker },
+		nestedActionEvents: ActionEventParams[],
+	): Promise<UpdateGroup<Item>> {
+		const { ActivityService } = await import('./activity.js');
+		const { RevisionsService } = await import('./revisions.js');
+
+		// Sorted for the work below only. `group.keys` stays in the caller's row order,
+		// which is what `updateGroups` returns and what the per-row action events walk.
+		const keys = [...group.keys].sort();
+		const payloadAfterHooks = group.data as Partial<AnyItem>;
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
 		if (this.accountability) {
 			await validateAccess(
@@ -1313,7 +1721,7 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, data, this.knex, {
+					throw await translateDatabaseError(err, payloadAfterHooks, this.knex, {
 						collection: this.collection,
 						operation: 'update',
 					});
@@ -1443,55 +1851,7 @@ implements AbstractService<Item> {
 			}
 		}, opts.mutationTracker.snapshot());
 
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Old slices from the pre-update snapshot, plus the new value re-read from the
-			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
-			// type coercion can rewrite the scope column on write, so the stored row is
-			// authoritative, the payload isn't (same rule as createMany). "Committed"
-			// holds only when this call owns the transaction; from a hook it shares the
-			// caller's and this purge runs pre-commit —
-			// https://github.com/jclaveau/directus/issues/363
-			const newScopedCacheSnapshot = await this.scopedCache.snapshot(keys);
-
-			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheMutatedFingerprints(
-					oldScopedCacheSnapshot,
-					newScopedCacheSnapshot,
-				),
-				scopedCacheHookDeclarations,
-				[],
-				{
-					includeBareFingerprint: opts.purgeBareFingerprint !== false,
-					rows: scopedCacheUpdatedRows(
-						oldScopedCacheSnapshot,
-						newScopedCacheSnapshot,
-					),
-				},
-			);
-		}
-
-		if (opts.emitEvents !== false) {
-			const actionEvent = {
-				event:
-					this.eventScope === 'items'
-						? ['items.update', `${this.collection}.items.update`]
-						: `${this.eventScope}.update`,
-				meta: {
-					payload: payloadWithPresets,
-					keys,
-					collection: this.collection,
-				},
-				context: {
-					database: getDatabase(),
-					schema: this.schema,
-					accountability: this.accountability,
-				},
-			};
-
-			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
-		}
-
-		return keys;
+		return { data: payloadWithPresets, keys: group.keys };
 	}
 
 	/**

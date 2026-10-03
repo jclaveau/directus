@@ -628,7 +628,7 @@ describe(oneLine`
 		tracker.on.select('test').response([{ id: 1, student: 'B' }]);
 
 		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
-		emitter.onFilter('test.items.create', rewrite);
+		emitter.onFilter('test.items.create.one', rewrite);
 
 		try {
 			await service().createOne({ name: 'x', student: 'A' });
@@ -647,7 +647,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create', rewrite);
+			emitter.offFilter('test.items.create.one', rewrite);
 		}
 	});
 
@@ -712,7 +712,7 @@ describe(oneLine`
 		// between slices (an upsert), and createMany has no old∪new snapshot → the old
 		// slice would leak. So without a declaration the purge is coarse (null).
 		const takeOver = async () => 99;
-		emitter.onFilter('test.items.create', takeOver);
+		emitter.onFilter('test.items.create.one', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -726,7 +726,7 @@ describe(oneLine`
 		);
 		}
 		finally {
-			emitter.offFilter('test.items.create', takeOver);
+			emitter.offFilter('test.items.create.one', takeOver);
 		}
 	});
 
@@ -740,7 +740,7 @@ describe(oneLine`
 			return 99;
 		};
 
-		emitter.onFilter('test.items.create', takeOver);
+		emitter.onFilter('test.items.create.one', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -748,7 +748,7 @@ describe(oneLine`
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		}
 		finally {
-			emitter.offFilter('test.items.create', takeOver);
+			emitter.offFilter('test.items.create.one', takeOver);
 		}
 	});
 
@@ -767,7 +767,7 @@ describe(oneLine`
 			return 99;
 		};
 
-		emitter.onFilter('test.items.create', takeOverDuplicate);
+		emitter.onFilter('test.items.create.one', takeOverDuplicate);
 
 		try {
 			await service().createMany([
@@ -792,7 +792,45 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create', takeOverDuplicate);
+			emitter.offFilter('test.items.create.one', takeOverDuplicate);
+		}
+	});
+
+	it(oneLine`
+		a row pointed sameRowAs an earlier one still purges the created row's slice
+	`, async () => {
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+		const collapseTwin = async (entries: any) => {
+			return [entries[0], { sameRowAs: 0 }];
+		};
+
+		emitter.onFilter('test.items.create', collapseTwin);
+
+		try {
+			const keys = await service().createMany([
+				{ name: 'x', student: 'A' },
+				{ name: 'x', student: 'A' },
+			]);
+
+			expect(keys).toEqual([1, 1]);
+
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+				],
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create', collapseTwin);
 		}
 	});
 
@@ -806,7 +844,14 @@ describe(oneLine`
 		tracker.on.select('test').responseOnce([{ id: 1, student: 'C' }]);
 		tracker.on.update('test').response(1);
 
-		const rewrite = async (payload: any) => ({ ...payload, student: 'C' });
+		// The event now carries a group per change, so a rewriting hook maps over
+		// them rather than spreading a single payload.
+		const rewrite = async (groups: any) => {
+			return groups.map((group: any) => {
+				return { ...group, data: { ...group.data, student: 'C' } };
+			});
+		};
+
 		emitter.onFilter('test.items.update', rewrite);
 
 		try {
@@ -1271,7 +1316,7 @@ describe(oneLine`
 				return payload;
 			};
 
-			emitter.onFilter('test.items.create', declare);
+			emitter.onFilter('test.items.create.one', declare);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1295,7 +1340,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', declare);
+				emitter.offFilter('test.items.create.one', declare);
 			}
 		});
 
@@ -1451,7 +1496,7 @@ describe(oneLine`
 				return 99;
 			};
 
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1483,7 +1528,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 
@@ -1534,6 +1579,97 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', declareThenCancel);
+			}
+		});
+
+		it(oneLine`
+			a per-row cancel that declared its slice purges it too — cancelling every row
+			leaves nothing written, but the declaration still stands
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			// The grouped filter passes the update through; the per-row one declares a
+			// slice and then cancels its row. With the only row gone there is nothing to
+			// write, so the drain that runs on the written path never fires — the cancel
+			// path has to honour the declaration itself.
+			const declareThenCancelRow = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return null;
+			};
+
+			emitter.onFilter('test.items.update.one', declareThenCancelRow);
+
+			try {
+				await service().updateMany([1], { student: 'B' }, {
+					allowFilterCancel: true,
+				});
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update.one', declareThenCancelRow);
+			}
+		});
+
+		it(oneLine`
+			an update that fails still purges the slice a hook declared — the hook may
+			have written out of band before the update threw
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').simulateError('boom');
+
+			const declareSlice = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('test.items.update', declareSlice);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' })).rejects.toThrow();
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declareSlice);
 			}
 		});
 
@@ -1678,7 +1814,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async () => 99; // takes over a row, declares nothing new
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 
 			try {
 				await service().createMany(
@@ -1708,7 +1844,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 	});
@@ -1799,7 +1935,7 @@ describe(oneLine`
 				return 99;
 			};
 
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 			tracker.on.update('test').response(1);
 
 			try {
@@ -1814,7 +1950,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 
@@ -1831,7 +1967,7 @@ describe(oneLine`
 				return 99;
 			};
 
-			emitter.onFilter('test.items.create', takeOver);
+			emitter.onFilter('test.items.create.one', takeOver);
 
 			try {
 				await unscopedService().createMany([{ name: 'x' }]);
@@ -1855,7 +1991,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', takeOver);
+				emitter.offFilter('test.items.create.one', takeOver);
 			}
 		});
 	});

@@ -245,7 +245,7 @@ export async function readAllSharedSettings(): Promise<
  *
  * Through the settings singleton rather than a knex update: that is what writes
  * the revision answering who moved a threshold and when, and what fires the
- * `settings.update` action the announcement below rides on.
+ * `settings.update.one` action the announcement below rides on.
  */
 export async function writeSharedSettings(
 	column: SharedSettingsColumn,
@@ -305,7 +305,7 @@ export function onSharedSettingsChanged(
 export async function initSharedSettings(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
 
-	for (const event of ['settings.create', 'settings.update']) {
+	for (const event of ['settings.create.one', 'settings.update.one']) {
 		emitter.onAction(event, ({ payload }) => {
 			if (!payload) {
 				return;
@@ -325,7 +325,7 @@ export async function initSharedSettings(): Promise<void> {
 /**
  * Tell the other nodes `column` changed, so they re-read it.
  *
- * A write made inside a caller's transaction fires its `settings.update` action
+ * A write made inside a caller's transaction fires its `settings.update.one` action
  * before that transaction commits, and a node re-reading on that announcement
  * reads the row it replaces. Such a caller announces again once committed.
  */

@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { afterAll, beforeAll, expect, test, vi, type MockInstance } from 'vitest';
 import { stall } from './stall.js';
 
