@@ -1698,6 +1698,7 @@ async function* scanScopedCacheIndexKeys(
  */
 async function* readScopedCacheIndexSets(
 	indexKeys: readonly string[],
+	scanTally?: ScopedCacheScanTally,
 ): AsyncGenerator<ScopedCacheIndexedEntry[]> {
 	const redis = useScriptedRedis();
 	const largestWholeSet = scopedCacheIndexScanCount();
@@ -1724,9 +1725,15 @@ async function* readScopedCacheIndexSets(
 			for (const [setRead, members] of readSets.entries()) {
 				const indexKey = unreadKeys[setRead]!;
 
+				// A paged set is counted by the scan it is handed to.
 				if (typeof members === 'number') {
 					pagedKeys.push(indexKey);
 					continue;
+				}
+
+				if (scanTally !== undefined) {
+					scanTally.scannedIndexKeys += 1;
+					scanTally.scannedMembers += members.length;
 				}
 
 				for (const member of members) {
@@ -1751,7 +1758,7 @@ async function* readScopedCacheIndexSets(
 		}
 	}
 
-	yield* scanScopedCacheIndexKeys(pagedKeys);
+	yield* scanScopedCacheIndexKeys(pagedKeys, scanTally);
 }
 
 /**
@@ -2010,7 +2017,7 @@ const redisStore: ScopedCacheStore = {
 				collection,
 				scopedCacheHomePinIndexGlob(collection),
 			)) {
-				yield* readScopedCacheIndexSets(homePinKeys);
+				yield* readScopedCacheIndexSets(homePinKeys, scanTally);
 			}
 
 			return;
@@ -2026,7 +2033,7 @@ const redisStore: ScopedCacheStore = {
 		scanTally?.scanArms.add('collection');
 
 		for await (const indexKeys of scanCollectionIndexKeyNames(collection)) {
-			yield* readScopedCacheIndexSets(indexKeys);
+			yield* readScopedCacheIndexSets(indexKeys, scanTally);
 		}
 	},
 

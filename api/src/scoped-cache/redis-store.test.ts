@@ -2988,6 +2988,7 @@ describe('the scan tally', () => {
 		for (const command of [
 			scan,
 			sscan,
+			scopedCacheIndexSetsRead,
 			scopedCacheCollectionIndexKeysPrune,
 			mget,
 		]) {
@@ -3038,8 +3039,9 @@ describe('the scan tally', () => {
 			.mockResolvedValueOnce([
 				'0',
 				['scalabus:scoped-cache-index:fingerprint:slot:pin:id=7'],
-			])
-			.mockResolvedValueOnce(['0', ['slot:&id=,7,&|key-home']]);
+			]);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([['slot:&id=,7,&|key-home']]);
 
 		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
 			'scalabus:scoped-cache-index:fingerprint:slot:pin:id=7',
@@ -3073,15 +3075,17 @@ describe('the scan tally', () => {
 	`, async () => {
 		mget.mockResolvedValueOnce(['7', '7']);
 
-		sscan
-			.mockResolvedValueOnce([
-				'0',
-				[
-					'scalabus:scoped-cache-index:fingerprint:slot:',
-					'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
-				],
-			])
-			.mockResolvedValueOnce(['0', ['slot:&|key-a', 'slot:&|key-a__pins']]);
+		sscan.mockResolvedValueOnce([
+			'0',
+			[
+				'scalabus:scoped-cache-index:fingerprint:slot:',
+				'scalabus:scoped-cache-index:fingerprint:slot:owner=gone',
+			],
+		]);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([
+			['slot:&|key-a', 'slot:&|key-a__pins'],
+		]);
 
 		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
 			'scalabus:scoped-cache-index:fingerprint:slot:',
@@ -3115,16 +3119,17 @@ describe('the scan tally', () => {
 	`, async () => {
 		mget.mockResolvedValueOnce(['7', '7']);
 
-		// 101 sets: one round of 100, then one of 1 the reader never asks for.
-		const indexKeys = Array.from({ length: 101 }, (_unused, setAt) => {
+		// 501 sets: one round of 500, then one of 1 the reader never asks for.
+		const indexKeys = Array.from({ length: 501 }, (_unused, setAt) => {
 			return `scalabus:scoped-cache-index:fingerprint:slot:owner=${setAt}`;
 		});
 
-		sscan
-			.mockResolvedValueOnce(['0', indexKeys])
-			.mockResolvedValue(['0', []]);
-
+		sscan.mockResolvedValueOnce(['0', indexKeys]);
 		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce(indexKeys);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce(
+			Array.from({ length: 500 }, () => []),
+		);
 
 		const scanTally = {
 			scanArms: new Set(),
@@ -3142,8 +3147,57 @@ describe('the scan tally', () => {
 
 		expect(scanTally).toEqual({
 			scanArms: new Set(['collection']),
-			scannedIndexKeys: 100,
+			scannedIndexKeys: 500,
 			scannedMembers: 0,
+			scanMs: 0,
+		});
+	});
+
+	it(oneLine`
+		counts a set too large to read whole once, as the scan it is handed to
+		reads it
+	`, async () => {
+		mget.mockResolvedValueOnce(['7', '7']);
+
+		sscan
+			.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:scoped-cache-index:fingerprint:slot:owner=small',
+					'scalabus:scoped-cache-index:fingerprint:slot:owner=big',
+				],
+			])
+			.mockResolvedValueOnce([
+				'0',
+				['slot:&owner=,big,&|key-big', 'slot:&owner=,big,&|key-big__pins'],
+			]);
+
+		scopedCacheCollectionIndexKeysPrune.mockResolvedValueOnce([
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=small',
+			'scalabus:scoped-cache-index:fingerprint:slot:owner=big',
+		]);
+
+		scopedCacheIndexSetsRead.mockResolvedValueOnce([
+			['slot:&owner=,small,&|key-small'],
+			0,
+		]);
+
+		const scanTally = {
+			scanArms: new Set(),
+			scannedIndexKeys: 0,
+			scannedMembers: 0,
+			scanMs: 0,
+		} as ScopedCacheScanTally;
+
+		for await (const _page of redisScopedCacheStore().scanCollectionIndexedEntries(
+			'slot',
+			scanTally,
+		)) { /* drained */ }
+
+		expect(scanTally).toEqual({
+			scanArms: new Set(['collection']),
+			scannedIndexKeys: 2,
+			scannedMembers: 3,
 			scanMs: 0,
 		});
 	});
