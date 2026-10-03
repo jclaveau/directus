@@ -81,7 +81,18 @@ export function addJoin({ path, collection, aliasMap, rootQuery, schema, knex }:
 			: aliasMap[pathParts[0]!]?.alias;
 
 		if (!existingAlias) {
-			const alias = generateAlias();
+			// Two joins sharing an alias fail with
+			// "table name specified more than once" (42712)
+			let alias = generateAlias();
+
+			while (
+				Object.values(aliasMap)
+					.map((aliasEntry) => aliasEntry.alias)
+					.includes(alias)
+			) {
+				alias = generateAlias();
+			}
+
 			const aliasKey = parentFields ? `${parentFields}.${pathParts[0]}` : pathParts[0]!;
 			const aliasedParentCollection = aliasMap[parentFields ?? '']?.alias || parentCollection;
 
