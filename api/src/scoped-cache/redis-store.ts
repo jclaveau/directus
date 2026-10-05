@@ -1612,11 +1612,9 @@ interface ScopedCacheMemberLocation {
  *
  * A round's sets are sent together: ioredis writes each command as it is issued,
  * so the round costs one round trip, and a refused one rejects the round the way
- * a single `SSCAN` did. A member met twice within a round — one entry filed
- * under two of the sets read — is answered once. Only within a round: a scan
- * remembering every member it met would hold the whole of a large set, which
- * the paging exists to avoid, and a member answered again costs a repeated
- * delete, which the purge counts once.
+ * a single `SSCAN` did. A member filed under two of the sets read is answered
+ * once per set: each answer names the set the purge prunes it from, and the
+ * purge counts the key once.
  */
 async function* scanScopedCacheIndexKeys(
 	indexKeys: readonly string[],
@@ -1655,7 +1653,6 @@ async function* scanScopedCacheIndexKeys(
 
 			const entries: ScopedCacheIndexedEntry[] = [];
 			const unfinishedScans: typeof pendingScans = [];
-			const scannedMembers = new Set<string>();
 
 			for (const [replyAt, [next, members]] of scanReplies.entries()) {
 				const { indexKey } = pendingScans[replyAt]!;
@@ -1669,12 +1666,6 @@ async function* scanScopedCacheIndexKeys(
 				}
 
 				for (const member of members) {
-					if (scannedMembers.has(member)) {
-						continue;
-					}
-
-					scannedMembers.add(member);
-
 					const { fingerprint, key } = parseScopedCacheIndexMember(member);
 
 					entries.push({
@@ -1720,7 +1711,6 @@ async function* readScopedCacheIndexSets(
 			);
 
 			const entries: ScopedCacheIndexedEntry[] = [];
-			const readMembers = new Set<string>();
 
 			for (const [setRead, members] of readSets.entries()) {
 				const indexKey = unreadKeys[setRead]!;
@@ -1737,12 +1727,6 @@ async function* readScopedCacheIndexSets(
 				}
 
 				for (const member of members) {
-					if (readMembers.has(member)) {
-						continue;
-					}
-
-					readMembers.add(member);
-
 					const { fingerprint, key } = parseScopedCacheIndexMember(member);
 
 					entries.push({

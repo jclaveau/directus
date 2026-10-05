@@ -1516,8 +1516,8 @@ describe('scanCollectionIndexedEntries', () => {
 	});
 
 	it(oneLine`
-		yields a member once when two sets of the same reply hold it, filed under
-		the first
+		yields a member once per set of the same reply holding it, so a purge
+		prunes it from each
 	`, async () => {
 		mget.mockResolvedValueOnce(['7', '7']);
 
@@ -1554,6 +1554,14 @@ describe('scanCollectionIndexedEntries', () => {
 				key: 'key-shared',
 				location: {
 					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=a',
+					member: 'slot:&|key-shared',
+				},
+			},
+			{
+				fingerprint: { collection: 'slot' },
+				key: 'key-shared',
+				location: {
+					indexKey: 'scalabus:scoped-cache-index:fingerprint:slot:owner=b',
 					member: 'slot:&|key-shared',
 				},
 			},
