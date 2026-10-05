@@ -104,6 +104,9 @@ export async function monitorRedisCommands(
 const MULTI_KEY_COMMANDS = ['del', 'exists', 'mget', 'touch', 'unlink'];
 const MULTI_MEMBER_COMMANDS = ['sadd', 'smismember', 'srem'];
 
+// The permissions cache's keys and bus channel, which carry no namespace.
+const PERMISSIONS_CACHE_PREFIX = 'permissions:';
+
 /**
  * The commands one Directus instance sent under `namespace`, counted per command
  * and key, sorted by both: a purge runs some of its reads side by side, so the
@@ -114,7 +117,9 @@ const MULTI_MEMBER_COMMANDS = ['sadd', 'smismember', 'srem'];
  * as `<namespace>_<store>:`, the way a cache store prefixes the keys it writes. A
  * script's own commands are counted when they name it. `command` keeps the case
  * it was sent in, which tells the ones a script ran apart: scripts send theirs in
- * capitals. What reaches the log bus is left out: any log line lands there.
+ * capitals. What reaches the log bus is left out: any log line lands there. So is
+ * the permissions cache, which shares the connection under its own `permissions:`
+ * prefix and reads Redis whenever its local copy expires.
  *
  * `key` is the first argument naming the namespace, past it: the key a command
  * reads or writes, the pattern of a SCAN; a store's key keeps its `_<store>:`. A
@@ -172,7 +177,10 @@ export function countRedisCommands(
 			continue;
 		}
 
-		if (commandArgs[1] === logBusKey) {
+		if (
+			commandArgs[1] === logBusKey
+			|| commandArgs[1]?.startsWith(PERMISSIONS_CACHE_PREFIX)
+		) {
 			continue;
 		}
 
@@ -186,12 +194,6 @@ export function countRedisCommands(
 		)
 			.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g, '<uuid>')
 			.replace(/[0-9a-f]{32,}(?=(?:__\w+)?$)/, '<entry>');
-
-		// TEMP: find the job sending non-namespaced commands on the cache connection.
-		if (commandKey === '') {
-			// eslint-disable-next-line no-console
-			console.log('EMPTY-KEY', source, JSON.stringify(commandArgs));
-		}
 
 		let carriedItems = 0;
 
