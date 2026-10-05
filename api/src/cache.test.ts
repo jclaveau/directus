@@ -44,6 +44,12 @@ const redis = vi.hoisted(() => {
 			...indexKeys: string[]
 		) => indexKeys,
 		smembers: vi.fn(),
+		scopedCacheIndexSetsRead: vi.fn(
+			async (
+				_keyCount: number,
+				..._args: (string | number)[]
+			): Promise<string[][]> => [],
+		),
 		sscan: vi.fn(
 			async (..._args: string[]): Promise<[string, string[]]> => ['0', []],
 		),
@@ -607,6 +613,16 @@ describe('scoped cache purging', () => {
 				return ['0', Object.keys(indexedMembers).filter((setKey) => {
 					return setKey.startsWith(setPrefix);
 				})] as [string, string[]];
+			});
+
+			// The whole-set read answers each set the way `sscan` does: all its members.
+			redis.scopedCacheIndexSetsRead.mockImplementation(async (
+				keyCount: number,
+				...args: (string | number)[]
+			) => {
+				return args.slice(0, keyCount).map((indexKey) => {
+					return indexedMembers[indexKey as string] ?? [];
+				});
 			});
 
 			// The double runs what the script runs: move every set it was handed that

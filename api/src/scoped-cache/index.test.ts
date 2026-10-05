@@ -481,6 +481,15 @@ describe('countScopedCachePinMembers', () => {
 
 				return ['0', countedMembers[setKey] ?? []];
 			}),
+			// The whole-set read answers each set with what `sscan` pages out of it.
+			scopedCacheIndexSetsRead: vi.fn(async (
+				keyCount: number,
+				...args: (string | number)[]
+			) => {
+				return args.slice(0, keyCount).map((setKey) => {
+					return countedMembers[setKey as string] ?? [];
+				});
+			}),
 			// A reap has marked the index-key sets complete since the last flush.
 			mget: vi.fn(async () => ['1', '1']),
 			defineCommand: vi.fn(),
@@ -1733,6 +1742,15 @@ describe('retryPendingScopedCachePurges', () => {
 			}
 
 			return ['0', indexedMembers[setKey] ?? []];
+		}),
+		// The whole-set read answers each set with what `sscan` pages out of it.
+		scopedCacheIndexSetsRead: vi.fn(async (
+			keyCount: number,
+			...args: (string | number)[]
+		) => {
+			return args.slice(0, keyCount).map((setKey) => {
+				return indexedMembers[setKey as string] ?? [];
+			});
 		}),
 		// A reap has marked the index-key sets complete at this generation, so
 		// only the reap walks the keyspace: the marker and the generation read the
