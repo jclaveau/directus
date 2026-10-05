@@ -187,6 +187,12 @@ export function countRedisCommands(
 			.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g, '<uuid>')
 			.replace(/[0-9a-f]{32,}(?=(?:__\w+)?$)/, '<entry>');
 
+		// TEMP: find the job sending non-namespaced commands on the cache connection.
+		if (commandKey === '') {
+			// eslint-disable-next-line no-console
+			console.log('EMPTY-KEY', source, JSON.stringify(commandArgs));
+		}
+
 		let carriedItems = 0;
 
 		if (MULTI_KEY_COMMANDS.includes(lowerCommand)) {
