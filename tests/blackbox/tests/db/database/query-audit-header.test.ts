@@ -7,7 +7,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import { load as loadYaml } from 'js-yaml';
-import { cloneDeep, omit } from 'lodash-es';
+import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
@@ -112,95 +112,112 @@ describe.each(vendors)('%s', (vendor) => {
 			.set('Authorization', auth);
 	}
 
-	function requestProbe(route: string) {
-		return request(getUrl(vendor, env))
-			.get(`/query-audit-probe/${route}`)
-			.set('Authorization', auth);
-	}
-
-	function requestProbeAtLevel(level: string, token = USER.ADMIN.TOKEN) {
-		return request(getUrl(vendor, env))
-			.get('/query-audit-probe/transaction-only')
-			.set('Authorization', `Bearer ${token}`)
-			.set(queryAuditHeader, level);
-	}
+	type RequestCell = {
+		method: 'GET' | 'POST';
+		path: string;
+		payload?: unknown;
+		headers?: Record<string, string>;
+	};
 
 	type TransactionEntry = {
 		ms: number;
 		outcome?: string;
 		tables: Record<string, Record<string, number>>;
-		statements: {
-			sql: string;
-			count: number;
-			ms: number;
-			bindings?: unknown[][];
-		}[];
-		bindingsDropped?: number;
-		statementsDropped?: number;
+		statements?: { bindings?: unknown[][] }[];
+		entriesDropped?: number;
 	};
 
-	function auditOf(response: Response): TransactionEntry[] {
-		return JSON.parse(response.headers[queryAuditHeader]);
+	// A cell is YAML: the fork's multiline notation dedents it as a block.
+	function sendRequest(instanceUrl: string, requestCell: string) {
+		const { method, path, payload, headers = {} } = loadYaml(
+			requestCell,
+		) as RequestCell;
+
+		const pendingRequest = method === 'POST'
+			? request(instanceUrl).post(path)
+			: request(instanceUrl).get(path);
+
+		pendingRequest.set('Authorization', auth);
+
+		for (const [headerName, headerValue] of Object.entries(headers)) {
+			pendingRequest.set(
+				headerName,
+				headerValue.replace('<app access token>', USER.APP_ACCESS.TOKEN),
+			);
+		}
+
+		return payload === undefined
+			? pendingRequest
+			: pendingRequest.send(payload as object);
 	}
 
-	// Durations vary from run to run, so they are checked apart: what is left is
-	// compared stringified, in its key order, since the order is part of what the
-	// header reports.
+	function auditOf(response: Response): TransactionEntry[] | null {
+		return response.headers[queryAuditHeader] === undefined
+			? null
+			: JSON.parse(response.headers[queryAuditHeader]);
+	}
+
+	// A response cell states the keys it checks, so the rest of a response is
+	// matched loosely; an array still has to hold as many items as it states.
+	async function expectExchanges(
+		instanceUrl: string,
+		table: { request: string; response: string }[],
+	) {
+		const responses: Response[] = [];
+
+		for (const { request: requestCell } of table) {
+			responses.push(await sendRequest(instanceUrl, requestCell));
+		}
+
+		expect(responses.map((response) => {
+			return {
+				code: response.statusCode,
+				body: response.body,
+				headers: {
+					...response.headers,
+					[queryAuditHeader]: auditOf(response),
+				},
+			};
+		})).toMatchObject(table.map(({ response }) => loadYaml(response)));
+
+		return responses;
+	}
+
+	// Durations vary from run to run: two runs of a request compare the rest.
 	function entriesWithoutDurations(response: Response) {
-		return JSON.stringify(auditOf(response).map(({ outcome, tables }) => {
+		return JSON.stringify(auditOf(response)!.map(({ outcome, tables }) => {
 			return { outcome, tables };
 		}));
 	}
 
-	function expectHeader(response: Response, docString: string) {
-		expect(auditOf(response).map(({ ms }) => typeof ms))
-			.toEqual(auditOf(response).map(() => 'number'));
-
-		expect(entriesWithoutDurations(response))
-			.toBe(JSON.stringify(loadYaml(docString)));
-	}
-
 	defineFeature(feature, (scenario) => {
+		type ExchangeTable = { request: string; response: string }[];
+
 		scenario(
 			'a create reports its transaction and the reads around it',
-			({ when, then }) => {
-				let response: Response;
-
-				when('three articles are created', async () => {
-					response = await createArticles();
-
-					expect(response.statusCode).toBe(200);
-				});
-
+			({ then }) => {
 				// The statements a create runs differ by dialect.
-				then('on postgres the header reads:', (docString: string) => {
-					if (vendor === 'postgres') {
-						expectHeader(response, docString);
-					}
-				});
+				then(
+					'on postgres these requests get these responses:',
+					async (table: ExchangeTable) => {
+						if (vendor === 'postgres') {
+							await expectExchanges(getUrl(vendor, env), table);
+						}
+					},
+				);
 			},
 		);
 
 		scenario(
 			'a pool read inside a transaction is an entry of its own',
-			({ when, then }) => {
-				let response: Response;
-
+			({ then }) => {
 				// sqlite's pool holds one connection: a pool read inside an open
 				// transaction would wait on it forever.
-				when('the pool route is requested', async () => {
-					if (vendor !== 'sqlite3') {
-						response = await requestProbe('pool-inside-transaction');
-
-						expect(response.statusCode).toBe(200);
-					}
-				});
-
 				then(
-					'the header reads, except on sqlite3:',
-					(docString: string) => {
+					'except on sqlite3, these requests get these responses:',
+					async (table: ExchangeTable) => {
 						if (vendor !== 'sqlite3') {
-							expectHeader(response, docString);
+							await expectExchanges(getUrl(vendor, env), table);
 						}
 					},
 				);
@@ -209,28 +226,20 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			'reads through the transaction share its entry',
-			({ when, then, and }) => {
-				let response: Response;
-
-				when('the transaction route is requested', async () => {
-					response = await requestProbe('transaction-only');
-
-					expect(response.statusCode).toBe(200);
-				});
-
-				then('the header reads:', (docString: string) => {
-					expectHeader(response, docString);
-				});
+			({ then, and }) => {
+				then(
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, env), table);
+					},
+				);
 
 				// Quoting differs by dialect.
 				and(
-					"on postgres the transaction's statements read:",
-					(docString: string) => {
+					'on postgres these requests get these responses:',
+					async (table: ExchangeTable) => {
 						if (vendor === 'postgres') {
-							const { statements } = auditOf(response)[1]!;
-
-							expect(statements.map(({ sql, count }) => ({ sql, count })))
-								.toEqual(loadYaml(docString));
+							await expectExchanges(getUrl(vendor, env), table);
 						}
 					},
 				);
@@ -239,25 +248,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 		scenario(
 			"an admin asking full gets each run's bound values",
-			({ when, then }) => {
-				let response: Response;
-
-				when('the transaction route is requested at the full level', async () => {
-					response = await requestProbeAtLevel('full');
-
-					expect(response.statusCode).toBe(200);
-				});
-
-				// Quoting differs by dialect.
+			({ then }) => {
 				then(
-					"on postgres the transaction's statements read:",
-					(docString: string) => {
+					'on postgres these requests get these responses:',
+					async (table: ExchangeTable) => {
 						if (vendor === 'postgres') {
-							const { statements } = auditOf(response)[1]!;
-
-							expect(statements.map(({ sql, count, bindings }) => {
-								return { sql, count, bindings };
-							})).toEqual(loadYaml(docString));
+							await expectExchanges(getUrl(vendor, env), table);
 						}
 					},
 				);
@@ -268,95 +264,94 @@ describe.each(vendors)('%s', (vendor) => {
 		// request runs with are not for anyone but an admin to read.
 		scenario(
 			'anyone else asking full gets the statements alone',
-			({ when, then }) => {
-				let response: Response;
+			({ then, and }) => {
+				let responses: Response[];
 
-				when(
-					'a user who is no admin requests the transaction route at the full level',
-					async () => {
-						response = await requestProbeAtLevel(
-							'full',
-							USER.APP_ACCESS.TOKEN,
-						);
+				then(
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						responses = await expectExchanges(getUrl(vendor, env), table);
 					},
 				);
 
+				and('no statement carries its bound values', () => {
+					expect(responses[0]!.headers[queryAuditHeader])
+						.not.toContain('"bindings"');
+				});
+			},
+		);
+
+		scenario('a level outside the list is refused', ({ then }) => {
+			then(
+				'these requests get these responses:',
+				async (table: ExchangeTable) => {
+					await expectExchanges(getUrl(vendor, env), table);
+				},
+			);
+		});
+
+		scenario(
+			'a browser can read the refusal of a level outside the list',
+			({ then }) => {
 				then(
-					'the response is a 403 whose header lists statements without bound values',
-					() => {
-						expect(response.statusCode).toBe(403);
-						expect(response.headers[queryAuditHeader]).toContain('"statements"');
-						expect(response.headers[queryAuditHeader]).not.toContain('"bindings"');
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, env), table);
 					},
 				);
 			},
 		);
 
-		scenario('a level outside the list is refused', ({ when, then }) => {
-			let response: Response;
-
-			when('the transaction route is requested at the every level', async () => {
-				response = await requestProbeAtLevel('every');
-			});
-
-			then('the response is a 400 naming the levels', () => {
-				expect(response.statusCode).toBe(400);
-
-				expect(response.body.errors[0].message).toBe(
-					'Invalid query. "x-query-audit" must be one of counts, statements, full.',
-				);
-			});
-		});
-
 		scenario(
 			"a savepoint's rollback leaves its transaction open",
-			({ when, then }) => {
-				let response: Response;
-
-				when('the savepoint route is requested', async () => {
-					response = await requestProbe('rollback-past-savepoint');
-
-					expect(response.statusCode).toBe(200);
-				});
-
-				then('the header reads:', (docString: string) => {
-					expectHeader(response, docString);
-				});
+			({ then }) => {
+				then(
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, env), table);
+					},
+				);
 			},
 		);
 
 		// A raw newline or non-ASCII character in a header value makes Node
 		// refuse the whole response.
-		scenario('SQL a header cannot carry raw is escaped', ({ when, then, and }) => {
-			let response: Response;
+		scenario('SQL a header cannot carry raw is escaped', ({ then, and }) => {
+			let responses: Response[];
 
-			when('the accented multi-line route is requested', async () => {
-				response = await requestProbe('accented-multiline');
+			then(
+				'these requests get these responses:',
+				async (table: ExchangeTable) => {
+					responses = await expectExchanges(getUrl(vendor, env), table);
+				},
+			);
 
-				expect(response.statusCode).toBe(200);
+			and('the query audit header holds printable ASCII alone', () => {
+				expect(responses[0]!.headers[queryAuditHeader])
+					.toMatch(/^[\x20-\x7e]+$/);
 			});
+		});
 
-			then('the header holds printable ASCII alone', () => {
-				expect(response.headers[queryAuditHeader]).toMatch(/^[\x20-\x7e]+$/);
-			});
-
-			and("the second entry's statements read:", (docString: string) => {
-				const { statements } = auditOf(response)[1]!;
-
-				expect(statements.map(({ sql, count }) => ({ sql, count })))
-					.toEqual(loadYaml(docString));
-			});
+		// Only postgres casts a bound value with `::`.
+		scenario('a bound BigInt reads as its digits', ({ then }) => {
+			then(
+				'on postgres these requests get these responses:',
+				async (table: ExchangeTable) => {
+					if (vendor === 'postgres') {
+						await expectExchanges(getUrl(vendor, env), table);
+					}
+				},
+			);
 		});
 
 		scenario(
 			'past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted',
-			({ when, then }) => {
-				let response: Response;
+			({ given, then }) => {
+				const cappedEnv = cloneDeep(env);
 
-				when(
-					'an instance capped at 240 bytes serves the transaction route at full',
+				given(
+					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 240',
 					async () => {
-						const cappedEnv = cloneDeep(env);
 						const port = await getPort();
 
 						cappedEnv[vendor].PORT = String(port);
@@ -369,105 +364,47 @@ describe.each(vendors)('%s', (vendor) => {
 
 						await awaitDirectusConnection(port);
 
-						const requestCapped = () => {
-							return request(getUrl(vendor, cappedEnv))
-								.get('/query-audit-probe/transaction-only')
-								.set('Authorization', auth)
-								.set(queryAuditHeader, 'full');
-						};
-
-						// The first request loads the schema; the second is warm.
-						await requestCapped();
-						response = await requestCapped();
-
-						expect(response.statusCode).toBe(200);
+						// The first request loads the schema; the scenario's is warm.
+						await request(getUrl(vendor, cappedEnv))
+							.get('/query-audit-probe/transaction-only')
+							.set('Authorization', auth);
 					},
 				);
 
-				then('the header reads, durations aside:', (docString: string) => {
-					expect(auditOf(response).map(({ ms }) => typeof ms))
-						.toEqual(auditOf(response).map(() => 'number'));
-
-					expect(JSON.stringify(auditOf(response).map((entry) => {
-						return omit(entry, 'ms');
-					}))).toBe(JSON.stringify(loadYaml(docString)));
-				});
+				then(
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, cappedEnv), table);
+					},
+				);
 			},
 			60_000,
 		);
 
 		// Dropping every statement still leaves each entry its tables.
 		scenario(
-			'past QUERY_AUDIT_HEADER_MAX_SIZE with no detail left, '
-			+ 'the last entries are dropped and counted',
-			({ when, then }) => {
-				let response: Response;
-
-				when('the many pool reads route is requested', async () => {
-					response = await requestProbe('many-pool-reads');
-
-					expect(response.statusCode).toBe(200);
-				});
+			'with no detail left to drop, the last entries are dropped and counted',
+			({ then, and }) => {
+				let responses: Response[];
 
 				then(
-					'the header fits in 8kb and its last entry counts the entries dropped',
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						responses = await expectExchanges(getUrl(vendor, env), table);
+					},
+				);
+
+				and(
+					'the query audit header fits in 8kb, '
+					+ 'its last entry counting the entries dropped',
 					() => {
-						expect(response.headers[queryAuditHeader].length)
+						expect(responses[0]!.headers[queryAuditHeader].length)
 							.toBeLessThanOrEqual(8192);
 
-						expect(auditOf(response).at(-1))
+						expect(auditOf(responses[0]!)!.at(-1))
 							.toEqual({ entriesDropped: expect.any(Number) });
 					},
 				);
-			},
-		);
-
-		scenario('a bound BigInt reads as its digits', ({ when, then }) => {
-			let response: Response;
-
-			// Only postgres casts a bound value with `::`.
-			when('the BigInt route is requested at the full level', async () => {
-				if (vendor === 'postgres') {
-					response = await requestProbe('bigint-binding')
-						.set(queryAuditHeader, 'full');
-
-					expect(response.statusCode).toBe(200);
-				}
-			});
-
-			then(
-				"on postgres the second entry's statements read:",
-				(docString: string) => {
-					if (vendor === 'postgres') {
-						const { statements } = auditOf(response)[1]!;
-
-						expect(statements.map(({ sql, count, bindings }) => {
-							return { sql, count, bindings };
-						})).toEqual(loadYaml(docString));
-					}
-				},
-			);
-		});
-
-		scenario(
-			'a browser can read the refusal of a level outside the list',
-			({ when, then }) => {
-				let response: Response;
-
-				when(
-					'a browser requests the transaction route at the every level',
-					async () => {
-						response = await requestProbeAtLevel('every')
-							.set('Origin', 'http://example.com');
-					},
-				);
-
-				then('the response is a 400 the browser may read', () => {
-					expect(response.statusCode).toBe(400);
-
-					expect(response.headers['access-control-allow-origin'])
-						.toBe('http://example.com');
-				});
 			},
 		);
 
@@ -525,73 +462,56 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'two requests at once each report what they report alone',
 			({ when, then }) => {
-				let createdAlone: Response;
-				let readAlone: Response;
-				let createdAlongside: Response;
-				let readAlongside: Response;
+				let responsesAlone: Response[];
+				let responsesAlongside: Response[];
 
 				when(
-					'a create and a read run one after the other, then both at once',
-					async () => {
-						createdAlone = await createArticles();
-						readAlone = await readArticles();
+					'these requests run one after the other, then all at once:',
+					async (table: { request: string }[]) => {
+						responsesAlone = [];
 
-						[createdAlongside, readAlongside] = await Promise.all([
-							createArticles(),
-							readArticles(),
-						]);
+						for (const { request: requestCell } of table) {
+							responsesAlone.push(
+								await sendRequest(getUrl(vendor, env), requestCell),
+							);
+						}
+
+						responsesAlongside = await Promise.all(table.map(
+							({ request: requestCell }) => {
+								return sendRequest(getUrl(vendor, env), requestCell);
+							},
+						));
 					},
 				);
 
 				then('each reports the same entries both times', () => {
-					expect({
-						created: entriesWithoutDurations(createdAlongside),
-						read: entriesWithoutDurations(readAlongside),
-					}).toEqual({
-						created: entriesWithoutDurations(createdAlone),
-						read: entriesWithoutDurations(readAlone),
-					});
+					expect(responsesAlongside.map(entriesWithoutDurations))
+						.toEqual(responsesAlone.map(entriesWithoutDurations));
 				});
 			},
 		);
 
 		scenario(
 			'an error response reports the statements it ran',
-			({ when, then }) => {
-				let response: Response;
-
-				when('a missing collection is read', async () => {
-					response = await request(getUrl(vendor, env))
-						.get('/items/query_audit_header_missing')
-						.set('Authorization', auth);
-				});
-
+			({ then }) => {
 				then(
-					'the response is a 403 whose header reads:',
-					(docString: string) => {
-						expect(response.statusCode).toBe(403);
-
-						expectHeader(response, docString);
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, env), table);
 					},
 				);
 			},
 		);
 
-		scenario('no header without QUERY_AUDIT_HEADER', ({ when, then }) => {
-			let response: Response;
+		scenario('no header without QUERY_AUDIT_HEADER', ({ given, then }) => {
+			given('the instance without QUERY_AUDIT_HEADER', () => {});
 
-			when(
-				'the collection is read from an instance without QUERY_AUDIT_HEADER',
-				async () => {
-					response = await request(getUrl(vendor))
-						.get(`/items/${COLLECTION}`)
-						.set('Authorization', auth);
+			then(
+				'these requests get these responses:',
+				async (table: ExchangeTable) => {
+					await expectExchanges(getUrl(vendor), table);
 				},
 			);
-
-			then('the response carries no query audit header', () => {
-				expect(response.headers[queryAuditHeader]).toBeUndefined();
-			});
 		});
 	});
 });

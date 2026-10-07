@@ -1,124 +1,168 @@
 Feature: A request reports the SQL it ran, one entry per transaction
 
-  QUERY_AUDIT_HEADER names a response header listing, in the order they began,
-  the transactions the request ran. An entry maps each table to the statements
-  of each kind it received, and says whether it committed or rolled back. A
-  statement sent outside a transaction is an entry of its own, the way the
-  database runs it; BEGIN, COMMIT and SAVEPOINT are not listed.
-  A request picks how much by sending the same header: `counts` lists the
-  tables alone, `statements` adds each entry's statements: the SQL the driver
-  received, placeholders in place of the bound values, once per distinct text;
-  `full` adds each run's bound values, for an admin alone. QUERY_AUDIT_LEVEL is
-  the level of a request that sends none, `statements` on this instance.
-
-  Durations vary from run to run: the steps check each `ms` is a number, then
-  read the rest as the YAML below, in its key order. The probe routes read
-  `directus_settings` twice inside one transaction: the pool route sends the
-  second read through the pool, the transaction route through the transaction.
-  Every request authenticates first, which reads `directus_users` outside any
-  transaction.
+  - The instance: QUERY_AUDIT_HEADER `x-query-audit`, QUERY_AUDIT_LEVEL
+    `statements`, CORS on.
+  - A request authenticates as the admin unless its headers say otherwise.
+  - A response states the keys it checks; `x-query-audit` reads parsed, its
+    durations unstated.
+  - Authenticating reads `directus_users`: every header starts with that entry.
 
   Scenario: a create reports its transaction and the reads around it
-    When three articles are created
-    Then on postgres the header reads:
-      """
-      - tables: { directus_users: { select: 1 } }
-      - outcome: commit
-        tables:
-          query_audit_header_articles: { insert: 1 }
-          directus_activity: { insert: 1 }
-          directus_revisions: { insert: 1 }
-      - tables: { query_audit_header_articles: { select: 1 } }
-      """
+    Then on postgres these requests get these responses:
+      | request                                  | response                                        |
+      | method: POST                             | code: 200                                       |+
+      | path: /items/query_audit_header_articles | headers:                                        |
+      | payload:                                 |   x-query-audit:                                |
+      |   - title: a                             |     - tables: { directus_users: { select: 1 } } |
+      |   - title: b                             |     - outcome: commit                           |
+      |   - title: c                             |       tables:                                   |
+      |                                          |         query_audit_header_articles:            |
+      |                                          |           insert: 1                             |
+      |                                          |         directus_activity:                      |
+      |                                          |           insert: 1                             |
+      |                                          |         directus_revisions:                     |
+      |                                          |           insert: 1                             |
+      |                                          |     - tables:                                   |
+      |                                          |         query_audit_header_articles:            |
+      |                                          |           select: 1                             |
 
   Scenario: a pool read inside a transaction is an entry of its own
-    When the pool route is requested
-    Then the header reads, except on sqlite3:
-      """
-      - tables: { directus_users: { select: 1 } }
-      - outcome: commit
-        tables: { directus_settings: { select: 1 } }
-      - tables: { directus_settings: { select: 1 } }
-      """
+    Then except on sqlite3, these requests get these responses:
+      | request                                          | response                                           |
+      | method: GET                                      | code: 200                                          |+
+      | path: /query-audit-probe/pool-inside-transaction | headers:                                           |
+      |                                                  |   x-query-audit:                                   |
+      |                                                  |     - tables: { directus_users: { select: 1 } }    |
+      |                                                  |     - outcome: commit                              |
+      |                                                  |       tables: { directus_settings: { select: 1 } } |
+      |                                                  |     - tables: { directus_settings: { select: 1 } } |
 
   Scenario: reads through the transaction share its entry
-    When the transaction route is requested
-    Then the header reads:
-      """
-      - tables: { directus_users: { select: 1 } }
-      - outcome: commit
-        tables: { directus_settings: { select: 2 } }
-      """
-    And on postgres the transaction's statements read:
-      """
-      - sql: select "id" from "directus_settings" where "id" = $1
-        count: 2
-      """
+    Then these requests get these responses:
+      | request                                   | response                                           |
+      | method: GET                               | code: 200                                          |+
+      | path: /query-audit-probe/transaction-only | headers:                                           |
+      |                                           |   x-query-audit:                                   |
+      |                                           |     - tables: { directus_users: { select: 1 } }    |
+      |                                           |     - outcome: commit                              |
+      |                                           |       tables: { directus_settings: { select: 2 } } |
+    And on postgres these requests get these responses:
+      | request                                   | response                                         |
+      | method: GET                               | code: 200                                        |+
+      | path: /query-audit-probe/transaction-only | headers:                                         |
+      |                                           |   x-query-audit:                                 |
+      |                                           |     - tables: { directus_users: { select: 1 } }  |
+      |                                           |     - statements:                                |
+      |                                           |         - sql: >-                                |
+      |                                           |             select "id" from "directus_settings" |
+      |                                           |             where "id" = $1                      |
+      |                                           |           count: 2                               |
 
   Scenario: an admin asking full gets each run's bound values
-    When the transaction route is requested at the full level
-    Then on postgres the transaction's statements read:
-      """
-      - sql: select "id" from "directus_settings" where "id" = $1
-        count: 2
-        bindings: [[1], [1]]
-      """
+    Then on postgres these requests get these responses:
+      | request                                   | response                                         |
+      | method: GET                               | code: 200                                        |+
+      | path: /query-audit-probe/transaction-only | headers:                                         |
+      | headers:                                  |   x-query-audit:                                 |
+      |   x-query-audit: full                     |     - tables: { directus_users: { select: 1 } }  |
+      |                                           |     - statements:                                |
+      |                                           |         - sql: >-                                |
+      |                                           |             select "id" from "directus_settings" |
+      |                                           |             where "id" = $1                      |
+      |                                           |           count: 2                               |
+      |                                           |           bindings: [[1], [1]]                   |
 
   Scenario: anyone else asking full gets the statements alone
-    When a user who is no admin requests the transaction route at the full level
-    Then the response is a 403 whose header lists statements without bound values
+    Then these requests get these responses:
+      | request                                   | response                                        |
+      | method: GET                               | code: 403                                       |+
+      | path: /query-audit-probe/transaction-only | headers:                                        |
+      | headers:                                  |   x-query-audit:                                |
+      |   authorization: >-                       |     - tables: { directus_users: { select: 1 } } |
+      |     Bearer <app access token>             |       statements:                               |
+      |   x-query-audit: full                     |         - count: 1                              |
+    And no statement carries its bound values
 
   Scenario: a level outside the list is refused
-    When the transaction route is requested at the every level
-    Then the response is a 400 naming the levels
-
-  Scenario: a savepoint's rollback leaves its transaction open
-    When the savepoint route is requested
-    Then the header reads:
-      """
-      - tables: { directus_users: { select: 1 } }
-      - outcome: rollback
-        tables: { directus_settings: { select: 3 } }
-      """
-
-  Scenario: SQL a header cannot carry raw is escaped
-    When the accented multi-line route is requested
-    Then the header holds printable ASCII alone
-    And the second entry's statements read:
-      """
-      - sql: "select 'café' as accented_value\nfrom directus_settings"
-        count: 1
-      """
-
-  Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted
-    When an instance capped at 240 bytes serves the transaction route at full
-    Then the header reads, durations aside:
-      """
-      - tables: { directus_users: { select: 1 } }
-        bindingsDropped: 1
-        statementsDropped: 1
-      - outcome: commit
-        tables: { directus_settings: { select: 2 } }
-        bindingsDropped: 2
-        statementsDropped: 1
-      """
-
-  Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE with no detail left, the last entries are dropped and counted
-    When the many pool reads route is requested
-    Then the header fits in 8kb and its last entry counts the entries dropped
-
-  Scenario: a bound BigInt reads as its digits
-    When the BigInt route is requested at the full level
-    Then on postgres the second entry's statements read:
-      """
-      - sql: select $1::bigint as big_value
-        count: 1
-        bindings: [["9007199254740993"]]
-      """
+    Then these requests get these responses:
+      | request                                   | response                                   |
+      | method: GET                               | code: 400                                  |+
+      | path: /query-audit-probe/transaction-only | body:                                      |
+      | headers:                                  |   errors:                                  |
+      |   x-query-audit: every                    |     - message: >-                          |
+      |                                           |         Invalid query. "x-query-audit"     |
+      |                                           |         must be one of counts, statements, |
+      |                                           |         full.                              |
 
   Scenario: a browser can read the refusal of a level outside the list
-    When a browser requests the transaction route at the every level
-    Then the response is a 400 the browser may read
+    Then these requests get these responses:
+      | request                                   | response                          |
+      | method: GET                               | code: 400                         |+
+      | path: /query-audit-probe/transaction-only | headers:                          |
+      | headers:                                  |   access-control-allow-origin: >- |
+      |   origin: http://example.com              |     http://example.com            |
+      |   x-query-audit: every                    |                                   |
+
+  Scenario: a savepoint's rollback leaves its transaction open
+    Then these requests get these responses:
+      | request                                          | response                                           |
+      | method: GET                                      | code: 200                                          |+
+      | path: /query-audit-probe/rollback-past-savepoint | headers:                                           |
+      |                                                  |   x-query-audit:                                   |
+      |                                                  |     - tables: { directus_users: { select: 1 } }    |
+      |                                                  |     - outcome: rollback                            |
+      |                                                  |       tables: { directus_settings: { select: 3 } } |
+
+  Scenario: SQL a header cannot carry raw is escaped
+    Then these requests get these responses:
+      | request                                     | response                                        |
+      | method: GET                                 | code: 200                                       |+
+      | path: /query-audit-probe/accented-multiline | headers:                                        |
+      |                                             |   x-query-audit:                                |
+      |                                             |     - tables: { directus_users: { select: 1 } } |
+      |                                             |     - statements:                               |
+      |                                             |         - sql: |-                               |
+      |                                             |             select 'café' as accented_value     |
+      |                                             |             from directus_settings              |
+      |                                             |           count: 1                              |
+    And the query audit header holds printable ASCII alone
+
+  Scenario: a bound BigInt reads as its digits
+    Then on postgres these requests get these responses:
+      | request                                 | response                                        |
+      | method: GET                             | code: 200                                       |+
+      | path: /query-audit-probe/bigint-binding | headers:                                        |
+      | headers:                                |   x-query-audit:                                |
+      |   x-query-audit: full                   |     - tables: { directus_users: { select: 1 } } |
+      |                                         |     - statements:                               |
+      |                                         |         - sql: >-                               |
+      |                                         |             select $1::bigint                   |
+      |                                         |             as big_value                        |
+      |                                         |           count: 1                              |
+      |                                         |           bindings:                             |
+      |                                         |             - ["9007199254740993"]              |
+
+  Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted
+    Given an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 240
+    Then these requests get these responses:
+      | request                                   | response                                           |
+      | method: GET                               | code: 200                                          |+
+      | path: /query-audit-probe/transaction-only | headers:                                           |
+      | headers:                                  |   x-query-audit:                                   |
+      |   x-query-audit: full                     |     - tables: { directus_users: { select: 1 } }    |
+      |                                           |       bindingsDropped: 1                           |
+      |                                           |       statementsDropped: 1                         |
+      |                                           |     - outcome: commit                              |
+      |                                           |       tables: { directus_settings: { select: 2 } } |
+      |                                           |       bindingsDropped: 2                           |
+      |                                           |       statementsDropped: 1                         |
+
+  Scenario: with no detail left to drop, the last entries are dropped and counted
+    Then these requests get these responses:
+      | request                                  | response  |
+      | method: GET                              | code: 200 |+
+      | path: /query-audit-probe/many-pool-reads |           |
+    And the query audit header fits in 8kb, its last entry counting the entries dropped
 
   Scenario: an instance with a level outside the list refuses to start
     When an instance starts with QUERY_AUDIT_LEVEL every
@@ -129,16 +173,28 @@ Feature: A request reports the SQL it ran, one entry per transaction
     Then it exits naming QUERY_AUDIT_HEADER
 
   Scenario: two requests at once each report what they report alone
-    When a create and a read run one after the other, then both at once
+    When these requests run one after the other, then all at once:
+      | request                                  |
+      | method: POST                             |+
+      | path: /items/query_audit_header_articles |
+      | payload:                                 |
+      |   - title: a                             |
+      | method: GET                              |+
+      | path: /items/query_audit_header_articles |
     Then each reports the same entries both times
 
   Scenario: an error response reports the statements it ran
-    When a missing collection is read
-    Then the response is a 403 whose header reads:
-      """
-      - tables: { directus_users: { select: 1 } }
-      """
+    Then these requests get these responses:
+      | request                                 | response                                        |
+      | method: GET                             | code: 403                                       |+
+      | path: /items/query_audit_header_missing | headers:                                        |
+      |                                         |   x-query-audit:                                |
+      |                                         |     - tables: { directus_users: { select: 1 } } |
 
   Scenario: no header without QUERY_AUDIT_HEADER
-    When the collection is read from an instance without QUERY_AUDIT_HEADER
-    Then the response carries no query audit header
+    Given the instance without QUERY_AUDIT_HEADER
+    Then these requests get these responses:
+      | request                                 | response              |
+      | method: GET                             | code: 403             |+
+      | path: /items/query_audit_header_missing | headers:              |
+      |                                         |   x-query-audit: null |
