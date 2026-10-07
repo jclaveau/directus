@@ -196,7 +196,7 @@ test('drops the last entries once no entry holds statements', () => {
 // Dropping one entry's detail used to serialise the whole header again: 2000
 // entries took 20 s of the event loop.
 test('cuts thousands of entries down to the size in milliseconds', () => {
-	const audit = emptyQueryAudit('full');
+	const audit = emptyQueryAudit('bindings');
 
 	for (let connectionNumber = 0; connectionNumber < 2000; connectionNumber++) {
 		auditStatementStart(
@@ -208,7 +208,7 @@ test('cuts thousands of entries down to the size in milliseconds', () => {
 	}
 
 	const startedAt = Date.now();
-	const headerValue = formatQueryAudit(audit, { level: 'full', maxSize: 8192 });
+	const headerValue = formatQueryAudit(audit, { level: 'bindings', maxSize: 8192 });
 
 	expect({
 		within8kb: headerValue.length <= 8192,
@@ -218,16 +218,16 @@ test('cuts thousands of entries down to the size in milliseconds', () => {
 	expect(headerValue).toMatch(/,\{"entriesDropped":\d+\}\]$/);
 });
 
-test('reports each run\'s bound values at the full level', () => {
+test('reports each run\'s bound values at the bindings level', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
-	const audit = emptyQueryAudit('full');
+	const audit = emptyQueryAudit('bindings');
 
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [2])();
 	auditStatementStart(audit, 'select * from "a"', 'b')();
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
+	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
 		.toBe(
 			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
 			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
@@ -241,6 +241,86 @@ test('reports each run\'s bound values at the full level', () => {
 });
 
 test('drops bound values before statements past the size', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('bindings');
+
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [
+		'a first value long enough to matter',
+	])();
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [
+		'a second value long enough to matter',
+	])();
+
+	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 200 }))
+		.toBe(
+			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2}},"statements":[{'
+			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"count":2,"ms":0}],"bindingsDropped":2}]',
+		);
+
+	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 100 }))
+		.toBe(
+			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2}},'
+			+ '"bindingsDropped":2,"statementsDropped":1}]',
+		);
+});
+
+// `search` binds a number past Number.MAX_SAFE_INTEGER as a BigInt, which
+// JSON.stringify refuses.
+test('reports a BigInt bound value as its digits', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('bindings');
+
+	auditStatementStart(audit, 'select * from "a" where "n" = ?', 'a', [
+		9007199254740993n,
+	])();
+
+	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
+		.toBe(
+			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
+			+ '"sql":"select * from \\"a\\" where \\"n\\" = ?",'
+			+ '"count":1,"ms":0,"bindings":[["9007199254740993"]]}]}]',
+		);
+});
+
+test('lists every run in order at the full level', () => {
+	vi.spyOn(performance, 'now')
+		.mockReturnValueOnce(0)
+		.mockReturnValueOnce(0)
+		.mockReturnValueOnce(1)
+		.mockReturnValueOnce(1)
+		.mockReturnValueOnce(3)
+		.mockReturnValueOnce(3)
+		.mockReturnValueOnce(7)
+		.mockReturnValueOnce(7)
+		.mockReturnValueOnce(8);
+
+	const audit = emptyQueryAudit('full');
+
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+	auditStatementStart(audit, 'update "a" set "b" = ?', 'a', [2])();
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
+		.toBe(
+			'[{"ms":8,"outcome":"commit","tables":{"a":{"select":2,"update":1}},"runs":['
+			+ '{"sql":"select * from \\"a\\" where \\"id\\" = ?","ms":1,"bindings":[1]},'
+			+ '{"sql":"update \\"a\\" set \\"b\\" = ?","ms":2,"bindings":[2]},'
+			+ '{"sql":"select * from \\"a\\" where \\"id\\" = ?","ms":4,"bindings":[1]}'
+			+ ']}]',
+		);
+});
+
+test('groups the runs before dropping bound values past the size', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const audit = emptyQueryAudit('full');
@@ -257,36 +337,21 @@ test('drops bound values before statements past the size', () => {
 
 	auditStatementStart(audit, 'COMMIT;', 'a')();
 
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 260 }))
+		.toBe(
+			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2}},"statements":[{'
+			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"count":2,"ms":0,"bindings":['
+			+ '["a first value long enough to matter"],'
+			+ '["a second value long enough to matter"]'
+			+ ']}],"runsGrouped":2}]',
+		);
+
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 200 }))
 		.toBe(
 			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2}},"statements":[{'
 			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"count":2,"ms":0}],"bindingsDropped":2}]',
-		);
-
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 100 }))
-		.toBe(
-			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2}},'
-			+ '"bindingsDropped":2,"statementsDropped":1}]',
-		);
-});
-
-// `search` binds a number past Number.MAX_SAFE_INTEGER as a BigInt, which
-// JSON.stringify refuses.
-test('reports a BigInt bound value as its digits', () => {
-	vi.spyOn(performance, 'now').mockReturnValue(0);
-
-	const audit = emptyQueryAudit('full');
-
-	auditStatementStart(audit, 'select * from "a" where "n" = ?', 'a', [
-		9007199254740993n,
-	])();
-
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
-		.toBe(
-			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\" where \\"n\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[["9007199254740993"]]}]}]',
+			+ '"count":2,"ms":0}],"runsGrouped":2,"bindingsDropped":2}]',
 		);
 });
 
@@ -303,6 +368,7 @@ test('records no statement at the counts level', () => {
 			ms: 0,
 			tableCounts: new Map([['a', { select: 1 }]]),
 			statementAudits: new Map(),
+			runAudits: [],
 		},
 	]);
 });
@@ -311,13 +377,13 @@ test('records bound values only while they are allowed', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	let bindingsAllowed = true;
-	const audit = emptyQueryAudit('full', () => bindingsAllowed);
+	const audit = emptyQueryAudit('bindings', () => bindingsAllowed);
 
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
 	bindingsAllowed = false;
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [2])();
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
+	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
 		.toBe(
 			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
 			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'

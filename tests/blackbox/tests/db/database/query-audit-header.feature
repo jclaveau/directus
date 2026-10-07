@@ -73,13 +73,13 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |                                     |             where "id" = $1          |
       |                                     |           count: 2                   |
 
-  Scenario: an admin asking full gets each run's bound values
+  Scenario: an admin asking bindings gets each run's bound values
     Then on postgres these requests get these responses:
       | request                             | response                             |
       | method: GET                         | code: 200                            |+
       | path: /audit-probe/transaction-read | headers:                             |
       | headers:                            |   x-query-audit:                     |
-      |   x-query-audit: full               |     - tables:                        |
+      |   x-query-audit: bindings           |     - tables:                        |
       |                                     |         directus_users:              |
       |                                     |           select: 1                  |
       |                                     |     - statements:                    |
@@ -91,6 +91,30 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |                                     |           bindings:                  |
       |                                     |             - - 1                    |
       |                                     |             - - 1                    |
+
+  Scenario: an admin asking full gets every run in order, each with its values
+    Then on postgres these requests get these responses:
+      | request                             | response                               |
+      | method: GET                         | code: 200                              |+
+      | path: /audit-probe/transaction-read | headers:                               |
+      | headers:                            |   x-query-audit:                       |
+      |   x-query-audit: full               |     - tables:                          |
+      |                                     |         directus_users:                |
+      |                                     |           select: 1                    |
+      |                                     |     - outcome: commit                  |
+      |                                     |       runs:                            |
+      |                                     |         - sql: >-                      |
+      |                                     |             select "id"                |
+      |                                     |             from "directus_settings"   |
+      |                                     |             where "id" = $1            |
+      |                                     |           bindings:                    |
+      |                                     |             - 1                        |
+      |                                     |         - sql: >-                      |
+      |                                     |             select "id"                |
+      |                                     |             from "directus_settings"   |
+      |                                     |             where "id" = $1            |
+      |                                     |           bindings:                    |
+      |                                     |             - 1                        |
 
   Scenario: anyone else asking full gets the statements alone
     Then these requests get these responses:
@@ -113,7 +137,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |                                     |         Invalid query.          |
       |                                     |         "x-query-audit" must be |
       |                                     |         one of counts,          |
-      |                                     |         statements, full.       |
+      |                                     |         statements, bindings,   |
+      |                                     |         full.                   |
 
   Scenario: a browser can read the refusal of a level outside the list
     Then these requests get these responses:
@@ -160,7 +185,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                       | code: 200                          |+
       | path: /audit-probe/bigint-binding | headers:                           |
       | headers:                          |   x-query-audit:                   |
-      |   x-query-audit: full             |     - tables:                      |
+      |   x-query-audit: bindings         |     - tables:                      |
       |                                   |         directus_users:            |
       |                                   |           select: 1                |
       |                                   |     - statements:                  |
@@ -178,7 +203,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                  |+
       | path: /audit-probe/transaction-read | headers:                   |
       | headers:                            |   x-query-audit:           |
-      |   x-query-audit: full               |     - tables:              |
+      |   x-query-audit: bindings           |     - tables:              |
       |                                     |         directus_users:    |
       |                                     |           select: 1        |
       |                                     |       bindingsDropped: 1   |

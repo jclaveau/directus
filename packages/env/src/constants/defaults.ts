@@ -120,7 +120,8 @@ export const DEFAULTS = {
 	// unparseable size emits every pin.
 	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
 	QUERY_AUDIT_LEVEL: 'counts',
-	// Bound values then statements are dropped past it, largest entries first:
+	// Runs are grouped, then bound values and statements dropped past it, largest
+	// entries first:
 	// node's fetch refuses a response past 16kb of headers in total.
 	QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	CACHE_SKIP_ALLOWED: false,

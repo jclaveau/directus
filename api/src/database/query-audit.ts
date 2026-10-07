@@ -11,23 +11,32 @@ type TransactionOutcome = 'commit' | 'rollback';
 
 type StatementAudit = { count: number; ms: number; bindings: unknown[][] };
 
+type RunAudit = { sql: string; ms?: number; bindings?: unknown[] };
+
 type TransactionAudit = {
 	startedAt: number;
 	ms?: number;
 	outcome?: TransactionOutcome;
 	tableCounts: Map<string, KindCounts>;
 	statementAudits: Map<string, StatementAudit>;
+	runAudits: RunAudit[];
 };
 
 export type QueryAudit = {
 	recordsStatements: boolean;
+	recordsRuns: boolean;
 	recordsBindings: () => boolean;
 	closed: boolean;
 	transactionAudits: TransactionAudit[];
 	openTransactionAudits: Map<string, TransactionAudit>;
 };
 
-export const QUERY_AUDIT_LEVELS = ['counts', 'statements', 'full'] as const;
+export const QUERY_AUDIT_LEVELS = [
+	'counts',
+	'statements',
+	'bindings',
+	'full',
+] as const;
 
 export type QueryAuditLevel = (typeof QUERY_AUDIT_LEVELS)[number];
 
@@ -43,11 +52,19 @@ type StatementEntry = {
 	bindings?: unknown[][];
 };
 
+type RunEntry = {
+	sql: string;
+	ms?: number | undefined;
+	bindings?: unknown[] | undefined;
+};
+
 type TransactionEntry = {
 	ms?: number | undefined;
 	outcome?: TransactionOutcome | undefined;
 	tables: Record<string, KindCounts>;
 	statements?: StatementEntry[];
+	runs?: RunEntry[];
+	runsGrouped?: number;
 	bindingsDropped?: number;
 	statementsDropped?: number;
 };
@@ -86,9 +103,15 @@ export function isQueryAuditLevel(value: unknown): value is QueryAuditLevel {
 	return QUERY_AUDIT_LEVELS.includes(value as QueryAuditLevel);
 }
 
+// Bound values carry what the request read and wrote.
+export function levelCarriesBindings(level: QueryAuditLevel): boolean {
+	return level === 'bindings' || level === 'full';
+}
+
 /**
- * A request holds only what its `level` reports: no statements at `counts`, and
- * each run's bound values at `full` alone, while `bindingsAllowed` says so.
+ * A request holds only what its `level` reports: no statements at `counts`,
+ * each run's bound values from `bindings` up while `bindingsAllowed` says so,
+ * and every run in order at `full` alone.
  */
 export function emptyQueryAudit(
 	level: QueryAuditLevel = 'statements',
@@ -96,7 +119,8 @@ export function emptyQueryAudit(
 ): QueryAudit {
 	return {
 		recordsStatements: level !== 'counts',
-		recordsBindings: () => level === 'full' && bindingsAllowed(),
+		recordsRuns: level === 'full',
+		recordsBindings: () => levelCarriesBindings(level) && bindingsAllowed(),
 		closed: false,
 		transactionAudits: [],
 		openTransactionAudits: new Map(),
@@ -238,18 +262,26 @@ export function auditStatementStart(
 	const statementAudit = transactionAudit.statementAudits.get(sql)
 		?? { count: 0, ms: 0, bindings: [] };
 
+	const runAudit: RunAudit = { sql };
+
 	statementAudit.count++;
 
 	if (audit.recordsBindings()) {
 		statementAudit.bindings.push(bindings);
+		runAudit.bindings = bindings;
 	}
 
 	transactionAudit.statementAudits.set(sql, statementAudit);
+
+	if (audit.recordsRuns) {
+		transactionAudit.runAudits.push(runAudit);
+	}
 
 	return () => {
 		const elapsedMs = performance.now() - startedAt;
 
 		statementAudit.ms += elapsedMs;
+		runAudit.ms = elapsedMs;
 
 		if (!openTransactionAudit) {
 			transactionAudit.ms = elapsedMs;
@@ -259,8 +291,9 @@ export function auditStatementStart(
 
 /**
  * The audit as the JSON header value, non-ASCII escaped so a header can carry
- * it. Past `maxSize` bytes, the bound values of the largest entries go first,
- * then their statements, each entry naming how many it dropped, then the last
+ * it. Past `maxSize` bytes, the runs of the largest entries are grouped by
+ * statement first, then their bound values go, then their statements, each
+ * entry naming how many it grouped or dropped, then the last
  * entries, a closing `{"entriesDropped":N}` naming how many; `0` keeps them
  * all. Each entry is serialised again only when it changes, never the whole
  * header, so a request of thousands of entries is cut in milliseconds.
@@ -321,6 +354,7 @@ function newTransactionAudit(
 		startedAt,
 		tableCounts: new Map(),
 		statementAudits: new Map(),
+		runAudits: [],
 	};
 
 	audit.transactionAudits.push(transactionAudit);
@@ -345,6 +379,20 @@ function transactionEntryOf(
 		return transactionEntry;
 	}
 
+	if (level === 'full') {
+		transactionEntry.runs = transactionAudit.runAudits.map((runAudit) => {
+			return {
+				sql: runAudit.sql,
+				ms: runAudit.ms === undefined
+					? undefined
+					: Math.round(runAudit.ms),
+				bindings: runAudit.bindings,
+			};
+		});
+
+		return transactionEntry;
+	}
+
 	transactionEntry.statements = [...transactionAudit.statementAudits]
 		.map(([sql, statementAudit]) => {
 			const statementEntry: StatementEntry = {
@@ -353,7 +401,7 @@ function transactionEntryOf(
 				ms: Math.round(statementAudit.ms),
 			};
 
-			if (level === 'full') {
+			if (level === 'bindings') {
 				statementEntry.bindings = statementAudit.bindings;
 			}
 
@@ -363,12 +411,49 @@ function transactionEntryOf(
 	return transactionEntry;
 }
 
-// Bound values go before statements: a statement's text says more about the
-// request than one run's values.
+/**
+ * The runs of one statement as one statement entry: `count` runs, the sum of
+ * their `ms`, and the bound values of each run that has them.
+ */
+function statementEntriesOf(runEntries: RunEntry[]): StatementEntry[] {
+	const statementEntries = new Map<string, StatementEntry>();
+
+	for (const runEntry of runEntries) {
+		const statementEntry = statementEntries.get(runEntry.sql)
+			?? { sql: runEntry.sql, count: 0, ms: 0, bindings: [] };
+
+		statementEntry.count++;
+		statementEntry.ms += runEntry.ms ?? 0;
+
+		if (runEntry.bindings) {
+			statementEntry.bindings!.push(runEntry.bindings);
+		}
+
+		statementEntries.set(runEntry.sql, statementEntry);
+	}
+
+	return [...statementEntries.values()];
+}
+
+// Grouping the runs keeps every value but their order; bound values go before
+// statements: a statement's text says more about the request than one run's
+// values.
 const DROPPED_DETAILS = [
 	{
-		detailSizeOf: (statements: StatementEntry[]) => {
-			return statements.some(({ bindings }) => bindings)
+		detailSizeOf: ({ runs }: TransactionEntry) => {
+			return runs
+				? asciiJson(runs).length
+				: 0;
+		},
+		dropDetail: (transactionEntry: TransactionEntry) => {
+			transactionEntry.statements = statementEntriesOf(transactionEntry.runs!);
+			transactionEntry.runsGrouped = transactionEntry.runs!.length;
+			delete transactionEntry.runs;
+		},
+	},
+	{
+		detailSizeOf: ({ statements }: TransactionEntry) => {
+			return statements?.some(({ bindings }) => bindings)
 				? asciiJson(statements.map(({ bindings }) => bindings)).length
 				: 0;
 		},
@@ -384,8 +469,10 @@ const DROPPED_DETAILS = [
 		},
 	},
 	{
-		detailSizeOf: (statements: StatementEntry[]) => {
-			return asciiJson(statements).length;
+		detailSizeOf: ({ statements }: TransactionEntry) => {
+			return statements
+				? asciiJson(statements).length
+				: 0;
 		},
 		dropDetail: (transactionEntry: TransactionEntry) => {
 			transactionEntry.statementsDropped = transactionEntry.statements?.length ?? 0;
@@ -395,18 +482,14 @@ const DROPPED_DETAILS = [
 ];
 
 /**
- * The entries holding statements whose detail is not empty, largest detail
- * first, earliest first among equals.
+ * The entries whose detail is not empty, largest detail first, earliest first
+ * among equals.
  */
 function entryIndexesByDetailSize(
 	transactionEntries: TransactionEntry[],
-	detailSizeOf: (statements: StatementEntry[]) => number,
+	detailSizeOf: (transactionEntry: TransactionEntry) => number,
 ): number[] {
-	const detailSizes = transactionEntries.map(({ statements }) => {
-		return statements
-			? detailSizeOf(statements)
-			: 0;
-	});
+	const detailSizes = transactionEntries.map(detailSizeOf);
 
 	return detailSizes
 		.map((_detailSize, entryIndex) => entryIndex)

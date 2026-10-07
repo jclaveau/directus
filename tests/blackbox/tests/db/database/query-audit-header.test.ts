@@ -247,7 +247,21 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			"an admin asking full gets each run's bound values",
+			"an admin asking bindings gets each run's bound values",
+			({ then }) => {
+				then(
+					'on postgres these requests get these responses:',
+					async (table: ExchangeTable) => {
+						if (vendor === 'postgres') {
+							await expectExchanges(getUrl(vendor, env), table);
+						}
+					},
+				);
+			},
+		);
+
+		scenario(
+			'an admin asking full gets every run in order, each with its values',
 			({ then }) => {
 				then(
 					'on postgres these requests get these responses:',
@@ -431,7 +445,9 @@ describe.each(vendors)('%s', (vendor) => {
 					expect(exit.output).toContain('QUERY_AUDIT_LEVEL');
 
 					expect(exit.output)
-						.toContain('which is not one of counts, statements, full.');
+						.toContain(
+							'which is not one of counts, statements, bindings, full.',
+						);
 				});
 			},
 			60_000,

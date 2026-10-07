@@ -7,6 +7,7 @@ import {
 	emptyQueryAudit,
 	formatQueryAudit,
 	isQueryAuditLevel,
+	levelCarriesBindings,
 	QUERY_AUDIT_LEVELS,
 	queryAuditStore,
 } from '../database/query-audit.js';
@@ -14,14 +15,15 @@ import {
 /**
  * Dev-only: QUERY_AUDIT_HEADER names the header reporting the SQL this request
  * ran, one entry per transaction. A request sends the same header to pick how
- * much: `counts`, `statements`, or `full` for each run's bound values;
- * QUERY_AUDIT_LEVEL is the level of a request that sends none.
+ * much: `counts`, `statements`, `bindings` for each run's bound values, or
+ * `full` for every run in order; QUERY_AUDIT_LEVEL is the level of a request
+ * that sends none.
  *
- * Bound values carry what the request read and wrote, so `full` reports them to
- * an admin alone: anyone else gets `statements`. Whether the request is an
- * admin's is known once it has authenticated, after this middleware: until
- * then the values are recorded on the ask, and dropped at flush for anyone
- * else.
+ * Bound values carry what the request read and wrote, so `bindings` and `full`
+ * report them to an admin alone: anyone else gets `statements`. Whether the
+ * request is an admin's is known once it has authenticated, after this
+ * middleware: until then the values are recorded on the ask, and dropped at
+ * flush for anyone else.
  *
  * Written when the headers flush rather than in `respond`, so an error response
  * and a route that bypasses `respond` carry it too.
@@ -49,7 +51,7 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 		closeQueryAudit(audit);
 
 		this.setHeader(headerName, formatQueryAudit(audit, {
-			level: requestedLevel === 'full' && !req.accountability?.admin
+			level: levelCarriesBindings(requestedLevel) && !req.accountability?.admin
 				? 'statements'
 				: requestedLevel,
 			maxSize: parseBytesConfiguration(
