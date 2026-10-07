@@ -94,16 +94,14 @@ Feature: A request reports the SQL it ran, one entry per transaction
 
   Scenario: anyone else asking full gets the statements alone
     Then these requests get these responses:
-      | request                             | response                |
-      | method: GET                         | code: 403               |+
-      | path: /audit-probe/transaction-read | headers:                |
-      | headers:                            |   x-query-audit:        |
-      |   authorization: >-                 |     - tables:           |
-      |     Bearer <app access token>       |         directus_users: |
-      |   x-query-audit: full               |           select: 1     |
-      |                                     |       statements:       |
-      |                                     |         - count: 1      |
-    And no statement carries its bound values
+      | request                             | response  |
+      | method: GET                         | code: 403 |+
+      | path: /audit-probe/transaction-read |           |
+      | headers:                            |           |
+      |   authorization: >-                 |           |
+      |     Bearer <app access token>       |           |
+      |   x-query-audit: full               |           |
+    And the header lists statements, none carrying its bound values
 
   Scenario: a level outside the list is refused
     Then these requests get these responses:

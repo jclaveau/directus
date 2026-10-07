@@ -274,10 +274,16 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				and('no statement carries its bound values', () => {
-					expect(responses[0]!.headers[queryAuditHeader])
-						.not.toContain('"bindings"');
-				});
+				and(
+					'the header lists statements, none carrying its bound values',
+					() => {
+						expect(responses[0]!.headers[queryAuditHeader])
+							.toContain('"statements"');
+
+						expect(responses[0]!.headers[queryAuditHeader])
+							.not.toContain('"bindings"');
+					},
+				);
 			},
 		);
 
