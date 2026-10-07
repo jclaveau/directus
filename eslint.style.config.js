@@ -255,6 +255,19 @@ export const eslintBaseConfig = defineConfig([
       }],
     },
   },
+  {
+    files: [`**/*.feature`],
+    ignores: [`dist`, `node_modules`],
+    languageOptions: { parser: rawTextParser },
+    rules: {
+      // Gherkin tables hold two YAML columns side by side, hence 90 not 85.
+      "max-len": [`error`, {
+        code: 90,
+        tabWidth: 2,
+        comments: 90,
+      }],
+    },
+  },
 ])
 
 export default eslintBaseConfig

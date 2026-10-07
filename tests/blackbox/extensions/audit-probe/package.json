@@ -1,5 +1,5 @@
 {
-	"name": "query-audit-probe",
+	"name": "audit-probe",
 	"version": "0.0.0",
 	"private": true,
 	"directus:extension": {

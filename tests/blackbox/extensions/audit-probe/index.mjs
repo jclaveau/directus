@@ -1,6 +1,6 @@
-// Two reads inside one open transaction: `/pool-inside-transaction` sends the
+// Two reads inside one open transaction: `/pool-read` sends the
 // second through the pool, which hands it another connection while the
-// transaction pins the first; `/transaction-only` sends both through the
+// transaction pins the first; `/transaction-read` sends both through the
 // transaction. A bare extension route has no async-error wrapper, so a failed
 // read answers 500 rather than exit the shared test server.
 export default (router, { database }) => {
@@ -63,11 +63,11 @@ export default (router, { database }) => {
 		}
 	}
 
-	router.get('/pool-inside-transaction', readTwiceInTransaction(() => database));
-	router.get('/transaction-only', readTwiceInTransaction((trx) => trx));
-	router.get('/rollback-past-savepoint', adminOnly(rollBackPastSavepoint));
+	router.get('/pool-read', readTwiceInTransaction(() => database));
+	router.get('/transaction-read', readTwiceInTransaction((trx) => trx));
+	router.get('/savepoint-rollback', adminOnly(rollBackPastSavepoint));
 
-	router.get('/accented-multiline', adminOnly(() => {
+	router.get('/accented-sql', adminOnly(() => {
 		return database.raw('select \'café\' as accented_value\nfrom directus_settings');
 	}));
 

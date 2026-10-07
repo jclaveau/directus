@@ -11,7 +11,7 @@ import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
-const COLLECTION = 'query_audit_header_articles';
+const COLLECTION = 'audit_articles';
 
 const queryAuditHeader = 'x-query-audit';
 
@@ -366,7 +366,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 						// The first request loads the schema; the scenario's is warm.
 						await request(getUrl(vendor, cappedEnv))
-							.get('/query-audit-probe/transaction-only')
+							.get('/audit-probe/transaction-read')
 							.set('Authorization', auth);
 					},
 				);
