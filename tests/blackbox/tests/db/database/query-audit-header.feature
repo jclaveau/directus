@@ -51,7 +51,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       """
     And on postgres the transaction's statements read:
       """
-      - sql: select "id" from "directus_settings" where "id" = ?
+      - sql: select "id" from "directus_settings" where "id" = $1
         count: 2
       """
 
@@ -59,7 +59,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
     When the transaction route is requested at the full level
     Then on postgres the transaction's statements read:
       """
-      - sql: select "id" from "directus_settings" where "id" = ?
+      - sql: select "id" from "directus_settings" where "id" = $1
         count: 2
         bindings: [[1], [1]]
       """
