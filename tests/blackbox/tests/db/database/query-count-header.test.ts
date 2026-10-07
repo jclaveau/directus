@@ -1,5 +1,5 @@
 import config, { getUrl, paths } from '@common/config';
-import { CreateCollection, DeleteCollection } from '@common/functions';
+import { CreateCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -22,12 +22,9 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
+	// The collection goes through the spawned instance only: a schema change on
+	// the shared one would disturb the files running beside this one.
 	beforeAll(async () => {
-		await CreateCollection(vendor, {
-			collection: COLLECTION,
-			fields: [{ field: 'title', type: 'string', meta: {} }],
-		});
-
 		const port = await getPort();
 		env[vendor].PORT = String(port);
 
@@ -38,6 +35,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await awaitDirectusConnection(port);
 
+		await CreateCollection(vendor, {
+			collection: COLLECTION,
+			fields: [{ field: 'title', type: 'string', meta: {} }],
+			env,
+		});
+
 		// The first request of a kind loads the schema and the admin's
 		// permissions; every count below is the one of a warm instance.
 		await createArticles();
@@ -45,9 +48,11 @@ describe.each(vendors)('%s', (vendor) => {
 	}, 60_000);
 
 	afterAll(async () => {
-		instance.kill();
+		await request(getUrl(vendor, env))
+			.delete(`/collections/${COLLECTION}`)
+			.set('Authorization', auth);
 
-		await DeleteCollection(vendor, { collection: COLLECTION });
+		instance.kill();
 	});
 
 	function createArticles() {
