@@ -90,8 +90,8 @@ describe.each(vendors)('%s', (vendor) => {
 					transaction=8, other=0
 				`,
 				tables: oneLine`
-					query_count_header_articles=3, directus_activity=1,
-					directus_revisions=1
+					query_count_header_articles=2, directus_activity=1,
+					directus_revisions=1, directus_users=1
 				`,
 			});
 		},
