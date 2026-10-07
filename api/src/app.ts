@@ -66,6 +66,7 @@ import {
 	validateBytesEnv,
 	validateChoiceEnv,
 	validateDurationEnv,
+	validateHeaderNameEnv,
 } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
@@ -181,9 +182,9 @@ export default async function createApp(): Promise<express.Application> {
 	app.set('query parser', (str: string) => qs.parse(str, { depth: Number(env['QUERYSTRING_MAX_PARSE_DEPTH']) }));
 
 	if (queryAuditEnabled()) {
+		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 		validateChoiceEnv('QUERY_AUDIT_LEVEL', QUERY_AUDIT_LEVELS);
 		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
-		app.use(auditRequestQueries);
 	}
 
 	if (env['PRESSURE_LIMITER_ENABLED']) {
@@ -259,6 +260,11 @@ export default async function createApp(): Promise<express.Application> {
 
 	if (env['CORS_ENABLED'] === true) {
 		app.use(cors);
+	}
+
+	// After `cors`, so a browser can read the 400 of a level outside the list.
+	if (queryAuditEnabled()) {
+		app.use(auditRequestQueries);
 	}
 
 	app.use((req, res, next) => {

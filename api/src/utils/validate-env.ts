@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
+import { validateHeaderName } from 'node:http';
 import { useLogger } from '../logger/index.js';
 import { getMilliseconds } from './get-milliseconds.js';
 
@@ -132,4 +133,24 @@ export function validateChoiceEnv(
 	);
 
 	process.exit(1);
+}
+
+/**
+ * Refuse a variable naming a response header Node cannot write, which would
+ * otherwise fail every response, at boot like {@link validateDurationEnv}.
+ */
+export function validateHeaderNameEnv(key: string): void {
+	const env = useEnv();
+
+	try {
+		validateHeaderName(String(env[key]));
+	}
+	catch {
+		useLogger().error(
+			`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
+				+ 'which is not a valid header name.',
+		);
+
+		process.exit(1);
+	}
 }

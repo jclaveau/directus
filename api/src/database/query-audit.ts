@@ -20,7 +20,9 @@ type TransactionAudit = {
 };
 
 export type QueryAudit = {
-	recordsBindings: boolean;
+	recordsStatements: boolean;
+	recordsBindings: () => boolean;
+	closed: boolean;
 	transactionAudits: TransactionAudit[];
 	openTransactionAudits: Map<string, TransactionAudit>;
 };
@@ -56,6 +58,7 @@ type DriverQuery = (
 	this: unknown,
 	connection: DriverConnection,
 	queryObject: DriverQueryObject,
+	...streamArguments: unknown[]
 ) => Promise<unknown>;
 
 type DriverQueryObject = { sql: string; bindings?: unknown[] };
@@ -84,12 +87,17 @@ export function isQueryAuditLevel(value: unknown): value is QueryAuditLevel {
 }
 
 /**
- * `recordsBindings` keeps each run's bound values, which only the `full` level
- * reports: off, a request holds none of them.
+ * A request holds only what its `level` reports: no statements at `counts`, and
+ * each run's bound values at `full` alone, while `bindingsAllowed` says so.
  */
-export function emptyQueryAudit(recordsBindings = false): QueryAudit {
+export function emptyQueryAudit(
+	level: QueryAuditLevel = 'statements',
+	bindingsAllowed: () => boolean = () => true,
+): QueryAudit {
 	return {
-		recordsBindings,
+		recordsStatements: level !== 'counts',
+		recordsBindings: () => level === 'full' && bindingsAllowed(),
+		closed: false,
 		transactionAudits: [],
 		openTransactionAudits: new Map(),
 	};
@@ -112,17 +120,37 @@ export function auditQueriesOf(database: Knex): void {
 
 	auditedPrototypes.add(clientPrototype);
 
-	const runDriverQuery: DriverQuery = clientPrototype._query;
+	// `.stream()` reaches the driver through `_stream`, not `_query`.
+	for (const methodName of ['_query', '_stream']) {
+		const runDriverMethod: DriverQuery | undefined = clientPrototype[methodName];
 
-	clientPrototype._query = function (
-		this: unknown,
-		connection: DriverConnection,
-		queryObject: DriverQueryObject,
-	) {
+		if (runDriverMethod) {
+			clientPrototype[methodName] = auditedDriverMethod(runDriverMethod);
+		}
+	}
+}
+
+/**
+ * Stop recording: past the response's headers, nothing more can be reported,
+ * and a long-lived resource first created during the request would otherwise
+ * keep adding to its audit.
+ */
+export function closeQueryAudit(audit: QueryAudit): void {
+	audit.closed = true;
+	audit.openTransactionAudits.clear();
+}
+
+function auditedDriverMethod(runDriverMethod: DriverQuery): DriverQuery {
+	return function (this: unknown, connection, queryObject, ...streamArguments) {
 		const audit = queryAuditStore.getStore();
 
 		if (!audit) {
-			return runDriverQuery.call(this, connection, queryObject);
+			return runDriverMethod.call(
+				this,
+				connection,
+				queryObject,
+				...streamArguments,
+			);
 		}
 
 		const finishStatement = auditStatementStart(
@@ -132,8 +160,8 @@ export function auditQueriesOf(database: Knex): void {
 			queryObject.bindings,
 		);
 
-		return runDriverQuery
-			.call(this, connection, queryObject)
+		return runDriverMethod
+			.call(this, connection, queryObject, ...streamArguments)
 			.finally(finishStatement);
 	};
 }
@@ -149,6 +177,10 @@ export function auditStatementStart(
 	connectionId: string,
 	bindings: unknown[] = [],
 ): () => void {
+	if (audit.closed) {
+		return () => {};
+	}
+
 	const startedAt = performance.now();
 	const keyword = leadingKeyword(sql);
 
@@ -195,12 +227,20 @@ export function auditStatementStart(
 		transactionAudit.tableCounts.set(tableName, kindCounts);
 	}
 
+	if (!audit.recordsStatements) {
+		return () => {
+			if (!openTransactionAudit) {
+				transactionAudit.ms = performance.now() - startedAt;
+			}
+		};
+	}
+
 	const statementAudit = transactionAudit.statementAudits.get(sql)
 		?? { count: 0, ms: 0, bindings: [] };
 
 	statementAudit.count++;
 
-	if (audit.recordsBindings) {
+	if (audit.recordsBindings()) {
 		statementAudit.bindings.push(bindings);
 	}
 
@@ -220,8 +260,10 @@ export function auditStatementStart(
 /**
  * The audit as the JSON header value, non-ASCII escaped so a header can carry
  * it. Past `maxSize` bytes, the bound values of the largest entries go first,
- * then their statements, each entry naming how many it dropped; `0` keeps them
- * all.
+ * then their statements, each entry naming how many it dropped, then the last
+ * entries, a closing `{"entriesDropped":N}` naming how many; `0` keeps them
+ * all. Each entry is serialised again only when it changes, never the whole
+ * header, so a request of thousands of entries is cut in milliseconds.
  */
 export function formatQueryAudit(
 	audit: QueryAudit,
@@ -231,17 +273,44 @@ export function formatQueryAudit(
 		return transactionEntryOf(transactionAudit, level);
 	});
 
-	let headerValue = asciiJson(transactionEntries);
+	const entrySizes = transactionEntries.map((transactionEntry) => {
+		return asciiJson(transactionEntry).length;
+	});
 
-	while (maxSize > 0 && headerValue.length > maxSize) {
-		if (!dropLargestDetail(transactionEntries)) {
-			break;
-		}
+	// The entries, the commas between them and the brackets around them.
+	let headerSize = entrySizes.reduce((total, entrySize) => total + entrySize, 0)
+		+ Math.max(entrySizes.length - 1, 0)
+		+ 2;
 
-		headerValue = asciiJson(transactionEntries);
+	if (maxSize <= 0 || headerSize <= maxSize) {
+		return asciiJson(transactionEntries);
 	}
 
-	return headerValue;
+	for (const { detailSizeOf, dropDetail } of DROPPED_DETAILS) {
+		const largestFirst = entryIndexesByDetailSize(
+			transactionEntries,
+			detailSizeOf,
+		);
+
+		for (const entryIndex of largestFirst) {
+			if (headerSize <= maxSize) {
+				return asciiJson(transactionEntries);
+			}
+
+			dropDetail(transactionEntries[entryIndex]!);
+
+			const entrySize = asciiJson(transactionEntries[entryIndex]).length;
+
+			headerSize += entrySize - entrySizes[entryIndex]!;
+			entrySizes[entryIndex] = entrySize;
+		}
+	}
+
+	if (headerSize <= maxSize) {
+		return asciiJson(transactionEntries);
+	}
+
+	return asciiJson(withLastEntriesDropped(transactionEntries, entrySizes, maxSize));
 }
 
 function newTransactionAudit(
@@ -294,68 +363,96 @@ function transactionEntryOf(
 	return transactionEntry;
 }
 
+// Bound values go before statements: a statement's text says more about the
+// request than one run's values.
+const DROPPED_DETAILS = [
+	{
+		detailSizeOf: (statements: StatementEntry[]) => {
+			return statements.some(({ bindings }) => bindings)
+				? asciiJson(statements.map(({ bindings }) => bindings)).length
+				: 0;
+		},
+		dropDetail: (transactionEntry: TransactionEntry) => {
+			let droppedRuns = 0;
+
+			for (const statementEntry of transactionEntry.statements ?? []) {
+				droppedRuns += statementEntry.bindings?.length ?? 0;
+				delete statementEntry.bindings;
+			}
+
+			transactionEntry.bindingsDropped = droppedRuns;
+		},
+	},
+	{
+		detailSizeOf: (statements: StatementEntry[]) => {
+			return asciiJson(statements).length;
+		},
+		dropDetail: (transactionEntry: TransactionEntry) => {
+			transactionEntry.statementsDropped = transactionEntry.statements?.length ?? 0;
+			delete transactionEntry.statements;
+		},
+	},
+];
+
 /**
- * Drop the bound values of the entry holding the most, or once none holds any,
- * the statements of the entry holding the most. Returns whether there was
- * anything left to drop.
+ * The entries holding statements whose detail is not empty, largest detail
+ * first, earliest first among equals.
  */
-function dropLargestDetail(transactionEntries: TransactionEntry[]): boolean {
-	const bindingsEntry = largestEntryBy(transactionEntries, (statements) => {
-		return statements.some(({ bindings }) => bindings !== undefined)
-			? asciiJson(statements.map(({ bindings }) => bindings)).length
+function entryIndexesByDetailSize(
+	transactionEntries: TransactionEntry[],
+	detailSizeOf: (statements: StatementEntry[]) => number,
+): number[] {
+	const detailSizes = transactionEntries.map(({ statements }) => {
+		return statements
+			? detailSizeOf(statements)
 			: 0;
 	});
 
-	if (bindingsEntry?.statements) {
-		let droppedRuns = 0;
-
-		for (const statementEntry of bindingsEntry.statements) {
-			droppedRuns += statementEntry.bindings?.length ?? 0;
-			delete statementEntry.bindings;
-		}
-
-		bindingsEntry.bindingsDropped = droppedRuns;
-
-		return true;
-	}
-
-	const statementsEntry = largestEntryBy(transactionEntries, (statements) => {
-		return asciiJson(statements).length;
-	});
-
-	if (statementsEntry?.statements) {
-		statementsEntry.statementsDropped = statementsEntry.statements.length;
-		delete statementsEntry.statements;
-
-		return true;
-	}
-
-	return false;
+	return detailSizes
+		.map((_detailSize, entryIndex) => entryIndex)
+		.filter((entryIndex) => detailSizes[entryIndex]! > 0)
+		.sort((left, right) => detailSizes[right]! - detailSizes[left]!);
 }
 
-function largestEntryBy(
+/**
+ * Keep the earliest entries that fit beside `{"entriesDropped":N}`; that entry
+ * alone when none does.
+ */
+function withLastEntriesDropped(
 	transactionEntries: TransactionEntry[],
-	sizeOfStatements: (statements: StatementEntry[]) => number,
-): TransactionEntry | undefined {
-	let largestEntry: TransactionEntry | undefined;
-	let largestSize = 0;
+	entrySizes: number[],
+	maxSize: number,
+): (TransactionEntry | { entriesDropped: number })[] {
+	let keptSize = 2;
+	let keptCount = 0;
 
-	for (const transactionEntry of transactionEntries) {
-		const statementsSize = transactionEntry.statements
-			? sizeOfStatements(transactionEntry.statements)
-			: 0;
+	for (const entrySize of entrySizes) {
+		const droppedEntrySize = asciiJson({
+			entriesDropped: entrySizes.length - keptCount - 1,
+		}).length;
 
-		if (statementsSize > largestSize) {
-			largestEntry = transactionEntry;
-			largestSize = statementsSize;
+		if (keptSize + entrySize + 1 + droppedEntrySize > maxSize) {
+			break;
 		}
+
+		keptSize += entrySize + 1;
+		keptCount++;
 	}
 
-	return largestEntry;
+	return [
+		...transactionEntries.slice(0, keptCount),
+		{ entriesDropped: transactionEntries.length - keptCount },
+	];
 }
 
 function asciiJson(value: unknown): string {
-	return JSON.stringify(value).replace(/[^\x20-\x7e]/g, (character) => {
+	const json = JSON.stringify(value, (_key, jsonValue) => {
+		return typeof jsonValue === 'bigint'
+			? String(jsonValue)
+			: jsonValue;
+	});
+
+	return json.replace(/[^\x20-\x7e]/g, (character) => {
 		const hexCode = character.charCodeAt(0)
 			.toString(16)
 			.padStart(4, '0');

@@ -3,6 +3,7 @@ import { InvalidQueryError } from '@directus/errors';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler, Response } from 'express';
 import {
+	closeQueryAudit,
 	emptyQueryAudit,
 	formatQueryAudit,
 	isQueryAuditLevel,
@@ -18,8 +19,9 @@ import {
  *
  * Bound values carry what the request read and wrote, so `full` reports them to
  * an admin alone: anyone else gets `statements`. Whether the request is an
- * admin's is known once it has authenticated, after this middleware, so the
- * values are recorded on the ask and dropped at flush.
+ * admin's is known once it has authenticated, after this middleware: until
+ * then the values are recorded on the ask, and dropped at flush for anyone
+ * else.
  *
  * Written when the headers flush rather than in `respond`, so an error response
  * and a route that bypasses `respond` carry it too.
@@ -35,10 +37,17 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 		}));
 	}
 
-	const audit = emptyQueryAudit(requestedLevel === 'full');
+	const audit = emptyQueryAudit(requestedLevel, () => {
+		return req.accountability === undefined || req.accountability.admin;
+	});
+
 	const writeHead = res.writeHead;
 
+	res.once('close', () => closeQueryAudit(audit));
+
 	res.writeHead = function (this: Response, ...headArguments: any[]) {
+		closeQueryAudit(audit);
+
 		this.setHeader(headerName, formatQueryAudit(audit, {
 			level: requestedLevel === 'full' && !req.accountability?.admin
 				? 'statements'

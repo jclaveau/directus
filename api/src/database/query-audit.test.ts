@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import {
 	auditQueriesOf,
 	auditStatementStart,
+	closeQueryAudit,
 	emptyQueryAudit,
 	formatQueryAudit,
 	queryAuditEnabled,
@@ -168,7 +169,7 @@ test('drops the statements of the largest entries first past the size', () => {
 			+ '"statementsDropped":2}]',
 		);
 
-	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 10 }))
+	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 140 }))
 		.toBe(
 			'[{"ms":0,"tables":{"a":{"select":1}},"statementsDropped":1},'
 			+ '{"ms":0,"outcome":"commit","tables":{"b":{"select":2}},'
@@ -176,10 +177,51 @@ test('drops the statements of the largest entries first past the size', () => {
 		);
 });
 
+test('drops the last entries once no entry holds statements', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	auditStatementStart(audit, 'select * from "a"', 'a')();
+	auditStatementStart(audit, 'select * from "b"', 'a')();
+	auditStatementStart(audit, 'select * from "c"', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 60 }))
+		.toBe('[{"ms":0,"tables":{"a":{"select":1}}},{"entriesDropped":2}]');
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 10 }))
+		.toBe('[{"entriesDropped":3}]');
+});
+
+// Dropping one entry's detail used to serialise the whole header again: 2000
+// entries took 20 s of the event loop.
+test('cuts thousands of entries down to the size in milliseconds', () => {
+	const audit = emptyQueryAudit('full');
+
+	for (let connectionNumber = 0; connectionNumber < 2000; connectionNumber++) {
+		auditStatementStart(
+			audit,
+			'select * from "a" where "id" = ?',
+			`connection ${connectionNumber}`,
+			[connectionNumber],
+		)();
+	}
+
+	const startedAt = Date.now();
+	const headerValue = formatQueryAudit(audit, { level: 'full', maxSize: 8192 });
+
+	expect({
+		within8kb: headerValue.length <= 8192,
+		withinOneSecond: Date.now() - startedAt < 1000,
+	}).toEqual({ within8kb: true, withinOneSecond: true });
+
+	expect(headerValue).toMatch(/,\{"entriesDropped":\d+\}\]$/);
+});
+
 test('reports each run\'s bound values at the full level', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
-	const audit = emptyQueryAudit(true);
+	const audit = emptyQueryAudit('full');
 
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [2])();
@@ -201,7 +243,7 @@ test('reports each run\'s bound values at the full level', () => {
 test('drops bound values before statements past the size', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
-	const audit = emptyQueryAudit(true);
+	const audit = emptyQueryAudit('full');
 
 	auditStatementStart(audit, 'BEGIN;', 'a')();
 
@@ -222,11 +264,85 @@ test('drops bound values before statements past the size', () => {
 			+ '"count":2,"ms":0}],"bindingsDropped":2}]',
 		);
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 10 }))
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 100 }))
 		.toBe(
 			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2}},'
 			+ '"bindingsDropped":2,"statementsDropped":1}]',
 		);
+});
+
+// `search` binds a number past Number.MAX_SAFE_INTEGER as a BigInt, which
+// JSON.stringify refuses.
+test('reports a BigInt bound value as its digits', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('full');
+
+	auditStatementStart(audit, 'select * from "a" where "n" = ?', 'a', [
+		9007199254740993n,
+	])();
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
+		.toBe(
+			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
+			+ '"sql":"select * from \\"a\\" where \\"n\\" = ?",'
+			+ '"count":1,"ms":0,"bindings":[["9007199254740993"]]}]}]',
+		);
+});
+
+test('records no statement at the counts level', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('counts');
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+
+	expect(audit.transactionAudits).toEqual([
+		{
+			startedAt: 0,
+			ms: 0,
+			tableCounts: new Map([['a', { select: 1 }]]),
+			statementAudits: new Map(),
+		},
+	]);
+});
+
+test('records bound values only while they are allowed', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	let bindingsAllowed = true;
+	const audit = emptyQueryAudit('full', () => bindingsAllowed);
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+	bindingsAllowed = false;
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [2])();
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
+		.toBe(
+			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
+			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"count":1,"ms":0,"bindings":[[1]]}]},'
+			+ '{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
+			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"count":1,"ms":0,"bindings":[]}]}]',
+		);
+});
+
+// A resource first created during a request runs its callbacks in that
+// request's store for as long as it lives.
+test('records nothing once closed', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+	auditStatementStart(audit, 'select * from "a"', 'a')();
+	closeQueryAudit(audit);
+	auditStatementStart(audit, 'select * from "b"', 'b')();
+	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
+		.toBe('[{"tables":{"a":{"select":1}}}]');
 });
 
 test('escapes what a header cannot carry', () => {
@@ -282,6 +398,41 @@ test('leaves a statement sent outside any request unaudited', async () => {
 	);
 
 	expect(result).toBe('driver result');
+});
+
+test('audits a statement streamed through the driver', async () => {
+	const driverClient = new (class {
+		_query() {
+			return Promise.resolve();
+		}
+
+		_stream(
+			_connection: object,
+			_queryObject: object,
+			readStream: string,
+			streamOptions: object,
+		) {
+			return Promise.resolve([readStream, streamOptions]);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	const result = await queryAuditStore.run(audit, () => {
+		return driverClient._stream(
+			{ __knexUid: 'a' },
+			{ sql: 'select * from "authors"' },
+			'the stream',
+			{ highWaterMark: 1 },
+		);
+	});
+
+	expect(result).toEqual(['the stream', { highWaterMark: 1 }]);
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
+		.toMatch(/^\[\{"ms":\d+,"tables":\{"authors":\{"select":1\}\}\}\]$/);
 });
 
 test('wraps a dialect prototype once, however many pools share it', () => {

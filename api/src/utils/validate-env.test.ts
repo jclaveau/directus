@@ -8,6 +8,7 @@ import {
 	validateChoiceEnv,
 	validateDurationEnv,
 	validateEnv,
+	validateHeaderNameEnv,
 } from './validate-env.js';
 
 vi.mock('@directus/env');
@@ -170,6 +171,29 @@ test('takes a choice from the list', () => {
 	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' });
 
 	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+// Node throws on every `setHeader` of such a name: every response would fail.
+test('refuses a header name Node cannot write', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'x query audit' });
+
+	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+		'"HEADER_TEST_VARIABLE" Environment Variable is "x query audit", '
+			+ 'which is not a valid header name.',
+	);
+
+	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+});
+
+test('takes a header name Node can write', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
+
+	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

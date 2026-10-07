@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { InvalidQueryError } from '@directus/errors';
 import type { Request, Response } from 'express';
+import { EventEmitter } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import { afterEach, expect, test, vi } from 'vitest';
 import {
@@ -26,7 +27,12 @@ test('writes the audit of the request when its headers flush', () => {
 
 	const writeHead = vi.fn();
 	const setHeader = vi.fn();
-	const res = { writeHead, setHeader } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead,
+		setHeader,
+	}) as unknown as Response;
+
 	const req = { get: vi.fn() } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
@@ -61,7 +67,12 @@ test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const setHeader = vi.fn();
-	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader,
+	}) as unknown as Response;
+
 	const req = { get: vi.fn().mockReturnValue('counts') } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
@@ -89,7 +100,11 @@ test('reports the bound values to an admin asking full', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const setHeader = vi.fn();
-	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader,
+	}) as unknown as Response;
 
 	const req = {
 		get: vi.fn().mockReturnValue('full'),
@@ -126,7 +141,11 @@ test('withholds the bound values from anyone else asking full', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const setHeader = vi.fn();
-	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader,
+	}) as unknown as Response;
 
 	const req = {
 		get: vi.fn().mockReturnValue('full'),
@@ -160,7 +179,12 @@ test('refuses a level outside the list', () => {
 	});
 
 	const writeHead = vi.fn();
-	const res = { writeHead, setHeader: vi.fn() } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead,
+		setHeader: vi.fn(),
+	}) as unknown as Response;
+
 	const req = { get: vi.fn().mockReturnValue('every') } as unknown as Request;
 	const next = vi.fn();
 
@@ -181,7 +205,12 @@ test('writes an empty list for a request that ran no statement', () => {
 	});
 
 	const setHeader = vi.fn();
-	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader,
+	}) as unknown as Response;
+
 	const req = { get: vi.fn() } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {});
@@ -200,7 +229,12 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const setHeader = vi.fn();
-	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader,
+	}) as unknown as Response;
+
 	const req = { get: vi.fn() } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
@@ -218,5 +252,102 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 			+ '"statements":[{"sql":"select * from \\"articles\\"",'
 			+ '"count":1,"ms":0}]}]',
 		],
+	]);
+});
+
+// A connection pool first filled during the request runs its callbacks in the
+// request's store long after the response left.
+test('records nothing once the headers flushed', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader: vi.fn(),
+	}) as unknown as Response;
+
+	const req = { get: vi.fn() } as unknown as Request;
+	let requestAudit = queryAuditStore.getStore();
+
+	auditRequestQueries(req, res, () => {
+		requestAudit = queryAuditStore.getStore();
+	});
+
+	res.writeHead(200);
+	auditStatementStart(requestAudit!, 'select * from "articles"', 'a')();
+
+	expect(requestAudit!.transactionAudits).toEqual([]);
+});
+
+test('records nothing once the connection closed', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader: vi.fn(),
+	}) as unknown as Response;
+
+	const req = { get: vi.fn() } as unknown as Request;
+	let requestAudit = queryAuditStore.getStore();
+
+	auditRequestQueries(req, res, () => {
+		requestAudit = queryAuditStore.getStore();
+	});
+
+	res.emit('close');
+	auditStatementStart(requestAudit!, 'select * from "articles"', 'a')();
+
+	expect(requestAudit!.transactionAudits).toEqual([]);
+});
+
+test('records no bound value once anyone else authenticated', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader: vi.fn(),
+	}) as unknown as Response;
+
+	const req = { get: vi.fn().mockReturnValue('full') } as unknown as Request;
+	let requestAudit = queryAuditStore.getStore();
+
+	auditRequestQueries(req, res, () => {
+		requestAudit = queryAuditStore.getStore();
+	});
+
+	req.accountability = { admin: false } as NonNullable<Request['accountability']>;
+
+	auditStatementStart(
+		requestAudit!,
+		'select * from "articles" where "id" = ?',
+		'a',
+		[7],
+	)();
+
+	expect(requestAudit!.transactionAudits).toEqual([
+		{
+			startedAt: 0,
+			ms: 0,
+			tableCounts: new Map([['articles', { select: 1 }]]),
+			statementAudits: new Map([
+				[
+					'select * from "articles" where "id" = ?',
+					{ count: 1, ms: 0, bindings: [] },
+				],
+			]),
+		},
 	]);
 });
