@@ -3,6 +3,7 @@ import { CreateCollection, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import { cloneDeep } from 'lodash-es';
@@ -80,11 +81,19 @@ describe.each(vendors)('%s', (vendor) => {
 
 			expect(response.statusCode).toBe(200);
 
-			expect(response.headers['x-query-count']).toBe(
-				'total=0, select=0, insert=0, update=0, delete=0, transaction=0, other=0',
-			);
-
-			expect(response.headers['x-query-tables']).toBe('');
+			expect({
+				count: response.headers['x-query-count'],
+				tables: response.headers['x-query-tables'],
+			}).toEqual({
+				count: oneLine`
+					total=13, select=2, insert=3, update=0, delete=0,
+					transaction=8, other=0
+				`,
+				tables: oneLine`
+					query_count_header_articles=3, directus_activity=1,
+					directus_revisions=1
+				`,
+			});
 		},
 	);
 
