@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { parse as parseBytesConfiguration } from 'bytes';
 import { useLogger } from '../logger/index.js';
 import { getMilliseconds } from './get-milliseconds.js';
 
@@ -79,6 +80,31 @@ export function validateDurationEnv(keys: string[]): void {
 		logger.error(
 			`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
 				+ 'which is not a duration of 0 or more.',
+		);
+
+		process.exit(1);
+	}
+}
+
+/**
+ * Refuse a size variable that is not a size of 0 or more, at boot like
+ * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
+ * default.
+ */
+export function validateBytesEnv(keys: string[]): void {
+	const env = useEnv();
+	const logger = useLogger();
+
+	for (const key of keys) {
+		const parsedBytes = parseBytesConfiguration(String(env[key]));
+
+		if (parsedBytes !== null && parsedBytes >= 0) {
+			continue;
+		}
+
+		logger.error(
+			`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
+				+ 'which is not a size of 0 or more.',
 		);
 
 		process.exit(1);

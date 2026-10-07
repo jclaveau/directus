@@ -61,11 +61,15 @@ import {
 	validateCacheSettingsEnv,
 } from './cache-settings.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
-import { validateBooleanEnv, validateDurationEnv } from './utils/validate-env.js';
+import {
+	validateBooleanEnv,
+	validateBytesEnv,
+	validateDurationEnv,
+} from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
-import { queryCountEnabled } from './database/query-count.js';
+import { queryAuditEnabled } from './database/query-audit.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -75,7 +79,7 @@ import cache from './middleware/cache.js';
 import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
-import countRequestQueries from './middleware/query-count.js';
+import auditRequestQueries from './middleware/query-audit.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
@@ -175,8 +179,10 @@ export default async function createApp(): Promise<express.Application> {
 	app.set('trust proxy', env['IP_TRUST_PROXY']);
 	app.set('query parser', (str: string) => qs.parse(str, { depth: Number(env['QUERYSTRING_MAX_PARSE_DEPTH']) }));
 
-	if (queryCountEnabled()) {
-		app.use(countRequestQueries);
+	if (queryAuditEnabled()) {
+		validateBooleanEnv(['QUERY_AUDIT_STATEMENTS']);
+		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
+		app.use(auditRequestQueries);
 	}
 
 	if (env['PRESSURE_LIMITER_ENABLED']) {

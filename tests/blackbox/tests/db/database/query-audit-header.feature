@@ -1,0 +1,68 @@
+Feature: A request reports the SQL it ran, one entry per transaction
+
+  QUERY_AUDIT_HEADER names a response header listing, in the order they began,
+  the transactions the request ran. An entry maps each table to the statements
+  of each kind it received, and says whether it committed or rolled back. A
+  statement sent outside a transaction is an entry of its own, the way the
+  database runs it; BEGIN, COMMIT and SAVEPOINT are not listed.
+  QUERY_AUDIT_STATEMENTS adds each entry's statements: the SQL the driver
+  received, placeholders in place of the bound values, once per distinct text.
+
+  Durations vary from run to run: the steps check each `ms` is a number, then
+  read the rest as the YAML below, in its key order. The probe routes read
+  `directus_settings` twice inside one transaction: the pool route sends the
+  second read through the pool, the transaction route through the transaction.
+  Every request authenticates first, which reads `directus_users` outside any
+  transaction.
+
+  Scenario: a create reports its transaction and the reads around it
+    When three articles are created
+    Then on postgres the header reads:
+      """
+      - tables: { directus_users: { select: 1 } }
+      - outcome: commit
+        tables:
+          query_audit_header_articles: { insert: 1 }
+          directus_activity: { insert: 1 }
+          directus_revisions: { insert: 1 }
+      - tables: { query_audit_header_articles: { select: 1 } }
+      """
+
+  Scenario: a pool read inside a transaction is an entry of its own
+    When the pool route is requested
+    Then the header reads, except on sqlite3:
+      """
+      - tables: { directus_users: { select: 1 } }
+      - outcome: commit
+        tables: { directus_settings: { select: 1 } }
+      - tables: { directus_settings: { select: 1 } }
+      """
+
+  Scenario: reads through the transaction share its entry
+    When the transaction route is requested
+    Then the header reads:
+      """
+      - tables: { directus_users: { select: 1 } }
+      - outcome: commit
+        tables: { directus_settings: { select: 2 } }
+      """
+    And on postgres the transaction's statements read:
+      """
+      - sql: select "id" from "directus_settings"
+        count: 2
+      """
+
+  Scenario: two requests at once each report what they report alone
+    When a create and a read run one after the other, then both at once
+    Then each reports the same entries both times
+
+  Scenario: an error response reports the statements it ran
+    When a missing collection is read
+    Then the response is a 403 whose header reads:
+      """
+      - tables: { directus_users: { select: 1 } }
+      """
+
+  Scenario: no header without QUERY_AUDIT_HEADER
+    When the collection is read from an instance without QUERY_AUDIT_HEADER
+    Then the response carries no query audit header

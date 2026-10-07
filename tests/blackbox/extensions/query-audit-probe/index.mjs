@@ -12,8 +12,8 @@ export default (router, { database }) => {
 
 			try {
 				await database.transaction(async (trx) => {
-					await trx.raw('SELECT 1');
-					await secondReader(trx).raw('SELECT 1');
+					await trx('directus_settings').select('id');
+					await secondReader(trx)('directus_settings').select('id');
 				});
 
 				return res.json({ data: null });
