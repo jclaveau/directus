@@ -72,6 +72,41 @@ Feature: A request reports the SQL it ran, one entry per transaction
     When the transaction route is requested at the every level
     Then the response is a 400 naming the levels
 
+  Scenario: a savepoint's rollback leaves its transaction open
+    When the savepoint route is requested
+    Then the header reads:
+      """
+      - tables: { directus_users: { select: 1 } }
+      - outcome: rollback
+        tables: { directus_settings: { select: 3 } }
+      """
+
+  Scenario: SQL a header cannot carry raw is escaped
+    When the accented multi-line route is requested
+    Then the header holds printable ASCII alone
+    And the second entry's statements read:
+      """
+      - sql: "select 'café' as accented_value\nfrom directus_settings"
+        count: 1
+      """
+
+  Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted
+    When an instance capped at 10 bytes serves the transaction route at full
+    Then the header reads, durations aside:
+      """
+      - tables: { directus_users: { select: 1 } }
+        bindingsDropped: 1
+        statementsDropped: 1
+      - outcome: commit
+        tables: { directus_settings: { select: 2 } }
+        bindingsDropped: 2
+        statementsDropped: 1
+      """
+
+  Scenario: an instance with a level outside the list refuses to start
+    When an instance starts with QUERY_AUDIT_LEVEL every
+    Then it exits naming QUERY_AUDIT_LEVEL and the levels
+
   Scenario: two requests at once each report what they report alone
     When a create and a read run one after the other, then both at once
     Then each reports the same entries both times

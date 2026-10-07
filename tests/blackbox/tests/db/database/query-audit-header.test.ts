@@ -7,7 +7,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import { load as loadYaml } from 'js-yaml';
-import { cloneDeep } from 'lodash-es';
+import { cloneDeep, omit } from 'lodash-es';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
@@ -23,6 +23,7 @@ describe.each(vendors)('%s', (vendor) => {
 	env[vendor]['QUERY_AUDIT_LEVEL'] = 'statements';
 
 	let instance: ChildProcess;
+	let cappedInstance: ChildProcess | undefined;
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -57,6 +58,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.set('Authorization', auth);
 
 		instance.kill();
+		cappedInstance?.kill();
 	});
 
 	function createArticles() {
@@ -96,6 +98,8 @@ describe.each(vendors)('%s', (vendor) => {
 			ms: number;
 			bindings?: unknown[][];
 		}[];
+		bindingsDropped?: number;
+		statementsDropped?: number;
 	};
 
 	function auditOf(response: Response): TransactionEntry[] {
@@ -266,6 +270,132 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 			});
 		});
+
+		scenario(
+			"a savepoint's rollback leaves its transaction open",
+			({ when, then }) => {
+				let response: Response;
+
+				when('the savepoint route is requested', async () => {
+					response = await requestProbe('rollback-past-savepoint');
+
+					expect(response.statusCode).toBe(200);
+				});
+
+				then('the header reads:', (docString: string) => {
+					expectHeader(response, docString);
+				});
+			},
+		);
+
+		// A raw newline or non-ASCII character in a header value makes Node
+		// refuse the whole response.
+		scenario('SQL a header cannot carry raw is escaped', ({ when, then, and }) => {
+			let response: Response;
+
+			when('the accented multi-line route is requested', async () => {
+				response = await requestProbe('accented-multiline');
+
+				expect(response.statusCode).toBe(200);
+			});
+
+			then('the header holds printable ASCII alone', () => {
+				expect(response.headers[queryAuditHeader]).toMatch(/^[\x20-\x7e]+$/);
+			});
+
+			and("the second entry's statements read:", (docString: string) => {
+				const { statements } = auditOf(response)[1]!;
+
+				expect(statements.map(({ sql, count }) => ({ sql, count })))
+					.toEqual(loadYaml(docString));
+			});
+		});
+
+		scenario(
+			'past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted',
+			({ when, then }) => {
+				let response: Response;
+
+				when(
+					'an instance capped at 10 bytes serves the transaction route at full',
+					async () => {
+						const cappedEnv = cloneDeep(env);
+						const port = await getPort();
+
+						cappedEnv[vendor].PORT = String(port);
+						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '10';
+
+						cappedInstance = spawn('node', [paths.cli, 'start'], {
+							cwd: paths.cwd,
+							env: cappedEnv[vendor],
+						});
+
+						await awaitDirectusConnection(port);
+
+						const requestCapped = () => {
+							return request(getUrl(vendor, cappedEnv))
+								.get('/query-audit-probe/transaction-only')
+								.set('Authorization', auth)
+								.set(queryAuditHeader, 'full');
+						};
+
+						// The first request loads the schema; the second is warm.
+						await requestCapped();
+						response = await requestCapped();
+
+						expect(response.statusCode).toBe(200);
+					},
+				);
+
+				then('the header reads, durations aside:', (docString: string) => {
+					expect(auditOf(response).map(({ ms }) => typeof ms))
+						.toEqual(auditOf(response).map(() => 'number'));
+
+					expect(JSON.stringify(auditOf(response).map((entry) => {
+						return omit(entry, 'ms');
+					}))).toBe(JSON.stringify(loadYaml(docString)));
+				});
+			},
+			60_000,
+		);
+
+		scenario(
+			'an instance with a level outside the list refuses to start',
+			({ when, then }) => {
+				let exit: { code: number | null; output: string };
+
+				when('an instance starts with QUERY_AUDIT_LEVEL every', async () => {
+					const port = await getPort();
+
+					exit = await new Promise((resolve) => {
+						const refusedInstance = spawn('node', [paths.cli, 'start'], {
+							cwd: paths.cwd,
+							env: {
+								...env[vendor],
+								PORT: String(port),
+								QUERY_AUDIT_LEVEL: 'every',
+							},
+						});
+
+						let output = '';
+
+						refusedInstance.stdout.on('data', (chunk) => (output += String(chunk)));
+						refusedInstance.stderr.on('data', (chunk) => (output += String(chunk)));
+
+						refusedInstance.on('exit', (code) => resolve({ code, output }));
+					});
+				});
+
+				then('it exits naming QUERY_AUDIT_LEVEL and the levels', () => {
+					expect(exit.code, exit.output).toBe(1);
+					expect(exit.output).toContain('QUERY_AUDIT_LEVEL');
+
+					expect(exit.output)
+						.toContain('which is not one of counts, statements, full.');
+				});
+			},
+			60_000,
+		);
 
 		scenario(
 			'two requests at once each report what they report alone',
