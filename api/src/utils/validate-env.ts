@@ -110,3 +110,26 @@ export function validateBytesEnv(keys: string[]): void {
 		process.exit(1);
 	}
 }
+
+/**
+ * Refuse a variable set to none of `choices`, at boot like
+ * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
+ * default.
+ */
+export function validateChoiceEnv(
+	key: string,
+	choices: readonly string[],
+): void {
+	const env = useEnv();
+
+	if (choices.includes(env[key] as string)) {
+		return;
+	}
+
+	useLogger().error(
+		`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
+			+ `which is not one of ${choices.join(', ')}.`,
+	);
+
+	process.exit(1);
+}

@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { InvalidQueryError } from '@directus/errors';
 import type { Request, Response } from 'express';
 import { performance } from 'node:perf_hooks';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -17,7 +18,7 @@ afterEach(() => {
 test('writes the audit of the request when its headers flush', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
-		QUERY_AUDIT_STATEMENTS: true,
+		QUERY_AUDIT_LEVEL: 'statements',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	});
 
@@ -26,8 +27,9 @@ test('writes the audit of the request when its headers flush', () => {
 	const writeHead = vi.fn();
 	const setHeader = vi.fn();
 	const res = { writeHead, setHeader } as unknown as Response;
+	const req = { get: vi.fn() } as unknown as Request;
 
-	auditRequestQueries({} as Request, res, () => {
+	auditRequestQueries(req, res, () => {
 		const audit = queryAuditStore.getStore()!;
 
 		auditStatementStart(audit, 'select * from "articles"', 'a')();
@@ -49,10 +51,38 @@ test('writes the audit of the request when its headers flush', () => {
 	});
 });
 
-test('writes the tables alone without QUERY_AUDIT_STATEMENTS', () => {
+test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
-		QUERY_AUDIT_STATEMENTS: false,
+		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const setHeader = vi.fn();
+	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+	const req = { get: vi.fn().mockReturnValue('counts') } as unknown as Request;
+
+	auditRequestQueries(req, res, () => {
+		const audit = queryAuditStore.getStore()!;
+
+		auditStatementStart(audit, 'select * from "articles"', 'a')();
+	});
+
+	res.writeHead(200);
+
+	expect(req.get).toHaveBeenCalledWith('X-Query-Audit');
+
+	expect(setHeader.mock.calls).toEqual([
+		['X-Query-Audit', '[{"ms":0,"tables":{"articles":{"select":1}}}]'],
+	]);
+});
+
+test('reports the bound values to an admin asking full', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	});
 
@@ -61,30 +91,100 @@ test('writes the tables alone without QUERY_AUDIT_STATEMENTS', () => {
 	const setHeader = vi.fn();
 	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
 
-	auditRequestQueries({} as Request, res, () => {
+	const req = {
+		get: vi.fn().mockReturnValue('full'),
+		accountability: { admin: true },
+	} as unknown as Request;
+
+	auditRequestQueries(req, res, () => {
 		const audit = queryAuditStore.getStore()!;
 
-		auditStatementStart(audit, 'select * from "articles"', 'a')();
+		auditStatementStart(audit, 'select * from "articles" where "id" = ?', 'a', [
+			7,
+		])();
 	});
 
 	res.writeHead(200);
 
 	expect(setHeader.mock.calls).toEqual([
-		['X-Query-Audit', '[{"ms":0,"tables":{"articles":{"select":1}}}]'],
+		[
+			'X-Query-Audit',
+			'[{"ms":0,"tables":{"articles":{"select":1}},'
+			+ '"statements":[{"sql":"select * from \\"articles\\" where \\"id\\" = ?",'
+			+ '"count":1,"ms":0,"bindings":[[7]]}]}]',
+		],
 	]);
+});
+
+test('withholds the bound values from anyone else asking full', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const setHeader = vi.fn();
+	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+
+	const req = {
+		get: vi.fn().mockReturnValue('full'),
+		accountability: { admin: false },
+	} as unknown as Request;
+
+	auditRequestQueries(req, res, () => {
+		const audit = queryAuditStore.getStore()!;
+
+		auditStatementStart(audit, 'select * from "articles" where "id" = ?', 'a', [
+			7,
+		])();
+	});
+
+	res.writeHead(200);
+
+	expect(setHeader.mock.calls).toEqual([
+		[
+			'X-Query-Audit',
+			'[{"ms":0,"tables":{"articles":{"select":1}},'
+			+ '"statements":[{"sql":"select * from \\"articles\\" where \\"id\\" = ?",'
+			+ '"count":1,"ms":0}]}]',
+		],
+	]);
+});
+
+test('refuses a level outside the list', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
+	});
+
+	const writeHead = vi.fn();
+	const res = { writeHead, setHeader: vi.fn() } as unknown as Response;
+	const req = { get: vi.fn().mockReturnValue('every') } as unknown as Request;
+	const next = vi.fn();
+
+	auditRequestQueries(req, res, next);
+
+	expect(next).toHaveBeenCalledWith(new InvalidQueryError({
+		reason: '"X-Query-Audit" must be one of counts, statements, full',
+	}));
+
+	expect(res.writeHead).toBe(writeHead);
 });
 
 test('writes an empty list for a request that ran no statement', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
-		QUERY_AUDIT_STATEMENTS: false,
+		QUERY_AUDIT_LEVEL: 'counts',
 		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	});
 
 	const setHeader = vi.fn();
 	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+	const req = { get: vi.fn() } as unknown as Request;
 
-	auditRequestQueries({} as Request, res, () => {});
+	auditRequestQueries(req, res, () => {});
 
 	res.writeHead(200);
 
@@ -94,15 +194,16 @@ test('writes an empty list for a request that ran no statement', () => {
 test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
-		QUERY_AUDIT_STATEMENTS: true,
+		QUERY_AUDIT_LEVEL: 'statements',
 	});
 
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const setHeader = vi.fn();
 	const res = { writeHead: vi.fn(), setHeader } as unknown as Response;
+	const req = { get: vi.fn() } as unknown as Request;
 
-	auditRequestQueries({} as Request, res, () => {
+	auditRequestQueries(req, res, () => {
 		const audit = queryAuditStore.getStore()!;
 
 		auditStatementStart(audit, 'select * from "articles"', 'a')();

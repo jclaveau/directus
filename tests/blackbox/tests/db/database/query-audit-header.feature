@@ -5,8 +5,11 @@ Feature: A request reports the SQL it ran, one entry per transaction
   of each kind it received, and says whether it committed or rolled back. A
   statement sent outside a transaction is an entry of its own, the way the
   database runs it; BEGIN, COMMIT and SAVEPOINT are not listed.
-  QUERY_AUDIT_STATEMENTS adds each entry's statements: the SQL the driver
-  received, placeholders in place of the bound values, once per distinct text.
+  A request picks how much by sending the same header: `counts` lists the
+  tables alone, `statements` adds each entry's statements: the SQL the driver
+  received, placeholders in place of the bound values, once per distinct text;
+  `full` adds each run's bound values, for an admin alone. QUERY_AUDIT_LEVEL is
+  the level of a request that sends none, `statements` on this instance.
 
   Durations vary from run to run: the steps check each `ms` is a number, then
   read the rest as the YAML below, in its key order. The probe routes read
@@ -48,9 +51,26 @@ Feature: A request reports the SQL it ran, one entry per transaction
       """
     And on postgres the transaction's statements read:
       """
-      - sql: select "id" from "directus_settings"
+      - sql: select "id" from "directus_settings" where "id" = ?
         count: 2
       """
+
+  Scenario: an admin asking full gets each run's bound values
+    When the transaction route is requested at the full level
+    Then on postgres the transaction's statements read:
+      """
+      - sql: select "id" from "directus_settings" where "id" = ?
+        count: 2
+        bindings: [[1], [1]]
+      """
+
+  Scenario: anyone else asking full gets the statements alone
+    When a user who is no admin requests the transaction route at the full level
+    Then the response is a 403 whose header lists statements without bound values
+
+  Scenario: a level outside the list is refused
+    When the transaction route is requested at the every level
+    Then the response is a 400 naming the levels
 
   Scenario: two requests at once each report what they report alone
     When a create and a read run one after the other, then both at once

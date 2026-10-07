@@ -5,6 +5,7 @@ import { useLogger } from '../logger/index.js';
 import {
 	validateBooleanEnv,
 	validateBytesEnv,
+	validateChoiceEnv,
 	validateDurationEnv,
 	validateEnv,
 } from './validate-env.js';
@@ -147,6 +148,28 @@ test.each(['0', '8kb', '512'])('takes the size %j', (value) => {
 	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE']);
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+test('refuses a choice outside the list', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'every' });
+
+	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
+
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+		'"CHOICE_TEST_VARIABLE" Environment Variable is "every", '
+			+ 'which is not one of counts, full.',
+	);
+
+	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+});
+
+test('takes a choice from the list', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ CHOICE_TEST_VARIABLE: 'full' });
+
+	validateChoiceEnv('CHOICE_TEST_VARIABLE', ['counts', 'full']);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

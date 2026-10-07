@@ -64,12 +64,13 @@ import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
 import {
 	validateBooleanEnv,
 	validateBytesEnv,
+	validateChoiceEnv,
 	validateDurationEnv,
 } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
-import { queryAuditEnabled } from './database/query-audit.js';
+import { QUERY_AUDIT_LEVELS, queryAuditEnabled } from './database/query-audit.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -180,7 +181,7 @@ export default async function createApp(): Promise<express.Application> {
 	app.set('query parser', (str: string) => qs.parse(str, { depth: Number(env['QUERYSTRING_MAX_PARSE_DEPTH']) }));
 
 	if (queryAuditEnabled()) {
-		validateBooleanEnv(['QUERY_AUDIT_STATEMENTS']);
+		validateChoiceEnv('QUERY_AUDIT_LEVEL', QUERY_AUDIT_LEVELS);
 		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
 		app.use(auditRequestQueries);
 	}

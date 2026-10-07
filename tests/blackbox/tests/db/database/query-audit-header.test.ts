@@ -20,7 +20,7 @@ const feature = loadFeature('./tests/db/database/query-audit-header.feature');
 describe.each(vendors)('%s', (vendor) => {
 	const env = cloneDeep(config.envs);
 	env[vendor]['QUERY_AUDIT_HEADER'] = queryAuditHeader;
-	env[vendor]['QUERY_AUDIT_STATEMENTS'] = 'true';
+	env[vendor]['QUERY_AUDIT_LEVEL'] = 'statements';
 
 	let instance: ChildProcess;
 
@@ -79,11 +79,23 @@ describe.each(vendors)('%s', (vendor) => {
 			.set('Authorization', auth);
 	}
 
+	function requestProbeAtLevel(level: string, token = USER.ADMIN.TOKEN) {
+		return request(getUrl(vendor, env))
+			.get('/query-audit-probe/transaction-only')
+			.set('Authorization', `Bearer ${token}`)
+			.set(queryAuditHeader, level);
+	}
+
 	type TransactionEntry = {
 		ms: number;
 		outcome?: string;
 		tables: Record<string, Record<string, number>>;
-		statements: { sql: string; count: number; ms: number }[];
+		statements: {
+			sql: string;
+			count: number;
+			ms: number;
+			bindings?: unknown[][];
+		}[];
 	};
 
 	function auditOf(response: Response): TransactionEntry[] {
@@ -183,6 +195,77 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 			},
 		);
+
+		scenario(
+			"an admin asking full gets each run's bound values",
+			({ when, then }) => {
+				let response: Response;
+
+				when('the transaction route is requested at the full level', async () => {
+					response = await requestProbeAtLevel('full');
+
+					expect(response.statusCode).toBe(200);
+				});
+
+				// Quoting differs by dialect.
+				then(
+					"on postgres the transaction's statements read:",
+					(docString: string) => {
+						if (vendor === 'postgres') {
+							const { statements } = auditOf(response)[1]!;
+
+							expect(statements.map(({ sql, count, bindings }) => {
+								return { sql, count, bindings };
+							})).toEqual(loadYaml(docString));
+						}
+					},
+				);
+			},
+		);
+
+		// Authenticating a static token binds the token itself: the values a
+		// request runs with are not for anyone but an admin to read.
+		scenario(
+			'anyone else asking full gets the statements alone',
+			({ when, then }) => {
+				let response: Response;
+
+				when(
+					'a user who is no admin requests the transaction route at the full level',
+					async () => {
+						response = await requestProbeAtLevel(
+							'full',
+							USER.APP_ACCESS.TOKEN,
+						);
+					},
+				);
+
+				then(
+					'the response is a 403 whose header lists statements without bound values',
+					() => {
+						expect(response.statusCode).toBe(403);
+						expect(response.headers[queryAuditHeader]).toContain('"statements"');
+						expect(response.headers[queryAuditHeader]).not.toContain('"bindings"');
+					},
+				);
+			},
+		);
+
+		scenario('a level outside the list is refused', ({ when, then }) => {
+			let response: Response;
+
+			when('the transaction route is requested at the every level', async () => {
+				response = await requestProbeAtLevel('every');
+			});
+
+			then('the response is a 400 naming the levels', () => {
+				expect(response.statusCode).toBe(400);
+
+				expect(response.body.errors[0].message).toBe(
+					'Invalid query. "x-query-audit" must be one of counts, statements, full.',
+				);
+			});
+		});
 
 		scenario(
 			'two requests at once each report what they report alone',

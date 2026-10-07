@@ -88,7 +88,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_TAGS_HEADER_MAX_SIZE: 'string',
 	CACHE_PURGED_TAGS_HEADER: 'string',
 	QUERY_AUDIT_HEADER: 'string',
-	QUERY_AUDIT_STATEMENTS: 'boolean',
+	QUERY_AUDIT_LEVEL: 'string',
 	QUERY_AUDIT_HEADER_MAX_SIZE: 'string',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_VARY_CONTENT_TYPES: 'array',

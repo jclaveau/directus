@@ -12,8 +12,13 @@ export default (router, { database }) => {
 
 			try {
 				await database.transaction(async (trx) => {
-					await trx('directus_settings').select('id');
-					await secondReader(trx)('directus_settings').select('id');
+					await trx('directus_settings')
+						.select('id')
+						.where('id', 1);
+
+					await secondReader(trx)('directus_settings')
+						.select('id')
+						.where('id', 1);
 				});
 
 				return res.json({ data: null });

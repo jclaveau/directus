@@ -9,7 +9,7 @@ type KindCounts = Partial<Record<StatementKind, number>>;
 
 type TransactionOutcome = 'commit' | 'rollback';
 
-type StatementAudit = { count: number; ms: number };
+type StatementAudit = { count: number; ms: number; bindings: unknown[][] };
 
 type TransactionAudit = {
 	startedAt: number;
@@ -20,20 +20,33 @@ type TransactionAudit = {
 };
 
 export type QueryAudit = {
+	recordsBindings: boolean;
 	transactionAudits: TransactionAudit[];
 	openTransactionAudits: Map<string, TransactionAudit>;
 };
 
+export const QUERY_AUDIT_LEVELS = ['counts', 'statements', 'full'] as const;
+
+export type QueryAuditLevel = (typeof QUERY_AUDIT_LEVELS)[number];
+
 export type QueryAuditFormat = {
-	withStatements: boolean;
+	level: QueryAuditLevel;
 	maxSize: number;
+};
+
+type StatementEntry = {
+	sql: string;
+	count: number;
+	ms: number;
+	bindings?: unknown[][];
 };
 
 type TransactionEntry = {
 	ms?: number | undefined;
 	outcome?: TransactionOutcome | undefined;
 	tables: Record<string, KindCounts>;
-	statements?: { sql: string; count: number; ms: number }[];
+	statements?: StatementEntry[];
+	bindingsDropped?: number;
 	statementsDropped?: number;
 };
 
@@ -42,8 +55,10 @@ type DriverConnection = { __knexUid: string };
 type DriverQuery = (
 	this: unknown,
 	connection: DriverConnection,
-	queryObject: { sql: string },
+	queryObject: DriverQueryObject,
 ) => Promise<unknown>;
+
+type DriverQueryObject = { sql: string; bindings?: unknown[] };
 
 export const queryAuditStore = new AsyncLocalStorage<QueryAudit>();
 
@@ -64,8 +79,17 @@ export function queryAuditEnabled(): boolean {
 	return Boolean(useEnv()['QUERY_AUDIT_HEADER']);
 }
 
-export function emptyQueryAudit(): QueryAudit {
+export function isQueryAuditLevel(value: unknown): value is QueryAuditLevel {
+	return QUERY_AUDIT_LEVELS.includes(value as QueryAuditLevel);
+}
+
+/**
+ * `recordsBindings` keeps each run's bound values, which only the `full` level
+ * reports: off, a request holds none of them.
+ */
+export function emptyQueryAudit(recordsBindings = false): QueryAudit {
 	return {
+		recordsBindings,
 		transactionAudits: [],
 		openTransactionAudits: new Map(),
 	};
@@ -93,7 +117,7 @@ export function auditQueriesOf(database: Knex): void {
 	clientPrototype._query = function (
 		this: unknown,
 		connection: DriverConnection,
-		queryObject: { sql: string },
+		queryObject: DriverQueryObject,
 	) {
 		const audit = queryAuditStore.getStore();
 
@@ -105,6 +129,7 @@ export function auditQueriesOf(database: Knex): void {
 			audit,
 			queryObject.sql,
 			connection.__knexUid,
+			queryObject.bindings,
 		);
 
 		return runDriverQuery
@@ -122,6 +147,7 @@ export function auditStatementStart(
 	audit: QueryAudit,
 	sql: string,
 	connectionId: string,
+	bindings: unknown[] = [],
 ): () => void {
 	const startedAt = performance.now();
 	const keyword = leadingKeyword(sql);
@@ -170,9 +196,14 @@ export function auditStatementStart(
 	}
 
 	const statementAudit = transactionAudit.statementAudits.get(sql)
-		?? { count: 0, ms: 0 };
+		?? { count: 0, ms: 0, bindings: [] };
 
 	statementAudit.count++;
+
+	if (audit.recordsBindings) {
+		statementAudit.bindings.push(bindings);
+	}
+
 	transactionAudit.statementAudits.set(sql, statementAudit);
 
 	return () => {
@@ -188,28 +219,24 @@ export function auditStatementStart(
 
 /**
  * The audit as the JSON header value, non-ASCII escaped so a header can carry
- * it. Past `maxSize` bytes, the statements of the largest entries go first, each
- * entry naming how many it dropped; `0` keeps them all.
+ * it. Past `maxSize` bytes, the bound values of the largest entries go first,
+ * then their statements, each entry naming how many it dropped; `0` keeps them
+ * all.
  */
 export function formatQueryAudit(
 	audit: QueryAudit,
-	{ withStatements, maxSize }: QueryAuditFormat,
+	{ level, maxSize }: QueryAuditFormat,
 ): string {
 	const transactionEntries = audit.transactionAudits.map((transactionAudit) => {
-		return transactionEntryOf(transactionAudit, withStatements);
+		return transactionEntryOf(transactionAudit, level);
 	});
 
 	let headerValue = asciiJson(transactionEntries);
 
 	while (maxSize > 0 && headerValue.length > maxSize) {
-		const largestEntry = largestStatementsEntry(transactionEntries);
-
-		if (!largestEntry?.statements) {
+		if (!dropLargestDetail(transactionEntries)) {
 			break;
 		}
-
-		largestEntry.statementsDropped = largestEntry.statements.length;
-		delete largestEntry.statements;
 
 		headerValue = asciiJson(transactionEntries);
 	}
@@ -235,7 +262,7 @@ function newTransactionAudit(
 // A transaction still open when the headers flush has no `ms` yet.
 function transactionEntryOf(
 	transactionAudit: TransactionAudit,
-	withStatements: boolean,
+	level: QueryAuditLevel,
 ): TransactionEntry {
 	const transactionEntry: TransactionEntry = {
 		ms: transactionAudit.ms === undefined
@@ -245,29 +272,77 @@ function transactionEntryOf(
 		tables: Object.fromEntries(transactionAudit.tableCounts),
 	};
 
-	if (withStatements) {
-		transactionEntry.statements = [...transactionAudit.statementAudits]
-			.map(([sql, statementAudit]) => {
-				return {
-					sql,
-					count: statementAudit.count,
-					ms: Math.round(statementAudit.ms),
-				};
-			});
+	if (level === 'counts') {
+		return transactionEntry;
 	}
+
+	transactionEntry.statements = [...transactionAudit.statementAudits]
+		.map(([sql, statementAudit]) => {
+			const statementEntry: StatementEntry = {
+				sql,
+				count: statementAudit.count,
+				ms: Math.round(statementAudit.ms),
+			};
+
+			if (level === 'full') {
+				statementEntry.bindings = statementAudit.bindings;
+			}
+
+			return statementEntry;
+		});
 
 	return transactionEntry;
 }
 
-function largestStatementsEntry(
+/**
+ * Drop the bound values of the entry holding the most, or once none holds any,
+ * the statements of the entry holding the most. Returns whether there was
+ * anything left to drop.
+ */
+function dropLargestDetail(transactionEntries: TransactionEntry[]): boolean {
+	const bindingsEntry = largestEntryBy(transactionEntries, (statements) => {
+		return statements.some(({ bindings }) => bindings !== undefined)
+			? asciiJson(statements.map(({ bindings }) => bindings)).length
+			: 0;
+	});
+
+	if (bindingsEntry?.statements) {
+		let droppedRuns = 0;
+
+		for (const statementEntry of bindingsEntry.statements) {
+			droppedRuns += statementEntry.bindings?.length ?? 0;
+			delete statementEntry.bindings;
+		}
+
+		bindingsEntry.bindingsDropped = droppedRuns;
+
+		return true;
+	}
+
+	const statementsEntry = largestEntryBy(transactionEntries, (statements) => {
+		return asciiJson(statements).length;
+	});
+
+	if (statementsEntry?.statements) {
+		statementsEntry.statementsDropped = statementsEntry.statements.length;
+		delete statementsEntry.statements;
+
+		return true;
+	}
+
+	return false;
+}
+
+function largestEntryBy(
 	transactionEntries: TransactionEntry[],
+	sizeOfStatements: (statements: StatementEntry[]) => number,
 ): TransactionEntry | undefined {
 	let largestEntry: TransactionEntry | undefined;
 	let largestSize = 0;
 
 	for (const transactionEntry of transactionEntries) {
 		const statementsSize = transactionEntry.statements
-			? asciiJson(transactionEntry.statements).length
+			? sizeOfStatements(transactionEntry.statements)
 			: 0;
 
 		if (statementsSize > largestSize) {
