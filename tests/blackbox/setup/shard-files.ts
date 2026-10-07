@@ -54,7 +54,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// One spawned instance; one case waits out the descriptor drain.
 	'/tests/db/app/cache-audit-mcp.test.ts': 10_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
-	'/tests/db/database/query-audit-header.test.ts': 10_000,
+	'/tests/db/database/query-audit-header.test.ts': 14_000,
 	// The `after` chain. The auth files spend their time waiting, not querying,
 	// so they cost the same on every vendor. `connects` sleeps out the REST
 	// auth timeout once per case; `pings` stops at the close of a socket the

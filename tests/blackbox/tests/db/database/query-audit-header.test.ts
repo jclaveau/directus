@@ -21,6 +21,8 @@ describe.each(vendors)('%s', (vendor) => {
 	const env = cloneDeep(config.envs);
 	env[vendor]['QUERY_AUDIT_HEADER'] = queryAuditHeader;
 	env[vendor]['QUERY_AUDIT_LEVEL'] = 'statements';
+	env[vendor]['CORS_ENABLED'] = 'true';
+	env[vendor]['CORS_ORIGIN'] = 'true';
 
 	let instance: ChildProcess;
 	let cappedInstance: ChildProcess | undefined;
@@ -57,9 +59,44 @@ describe.each(vendors)('%s', (vendor) => {
 			.delete(`/collections/${COLLECTION}`)
 			.set('Authorization', auth);
 
-		instance.kill();
-		cappedInstance?.kill();
+		// An instance still shutting down would answer beside the next file.
+		await Promise.all([instance, cappedInstance].map((stoppedInstance) => {
+			return stoppedInstance && exitOf(stoppedInstance);
+		}));
 	});
+
+	function exitOf(runningInstance: ChildProcess) {
+		return new Promise<void>((resolve) => {
+			if (runningInstance.exitCode !== null || runningInstance.signalCode !== null) {
+				return resolve();
+			}
+
+			runningInstance.once('exit', () => resolve());
+			runningInstance.kill();
+		});
+	}
+
+	// An instance that starts anyway is stopped after 30 seconds, and exits with
+	// no code.
+	function refusedStartOf(refusedEnv: Record<string, string>) {
+		return new Promise<{ code: number | null; output: string }>((resolve) => {
+			const refusedInstance = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: { ...env[vendor], ...refusedEnv },
+			});
+
+			const stopTimer = setTimeout(() => refusedInstance.kill(), 30_000);
+			let output = '';
+
+			refusedInstance.stdout.on('data', (chunk) => (output += String(chunk)));
+			refusedInstance.stderr.on('data', (chunk) => (output += String(chunk)));
+
+			refusedInstance.on('exit', (code) => {
+				clearTimeout(stopTimer);
+				resolve({ code, output });
+			});
+		});
+	}
 
 	function createArticles() {
 		return request(getUrl(vendor, env))
@@ -317,13 +354,13 @@ describe.each(vendors)('%s', (vendor) => {
 				let response: Response;
 
 				when(
-					'an instance capped at 10 bytes serves the transaction route at full',
+					'an instance capped at 240 bytes serves the transaction route at full',
 					async () => {
 						const cappedEnv = cloneDeep(env);
 						const port = await getPort();
 
 						cappedEnv[vendor].PORT = String(port);
-						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '10';
+						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '240';
 
 						cappedInstance = spawn('node', [paths.cli, 'start'], {
 							cwd: paths.cwd,
@@ -359,30 +396,90 @@ describe.each(vendors)('%s', (vendor) => {
 			60_000,
 		);
 
+		// Dropping every statement still leaves each entry its tables.
+		scenario(
+			'past QUERY_AUDIT_HEADER_MAX_SIZE with no detail left, '
+			+ 'the last entries are dropped and counted',
+			({ when, then }) => {
+				let response: Response;
+
+				when('the many pool reads route is requested', async () => {
+					response = await requestProbe('many-pool-reads');
+
+					expect(response.statusCode).toBe(200);
+				});
+
+				then(
+					'the header fits in 8kb and its last entry counts the entries dropped',
+					() => {
+						expect(response.headers[queryAuditHeader].length)
+							.toBeLessThanOrEqual(8192);
+
+						expect(auditOf(response).at(-1))
+							.toEqual({ entriesDropped: expect.any(Number) });
+					},
+				);
+			},
+		);
+
+		scenario('a bound BigInt reads as its digits', ({ when, then }) => {
+			let response: Response;
+
+			// Only postgres casts a bound value with `::`.
+			when('the BigInt route is requested at the full level', async () => {
+				if (vendor === 'postgres') {
+					response = await requestProbe('bigint-binding')
+						.set(queryAuditHeader, 'full');
+
+					expect(response.statusCode).toBe(200);
+				}
+			});
+
+			then(
+				"on postgres the second entry's statements read:",
+				(docString: string) => {
+					if (vendor === 'postgres') {
+						const { statements } = auditOf(response)[1]!;
+
+						expect(statements.map(({ sql, count, bindings }) => {
+							return { sql, count, bindings };
+						})).toEqual(loadYaml(docString));
+					}
+				},
+			);
+		});
+
+		scenario(
+			'a browser can read the refusal of a level outside the list',
+			({ when, then }) => {
+				let response: Response;
+
+				when(
+					'a browser requests the transaction route at the every level',
+					async () => {
+						response = await requestProbeAtLevel('every')
+							.set('Origin', 'http://example.com');
+					},
+				);
+
+				then('the response is a 400 the browser may read', () => {
+					expect(response.statusCode).toBe(400);
+
+					expect(response.headers['access-control-allow-origin'])
+						.toBe('http://example.com');
+				});
+			},
+		);
+
 		scenario(
 			'an instance with a level outside the list refuses to start',
 			({ when, then }) => {
 				let exit: { code: number | null; output: string };
 
 				when('an instance starts with QUERY_AUDIT_LEVEL every', async () => {
-					const port = await getPort();
-
-					exit = await new Promise((resolve) => {
-						const refusedInstance = spawn('node', [paths.cli, 'start'], {
-							cwd: paths.cwd,
-							env: {
-								...env[vendor],
-								PORT: String(port),
-								QUERY_AUDIT_LEVEL: 'every',
-							},
-						});
-
-						let output = '';
-
-						refusedInstance.stdout.on('data', (chunk) => (output += String(chunk)));
-						refusedInstance.stderr.on('data', (chunk) => (output += String(chunk)));
-
-						refusedInstance.on('exit', (code) => resolve({ code, output }));
+					exit = await refusedStartOf({
+						PORT: String(await getPort()),
+						QUERY_AUDIT_LEVEL: 'every',
 					});
 				});
 
@@ -392,6 +489,34 @@ describe.each(vendors)('%s', (vendor) => {
 
 					expect(exit.output)
 						.toContain('which is not one of counts, statements, full.');
+				});
+			},
+			60_000,
+		);
+
+		// Node refuses such a name on every response the instance would send.
+		scenario(
+			'an instance with a header name Node cannot write refuses to start',
+			({ when, then }) => {
+				let exit: { code: number | null; output: string };
+
+				when(
+					'an instance starts with QUERY_AUDIT_HEADER "x query audit"',
+					async () => {
+						exit = await refusedStartOf({
+							PORT: String(await getPort()),
+							QUERY_AUDIT_HEADER: 'x query audit',
+						});
+					},
+				);
+
+				then('it exits naming QUERY_AUDIT_HEADER', () => {
+					expect(exit.code, exit.output).toBe(1);
+
+					expect(exit.output).toContain(
+						'"QUERY_AUDIT_HEADER" Environment Variable is "x query audit", '
+						+ 'which is not a valid header name.',
+					);
 				});
 			},
 			60_000,

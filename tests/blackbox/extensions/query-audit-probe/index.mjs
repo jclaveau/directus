@@ -70,4 +70,17 @@ export default (router, { database }) => {
 	router.get('/accented-multiline', adminOnly(() => {
 		return database.raw('select \'café\' as accented_value\nfrom directus_settings');
 	}));
+
+	// Each read outside a transaction is an entry of its own: 200 of them
+	// outgrow any header once their statements are dropped.
+	router.get('/many-pool-reads', adminOnly(async () => {
+		for (let readNumber = 0; readNumber < 200; readNumber++) {
+			await readSettings(database);
+		}
+	}));
+
+	// Past Number.MAX_SAFE_INTEGER, `search` binds a number as a BigInt.
+	router.get('/bigint-binding', adminOnly(() => {
+		return database.raw('select ?::bigint as big_value', [9007199254740993n]);
+	}));
 };

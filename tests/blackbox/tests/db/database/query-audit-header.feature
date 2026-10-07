@@ -91,7 +91,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       """
 
   Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted
-    When an instance capped at 10 bytes serves the transaction route at full
+    When an instance capped at 240 bytes serves the transaction route at full
     Then the header reads, durations aside:
       """
       - tables: { directus_users: { select: 1 } }
@@ -103,9 +103,30 @@ Feature: A request reports the SQL it ran, one entry per transaction
         statementsDropped: 1
       """
 
+  Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE with no detail left, the last entries are dropped and counted
+    When the many pool reads route is requested
+    Then the header fits in 8kb and its last entry counts the entries dropped
+
+  Scenario: a bound BigInt reads as its digits
+    When the BigInt route is requested at the full level
+    Then on postgres the second entry's statements read:
+      """
+      - sql: select $1::bigint as big_value
+        count: 1
+        bindings: [["9007199254740993"]]
+      """
+
+  Scenario: a browser can read the refusal of a level outside the list
+    When a browser requests the transaction route at the every level
+    Then the response is a 400 the browser may read
+
   Scenario: an instance with a level outside the list refuses to start
     When an instance starts with QUERY_AUDIT_LEVEL every
     Then it exits naming QUERY_AUDIT_LEVEL and the levels
+
+  Scenario: an instance with a header name Node cannot write refuses to start
+    When an instance starts with QUERY_AUDIT_HEADER "x query audit"
+    Then it exits naming QUERY_AUDIT_HEADER
 
   Scenario: two requests at once each report what they report alone
     When a create and a read run one after the other, then both at once
