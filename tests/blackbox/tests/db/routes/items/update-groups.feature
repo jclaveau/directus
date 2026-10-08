@@ -84,6 +84,22 @@ Feature: An update reaches its hooks as groups, then once per row
       | items.update     | action | 1     |
       | items.update.one | action | 3     |
 
+  Scenario: a row a non-admin sends twice with one change is checked and written once
+    Given the rows:
+      | name  |
+      | twice |
+    And the requests authenticate as a user who may read and update the rows
+    When the batch sends:
+      | name  | status   |
+      | twice | archived |
+      | twice | archived |
+    Then the grouped action carries:
+      | status   | names     |
+      | archived | ["twice"] |
+    And the rows hold:
+      | name  | status   |
+      | twice | archived |
+
   Scenario: a grouped hook answering with one payload is refused, naming the per-row event
     Given the rows:
       | name   |

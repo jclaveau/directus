@@ -5,7 +5,7 @@ import {
 	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
-import { CreateItem } from '@common/functions';
+import { CreateItem, CreatePermission } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
@@ -21,6 +21,7 @@ type RowLogged = { id: number; status?: string };
 type Update = {
 	rows: GroupedRow[];
 	malformedKey: string;
+	authorization: string;
 	response?: request.Response;
 };
 
@@ -71,6 +72,26 @@ describe.each(vendors)('%s', (vendor) => {
 			});
 		});
 
+		given.optional(
+			'the requests authenticate as a user who may read and update the rows',
+			async () => {
+				for (const action of ['read', 'update'] as const) {
+					await CreatePermission(vendor, {
+						role: USER.APP_ACCESS.KEY,
+						permission: {
+							collection: collectionGrouped,
+							action,
+							permissions: {},
+							fields: ['*'],
+						},
+						policyName: 'Update Groups',
+					});
+				}
+
+				update.authorization = `Bearer ${USER.APP_ACCESS.TOKEN}`;
+			},
+		);
+
 		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
 			update.response = await request(getUrl(vendor))
 				.patch(`/items/${collectionGrouped}`)
@@ -84,7 +105,7 @@ describe.each(vendors)('%s', (vendor) => {
 						? { id }
 						: { id, status: change.status };
 				}))
-				.set('Authorization', AUTH);
+				.set('Authorization', update.authorization);
 		});
 
 		when.optional(
@@ -93,7 +114,7 @@ describe.each(vendors)('%s', (vendor) => {
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: update.rows.map((row) => row.id), data: { status } })
-					.set('Authorization', AUTH);
+					.set('Authorization', update.authorization);
 			},
 		);
 
@@ -240,6 +261,10 @@ describe.each(vendors)('%s', (vendor) => {
 			'a batch answers with every row it was sent, no-op rows included',
 			'rows carrying the same change are written together, however far apart',
 			oneLine`
+				a row a non-admin sends twice with one change is checked and written
+				once
+			`,
+			oneLine`
 				a grouped hook answering with one payload is refused, naming the
 				per-row event
 			`,
@@ -260,7 +285,11 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 		]) {
 			scenario(title, (steps) => {
-				defineSteps(steps, { rows: [], malformedKey: `not-a-key-${randomUUID()}` });
+				defineSteps(steps, {
+					rows: [],
+					malformedKey: `not-a-key-${randomUUID()}`,
+					authorization: AUTH,
+				});
 			}, 60_000);
 		}
 	});

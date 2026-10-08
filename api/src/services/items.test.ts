@@ -19,6 +19,9 @@ import {
 } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
+import {
 	AutoIncrementHelperPostgres,
 } from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
@@ -2414,6 +2417,32 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const keys = await service.updateMany([1], { name: 'y' });
 
 			expect(keys).toEqual([1]);
+		});
+
+		it('checks a row sent twice with one change once', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
+			tracker.on.update('test').response(1);
+			vi.mocked(validateAccess).mockClear();
+
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			});
+
+			const keys = await service.updateBatch([
+				{ id: 1, name: 'y' },
+				{ id: 1, name: 'y' },
+			]);
+
+			expect(keys).toEqual([1, 1]);
+
+			expect(vi.mocked(validateAccess).mock.calls).toEqual([
+				[
+					expect.objectContaining({ action: 'update', primaryKeys: [1] }),
+					expect.anything(),
+				],
+			]);
 		});
 	});
 
