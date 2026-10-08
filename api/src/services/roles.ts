@@ -118,11 +118,24 @@ export class RolesService extends ItemsService {
 	// A batch can close a loop no single row closes (A under B, B under A), so a
 	// climb reads the parent the batch is about to write before the stored one.
 	private async validateRoleNesting(parentGroups: UpdateGroup<Item>[]) {
+		// Postgres matches a uuid whatever its casing, so the check compares ids
+		// lower-cased.
+		const normalizeRoleId = (roleId: unknown) => {
+			if (!roleId) {
+				return null;
+			}
+
+			return String(roleId).toLowerCase();
+		};
+
 		const parentsInBatch = new Map<string, string | null>();
 
 		for (const { data, keys } of parentGroups) {
 			for (const key of keys) {
-				parentsInBatch.set(String(key), data['parent'] ?? null);
+				parentsInBatch.set(
+					String(key).toLowerCase(),
+					normalizeRoleId(data['parent']),
+				);
 			}
 		}
 
@@ -140,7 +153,7 @@ export class RolesService extends ItemsService {
 					.where({ id: roleId })
 					.first();
 
-				storedParents.set(roleId, role?.parent ?? null);
+				storedParents.set(roleId, normalizeRoleId(role?.parent));
 			}
 
 			return storedParents.get(roleId) ?? null;
