@@ -33,6 +33,7 @@ import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
+import { UsersService } from './users.js';
 
 // Mirrors scoped-cache-purge.test.ts: force auto-purge on so shouldClearCache() routes to a
 // truthy cache, mock the database client to postgres, and stub the scoped-cache module so the
@@ -1895,6 +1896,53 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					expect.anything(),
 				],
 			]);
+		});
+	});
+
+	describe('a guard error of a row a per-row hook cancels', () => {
+		const cancelGuardedRow = (row: { id: string }) => {
+			return row.id === 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22'
+				? null
+				: row;
+		};
+
+		beforeEach(() => {
+			emitter.onFilter('users.update.one', cancelGuardedRow);
+		});
+
+		afterEach(() => {
+			emitter.offFilter('users.update.one', cancelGuardedRow);
+		});
+
+		it('writes the sibling rows', async () => {
+			tracker.on.update('directus_users').response(1);
+
+			const result = await new UsersService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('first_name').string();
+						c.field('tfa_secret').string();
+					})
+					.build(),
+			}).updateBatch(
+				[
+					{
+						id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+						first_name: 'Ada',
+					},
+					{
+						id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22',
+						tfa_secret: 'secret',
+					},
+				],
+				{ allowFilterCancel: true },
+			);
+
+			expect(result).toEqual(['0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', null]);
 		});
 	});
 

@@ -2,6 +2,7 @@ import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@dire
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { FailedValidationError } from '@directus/validation';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -221,13 +222,24 @@ describe('Integration Tests', () => {
 
 				await service.updateMany(['user-id-10', 'user-id-11'], { email: 'test@example.com' }, opts);
 
-				expect(opts.preMutationError).toStrictEqual(
-					new RecordNotUniqueError({
-						collection: 'directus_users',
-						field: 'email',
-						value: 'test@example.com',
-					}),
-				);
+				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([
+					[
+						'user-id-10',
+						new RecordNotUniqueError({
+							collection: 'directus_users',
+							field: 'email',
+							value: 'test@example.com',
+						}),
+					],
+					[
+						'user-id-11',
+						new RecordNotUniqueError({
+							collection: 'directus_users',
+							field: 'email',
+							value: 'test@example.com',
+						}),
+					],
+				]));
 
 				expect(clearUserSessionsSpy).toBeCalled();
 			});
@@ -261,9 +273,12 @@ describe('Integration Tests', () => {
 
 						expect(superUpdateGroupsSpy).toHaveBeenCalled();
 
-						expect(opts.preMutationError).toStrictEqual(
-							new InvalidPayloadError({ reason: `You can't change the "${field}" value manually` }),
-						);
+						expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
+							'1',
+							new InvalidPayloadError({
+								reason: `You can't change the "${field}" value manually`,
+							}),
+						]]));
 					});
 				});
 
@@ -300,11 +315,12 @@ describe('Integration Tests', () => {
 					opts,
 				);
 
-				expect(opts.preMutationError).toStrictEqual(
+				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
+					'user-id-20',
 					new InvalidPayloadError({
 						reason: `You can't change the "tfa_secret" value manually`,
 					}),
-				);
+				]]));
 			});
 
 			it('checks the password policy of every row', async () => {
@@ -341,16 +357,17 @@ describe('Integration Tests', () => {
 					{ id: 'user-id-26', email: 'SAME@example.com' },
 				], opts);
 
-				expect(opts.preMutationError).toStrictEqual(
+				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map([[
+					'user-id-26',
 					new RecordNotUniqueError({
 						collection: 'directus_users',
 						field: 'email',
 						value: 'SAME@example.com',
 					}),
-				);
+				]]));
 			});
 
-			it('keeps the first row\'s error when several rows are refused', async () => {
+			it('keeps each row\'s own error when several rows are refused', async () => {
 				const opts: MutationOptions = {};
 
 				await service.updateBatch([
@@ -358,11 +375,22 @@ describe('Integration Tests', () => {
 					{ id: 'user-id-28', email: 'not-an-email' },
 				], opts);
 
-				expect(opts.preMutationError).toStrictEqual(
-					new InvalidPayloadError({
-						reason: `You can't change the "tfa_secret" value manually`,
-					}),
-				);
+				expect(opts.preMutationErrorsByKey).toStrictEqual(new Map<string, Error>([
+					[
+						'user-id-27',
+						new InvalidPayloadError({
+							reason: `You can't change the "tfa_secret" value manually`,
+						}),
+					],
+					[
+						'user-id-28',
+						new FailedValidationError({
+							field: 'email',
+							type: 'email',
+							path: [],
+						}),
+					],
+				]));
 			});
 
 			it('requests the union of every row\'s integrity checks once', async () => {
