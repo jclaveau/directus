@@ -113,6 +113,61 @@ function carriesOnlyIndices(answeredList: unknown[]): boolean {
 }
 
 /**
+ * The list a grouped filter receives, refusing any touch of one of its
+ * collection's fields: a hook written for one payload deletes or checks a field
+ * on the list itself, where the write never reads it, and would let the write
+ * through unchecked.
+ */
+function refuseFieldAccess<AnsweredList extends unknown[]>(
+	answeredList: AnsweredList,
+	fieldNames: string[],
+	createRefusal: () => Error,
+): AnsweredList {
+	// An index, an Array member, `then` and `toJSON` win over a field of the same
+	// name, so iterating, cloning, serializing and awaiting the list keep working.
+	const refusedNames = new Set(fieldNames.filter((fieldName) => {
+		return !/^\d+$/.test(fieldName)
+			&& !(fieldName in answeredList)
+			&& fieldName !== 'then'
+			&& fieldName !== 'toJSON';
+	}));
+
+	function guardProperty(property: string | symbol) {
+		if (typeof property === 'string' && refusedNames.has(property)) {
+			throw createRefusal();
+		}
+	}
+
+	return new Proxy(answeredList, {
+		get(target, property, receiver) {
+			guardProperty(property);
+
+			return Reflect.get(target, property, receiver);
+		},
+		has(target, property) {
+			guardProperty(property);
+
+			return Reflect.has(target, property);
+		},
+		set(target, property, value, receiver) {
+			guardProperty(property);
+
+			return Reflect.set(target, property, value, receiver);
+		},
+		deleteProperty(target, property) {
+			guardProperty(property);
+
+			return Reflect.deleteProperty(target, property);
+		},
+		defineProperty(target, property, descriptor) {
+			guardProperty(property);
+
+			return Reflect.defineProperty(target, property, descriptor);
+		},
+	});
+}
+
+/**
  * Whether a grouped `items.create` filter answered one entry per row it received,
  * each a `CreateEntry` or `null`, a `sameRowAs` pointing at an earlier position.
  */
@@ -450,24 +505,8 @@ implements AbstractService<Item> {
 				return { data: cloneDeep(row) };
 			});
 
-			// Once for the whole create, so a hook sees every row it is about to insert,
-			// stored duplicates and same-request twins alike.
-			const entriesAfterHooks =
-				opts.emitEvents !== false
-					? await emitter.emitFilter<CreateEntry<Item>[], null>(
-						createEvent,
-						entries,
-						{ collection: this.collection },
-						filterContext,
-					)
-					: entries;
-
-			const createEntries = entriesAfterHooks === null
-				? data.map(() => null)
-				: entriesAfterHooks;
-
-			if (!isCreateEntryList(createEntries, data.length)) {
-				throw new InvalidPayloadError({
+			const createEntryListRefusal = () => {
+				return new InvalidPayloadError({
 					reason: oneLine`
 						A "${this.eventScope}.create" filter hook must return one
 						{ data } | { key } | { sameRowAs } | null per row it received, a
@@ -475,6 +514,36 @@ implements AbstractService<Item> {
 						belongs on "${this.eventScope}.create.one"
 					`,
 				});
+			};
+
+			const guardedEntries = refuseFieldAccess(
+				entries,
+				Object.keys(this.schema.collections[this.collection]!.fields),
+				createEntryListRefusal,
+			);
+
+			// Once for the whole create, so a hook sees every row it is about to insert,
+			// stored duplicates and same-request twins alike.
+			const answeredEntries =
+				opts.emitEvents !== false
+					? await emitter.emitFilter<CreateEntry<Item>[], null>(
+						createEvent,
+						guardedEntries,
+						{ collection: this.collection },
+						filterContext,
+					)
+					: entries;
+
+			const entriesAfterHooks = answeredEntries === guardedEntries
+				? entries
+				: answeredEntries;
+
+			const createEntries = entriesAfterHooks === null
+				? data.map(() => null)
+				: entriesAfterHooks;
+
+			if (!isCreateEntryList(createEntries, data.length)) {
+				throw createEntryListRefusal();
 			}
 
 			for (const [index, entry] of createEntries.entries()) {
@@ -1365,11 +1434,27 @@ implements AbstractService<Item> {
 			return { data: cloneDeep(group.data), keys: [...group.keys] };
 		});
 
-		const groupsAfterHooks =
+		const groupListRefusal = () => {
+			return new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.update" filter hook must return the
+					{ data, keys }[] it received; a hook that handles one row belongs on
+					"${this.eventScope}.update.one"
+				`,
+			});
+		};
+
+		const guardedPayload = refuseFieldAccess(
+			payload,
+			Object.keys(this.schema.collections[this.collection]!.fields),
+			groupListRefusal,
+		);
+
+		const answeredGroups =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<UpdateGroup<Item>[], null>(
 					updateEvent,
-					payload,
+					guardedPayload,
 					{
 						collection: this.collection,
 					},
@@ -1379,6 +1464,10 @@ implements AbstractService<Item> {
 					},
 				)
 				: payload;
+
+		const groupsAfterHooks = answeredGroups === guardedPayload
+			? payload
+			: answeredGroups;
 
 		if (groupsAfterHooks === null) {
 			if (!opts.allowFilterCancel) {
@@ -1406,13 +1495,7 @@ implements AbstractService<Item> {
 			});
 
 		if (!isGroupList) {
-			throw new InvalidPayloadError({
-				reason: oneLine`
-					A "${this.eventScope}.update" filter hook must return the
-					{ data, keys }[] it received; a hook that handles one row belongs on
-					"${this.eventScope}.update.one"
-				`,
-			});
+			throw groupListRefusal();
 		}
 
 		const keys = groupsAfterHooks.flatMap((group) => group.keys);

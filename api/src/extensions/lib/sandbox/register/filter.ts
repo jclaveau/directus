@@ -1,5 +1,6 @@
 import type { FilterHandler, PromiseCallback } from '@directus/types';
 import type { Reference } from 'isolated-vm';
+import { types } from 'node:util';
 import emitter from '../../../../emitter.js';
 import { callReference } from './call-reference.js';
 
@@ -16,7 +17,13 @@ export function registerFilterGenerator() {
 		const eventCopied = event.copySync();
 
 		const handler: FilterHandler = async (payload) => {
-			const response = await callReference(cb, [payload]);
+			// A grouped event hands its list behind a Proxy, which the copy into the
+			// isolate cannot serialize.
+			const copyablePayload = types.isProxy(payload) && Array.isArray(payload)
+				? Array.from(payload)
+				: payload;
+
+			const response = await callReference(cb, [copyablePayload]);
 
 			return response.copy();
 		};
