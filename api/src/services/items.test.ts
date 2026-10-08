@@ -632,6 +632,8 @@ describe('Integration Tests', () => {
 						{ awaitActionHooks: true },
 					);
 
+					expect(updateListener).toHaveBeenCalledTimes(1);
+
 					expect(updateListener).toHaveBeenCalledWith(
 						expect.objectContaining({
 							payload: [
