@@ -485,8 +485,13 @@ implements AbstractService<Item> {
 		const declaredPurgesAtStart =
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
-		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
+		const {
+			nestedActionEvents,
+			actionPayloads,
+			takenOverRowKeys,
+		} = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
+			const takenOverRowKeys: PrimaryKey[] = [];
 			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 			let autoIncrementSequenceNeedsToBeReset = false;
 
@@ -599,6 +604,7 @@ implements AbstractService<Item> {
 					);
 
 					results[index] = payloadAfterHooks;
+					takenOverRowKeys.push(payloadAfterHooks);
 					continue;
 				}
 
@@ -928,6 +934,7 @@ implements AbstractService<Item> {
 				actionPayloads: postPrepared.map(
 					(p): ActionPayload => ({ primaryKey: p.primaryKey, actionHookPayload: p.actionHookPayload }),
 				),
+				takenOverRowKeys,
 			};
 		}, opts.mutationTracker.snapshot());
 
@@ -1004,8 +1011,8 @@ implements AbstractService<Item> {
 			];
 
 			const changedKeys = liveKeys.filter((key) => {
-				// A take-over the hook declared inert wrote nothing, so it neither
-				// moved a slice nor counts toward the row/payload mismatch.
+				// A take-over the hook declared inert wrote nothing, so it moved no
+				// slice.
 				return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
 			});
 
@@ -1020,7 +1027,11 @@ implements AbstractService<Item> {
 				return results;
 			}
 
-			const someRowTakenOver = changedKeys.length > actionPayloads.length;
+			// Counted off the take-overs themselves: one returning a key another row of
+			// this call inserts adds no key to the set above.
+			const someRowTakenOver = takenOverRowKeys.some((key) => {
+				return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
+			});
 
 			const takeoverUndeclared =
 				someRowTakenOver &&
