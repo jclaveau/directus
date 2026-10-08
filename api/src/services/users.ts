@@ -274,9 +274,6 @@ export class UsersService extends ItemsService {
 				return keys;
 			});
 
-		let integrityCheckFlags =
-			opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
-
 		for (const { data, keys } of groups) {
 			try {
 				if (data['email']) {
@@ -335,7 +332,17 @@ export class UsersService extends ItemsService {
 					}
 				}
 			}
+		}
 
+		return await super.updateGroups(groups, opts);
+	}
+
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Item>[],
+	): UserIntegrityCheckFlag {
+		let integrityCheckFlags = UserIntegrityCheckFlag.None;
+
+		for (const { data } of groups) {
 			if ('role' in data) {
 				integrityCheckFlags |= UserIntegrityCheckFlag.All;
 			}
@@ -351,13 +358,13 @@ export class UsersService extends ItemsService {
 			}
 		}
 
-		if (integrityCheckFlags) {
-			opts.userIntegrityCheckFlags = integrityCheckFlags;
-			opts.onRequireUserIntegrityCheck?.(integrityCheckFlags);
-		}
+		return integrityCheckFlags;
+	}
 
-		const result = await super.updateGroups(groups, opts);
-
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions,
+	): Promise<void> {
 		for (const { data, keys } of groups) {
 			if (data['status'] !== undefined && data['status'] !== 'active') {
 				await this.clearUserSessions(keys);
@@ -371,8 +378,6 @@ export class UsersService extends ItemsService {
 		if (groups.some(({ data }) => 'role' in data)) {
 			await this.clearCaches(opts);
 		}
-
-		return result;
 	}
 
 	/**

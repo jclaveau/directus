@@ -1400,6 +1400,25 @@ implements AbstractService<Item> {
 		return Object.keys(payloadAfterHooks ?? {}).every(changesNothing);
 	}
 
+	/**
+	 * The user integrity checks writing these groups calls for. Handed the groups
+	 * the hooks left, so a field a hook adds counts like the caller's own.
+	 */
+	protected requiredIntegrityChecks(
+		_groups: UpdateGroup<Item>[],
+	): UserIntegrityCheckFlag {
+		return UserIntegrityCheckFlag.None;
+	}
+
+	/**
+	 * What writing these groups sets off once they are written — a cache clear,
+	 * a logout. Handed the groups the hooks left.
+	 */
+	protected async applyUpdateSideEffects(
+		_groups: UpdateGroup<Item>[],
+		_opts: MutationOptions,
+	): Promise<void> {}
+
 	async updateGroups(
 		groups: UpdateGroup<Item>[],
 		opts: DeferredPurgeOptions & { allowFilterCancel: true },
@@ -1697,7 +1716,8 @@ implements AbstractService<Item> {
 				const nestedActionEvents: ActionEventParams[] = [];
 
 				let userIntegrityCheckFlags =
-					opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
+					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
+					| this.requiredIntegrityChecks(writingGroups);
 
 				// Every group before any is applied, so a row the caller may not update
 				// is refused whatever error a guard stored for another row.
@@ -1819,6 +1839,8 @@ implements AbstractService<Item> {
 				opts,
 			);
 		}
+
+		await this.applyUpdateSideEffects(writingGroups, opts);
 
 		// Every row the caller sent, in its order — a row whose change turned out to be
 		// a no-op included. The REST layer reads these keys back to build the response

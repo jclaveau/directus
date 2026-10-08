@@ -76,30 +76,38 @@ export class PoliciesService extends ItemsService<Policy> {
 	): Promise<PrimaryKey[]> {
 		for (const { data } of groups) {
 			this.assertValidIpAccess(data);
+		}
 
+		return await super.updateGroups(groups, opts);
+	}
+
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Policy>[],
+	): UserIntegrityCheckFlag {
+		let integrityCheckFlags = UserIntegrityCheckFlag.None;
+
+		for (const { data } of groups) {
 			if ('admin_access' in data) {
-				let flags = UserIntegrityCheckFlag.RemainingAdmins;
+				integrityCheckFlags |= UserIntegrityCheckFlag.RemainingAdmins;
 
 				if (data['admin_access'] === true) {
 					// Only need a full user count if the policy allows admin access
-					flags |= UserIntegrityCheckFlag.All;
+					integrityCheckFlags |= UserIntegrityCheckFlag.All;
 				}
-
-				opts.userIntegrityCheckFlags =
-					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | flags;
 			}
 
 			if ('app_access' in data) {
-				opts.userIntegrityCheckFlags =
-					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
-					| UserIntegrityCheckFlag.UserLimits;
+				integrityCheckFlags |= UserIntegrityCheckFlag.UserLimits;
 			}
 		}
 
-		if (opts.userIntegrityCheckFlags) opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
+		return integrityCheckFlags;
+	}
 
-		const result = await super.updateGroups(groups, opts);
-
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Policy>[],
+		opts: MutationOptions,
+	): Promise<void> {
 		if (
 			groups.some(({ data }) => {
 				return ['admin_access', 'app_access', 'ip_access', 'enforce_tfa']
@@ -109,8 +117,6 @@ export class PoliciesService extends ItemsService<Policy> {
 			// Some relevant properties on policies have been updated, clear the caches
 			await this.clearCaches(opts);
 		}
-
-		return result;
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {

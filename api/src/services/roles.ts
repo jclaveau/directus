@@ -34,23 +34,31 @@ export class RolesService extends ItemsService {
 		const parentGroups = groups.filter(({ data }) => 'parent' in data);
 
 		if (parentGroups.length > 0) {
-			// If the parent of a role changed we need to make a full integrity check.
-			// Anything related to policies will be checked in the AccessService, where the policies are attached to roles
-			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
-
 			await this.validateRoleNesting(parentGroups);
 		}
 
-		const result = await super.updateGroups(groups, opts);
+		return await super.updateGroups(groups, opts);
+	}
 
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Item>[],
+	): UserIntegrityCheckFlag {
+		// If the parent of a role changed we need to make a full integrity check.
+		// Anything related to policies will be checked in the AccessService, where
+		// the policies are attached to roles
+		return groups.some(({ data }) => 'parent' in data)
+			? UserIntegrityCheckFlag.All
+			: UserIntegrityCheckFlag.None;
+	}
+
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Item>[],
+	): Promise<void> {
 		// Only clear the permissions cache if the parent role has changed
 		// If anything policies related has changed, the cache will be cleared in the AccessService as well
-		if (parentGroups.length > 0) {
+		if (groups.some(({ data }) => 'parent' in data)) {
 			await this.clearCaches();
 		}
-
-		return result;
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
