@@ -218,12 +218,14 @@ function isCreateEntryList(
  * writes them all. A group never joins one written before a later change to one of
  * its own rows, so two changes to the same row still land in the caller's order.
  *
- * Only a scalar change merges. A group writing a nested item creates it once per
- * group and walks its O2M rows per group, so two such groups merged would create
- * one related item where the caller asked for two.
+ * A group writing a nested item creates it once per group and walks its O2M rows
+ * per group, so it merges only with the rows split off the same caller group: two
+ * caller groups merged would create one related item where the caller asked for
+ * two, and one caller group left split would create one per row.
  */
 function mergeUpdateGroups<Item extends AnyItem>(
 	candidateGroups: UpdateGroup<Item>[],
+	callerGroupIndexes: number[],
 	writesNestedItems: (groupData: Partial<Item>) => boolean,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
@@ -231,12 +233,19 @@ function mergeUpdateGroups<Item extends AnyItem>(
 	const groupIndexByData = new Map<string, number>();
 	const lastGroupIndexByKey = new Map<string, number>();
 
-	for (const candidateGroup of candidateGroups) {
-		const serializedData = JSON.stringify(candidateGroup.data, (_field, value) => {
-			return typeof value === 'bigint'
-				? value.toString()
-				: value;
-		});
+	for (const [candidateIndex, candidateGroup] of candidateGroups.entries()) {
+		const serializedChange = JSON.stringify(
+			candidateGroup.data,
+			(_field, value) => {
+				return typeof value === 'bigint'
+					? value.toString()
+					: value;
+			},
+		);
+
+		const serializedData = writesNestedItems(candidateGroup.data)
+			? `${callerGroupIndexes[candidateIndex]}:${serializedChange}`
+			: serializedChange;
 
 		let latestConflictIndex = -1;
 
@@ -247,9 +256,7 @@ function mergeUpdateGroups<Item extends AnyItem>(
 			);
 		}
 
-		const sameDataIndex = writesNestedItems(candidateGroup.data)
-			? undefined
-			: groupIndexByData.get(serializedData);
+		const sameDataIndex = groupIndexByData.get(serializedData);
 
 		let targetIndex: number;
 
@@ -1550,12 +1557,13 @@ implements AbstractService<Item> {
 		// per-row hook cancelled. This is what the update returns.
 		let rowKeys: (PrimaryKey | null)[] = [];
 		let candidateGroups: UpdateGroup<Item>[] = [];
+		let callerGroupIndexes: number[] = [];
 
 		// Then once per row, so a hook that only ever handled a single item keeps a seam
 		// that fires exactly once per row — which the group event, by design, does not.
 		// With nothing listening, the per-row copies would be built for nobody.
 		if (opts.emitEvents !== false && emitter.hasFilterListeners(rowEvent)) {
-			for (const group of groupsAfterHooks) {
+			for (const [groupIndex, group] of groupsAfterHooks.entries()) {
 				for (const key of group.keys) {
 					const rowAfterHooks = await emitter.emitFilter<Partial<AnyItem>, null>(
 						rowEvent,
@@ -1601,12 +1609,15 @@ implements AbstractService<Item> {
 						data: omit(rowAfterHooks, primaryKeyField) as Partial<Item>,
 						keys: [key],
 					});
+
+					callerGroupIndexes.push(groupIndex);
 				}
 			}
 		}
 		else {
 			rowKeys = keys;
 			candidateGroups = groupsAfterHooks;
+			callerGroupIndexes = groupsAfterHooks.map((_group, groupIndex) => groupIndex);
 		}
 
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
@@ -1617,14 +1628,18 @@ implements AbstractService<Item> {
 			.filter((relation) => relation.collection === this.collection)
 			.map((relation) => relation.field));
 
-		const mergedGroups = mergeUpdateGroups(candidateGroups, (groupData) => {
-			return Object.entries(groupData).some(([field, value]) => {
-				const nestsAnItem = typeof value === 'object' && value !== null;
+		const mergedGroups = mergeUpdateGroups(
+			candidateGroups,
+			callerGroupIndexes,
+			(groupData) => {
+				return Object.entries(groupData).some(([field, value]) => {
+					const nestsAnItem = typeof value === 'object' && value !== null;
 
-				return aliases.includes(field)
-					|| (relationalFields.has(field) && nestsAnItem);
-			});
-		});
+					return aliases.includes(field)
+						|| (relationalFields.has(field) && nestsAnItem);
+				});
+			},
+		);
 
 		const writingGroups = mergedGroups.filter((group) => {
 			return !this.groupChangesNothing(group, aliases);
