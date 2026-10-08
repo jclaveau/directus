@@ -1379,6 +1379,35 @@ implements AbstractService<Item> {
 
 		const keys = groupsAfterHooks.flatMap((group) => group.keys);
 
+		// A dropped key would cancel its row with no null in the result, and
+		// without allowFilterCancel; cancelling a row is the per-row event's job.
+		const unmatchedKeyCounts = new Map<string, number>();
+
+		for (const key of keys) {
+			const keyName = String(key);
+
+			unmatchedKeyCounts.set(keyName, (unmatchedKeyCounts.get(keyName) ?? 0) + 1);
+		}
+
+		const dropsInputKey = inputKeys.some((key) => {
+			const keyName = String(key);
+			const unmatchedCount = unmatchedKeyCounts.get(keyName) ?? 0;
+
+			unmatchedKeyCounts.set(keyName, unmatchedCount - 1);
+
+			return unmatchedCount === 0;
+		});
+
+		if (dropsInputKey) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.update" filter hook must keep every key it
+					received; a hook that cancels one row belongs on
+					"${this.eventScope}.update.one"
+				`,
+			});
+		}
+
 		// Keys a hook added are counted and validated like the caller's own.
 		if (!opts.bypassLimits && keys.length > inputKeys.length) {
 			mutationTracker.trackMutations(keys.length - inputKeys.length);

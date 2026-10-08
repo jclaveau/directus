@@ -880,6 +880,53 @@ describe('Integration Tests', () => {
 				emitFilterSpy.mockRestore();
 			});
 
+			it('refuses an update hook that drops a key', async () => {
+				const emitFilterSpy = stubUpdateFilter([
+					{ data: { name: 'y' }, keys: [1] },
+				]);
+
+				await expect(service.updateMany([1, 2], { name: 'Test' })).rejects.toThrow(
+					/must keep every key it received/,
+				);
+
+				expect(tracker.history.all).toHaveLength(0);
+
+				emitFilterSpy.mockRestore();
+			});
+
+			it(oneLine`
+				refuses an update hook that drops one of a row's two changes
+			`, async () => {
+				const emitFilterSpy = stubUpdateFilter([
+					{ data: { name: 'first' }, keys: [1] },
+				]);
+
+				await expect(service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 1, name: 'second' },
+				])).rejects.toThrow(/must keep every key it received/);
+
+				expect(tracker.history.all).toHaveLength(0);
+
+				emitFilterSpy.mockRestore();
+			});
+
+			it('lets an update hook move a key to another group', async () => {
+				const emitFilterSpy = stubUpdateFilter([
+					{ data: { name: 'first' }, keys: [] },
+					{ data: { name: 'second' }, keys: [1, 2] },
+				]);
+
+				const keys = await service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 2, name: 'second' },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+
+				emitFilterSpy.mockRestore();
+			});
+
 			it('still counts a key a hook added against the batch limit', async () => {
 				const emitFilterSpy = stubUpdateFilter([
 					{ data: { name: 'y' }, keys: [1, 2, 3] },
