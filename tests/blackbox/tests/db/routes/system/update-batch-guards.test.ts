@@ -33,15 +33,29 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
-	// `<run>` and every `<name>` a Given created; anything else stays as written.
+	// `<run>` and every `<name>` a Given created, `<name:upper>` upper-cased;
+	// anything else stays as written.
 	function withKeys(cell: string, batch: Batch) {
-		return cell.replaceAll(/<([\w-]+)>/g, (placeholder, name: string) => {
-			if (name === 'run') {
-				return batch.run;
-			}
+		return cell.replaceAll(
+			/<([\w-]+)(:upper)?>/g,
+			(placeholder, name: string, upper?: string) => {
+				if (name === 'run') {
+					return batch.run;
+				}
 
-			return batch.keysByName[name] ?? placeholder;
-		});
+				const key = batch.keysByName[name];
+
+				if (key === undefined) {
+					return placeholder;
+				}
+
+				if (upper === undefined) {
+					return key;
+				}
+
+				return key.toUpperCase();
+			},
+		);
 	}
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
@@ -176,6 +190,8 @@ describe.each(vendors)('%s', (vendor) => {
 			'a batch moving a translation key to a row while freeing it is applied',
 			'a batch moving a version key to a version while freeing it is applied',
 			'a batch giving translations keys that join alike is applied',
+			'a batch looping two roles through an upper-cased id is refused',
+			'a batch making a role its own parent in upper case is refused',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {

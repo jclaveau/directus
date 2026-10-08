@@ -216,6 +216,23 @@ describe('Integration Tests', () => {
 
 				expect(tracker.history.select).toHaveLength(2);
 			});
+
+			it('refuses a role made its own parent in another casing', async () => {
+				tracker.on.select('directus_roles').response({ parent: null });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'ROLE-A' }, keys: ['role-a'] },
+				])).rejects.toThrow('A role cannot be a parent of itself');
+			});
+
+			it('refuses a batch loop naming one role in two casings', async () => {
+				tracker.on.select('directus_roles').response({ parent: null });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'ROLE-B' }, keys: ['role-a'] },
+					{ data: { parent: 'role-a' }, keys: ['role-b'] },
+				])).rejects.toThrow('already a descendant of itself');
+			});
 		});
 	});
 });

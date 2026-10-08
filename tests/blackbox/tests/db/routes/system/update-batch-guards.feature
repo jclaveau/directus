@@ -377,3 +377,48 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:                      |   data:                  |
       |   fields: key,language      |     key: x-<run>         |
       |                             |     language: en-US      |
+
+  Scenario: a batch looping two roles through an upper-cased id is refused
+    Given the rows of /roles:
+      | as    | name  |
+      | left  | left  |
+      | right | right |
+    Then these requests get these responses:
+      | request                   | response                     |
+      | method: PATCH             | code: 400                    |+
+      | path: /roles              | body:                        |
+      | payload:                  |   errors:                    |
+      |   - id: <left>            |     - extensions:            |
+      |     parent: <right:upper> |         reason: >-           |
+      |   - id: <right>           |           A role cannot have |
+      |     parent: <left>        |           a parent that is   |
+      |                           |           already a          |
+      |                           |           descendant of      |
+      |                           |           itself             |
+      | method: GET               | code: 200                    |+
+      | path: /roles/<left>       | body:                        |
+      | query:                    |   data:                      |
+      |   fields: parent          |     parent: null             |
+      | method: GET               | code: 200                    |+
+      | path: /roles/<right>      | body:                        |
+      | query:                    |   data:                      |
+      |   fields: parent          |     parent: null             |
+
+  Scenario: a batch making a role its own parent in upper case is refused
+    Given the rows of /roles:
+      | as   | name |
+      | solo | solo |
+    Then these requests get these responses:
+      | request                  | response                   |
+      | method: PATCH            | code: 400                  |+
+      | path: /roles             | body:                      |
+      | payload:                 |   errors:                  |
+      |   - id: <solo>           |     - extensions:          |
+      |     parent: <solo:upper> |         reason: >-         |
+      |                          |           A role cannot be |
+      |                          |           a parent of      |
+      |                          |           itself           |
+      | method: GET              | code: 200                  |+
+      | path: /roles/<solo>      | body:                      |
+      | query:                   |   data:                    |
+      |   fields: parent         |     parent: null           |
