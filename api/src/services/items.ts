@@ -227,6 +227,7 @@ function mergeUpdateGroups<Item extends AnyItem>(
 	writesNestedItems: (groupData: Partial<Item>) => boolean,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
+	const keyNamesByGroupIndex: Set<string>[] = [];
 	const groupIndexByData = new Map<string, number>();
 	const lastGroupIndexByKey = new Map<string, number>();
 
@@ -258,22 +259,25 @@ function mergeUpdateGroups<Item extends AnyItem>(
 			isEqual(mergedGroups[sameDataIndex]!.data, candidateGroup.data)
 		) {
 			targetIndex = sameDataIndex;
-
-			// A loop, not a spread: one group can carry more keys than a call takes
-			// arguments.
-			for (const key of candidateGroup.keys) {
-				mergedGroups[targetIndex]!.keys.push(key);
-			}
 		}
 		else {
 			targetIndex = mergedGroups.length;
 
-			mergedGroups.push({
-				data: candidateGroup.data,
-				keys: [...candidateGroup.keys],
-			});
+			mergedGroups.push({ data: candidateGroup.data, keys: [] });
+			keyNamesByGroupIndex.push(new Set());
 
 			groupIndexByData.set(serializedData, targetIndex);
+		}
+
+		// The access check counts the stored rows against the keys, so a row the
+		// caller sent twice with one change is written, and checked, once.
+		for (const key of candidateGroup.keys) {
+			const keyNames = keyNamesByGroupIndex[targetIndex]!;
+
+			if (!keyNames.has(String(key))) {
+				keyNames.add(String(key));
+				mergedGroups[targetIndex]!.keys.push(key);
+			}
 		}
 
 		for (const key of candidateGroup.keys) {
