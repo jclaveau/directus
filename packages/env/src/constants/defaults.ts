@@ -119,6 +119,11 @@ export const DEFAULTS = {
 	// carries one pin per row and answers with both tag headers. `0` or an
 	// unparseable size emits every pin.
 	CACHE_TAGS_HEADER_MAX_SIZE: '4kb',
+	QUERY_AUDIT_LEVEL: 'counts',
+	// Runs are grouped, then bound values and statements dropped past it, largest
+	// entries first:
+	// node's fetch refuses a response past 16kb of headers in total.
+	QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly
 	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded

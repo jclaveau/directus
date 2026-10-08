@@ -61,10 +61,21 @@ import {
 	validateCacheSettingsEnv,
 } from './cache-settings.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
-import { validateBooleanEnv, validateDurationEnv } from './utils/validate-env.js';
+import {
+	validateBooleanEnv,
+	validateBytesEnv,
+	validateChoiceEnv,
+	validateDurationEnv,
+	validateHeaderNameEnv,
+} from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
+import {
+	QUERY_AUDIT_LEVELS,
+	QUERY_AUDIT_MIN_SIZE,
+	queryAuditEnabled,
+} from './database/query-audit.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -74,6 +85,7 @@ import cache from './middleware/cache.js';
 import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
+import auditRequestQueries from './middleware/query-audit.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
@@ -173,6 +185,12 @@ export default async function createApp(): Promise<express.Application> {
 	app.set('trust proxy', env['IP_TRUST_PROXY']);
 	app.set('query parser', (str: string) => qs.parse(str, { depth: Number(env['QUERYSTRING_MAX_PARSE_DEPTH']) }));
 
+	if (queryAuditEnabled()) {
+		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
+		validateChoiceEnv('QUERY_AUDIT_LEVEL', QUERY_AUDIT_LEVELS);
+		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], QUERY_AUDIT_MIN_SIZE);
+	}
+
 	if (env['PRESSURE_LIMITER_ENABLED']) {
 		const sampleInterval = Number(env['PRESSURE_LIMITER_SAMPLE_INTERVAL']);
 
@@ -246,6 +264,11 @@ export default async function createApp(): Promise<express.Application> {
 
 	if (env['CORS_ENABLED'] === true) {
 		app.use(cors);
+	}
+
+	// After `cors`, so a browser can read the 400 of a level outside the list.
+	if (queryAuditEnabled()) {
+		app.use(auditRequestQueries);
 	}
 
 	app.use((req, res, next) => {

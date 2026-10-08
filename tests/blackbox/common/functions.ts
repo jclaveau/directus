@@ -268,7 +268,9 @@ export async function CreateCollection(
 		.set('Authorization', auth)
 		.send(payload);
 
-	if (response.status === 403) {
+	// The no-cache instance is the shared one: a caller pinned to its own instance
+	// must not have its collection land there.
+	if (response.status === 403 && !options.env) {
 		response = await request(getNoCacheUrl(vendor))
 			.post(`/collections`)
 			.set('Authorization', auth)
@@ -320,8 +322,9 @@ export async function CreateCollections(
 		.send(missing);
 
 	// As in CreateField: a stale schema snapshot on the cache server answers 403 for
-	// structure the database already has.
-	if (response.status === 403) {
+	// structure the database already has. Never for a caller pinned to its own
+	// instance, as in CreateCollection.
+	if (response.status === 403 && !options.env) {
 		response = await request(getNoCacheUrl(vendor))
 			.post(`/collections`)
 			.set('Authorization', auth)
