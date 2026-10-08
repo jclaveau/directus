@@ -155,7 +155,11 @@ export class VersionsService extends ItemsService {
 		const keyCombos = new Set();
 
 		for (const item of data) {
-			const keyCombo = `${item['key']}-${item['collection']}-${item['item']}`;
+			const keyCombo = JSON.stringify([
+				item['key'],
+				item['collection'],
+				String(item['item']),
+			]);
 
 			if (keyCombos.has(keyCombo)) {
 				throw new UnprocessableContentError({
@@ -208,7 +212,7 @@ export class VersionsService extends ItemsService {
 			for (const pk of keys) {
 				const { collection, item } = await this.readOne(pk, { fields: ['collection', 'item'] });
 
-				const keyCombo = `${data['key']}-${collection}-${item}`;
+				const keyCombo = JSON.stringify([data['key'], collection, String(item)]);
 
 				if (keyCombos.has(keyCombo)) {
 					throw new UnprocessableContentError({

@@ -68,8 +68,10 @@ export class TranslationsService extends ItemsService {
 				for (const item of items) {
 					const updatedData = { ...item, ...data };
 
-					const keyCombo =
-						`${updatedData['key']}-${updatedData['language']}`;
+					const keyCombo = JSON.stringify([
+						updatedData['key'],
+						updatedData['language'],
+					]);
 
 					if (
 						claimedCombos.has(keyCombo)
