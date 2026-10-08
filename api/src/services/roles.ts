@@ -9,12 +9,14 @@ import type {
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
-import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 import { AccessService } from './access.js';
 import { PresetsService } from './presets.js';
 import { UsersService } from './users.js';
+
+const DESCENDANT_PARENT_REASON =
+	'A role cannot have a parent that is already a descendant of itself';
 
 export class RolesService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -37,9 +39,7 @@ export class RolesService extends ItemsService {
 			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-			for (const { data, keys } of parentGroups) {
-				await this.validateRoleNesting(keys as string[], data['parent']);
-			}
+			await this.validateRoleNesting(parentGroups);
 		}
 
 		const result = await super.updateGroups(groups, opts);
@@ -115,16 +115,57 @@ export class RolesService extends ItemsService {
 		return keys;
 	}
 
-	private async validateRoleNesting(ids: string[], parent: string) {
-		if (ids.includes(parent)) {
-			throw new InvalidPayloadError({ reason: 'A role cannot be a parent of itself' });
+	// A batch can close a loop no single row closes (A under B, B under A), so a
+	// climb reads the parent the batch is about to write before the stored one.
+	private async validateRoleNesting(parentGroups: UpdateGroup<Item>[]) {
+		const parentsInBatch = new Map<string, string | null>();
+
+		for (const { data, keys } of parentGroups) {
+			for (const key of keys) {
+				parentsInBatch.set(String(key), data['parent'] ?? null);
+			}
 		}
 
-		const roles = await fetchRolesTree(parent, this.knex);
+		const storedParents = new Map<string, string | null>();
 
-		if (ids.some((id) => roles.includes(id))) {
-			// The role tree up from the parent already includes this role, so it would create a circular reference
-			throw new InvalidPayloadError({ reason: 'A role cannot have a parent that is already a descendant of itself' });
+		const readParent = async (roleId: string) => {
+			if (parentsInBatch.has(roleId)) {
+				return parentsInBatch.get(roleId) ?? null;
+			}
+
+			if (!storedParents.has(roleId)) {
+				const role = await this.knex
+					.select('parent')
+					.from('directus_roles')
+					.where({ id: roleId })
+					.first();
+
+				storedParents.set(roleId, role?.parent ?? null);
+			}
+
+			return storedParents.get(roleId) ?? null;
+		};
+
+		for (const [roleId, parentId] of parentsInBatch) {
+			if (parentId === roleId) {
+				throw new InvalidPayloadError({
+					reason: 'A role cannot be a parent of itself',
+				});
+			}
+
+			const climbedRoles = new Set<string>();
+			let ancestorId = parentId;
+
+			// A loop above the role that does not pass through it is another row's
+			// to refuse, so the climb stops there.
+			while (ancestorId && !climbedRoles.has(ancestorId)) {
+				if (ancestorId === roleId) {
+					throw new InvalidPayloadError({ reason: DESCENDANT_PARENT_REASON });
+				}
+
+				climbedRoles.add(ancestorId);
+				ancestorId = await readParent(ancestorId);
+			}
 		}
 	}
 

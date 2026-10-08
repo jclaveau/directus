@@ -21,9 +21,12 @@ const schema = new SchemaBuilder()
 	})
 	.build();
 
+// Taken before the updateMany tests replace it on the prototype.
+const validateRoleNesting = (RolesService.prototype as any).validateRoleNesting;
+
 describe('Integration Tests', () => {
 	const db = knex.default({ client: MockClient });
-	createTracker(db);
+	const tracker = createTracker(db);
 
 	describe('Services / Roles', () => {
 		const service = new RolesService({
@@ -83,11 +86,10 @@ describe('Integration Tests', () => {
 					{ id: 'role-id-10', parent: 'parent-role-id-5' },
 				], opts);
 
-				expect(validateRoleNestingSpy)
-					.toHaveBeenNthCalledWith(1, ['role-id-9'], 'parent-role-id-4');
-
-				expect(validateRoleNestingSpy)
-					.toHaveBeenNthCalledWith(2, ['role-id-10'], 'parent-role-id-5');
+				expect(validateRoleNestingSpy).toHaveBeenCalledWith([
+					{ data: { parent: 'parent-role-id-4' }, keys: ['role-id-9'] },
+					{ data: { parent: 'parent-role-id-5' }, keys: ['role-id-10'] },
+				]);
 
 				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
 			});
@@ -163,6 +165,56 @@ describe('Integration Tests', () => {
 				await service.deleteMany(['role-id-8']);
 
 				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+		});
+
+		describe('validateRoleNesting', () => {
+			afterEach(() => {
+				tracker.reset();
+			});
+
+			it('refuses a role made its own parent', async () => {
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-a' }, keys: ['role-a'] },
+				])).rejects.toThrow('A role cannot be a parent of itself');
+			});
+
+			it('refuses a parent stored below the role', async () => {
+				tracker.on.select('directus_roles')
+					.responseOnce({ parent: 'role-a' });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+				])).rejects.toThrow('already a descendant of itself');
+			});
+
+			it('refuses two rows of a batch putting roles under each other', async () => {
+				tracker.on.select('directus_roles').response({ parent: null });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+					{ data: { parent: 'role-a' }, keys: ['role-b'] },
+				])).rejects.toThrow('already a descendant of itself');
+			});
+
+			it('accepts a batch freeing the child the role moves under', async () => {
+				tracker.on.select('directus_roles').response({ parent: 'role-a' });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+					{ data: { parent: null }, keys: ['role-b'] },
+				])).resolves.toBe(undefined);
+			});
+
+			it('stops at a stored loop the role is not part of', async () => {
+				tracker.on.select('directus_roles').responseOnce({ parent: 'role-c' });
+				tracker.on.select('directus_roles').responseOnce({ parent: 'role-b' });
+
+				await expect(validateRoleNesting.call(service, [
+					{ data: { parent: 'role-b' }, keys: ['role-a'] },
+				])).resolves.toBe(undefined);
+
+				expect(tracker.history.select).toHaveLength(2);
 			});
 		});
 	});
