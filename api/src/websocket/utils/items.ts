@@ -122,8 +122,15 @@ export async function getFieldsPayload(
 			return await service.readAll();
 		case 'delete':
 			return event.keys;
-		default:
-			return await service.readOne(event?.payload?.['collection'], event?.payload?.['field']);
+
+		default: {
+			const fieldPayload: Record<string, any> = event?.payload ?? {};
+
+			return await service.readOne(
+				fieldPayload['collection'],
+				fieldPayload['field'],
+			);
+		}
 	}
 }
 

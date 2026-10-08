@@ -1,3 +1,4 @@
+import type { PrimaryKey, UpdateGroup } from '@directus/types';
 import { useBus } from '../../bus/index.js';
 import emitter from '../../emitter.js';
 import type { WebSocketEvent } from '../messages.js';
@@ -38,16 +39,20 @@ export function registerWebSocketEvents() {
 	registerSortHooks();
 }
 
-// `items.update` carries a group per change rather than one payload and a flat key
-// list, so the wire's `keys` is the union of every group's. Shared by every module's
-// update and by files', which differ only in the event they register for.
+// `items.update` carries a group per change, so the wire's `keys` is every group's,
+// each key once. Shared by every module's update and by files', which differ only
+// in the event they register for.
 function updateEvent(
 	{ collection, payload = [] }: Record<string, any>,
 ): WebSocketEvent {
 	return {
 		collection,
 		action: 'update',
-		keys: payload.flatMap((group: any) => group.keys),
+		keys: [
+			...new Set<PrimaryKey>(
+				payload.flatMap((group: UpdateGroup) => group.keys),
+			),
+		],
 		payload,
 	};
 }
@@ -55,7 +60,7 @@ function updateEvent(
 function registerActionHooks(modules: string[]) {
 	// register event hooks that can be handled in an uniform manner
 	for (const module of modules) {
-		// One message per row, as before `items.create` carried the whole create.
+		// One message per row; the grouped `create` carries the whole create.
 		registerAction(`${module}.create.one`, ({ key, collection, payload = {} }) => {
 			return {
 				collection,
@@ -78,19 +83,43 @@ function registerActionHooks(modules: string[]) {
 
 function registerFieldsHooks() {
 	// exception for field hooks that don't report `directus_fields` as being the collection
-	registerAction('fields.create', ({ key, payload = {} }) => ({
-		collection: 'directus_fields',
-		action: 'create',
-		key,
-		payload,
-	}));
+	// FieldsService emits `fields.create` and `fields.update` itself with one field;
+	// a `directus_fields` write through ItemsService emits them grouped, its
+	// create's rows reaching `fields.create.one`.
+	registerAction('fields.create', ({ key, payload = {} }) => {
+		if (Array.isArray(payload)) {
+			return null;
+		}
 
-	registerAction('fields.update', ({ keys, payload = {} }) => ({
-		collection: 'directus_fields',
-		action: 'update',
-		keys,
-		payload,
-	}));
+		return {
+			collection: 'directus_fields',
+			action: 'create',
+			key,
+			payload,
+		};
+	});
+
+	registerAction('fields.create.one', ({ key, payload = {} }) => {
+		return {
+			collection: 'directus_fields',
+			action: 'create',
+			key,
+			payload,
+		};
+	});
+
+	registerAction('fields.update', (meta) => {
+		if (Array.isArray(meta['payload'])) {
+			return { ...updateEvent(meta), collection: 'directus_fields' };
+		}
+
+		return {
+			collection: 'directus_fields',
+			action: 'update',
+			keys: meta['keys'] ?? [],
+			payload: meta['payload'] ?? {},
+		};
+	});
 
 	registerAction('fields.delete', ({ keys, payload = [] }) => ({
 		collection: 'directus_fields',
@@ -121,19 +150,18 @@ function registerFilesHooks() {
 
 function registerRelationsHooks() {
 	// exception for relation hooks that don't report `directus_relations` as being the collection
-	registerAction('relations.create', ({ key, payload = {} }) => ({
-		collection: 'directus_relations',
-		action: 'create',
-		key,
-		payload: { ...payload, key },
-	}));
+	registerAction('relations.create.one', ({ key, payload = {} }) => {
+		return {
+			collection: 'directus_relations',
+			action: 'create',
+			key,
+			payload: { ...payload, key },
+		};
+	});
 
-	registerAction('relations.update', ({ keys, payload = {} }) => ({
-		collection: 'directus_relations',
-		action: 'update',
-		keys,
-		payload,
-	}));
+	registerAction('relations.update', (meta) => {
+		return { ...updateEvent(meta), collection: 'directus_relations' };
+	});
 
 	registerAction('relations.delete', ({ collection, payload = [] }) => ({
 		collection: 'directus_relations',
@@ -157,11 +185,20 @@ function registerSortHooks() {
  * @param event The action event to watch
  * @param transform Transformer function
  */
-function registerAction(event: string, transform: (args: Record<string, any>) => WebSocketEvent) {
+function registerAction(
+	event: string,
+	transform: (args: Record<string, any>) => WebSocketEvent | null,
+) {
 	const messenger = useBus();
 
 	emitter.onAction(event, (data: Record<string, any>) => {
+		const websocketEvent = transform(data);
+
+		if (websocketEvent === null) {
+			return;
+		}
+
 		// push the event through the Redis pub/sub
-		messenger.publish('websocket.event', transform(data) as Record<string, any>);
+		messenger.publish('websocket.event', websocketEvent as Record<string, any>);
 	});
 }

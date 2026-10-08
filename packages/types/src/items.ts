@@ -13,8 +13,8 @@ export type PrimaryKey = string | number;
  * `items.update` event carries that same list, so a hook sees every row a single
  * update touches instead of one firing per row.
  */
-export type UpdateGroup<Item = any> = {
-	data: Partial<Item>;
+export type UpdateGroup<GroupItem = any> = {
+	data: Partial<GroupItem>;
 	keys: PrimaryKey[];
 };
 
@@ -24,8 +24,8 @@ export type UpdateGroup<Item = any> = {
  * stored row instead (`{ key }`), answer it with the row of an earlier position of
  * the same create (`{ sameRowAs }`), or cancel it (`null`).
  */
-export type CreateEntry<Item = any> =
-	| { data: Partial<Item> }
+export type CreateEntry<EntryItem = any> =
+	| { data: Partial<EntryItem> }
 	| { key: PrimaryKey }
 	| { sameRowAs: number };
 
