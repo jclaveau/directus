@@ -36,7 +36,7 @@ export const seedDBStructure = () => {
 			await request(getUrl(vendor))
 				.delete('/flows')
 				.send(eventFlows.map((flow) => flow.id))
-				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+				.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
 
 			await CreateCollections(vendor, {
 				collections: [
@@ -65,7 +65,7 @@ export const seedDBStructure = () => {
 						options: { ...flow.options, collections: [collectionFlowRuns] },
 					};
 				}))
-				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+				.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
 
 			expect(response.statusCode).toEqual(200);
 		},
