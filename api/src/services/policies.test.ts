@@ -1,9 +1,10 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import { type MutationOptions, UserIntegrityCheckFlag } from '@directus/types';
+import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
-import { MockClient } from 'knex-mock-client';
+import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
+import emitter from '../emitter.js';
 import { ItemsService } from './items.js';
 import { PoliciesService } from './policies.js';
 
@@ -25,12 +26,18 @@ const schema = new SchemaBuilder()
 	.collection('directus_policies', (c) => {
 		c.field('id').uuid()
 			.primary();
+
+		c.field('name').string();
+		c.field('admin_access').boolean();
+		c.field('app_access').boolean();
 	})
 	.build();
 
 const db = knex.default({ client: MockClient });
+const tracker = createTracker(db);
 
 afterEach(() => {
+	tracker.reset();
 	vi.restoreAllMocks();
 	vi.mocked(clearSystemCache).mockClear();
 });
@@ -49,17 +56,49 @@ describe('Services / Policies', () => {
 		});
 
 		it('requests the union of every row\'s integrity checks', async () => {
-			vi.spyOn(ItemsService.prototype, 'updateGroups')
-				.mockResolvedValue(['policy-id-2', 'policy-id-3']);
+			tracker.on.update('directus_policies').response(1);
 
-			const opts: MutationOptions = {};
+			const onRequireUserIntegrityCheck = vi.fn();
 
 			await new PoliciesService({ knex: db, schema }).updateBatch([
-				{ id: 'policy-id-2', admin_access: false },
-				{ id: 'policy-id-3', app_access: true },
-			], opts);
+				{ id: '7d3e5f40-1a2b-4c3d-9e8f-000000000002', admin_access: false },
+				{ id: '7d3e5f40-1a2b-4c3d-9e8f-000000000003', app_access: true },
+			], { onRequireUserIntegrityCheck });
 
-			expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+			expect(onRequireUserIntegrityCheck)
+				.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
+			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+
+		it('clears the caches when a policies.update hook grants admin', async () => {
+			tracker.on.update('directus_policies').response(1);
+
+			const onRequireUserIntegrityCheck = vi.fn();
+
+			const grantAdminAccess = () => {
+				return [{
+					data: { name: 'Editors', admin_access: true },
+					keys: ['7d3e5f40-1a2b-4c3d-9e8f-000000000004'],
+				}];
+			};
+
+			emitter.onFilter('policies.update', grantAdminAccess);
+
+			try {
+				await new PoliciesService({ knex: db, schema }).updateMany(
+					['7d3e5f40-1a2b-4c3d-9e8f-000000000004'],
+					{ name: 'Editors' },
+					{ onRequireUserIntegrityCheck },
+				);
+			}
+			finally {
+				emitter.offFilter('policies.update', grantAdminAccess);
+			}
+
+			expect(onRequireUserIntegrityCheck)
+				.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
 			expect(clearSystemCache).toHaveBeenCalledTimes(1);
 		});
 	});

@@ -4,6 +4,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import emitter from '../emitter.js';
 import { AccessService, ItemsService, PresetsService, RolesService, UsersService } from './index.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -18,11 +19,15 @@ const schema = new SchemaBuilder()
 	.collection('directus_roles', (c) => {
 		c.field('id').uuid()
 			.primary();
+
+		c.field('name').string();
+		c.field('parent').uuid();
 	})
 	.build();
 
-// Taken before the updateMany tests replace it on the prototype.
+// Taken before the updateMany tests replace them on the prototypes.
 const validateRoleNesting = (RolesService.prototype as any).validateRoleNesting;
+const itemsUpdateGroups = ItemsService.prototype.updateGroups;
 
 describe('Integration Tests', () => {
 	const db = knex.default({ client: MockClient });
@@ -39,7 +44,7 @@ describe('Integration Tests', () => {
 		});
 
 		describe('updateMany', () => {
-			vi.spyOn(ItemsService.prototype, 'updateGroups')
+			const superUpdateGroupsSpy = vi.spyOn(ItemsService.prototype, 'updateGroups')
 				.mockResolvedValue(['role-id-1']);
 
 			const validateRoleNestingSpy = vi
@@ -55,11 +60,19 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if parent is changed', async () => {
-				const opts: MutationOptions = {};
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
 
-				await service.updateMany(['role-id-3'], { parent: 'parent-role-id-1' }, opts);
+				const onRequireUserIntegrityCheck = vi.fn();
 
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+				await service.updateMany(
+					['5a1c9e20-3b4d-4c6e-8f70-000000000003'],
+					{ parent: '5a1c9e20-3b4d-4c6e-8f70-000000000103' },
+					{ onRequireUserIntegrityCheck },
+				);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 			});
 
 			it('should validate role nesting if parent is changed', async () => {
@@ -71,27 +84,86 @@ describe('Integration Tests', () => {
 			});
 
 			it('should clear caches if parent is changed', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
+
 				const clearCacheSpy = vi.spyOn(RolesService.prototype as any, 'clearCaches');
 
-				await service.updateMany(['role-id-5'], { parent: 'parent-role-id-3' });
+				await service.updateMany(
+					['5a1c9e20-3b4d-4c6e-8f70-000000000005'],
+					{ parent: '5a1c9e20-3b4d-4c6e-8f70-000000000105' },
+					{ onRequireUserIntegrityCheck: vi.fn() },
+				);
+
+				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('clears the caches when a roles.update hook reparents', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
+
+				const clearCacheSpy = vi.spyOn(RolesService.prototype as any, 'clearCaches');
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				const giveParent = () => {
+					return [{
+						data: {
+							name: 'Editors',
+							parent: '5a1c9e20-3b4d-4c6e-8f70-000000000111',
+						},
+						keys: ['5a1c9e20-3b4d-4c6e-8f70-000000000011'],
+					}];
+				};
+
+				emitter.onFilter('roles.update', giveParent);
+
+				try {
+					await service.updateMany(
+						['5a1c9e20-3b4d-4c6e-8f70-000000000011'],
+						{ name: 'Editors' },
+						{ onRequireUserIntegrityCheck },
+					);
+				}
+				finally {
+					emitter.offFilter('roles.update', giveParent);
+				}
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 
 				expect(clearCacheSpy).toHaveBeenCalled();
 			});
 
 			it('validates the nesting of every row of a batch', async () => {
-				const opts: MutationOptions = {};
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_roles').response(1);
+
+				const onRequireUserIntegrityCheck = vi.fn();
 
 				await service.updateBatch([
-					{ id: 'role-id-9', parent: 'parent-role-id-4' },
-					{ id: 'role-id-10', parent: 'parent-role-id-5' },
-				], opts);
+					{
+						id: '5a1c9e20-3b4d-4c6e-8f70-000000000009',
+						parent: '5a1c9e20-3b4d-4c6e-8f70-000000000104',
+					},
+					{
+						id: '5a1c9e20-3b4d-4c6e-8f70-000000000010',
+						parent: '5a1c9e20-3b4d-4c6e-8f70-000000000105',
+					},
+				], { onRequireUserIntegrityCheck });
 
 				expect(validateRoleNestingSpy).toHaveBeenCalledWith([
-					{ data: { parent: 'parent-role-id-4' }, keys: ['role-id-9'] },
-					{ data: { parent: 'parent-role-id-5' }, keys: ['role-id-10'] },
+					{
+						data: { parent: '5a1c9e20-3b4d-4c6e-8f70-000000000104' },
+						keys: ['5a1c9e20-3b4d-4c6e-8f70-000000000009'],
+					},
+					{
+						data: { parent: '5a1c9e20-3b4d-4c6e-8f70-000000000105' },
+						keys: ['5a1c9e20-3b4d-4c6e-8f70-000000000010'],
+					},
 				]);
 
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 			});
 		});
 

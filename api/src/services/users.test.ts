@@ -7,6 +7,7 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import emitter from '../emitter.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService, MailService, UsersService } from './index.js';
@@ -51,8 +52,17 @@ const schema = new SchemaBuilder()
 		c.field('id').uuid().primary().options({
 			nullable: false,
 		});
+
+		c.field('first_name').string();
+		c.field('email').string();
+		c.field('password').string();
+		c.field('status').string();
+		c.field('role').uuid();
 	})
 	.build();
+
+// Taken before the Users tests replace it on the prototype.
+const itemsUpdateGroups = ItemsService.prototype.updateGroups;
 
 describe('Integration Tests', () => {
 	const db = knex.default({ client: MockClient });
@@ -171,37 +181,137 @@ describe('Integration Tests', () => {
 			});
 
 			it('should request all user integrity checks if role is changed', async () => {
-				const opts: MutationOptions = {};
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
 
-				await service.updateMany(['user-id-4'], { role: testRoleId }, opts);
+				const onRequireUserIntegrityCheck = vi.fn();
 
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000004'],
+					{ role: testRoleId },
+					{ onRequireUserIntegrityCheck },
+				);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 			});
 
 			it('should request all user integrity checks if status is changed to not "active"', async () => {
-				const opts: MutationOptions = {};
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
 
-				await service.updateMany(['user-id-5'], { status: 'inactive' }, opts);
+				const onRequireUserIntegrityCheck = vi.fn();
 
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
-				expect(clearUserSessionsSpy).toBeCalled();
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000005'],
+					{ status: 'inactive' },
+					{ onRequireUserIntegrityCheck },
+				);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
+				expect(clearUserSessionsSpy)
+					.toHaveBeenCalledWith(['8e2b4c10-5d3a-4f6e-9a7b-000000000005']);
 			});
 
 			it('should request user limit checks if status is changed to "active"', async () => {
-				const opts: MutationOptions = {};
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
 
-				await service.updateMany(['user-id-6'], { status: 'active' }, opts);
+				const onRequireUserIntegrityCheck = vi.fn();
 
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000006'],
+					{ status: 'active' },
+					{ onRequireUserIntegrityCheck },
+				);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.UserLimits);
+
 				expect(clearUserSessionsSpy).not.toBeCalled();
 			});
 
 			it('should clear caches if role is changed', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
 				const clearCacheSpy = vi.spyOn(UsersService.prototype as any, 'clearCaches');
 
-				await service.updateMany(['user-id-7'], { role: testRoleId });
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000007'],
+					{ role: testRoleId },
+					{ onRequireUserIntegrityCheck: vi.fn() },
+				);
 
 				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('clears the caches when a users.update hook changes the role', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				const clearCacheSpy = vi.spyOn(UsersService.prototype as any, 'clearCaches');
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				const giveRole = () => {
+					return [{
+						data: { first_name: 'Ada', role: testRoleId },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000040'],
+					}];
+				};
+
+				emitter.onFilter('users.update', giveRole);
+
+				try {
+					await service.updateMany(
+						['8e2b4c10-5d3a-4f6e-9a7b-000000000040'],
+						{ first_name: 'Ada' },
+						{ onRequireUserIntegrityCheck },
+					);
+				}
+				finally {
+					emitter.offFilter('users.update', giveRole);
+				}
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
+				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('logs out the users a users.update hook suspends', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				const suspendUser = () => {
+					return [{
+						data: { first_name: 'Ada', status: 'suspended' },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000041'],
+					}];
+				};
+
+				emitter.onFilter('users.update', suspendUser);
+
+				try {
+					await service.updateMany(
+						['8e2b4c10-5d3a-4f6e-9a7b-000000000041'],
+						{ first_name: 'Ada' },
+						{ onRequireUserIntegrityCheck },
+					);
+				}
+				finally {
+					emitter.offFilter('users.update', suspendUser);
+				}
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
+				expect(clearUserSessionsSpy)
+					.toHaveBeenCalledWith(['8e2b4c10-5d3a-4f6e-9a7b-000000000041']);
 			});
 
 			it('should not checkUniqueEmails', async () => {
@@ -211,10 +321,20 @@ describe('Integration Tests', () => {
 			});
 
 			it('should checkUniqueEmails once', async () => {
-				await service.updateMany(['user-id-9'], { email: 'test@example.com' });
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000009'],
+					{ email: 'test@example.com' },
+				);
 
 				expect(checkUniqueEmailsSpy).toBeCalledTimes(1);
-				expect(clearUserSessionsSpy).toBeCalled();
+
+				expect(clearUserSessionsSpy).toHaveBeenCalledWith(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000009'],
+					undefined,
+				);
 			});
 
 			it('should disallow updating multiple items to same email', async () => {
@@ -240,8 +360,6 @@ describe('Integration Tests', () => {
 						}),
 					],
 				]));
-
-				expect(clearUserSessionsSpy).toBeCalled();
 			});
 
 			it('should not checkPasswordPolicy', async () => {
@@ -252,10 +370,20 @@ describe('Integration Tests', () => {
 			});
 
 			it('should checkPasswordPolicy once', async () => {
-				await service.updateMany(['user-id-13'], { password: 'testpassword' });
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				await service.updateMany(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000013'],
+					{ password: 'testpassword' },
+				);
 
 				expect(checkPasswordPolicySpy).toBeCalledTimes(1);
-				expect(clearUserSessionsSpy).toBeCalled();
+
+				expect(clearUserSessionsSpy).toHaveBeenCalledWith(
+					['8e2b4c10-5d3a-4f6e-9a7b-000000000013'],
+					undefined,
+				);
 			});
 
 			describe('restricted auth fields', () => {
@@ -400,11 +528,14 @@ describe('Integration Tests', () => {
 			});
 
 			it('requests the union of every row\'s integrity checks once', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
 				const onRequireUserIntegrityCheck = vi.fn();
 
 				await service.updateBatch([
-					{ id: 'user-id-29', status: 'active' },
-					{ id: 'user-id-30', role: testRoleId },
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000029', status: 'active' },
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000030', role: testRoleId },
 				], { onRequireUserIntegrityCheck });
 
 				expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
@@ -414,13 +545,18 @@ describe('Integration Tests', () => {
 			});
 
 			it('logs out the users a row suspends', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
 				await service.updateBatch([
-					{ id: 'user-id-31', status: 'suspended' },
-					{ id: 'user-id-32', first_name: 'Ada' },
-				]);
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000031', status: 'suspended' },
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000032', first_name: 'Ada' },
+				], { onRequireUserIntegrityCheck: vi.fn() });
 
 				expect(clearUserSessionsSpy).toHaveBeenCalledTimes(1);
-				expect(clearUserSessionsSpy).toHaveBeenCalledWith(['user-id-31']);
+
+				expect(clearUserSessionsSpy)
+					.toHaveBeenCalledWith(['8e2b4c10-5d3a-4f6e-9a7b-000000000031']);
 			});
 		});
 
@@ -542,7 +678,7 @@ describe('Integration Tests', () => {
 
 				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
 					[{ data: { role: 'invite-role' }, keys: [mockUser.id] }],
-					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+					expect.anything(),
 				);
 			});
 		});
