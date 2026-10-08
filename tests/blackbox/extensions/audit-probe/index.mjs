@@ -71,10 +71,10 @@ export default (router, { database }) => {
 		return database.raw('select \'café\' as accented_value\nfrom directus_settings');
 	}));
 
-	// Each read outside a transaction is an entry of its own: 200 of them
-	// outgrow any header once their statements are dropped.
+	// Each read outside a transaction is an entry of its own: 400 of them
+	// outgrow 8kb even as their kind and table alone.
 	router.get('/many-pool-reads', adminOnly(async () => {
-		for (let readNumber = 0; readNumber < 200; readNumber++) {
+		for (let readNumber = 0; readNumber < 400; readNumber++) {
 			await readSettings(database);
 		}
 	}));

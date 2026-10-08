@@ -86,17 +86,12 @@ test('audits a transaction: tables, statements, length and outcome', () => {
 	]);
 });
 
-test('reports a statement outside a transaction as one of its own', () => {
-	let now = 0;
-	vi.spyOn(performance, 'now').mockImplementation(() => now);
+test('counts a statement outside a transaction as its kind and table', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const audit = emptyQueryAudit();
 
-	const finishRead = auditStatementStart(audit, 'select * from "authors"', 'a');
-
-	now = 2;
-	finishRead();
-
+	auditStatementStart(audit, 'select * from "authors"', 'a')();
 	auditStatementStart(audit, 'BEGIN;', 'a')();
 	auditStatementStart(audit, 'update "articles" set "title" = ?', 'a')();
 	auditStatementStart(audit, 'select * from "authors"', 'b')();
@@ -105,11 +100,65 @@ test('reports a statement outside a transaction as one of its own', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"ms":2,"tables":{"authors":{"select":1}}},'
+			'["select authors",'
 			+ '{"ms":0,"outcome":"rollback","tables":{"articles":{"update":1}}},'
-			+ '{"ms":0,"tables":{"authors":{"select":1}}},'
-			+ '{"ms":0,"tables":{}}]',
+			+ '"select authors","set"]',
 		);
+});
+
+test('reports a statement outside a transaction as its SQL', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	auditStatementStart(audit, 'select * from "authors"', 'a')();
+	auditStatementStart(audit, 'SET search_path TO public', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 0 }))
+		.toBe('["select * from \\"authors\\"","SET search_path TO public"]');
+});
+
+test('pairs a statement outside a transaction with its bound values', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('bindings');
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+
+	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
+		.toBe('[{"select * from \\"a\\" where \\"id\\" = ?":[1]}]');
+});
+
+test('times a statement outside a transaction at the full level alone', () => {
+	vi.spyOn(performance, 'now')
+		.mockReturnValueOnce(0)
+		.mockReturnValueOnce(2);
+
+	const audit = emptyQueryAudit('full');
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
+		.toBe(
+			'[{"select * from \\"a\\" where \\"id\\" = ?":'
+			+ '{"ms":2,"bindings":[1]}}]',
+		);
+});
+
+test('steps a statement outside a transaction down a level past the size', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('full');
+
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [
+		'a value long enough to matter',
+	])();
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 60 }))
+		.toBe('["select * from \\"a\\" where \\"id\\" = ?"]');
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 30 }))
+		.toBe('["select a"]');
 });
 
 test('counts a statement of no other kind as other', () => {
@@ -127,8 +176,7 @@ test('counts a statement of no other kind as other', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"ms":0,"tables":{"articles":{"delete":1}}},'
-			+ '{"ms":0,"tables":{"kept":{"other":1}}}]',
+			'["delete articles","other kept"]',
 		);
 });
 
@@ -145,7 +193,7 @@ test('keeps two transactions open at once apart', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"tables":{"articles":{"insert":1}}},'
+			'[{"outcome":"open","tables":{"articles":{"insert":1}}},'
 			+ '{"ms":0,"outcome":"commit","tables":{"authors":{"insert":1}}}]',
 		);
 });
@@ -155,23 +203,26 @@ test('drops the statements of the largest entries first past the size', () => {
 
 	const audit = emptyQueryAudit();
 
+	auditStatementStart(audit, 'BEGIN;', 'a')();
 	auditStatementStart(audit, 'select * from "a"', 'a')();
+	auditStatementStart(audit, 'COMMIT;', 'a')();
 	auditStatementStart(audit, 'BEGIN;', 'a')();
 	auditStatementStart(audit, 'select * from "b" where "x" = ?', 'a')();
 	auditStatementStart(audit, 'select * from "b" where "y" = ?', 'a')();
 	auditStatementStart(audit, 'COMMIT;', 'a')();
 
-	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 180 }))
+	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 200 }))
 		.toBe(
-			'[{"ms":0,"tables":{"a":{"select":1}},'
+			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":1}},'
 			+ '"statements":[{"sql":"select * from \\"a\\"","count":1,"ms":0}]},'
 			+ '{"ms":0,"outcome":"commit","tables":{"b":{"select":2}},'
 			+ '"statementsDropped":2}]',
 		);
 
-	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 140 }))
+	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 160 }))
 		.toBe(
-			'[{"ms":0,"tables":{"a":{"select":1}},"statementsDropped":1},'
+			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":1}},'
+			+ '"statementsDropped":1},'
 			+ '{"ms":0,"outcome":"commit","tables":{"b":{"select":2}},'
 			+ '"statementsDropped":2}]',
 		);
@@ -186,8 +237,8 @@ test('drops the last entries once no entry holds statements', () => {
 	auditStatementStart(audit, 'select * from "b"', 'a')();
 	auditStatementStart(audit, 'select * from "c"', 'a')();
 
-	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 60 }))
-		.toBe('[{"ms":0,"tables":{"a":{"select":1}}},{"entriesDropped":2}]');
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 33 }))
+		.toBe('["select a",{"entriesDropped":2}]');
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 10 }))
 		.toBe('[{"entriesDropped":3}]');
@@ -223,20 +274,19 @@ test('reports each run\'s bound values at the bindings level', () => {
 
 	const audit = emptyQueryAudit('bindings');
 
+	auditStatementStart(audit, 'BEGIN;', 'a')();
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
 	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [2])();
-	auditStatementStart(audit, 'select * from "a"', 'b')();
+	auditStatementStart(audit, 'select * from "a"', 'a')();
+	auditStatementStart(audit, 'COMMIT;', 'a')();
 
 	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
 		.toBe(
-			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[[1]]}]},'
-			+ '{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[[2]]}]},'
-			+ '{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\"","count":1,"ms":0,"bindings":[[]]}]}]',
+			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":3}},"statements":['
+			+ '{"sql":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"count":2,"ms":0,"bindings":[[1],[2]]},'
+			+ '{"sql":"select * from \\"a\\"","count":1,"ms":0,"bindings":[[]]}'
+			+ ']}]',
 		);
 });
 
@@ -284,9 +334,8 @@ test('reports a BigInt bound value as its digits', () => {
 
 	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
 		.toBe(
-			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\" where \\"n\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[["9007199254740993"]]}]}]',
+			'[{"select * from \\"a\\" where \\"n\\" = ?":'
+			+ '["9007199254740993"]}]',
 		);
 });
 
@@ -366,6 +415,10 @@ test('records no statement at the counts level', () => {
 		{
 			startedAt: 0,
 			ms: 0,
+			loneStatement: {
+				sql: 'select * from "a" where "id" = ?',
+				summary: 'select a',
+			},
 			tableCounts: new Map([['a', { select: 1 }]]),
 			statementAudits: new Map(),
 			runAudits: [],
@@ -385,12 +438,8 @@ test('records bound values only while they are allowed', () => {
 
 	expect(formatQueryAudit(audit, { level: 'bindings', maxSize: 0 }))
 		.toBe(
-			'[{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[[1]]}]},'
-			+ '{"ms":0,"tables":{"a":{"select":1}},"statements":[{'
-			+ '"sql":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[]}]}]',
+			'[{"select * from \\"a\\" where \\"id\\" = ?":[1]},'
+			+ '{"select * from \\"a\\" where \\"id\\" = ?":[]}]',
 		);
 });
 
@@ -408,7 +457,7 @@ test('records nothing once closed', () => {
 	auditStatementStart(audit, 'COMMIT;', 'a')();
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
-		.toBe('[{"tables":{"a":{"select":1}}}]');
+		.toBe('[{"outcome":"open","tables":{"a":{"select":1}}}]');
 });
 
 test('escapes what a header cannot carry', () => {
@@ -420,9 +469,7 @@ test('escapes what a header cannot carry', () => {
 
 	expect(formatQueryAudit(audit, { level: 'statements', maxSize: 0 }))
 		.toBe(
-			'[{"ms":0,"tables":{"caf\\u00e9":{"select":1}},'
-			+ '"statements":[{"sql":"select *\\nfrom \\"caf\\u00e9\\"",'
-			+ '"count":1,"ms":0}]}]',
+			'["select *\\nfrom \\"caf\\u00e9\\""]',
 		);
 });
 
@@ -446,7 +493,7 @@ test('audits every statement sent through the driver', async () => {
 	expect(result).toBe('driver result');
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
-		.toMatch(/^\[\{"ms":\d+,"tables":\{"authors":\{"select":1\}\}\}\]$/);
+		.toBe('["select authors"]');
 });
 
 test('leaves a statement sent outside any request unaudited', async () => {
@@ -498,7 +545,7 @@ test('audits a statement streamed through the driver', async () => {
 	expect(result).toEqual(['the stream', { highWaterMark: 1 }]);
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
-		.toMatch(/^\[\{"ms":\d+,"tables":\{"authors":\{"select":1\}\}\}\]$/);
+		.toBe('["select authors"]');
 });
 
 test('wraps a dialect prototype once, however many pools share it', () => {
@@ -520,7 +567,7 @@ test('wraps a dialect prototype once, however many pools share it', () => {
 	});
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
-		.toBe('[{"tables":{"authors":{"select":1}}}]');
+		.toBe('["select authors"]');
 });
 
 test('is enabled by QUERY_AUDIT_HEADER alone', () => {

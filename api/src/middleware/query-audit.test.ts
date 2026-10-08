@@ -46,9 +46,7 @@ test('writes the audit of the request when its headers flush', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"ms":0,"tables":{"articles":{"select":1}},'
-			+ '"statements":[{"sql":"select * from \\"articles\\"",'
-			+ '"count":1,"ms":0}]}]',
+			'["select * from \\"articles\\""]',
 		],
 	]);
 
@@ -86,7 +84,7 @@ test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 	expect(req.get).toHaveBeenCalledWith('X-Query-Audit');
 
 	expect(setHeader.mock.calls).toEqual([
-		['X-Query-Audit', '[{"ms":0,"tables":{"articles":{"select":1}}}]'],
+		['X-Query-Audit', '["select articles"]'],
 	]);
 });
 
@@ -124,9 +122,7 @@ test('reports the bound values to an admin asking bindings', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"ms":0,"tables":{"articles":{"select":1}},'
-			+ '"statements":[{"sql":"select * from \\"articles\\" where \\"id\\" = ?",'
-			+ '"count":1,"ms":0,"bindings":[[7]]}]}]',
+			'[{"select * from \\"articles\\" where \\"id\\" = ?":[7]}]',
 		],
 	]);
 });
@@ -213,9 +209,7 @@ test.each(['bindings', 'full'])(
 		expect(setHeader.mock.calls).toEqual([
 			[
 				'X-Query-Audit',
-				'[{"ms":0,"tables":{"articles":{"select":1}},'
-				+ '"statements":[{"sql":"select * from \\"articles\\" where \\"id\\" = ?",'
-				+ '"count":1,"ms":0}]}]',
+				'["select * from \\"articles\\" where \\"id\\" = ?"]',
 			],
 		]);
 	},
@@ -297,9 +291,7 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"ms":0,"tables":{"articles":{"select":1}},'
-			+ '"statements":[{"sql":"select * from \\"articles\\"",'
-			+ '"count":1,"ms":0}]}]',
+			'["select * from \\"articles\\""]',
 		],
 	]);
 });
@@ -390,6 +382,10 @@ test('records no bound value once anyone else authenticated', () => {
 		{
 			startedAt: 0,
 			ms: 0,
+			loneStatement: {
+				sql: 'select * from "articles" where "id" = ?',
+				summary: 'select articles',
+			},
 			tableCounts: new Map([['articles', { select: 1 }]]),
 			statementAudits: new Map([
 				[
