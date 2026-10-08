@@ -932,6 +932,49 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		an undeclared take-over returning a key this same create inserted still purges
+		coarse — the row it returned is not the only one it may have written
+	`, async () => {
+		tracker.on.insert('test').response([1]);
+		tracker.on.update('test').response(1);
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+		// Every row's hook runs before the insert, so the key a hook can share with
+		// another row of the call is one that row sends.
+		const takeOverSibling = async (payload: any) => {
+			if (payload.name !== 'dup') {
+				return payload;
+			}
+
+			await db('test')
+				.where({ id: 5 })
+				.update({ name: 'merged' });
+
+			return 1;
+		};
+
+		emitter.onFilter('test.items.create.one', takeOverSibling);
+
+		try {
+			await service().createMany([
+				{ id: 1, name: 'x', student: 'A' },
+				{ name: 'dup', student: 'A' },
+			]);
+
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create.one', takeOverSibling);
+		}
+	});
+
+	it(oneLine`
 		updateMany's new slice reflects a hook-rewritten scope value — it re-reads the
 		committed row, and the hook's payload is what got written
 	`, async () => {
