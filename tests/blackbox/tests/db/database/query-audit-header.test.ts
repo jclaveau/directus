@@ -21,7 +21,6 @@ describe.each(vendors)('%s', (vendor) => {
 	const env = cloneDeep(config.envs);
 	env[vendor]['QUERY_AUDIT_HEADER'] = queryAuditHeader;
 	env[vendor]['QUERY_AUDIT_LEVEL'] = 'statements';
-	env[vendor]['QUERY_AUDIT_TIMINGS'] = 'false';
 	env[vendor]['CORS_ENABLED'] = 'true';
 	env[vendor]['CORS_ORIGIN'] = 'true';
 
@@ -318,14 +317,17 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
-		scenario('a level outside the list is refused', ({ then }) => {
-			then(
-				'these requests get these responses:',
-				async (table: ExchangeTable) => {
-					await expectExchanges(getUrl(vendor, env), table);
-				},
-			);
-		});
+		scenario(
+			'a level or a timings word outside the list is refused',
+			({ then }) => {
+				then(
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, env), table);
+					},
+				);
+			},
+		);
 
 		scenario(
 			'a browser can read the refusal of a level outside the list',

@@ -124,7 +124,6 @@ export const DEFAULTS = {
 	// entries first:
 	// node's fetch refuses a response past 16kb of headers in total.
 	QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
-	QUERY_AUDIT_TIMINGS: true,
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly
 	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded

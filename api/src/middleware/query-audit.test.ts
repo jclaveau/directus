@@ -226,7 +226,15 @@ test.each(['bindings', 'full'])(
 	},
 );
 
-test('refuses a level outside the list', () => {
+test.each([
+	'every',
+	'statements; fast',
+	'a; b; c',
+	'no-timings; statements',
+	'timings; no-timings',
+	'statements; no-timings; timings',
+	'statements;',
+])('refuses %j', (askedValue) => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
@@ -239,13 +247,15 @@ test('refuses a level outside the list', () => {
 		setHeader: vi.fn(),
 	}) as unknown as Response;
 
-	const req = { get: vi.fn().mockReturnValue('every') } as unknown as Request;
+	const req = { get: vi.fn().mockReturnValue(askedValue) } as unknown as Request;
 	const next = vi.fn();
 
 	auditRequestQueries(req, res, next);
 
 	expect(next).toHaveBeenCalledWith(new InvalidQueryError({
-		reason: '"X-Query-Audit" must be one of counts, statements, bindings, full',
+		reason: '"X-Query-Audit" must be a level, a timings word, or both as '
+			+ '"<level>; <timings word>". Levels: counts, statements, bindings, '
+			+ 'full. Timings words: timings, no-timings',
 	}));
 
 	expect(res.writeHead).toBe(writeHead);
@@ -314,11 +324,48 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is 0', () => {
 	]);
 });
 
-test('leaves out every duration when QUERY_AUDIT_TIMINGS is false', () => {
+test.each([
+	{
+		askedValue: 'statements',
+		auditHeader: '{"ms":0,"db":0,"wait":0,"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","ms":0,"wait":0,"statements":'
+			+ '[{"stmt":"select * from \\"articles\\"","ms":0}]}]}',
+	},
+	{
+		askedValue: 'statements; timings',
+		auditHeader: '{"ms":0,"db":0,"wait":0,"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","ms":0,"wait":0,"statements":'
+			+ '[{"stmt":"select * from \\"articles\\"","ms":0}]}]}',
+	},
+	{
+		askedValue: 'statements; no-timings',
+		auditHeader: '{"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","statements":'
+			+ '[{"stmt":"select * from \\"articles\\""}]}]}',
+	},
+	{
+		askedValue: ' statements ;no-timings ',
+		auditHeader: '{"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","statements":'
+			+ '[{"stmt":"select * from \\"articles\\""}]}]}',
+	},
+	{
+		askedValue: 'timings',
+		auditHeader: '{"ms":0,"db":0,"wait":0,"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","ms":0,"wait":0,"statements":'
+			+ '[{"stmt":"select articles...","ms":0}]}]}',
+	},
+	{
+		askedValue: 'no-timings',
+		auditHeader: '{"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","statements":'
+			+ '[{"stmt":"select articles..."}]}]}',
+	},
+])('reports the durations $askedValue asks for', ({ askedValue, auditHeader }) => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
-		QUERY_AUDIT_LEVEL: 'statements',
-		QUERY_AUDIT_TIMINGS: false,
+		QUERY_AUDIT_LEVEL: 'counts',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
 	});
 
 	vi.spyOn(performance, 'now').mockReturnValue(0);
@@ -330,7 +377,7 @@ test('leaves out every duration when QUERY_AUDIT_TIMINGS is false', () => {
 		setHeader,
 	}) as unknown as Response;
 
-	const req = { get: vi.fn() } as unknown as Request;
+	const req = { get: vi.fn().mockReturnValue(askedValue) } as unknown as Request;
 
 	auditRequestQueries(req, res, () => {
 		const audit = queryAuditStore.getStore()!;
@@ -342,14 +389,7 @@ test('leaves out every duration when QUERY_AUDIT_TIMINGS is false', () => {
 
 	res.writeHead(200);
 
-	expect(setHeader.mock.calls).toEqual([
-		[
-			'X-Query-Audit',
-			'{"maxPoolConnections":1,"statements":['
-			+ '{"transaction":"commit","statements":'
-			+ '[{"stmt":"select * from \\"articles\\""}]}]}',
-		],
-	]);
+	expect(setHeader.mock.calls).toEqual([['X-Query-Audit', auditHeader]]);
 });
 
 // A connection pool first filled during the request runs its callbacks in the
