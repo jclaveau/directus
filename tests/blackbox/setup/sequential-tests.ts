@@ -104,6 +104,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/websocket/auth-strict-connects.test.ts',
 			'/tests/db/websocket/auth-strict-pings.test.ts',
 			'/tests/db/websocket/general.test.ts',
+			'/tests/db/websocket/batch-update.test.ts',
 			// WebSocket subscriptions starve under the parallel pool's load; run this
 			// (split out of m2o.test.ts) sequentially like the other WS suites (#277).
 			'/tests/db/routes/items/m2o-max-batch-mutation.test.ts',

@@ -6,24 +6,56 @@ import request from 'supertest';
 import { expect, it } from 'vitest';
 
 export const collectionFlowRuns = 'test_event_flow_runs';
+export const collectionFlowRewrites = 'test_event_flow_rewrites';
+export const collectionFlowRefusals = 'test_event_flow_refusals';
 
 // Created at seed time: a flow created mid-test reaches the event bus only once
-// its asynchronous reload lands.
+// its asynchronous reload lands. A flow holding `transform` is a filter flow whose
+// `$last` return replaces the change it was given.
 export const eventFlows = [
 	{
 		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f01',
 		name: 'event-flow-runs update filter',
+		collection: collectionFlowRuns,
 		options: { type: 'filter', scope: ['items.update'] },
 	},
 	{
 		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f02',
 		name: 'event-flow-runs update action',
+		collection: collectionFlowRuns,
 		options: { type: 'action', scope: ['items.update'] },
 	},
 	{
 		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f03',
 		name: 'event-flow-runs create action',
+		collection: collectionFlowRuns,
 		options: { type: 'action', scope: ['items.create'] },
+	},
+	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f04',
+		name: 'event-flow-runs rewrite filter',
+		collection: collectionFlowRewrites,
+		options: { type: 'filter', scope: ['items.update'], return: '$last' },
+		transform: { status: 'set-by-flow' },
+	},
+	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f05',
+		name: 'event-flow-runs refusal filter',
+		collection: collectionFlowRefusals,
+		options: { type: 'filter', scope: ['items.update'], return: '$last' },
+		transform: null,
+	},
+	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f06',
+		name: 'event-flow-runs users update filter',
+		collection: 'directus_users',
+		options: { type: 'filter', scope: ['items.update'] },
+	},
+	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f07',
+		name: 'event-flow-runs users update action',
+		collection: 'directus_users',
+		options: { type: 'action', scope: ['items.update'] },
 	},
 ];
 
@@ -31,29 +63,42 @@ export const seedDBStructure = () => {
 	it.each(vendors)(
 		'%s',
 		async (vendor) => {
-			await DeleteCollection(vendor, { collection: collectionFlowRuns });
+			const auth = `Bearer ${USER.TESTS_FLOW.TOKEN}`;
 
+			for (const collection of [
+				collectionFlowRuns,
+				collectionFlowRewrites,
+				collectionFlowRefusals,
+			]) {
+				await DeleteCollection(vendor, { collection });
+			}
+
+			// Deleting a flow deletes its operations.
 			await request(getUrl(vendor))
 				.delete('/flows')
 				.send(eventFlows.map((flow) => flow.id))
-				.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+				.set('Authorization', auth);
 
 			await CreateCollections(vendor, {
 				collections: [
-					{
-						collection: collectionFlowRuns,
+					collectionFlowRuns,
+					collectionFlowRewrites,
+					collectionFlowRefusals,
+				].map((collection) => {
+					return {
+						collection,
 						meta: {},
 						fields: [
 							{ field: 'name', type: 'string', meta: {} },
 							{ field: 'status', type: 'string', meta: {} },
 						],
-					},
-				],
+					};
+				}),
 			});
 
-			// No operation: a run with accountability "all" still writes a revision
-			// holding its $trigger, which is all the test reads back.
-			const response = await request(getUrl(vendor))
+			// A run with accountability "all" writes a revision holding its $trigger,
+			// which is all the test reads back.
+			const flowsResponse = await request(getUrl(vendor))
 				.post('/flows')
 				.send(eventFlows.map((flow) => {
 					return {
@@ -62,12 +107,45 @@ export const seedDBStructure = () => {
 						status: 'active',
 						trigger: 'event',
 						accountability: 'all',
-						options: { ...flow.options, collections: [collectionFlowRuns] },
+						options: { ...flow.options, collections: [flow.collection] },
 					};
 				}))
-				.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+				.set('Authorization', auth);
 
-			expect(response.statusCode).toEqual(200);
+			expect(flowsResponse.statusCode).toEqual(200);
+
+			const transformFlows = eventFlows.filter((flow) => 'transform' in flow);
+
+			// The operation needs its flow to exist, and the flow then names it as
+			// the one it starts with.
+			const operationsResponse = await request(getUrl(vendor))
+				.post('/operations')
+				.send(transformFlows.map((flow) => {
+					return {
+						name: 'transform',
+						key: 'transform',
+						type: 'transform',
+						position_x: 19,
+						position_y: 1,
+						options: { json: flow.transform },
+						flow: flow.id,
+					};
+				}))
+				.query({ fields: 'id,flow' })
+				.set('Authorization', auth);
+
+			expect(operationsResponse.statusCode).toEqual(200);
+
+			const startsResponse = await request(getUrl(vendor))
+				.patch('/flows')
+				.send(operationsResponse.body.data.map((
+					operation: { id: string; flow: string },
+				) => {
+					return { id: operation.flow, operation: operation.id };
+				}))
+				.set('Authorization', auth);
+
+			expect(startsResponse.statusCode).toEqual(200);
 		},
 		300_000,
 	);

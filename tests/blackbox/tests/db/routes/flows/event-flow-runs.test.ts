@@ -8,19 +8,24 @@ import {
 import { CreateItem } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
+import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { describe, expect } from 'vitest';
-import { collectionFlowRuns, eventFlows } from './event-flow-runs.seed';
+import { eventFlows } from './event-flow-runs.seed';
 
-type FlowRow = { id: number; name: string };
+type FlowRow = { id: number | string; name: string };
 
 type FlowTrigger = {
 	payload: { status?: string; name?: string };
-	keys?: number[];
-	key?: number;
+	keys?: (number | string)[];
+	key?: number | string;
 };
 
-type Update = { rows: FlowRow[]; response?: request.Response };
+type Update = {
+	rows: FlowRow[];
+	path: string;
+	response?: request.Response;
+};
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -39,6 +44,8 @@ describe.each(vendors)('%s', (vendor) => {
 			.query({
 				'filter[collection][_eq]': 'directus_flows',
 				'filter[item][_eq]': flowId,
+				// The seed's writes to the flow left revisions too, holding no $trigger.
+				'filter[activity][action][_eq]': 'run',
 				fields: 'data',
 				sort: 'id',
 				limit: -1,
@@ -52,7 +59,7 @@ describe.each(vendors)('%s', (vendor) => {
 		}) => revision.data.data.$trigger);
 	}
 
-	function namesOf(update: Update, keys: number[]) {
+	function namesOf(update: Update, keys: (number | string)[]) {
 		return keys.map((key) => {
 			return update.rows.find((row) => row.id === key)!.name;
 		});
@@ -62,16 +69,45 @@ describe.each(vendors)('%s', (vendor) => {
 		{ given, when, then, and }: StepFunctions,
 		update: Update,
 	) {
-		given('the rows:', async (table: Record<string, string>[]) => {
-			update.rows = await CreateItem(vendor, {
-				collection: collectionFlowRuns,
-				item: parseGherkinTable<{ name: string }>(table),
+		given.optional(
+			/^the rows of (\w+):$/,
+			async (collection: string, table: Record<string, string>[]) => {
+				update.path = `/items/${collection}`;
+
+				update.rows = await CreateItem(vendor, {
+					collection,
+					item: parseGherkinTable<{ name: string }>(table),
+				});
+			},
+		);
+
+		given.optional('the users:', async (table: Record<string, string>[]) => {
+			update.path = '/users';
+
+			const response = await request(getUrl(vendor))
+				.post('/users')
+				.query({ fields: 'id,first_name' })
+				.send(parseGherkinTable<{ name: string }>(table).map((user) => {
+					return {
+						first_name: user.name,
+						email: `${user.name}-${randomUUID()}@event-flow-runs.test`,
+					};
+				}))
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+
+			update.rows = response.body.data.map((user: {
+				id: string;
+				first_name: string;
+			}) => {
+				return { id: user.id, name: user.first_name };
 			});
 		});
 
 		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
 			update.response = await request(getUrl(vendor))
-				.patch(`/items/${collectionFlowRuns}`)
+				.patch(update.path)
 				.send(parseGherkinTable<{ name: string; status: string }>(table)
 					.map((change) => {
 						return {
@@ -86,7 +122,7 @@ describe.each(vendors)('%s', (vendor) => {
 			/^the rows are updated to the status "(.*)"$/,
 			async (status: string) => {
 				update.response = await request(getUrl(vendor))
-					.patch(`/items/${collectionFlowRuns}`)
+					.patch(update.path)
 					.send({ keys: update.rows.map((row) => row.id), data: { status } })
 					.set('Authorization', AUTH);
 			},
@@ -116,6 +152,27 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(/^the "(.*)" flow ran with:$/, expectUpdateRuns);
 
 		then.optional(
+			/^the update is refused with a reason naming "(.*)"$/,
+			(reason: string) => {
+				expect(update.response!.statusCode).toEqual(400);
+				expect(update.response!.body.errors[0].message).toContain(reason);
+			},
+		);
+
+		then.optional('the rows hold:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.get(update.path)
+				.query({
+					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+					fields: 'name,status',
+					sort: 'id',
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.body.data).toEqual(parseGherkinTable(table));
+		});
+
+		then.optional(
 			/^the "(.*)" flow ran once for each of:$/,
 			async (flowLabel: string, table: Record<string, string>[]) => {
 				const ownKeys = update.rows.map((row) => row.id);
@@ -137,9 +194,12 @@ describe.each(vendors)('%s', (vendor) => {
 			'an update of several rows to one status runs each update flow once',
 			'a batch carrying two changes runs each update flow once per change',
 			'a create runs the create flow once per row',
+			'a filter flow\'s return replaces the change it was given',
+			'a filter flow returning null refuses the update',
+			'an update of several users runs each users update flow once',
 		]) {
 			scenario(title, (steps) => {
-				defineSteps(steps, { rows: [] });
+				defineSteps(steps, { rows: [], path: '' });
 			}, 60_000);
 		}
 	});
