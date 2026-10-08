@@ -11,6 +11,7 @@ import type {
 	PrimaryKey,
 	SchemaOverview,
 	OperationHandler,
+	UpdateGroup,
 } from '@directus/types';
 import { applyOptionsData, deepMap, getRedactedString, isValidJSON, parseJSON, toArray } from '@directus/utils';
 import type { Knex } from 'knex';
@@ -164,6 +165,7 @@ class FlowManager {
 		for (const flow of flowTrees) {
 			if (flow.trigger === 'event') {
 				let events: string[] = [];
+				const updateGroupsEvents = new Set<string>();
 
 				if (flow.options?.['scope']) {
 					events = toArray(flow.options['scope'])
@@ -171,13 +173,22 @@ class FlowManager {
 							if (['items.create', 'items.update', 'items.delete'].includes(scope)) {
 								if (!flow.options?.['collections']) return [];
 
+								// A create runs the flow once per row, as it always has; an
+								// update once per change, on the grouped event.
+								const rowSuffix = scope === 'items.create'
+									? '.one'
+									: '';
+
 								return toArray(flow.options['collections']).map((collection: string) => {
-									if (isSystemCollection(collection)) {
-										const action = scope.split('.')[1];
-										return collection.substring(9) + '.' + action;
+									const event = isSystemCollection(collection)
+										? `${collection.substring(9)}.${scope.split('.')[1]}${rowSuffix}`
+										: `${collection}.${scope}${rowSuffix}`;
+
+									if (scope === 'items.update') {
+										updateGroupsEvents.add(event);
 									}
 
-									return `${collection}.${scope}`;
+									return event;
 								});
 							}
 
@@ -187,7 +198,7 @@ class FlowManager {
 				}
 
 				if (flow.options['type'] === 'filter') {
-					const handler: FilterHandler = (payload, meta, context) =>
+					const rowHandler: FilterHandler = (payload, meta, context) =>
 						this.executeFlow(
 							flow,
 							{ payload, ...meta },
@@ -198,26 +209,78 @@ class FlowManager {
 							},
 						);
 
-					events.forEach((event) => emitter.onFilter(event, handler));
+					// One run per group, its trigger shaped like the single update
+					// the flow was written for; a returned value replaces that
+					// group's data.
+					const groupHandler: FilterHandler = async (payload, meta, context) => {
+						const groupsAfterFlow: UpdateGroup[] = [];
 
-					this.triggerHandlers.push({
-						id: flow.id,
-						events: events.map((event) => ({ type: 'filter', name: event, handler })),
+						for (const group of payload as UpdateGroup[]) {
+							const dataAfterFlow = await rowHandler(
+								group.data,
+								{ ...meta, keys: group.keys, originalPayload: group.data },
+								context,
+							);
+
+							groupsAfterFlow.push({
+								data: dataAfterFlow === undefined
+									? group.data
+									: dataAfterFlow as UpdateGroup['data'],
+								keys: group.keys,
+							});
+						}
+
+						return groupsAfterFlow;
+					};
+
+					const handlers = events.map((event) => {
+						return {
+							type: 'filter' as const,
+							name: event,
+							handler: updateGroupsEvents.has(event)
+								? groupHandler
+								: rowHandler,
+						};
 					});
+
+					handlers.forEach(({ name, handler }) => emitter.onFilter(name, handler));
+
+					this.triggerHandlers.push({ id: flow.id, events: handlers });
 				} else if (flow.options['type'] === 'action') {
-					const handler: ActionHandler = (meta, context) =>
+					const rowHandler: ActionHandler = (meta, context) =>
 						this.executeFlow(flow, meta, {
 							accountability: context['accountability'],
 							database: getDatabase(),
 							getSchema: context['schema'] ? () => context['schema'] : getSchema,
 						});
 
-					events.forEach((event) => emitter.onAction(event, handler));
+					const groupHandler: ActionHandler = async (meta, context) => {
+						for (const group of meta['payload'] as UpdateGroup[]) {
+							await rowHandler(
+								{
+									event: meta['event'],
+									payload: group.data,
+									keys: group.keys,
+									collection: meta['collection'],
+								},
+								context,
+							);
+						}
+					};
 
-					this.triggerHandlers.push({
-						id: flow.id,
-						events: events.map((event) => ({ type: 'action', name: event, handler })),
+					const handlers = events.map((event) => {
+						return {
+							type: 'action' as const,
+							name: event,
+							handler: updateGroupsEvents.has(event)
+								? groupHandler
+								: rowHandler,
+						};
 					});
+
+					handlers.forEach(({ name, handler }) => emitter.onAction(name, handler));
+
+					this.triggerHandlers.push({ id: flow.id, events: handlers });
 				}
 			} else if (flow.trigger === 'schedule') {
 				if (validateCron(flow.options['cron'])) {
