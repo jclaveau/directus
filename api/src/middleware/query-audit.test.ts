@@ -46,7 +46,7 @@ test('writes the audit of the request when its headers flush', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'["select * from \\"articles\\""]',
+			'[{"stmt":"select * from \\"articles\\"","ms":0}]',
 		],
 	]);
 
@@ -84,7 +84,7 @@ test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 	expect(req.get).toHaveBeenCalledWith('X-Query-Audit');
 
 	expect(setHeader.mock.calls).toEqual([
-		['X-Query-Audit', '["select articles"]'],
+		['X-Query-Audit', '[{"stmt":"select articles...","ms":0}]'],
 	]);
 });
 
@@ -122,7 +122,8 @@ test('reports the bound values to an admin asking bindings', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"select * from \\"articles\\" where \\"id\\" = ?":[7]}]',
+			'[{"stmt":"select * from \\"articles\\" where \\"id\\" = ?",'
+			+ '"ms":0,"bindings":[[7]]}]',
 		],
 	]);
 });
@@ -163,11 +164,10 @@ test('lists every run in order to an admin asking full', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"ms":0,"outcome":"commit","tables":{"a":{"select":2,"update":1}},'
-			+ '"runs":['
-			+ '{"sql":"select * from \\"a\\" where \\"id\\" = ?","ms":0,"bindings":[7]},'
-			+ '{"sql":"update \\"a\\" set \\"b\\" = ?","ms":0,"bindings":[8]},'
-			+ '{"sql":"select * from \\"a\\" where \\"id\\" = ?","ms":0,"bindings":[7]}'
+			'[{"transaction":"commit","ms":0,"statements":['
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","ms":0,"bindings":[7]},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":0,"bindings":[8]},'
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","ms":0,"bindings":[7]}'
 			+ ']}]',
 		],
 	]);
@@ -209,7 +209,7 @@ test.each(['bindings', 'full'])(
 		expect(setHeader.mock.calls).toEqual([
 			[
 				'X-Query-Audit',
-				'["select * from \\"articles\\" where \\"id\\" = ?"]',
+				'[{"stmt":"select * from \\"articles\\" where \\"id\\" = ?","ms":0}]',
 			],
 		]);
 	},
@@ -291,7 +291,44 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'["select * from \\"articles\\""]',
+			'[{"stmt":"select * from \\"articles\\"","ms":0}]',
+		],
+	]);
+});
+
+test('leaves out every duration when QUERY_AUDIT_TIMINGS is false', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_TIMINGS: false,
+	});
+
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const setHeader = vi.fn();
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader,
+	}) as unknown as Response;
+
+	const req = { get: vi.fn() } as unknown as Request;
+
+	auditRequestQueries(req, res, () => {
+		const audit = queryAuditStore.getStore()!;
+
+		auditStatementStart(audit, 'BEGIN;', 'a')();
+		auditStatementStart(audit, 'select * from "articles"', 'a')();
+		auditStatementStart(audit, 'COMMIT;', 'a')();
+	});
+
+	res.writeHead(200);
+
+	expect(setHeader.mock.calls).toEqual([
+		[
+			'X-Query-Audit',
+			'[{"transaction":"commit","statements":'
+			+ '[{"stmt":"select * from \\"articles\\""}]}]',
 		],
 	]);
 });
@@ -382,18 +419,27 @@ test('records no bound value once anyone else authenticated', () => {
 		{
 			startedAt: 0,
 			ms: 0,
-			loneStatement: {
-				sql: 'select * from "articles" where "id" = ?',
-				summary: 'select articles',
-			},
-			tableCounts: new Map([['articles', { select: 1 }]]),
+			outsideTransaction: true,
 			statementAudits: new Map([
 				[
 					'select * from "articles" where "id" = ?',
-					{ count: 1, ms: 0, bindings: [] },
+					{
+						stmt: 'select * from "articles" where "id" = ?',
+						cutStmt: 'select articles...',
+						count: 1,
+						ms: 0,
+						bindings: [],
+					},
 				],
 			]),
-			runAudits: [{ sql: 'select * from "articles" where "id" = ?', ms: 0 }],
+			runAudits: [
+				{
+					stmt: 'select * from "articles" where "id" = ?',
+					cutStmt: 'select articles...',
+					ms: 0,
+					bindings: [],
+				},
+			],
 		},
 	]);
 });

@@ -90,6 +90,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	QUERY_AUDIT_HEADER: 'string',
 	QUERY_AUDIT_LEVEL: 'string',
 	QUERY_AUDIT_HEADER_MAX_SIZE: 'string',
+	QUERY_AUDIT_TIMINGS: 'boolean',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_VARY_CONTENT_TYPES: 'array',
 	CACHE_VARY_REQUEST_HEADERS: 'array',

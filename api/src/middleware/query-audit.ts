@@ -17,7 +17,8 @@ import {
  * ran, one entry per transaction. A request sends the same header to pick how
  * much: `counts`, `statements`, `bindings` for each run's bound values, or
  * `full` for every run in order; QUERY_AUDIT_LEVEL is the level of a request
- * that sends none.
+ * that sends none. QUERY_AUDIT_TIMINGS `false` leaves out every `ms`, so two
+ * runs of a request report the same header.
  *
  * Bound values carry what the request read and wrote, so `bindings` and `full`
  * report them to an admin alone: anyone else gets `statements`. Whether the
@@ -57,6 +58,7 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 			maxSize: parseBytesConfiguration(
 				String(env['QUERY_AUDIT_HEADER_MAX_SIZE']),
 			) ?? 0,
+			timings: env['QUERY_AUDIT_TIMINGS'] !== false,
 		}));
 
 		return writeHead.apply(this, headArguments as any);

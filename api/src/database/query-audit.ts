@@ -5,23 +5,32 @@ import { performance } from 'node:perf_hooks';
 
 type StatementKind = 'select' | 'insert' | 'update' | 'delete' | 'other';
 
-type KindCounts = Partial<Record<StatementKind, number>>;
-
 type TransactionOutcome = 'commit' | 'rollback';
 
-type StatementAudit = { count: number; ms: number; bindings: unknown[][] };
+/**
+ * One statement as reported: `stmt` is its SQL, or `<kind> <table>...` at
+ * `counts`, and `cutStmt` that shorter form whatever the level.
+ */
+type StatementAudit = {
+	stmt: string;
+	cutStmt: string;
+	count: number;
+	ms: number;
+	bindings: unknown[][];
+};
 
-type RunAudit = { sql: string; ms?: number; bindings?: unknown[] };
-
-// `summary` is `<kind> <table>`, the statement's keyword alone with no table.
-type LoneStatement = { sql: string; summary: string };
+type RunAudit = {
+	stmt: string;
+	cutStmt: string;
+	ms?: number;
+	bindings: unknown[];
+};
 
 type TransactionAudit = {
 	startedAt: number;
 	ms?: number;
 	outcome?: TransactionOutcome;
-	loneStatement?: LoneStatement;
-	tableCounts: Map<string, KindCounts>;
+	outsideTransaction: boolean;
 	statementAudits: Map<string, StatementAudit>;
 	runAudits: RunAudit[];
 };
@@ -47,44 +56,31 @@ export type QueryAuditLevel = (typeof QUERY_AUDIT_LEVELS)[number];
 export type QueryAuditFormat = {
 	level: QueryAuditLevel;
 	maxSize: number;
+	timings?: boolean;
 };
 
-type StatementEntry = {
-	sql: string;
+// `bindings` holds one array of values per run, its single run's at `full`.
+type StatementItem = {
+	stmt: string;
+	cutStmt: string;
 	count: number;
-	ms: number;
+	ms: number | undefined;
 	bindings?: unknown[][];
 };
 
-type RunEntry = {
-	sql: string;
-	ms?: number | undefined;
-	bindings?: unknown[] | undefined;
-};
-
-type TransactionEntry = {
-	ms?: number | undefined;
-	outcome: TransactionOutcome | 'open';
-	tables: Record<string, KindCounts>;
-	statements?: StatementEntry[];
-	runs?: RunEntry[];
+/**
+ * A transaction, or with no `transaction` a statement outside one: its single
+ * item then stands as the entry. `runsInOrder` holds every run at `full`.
+ */
+type AuditEntry = {
+	transaction?: TransactionOutcome | 'open';
+	ms: number | undefined;
+	runsInOrder: boolean;
+	statementItems: StatementItem[];
 	runsGrouped?: number;
 	bindingsDropped?: number;
-	statementsDropped?: number;
+	statementsCut?: number;
 };
-
-/**
- * A statement outside a transaction, at the `level` it is reported: its summary
- * at `counts`, its SQL at `statements`, `{ <sql>: <bindings> }` at `bindings`
- * and `{ <sql>: { ms, bindings } }` at `full`.
- */
-type LoneStatementEntry = LoneStatement & {
-	level: QueryAuditLevel;
-	ms?: number | undefined;
-	bindings: unknown[];
-};
-
-type AuditEntry = TransactionEntry | LoneStatementEntry;
 
 type DriverConnection = { __knexUid: string };
 
@@ -225,7 +221,7 @@ export function auditStatementStart(
 	const keyword = leadingKeyword(sql);
 
 	if (keyword === 'begin' || keyword === 'start') {
-		const transactionAudit = newTransactionAudit(audit, startedAt);
+		const transactionAudit = newTransactionAudit(audit, startedAt, false);
 
 		audit.openTransactionAudits.set(connectionId, transactionAudit);
 
@@ -255,35 +251,22 @@ export function auditStatementStart(
 	}
 
 	const tableName = TABLE_PATTERN.exec(sql)?.[1];
-	const statementKind = kindOfKeyword(keyword);
+
+	const cutStmt = tableName
+		? `${kindOfKeyword(keyword)} ${tableName}...`
+		: `${keyword}...`;
+
+	const stmt = audit.recordsStatements
+		? sql
+		: cutStmt;
 
 	const transactionAudit = openTransactionAudit
-		?? newTransactionAudit(audit, startedAt, {
-			sql,
-			summary: tableName
-				? `${statementKind} ${tableName}`
-				: keyword,
-		});
+		?? newTransactionAudit(audit, startedAt, true);
 
-	if (tableName) {
-		const kindCounts = transactionAudit.tableCounts.get(tableName) ?? {};
+	const statementAudit = transactionAudit.statementAudits.get(stmt)
+		?? { stmt, cutStmt, count: 0, ms: 0, bindings: [] };
 
-		kindCounts[statementKind] = (kindCounts[statementKind] ?? 0) + 1;
-		transactionAudit.tableCounts.set(tableName, kindCounts);
-	}
-
-	if (!audit.recordsStatements) {
-		return () => {
-			if (!openTransactionAudit) {
-				transactionAudit.ms = performance.now() - startedAt;
-			}
-		};
-	}
-
-	const statementAudit = transactionAudit.statementAudits.get(sql)
-		?? { count: 0, ms: 0, bindings: [] };
-
-	const runAudit: RunAudit = { sql };
+	const runAudit: RunAudit = { stmt, cutStmt, bindings: [] };
 
 	statementAudit.count++;
 
@@ -292,7 +275,7 @@ export function auditStatementStart(
 		runAudit.bindings = bindings;
 	}
 
-	transactionAudit.statementAudits.set(sql, statementAudit);
+	transactionAudit.statementAudits.set(stmt, statementAudit);
 
 	if (audit.recordsRuns) {
 		transactionAudit.runAudits.push(runAudit);
@@ -312,21 +295,27 @@ export function auditStatementStart(
 
 /**
  * The audit as the JSON header value, non-ASCII escaped so a header can carry
- * it: a transaction is an entry of its tables, a statement outside one a string
- * or a one-key object. Past `maxSize` bytes, the runs of the largest entries
- * are grouped by statement first, then their bound values go, then their
- * statements, each transaction naming how many it grouped or dropped, then the
- * last entries, a closing `{"entriesDropped":N}` naming how many; `0` keeps
- * them all. Each entry is serialised again only when it changes, never the whole
- * header, so a request of thousands of entries is cut in milliseconds.
+ * it: a transaction is `{ transaction, ms, statements }`, a statement outside
+ * one `{ stmt, ms }` on its own, and every statement `{ stmt, count, ms,
+ * bindings }`. `timings: false` leaves out every `ms`. Past `maxSize` bytes,
+ * the runs of the largest entries are grouped by statement first, then their
+ * bound values go, then their SQL is cut to `<kind> <table>...`, each entry
+ * naming how many it grouped, dropped or cut, then the last entries go, a
+ * closing `{"entriesDropped":N}` naming how many; `0` keeps them all. Each entry
+ * is serialised again only when it changes, never the whole header, so a
+ * request of thousands of entries is cut in milliseconds.
  */
 export function formatQueryAudit(
 	audit: QueryAudit,
-	{ level, maxSize }: QueryAuditFormat,
+	{ level, maxSize, timings = true }: QueryAuditFormat,
 ): string {
 	const auditEntries = audit.transactionAudits.map((transactionAudit) => {
 		return auditEntryOf(transactionAudit, level);
 	});
+
+	const jsonValueOf = (auditEntry: AuditEntry) => {
+		return entryValueOf(auditEntry, timings);
+	};
 
 	const entrySizes = auditEntries.map((auditEntry) => {
 		return asciiJson(jsonValueOf(auditEntry)).length;
@@ -365,24 +354,25 @@ export function formatQueryAudit(
 		return asciiJson(auditEntries.map(jsonValueOf));
 	}
 
-	return asciiJson(withLastEntriesDropped(auditEntries, entrySizes, maxSize));
+	const keptCount = keptEntryCount(entrySizes, maxSize);
+
+	return asciiJson([
+		...auditEntries.slice(0, keptCount).map(jsonValueOf),
+		{ entriesDropped: auditEntries.length - keptCount },
+	]);
 }
 
 function newTransactionAudit(
 	audit: QueryAudit,
 	startedAt: number,
-	loneStatement?: LoneStatement,
+	outsideTransaction: boolean,
 ): TransactionAudit {
 	const transactionAudit: TransactionAudit = {
 		startedAt,
-		tableCounts: new Map(),
+		outsideTransaction,
 		statementAudits: new Map(),
 		runAudits: [],
 	};
-
-	if (loneStatement) {
-		transactionAudit.loneStatement = loneStatement;
-	}
 
 	audit.transactionAudits.push(transactionAudit);
 
@@ -395,159 +385,157 @@ function auditEntryOf(
 	transactionAudit: TransactionAudit,
 	level: QueryAuditLevel,
 ): AuditEntry {
-	const ms = transactionAudit.ms === undefined
-		? undefined
-		: Math.round(transactionAudit.ms);
+	const statementItems: StatementItem[] = level === 'full'
+		? transactionAudit.runAudits.map((runAudit) => {
+			return {
+				stmt: runAudit.stmt,
+				cutStmt: runAudit.cutStmt,
+				count: 1,
+				ms: runAudit.ms,
+				bindings: [runAudit.bindings],
+			};
+		})
+		: [...transactionAudit.statementAudits.values()].map((statementAudit) => {
+			return { ...statementAudit };
+		});
 
-	if (transactionAudit.loneStatement) {
-		const [statementAudit] = transactionAudit.statementAudits.values();
+	const levelItems = level === 'counts'
+		? mergedStatementItems(statementItems.map((statementItem) => {
+			return { ...statementItem, stmt: statementItem.cutStmt };
+		}))
+		: statementItems;
 
-		return {
-			...transactionAudit.loneStatement,
-			level,
-			ms,
-			bindings: statementAudit?.bindings[0] ?? [],
-		};
+	if (!levelCarriesBindings(level)) {
+		for (const statementItem of levelItems) {
+			delete statementItem.bindings;
+		}
 	}
 
-	const transactionEntry: TransactionEntry = {
-		ms,
-		outcome: transactionAudit.outcome ?? 'open',
-		tables: Object.fromEntries(transactionAudit.tableCounts),
+	const auditEntry: AuditEntry = {
+		ms: transactionAudit.ms,
+		runsInOrder: level === 'full',
+		statementItems: levelItems,
 	};
 
-	if (level === 'counts') {
-		return transactionEntry;
+	if (!transactionAudit.outsideTransaction) {
+		auditEntry.transaction = transactionAudit.outcome ?? 'open';
 	}
 
-	if (level === 'full') {
-		transactionEntry.runs = transactionAudit.runAudits.map((runAudit) => {
-			return {
-				sql: runAudit.sql,
-				ms: runAudit.ms === undefined
-					? undefined
-					: Math.round(runAudit.ms),
-				bindings: runAudit.bindings,
-			};
-		});
-
-		return transactionEntry;
-	}
-
-	transactionEntry.statements = [...transactionAudit.statementAudits]
-		.map(([sql, statementAudit]) => {
-			const statementEntry: StatementEntry = {
-				sql,
-				count: statementAudit.count,
-				ms: Math.round(statementAudit.ms),
-			};
-
-			if (level === 'bindings') {
-				statementEntry.bindings = statementAudit.bindings;
-			}
-
-			return statementEntry;
-		});
-
-	return transactionEntry;
+	return auditEntry;
 }
 
-function isLoneStatementEntry(
-	auditEntry: AuditEntry,
-): auditEntry is LoneStatementEntry {
-	return 'summary' in auditEntry;
-}
+function entryValueOf(auditEntry: AuditEntry, timings: boolean): unknown {
+	const { runsGrouped, bindingsDropped, statementsCut } = auditEntry;
 
-function jsonValueOf(auditEntry: AuditEntry): unknown {
-	if (!isLoneStatementEntry(auditEntry)) {
-		return auditEntry;
-	}
+	const droppedDetails = Object.fromEntries(Object.entries({
+		runsGrouped,
+		bindingsDropped,
+		statementsCut,
+	}).filter(([, droppedCount]) => droppedCount !== undefined));
 
-	const { level, summary, sql, ms, bindings } = auditEntry;
+	const statementValues = auditEntry.statementItems.map((statementItem) => {
+		return statementValueOf(statementItem, auditEntry.runsInOrder, timings);
+	});
 
-	if (level === 'counts') {
-		return summary;
-	}
-
-	if (level === 'statements') {
-		return sql;
+	if (auditEntry.transaction === undefined) {
+		return { ...statementValues[0], ...droppedDetails };
 	}
 
 	return {
-		[sql]: level === 'full'
-			? { ms, bindings }
-			: bindings,
+		transaction: auditEntry.transaction,
+		...msValueOf(auditEntry.ms, timings),
+		statements: statementValues,
+		...droppedDetails,
 	};
 }
 
-/**
- * The runs of one statement as one statement entry: `count` runs, the sum of
- * their `ms`, and the bound values of each run that has them.
- */
-function statementEntriesOf(runEntries: RunEntry[]): StatementEntry[] {
-	const statementEntries = new Map<string, StatementEntry>();
+function statementValueOf(
+	statementItem: StatementItem,
+	runsInOrder: boolean,
+	timings: boolean,
+): Record<string, unknown> {
+	const statementValue: Record<string, unknown> = { stmt: statementItem.stmt };
 
-	for (const runEntry of runEntries) {
-		const statementEntry = statementEntries.get(runEntry.sql)
-			?? { sql: runEntry.sql, count: 0, ms: 0, bindings: [] };
-
-		statementEntry.count++;
-		statementEntry.ms += runEntry.ms ?? 0;
-
-		if (runEntry.bindings) {
-			statementEntry.bindings!.push(runEntry.bindings);
-		}
-
-		statementEntries.set(runEntry.sql, statementEntry);
+	if (!runsInOrder && statementItem.count > 1) {
+		statementValue['count'] = statementItem.count;
 	}
 
-	return [...statementEntries.values()];
+	Object.assign(statementValue, msValueOf(statementItem.ms, timings));
+
+	if (statementItem.bindings) {
+		statementValue['bindings'] = runsInOrder
+			? statementItem.bindings[0]
+			: statementItem.bindings;
+	}
+
+	return statementValue;
+}
+
+function msValueOf(ms: number | undefined, timings: boolean) {
+	return timings && ms !== undefined
+		? { ms: Math.round(ms) }
+		: {};
+}
+
+/**
+ * The items sharing a `stmt` as one, in first-seen order: their runs counted,
+ * their `ms` summed, the bound values of each run kept.
+ */
+function mergedStatementItems(
+	statementItems: StatementItem[],
+): StatementItem[] {
+	const itemsByStmt = new Map<string, StatementItem>();
+
+	for (const statementItem of statementItems) {
+		const mergedItem = itemsByStmt.get(statementItem.stmt);
+
+		if (!mergedItem) {
+			itemsByStmt.set(statementItem.stmt, { ...statementItem });
+
+			continue;
+		}
+
+		mergedItem.count += statementItem.count;
+		mergedItem.ms = (mergedItem.ms ?? 0) + (statementItem.ms ?? 0);
+
+		if (mergedItem.bindings && statementItem.bindings) {
+			mergedItem.bindings = mergedItem.bindings.concat(statementItem.bindings);
+		}
+	}
+
+	return [...itemsByStmt.values()];
 }
 
 // Grouping the runs keeps every value but their order; bound values go before
-// statements: a statement's text says more about the request than one run's
-// values. A statement outside a transaction steps down a level at each.
+// the SQL: a statement's text says more about the request than one run's
+// values.
 const DROPPED_DETAILS = [
 	{
 		detailSizeOf: (auditEntry: AuditEntry) => {
-			return !isLoneStatementEntry(auditEntry) && auditEntry.runs
-				? asciiJson(auditEntry.runs).length
+			return auditEntry.runsInOrder && auditEntry.statementItems.length > 1
+				? asciiJson(auditEntry.statementItems).length
 				: 0;
 		},
 		dropDetail: (auditEntry: AuditEntry) => {
-			const transactionEntry = auditEntry as TransactionEntry;
-
-			transactionEntry.statements = statementEntriesOf(transactionEntry.runs!);
-			transactionEntry.runsGrouped = transactionEntry.runs!.length;
-			delete transactionEntry.runs;
+			auditEntry.runsGrouped = auditEntry.statementItems.length;
+			auditEntry.statementItems = mergedStatementItems(auditEntry.statementItems);
+			auditEntry.runsInOrder = false;
 		},
 	},
 	{
 		detailSizeOf: (auditEntry: AuditEntry) => {
-			if (isLoneStatementEntry(auditEntry)) {
-				return levelCarriesBindings(auditEntry.level)
-					? asciiJson(jsonValueOf(auditEntry)).length
-					: 0;
-			}
+			const { statementItems } = auditEntry;
 
-			const { statements } = auditEntry;
-
-			return statements?.some(({ bindings }) => bindings)
-				? asciiJson(statements.map(({ bindings }) => bindings)).length
+			return statementItems.some(({ bindings }) => bindings)
+				? asciiJson(statementItems.map(({ bindings }) => bindings)).length
 				: 0;
 		},
 		dropDetail: (auditEntry: AuditEntry) => {
-			if (isLoneStatementEntry(auditEntry)) {
-				auditEntry.level = 'statements';
-
-				return;
-			}
-
 			let droppedRuns = 0;
 
-			for (const statementEntry of auditEntry.statements ?? []) {
-				droppedRuns += statementEntry.bindings?.length ?? 0;
-				delete statementEntry.bindings;
+			for (const statementItem of auditEntry.statementItems) {
+				droppedRuns += statementItem.bindings?.length ?? 0;
+				delete statementItem.bindings;
 			}
 
 			auditEntry.bindingsDropped = droppedRuns;
@@ -555,25 +543,26 @@ const DROPPED_DETAILS = [
 	},
 	{
 		detailSizeOf: (auditEntry: AuditEntry) => {
-			if (isLoneStatementEntry(auditEntry)) {
-				return auditEntry.level === 'statements'
-					? asciiJson(auditEntry.sql).length
-					: 0;
-			}
+			const uncutStmts = auditEntry.statementItems
+				.filter(({ stmt, cutStmt }) => stmt !== cutStmt)
+				.map(({ stmt }) => stmt);
 
-			return auditEntry.statements
-				? asciiJson(auditEntry.statements).length
+			return uncutStmts.length > 0
+				? asciiJson(uncutStmts).length
 				: 0;
 		},
 		dropDetail: (auditEntry: AuditEntry) => {
-			if (isLoneStatementEntry(auditEntry)) {
-				auditEntry.level = 'counts';
+			let cutCount = 0;
 
-				return;
+			for (const statementItem of auditEntry.statementItems) {
+				if (statementItem.stmt !== statementItem.cutStmt) {
+					statementItem.stmt = statementItem.cutStmt;
+					cutCount++;
+				}
 			}
 
-			auditEntry.statementsDropped = auditEntry.statements?.length ?? 0;
-			delete auditEntry.statements;
+			auditEntry.statementsCut = cutCount;
+			auditEntry.statementItems = mergedStatementItems(auditEntry.statementItems);
 		},
 	},
 ];
@@ -595,14 +584,10 @@ function entryIndexesByDetailSize(
 }
 
 /**
- * Keep the earliest entries that fit beside `{"entriesDropped":N}`; that entry
- * alone when none does.
+ * How many of the earliest entries fit beside `{"entriesDropped":N}`; none
+ * when not even the first does.
  */
-function withLastEntriesDropped(
-	auditEntries: AuditEntry[],
-	entrySizes: number[],
-	maxSize: number,
-): unknown[] {
+function keptEntryCount(entrySizes: number[], maxSize: number): number {
 	let keptSize = 2;
 	let keptCount = 0;
 
@@ -619,10 +604,7 @@ function withLastEntriesDropped(
 		keptCount++;
 	}
 
-	return [
-		...auditEntries.slice(0, keptCount).map(jsonValueOf),
-		{ entriesDropped: auditEntries.length - keptCount },
-	];
+	return keptCount;
 }
 
 function asciiJson(value: unknown): string {

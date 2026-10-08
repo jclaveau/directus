@@ -185,6 +185,7 @@ export default async function createApp(): Promise<express.Application> {
 		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 		validateChoiceEnv('QUERY_AUDIT_LEVEL', QUERY_AUDIT_LEVELS);
 		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
+		validateBooleanEnv(['QUERY_AUDIT_TIMINGS']);
 	}
 
 	if (env['PRESSURE_LIMITER_ENABLED']) {
