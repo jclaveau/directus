@@ -34,6 +34,7 @@ import {
 	scopedCacheMutatedFingerprints,
 	scopedCacheUpdatedRows,
 	scopedCacheWrittenRows,
+	type ScopedCacheSnapshot,
 	stripScopedCacheOwnershipInjections,
 	takenOverScopedCacheKey,
 	withScopedCacheOwnershipInjections,
@@ -68,6 +69,18 @@ import { PayloadService } from './payload.js';
 const env = useEnv();
 
 /**
+ * The options `upsertMany` hands the updates it defers its purge for. Only the
+ * update sees the rows an `items.update` filter added, so it reports them, with
+ * the slices they sat in before it wrote them.
+ */
+type DeferredPurgeOptions = MutationOptions & {
+	onHookAddedRows?: (
+		hookAddedKeys: PrimaryKey[],
+		oldScopedCacheSnapshot: ScopedCacheSnapshot,
+	) => void;
+};
+
+/**
  * Emit a mutation's action events in parallel. This fork awaits them by default so a
  * mutation read-back sees rows its action hooks create (e.g. the notifying fan-out).
  * Pass `awaitActionHooks: false` for the historical fire-and-forget behaviour.
@@ -91,6 +104,15 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 }
 
 /**
+ * Whether a list holds nothing but its entries. A hook written for one payload
+ * sets `payload.field = x` on the list itself, where no write ever reads it, and
+ * a sparse list hides the holes `every` skips.
+ */
+function carriesOnlyIndices(answeredList: unknown[]): boolean {
+	return Object.keys(answeredList).length === answeredList.length;
+}
+
+/**
  * Whether a grouped `items.create` filter answered one entry per row it received,
  * each a `CreateEntry` or `null`, a `sameRowAs` pointing at an earlier position.
  */
@@ -99,6 +121,10 @@ function isCreateEntryList(
 	rowCount: number,
 ): entriesAfterHooks is (CreateEntry | null)[] {
 	if (!Array.isArray(entriesAfterHooks) || entriesAfterHooks.length !== rowCount) {
+		return false;
+	}
+
+	if (!carriesOnlyIndices(entriesAfterHooks)) {
 		return false;
 	}
 
@@ -130,9 +156,14 @@ function isCreateEntryList(
  * Merge the groups carrying the same change, wherever they sit, so one statement
  * writes them all. A group never joins one written before a later change to one of
  * its own rows, so two changes to the same row still land in the caller's order.
+ *
+ * Only a scalar change merges. A group writing a nested item creates it once per
+ * group and walks its O2M rows per group, so two such groups merged would create
+ * one related item where the caller asked for two.
  */
 function mergeUpdateGroups<Item extends AnyItem>(
 	candidateGroups: UpdateGroup<Item>[],
+	writesNestedItems: (groupData: Partial<Item>) => boolean,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
 	const groupIndexByData = new Map<string, number>();
@@ -154,7 +185,10 @@ function mergeUpdateGroups<Item extends AnyItem>(
 			);
 		}
 
-		const sameDataIndex = groupIndexByData.get(serializedData);
+		const sameDataIndex = writesNestedItems(candidateGroup.data)
+			? undefined
+			: groupIndexByData.get(serializedData);
+
 		let targetIndex: number;
 
 		if (
@@ -1167,12 +1201,14 @@ implements AbstractService<Item> {
 
 	/**
 	 * Update multiple items in a single transaction.
-	 *
-	 * Uses `this.updateOne` under the hood.
 	 */
 	async updateBatch(data: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
 		if (!Array.isArray(data)) {
 			throw new InvalidPayloadError({ reason: 'Input should be an array of items' });
+		}
+
+		if (data.length === 0) {
+			return [];
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -1269,12 +1305,12 @@ implements AbstractService<Item> {
 
 	async updateGroups(
 		groups: UpdateGroup<Item>[],
-		opts: MutationOptions & { allowFilterCancel: true },
+		opts: DeferredPurgeOptions & { allowFilterCancel: true },
 	): Promise<(PrimaryKey | null)[]>;
 
 	async updateGroups(
 		groups: UpdateGroup<Item>[],
-		opts?: MutationOptions,
+		opts?: DeferredPurgeOptions,
 	): Promise<PrimaryKey[]>;
 
 	/**
@@ -1285,7 +1321,7 @@ implements AbstractService<Item> {
 	 */
 	async updateGroups(
 		groups: UpdateGroup<Item>[],
-		opts: MutationOptions = {},
+		opts: DeferredPurgeOptions = {},
 	): Promise<(PrimaryKey | null)[]> {
 		// Captured, so the transaction callback below still sees it set.
 		const mutationTracker = opts.mutationTracker ?? this.createMutationTracker();
@@ -1363,9 +1399,11 @@ implements AbstractService<Item> {
 
 		// A hook written before the event carried groups returns one payload, which
 		// would otherwise reach the write as a list of nothing.
-		const isGroupList = Array.isArray(groupsAfterHooks) && groupsAfterHooks.every(
-			(group) => isPlainObject(group?.data) && Array.isArray(group?.keys),
-		);
+		const isGroupList = Array.isArray(groupsAfterHooks)
+			&& carriesOnlyIndices(groupsAfterHooks)
+			&& groupsAfterHooks.every((group) => {
+				return isPlainObject(group?.data) && Array.isArray(group?.keys);
+			});
 
 		if (!isGroupList) {
 			throw new InvalidPayloadError({
@@ -1429,8 +1467,8 @@ implements AbstractService<Item> {
 					const rowAfterHooks = await emitter.emitFilter<Partial<AnyItem>, null>(
 						rowEvent,
 						{
-							[primaryKeyField]: key,
 							...cloneDeep(group.data),
+							[primaryKeyField]: key,
 						} as Partial<AnyItem>,
 						{
 							collection: this.collection,
@@ -1478,11 +1516,22 @@ implements AbstractService<Item> {
 			candidateGroups = groupsAfterHooks;
 		}
 
-		const mergedGroups = mergeUpdateGroups(candidateGroups);
-
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
+
+		const relationalFields = new Set(this.schema.relations
+			.filter((relation) => relation.collection === this.collection)
+			.map((relation) => relation.field));
+
+		const mergedGroups = mergeUpdateGroups(candidateGroups, (groupData) => {
+			return Object.entries(groupData).some(([field, value]) => {
+				const nestsAnItem = typeof value === 'object' && value !== null;
+
+				return aliases.includes(field)
+					|| (relationalFields.has(field) && nestsAnItem);
+			});
+		});
 
 		const writingGroups = mergedGroups.filter((group) => {
 			return !this.groupChangesNothing(group, aliases);
@@ -1493,6 +1542,21 @@ implements AbstractService<Item> {
 		// Empty when the collection isn't scoped.
 		const writtenKeys = writingGroups.flatMap((group) => group.keys);
 		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
+
+		if (opts.onHookAddedRows && keys.length > inputKeys.length) {
+			const inputKeyNames = new Set(inputKeys.map((key) => String(key)));
+
+			const hookAddedKeys = writtenKeys.filter((key) => {
+				return !inputKeyNames.has(String(key));
+			});
+
+			opts.onHookAddedRows(hookAddedKeys, {
+				canResolveSlicesFromRows: oldScopedCacheSnapshot.canResolveSlicesFromRows,
+				rows: oldScopedCacheSnapshot.rows.filter((snapshotRow) => {
+					return !inputKeyNames.has(String(snapshotRow.key));
+				}),
+			});
+		}
 
 		if (writingGroups.length === 0) {
 			// Nothing is written — every group was a no-op, or the per-row filter
@@ -1549,38 +1613,30 @@ implements AbstractService<Item> {
 			},
 			mutationTracker.snapshot(),
 		).catch(async (error) => {
-			// A hook may have written out of band before the update threw.
-			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			// On a transaction this call opened, the failure rolled every group back,
+			// leaving only what a hook wrote out of band. On the caller's, the groups
+			// written before the failure commit with it.
+			if (this.knex.isTransaction) {
+				await this.purgeUpdatedScopedCache(
+					writtenKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
 
 			throw error;
 		});
 
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Old slices from the pre-update snapshot, plus the new value re-read from the
-			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
-			// type coercion can rewrite the scope column on write, so the stored row is
-			// authoritative, the payload isn't (same rule as createMany). "Committed"
-			// holds only when this call owns the transaction; from a hook it shares the
-			// caller's and this purge runs pre-commit —
-			// https://github.com/jclaveau/directus/issues/363
-			const newScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
-
-			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheMutatedFingerprints(
-					oldScopedCacheSnapshot,
-					newScopedCacheSnapshot,
-				),
-				scopedCacheHookDeclarations,
-				[],
-				{
-					includeBareFingerprint: opts.purgeBareFingerprint !== false,
-					rows: scopedCacheUpdatedRows(
-						oldScopedCacheSnapshot,
-						newScopedCacheSnapshot,
-					),
-				},
-			);
-		}
+		await this.purgeUpdatedScopedCache(
+			writtenKeys,
+			oldScopedCacheSnapshot,
+			scopedCacheHookDeclarations,
+			opts,
+		);
 
 		if (opts.emitEvents !== false) {
 			const actionContext = {
@@ -1599,7 +1655,7 @@ implements AbstractService<Item> {
 						return {
 							event: rowEvent,
 							meta: {
-								payload: { [primaryKeyField]: key, ...group.data },
+								payload: { ...group.data, [primaryKeyField]: key },
 								collection: this.collection,
 							},
 							context: actionContext,
@@ -1630,6 +1686,50 @@ implements AbstractService<Item> {
 		// body, so dropping a no-op row would omit an item the caller named from its
 		// own PATCH response.
 		return rowKeys;
+	}
+
+	/**
+	 * Purge the slices the written rows sat in before the update and the ones they
+	 * sit in now (old ∪ new), re-read from the stored rows rather than the post-hook
+	 * payload: a DB trigger or type coercion can rewrite the scope column on write
+	 * (same rule as createMany). "Now" is committed only when this call owns the
+	 * transaction; from a hook it shares the caller's and this purge runs pre-commit
+	 * — https://github.com/jclaveau/directus/issues/363
+	 *
+	 * A re-read that fails, as any read does on a Postgres transaction an error
+	 * aborted, leaves the new slices unknown, so the collection is purged whole.
+	 */
+	private async purgeUpdatedScopedCache(
+		writtenKeys: PrimaryKey[],
+		oldScopedCacheSnapshot: ScopedCacheSnapshot,
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (!shouldClearCache(this.cache, opts, this.collection)) {
+			return;
+		}
+
+		const newScopedCacheSnapshot = await this.scopedCache
+			.snapshot(writtenKeys)
+			.catch(() => null);
+
+		this.scopedCachePurged = await this.scopedCache.purge(
+			scopedCacheMutatedFingerprints(
+				oldScopedCacheSnapshot,
+				newScopedCacheSnapshot,
+			),
+			declarations,
+			[],
+			{
+				includeBareFingerprint: opts.purgeBareFingerprint !== false,
+				rows: newScopedCacheSnapshot === null
+					? undefined
+					: scopedCacheUpdatedRows(
+						oldScopedCacheSnapshot,
+						newScopedCacheSnapshot,
+					),
+			},
+		);
 	}
 
 	/**
@@ -1943,30 +2043,57 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations =
 			createScopedCacheHookDeclarations(this.schema);
 
-		const primaryKeys = await transaction(this.knex, async (knex) => {
-			const service = this.fork({ knex });
+		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
+		// retryable error.
+		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
+			this.knex,
+			async (knex) => {
+				const service = this.fork({ knex });
 
-			const primaryKeys: PrimaryKey[] = [];
+				const primaryKeys: PrimaryKey[] = [];
+				const hookAddedKeys: PrimaryKey[] = [];
+				const hookAddedSnapshots: ScopedCacheSnapshot[] = [];
 
-			for (const payload of payloads) {
-				const primaryKey = await service.upsertOne(payload, {
+				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
 					scopedCacheHookDeclarations,
-				});
+					onHookAddedRows: (addedKeys, addedSnapshot) => {
+						for (const addedKey of addedKeys) {
+							hookAddedKeys.push(addedKey);
+						}
 
-				primaryKeys.push(primaryKey);
-			}
+						hookAddedSnapshots.push(addedSnapshot);
+					},
+				};
 
-			return primaryKeys;
-		}, opts.mutationTracker.snapshot());
+				for (const payload of payloads) {
+					primaryKeys.push(await service.upsertOne(payload, childOpts));
+				}
+
+				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
+			},
+			opts.mutationTracker.snapshot(),
+		);
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// New scope values for every committed row (inserts + moved updates), re-read
-			// by returned key so a hook's take-over shows as whatever is now stored.
+			// by returned key so a hook's take-over shows as whatever is now stored,
+			// plus the rows an update filter added, which no returned key names.
 			const newScopedCacheSnapshot = await this.scopedCache.snapshot(
-				primaryKeys.filter((key): key is PrimaryKey => key !== null && key !== undefined),
+				primaryKeys
+					.filter((key): key is PrimaryKey => key !== null && key !== undefined)
+					.concat(hookAddedKeys),
 			);
+
+			const oldSnapshots = [oldScopedCacheSnapshot, ...hookAddedSnapshots];
+
+			const oldScopedCacheRows: ScopedCacheSnapshot = {
+				canResolveSlicesFromRows: oldSnapshots.every((oldSnapshot) => {
+					return oldSnapshot.canResolveSlicesFromRows;
+				}),
+				rows: oldSnapshots.flatMap((oldSnapshot) => oldSnapshot.rows),
+			};
 
 			// An insert-shaped payload routes to createOne, where a filter hook can take
 			// the row over and return an existing key — an update in disguise, whose OLD
@@ -1985,7 +2112,7 @@ implements AbstractService<Item> {
 			const scopedCacheFingerprints = takeoverUndeclared
 				? null
 				: scopedCacheMutatedFingerprints(
-					oldScopedCacheSnapshot,
+					oldScopedCacheRows,
 					newScopedCacheSnapshot,
 				);
 
@@ -2001,7 +2128,7 @@ implements AbstractService<Item> {
 					rows: scopedCacheFingerprints === null
 						? undefined
 						: scopedCacheUpdatedRows(
-							oldScopedCacheSnapshot,
+							oldScopedCacheRows,
 							newScopedCacheSnapshot,
 						),
 				},

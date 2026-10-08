@@ -616,6 +616,103 @@ describe(oneLine`
 		);
 	});
 
+	it(oneLine`
+		upsertMany purges old ∪ new of a row an update filter added
+	`, async () => {
+		tracker.on.select((query) => query.bindings.includes(2))
+			.responseOnce([{ id: 1, student: 'A' }, { id: 2, student: 'B' }]);
+
+		tracker.on.select((query) => query.bindings.includes(2))
+			.responseOnce([{ id: 1, student: 'C' }, { id: 2, student: 'C' }]);
+
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+		const addRowTwo = async () => {
+			return [{ data: { student: 'C' }, keys: [1, 2] }];
+		};
+
+		emitter.onFilter('test.items.update', addRowTwo);
+
+		try {
+			await service().upsertMany([{ id: 1, student: 'C' }]);
+		}
+		finally {
+			emitter.offFilter('test.items.update', addRowTwo);
+		}
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['c'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['c'] },
+				},
+			],
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		a failed updateBatch on the caller's transaction purges old ∪ new of every
+		row, since the groups written before the failure commit with it
+	`, async () => {
+		tracker.on.select('test').response([
+			{ id: 1, student: 'A' },
+			{ id: 2, student: 'B' },
+		]);
+
+		tracker.on.update((query) => query.bindings.includes('second'))
+			.simulateError('boom');
+
+		await db.transaction(async (trx) => {
+			const callerService = new ItemsService('test', { knex: trx, schema });
+
+			await expect(callerService.updateBatch([
+				{ id: 1, name: 'first' },
+				{ id: 2, name: 'second' },
+			])).rejects.toThrow('boom');
+		});
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['1'], 'student': ['a'] },
+				},
+				{
+					collection: 'test',
+					pinnedScope: { 'id': ['2'], 'student': ['b'] },
+				},
+			],
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
 	// Purge pins come from the value actually stored, not the raw input: a
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
