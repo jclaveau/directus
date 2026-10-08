@@ -125,6 +125,13 @@ export type MutationOptions = {
 	preMutationError?: DirectusError | undefined;
 
 	/**
+	 * The validation error to throw right before the mutation of a row, by the
+	 * row's primary key as a string; thrown only if that row is still written
+	 * once the filter hooks ran
+	 */
+	preMutationErrorsByKey?: Map<string, DirectusError> | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */

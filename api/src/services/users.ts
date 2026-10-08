@@ -314,7 +314,13 @@ export class UsersService extends ItemsService {
 				}
 			}
 			catch (err: any) {
-				opts.preMutationError ??= err;
+				opts.preMutationErrorsByKey ??= new Map();
+
+				for (const key of keys) {
+					if (!opts.preMutationErrorsByKey.has(String(key))) {
+						opts.preMutationErrorsByKey.set(String(key), err);
+					}
+				}
 			}
 
 			if ('role' in data) {

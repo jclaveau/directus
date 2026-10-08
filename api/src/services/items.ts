@@ -1913,8 +1913,12 @@ implements AbstractService<Item> {
 			)
 			: payloadAfterHooks;
 
-		if (opts.preMutationError) {
-			throw opts.preMutationError;
+		const preMutationError = opts.preMutationError ?? group.keys
+			.map((key) => opts.preMutationErrorsByKey?.get(String(key)))
+			.find((keyError) => keyError !== undefined);
+
+		if (preMutationError) {
+			throw preMutationError;
 		}
 
 		await transaction(this.knex, async (trx) => {
