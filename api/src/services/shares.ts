@@ -1,6 +1,13 @@
 import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidCredentialsError } from '@directus/errors';
-import type { AbstractServiceOptions, Item, LoginResult, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	LoginResult,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
@@ -45,10 +52,13 @@ export class SharesService extends ItemsService {
 		return super.createOne(data, opts);
 	}
 
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		await clearPermissionsCache();
 
-		return super.updateMany(keys, data, opts);
+		return super.updateGroups(groups, opts);
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts?: MutationOptions): Promise<PrimaryKey[]> {

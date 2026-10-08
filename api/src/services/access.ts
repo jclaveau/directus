@@ -1,4 +1,10 @@
-import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
@@ -33,16 +39,18 @@ export class AccessService extends ItemsService {
 		return result;
 	}
 
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Item>,
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
 		// Updating policy attachments might affect the number of admin/app/api users
 		opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		const result = await super.updateMany(keys, data, { ...opts, userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+		const result = await super.updateGroups(groups, {
+			...opts,
+			userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+		});
 
 		// Some policy attachments have been updated, clear the caches
 		await this.clearCaches();

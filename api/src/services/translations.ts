@@ -1,4 +1,10 @@
-import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import getDatabase from '../database/index.js';
 import { InvalidPayloadError } from '@directus/errors';
 import { ItemsService } from './items.js';
@@ -25,21 +31,44 @@ export class TranslationsService extends ItemsService {
 		return await super.createOne(data, opts);
 	}
 
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		if (keys.length > 0 && 'key' in data && 'language' in data) {
-			throw new InvalidPayloadError({ reason: 'Duplicate key and language combination' });
-		} else if ('key' in data || 'language' in data) {
-			const items = await this.readMany(keys);
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		const claimedCombos = new Set<string>();
 
-			for (const item of items) {
-				const updatedData = { ...item, ...data };
+		for (const { data, keys } of groups) {
+			if (keys.length > 0 && 'key' in data && 'language' in data) {
+				throw new InvalidPayloadError({
+					reason: 'Duplicate key and language combination',
+				});
+			}
+			else if ('key' in data || 'language' in data) {
+				const items = await this.readMany(keys);
 
-				if (await this.translationKeyExists(updatedData['key'], updatedData['language'])) {
-					throw new InvalidPayloadError({ reason: 'Duplicate key and language combination' });
+				for (const item of items) {
+					const updatedData = { ...item, ...data };
+
+					const keyCombo =
+						`${updatedData['key']}-${updatedData['language']}`;
+
+					if (
+						claimedCombos.has(keyCombo)
+						|| await this.translationKeyExists(
+							updatedData['key'],
+							updatedData['language'],
+						)
+					) {
+						throw new InvalidPayloadError({
+							reason: 'Duplicate key and language combination',
+						});
+					}
+
+					claimedCombos.add(keyCombo);
 				}
 			}
 		}
 
-		return await super.updateMany(keys, data, opts);
+		return await super.updateGroups(groups, opts);
 	}
 }

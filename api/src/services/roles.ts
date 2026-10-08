@@ -1,5 +1,11 @@
 import { InvalidPayloadError } from '@directus/errors';
-import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
@@ -19,25 +25,28 @@ export class RolesService extends ItemsService {
 	// users, as the role of a user is actually updated in the UsersService on the user, which will make sure to
 	// initiate a user integrity check if necessary. Same goes for role nesting check as well as cache clearing.
 
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Item>,
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		if ('parent' in data) {
+		const parentGroups = groups.filter(({ data }) => 'parent' in data);
+
+		if (parentGroups.length > 0) {
 			// If the parent of a role changed we need to make a full integrity check.
 			// Anything related to policies will be checked in the AccessService, where the policies are attached to roles
 			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
 			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-			await this.validateRoleNesting(keys as string[], data['parent']);
+			for (const { data, keys } of parentGroups) {
+				await this.validateRoleNesting(keys as string[], data['parent']);
+			}
 		}
 
-		const result = await super.updateMany(keys, data, opts);
+		const result = await super.updateGroups(groups, opts);
 
 		// Only clear the permissions cache if the parent role has changed
 		// If anything policies related has changed, the cache will be cleared in the AccessService as well
-		if ('parent' in data) {
+		if (parentGroups.length > 0) {
 			await this.clearCaches();
 		}
 

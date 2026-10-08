@@ -6,6 +6,7 @@ import type {
 	MutationOptions,
 	PrimaryKey,
 	RegisterUserInput,
+	UpdateGroup,
 	User,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -251,82 +252,104 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * Update many users by primary key
+	 * Update users in groups, each group one change applied to the keys it names.
+	 * Every update entrypoint funnels through here.
 	 */
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Item>,
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		try {
-			if (data['email']) {
-				if (keys.length > 1) {
-					throw new RecordNotUniqueError({
-						collection: 'directus_users',
-						field: 'email',
-						value: data['email'],
+		const claimedEmails = new Set<string>();
+
+		let integrityCheckFlags =
+			opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
+
+		for (const { data, keys } of groups) {
+			try {
+				if (data['email']) {
+					const lowerEmail = String(data['email']).toLowerCase();
+
+					// One email can belong to one user only, across every group.
+					if (keys.length > 1 || claimedEmails.has(lowerEmail)) {
+						throw new RecordNotUniqueError({
+							collection: 'directus_users',
+							field: 'email',
+							value: data['email'],
+						});
+					}
+
+					claimedEmails.add(lowerEmail);
+					this.validateEmail(data['email']);
+					await this.checkUniqueEmails([data['email']], keys[0]);
+				}
+
+				if (data['password']) {
+					await this.checkPasswordPolicy([data['password']]);
+				}
+
+				if (data['tfa_secret'] !== undefined) {
+					throw new InvalidPayloadError({
+						reason: `You can't change the "tfa_secret" value manually`,
 					});
 				}
 
-				this.validateEmail(data['email']);
-				await this.checkUniqueEmails([data['email']], keys[0]);
-			}
+				if (data['provider'] !== undefined) {
+					if (this.accountability && this.accountability.admin !== true) {
+						throw new InvalidPayloadError({
+							reason: `You can't change the "provider" value manually`,
+						});
+					}
 
-			if (data['password']) {
-				await this.checkPasswordPolicy([data['password']]);
-			}
-
-			if (data['tfa_secret'] !== undefined) {
-				throw new InvalidPayloadError({ reason: `You can't change the "tfa_secret" value manually` });
-			}
-
-			if (data['provider'] !== undefined) {
-				if (this.accountability && this.accountability.admin !== true) {
-					throw new InvalidPayloadError({ reason: `You can't change the "provider" value manually` });
+					data['auth_data'] = null;
 				}
 
-				data['auth_data'] = null;
-			}
+				if (data['external_identifier'] !== undefined) {
+					if (this.accountability && this.accountability.admin !== true) {
+						throw new InvalidPayloadError({
+							reason: `You can't change the "external_identifier" value manually`,
+						});
+					}
 
-			if (data['external_identifier'] !== undefined) {
-				if (this.accountability && this.accountability.admin !== true) {
-					throw new InvalidPayloadError({ reason: `You can't change the "external_identifier" value manually` });
+					data['auth_data'] = null;
 				}
-
-				data['auth_data'] = null;
 			}
-		} catch (err: any) {
-			opts.preMutationError = err;
-		}
+			catch (err: any) {
+				opts.preMutationError ??= err;
+			}
 
-		if ('role' in data) {
-			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
-		}
+			if ('role' in data) {
+				integrityCheckFlags |= UserIntegrityCheckFlag.All;
+			}
 
-		if ('status' in data) {
-			if (data['status'] === 'active') {
-				// User are being activated, no need to check if there are enough admins
-				opts.userIntegrityCheckFlags =
-					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-			} else {
-				opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
+			if ('status' in data) {
+				if (data['status'] === 'active') {
+					// User are being activated, no need to check if there are enough admins
+					integrityCheckFlags |= UserIntegrityCheckFlag.UserLimits;
+				}
+				else {
+					integrityCheckFlags |= UserIntegrityCheckFlag.All;
+				}
 			}
 		}
 
-		if (opts.userIntegrityCheckFlags) {
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
+		if (integrityCheckFlags) {
+			opts.userIntegrityCheckFlags = integrityCheckFlags;
+			opts.onRequireUserIntegrityCheck?.(integrityCheckFlags);
 		}
 
-		const result = await super.updateMany(keys, data, opts);
+		const result = await super.updateGroups(groups, opts);
 
-		if (data['status'] !== undefined && data['status'] !== 'active') {
-			await this.clearUserSessions(keys);
-		} else if (data['password'] !== undefined || data['email'] !== undefined) {
-			await this.clearUserSessions(keys, this.accountability?.session);
+		for (const { data, keys } of groups) {
+			if (data['status'] !== undefined && data['status'] !== 'active') {
+				await this.clearUserSessions(keys);
+			}
+			else if (data['password'] !== undefined || data['email'] !== undefined) {
+				await this.clearUserSessions(keys, this.accountability?.session);
+			}
 		}
 
 		// Only clear the caches if the role has been updated
-		if ('role' in data) {
+		if (groups.some(({ data }) => 'role' in data)) {
 			await this.clearCaches(opts);
 		}
 

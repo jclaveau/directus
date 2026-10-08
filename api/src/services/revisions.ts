@@ -1,5 +1,11 @@
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
-import type { AbstractServiceOptions, Item, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { ItemsService } from './items.js';
 
 export class RevisionsService extends ItemsService {
@@ -47,11 +53,10 @@ export class RevisionsService extends ItemsService {
 		return super.createMany(data, this.setDefaultOptions(opts));
 	}
 
-	override async updateOne(key: PrimaryKey, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		return super.updateOne(key, data, this.setDefaultOptions(opts));
-	}
-
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
-		return super.updateMany(keys, data, this.setDefaultOptions(opts));
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		return super.updateGroups(groups, this.setDefaultOptions(opts));
 	}
 }

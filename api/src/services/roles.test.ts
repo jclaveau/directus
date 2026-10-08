@@ -15,6 +15,10 @@ const schema = new SchemaBuilder()
 	.collection('test', (c) => {
 		c.field('id').uuid().primary();
 	})
+	.collection('directus_roles', (c) => {
+		c.field('id').uuid()
+			.primary();
+	})
 	.build();
 
 describe('Integration Tests', () => {
@@ -32,7 +36,8 @@ describe('Integration Tests', () => {
 		});
 
 		describe('updateMany', () => {
-			vi.spyOn(ItemsService.prototype, 'updateMany').mockResolvedValue(['role-id-1']);
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['role-id-1']);
 
 			const validateRoleNestingSpy = vi
 				.spyOn(RolesService.prototype as any, 'validateRoleNesting')
@@ -68,6 +73,23 @@ describe('Integration Tests', () => {
 				await service.updateMany(['role-id-5'], { parent: 'parent-role-id-3' });
 
 				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('validates the nesting of every row of a batch', async () => {
+				const opts: MutationOptions = {};
+
+				await service.updateBatch([
+					{ id: 'role-id-9', parent: 'parent-role-id-4' },
+					{ id: 'role-id-10', parent: 'parent-role-id-5' },
+				], opts);
+
+				expect(validateRoleNestingSpy)
+					.toHaveBeenNthCalledWith(1, ['role-id-9'], 'parent-role-id-4');
+
+				expect(validateRoleNestingSpy)
+					.toHaveBeenNthCalledWith(2, ['role-id-10'], 'parent-role-id-5');
+
+				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
 			});
 		});
 

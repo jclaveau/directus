@@ -70,7 +70,7 @@ describe('Integration Tests', () => {
 		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne')
 			.mockResolvedValue('user-id-1');
 
-		const superUpdateManySpy = vi.spyOn(ItemsService.prototype, 'updateMany')
+		const superUpdateGroupsSpy = vi.spyOn(ItemsService.prototype, 'updateGroups')
 			.mockResolvedValue(['user-id-2']);
 
 		const checkUniqueEmailsSpy = vi
@@ -259,7 +259,7 @@ describe('Integration Tests', () => {
 
 						await service.updateMany([1], { [field]: 'test' }, opts);
 
-						expect(superUpdateManySpy).toHaveBeenCalled();
+						expect(superUpdateGroupsSpy).toHaveBeenCalled();
 
 						expect(opts.preMutationError).toStrictEqual(
 							new InvalidPayloadError({ reason: `You can't change the "${field}" value manually` }),
@@ -282,11 +282,111 @@ describe('Integration Tests', () => {
 
 						await expect(promise).resolves.not.toThrow();
 
-						expect(superUpdateManySpy.mock.lastCall![1]).toEqual(
-							expect.objectContaining({ [field]: 'test', auth_data: null }),
+						expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+							[{ data: { [field]: 'test', auth_data: null }, keys: ['user-id-14'] }],
+							{},
 						);
 					});
 				});
+			});
+		});
+
+		describe('updateBatch', () => {
+			it('refuses a row that sets tfa_secret', async () => {
+				const opts: MutationOptions = {};
+
+				await service.updateBatch(
+					[{ id: 'user-id-20', tfa_secret: 'secret' }],
+					opts,
+				);
+
+				expect(opts.preMutationError).toStrictEqual(
+					new InvalidPayloadError({
+						reason: `You can't change the "tfa_secret" value manually`,
+					}),
+				);
+			});
+
+			it('checks the password policy of every row', async () => {
+				await service.updateBatch([
+					{ id: 'user-id-21', password: 'first-password' },
+					{ id: 'user-id-22', password: 'second-password' },
+				]);
+
+				expect(checkPasswordPolicySpy)
+					.toHaveBeenNthCalledWith(1, ['first-password']);
+
+				expect(checkPasswordPolicySpy)
+					.toHaveBeenNthCalledWith(2, ['second-password']);
+			});
+
+			it('checks each email against the other users but its own', async () => {
+				await service.updateBatch([
+					{ id: 'user-id-23', email: 'first@example.com' },
+					{ id: 'user-id-24', email: 'second@example.com' },
+				]);
+
+				expect(checkUniqueEmailsSpy)
+					.toHaveBeenNthCalledWith(1, ['first@example.com'], 'user-id-23');
+
+				expect(checkUniqueEmailsSpy)
+					.toHaveBeenNthCalledWith(2, ['second@example.com'], 'user-id-24');
+			});
+
+			it('refuses two rows set to the same email, whatever the casing', async () => {
+				const opts: MutationOptions = {};
+
+				await service.updateBatch([
+					{ id: 'user-id-25', email: 'same@example.com' },
+					{ id: 'user-id-26', email: 'SAME@example.com' },
+				], opts);
+
+				expect(opts.preMutationError).toStrictEqual(
+					new RecordNotUniqueError({
+						collection: 'directus_users',
+						field: 'email',
+						value: 'SAME@example.com',
+					}),
+				);
+			});
+
+			it('keeps the first row\'s error when several rows are refused', async () => {
+				const opts: MutationOptions = {};
+
+				await service.updateBatch([
+					{ id: 'user-id-27', tfa_secret: 'secret' },
+					{ id: 'user-id-28', email: 'not-an-email' },
+				], opts);
+
+				expect(opts.preMutationError).toStrictEqual(
+					new InvalidPayloadError({
+						reason: `You can't change the "tfa_secret" value manually`,
+					}),
+				);
+			});
+
+			it('requests the union of every row\'s integrity checks once', async () => {
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				await service.updateBatch([
+					{ id: 'user-id-29', status: 'active' },
+					{ id: 'user-id-30', role: testRoleId },
+				], { onRequireUserIntegrityCheck });
+
+				expect(onRequireUserIntegrityCheck).toHaveBeenCalledTimes(1);
+
+				expect(onRequireUserIntegrityCheck)
+					.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+			});
+
+			it('logs out the users a row suspends', async () => {
+				await service.updateBatch([
+					{ id: 'user-id-31', status: 'suspended' },
+					{ id: 'user-id-32', first_name: 'Ada' },
+				]);
+
+				expect(clearUserSessionsSpy).toHaveBeenCalledTimes(1);
+				expect(clearUserSessionsSpy).toHaveBeenCalledWith(['user-id-31']);
 			});
 		});
 
@@ -406,8 +506,10 @@ describe('Integration Tests', () => {
 				const promise = service.inviteUser('user@example.com', 'invite-role', null);
 				await expect(promise).resolves.not.toThrow();
 
-				expect(superUpdateManySpy.mock.lastCall![0]).toEqual([mockUser.id]);
-				expect(superUpdateManySpy.mock.lastCall![1]).toEqual({ role: 'invite-role' });
+				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+					[{ data: { role: 'invite-role' }, keys: [mockUser.id] }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
 			});
 		});
 
