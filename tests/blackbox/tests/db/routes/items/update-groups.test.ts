@@ -12,7 +12,11 @@ import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { describe, expect } from 'vitest';
-import { collectionGrouped, collectionGroupedLog } from './update-groups.seed';
+import {
+	collectionGrouped,
+	collectionGroupedLog,
+	collectionGroupedOwner,
+} from './update-groups.seed';
 
 type GroupedRow = { id: number; name: string; status: string | null };
 type UpdateGroupLogged = { data: { status?: string }; keys: number[] };
@@ -125,6 +129,19 @@ describe.each(vendors)('%s', (vendor) => {
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: [update.malformedKey], data: { status } })
 					.set('Authorization', AUTH);
+			},
+		);
+
+		when.optional(
+			/^the rows are updated to point at a new owner named "(.*)"$/,
+			async (ownerName: string) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${collectionGrouped}`)
+					.send({
+						keys: update.rows.map((row) => row.id),
+						data: { owner: { name: ownerName } },
+					})
+					.set('Authorization', update.authorization);
 			},
 		);
 
@@ -252,6 +269,36 @@ describe.each(vendors)('%s', (vendor) => {
 				return payload.includes(update.malformedKey);
 			})).toEqual([]);
 		});
+
+		and.optional(
+			/^the rows point at the one owner named "(.*)"$/,
+			async (ownerName: string) => {
+				const ownersResponse = await request(getUrl(vendor))
+					.get(`/items/${collectionGroupedOwner}`)
+					.query({ 'filter[name][_eq]': ownerName, fields: 'id' })
+					.set('Authorization', AUTH);
+
+				expect(ownersResponse.body.data).toEqual([
+					{ id: expect.any(Number) },
+				]);
+
+				const ownerId = ownersResponse.body.data[0].id;
+
+				const rowsResponse = await request(getUrl(vendor))
+					.get(`/items/${collectionGrouped}`)
+					.query({
+						'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+						fields: 'owner',
+						sort: 'id',
+					})
+					.set('Authorization', AUTH);
+
+				expect(rowsResponse.body.data).toEqual([
+					{ owner: ownerId },
+					{ owner: ownerId },
+				]);
+			},
+		);
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -282,6 +329,10 @@ describe.each(vendors)('%s', (vendor) => {
 			oneLine`
 				a per-row hook rewriting one row splits its group, the rewrite
 				written
+			`,
+			oneLine`
+				a nested owner sent to several rows is created once, whatever the
+				per-row hook
 			`,
 		]) {
 			scenario(title, (steps) => {

@@ -180,3 +180,12 @@ Feature: An update reaches its hooks as groups, then once per row
       | d-one     | archived |
       | rewritten | archived |
       | d-three   | archived |
+
+  Scenario: a nested owner sent to several rows is created once, whatever the per-row hook
+    Given the rows:
+      | name    |
+      | owned-a |
+      | owned-b |
+    When the rows are updated to point at a new owner named "shared-owner"
+    Then the update succeeds
+    And the rows point at the one owner named "shared-owner"
