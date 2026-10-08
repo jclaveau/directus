@@ -41,9 +41,12 @@ describe('update messages', () => {
 		]);
 	});
 
-	test('a relations update sends the keys of its groups', async () => {
+	test('a relations update sends one message per group', async () => {
 		await emitter.emitAction('relations.update', {
-			payload: [{ data: { one_field: 'tags' }, keys: [4] }],
+			payload: [
+				{ data: { one_field: 'tags' }, keys: [4] },
+				{ data: { one_field: 'links' }, keys: [5, 6] },
+			],
 			collection: 'directus_relations',
 		});
 
@@ -52,7 +55,13 @@ describe('update messages', () => {
 				collection: 'directus_relations',
 				action: 'update',
 				keys: [4],
-				payload: [{ data: { one_field: 'tags' }, keys: [4] }],
+				payload: { one_field: 'tags' },
+			}],
+			['websocket.event', {
+				collection: 'directus_relations',
+				action: 'update',
+				keys: [5, 6],
+				payload: { one_field: 'links' },
 			}],
 		]);
 	});
@@ -74,9 +83,12 @@ describe('update messages', () => {
 		]);
 	});
 
-	test('a grouped fields update sends the keys of its groups', async () => {
+	test('a grouped fields update sends one message per group', async () => {
 		await emitter.emitAction('fields.update', {
-			payload: [{ data: { note: 'x' }, keys: [8, 9] }],
+			payload: [
+				{ data: { collection: 'articles', field: 'title' }, keys: [8] },
+				{ data: { collection: 'articles', field: 'body' }, keys: [9] },
+			],
 			collection: 'directus_fields',
 		});
 
@@ -84,8 +96,14 @@ describe('update messages', () => {
 			['websocket.event', {
 				collection: 'directus_fields',
 				action: 'update',
-				keys: [8, 9],
-				payload: [{ data: { note: 'x' }, keys: [8, 9] }],
+				keys: [8],
+				payload: { collection: 'articles', field: 'title' },
+			}],
+			['websocket.event', {
+				collection: 'directus_fields',
+				action: 'update',
+				keys: [9],
+				payload: { collection: 'articles', field: 'body' },
 			}],
 		]);
 	});
