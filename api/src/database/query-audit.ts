@@ -56,7 +56,7 @@ export type QueryAudit = {
 	waitMs: number;
 	connectionWaits: Map<string, number>;
 	connectionHolds: Map<string, number>;
-	maxConnections: number;
+	maxPoolConnections: number;
 	transactionAudits: TransactionAudit[];
 	openTransactionAudits: Map<string, TransactionAudit>;
 };
@@ -175,7 +175,7 @@ export function emptyQueryAudit(
 		waitMs: 0,
 		connectionWaits: new Map(),
 		connectionHolds: new Map(),
-		maxConnections: 0,
+		maxPoolConnections: 0,
 		transactionAudits: [],
 		openTransactionAudits: new Map(),
 	};
@@ -479,7 +479,11 @@ function holdConnection(audit: QueryAudit, connectionId: string): void {
 	const { connectionHolds } = audit;
 
 	connectionHolds.set(connectionId, (connectionHolds.get(connectionId) ?? 0) + 1);
-	audit.maxConnections = Math.max(audit.maxConnections, connectionHolds.size);
+
+	audit.maxPoolConnections = Math.max(
+		audit.maxPoolConnections,
+		connectionHolds.size,
+	);
 }
 
 function releaseConnection(audit: QueryAudit, connectionId: string): void {
@@ -574,8 +578,8 @@ export function formatQueryAudit(
 
 /**
  * `ms` from the audit's start until the headers flush, `db` the statements'
- * `ms`, `wait` the pool's, and `maxConnections` the most the request held at
- * once.
+ * `ms`, `wait` the pool's, and `maxPoolConnections` the most pool connections
+ * the request held at once.
  */
 function requestValueOf(audit: QueryAudit, timings: boolean): unknown {
 	const requestTimings = timings
@@ -587,7 +591,7 @@ function requestValueOf(audit: QueryAudit, timings: boolean): unknown {
 		: {};
 
 	return {
-		request: { ...requestTimings, maxConnections: audit.maxConnections },
+		request: { ...requestTimings, maxPoolConnections: audit.maxPoolConnections },
 	};
 }
 

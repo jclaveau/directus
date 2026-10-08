@@ -67,7 +67,7 @@ test('audits a transaction: its statements, length and outcome', () => {
 		level: 'statements',
 		maxSize: 0,
 	}))).toEqual([
-		{ request: { ms: 14, db: 12, wait: 0, maxConnections: 1 } },
+		{ request: { ms: 14, db: 12, wait: 0, maxPoolConnections: 1 } },
 		{
 			transaction: 'commit',
 			ms: 14,
@@ -101,7 +101,7 @@ test('counts a statement outside a transaction as its kind and table', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":2}},'
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxPoolConnections":2}},'
 			+ '{"stmt":"select authors...","ms":0,"wait":0},'
 			+ '{"transaction":"rollback","ms":0,"wait":0,'
 			+ '"statements":[{"stmt":"update articles...","ms":0}]},'
@@ -126,7 +126,7 @@ test('counts the statements of a transaction by kind and table', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
+		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
 		+ '{"stmt":"select a...","count":2},{"stmt":"insert b..."}]}]',
 	);
 });
@@ -144,7 +144,7 @@ test('reports a statement outside a transaction as its SQL', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},{"stmt":"select * from \\"authors\\""},'
+		'[{"request":{"maxPoolConnections":1}},{"stmt":"select * from \\"authors\\""},'
 		+ '{"stmt":"SET search_path TO public"}]',
 	);
 });
@@ -161,7 +161,7 @@ test('pairs a statement outside a transaction with its bound values', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]}]',
 	);
 });
@@ -184,7 +184,7 @@ test('gives a run outside a transaction its own values at the full level', () =>
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":2,"db":2,"wait":0,"maxConnections":1}},'
+			'[{"request":{"ms":2,"db":2,"wait":0,"maxPoolConnections":1}},'
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 			+ '"ms":2,"wait":0,"bindings":[1]}]',
 		);
@@ -199,16 +199,16 @@ test('cuts a lone statement to its kind and table past the size', () => {
 		'a value long enough to matter',
 	])();
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 113, timings: false }))
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 117, timings: false }))
 		.toBe(
-			'[{"request":{"maxConnections":1}},'
+			'[{"request":{"maxPoolConnections":1}},'
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 			+ '"bindingsDropped":1}]',
 		);
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 98, timings: false }))
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 102, timings: false }))
 		.toBe(
-			'[{"request":{"maxConnections":1}},'
+			'[{"request":{"maxPoolConnections":1}},'
 			+ '{"stmt":"select a...","bindingsDropped":1,"statementsCut":1}]',
 		);
 });
@@ -231,7 +231,7 @@ test('counts a statement of no other kind as other', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"delete articles..."},{"stmt":"other kept..."}]',
 	);
 });
@@ -249,7 +249,7 @@ test('keeps two transactions open at once apart', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":2}},'
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxPoolConnections":2}},'
 			+ '{"transaction":"open","wait":0,'
 			+ '"statements":[{"stmt":"insert articles...","ms":0}]},'
 			+ '{"transaction":"commit","ms":0,"wait":0,'
@@ -272,10 +272,10 @@ test('cuts the SQL of the largest entries first past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'statements',
-		maxSize: 213,
+		maxSize: 217,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"commit","statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"x\\" = ?"}]},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select b...","count":2}],'
@@ -284,10 +284,10 @@ test('cuts the SQL of the largest entries first past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'statements',
-		maxSize: 208,
+		maxSize: 212,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select a..."}],'
 		+ '"statementsCut":1},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select b...","count":2}],'
@@ -304,14 +304,14 @@ test('drops the last entries once no entry holds more to cut', () => {
 	auditStatementStart(audit, 'select * from "b"', 'a')();
 	auditStatementStart(audit, 'select * from "c"', 'a')();
 
-	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 83, timings: false }))
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 87, timings: false }))
 		.toBe(
-			'[{"request":{"maxConnections":1}},'
+			'[{"request":{"maxPoolConnections":1}},'
 			+ '{"stmt":"select a..."},{"entriesDropped":2}]',
 		);
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 10, timings: false }))
-		.toBe('[{"request":{"maxConnections":1}},{"entriesDropped":3}]');
+		.toBe('[{"request":{"maxPoolConnections":1}},{"entriesDropped":3}]');
 });
 
 // Dropping one entry's detail used to serialise the whole header again: 2000
@@ -355,7 +355,7 @@ test('reports each run\'s bound values at the bindings level', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
+		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":[[1],[2]]},'
 		+ '{"stmt":"select * from \\"a\\"","bindings":[[]]}'
@@ -382,10 +382,10 @@ test('drops bound values before cutting the SQL past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'bindings',
-		maxSize: 153,
+		maxSize: 157,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2}],"bindingsDropped":2}]',
@@ -393,10 +393,10 @@ test('drops bound values before cutting the SQL past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'bindings',
-		maxSize: 148,
+		maxSize: 152,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select a...","count":2}],'
 		+ '"bindingsDropped":2,"statementsCut":1}]',
 	);
@@ -418,7 +418,7 @@ test('reports a BigInt bound value as its digits', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"select * from \\"a\\" where \\"n\\" = ?",'
 		+ '"bindings":[["9007199254740993"]]}]',
 	);
@@ -467,7 +467,7 @@ test('lists every run in order at the full level', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":8,"db":7,"wait":0,"maxConnections":1}},'
+			'[{"request":{"ms":8,"db":7,"wait":0,"maxPoolConnections":1}},'
 			+ '{"transaction":"commit","ms":8,"wait":0,"statements":['
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 			+ '"ms":1,"bindings":[1]},'
@@ -500,7 +500,7 @@ test('groups the runs before dropping bound values past the size', () => {
 		maxSize: 253,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":['
@@ -514,7 +514,7 @@ test('groups the runs before dropping bound values past the size', () => {
 		maxSize: 183,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2}],"runsGrouped":2,"bindingsDropped":2}]',
@@ -567,7 +567,7 @@ test('records bound values only while they are allowed', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]},'
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[]}]',
 	);
@@ -591,7 +591,7 @@ test('records nothing once closed', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"open","statements":[{"stmt":"select a..."}]}]',
 	);
 });
@@ -608,7 +608,7 @@ test('escapes what a header cannot carry', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"select *\\nfrom \\"caf\\u00e9\\""}]',
 	);
 });
@@ -636,7 +636,7 @@ test('audits every statement sent through the driver', async () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"request":{"maxConnections":1}},{"stmt":"select authors..."}]');
+	})).toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"select authors..."}]');
 });
 
 test('leaves a statement sent outside any request unaudited', async () => {
@@ -691,7 +691,7 @@ test('audits a statement streamed through the driver', async () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"request":{"maxConnections":1}},{"stmt":"select authors..."}]');
+	})).toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"select authors..."}]');
 });
 
 test('wraps a dialect prototype once, however many pools share it', () => {
@@ -716,7 +716,7 @@ test('wraps a dialect prototype once, however many pools share it', () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"request":{"maxConnections":1}},{"stmt":"select authors..."}]');
+	})).toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"select authors..."}]');
 });
 
 test('reports how long a statement waited for its pool connection', async () => {
@@ -754,7 +754,7 @@ test('reports how long a statement waited for its pool connection', async () => 
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":40,"db":0,"wait":40,"maxConnections":1}},'
+			'[{"request":{"ms":40,"db":0,"wait":40,"maxPoolConnections":1}},'
 			+ '{"stmt":"select authors...","ms":0,"wait":40}]',
 		);
 });
@@ -793,7 +793,7 @@ test('counts the wait for a connection the pool never handed out', async () => {
 	await expect(acquireResult).rejects.toThrow('pool exhausted');
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
-		.toBe('[{"request":{"ms":30,"db":0,"wait":30,"maxConnections":0}}]');
+		.toBe('[{"request":{"ms":30,"db":0,"wait":30,"maxPoolConnections":0}}]');
 });
 
 test('gives a transaction the wait of its BEGIN, its statements no wait', () => {
@@ -808,7 +808,7 @@ test('gives a transaction the wait of its BEGIN, its statements no wait', () => 
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":5,"maxConnections":1}},'
+			'[{"request":{"ms":0,"db":0,"wait":5,"maxPoolConnections":1}},'
 			+ '{"transaction":"commit","ms":0,"wait":5,'
 			+ '"statements":[{"stmt":"select a...","ms":0}]}]',
 		);
@@ -825,7 +825,7 @@ test('reports a pool wait on the one statement that waited', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":5,"maxConnections":1}},'
+			'[{"request":{"ms":0,"db":0,"wait":5,"maxPoolConnections":1}},'
 			+ '{"stmt":"select a...","ms":0,"wait":5},'
 			+ '{"stmt":"select b...","ms":0,"wait":0}]',
 		);
@@ -868,7 +868,7 @@ test('sums the rows of grouped runs, each run its own at full', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
+		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
 		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","count":2,"rows":5}]}]',
 	);
 
@@ -877,7 +877,7 @@ test('sums the rows of grouped runs, each run its own at full', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
+		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
 		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":2,"bindings":[2]},'
 		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindings":[3]}]}]',
 	);
@@ -900,7 +900,7 @@ test('sums rows and keeps the first error of statements a cut merges', () => {
 		maxSize: 200,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},{"transaction":"rollback","statements":['
+		'[{"request":{"maxPoolConnections":1}},{"transaction":"rollback","statements":['
 		+ '{"stmt":"update a...","count":4,"rows":5,"error":"23505"}],'
 		+ '"statementsCut":4}]',
 	);
@@ -927,7 +927,7 @@ test('leaves out the rows of a statement pg counts none for', async () => {
 	});
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0, timings: false }))
-		.toBe('[{"request":{"maxConnections":1}},{"stmt":"set..."}]');
+		.toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"set..."}]');
 });
 
 test('reads the rows sqlite3 returned or changed', async () => {
@@ -965,7 +965,7 @@ test('reads the rows sqlite3 returned or changed', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"select a...","rows":2},{"stmt":"delete b...","rows":4},'
 		+ '{"stmt":"pragma..."}]',
 	);
@@ -1006,7 +1006,7 @@ test('reads the rows mysql returned or changed', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"stmt":"select a...","rows":1},{"stmt":"delete b...","rows":6},'
 		+ '{"stmt":"select c..."}]',
 	);
@@ -1060,7 +1060,7 @@ test('reports a failed statement\'s code and the rollback after it', async () =>
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxConnections":1}},'
+		'[{"request":{"maxPoolConnections":1}},'
 		+ '{"transaction":"rollback",'
 		+ '"statements":[{"stmt":"insert a...","count":2,"error":"23505"}]},'
 		+ '{"stmt":"select c...","error":"1062"},'
@@ -1083,7 +1083,7 @@ test('keeps the rows and the error of an item past the size', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0, timings: false }))
 		.toBe(
-			'[{"request":{"maxConnections":1}},'
+			'[{"request":{"maxPoolConnections":1}},'
 			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,'
 			+ '"bindings":["a value long enough to matter"]},'
 			+ '{"stmt":"insert into \\"c\\" (\\"d\\") values (?)","error":"23505",'
@@ -1092,7 +1092,7 @@ test('keeps the rows and the error of an item past the size', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 184, timings: false }))
 		.toBe(
-			'[{"request":{"maxConnections":1}},'
+			'[{"request":{"maxPoolConnections":1}},'
 			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindingsDropped":1},'
 			+ '{"stmt":"insert c...","error":"23505",'
 			+ '"bindingsDropped":1,"statementsCut":1}]',
@@ -1100,7 +1100,7 @@ test('keeps the rows and the error of an item past the size', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 177, timings: false }))
 		.toBe(
-			'[{"request":{"maxConnections":1}},'
+			'[{"request":{"maxPoolConnections":1}},'
 			+ '{"stmt":"update a...","rows":3,"bindingsDropped":1,"statementsCut":1},'
 			+ '{"entriesDropped":1}]',
 		);

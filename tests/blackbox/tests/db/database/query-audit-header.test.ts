@@ -390,12 +390,12 @@ describe.each(vendors)('%s', (vendor) => {
 				const cappedEnv = cloneDeep(env);
 
 				given(
-					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 280',
+					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 284',
 					async () => {
 						const port = await getPort();
 
 						cappedEnv[vendor].PORT = String(port);
-						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '280';
+						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '284';
 
 						cappedInstance = spawn('node', [paths.cli, 'start'], {
 							cwd: paths.cwd,
