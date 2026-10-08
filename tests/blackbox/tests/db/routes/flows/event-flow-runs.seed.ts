@@ -9,9 +9,8 @@ export const collectionFlowRuns = 'test_event_flow_runs';
 export const collectionFlowRewrites = 'test_event_flow_rewrites';
 export const collectionFlowRefusals = 'test_event_flow_refusals';
 
-// Created at seed time: a flow created mid-test reaches the event bus only once
-// its asynchronous reload lands. A flow holding `transform` is a filter flow whose
-// `$last` return replaces the change it was given.
+// A flow holding `transform` is a filter flow whose `$last` return replaces the
+// change it was given.
 export const eventFlows = [
 	{
 		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f01',
@@ -96,8 +95,6 @@ export const seedDBStructure = () => {
 				}),
 			});
 
-			// One flow per request, and one start per request: only a single create
-			// and a single update reload the flow manager, which registers the flows.
 			// A run with accountability "all" writes a revision holding its $trigger,
 			// which is all the test reads back.
 			for (const eventFlow of eventFlows) {

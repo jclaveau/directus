@@ -8,10 +8,11 @@ import {
 import { CreateItem } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
+import { sleep } from '@utils/sleep';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
-import { describe, expect } from 'vitest';
-import { eventFlows } from './event-flow-runs.seed';
+import { beforeAll, describe, expect } from 'vitest';
+import { collectionFlowRefusals, eventFlows } from './event-flow-runs.seed';
 
 type FlowRow = { id: number | string; name: string };
 
@@ -32,6 +33,42 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 const feature = loadFeature('./tests/db/routes/flows/event-flow-runs.feature');
 
 describe.each(vendors)('%s', (vendor) => {
+	// The seed wrote the flows through the seed server, and a server registers
+	// flows only on a reload of its own, which a write to a flow starts.
+	beforeAll(async () => {
+		const reload = await request(getUrl(vendor))
+			.patch('/flows')
+			.send({
+				keys: eventFlows.map((eventFlow) => eventFlow.id),
+				data: { status: 'active' },
+			})
+			.set('Authorization', AUTH);
+
+		expect(reload.statusCode).toEqual(200);
+
+		const [probe] = await CreateItem(vendor, {
+			collection: collectionFlowRefusals,
+			item: [{ name: 'reload-probe' }],
+		});
+
+		// The reload lands after the response: the refusal filter refusing the
+		// probe is the sign it did.
+		for (let attempt = 0; attempt < 100; attempt++) {
+			const response = await request(getUrl(vendor))
+				.patch(`/items/${collectionFlowRefusals}/${probe.id}`)
+				.send({ status: 'probe' })
+				.set('Authorization', AUTH);
+
+			if (response.statusCode === 400) {
+				return;
+			}
+
+			await sleep(100);
+		}
+
+		throw new Error('the flows never loaded on this server');
+	}, 30_000);
+
 	// Every run of a flow leaves a revision holding its $trigger; the flows are
 	// shared by every scenario, so a step keeps only the runs naming its own rows.
 	async function readTriggers(flowLabel: string): Promise<FlowTrigger[]> {
