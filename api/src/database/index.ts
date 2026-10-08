@@ -24,6 +24,7 @@ import {
 	requiredConnectionFields,
 } from './connections.js';
 import { getHelpers } from './helpers/index.js';
+import { auditQueriesOf, queryAuditEnabled } from './query-audit.js';
 
 export {
 	getConnectionNameForAccountability,
@@ -179,6 +180,10 @@ export function constructDatabase(
 
 	const dbInstance = knex.default(knexConfig);
 	validateDatabaseCharset(dbInstance);
+
+	if (queryAuditEnabled()) {
+		auditQueriesOf(dbInstance);
+	}
 
 	const times = new Map<string, number>();
 

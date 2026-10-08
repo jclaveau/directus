@@ -1904,6 +1904,13 @@ describe('retryPendingScopedCachePurges', () => {
 			scopedCachePinCount: 1,
 			evicted: 1,
 			durationMs: null,
+			// No index path in a drain, so the declared pin walks the collection.
+			scopedCacheScan: {
+				scanArms: 'collection',
+				scannedIndexKeys: 1,
+				scannedMembers: 1,
+				scanMs: expect.any(Number),
+			},
 		});
 
 		// One id across the drain, so an entry two of its targets reach counts one

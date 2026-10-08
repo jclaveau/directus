@@ -10,8 +10,8 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { monitorRedisCommands } from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
-import { randomUUID } from 'crypto';
 import getPort from 'get-port';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
@@ -390,64 +390,42 @@ describe.each(vendors)('%s', (vendor) => {
 		// The commands the purge sends to this collection's index sets, as MONITOR
 		// sees them, the ones its scripts run included, each kept as sent.
 		when.optional(/^every read of \w+ is purged$/, async () => {
-			const monitor = redisClient.duplicate({
-				monitor: true,
-				lazyConnect: false,
-			});
+			const monitoredCommands = await monitorRedisCommands(
+				redisClient,
+				async () => {
+					const purged = await request(getUrl(vendor, env))
+						.post(`/cache-collection-purge/${collection}`)
+						.set('Authorization', auth);
 
-			await new Promise<void>((resolveMonitoring, rejectMonitoring) => {
-				monitor.once('monitoring', resolveMonitoring);
+					expect(purged.statusCode).toBe(200);
+				},
+			);
 
-				// ioredis flips to monitoring only after the OK resolves, so a
-				// line landing in the same chunk finds an empty command queue.
-				monitor.on('error', (monitorError: Error) => {
-					if (!monitorError.message.startsWith('Command queue state error')) {
-						rejectMonitoring(monitorError);
-					}
+			for (const { commandArgs } of monitoredCommands) {
+				const command = commandArgs[0]!.toLowerCase();
+
+				const namesCollection = commandArgs.some((commandArg) => {
+					return commandArg.includes(collection);
 				});
-			});
 
-			const endSentinel = `${namespace}:monitor-sentinel:${randomUUID()}`;
-
-			const endSeen = new Promise<void>((resolveEnd) => {
-				monitor.on('monitor', (_time: string, commandArgs: string[]) => {
-					const command = commandArgs[0]!.toLowerCase();
-
-					const namesCollection = commandArgs.some((commandArg) => {
-						return commandArg.includes(collection);
-					});
-
-					if (commandArgs[1] === endSentinel) {
-						resolveEnd();
-					}
-					// Its first page only: a scan of the keyspace takes several.
-					else if (
-						namesCollection
-						&& ((command === 'scan' && commandArgs[1] === '0')
-							|| (command === 'sscan' && commandArgs[2] === '0'))
-					) {
-						purgeReads.push(commandArgs);
-					}
-					else if (
-						namesCollection
-						&& ['rename', 'sadd', 'srem', 'unlink'].includes(command)
-						&& commandArgs.slice(1).every((commandArg) => {
-							return commandArg.startsWith(indexPrefix);
-						})
-					) {
-						purgeWrites.push(commandArgs);
-					}
-				});
-			});
-
-			const purged = await request(getUrl(vendor, env))
-				.post(`/cache-collection-purge/${collection}`)
-				.set('Authorization', auth);
-
-			expect(purged.statusCode).toBe(200);
-
-			await Promise.all([endSeen, redisClient.get(endSentinel)]);
-			monitor.disconnect();
+				// Its first page only: a scan of the keyspace takes several.
+				if (
+					namesCollection
+					&& ((command === 'scan' && commandArgs[1] === '0')
+						|| (command === 'sscan' && commandArgs[2] === '0'))
+				) {
+					purgeReads.push(commandArgs);
+				}
+				else if (
+					namesCollection
+					&& ['rename', 'sadd', 'srem', 'unlink'].includes(command)
+					&& commandArgs.slice(1).every((commandArg) => {
+						return commandArg.startsWith(indexPrefix);
+					})
+				) {
+					purgeWrites.push(commandArgs);
+				}
+			}
 		});
 
 		// A cell spells the index prefix `<index>` and a moved set's fresh uuid

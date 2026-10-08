@@ -9,7 +9,9 @@ Feature: The purges a transaction queues for one collection run as one
   its `updated_ids` one by one, each with its `updated_values`, through an
   items service on the signal's transaction. Each purge moves the collection's
   purge counter, so a signal updating five rows moves it as much as a signal
-  updating one.
+  updating one, and sends Redis the same index reads: one per index set the
+  rows reach. Only the reads of the purge counter, one per row updated, grow
+  with the rows. A command spelled in capitals ran in a script.
 
   Scenario: five rows updated one by one purge their collection once
     Given these rows of merged_purge_row:
@@ -26,6 +28,84 @@ Feature: The purges a transaction queues for one collection run as one
       | updated_ids     | updated_values  |
       | [1, 2, 3, 4, 5] | {"revision": 2} |
     Then the second signal moved the rows' purge counter as much as the first
+
+  Scenario: five rows updated one by one send Redis the commands of one purge
+    Given the cache is cleared
+    And these rows of merged_purge_row:
+      | markers | id | owner | revision |
+      | batch_3 | 9  | gamma | 0        |
+      | batch_3 | 10 | gamma | 0        |
+      | batch_3 | 11 | gamma | 0        |
+      | batch_3 | 12 | gamma | 0        |
+      | batch_3 | 13 | gamma | 0        |
+    When a signal updates these rows one by one:
+      | id  | updated_ids | updated_values  |
+      | 901 | [9]         | {"revision": 1} |
+    And a signal updates these rows one by one:
+      | id  | updated_ids         | updated_values  |
+      | 902 | [9, 10, 11, 12, 13] | {"revision": 2} |
+    Then the first signal sent these Redis commands:
+      | command    | key                                         | calls | items |
+      | EXPIRE     | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | EXPIRE     | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | INCR       | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | INCR       | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | SET        | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | SET        | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | evalsha    | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | evalsha    | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | mget       | scoped-cache-collection-index-keys-complete | 2     | 4     |+
+      | mget       | scoped-cache-epoch:merged_purge_row         | 1     | 2     |+
+      | mget       | scoped-cache-epoch:                         | 1     | 2     |+
+      |            | merged_purge_signal                         |       |       |
+      | publish    | bus:websocket.event                         | 6     |       |+
+      | smismember | scoped-cache-index:                         | 1     | 2     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | merged_purge_row                            |       |       |
+      | smismember | scoped-cache-index:                         | 1     | 1     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | merged_purge_signal                         |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | merged_purge_row:                           |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | merged_purge_row:owner=gamma                |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | merged_purge_signal:                        |       |       |
+    And the second signal sent these Redis commands:
+      | command    | key                                         | calls | items |
+      | EXPIRE     | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | EXPIRE     | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | INCR       | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | INCR       | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | SET        | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | SET        | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | evalsha    | scoped-cache-epoch:merged_purge_row         | 1     |       |+
+      | evalsha    | scoped-cache-epoch:                         | 1     |       |+
+      |            | merged_purge_signal                         |       |       |
+      | mget       | scoped-cache-collection-index-keys-complete | 2     | 4     |+
+      | mget       | scoped-cache-epoch:merged_purge_row         | 5     | 10    |+
+      | mget       | scoped-cache-epoch:                         | 1     | 2     |+
+      |            | merged_purge_signal                         |       |       |
+      | publish    | bus:websocket.event                         | 18    |       |+
+      | smismember | scoped-cache-index:                         | 1     | 6     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | merged_purge_row                            |       |       |
+      | smismember | scoped-cache-index:                         | 1     | 1     |+
+      |            | collection-index-keys:                      |       |       |
+      |            | merged_purge_signal                         |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | merged_purge_row:                           |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | merged_purge_row:owner=gamma                |       |       |
+      | sscan      | scoped-cache-index:fingerprint:             | 1     |       |+
+      |            | merged_purge_signal:                        |       |       |
 
   Scenario: the merged purge drops the reads of every row it names and spares the others
     Given these rows of merged_purge_row:
