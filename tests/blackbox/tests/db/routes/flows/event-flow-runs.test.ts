@@ -59,10 +59,14 @@ describe.each(vendors)('%s', (vendor) => {
 		}) => revision.data.data.$trigger);
 	}
 
+	// A key naming no row of the scenario reads as undefined, failing the step's
+	// comparison rather than throwing.
 	function namesOf(update: Update, keys: (number | string)[]) {
-		return keys.map((key) => {
-			return update.rows.find((row) => row.id === key)!.name;
-		});
+		const nameByKey = Object.fromEntries(update.rows.map((row) => {
+			return [row.id, row.name];
+		}));
+
+		return keys.map((key) => nameByKey[key]);
 	}
 
 	function defineSteps(
@@ -86,11 +90,11 @@ describe.each(vendors)('%s', (vendor) => {
 
 			const response = await request(getUrl(vendor))
 				.post('/users')
-				.query({ fields: 'id,first_name' })
+				.query({ fields: 'id,first_name', sort: 'first_name' })
 				.send(parseGherkinTable<{ name: string }>(table).map((user) => {
 					return {
 						first_name: user.name,
-						email: `${user.name}-${randomUUID()}@event-flow-runs.test`,
+						email: `${user.name}-${randomUUID()}@example.com`,
 					};
 				}))
 				.set('Authorization', AUTH);
@@ -192,7 +196,7 @@ describe.each(vendors)('%s', (vendor) => {
 	defineFeature(feature, (scenario) => {
 		for (const title of [
 			'an update of several rows to one status runs each update flow once',
-			'a batch carrying two changes runs each update flow once per change',
+			'a batch runs the update filter once per row, the action once per change',
 			'a create runs the create flow once per row',
 			'a filter flow\'s return replaces the change it was given',
 			'a filter flow returning null refuses the update',

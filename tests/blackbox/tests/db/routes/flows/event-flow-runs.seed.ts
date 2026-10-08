@@ -76,7 +76,7 @@ export const seedDBStructure = () => {
 			// Deleting a flow deletes its operations.
 			await request(getUrl(vendor))
 				.delete('/flows')
-				.send(eventFlows.map((flow) => flow.id))
+				.send(eventFlows.map((eventFlow) => eventFlow.id))
 				.set('Authorization', auth);
 
 			await CreateCollections(vendor, {
@@ -96,56 +96,59 @@ export const seedDBStructure = () => {
 				}),
 			});
 
+			// One flow per request, and one start per request: only a single create
+			// and a single update reload the flow manager, which registers the flows.
 			// A run with accountability "all" writes a revision holding its $trigger,
 			// which is all the test reads back.
-			const flowsResponse = await request(getUrl(vendor))
-				.post('/flows')
-				.send(eventFlows.map((flow) => {
-					return {
-						id: flow.id,
-						name: flow.name,
+			for (const eventFlow of eventFlows) {
+				const flowResponse = await request(getUrl(vendor))
+					.post('/flows')
+					.send({
+						id: eventFlow.id,
+						name: eventFlow.name,
 						status: 'active',
 						trigger: 'event',
 						accountability: 'all',
-						options: { ...flow.options, collections: [flow.collection] },
-					};
-				}))
-				.set('Authorization', auth);
+						options: {
+							...eventFlow.options,
+							collections: [eventFlow.collection],
+						},
+					})
+					.set('Authorization', auth);
 
-			expect(flowsResponse.statusCode).toEqual(200);
+				expect(flowResponse.statusCode).toEqual(200);
+			}
 
-			const transformFlows = eventFlows.filter((flow) => 'transform' in flow);
+			const transformFlows = eventFlows.filter((eventFlow) => {
+				return 'transform' in eventFlow;
+			});
 
-			// The operation needs its flow to exist, and the flow then names it as
-			// the one it starts with.
-			const operationsResponse = await request(getUrl(vendor))
-				.post('/operations')
-				.send(transformFlows.map((flow) => {
-					return {
+			for (const transformFlow of transformFlows) {
+				// The operation needs its flow to exist, and the flow then names it as
+				// the one it starts with.
+				const operationResponse = await request(getUrl(vendor))
+					.post('/operations')
+					.send({
 						name: 'transform',
 						key: 'transform',
 						type: 'transform',
 						position_x: 19,
 						position_y: 1,
-						options: { json: flow.transform },
-						flow: flow.id,
-					};
-				}))
-				.query({ fields: 'id,flow' })
-				.set('Authorization', auth);
+						options: { json: transformFlow.transform },
+						flow: transformFlow.id,
+					})
+					.query({ fields: 'id' })
+					.set('Authorization', auth);
 
-			expect(operationsResponse.statusCode).toEqual(200);
+				expect(operationResponse.statusCode).toEqual(200);
 
-			const startsResponse = await request(getUrl(vendor))
-				.patch('/flows')
-				.send(operationsResponse.body.data.map((
-					operation: { id: string; flow: string },
-				) => {
-					return { id: operation.flow, operation: operation.id };
-				}))
-				.set('Authorization', auth);
+				const startResponse = await request(getUrl(vendor))
+					.patch(`/flows/${transformFlow.id}`)
+					.send({ operation: operationResponse.body.data.id })
+					.set('Authorization', auth);
 
-			expect(startsResponse.statusCode).toEqual(200);
+				expect(startResponse.statusCode).toEqual(200);
+			}
 		},
 		300_000,
 	);

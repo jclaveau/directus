@@ -115,7 +115,8 @@ Feature: An update reaches its hooks as groups, then once per row
       | c-two     |
       | c-three   |
     When the rows are updated to the status "archived"
-    Then the rows hold:
+    Then the update succeeds
+    And the rows hold:
       | name      | status   |
       | cancel-me |          |
       | c-two     | archived |
@@ -132,7 +133,8 @@ Feature: An update reaches its hooks as groups, then once per row
       | rewrite-me |
       | d-three    |
     When the rows are updated to the status "archived"
-    Then the rows hold:
+    Then the update succeeds
+    And the rows hold:
       | name      | status   |
       | d-one     | archived |
       | rewritten | archived |

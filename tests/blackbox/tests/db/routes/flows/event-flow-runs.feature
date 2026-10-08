@@ -2,8 +2,10 @@ Feature: An event flow runs once per change, as it did before updates carried gr
 
   An update reaches its hooks as `{ data, keys }[]` groups. An event flow on
   `items.update` runs once per group, its `$trigger` shaped like the single
-  update the flow was written for: `{ payload: data, keys }`. A filter flow
-  returning `$last` replaces that group's change. A flow on `items.create` runs
+  update the flow was written for: `{ payload: data, keys }`. A batch sends one
+  group per row; the rows carrying the same change are merged after the filter,
+  so the action runs once per change. A filter flow returning `$last` replaces
+  that group's change. A flow on `items.create` runs
   once per created row. Every run leaves a revision holding its `$trigger`,
   read back here. A row is named by the `name` it was created with; a user by
   its first name.
@@ -28,7 +30,7 @@ Feature: An event flow runs once per change, as it did before updates carried gr
       | status   | names                     |
       | archived | ["one-a","one-b","one-c"] |
 
-  Scenario: a batch carrying two changes runs each update flow once per change
+  Scenario: a batch runs the update filter once per row, the action once per change
     Given the rows of test_event_flow_runs:
       | name  |
       | two-a |
@@ -40,9 +42,10 @@ Feature: An event flow runs once per change, as it did before updates carried gr
       | two-b | kept     |
       | two-c | archived |
     Then the "update filter" flow ran with:
-      | status   | names             |
-      | archived | ["two-a","two-c"] |
-      | kept     | ["two-b"]         |
+      | status   | names     |
+      | archived | ["two-a"] |
+      | kept     | ["two-b"] |
+      | archived | ["two-c"] |
     And the "update action" flow ran with:
       | status   | names             |
       | archived | ["two-a","two-c"] |

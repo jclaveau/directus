@@ -50,10 +50,14 @@ describe.each(vendors)('%s', (vendor) => {
 		return response.body.data.map((entry: { payload: string }) => entry.payload);
 	}
 
+	// A key naming no row of the scenario reads as undefined, failing the step's
+	// comparison rather than throwing.
 	function namesOf(update: Update, keys: number[]) {
-		return keys.map((key) => {
-			return update.rows.find((row) => row.id === key)!.name;
-		});
+		const nameByKey = Object.fromEntries(update.rows.map((row) => {
+			return [row.id, row.name];
+		}));
+
+		return keys.map((key) => nameByKey[key]);
 	}
 
 	function defineSteps(
@@ -103,6 +107,10 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		then.optional('the update succeeds', () => {
+			expect(update.response!.statusCode).toEqual(200);
+		});
+
 		then.optional('the update answers:', (table: Record<string, string>[]) => {
 			expect(update.response!.statusCode).toEqual(200);
 			expect(update.response!.body.data).toEqual(parseGherkinTable(table));
@@ -115,20 +123,26 @@ describe.each(vendors)('%s', (vendor) => {
 
 				const ownKeys = update.rows.map((row) => row.id);
 
-				const groups: UpdateGroupLogged[] = (
+				// Every grouped event naming one of these rows, so a second one fails
+				// the comparison.
+				const ownEvents: UpdateGroupLogged[][] = (
 					await readLoggedPayloads('items.update', phase)
 				)
 					.map((payload: string) => JSON.parse(payload))
-					.find((logged: UpdateGroupLogged[]) => {
-						return logged.some((group) => ownKeys.includes(group.keys[0]!));
+					.filter((logged: UpdateGroupLogged[]) => {
+						return logged.some((group) => {
+							return group.keys.some((key) => ownKeys.includes(key));
+						});
 					});
 
-				expect(groups.map((group) => {
-					return {
-						status: group.data.status,
-						names: namesOf(update, group.keys),
-					};
-				})).toEqual(parseGherkinTable(table));
+				expect(ownEvents.map((groups) => {
+					return groups.map((group) => {
+						return {
+							status: group.data.status,
+							names: namesOf(update, group.keys),
+						};
+					});
+				})).toEqual([parseGherkinTable(table)]);
 			},
 		);
 
@@ -199,11 +213,15 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		// The probe's earlier entries show it logs, so an empty match means
+		// something.
 		and.optional('no update event names the malformed key', async () => {
 			const payloads = [
 				...await readLoggedPayloads('items.update', 'filter'),
 				...await readLoggedPayloads('items.update.one', 'filter'),
 			];
+
+			expect(payloads.length).toBeGreaterThan(0);
 
 			expect(payloads.filter((payload: string) => {
 				return payload.includes(update.malformedKey);
