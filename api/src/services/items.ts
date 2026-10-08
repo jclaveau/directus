@@ -104,11 +104,17 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 }
 
 /**
- * Whether a list holds nothing but its entries. A hook written for one payload
- * sets `payload.field = x` on the list itself, where no write ever reads it, and
- * a sparse list hides the holes `every` skips.
+ * Whether a list holds nothing but its entries, with no hole among them. A hook
+ * written for one payload sets `payload.field = x` on the list itself, where no
+ * write ever reads it, and `every` skips a hole.
  */
 function carriesOnlyIndices(answeredList: unknown[]): boolean {
+	for (let index = 0; index < answeredList.length; index++) {
+		if (!(index in answeredList)) {
+			return false;
+		}
+	}
+
 	return Object.keys(answeredList).length === answeredList.length;
 }
 
