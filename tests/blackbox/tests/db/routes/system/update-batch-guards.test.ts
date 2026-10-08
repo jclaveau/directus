@@ -175,6 +175,7 @@ describe.each(vendors)('%s', (vendor) => {
 			'a batch moving an email to a user while freeing it is applied',
 			'a batch moving a translation key to a row while freeing it is applied',
 			'a batch moving a version key to a version while freeing it is applied',
+			'a batch giving translations keys that join alike is applied',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {

@@ -67,5 +67,31 @@ describe('Services / Translations', () => {
 
 			expect(updateGroups).not.toHaveBeenCalled();
 		});
+
+		it('applies two rows whose key and language only join alike', async () => {
+			vi.spyOn(ItemsService.prototype, 'readMany')
+				.mockResolvedValueOnce(withMeta(
+					[{ id: 'translation-id-4', key: 'hello', language: 'US' }],
+					{ scopedCacheFingerprints: [] },
+				))
+				.mockResolvedValueOnce(withMeta(
+					[{ id: 'translation-id-5', key: 'hi', language: 'en-US' }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+			vi.spyOn(TranslationsService.prototype as any, 'translationKeyExists')
+				.mockResolvedValue(false);
+
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['translation-id-4', 'translation-id-5']);
+
+			await expect(new TranslationsService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).updateBatch([
+				{ id: 'translation-id-4', key: 'greeting-en' },
+				{ id: 'translation-id-5', key: 'greeting' },
+			])).resolves.toStrictEqual(['translation-id-4', 'translation-id-5']);
+		});
 	});
 });

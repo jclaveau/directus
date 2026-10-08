@@ -352,3 +352,28 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /versions/<draft-b> | body:             |
       | query:                    |   data:           |
       |   fields: key             |     key: draft-a  |
+
+  Scenario: a batch giving translations keys that join alike is applied
+    Given the rows of /translations:
+      | as    | key         | language | value |
+      | first | first-<run> | US       | one   |
+      | other | other-<run> | en-US    | two   |
+    Then these requests get these responses:
+      | request                     | response                 |
+      | method: PATCH               | code: 200                |+
+      | path: /translations         |                          |
+      | payload:                    |                          |
+      |   - id: <first>             |                          |
+      |     key: x-<run>-en         |                          |
+      |   - id: <other>             |                          |
+      |     key: x-<run>            |                          |
+      | method: GET                 | code: 200                |+
+      | path: /translations/<first> | body:                    |
+      | query:                      |   data:                  |
+      |   fields: key,language      |     key: x-<run>-en      |
+      |                             |     language: US         |
+      | method: GET                 | code: 200                |+
+      | path: /translations/<other> | body:                    |
+      | query:                      |   data:                  |
+      |   fields: key,language      |     key: x-<run>         |
+      |                             |     language: en-US      |
