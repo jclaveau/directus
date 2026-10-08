@@ -6,8 +6,8 @@ Feature: A batch update of a system collection is checked as a single update is
   - A row created in a `Given` is named by its `as` cell, and `<name>` in a
     later cell stands for its primary key; `<run>` for a value unique to this
     run. The `as` cell is not sent.
-  - A request authenticates as the admin. A response cell states the keys it
-    checks.
+  - A request authenticates as the admin, or as the user its `as` cell names.
+    A response cell states the keys it checks.
 
   Scenario: a batch setting a tfa_secret is refused and writes nothing
     Given the rows of /users:
@@ -49,6 +49,32 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:                            |   data:                     |
       |   fields: email                   |     email: >-               |
       |                                   |       bob-<run>@example.com |
+
+  Scenario: a batch naming a user its sender may not update is forbidden
+    Given the rows of /users:
+      | as    | first_name | email                   |
+      | owner | owner      | owner-<run>@example.com |
+      | other | other      | other-<run>@example.com |
+    And a user who may update only their own row, as self
+    Then these requests get these responses:
+      | request                            | response                      |
+      | as: self                           | code: 403                     |+
+      | method: PATCH                      | body:                         |
+      | path: /users                       |   errors:                     |
+      | payload:                           |     - extensions:             |
+      |   - id: <self>                     |         code: FORBIDDEN       |
+      |     first_name: renamed            |                               |
+      |   - id: <other>                    |                               |
+      |     email: owner-<run>@example.com |                               |
+      | method: GET                        | code: 200                     |+
+      | path: /users/<self>                | body:                         |
+      | query:                             |   data:                       |
+      |   fields: first_name               |     first_name: self          |
+      | method: GET                        | code: 200                     |+
+      | path: /users/<other>               | body:                         |
+      | query:                             |   data:                       |
+      |   fields: email                    |     email: >-                 |
+      |                                    |       other-<run>@example.com |
 
   Scenario: a batch making a role its own parent is refused and writes nothing
     Given the rows of /roles:

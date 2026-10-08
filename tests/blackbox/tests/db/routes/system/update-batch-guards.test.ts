@@ -13,6 +13,7 @@ import request, { type Response } from 'supertest';
 import { describe, expect } from 'vitest';
 
 type RequestCell = {
+	as?: string;
 	method: 'GET' | 'PATCH';
 	path: string;
 	query?: Record<string, string>;
@@ -22,6 +23,7 @@ type RequestCell = {
 type Batch = {
 	run: string;
 	keysByName: Record<string, string>;
+	tokensByName: Record<string, string>;
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -43,8 +45,8 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
-	function sendRequest(requestCell: string) {
-		const { method, path, query = {}, payload } = loadYaml(
+	function sendRequest(requestCell: string, batch: Batch) {
+		const { as: name, method, path, query = {}, payload } = loadYaml(
 			requestCell,
 		) as RequestCell;
 
@@ -52,7 +54,12 @@ describe.each(vendors)('%s', (vendor) => {
 			? request(getUrl(vendor)).patch(path)
 			: request(getUrl(vendor)).get(path);
 
-		pendingRequest.query(query).set('Authorization', AUTH);
+		pendingRequest.query(query).set(
+			'Authorization',
+			name === undefined
+				? AUTH
+				: `Bearer ${batch.tokensByName[name]}`,
+		);
 
 		return payload === undefined
 			? pendingRequest
@@ -89,6 +96,46 @@ describe.each(vendors)('%s', (vendor) => {
 		// Given creates rows of: the versions of the item the first one created.
 		and.optional(/^the rows of (\/versions):$/, createRows);
 
+		and.optional(
+			/^a user who may update only their own row, as (\S+)$/,
+			async (name: string) => {
+				const policyResponse = await request(getUrl(vendor))
+					.post('/policies')
+					.send({
+						name: `update-self-${batch.run}`,
+						app_access: false,
+						admin_access: false,
+						permissions: [{
+							collection: 'directus_users',
+							action: 'update',
+							fields: ['*'],
+							permissions: { id: { _eq: '$CURRENT_USER' } },
+						}],
+					})
+					.set('Authorization', AUTH);
+
+				expect(policyResponse.statusCode).toEqual(200);
+
+				const token = randomUUID();
+
+				const userResponse = await request(getUrl(vendor))
+					.post('/users')
+					.query({ fields: 'id' })
+					.send({
+						first_name: name,
+						email: `${name}-${batch.run}@example.com`,
+						token,
+						policies: [{ policy: policyResponse.body.data.id }],
+					})
+					.set('Authorization', AUTH);
+
+				expect(userResponse.statusCode).toEqual(200);
+
+				batch.keysByName[name] = String(userResponse.body.data.id);
+				batch.tokensByName[name] = token;
+			},
+		);
+
 		// A response cell states the keys it checks; an array still has to hold as
 		// many items as it states.
 		then(
@@ -97,7 +144,9 @@ describe.each(vendors)('%s', (vendor) => {
 				const responses: Response[] = [];
 
 				for (const { request: requestCell } of table) {
-					responses.push(await sendRequest(withKeys(requestCell, batch)));
+					responses.push(
+						await sendRequest(withKeys(requestCell, batch), batch),
+					);
 				}
 
 				expect(responses.map((response) => {
@@ -113,6 +162,7 @@ describe.each(vendors)('%s', (vendor) => {
 		for (const title of [
 			'a batch setting a tfa_secret is refused and writes nothing',
 			'a batch giving two users one email is refused and writes nothing',
+			'a batch naming a user its sender may not update is forbidden',
 			'a batch making a role its own parent is refused and writes nothing',
 			'a batch moving a role under its own child is refused, writing nothing',
 			'a batch putting two roles under each other is refused, writing nothing',
@@ -124,7 +174,11 @@ describe.each(vendors)('%s', (vendor) => {
 			'a batch giving two versions of one item the same key is refused',
 		]) {
 			scenario(title, (steps) => {
-				defineSteps(steps, { run: randomUUID(), keysByName: {} });
+				defineSteps(steps, {
+					run: randomUUID(),
+					keysByName: {},
+					tokensByName: {},
+				});
 			}, 60_000);
 		}
 	});
