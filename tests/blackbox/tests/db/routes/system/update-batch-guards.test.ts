@@ -84,7 +84,10 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 
 		given(/^the rows of (\S+):$/, createRows);
-		and.optional(/^the rows of (\S+):$/, createRows);
+
+		// `.optional` binds on the step's text, so it names the one path a second
+		// Given creates rows of: the versions of the item the first one created.
+		and.optional(/^the rows of (\/versions):$/, createRows);
 
 		// A response cell states the keys it checks; an array still has to hold as
 		// many items as it states.
