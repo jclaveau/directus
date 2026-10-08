@@ -278,3 +278,77 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /versions/<draft-b> | body:                                   |
       | query:                    |   data:                                 |
       |   fields: key             |     key: draft-b                        |
+
+  Scenario: a batch moving an email to a user while freeing it is applied
+    Given the rows of /users:
+      | as  | first_name | email                 |
+      | ann | ann        | ann-<run>@example.com |
+      | bob | bob        | bob-<run>@example.com |
+    Then these requests get these responses:
+      | request                          | response                    |
+      | method: PATCH                    | code: 200                   |+
+      | path: /users                     |                             |
+      | payload:                         |                             |
+      |   - id: <ann>                    |                             |
+      |     email: new-<run>@example.com |                             |
+      |   - id: <bob>                    |                             |
+      |     email: ann-<run>@example.com |                             |
+      | method: GET                      | code: 200                   |+
+      | path: /users/<ann>               | body:                       |
+      | query:                           |   data:                     |
+      |   fields: email                  |     email: >-               |
+      |                                  |       new-<run>@example.com |
+      | method: GET                      | code: 200                   |+
+      | path: /users/<bob>               | body:                       |
+      | query:                           |   data:                     |
+      |   fields: email                  |     email: >-               |
+      |                                  |       ann-<run>@example.com |
+
+  Scenario: a batch moving a translation key to a row while freeing it is applied
+    Given the rows of /translations:
+      | as    | key         | language | value |
+      | first | first-<run> | en-US    | one   |
+      | other | other-<run> | en-US    | two   |
+    Then these requests get these responses:
+      | request                     | response                 |
+      | method: PATCH               | code: 200                |+
+      | path: /translations         |                          |
+      | payload:                    |                          |
+      |   - id: <first>             |                          |
+      |     key: new-<run>          |                          |
+      |   - id: <other>             |                          |
+      |     key: first-<run>        |                          |
+      | method: GET                 | code: 200                |+
+      | path: /translations/<first> | body:                    |
+      | query:                      |   data:                  |
+      |   fields: key               |     key: new-<run>       |
+      | method: GET                 | code: 200                |+
+      | path: /translations/<other> | body:                    |
+      | query:                      |   data:                  |
+      |   fields: key               |     key: first-<run>     |
+
+  Scenario: a batch moving a version key to a version while freeing it is applied
+    Given the rows of /items/test_batch_guards_versioned:
+      | as    | title |
+      | essay | essay |
+    And the rows of /versions:
+      | as      | key     | name    | collection                  | item      |
+      | draft-a | draft-a | draft-a | test_batch_guards_versioned | "<essay>" |
+      | draft-b | draft-b | draft-b | test_batch_guards_versioned | "<essay>" |
+    Then these requests get these responses:
+      | request                   | response          |
+      | method: PATCH             | code: 200         |+
+      | path: /versions           |                   |
+      | payload:                  |                   |
+      |   - id: <draft-a>         |                   |
+      |     key: draft-c          |                   |
+      |   - id: <draft-b>         |                   |
+      |     key: draft-a          |                   |
+      | method: GET               | code: 200         |+
+      | path: /versions/<draft-a> | body:             |
+      | query:                    |   data:           |
+      |   fields: key             |     key: draft-c  |
+      | method: GET               | code: 200         |+
+      | path: /versions/<draft-b> | body:             |
+      | query:                    |   data:           |
+      |   fields: key             |     key: draft-a  |

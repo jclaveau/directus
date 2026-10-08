@@ -172,6 +172,9 @@ describe.each(vendors)('%s', (vendor) => {
 			'a batch giving two translations one key and language is refused',
 			'a batch giving a version the reserved key "main" is refused',
 			'a batch giving two versions of one item the same key is refused',
+			'a batch moving an email to a user while freeing it is applied',
+			'a batch moving a translation key to a row while freeing it is applied',
+			'a batch moving a version key to a version while freeing it is applied',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {

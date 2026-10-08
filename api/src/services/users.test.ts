@@ -336,17 +336,23 @@ describe('Integration Tests', () => {
 					.toHaveBeenNthCalledWith(2, ['second-password']);
 			});
 
-			it('checks each email against the other users but its own', async () => {
+			it('checks emails against the users the batch keeps', async () => {
 				await service.updateBatch([
 					{ id: 'user-id-23', email: 'first@example.com' },
 					{ id: 'user-id-24', email: 'second@example.com' },
 				]);
 
-				expect(checkUniqueEmailsSpy)
-					.toHaveBeenNthCalledWith(1, ['first@example.com'], 'user-id-23');
+				expect(checkUniqueEmailsSpy).toHaveBeenNthCalledWith(
+					1,
+					['first@example.com'],
+					['user-id-23', 'user-id-24'],
+				);
 
-				expect(checkUniqueEmailsSpy)
-					.toHaveBeenNthCalledWith(2, ['second@example.com'], 'user-id-24');
+				expect(checkUniqueEmailsSpy).toHaveBeenNthCalledWith(
+					2,
+					['second@example.com'],
+					['user-id-23', 'user-id-24'],
+				);
 			});
 
 			it('refuses two rows set to the same email, whatever the casing', async () => {
