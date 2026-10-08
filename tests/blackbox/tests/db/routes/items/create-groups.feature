@@ -9,6 +9,9 @@ Feature: A create reaches its hooks as entries, then once per row
     - "legacy-shape": answers with that row's payload alone.
     - "twin-of-first": answers `{ sameRowAs: 0 }`.
     - "cancel-in-group": answers `null` for that row.
+    - "strip-name": deletes `name` off the list itself.
+    - "check-name": reads `name` off the list itself, throwing when it reads
+      "check-name".
   - A request authenticates as the admin.
 
   Scenario: a create fires the grouped event once, then the per-row one per row
@@ -44,6 +47,34 @@ Feature: A create reaches its hooks as entries, then once per row
       | path: /items/test_create_groups   | body:                         |
       | query:                            |   data: []                    |
       |   filter[name][_eq]: legacy-shape |                               |
+    Then the first refusal names "items.create.one"
+
+  Scenario: a grouped hook deleting a field off the list is refused, creating nothing
+    When these requests get these responses:
+      | request                         | response                      |
+      | method: POST                    | code: 400                     |+
+      | path: /items/test_create_groups | body:                         |
+      | payload:                        |   errors:                     |
+      |   - name: strip-name            |     - extensions:             |
+      |                                 |         code: INVALID_PAYLOAD |
+      | method: GET                     | code: 200                     |+
+      | path: /items/test_create_groups | body:                         |
+      | query:                          |   data: []                    |
+      |   filter[name][_eq]: strip-name |                               |
+    Then the first refusal names "items.create.one"
+
+  Scenario: a grouped hook reading a field off the list is refused, creating nothing
+    When these requests get these responses:
+      | request                         | response                      |
+      | method: POST                    | code: 400                     |+
+      | path: /items/test_create_groups | body:                         |
+      | payload:                        |   errors:                     |
+      |   - name: check-name            |     - extensions:             |
+      |                                 |         code: INVALID_PAYLOAD |
+      | method: GET                     | code: 200                     |+
+      | path: /items/test_create_groups | body:                         |
+      | query:                          |   data: []                    |
+      |   filter[name][_eq]: check-name |                               |
     Then the first refusal names "items.create.one"
 
   Scenario: a grouped hook marking a twin inserts the row once

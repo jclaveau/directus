@@ -9,6 +9,10 @@
 //     event had before it carried entries.
 //   'twin-of-first' → answers { sameRowAs: 0 }, the row the create starts with.
 //   'cancel-in-group' → answers null for that row.
+//   'strip-name' → deletes `name` off the list, the way a hook written for one
+//     payload strips a field.
+//   'check-name' → reads `name` off the list, the way a hook written for one
+//     payload refuses a value.
 
 const COLLECTION = 'test_create_groups';
 const LOG = 'test_create_groups_log';
@@ -31,6 +35,22 @@ export default function registerHooks({ filter, action }, { database }) {
 		await record('items.create', 'filter', entries);
 
 		if (!Array.isArray(entries)) {
+			return entries;
+		}
+
+		const names = entries.map((entry) => entry?.data?.name);
+
+		if (names.includes('strip-name')) {
+			delete entries.name;
+
+			return entries;
+		}
+
+		if (names.includes('check-name')) {
+			if (entries.name === 'check-name') {
+				throw new Error('The name "check-name" is refused');
+			}
+
 			return entries;
 		}
 

@@ -13,6 +13,9 @@ Feature: An update reaches its hooks as groups, then once per row
   - status "legacy-shape": the grouped filter answers with that group's
     payload alone, the shape it had before the event carried groups.
   - status "drop-key": the grouped filter drops that group's first key.
+  - status "strip-name": the grouped filter deletes `name` off the list itself.
+  - status "check-status": the grouped filter reads `status` off the list
+    itself, throwing when it reads "check-status".
 
   Scenario: an update fires the grouped event once, then the per-row one per row
     Given the rows:
@@ -102,6 +105,28 @@ Feature: An update reaches its hooks as groups, then once per row
       | name   | status |
       | drop-a |        |
       | drop-b |        |
+
+  Scenario: a grouped hook deleting a field off the list is refused, writing nothing
+    Given the rows:
+      | name    |
+      | strip-a |
+    When the rows are updated to the status "strip-name"
+    Then the update is refused with a reason naming "items.update.one"
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name    | status |
+      | strip-a |        |
+
+  Scenario: a grouped hook reading a field off the list is refused, writing nothing
+    Given the rows:
+      | name    |
+      | check-a |
+    When the rows are updated to the status "check-status"
+    Then the update is refused with a reason naming "items.update.one"
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name    | status |
+      | check-a |        |
 
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"

@@ -514,6 +514,74 @@ describe('Integration Tests', () => {
 
 				transactionSpy.mockRestore();
 			});
+
+			it('refuses a grouped hook deleting a field off the entries', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => {
+						return callback({ ...db, batchInsert } as any);
+					});
+
+				const groupHook = (entries: any) => {
+					delete entries.name;
+
+					return entries;
+				};
+
+				emitter.onFilter('items.create', groupHook);
+
+				try {
+					await expect(
+						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
+					).rejects.toThrow(/items\.create\.one/);
+
+					expect(batchInsert).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.create', groupHook);
+					transactionSpy.mockRestore();
+				}
+			});
+
+			it('refuses a grouped hook reading a field off the entries', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => {
+						return callback({ ...db, batchInsert } as any);
+					});
+
+				const groupHook = (entries: any) => {
+					if (entries.name === 'a') {
+						throw new Error('The name "a" is refused');
+					}
+
+					return entries;
+				};
+
+				emitter.onFilter('items.create', groupHook);
+
+				try {
+					await expect(
+						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
+					).rejects.toThrow(/items\.create\.one/);
+
+					expect(batchInsert).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.create', groupHook);
+					transactionSpy.mockRestore();
+				}
+			});
 		});
 
 		describe('updateBatch', () => {
@@ -859,6 +927,50 @@ describe('Integration Tests', () => {
 				expect(tracker.history.all).toHaveLength(0);
 
 				emitFilterSpy.mockRestore();
+			});
+
+			it('refuses a grouped hook deleting a field off the list', async () => {
+				const groupHook = (payload: any) => {
+					delete payload.name;
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it('refuses a grouped hook reading a field off the list', async () => {
+				const groupHook = (payload: any) => {
+					if (payload.name === 'Test') {
+						throw new Error('The name "Test" is refused');
+					}
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
 			});
 
 			it(oneLine`

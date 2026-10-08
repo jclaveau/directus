@@ -154,6 +154,10 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		and.optional(/^the refusal's code is "(.*)"$/, (code: string) => {
+			expect(update.response!.body.errors[0].extensions.code).toEqual(code);
+		});
+
 		and.optional('the rows hold:', async (table: Record<string, string>[]) => {
 			const response = await request(getUrl(vendor))
 				.get(`/items/${collectionGrouped}`)
@@ -240,6 +244,14 @@ describe.each(vendors)('%s', (vendor) => {
 				per-row event
 			`,
 			'a grouped hook dropping a key is refused, naming the per-row event',
+			oneLine`
+				a grouped hook deleting a field off the list is refused, writing
+				nothing
+			`,
+			oneLine`
+				a grouped hook reading a field off the list is refused, writing
+				nothing
+			`,
 			'a malformed key is refused before any update hook runs',
 			'a per-row hook cancels its row and its siblings are written',
 			oneLine`

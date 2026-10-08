@@ -6,6 +6,7 @@ import {
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
+import { oneLine } from '@directus/utils';
 import { load as loadYaml } from 'js-yaml';
 import request, { type Response } from 'supertest';
 import { describe, expect } from 'vitest';
@@ -149,6 +150,14 @@ describe.each(vendors)('%s', (vendor) => {
 		for (const title of [
 			'a create fires the grouped event once, then the per-row one per row',
 			'a grouped hook answering with one payload is refused',
+			oneLine`
+				a grouped hook deleting a field off the list is refused, creating
+				nothing
+			`,
+			oneLine`
+				a grouped hook reading a field off the list is refused, creating
+				nothing
+			`,
 			'a grouped hook marking a twin inserts the row once',
 			'a grouped hook cancelling one row writes its siblings',
 		]) {
