@@ -1,4 +1,4 @@
-// Records what the update events actually deliver, for batch-update-groups.test.ts.
+// Records what the update events actually deliver, for update-groups.test.ts.
 //
 // Every extension here loads into every instance, so this one only reacts to
 // its own collection and swallows its own failures: the log table exists for
@@ -10,6 +10,7 @@
 //   name 'rewrite-me' → the per-row filter rewrites it, splitting its group.
 //   status 'legacy-shape' → the grouped filter answers with that group's
 //     payload alone, the shape it had before the event carried groups.
+//   status 'drop-key' → the grouped filter drops that group's first key.
 // The name is read back from the row, since the event carries only what is
 // being written.
 
@@ -37,8 +38,16 @@ export default function registerHooks({ filter, action }, { database }) {
 			? payload.find((group) => group?.data?.status === 'legacy-shape')
 			: undefined;
 
-		return legacyGroup
-			? legacyGroup.data
+		if (legacyGroup) {
+			return legacyGroup.data;
+		}
+
+		return Array.isArray(payload)
+			? payload.map((group) => {
+				return group?.data?.status === 'drop-key'
+					? { ...group, keys: group.keys.slice(1) }
+					: group;
+			})
 			: payload;
 	});
 

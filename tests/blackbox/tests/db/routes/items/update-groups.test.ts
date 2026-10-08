@@ -12,10 +12,11 @@ import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { describe, expect } from 'vitest';
-import { collectionGrouped, collectionGroupedLog } from './batch-update-groups.seed';
+import { collectionGrouped, collectionGroupedLog } from './update-groups.seed';
 
 type GroupedRow = { id: number; name: string; status: string | null };
 type UpdateGroupLogged = { data: { status?: string }; keys: number[] };
+type RowLogged = { id: number; status?: string };
 
 type Update = {
 	rows: GroupedRow[];
@@ -26,12 +27,12 @@ type Update = {
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
 const feature = loadFeature(
-	'./tests/db/routes/items/update-groups-guards.feature',
+	'./tests/db/routes/items/update-groups.feature',
 );
 
 describe.each(vendors)('%s', (vendor) => {
-	// batch-update-groups.test.ts clears the log the probe writes into, so these
-	// steps never do: they read back only the entries naming their own rows.
+	// The log is shared by every scenario, and is never cleared: a step reads back
+	// only the entries naming its own rows.
 	async function readLoggedPayloads(event: string, phase: string) {
 		const response = await request(getUrl(vendor))
 			.get(`/items/${collectionGroupedLog}`)
@@ -66,24 +67,18 @@ describe.each(vendors)('%s', (vendor) => {
 			});
 		});
 
-		when.optional('the batch sends each row its key alone', async () => {
+		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
 			update.response = await request(getUrl(vendor))
 				.patch(`/items/${collectionGrouped}`)
 				.query({ fields: 'name,status', sort: 'id' })
-				.send(update.rows.map((row) => ({ id: row.id })))
-				.set('Authorization', AUTH);
-		});
+				.send(parseGherkinTable<{ name: string; status: string | null }>(
+					table,
+				).map((change) => {
+					const id = update.rows.find((row) => row.name === change.name)!.id;
 
-		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
-			const changes = parseGherkinTable<{ name: string; status: string }>(table);
-
-			update.response = await request(getUrl(vendor))
-				.patch(`/items/${collectionGrouped}`)
-				.send(changes.map((change) => {
-					return {
-						id: update.rows.find((row) => row.name === change.name)!.id,
-						status: change.status,
-					};
+					return change.status === null
+						? { id }
+						: { id, status: change.status };
 				}))
 				.set('Authorization', AUTH);
 		});
@@ -114,14 +109,14 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		then.optional(
-			'the grouped action carries:',
-			async (table: Record<string, string>[]) => {
+			/^the grouped (filter|action) carries:$/,
+			async (phase: string, table: Record<string, string>[]) => {
 				expect(update.response!.statusCode).toEqual(200);
 
 				const ownKeys = update.rows.map((row) => row.id);
 
 				const groups: UpdateGroupLogged[] = (
-					await readLoggedPayloads('items.update', 'action')
+					await readLoggedPayloads('items.update', phase)
 				)
 					.map((payload: string) => JSON.parse(payload))
 					.find((logged: UpdateGroupLogged[]) => {
@@ -158,6 +153,52 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
+		// A grouped payload names a row in a group's keys, a per-row one in its id.
+		and.optional(
+			'the update events naming these rows are:',
+			async (table: Record<string, string>[]) => {
+				const ownKeys = update.rows.map((row) => row.id);
+
+				const counts = await Promise.all(table.map(async ({ event, phase }) => {
+					const payloads: (UpdateGroupLogged[] | RowLogged)[] = (
+						await readLoggedPayloads(event!, phase!)
+					).map((payload: string) => JSON.parse(payload));
+
+					return {
+						event,
+						phase,
+						count: payloads.filter((payload) => {
+							return Array.isArray(payload)
+								? payload.some((group) => {
+									return group.keys.some((key) => ownKeys.includes(key));
+								})
+								: ownKeys.includes(payload.id);
+						}).length,
+					};
+				}));
+
+				expect(counts).toEqual(parseGherkinTable(table));
+			},
+		);
+
+		// The per-row actions run together, so their log order is not theirs.
+		and.optional(
+			'the per-row action names, in any order:',
+			async (table: Record<string, string>[]) => {
+				const ownKeys = update.rows.map((row) => row.id);
+
+				const actedKeys = (await readLoggedPayloads('items.update.one', 'action'))
+					.map((payload: string) => (JSON.parse(payload) as RowLogged).id)
+					.filter((key: number) => ownKeys.includes(key));
+
+				expect(namesOf(update, actedKeys).sort()).toEqual(
+					parseGherkinTable<{ name: string }>(table)
+						.map((row) => row.name)
+						.sort(),
+				);
+			},
+		);
+
 		and.optional('no update event names the malformed key', async () => {
 			const payloads = [
 				...await readLoggedPayloads('items.update', 'filter'),
@@ -172,13 +213,21 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
+			'an update fires the grouped event once, then the per-row one per row',
 			'a batch where every row writes nothing answers with every row',
+			'a batch answers with every row it was sent, no-op rows included',
 			'rows carrying the same change are written together, however far apart',
 			oneLine`
 				a grouped hook answering with one payload is refused, naming the
 				per-row event
 			`,
+			'a grouped hook dropping a key is refused, naming the per-row event',
 			'a malformed key is refused before any update hook runs',
+			'a per-row hook cancels its row and its siblings are written',
+			oneLine`
+				a per-row hook rewriting one row splits its group, the rewrite
+				written
+			`,
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, { rows: [], malformedKey: `not-a-key-${randomUUID()}` });
