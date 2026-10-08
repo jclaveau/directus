@@ -181,6 +181,16 @@ export class VersionsService extends ItemsService {
 
 		const keyCombos = new Set();
 
+		// A version the batch renames frees its old key; keyCombos still refuses
+		// two rows claiming one.
+		const renamedKeys = groups
+			.filter(({ data }) => {
+				return 'key' in data;
+			})
+			.flatMap(({ keys }) => {
+				return keys;
+			});
+
 		for (const { data, keys } of groups) {
 			const { error } = versionUpdateSchema.validate(data);
 
@@ -210,7 +220,12 @@ export class VersionsService extends ItemsService {
 
 				const existingVersions = await super.readByQuery({
 					aggregate: { count: ['*'] },
-					filter: { id: { _neq: pk }, key: { _eq: data['key'] }, collection: { _eq: collection }, item: { _eq: item } },
+					filter: {
+						id: { _nin: renamedKeys },
+						key: { _eq: data['key'] },
+						collection: { _eq: collection },
+						item: { _eq: item },
+					},
 				});
 
 				if (existingVersions[0]!['count'] > 0) {

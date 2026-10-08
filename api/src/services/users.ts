@@ -48,7 +48,10 @@ export class UsersService extends ItemsService {
 	 * User email has to be unique case-insensitive. This is an additional check to make sure that
 	 * the email is unique regardless of casing
 	 */
-	private async checkUniqueEmails(emails: string[], excludeKey?: PrimaryKey): Promise<void> {
+	private async checkUniqueEmails(
+		emails: string[],
+		excludeKeys: PrimaryKey[] = [],
+	): Promise<void> {
 		emails = emails.map((email) => email.toLowerCase());
 
 		const duplicates = emails.filter((value, index, array) => array.indexOf(value) !== index);
@@ -66,8 +69,8 @@ export class UsersService extends ItemsService {
 			.from('directus_users')
 			.whereRaw(`LOWER(??) IN (${emails.map(() => '?')})`, ['email', ...emails]);
 
-		if (excludeKey) {
-			query.whereNot('id', excludeKey);
+		if (excludeKeys.length > 0) {
+			query.whereNotIn('id', excludeKeys);
 		}
 
 		const results = await query;
@@ -261,6 +264,16 @@ export class UsersService extends ItemsService {
 	): Promise<PrimaryKey[]> {
 		const claimedEmails = new Set<string>();
 
+		// A user the batch gives a new email frees its old one; claimedEmails
+		// still refuses two rows claiming one.
+		const rewrittenEmailKeys = groups
+			.filter(({ data }) => {
+				return Boolean(data['email']);
+			})
+			.flatMap(({ keys }) => {
+				return keys;
+			});
+
 		let integrityCheckFlags =
 			opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 
@@ -280,7 +293,7 @@ export class UsersService extends ItemsService {
 
 					claimedEmails.add(lowerEmail);
 					this.validateEmail(data['email']);
-					await this.checkUniqueEmails([data['email']], keys[0]);
+					await this.checkUniqueEmails([data['email']], rewrittenEmailKeys);
 				}
 
 				if (data['password']) {

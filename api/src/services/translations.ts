@@ -18,8 +18,17 @@ export class TranslationsService extends ItemsService {
 		this.schema = options.schema;
 	}
 
-	private async translationKeyExists(key: string, language: string) {
-		const result = await this.knex.select('id').from(this.collection).where({ key, language });
+	private async translationKeyExists(
+		key: string,
+		language: string,
+		excludeKeys: PrimaryKey[] = [],
+	) {
+		const result = await this.knex
+			.select('id')
+			.from(this.collection)
+			.where({ key, language })
+			.whereNotIn('id', excludeKeys);
+
 		return result.length > 0;
 	}
 
@@ -36,6 +45,16 @@ export class TranslationsService extends ItemsService {
 		opts?: MutationOptions,
 	): Promise<PrimaryKey[]> {
 		const claimedCombos = new Set<string>();
+
+		// A row the batch moves frees its old combination; claimedCombos still
+		// refuses two rows claiming one.
+		const movedKeys = groups
+			.filter(({ data }) => {
+				return 'key' in data || 'language' in data;
+			})
+			.flatMap(({ keys }) => {
+				return keys;
+			});
 
 		for (const { data, keys } of groups) {
 			if (keys.length > 0 && 'key' in data && 'language' in data) {
@@ -57,6 +76,9 @@ export class TranslationsService extends ItemsService {
 						|| await this.translationKeyExists(
 							updatedData['key'],
 							updatedData['language'],
+							movedKeys.filter((movedKey) => {
+								return String(movedKey) !== String(item['id']);
+							}),
 						)
 					) {
 						throw new InvalidPayloadError({
