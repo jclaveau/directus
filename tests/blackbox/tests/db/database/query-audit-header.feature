@@ -1,76 +1,105 @@
 Feature: A request reports the SQL it ran, one entry per transaction
 
   - The instance: QUERY_AUDIT_HEADER `x-query-audit`, QUERY_AUDIT_LEVEL
-    `statements`, CORS on.
+    `statements`, QUERY_AUDIT_TIMINGS `false`, CORS on.
   - A request authenticates as the admin unless its headers say otherwise.
-  - A response states the keys it checks; `x-query-audit` reads parsed, its
-    durations unstated.
-  - A statement outside a transaction is an entry of its own: `<kind> <table>`
-    at `counts`, its SQL at `statements`, `<sql>: <bindings>` at `bindings`,
-    `<sql>: { ms, bindings }` at `full`.
-  - Authenticating reads `directus_users` outside a transaction: every header
-    starts with that entry.
+  - A response states the keys it checks; `x-query-audit` reads parsed.
+  - Every header starts with its `request:` entry, then the read that
+    authenticates it, outside any transaction.
+  - At `counts`, `stmt` is `<kind> <table>...`; at the other levels, the SQL.
 
   Scenario: a create reports its transaction and the reads around it
     Then on postgres these requests get these responses:
-      | request                     | response                    |
-      | method: POST                | code: 200                   |+
-      | path: /items/audit_articles | headers:                    |
-      | headers:                    |   x-query-audit:            |
-      |   x-query-audit: counts     |     - select directus_users |
-      | payload:                    |     - outcome: commit       |
-      |   - title: a                |       tables:               |
-      |   - title: b                |         audit_articles:     |
-      |   - title: c                |           insert: 1         |
-      |                             |         directus_activity:  |
-      |                             |           insert: 1         |
-      |                             |         directus_revisions: |
-      |                             |           insert: 1         |
-      |                             |     - select audit_articles |
+      | request                     | response                                   |
+      | method: POST                | code: 200                                  |+
+      | path: /items/audit_articles | headers:                                   |
+      | headers:                    |   x-query-audit:                           |
+      |   x-query-audit: counts     |     - request:                             |
+      | payload:                    |         maxConnections: 1                  |
+      |   - title: a                |     - stmt: select directus_users...       |
+      |   - title: b                |     - transaction: commit                  |
+      |   - title: c                |       statements:                          |
+      |                             |       - stmt: insert audit_articles...     |
+      |                             |         rows: 3                            |
+      |                             |       - stmt: insert directus_activity...  |
+      |                             |       - stmt: insert directus_revisions... |
+      |                             |     - stmt: select audit_articles...       |
 
-  Scenario: a pool read inside a transaction is an entry of its own
+  Scenario: a pool read inside a transaction holds a second connection
     Then except on sqlite3, these requests get these responses:
-      | request                      | response                       |
-      | method: GET                  | code: 200                      |+
-      | path: /audit-probe/pool-read | headers:                       |
-      | headers:                     |   x-query-audit:               |
-      |   x-query-audit: counts      |     - select directus_users    |
-      |                              |     - outcome: commit          |
-      |                              |       tables:                  |
-      |                              |         directus_settings:     |
-      |                              |           select: 1            |
-      |                              |     - select directus_settings |
+      | request                      | response                                  |
+      | method: GET                  | code: 200                                 |+
+      | path: /audit-probe/pool-read | headers:                                  |
+      | headers:                     |   x-query-audit:                          |
+      |   x-query-audit: counts      |     - request:                            |
+      |                              |         maxConnections: 2                 |
+      |                              |     - stmt: select directus_users...      |
+      |                              |     - transaction: commit                 |
+      |                              |       statements:                         |
+      |                              |       - stmt: select directus_settings... |
+      |                              |     - stmt: select directus_settings...   |
 
-  Scenario: reads through the transaction share its entry
+  Scenario: reads through the transaction share its connection and its entry
     Then these requests get these responses:
-      | request                             | response                    |
-      | method: GET                         | code: 200                   |+
-      | path: /audit-probe/transaction-read | headers:                    |
-      | headers:                            |   x-query-audit:            |
-      |   x-query-audit: counts             |     - select directus_users |
-      |                                     |     - outcome: commit       |
-      |                                     |       tables:               |
-      |                                     |         directus_settings:  |
-      |                                     |           select: 2         |
+      | request                             | response                                  |
+      | method: GET                         | code: 200                                 |+
+      | path: /audit-probe/transaction-read | headers:                                  |
+      | headers:                            |   x-query-audit:                          |
+      |   x-query-audit: counts             |     - request:                            |
+      |                                     |         maxConnections: 1                 |
+      |                                     |     - stmt: select directus_users...      |
+      |                                     |     - transaction: commit                 |
+      |                                     |       statements:                         |
+      |                                     |       - stmt: select directus_settings... |
+      |                                     |         count: 2                          |
+      |                                     |         rows: 2                           |
     And on postgres these requests get these responses:
-      | request                             | response                             |
-      | method: GET                         | code: 200                            |+
-      | path: /audit-probe/transaction-read | headers:                             |
-      |                                     |   x-query-audit:                     |
-      |                                     |     - >-                             |
-      |                                     |       select "directus_users"."id",  |
-      |                                     |       "directus_users"."role"        |
-      |                                     |       from "directus_users"          |
-      |                                     |       where                          |
-      |                                     |       "directus_users"."token" = $1  |
-      |                                     |       and "status" = $2 limit $3     |
-      |                                     |     - outcome: commit                |
-      |                                     |       statements:                    |
-      |                                     |         - sql: >-                    |
-      |                                     |             select "id"              |
-      |                                     |             from "directus_settings" |
-      |                                     |             where "id" = $1          |
-      |                                     |           count: 2                   |
+      | request                             | response                              |
+      | method: GET                         | code: 200                             |+
+      | path: /audit-probe/transaction-read | headers:                              |
+      |                                     |   x-query-audit:                      |
+      |                                     |     - request:                        |
+      |                                     |         maxConnections: 1             |
+      |                                     |     - stmt: >-                        |
+      |                                     |         select "directus_users"."id", |
+      |                                     |         "directus_users"."role"       |
+      |                                     |         from "directus_users"         |
+      |                                     |         where                         |
+      |                                     |         "directus_users"."token" = $1 |
+      |                                     |         and "status" = $2 limit $3    |
+      |                                     |     - transaction: commit             |
+      |                                     |       statements:                     |
+      |                                     |       - stmt: >-                      |
+      |                                     |           select "id"                 |
+      |                                     |           from "directus_settings"    |
+      |                                     |           where "id" = $1             |
+      |                                     |         count: 2                      |
+
+  Scenario: an update matching no row reports it changed none
+    Then these requests get these responses:
+      | request                           | response                             |
+      | method: GET                       | code: 200                            |+
+      | path: /audit-probe/update-nothing | headers:                             |
+      | headers:                          |   x-query-audit:                     |
+      |   x-query-audit: counts           |     - request:                       |
+      |                                   |         maxConnections: 1            |
+      |                                   |     - stmt: select directus_users... |
+      |                                   |     - stmt: update audit_articles... |
+      |                                   |       rows: 0                        |
+
+  Scenario: a failed statement reports its code, its transaction rolled back
+    Then on postgres these requests get these responses:
+      | request                             | response                               |
+      | method: GET                         | code: 500                              |+
+      | path: /audit-probe/duplicate-insert | headers:                               |
+      | headers:                            |   x-query-audit:                       |
+      |   x-query-audit: counts             |     - request:                         |
+      |                                     |         maxConnections: 1              |
+      |                                     |     - stmt: select directus_users...   |
+      |                                     |     - transaction: rollback            |
+      |                                     |       statements:                      |
+      |                                     |       - stmt: insert audit_articles... |
+      |                                     |         error: '23505'                 |
 
   Scenario: an admin asking bindings gets each run's bound values
     Then on postgres these requests get these responses:
@@ -78,26 +107,29 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                             |+
       | path: /audit-probe/transaction-read | headers:                              |
       | headers:                            |   x-query-audit:                      |
-      |   x-query-audit: bindings           |     - ? >-                            |
+      |   x-query-audit: bindings           |     - request:                        |
+      |                                     |         maxConnections: 1             |
+      |                                     |     - stmt: >-                        |
       |                                     |         select "directus_users"."id", |
       |                                     |         "directus_users"."role"       |
       |                                     |         from "directus_users"         |
       |                                     |         where                         |
       |                                     |         "directus_users"."token" = $1 |
       |                                     |         and "status" = $2 limit $3    |
-      |                                     |       : - AdminToken                  |
-      |                                     |         - active                      |
-      |                                     |         - 1                           |
-      |                                     |     - outcome: commit                 |
+      |                                     |       bindings:                       |
+      |                                     |         - - AdminToken                |
+      |                                     |           - active                    |
+      |                                     |           - 1                         |
+      |                                     |     - transaction: commit             |
       |                                     |       statements:                     |
-      |                                     |         - sql: >-                     |
-      |                                     |             select "id"               |
-      |                                     |             from "directus_settings"  |
-      |                                     |             where "id" = $1           |
-      |                                     |           count: 2                    |
-      |                                     |           bindings:                   |
-      |                                     |             - - 1                     |
-      |                                     |             - - 1                     |
+      |                                     |       - stmt: >-                      |
+      |                                     |           select "id"                 |
+      |                                     |           from "directus_settings"    |
+      |                                     |           where "id" = $1             |
+      |                                     |         count: 2                      |
+      |                                     |         bindings:                     |
+      |                                     |           - - 1                       |
+      |                                     |           - - 1                       |
 
   Scenario: an admin asking full gets every run in order, each with its values
     Then on postgres these requests get these responses:
@@ -105,31 +137,33 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                             |+
       | path: /audit-probe/transaction-read | headers:                              |
       | headers:                            |   x-query-audit:                      |
-      |   x-query-audit: full               |     - ? >-                            |
+      |   x-query-audit: full               |     - request:                        |
+      |                                     |         maxConnections: 1             |
+      |                                     |     - stmt: >-                        |
       |                                     |         select "directus_users"."id", |
       |                                     |         "directus_users"."role"       |
       |                                     |         from "directus_users"         |
       |                                     |         where                         |
       |                                     |         "directus_users"."token" = $1 |
       |                                     |         and "status" = $2 limit $3    |
-      |                                     |       : bindings:                     |
-      |                                     |           - AdminToken                |
-      |                                     |           - active                    |
+      |                                     |       bindings:                       |
+      |                                     |         - AdminToken                  |
+      |                                     |         - active                      |
+      |                                     |         - 1                           |
+      |                                     |     - transaction: commit             |
+      |                                     |       statements:                     |
+      |                                     |       - stmt: >-                      |
+      |                                     |           select "id"                 |
+      |                                     |           from "directus_settings"    |
+      |                                     |           where "id" = $1             |
+      |                                     |         bindings:                     |
       |                                     |           - 1                         |
-      |                                     |     - outcome: commit                 |
-      |                                     |       runs:                           |
-      |                                     |         - sql: >-                     |
-      |                                     |             select "id"               |
-      |                                     |             from "directus_settings"  |
-      |                                     |             where "id" = $1           |
-      |                                     |           bindings:                   |
-      |                                     |             - 1                       |
-      |                                     |         - sql: >-                     |
-      |                                     |             select "id"               |
-      |                                     |             from "directus_settings"  |
-      |                                     |             where "id" = $1           |
-      |                                     |           bindings:                   |
-      |                                     |             - 1                       |
+      |                                     |       - stmt: >-                      |
+      |                                     |           select "id"                 |
+      |                                     |           from "directus_settings"    |
+      |                                     |           where "id" = $1             |
+      |                                     |         bindings:                     |
+      |                                     |           - 1                         |
 
   Scenario: anyone else asking full gets the statements alone
     Then these requests get these responses:
@@ -140,7 +174,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |   authorization: >-                 |           |
       |     Bearer <app access token>       |           |
       |   x-query-audit: full               |           |
-    And the header starts with the token's lookup as its SQL alone
+    And the token's lookup reports its SQL alone
 
   Scenario: a level outside the list is refused
     Then these requests get these responses:
@@ -166,32 +200,36 @@ Feature: A request reports the SQL it ran, one entry per transaction
 
   Scenario: a savepoint's rollback leaves its transaction open
     Then these requests get these responses:
-      | request                               | response                    |
-      | method: GET                           | code: 200                   |+
-      | path: /audit-probe/savepoint-rollback | headers:                    |
-      | headers:                              |   x-query-audit:            |
-      |   x-query-audit: counts               |     - select directus_users |
-      |                                       |     - outcome: rollback     |
-      |                                       |       tables:               |
-      |                                       |         directus_settings:  |
-      |                                       |           select: 3         |
+      | request                           | response                                  |
+      | method: GET                       | code: 200                                 |+
+      | path: /audit-probe/savepoint-undo | headers:                                  |
+      | headers:                          |   x-query-audit:                          |
+      |   x-query-audit: counts           |     - request:                            |
+      |                                   |         maxConnections: 1                 |
+      |                                   |     - stmt: select directus_users...      |
+      |                                   |     - transaction: rollback               |
+      |                                   |       statements:                         |
+      |                                   |       - stmt: select directus_settings... |
+      |                                   |         count: 3                          |
 
   Scenario: SQL a header cannot carry raw is escaped
     Then on postgres these requests get these responses:
-      | request                         | response                              |
-      | method: GET                     | code: 200                             |+
-      | path: /audit-probe/accented-sql | headers:                              |
-      |                                 |   x-query-audit:                      |
-      |                                 |     - >-                              |
-      |                                 |       select "directus_users"."id",   |
-      |                                 |       "directus_users"."role"         |
-      |                                 |       from "directus_users"           |
-      |                                 |       where                           |
-      |                                 |       "directus_users"."token" = $1   |
-      |                                 |       and "status" = $2 limit $3      |
-      |                                 |     - \|-                             |
-      |                                 |       select 'café' as accented_value |
-      |                                 |       from directus_settings          |
+      | request                         | response                                |
+      | method: GET                     | code: 200                               |+
+      | path: /audit-probe/accented-sql | headers:                                |
+      |                                 |   x-query-audit:                        |
+      |                                 |     - request:                          |
+      |                                 |         maxConnections: 1               |
+      |                                 |     - stmt: >-                          |
+      |                                 |         select "directus_users"."id",   |
+      |                                 |         "directus_users"."role"         |
+      |                                 |         from "directus_users"           |
+      |                                 |         where                           |
+      |                                 |         "directus_users"."token" = $1   |
+      |                                 |         and "status" = $2 limit $3      |
+      |                                 |     - stmt: \|-                         |
+      |                                 |         select 'café' as accented_value |
+      |                                 |         from directus_settings          |
     And the query audit header holds printable ASCII alone
 
   Scenario: a bound BigInt reads as its digits
@@ -200,39 +238,42 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                       | code: 200                             |+
       | path: /audit-probe/bigint-binding | headers:                              |
       | headers:                          |   x-query-audit:                      |
-      |   x-query-audit: bindings         |     - ? >-                            |
+      |   x-query-audit: bindings         |     - request:                        |
+      |                                   |         maxConnections: 1             |
+      |                                   |     - stmt: >-                        |
       |                                   |         select "directus_users"."id", |
       |                                   |         "directus_users"."role"       |
       |                                   |         from "directus_users"         |
       |                                   |         where                         |
       |                                   |         "directus_users"."token" = $1 |
       |                                   |         and "status" = $2 limit $3    |
-      |                                   |       : - AdminToken                  |
-      |                                   |         - active                      |
-      |                                   |         - 1                           |
-      |                                   |     - ? >-                            |
+      |                                   |     - stmt: >-                        |
       |                                   |         select $1::bigint             |
       |                                   |         as big_value                  |
-      |                                   |       : - "9007199254740993"          |
+      |                                   |       bindings:                       |
+      |                                   |         - - "9007199254740993"        |
 
   Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted
-    Given an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 240
+    Given an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 280
     Then on postgres these requests get these responses:
       | request                             | response                             |
       | method: GET                         | code: 200                            |+
       | path: /audit-probe/transaction-read | headers:                             |
       | headers:                            |   x-query-audit:                     |
-      |   x-query-audit: bindings           |     - select directus_users          |
-      |                                     |     - outcome: commit                |
-      |                                     |       tables:                        |
-      |                                     |         directus_settings:           |
-      |                                     |           select: 2                  |
+      |   x-query-audit: bindings           |     - request:                       |
+      |                                     |         maxConnections: 1            |
+      |                                     |     - stmt: select directus_users... |
+      |                                     |       rows: 1                        |
+      |                                     |       bindingsDropped: 1             |
+      |                                     |       statementsCut: 1               |
+      |                                     |     - transaction: commit            |
       |                                     |       statements:                    |
-      |                                     |         - sql: >-                    |
-      |                                     |             select "id"              |
-      |                                     |             from "directus_settings" |
-      |                                     |             where "id" = $1          |
-      |                                     |           count: 2                   |
+      |                                     |       - stmt: >-                     |
+      |                                     |           select "id"                |
+      |                                     |           from "directus_settings"   |
+      |                                     |           where "id" = $1            |
+      |                                     |         count: 2                     |
+      |                                     |         rows: 2                      |
       |                                     |       bindingsDropped: 2             |
 
   Scenario: with no detail left to drop, the last entries are dropped and counted
@@ -263,11 +304,13 @@ Feature: A request reports the SQL it ran, one entry per transaction
 
   Scenario: an error response reports the statements it ran
     Then these requests get these responses:
-      | request                    | response                    |
-      | method: GET                | code: 403                   |+
-      | path: /items/audit_missing | headers:                    |
-      | headers:                   |   x-query-audit:            |
-      |   x-query-audit: counts    |     - select directus_users |
+      | request                    | response                             |
+      | method: GET                | code: 403                            |+
+      | path: /items/audit_missing | headers:                             |
+      | headers:                   |   x-query-audit:                     |
+      |   x-query-audit: counts    |     - request:                       |
+      |                            |         maxConnections: 1            |
+      |                            |     - stmt: select directus_users... |
 
   Scenario: no header without QUERY_AUDIT_HEADER
     Given the instance without QUERY_AUDIT_HEADER

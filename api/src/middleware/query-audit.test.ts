@@ -46,7 +46,8 @@ test('writes the audit of the request when its headers flush', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"stmt":"select * from \\"articles\\"","ms":0}]',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
+			+ '{"stmt":"select * from \\"articles\\"","ms":0,"wait":0}]',
 		],
 	]);
 
@@ -84,7 +85,11 @@ test('takes the level the request sends over QUERY_AUDIT_LEVEL', () => {
 	expect(req.get).toHaveBeenCalledWith('X-Query-Audit');
 
 	expect(setHeader.mock.calls).toEqual([
-		['X-Query-Audit', '[{"stmt":"select articles...","ms":0}]'],
+		[
+			'X-Query-Audit',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
+			+ '{"stmt":"select articles...","ms":0,"wait":0}]',
+		],
 	]);
 });
 
@@ -122,8 +127,9 @@ test('reports the bound values to an admin asking bindings', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"stmt":"select * from \\"articles\\" where \\"id\\" = ?",'
-			+ '"ms":0,"bindings":[[7]]}]',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
+			+ '{"stmt":"select * from \\"articles\\" where \\"id\\" = ?",'
+			+ '"ms":0,"wait":0,"bindings":[[7]]}]',
 		],
 	]);
 });
@@ -164,10 +170,13 @@ test('lists every run in order to an admin asking full', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"transaction":"commit","ms":0,"statements":['
-			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","ms":0,"bindings":[7]},'
-			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":0,"bindings":[8]},'
-			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","ms":0,"bindings":[7]}'
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
+			+ '{"transaction":"commit","ms":0,"wait":0,"statements":['
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"ms":0,"wait":0,"bindings":[7]},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":0,"wait":0,"bindings":[8]},'
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"ms":0,"wait":0,"bindings":[7]}'
 			+ ']}]',
 		],
 	]);
@@ -209,7 +218,9 @@ test.each(['bindings', 'full'])(
 		expect(setHeader.mock.calls).toEqual([
 			[
 				'X-Query-Audit',
-				'[{"stmt":"select * from \\"articles\\" where \\"id\\" = ?","ms":0}]',
+				'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
+				+ '{"stmt":"select * from \\"articles\\" where \\"id\\" = ?",'
+				+ '"ms":0,"wait":0}]',
 			],
 		]);
 	},
@@ -240,7 +251,7 @@ test('refuses a level outside the list', () => {
 	expect(res.writeHead).toBe(writeHead);
 });
 
-test('writes an empty list for a request that ran no statement', () => {
+test('writes the request entry alone for a request that ran no statement', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'counts',
@@ -260,7 +271,12 @@ test('writes an empty list for a request that ran no statement', () => {
 
 	res.writeHead(200);
 
-	expect(setHeader.mock.calls).toEqual([['X-Query-Audit', '[]']]);
+	expect(setHeader.mock.calls).toEqual([
+		[
+			'X-Query-Audit',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":0}}]',
+		],
+	]);
 });
 
 test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
@@ -291,7 +307,8 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"stmt":"select * from \\"articles\\"","ms":0}]',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
+			+ '{"stmt":"select * from \\"articles\\"","ms":0,"wait":0}]',
 		],
 	]);
 });
@@ -327,7 +344,8 @@ test('leaves out every duration when QUERY_AUDIT_TIMINGS is false', () => {
 	expect(setHeader.mock.calls).toEqual([
 		[
 			'X-Query-Audit',
-			'[{"transaction":"commit","statements":'
+			'[{"request":{"maxConnections":1}},'
+			+ '{"transaction":"commit","statements":'
 			+ '[{"stmt":"select * from \\"articles\\""}]}]',
 		],
 	]);
@@ -419,6 +437,7 @@ test('records no bound value once anyone else authenticated', () => {
 		{
 			startedAt: 0,
 			ms: 0,
+			wait: 0,
 			outsideTransaction: true,
 			statementAudits: new Map([
 				[
@@ -428,6 +447,7 @@ test('records no bound value once anyone else authenticated', () => {
 						cutStmt: 'select articles...',
 						count: 1,
 						ms: 0,
+						wait: 0,
 						bindings: [],
 					},
 				],
@@ -437,6 +457,7 @@ test('records no bound value once anyone else authenticated', () => {
 					stmt: 'select * from "articles" where "id" = ?',
 					cutStmt: 'select articles...',
 					ms: 0,
+					wait: 0,
 					bindings: [],
 				},
 			],

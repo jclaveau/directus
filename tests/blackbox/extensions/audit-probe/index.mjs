@@ -65,7 +65,7 @@ export default (router, { database }) => {
 
 	router.get('/pool-read', readTwiceInTransaction(() => database));
 	router.get('/transaction-read', readTwiceInTransaction((trx) => trx));
-	router.get('/savepoint-rollback', adminOnly(rollBackPastSavepoint));
+	router.get('/savepoint-undo', adminOnly(rollBackPastSavepoint));
 
 	router.get('/accented-sql', adminOnly(() => {
 		return database.raw('select \'café\' as accented_value\nfrom directus_settings');
@@ -77,6 +77,23 @@ export default (router, { database }) => {
 		for (let readNumber = 0; readNumber < 400; readNumber++) {
 			await readSettings(database);
 		}
+	}));
+
+	router.get('/update-nothing', adminOnly(() => {
+		return database('audit_articles')
+			.update({ title: 'unchanged' })
+			.where('id', -1);
+	}));
+
+	// Both rows take one id, so the insert breaks the primary key and its
+	// transaction rolls back.
+	router.get('/duplicate-insert', adminOnly(() => {
+		return database.transaction((trx) => {
+			return trx('audit_articles').insert([
+				{ id: 1_000_001, title: 'a' },
+				{ id: 1_000_001, title: 'b' },
+			]);
+		});
 	}));
 
 	// Past Number.MAX_SAFE_INTEGER, `search` binds a number as a BigInt.

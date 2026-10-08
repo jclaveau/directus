@@ -21,6 +21,7 @@ describe.each(vendors)('%s', (vendor) => {
 	const env = cloneDeep(config.envs);
 	env[vendor]['QUERY_AUDIT_HEADER'] = queryAuditHeader;
 	env[vendor]['QUERY_AUDIT_LEVEL'] = 'statements';
+	env[vendor]['QUERY_AUDIT_TIMINGS'] = 'false';
 	env[vendor]['CORS_ENABLED'] = 'true';
 	env[vendor]['CORS_ORIGIN'] = 'true';
 
@@ -119,8 +120,7 @@ describe.each(vendors)('%s', (vendor) => {
 		headers?: Record<string, string>;
 	};
 
-	// A statement outside a transaction is a string, or a one-key object.
-	type AuditEntry = string | Record<string, unknown>;
+	type AuditEntry = Record<string, unknown>;
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(instanceUrl: string, requestCell: string) {
@@ -178,15 +178,6 @@ describe.each(vendors)('%s', (vendor) => {
 		return responses;
 	}
 
-	// Durations vary from run to run: two runs of a request compare the rest.
-	function entriesWithoutDurations(response: Response) {
-		return JSON.stringify(auditOf(response), (key, value) => {
-			return key === 'ms'
-				? undefined
-				: value;
-		});
-	}
-
 	defineFeature(feature, (scenario) => {
 		type ExchangeTable = { request: string; response: string }[];
 
@@ -206,7 +197,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			'a pool read inside a transaction is an entry of its own',
+			'a pool read inside a transaction holds a second connection',
 			({ then }) => {
 				// sqlite's pool holds one connection: a pool read inside an open
 				// transaction would wait on it forever.
@@ -222,7 +213,7 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		scenario(
-			'reads through the transaction share its entry',
+			'reads through the transaction share its connection and its entry',
 			({ then, and }) => {
 				then(
 					'these requests get these responses:',
@@ -233,6 +224,33 @@ describe.each(vendors)('%s', (vendor) => {
 
 				// Quoting differs by dialect.
 				and(
+					'on postgres these requests get these responses:',
+					async (table: ExchangeTable) => {
+						if (vendor === 'postgres') {
+							await expectExchanges(getUrl(vendor, env), table);
+						}
+					},
+				);
+			},
+		);
+
+		scenario(
+			'an update matching no row reports it changed none',
+			({ then }) => {
+				then(
+					'these requests get these responses:',
+					async (table: ExchangeTable) => {
+						await expectExchanges(getUrl(vendor, env), table);
+					},
+				);
+			},
+		);
+
+		// The code is the driver's own: SQLSTATE on postgres.
+		scenario(
+			'a failed statement reports its code, its transaction rolled back',
+			({ then }) => {
+				then(
 					'on postgres these requests get these responses:',
 					async (table: ExchangeTable) => {
 						if (vendor === 'postgres') {
@@ -286,9 +304,10 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				and(
-					"the header starts with the token's lookup as its SQL alone",
+					"the token's lookup reports its SQL alone",
 					() => {
-						expect(auditOf(responses[0]!)![0]).toEqual(expect.any(String));
+						expect(auditOf(responses[0]!)![1])
+							.toEqual({ stmt: expect.any(String), rows: 1 });
 
 						expect(responses[0]!.headers[queryAuditHeader])
 							.not.toContain('"bindings"');
@@ -371,12 +390,12 @@ describe.each(vendors)('%s', (vendor) => {
 				const cappedEnv = cloneDeep(env);
 
 				given(
-					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 240',
+					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 280',
 					async () => {
 						const port = await getPort();
 
 						cappedEnv[vendor].PORT = String(port);
-						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '240';
+						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '280';
 
 						cappedInstance = spawn('node', [paths.cli, 'start'], {
 							cwd: paths.cwd,
@@ -511,8 +530,8 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then('each reports the same entries both times', () => {
-					expect(responsesAlongside.map(entriesWithoutDurations))
-						.toEqual(responsesAlone.map(entriesWithoutDurations));
+					expect(responsesAlongside.map(auditOf))
+						.toEqual(responsesAlone.map(auditOf));
 				});
 			},
 		);

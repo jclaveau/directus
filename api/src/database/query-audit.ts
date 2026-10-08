@@ -16,6 +16,9 @@ type StatementAudit = {
 	cutStmt: string;
 	count: number;
 	ms: number;
+	wait: number;
+	rows?: number;
+	error?: string;
 	bindings: unknown[][];
 };
 
@@ -23,12 +26,20 @@ type RunAudit = {
 	stmt: string;
 	cutStmt: string;
 	ms?: number;
+	wait: number;
+	rows?: number;
+	error?: string;
 	bindings: unknown[];
 };
+
+// What the driver answered: the rows it returned or changed, or the code of
+// the error it failed with.
+type StatementOutcome = { rows?: number | undefined; error?: string };
 
 type TransactionAudit = {
 	startedAt: number;
 	ms?: number;
+	wait: number;
 	outcome?: TransactionOutcome;
 	outsideTransaction: boolean;
 	statementAudits: Map<string, StatementAudit>;
@@ -40,6 +51,12 @@ export type QueryAudit = {
 	recordsRuns: boolean;
 	recordsBindings: () => boolean;
 	closed: boolean;
+	startedAt: number;
+	dbMs: number;
+	waitMs: number;
+	connectionWaits: Map<string, number>;
+	connectionHolds: Map<string, number>;
+	maxConnections: number;
 	transactionAudits: TransactionAudit[];
 	openTransactionAudits: Map<string, TransactionAudit>;
 };
@@ -65,6 +82,9 @@ type StatementItem = {
 	cutStmt: string;
 	count: number;
 	ms: number | undefined;
+	wait: number;
+	rows?: number | undefined;
+	error?: string | undefined;
 	bindings?: unknown[][];
 };
 
@@ -75,6 +95,7 @@ type StatementItem = {
 type AuditEntry = {
 	transaction?: TransactionOutcome | 'open';
 	ms: number | undefined;
+	wait: number;
 	runsInOrder: boolean;
 	statementItems: StatementItem[];
 	runsGrouped?: number;
@@ -84,14 +105,28 @@ type AuditEntry = {
 
 type DriverConnection = { __knexUid: string };
 
+type DriverClient = { dialect?: string };
+
 type DriverQuery = (
-	this: unknown,
+	this: DriverClient,
 	connection: DriverConnection,
 	queryObject: DriverQueryObject,
 	...streamArguments: unknown[]
 ) => Promise<unknown>;
 
-type DriverQueryObject = { sql: string; bindings?: unknown[] };
+type AcquireConnection = (
+	this: unknown,
+	...acquireArguments: unknown[]
+) => Promise<DriverConnection>;
+
+// `response` and `context` are what the dialect's `_query` stored once the
+// driver answered.
+type DriverQueryObject = {
+	sql: string;
+	bindings?: unknown[];
+	response?: unknown;
+	context?: unknown;
+};
 
 export const queryAuditStore = new AsyncLocalStorage<QueryAudit>();
 
@@ -135,6 +170,12 @@ export function emptyQueryAudit(
 		recordsRuns: level === 'full',
 		recordsBindings: () => levelCarriesBindings(level) && bindingsAllowed(),
 		closed: false,
+		startedAt: performance.now(),
+		dbMs: 0,
+		waitMs: 0,
+		connectionWaits: new Map(),
+		connectionHolds: new Map(),
+		maxConnections: 0,
 		transactionAudits: [],
 		openTransactionAudits: new Map(),
 	};
@@ -165,6 +206,37 @@ export function auditQueriesOf(database: Knex): void {
 			clientPrototype[methodName] = auditedDriverMethod(runDriverMethod);
 		}
 	}
+
+	// A transaction's client answers with its own connection, so a statement
+	// inside one never waits: the transaction's wait is its `BEGIN`'s.
+	const acquireConnection: AcquireConnection | undefined
+		= clientPrototype.acquireConnection;
+
+	if (acquireConnection) {
+		clientPrototype.acquireConnection = auditedAcquireConnection(
+			acquireConnection,
+		);
+	}
+}
+
+/**
+ * Record how long the pool took to hand `connectionId` out, `undefined` when
+ * it handed none; the next statement on that connection reports it.
+ */
+export function auditConnectionWait(
+	audit: QueryAudit,
+	connectionId: string | undefined,
+	waitMs: number,
+): void {
+	if (audit.closed) {
+		return;
+	}
+
+	audit.waitMs += waitMs;
+
+	if (connectionId !== undefined) {
+		audit.connectionWaits.set(connectionId, waitMs);
+	}
 }
 
 /**
@@ -177,8 +249,39 @@ export function closeQueryAudit(audit: QueryAudit): void {
 	audit.openTransactionAudits.clear();
 }
 
+function auditedAcquireConnection(
+	acquireConnection: AcquireConnection,
+): AcquireConnection {
+	return function (this: unknown, ...acquireArguments) {
+		const audit = queryAuditStore.getStore();
+
+		if (!audit) {
+			return acquireConnection.apply(this, acquireArguments);
+		}
+
+		const startedAt = performance.now();
+
+		return acquireConnection.apply(this, acquireArguments).then(
+			(connection) => {
+				auditConnectionWait(
+					audit,
+					connection.__knexUid,
+					performance.now() - startedAt,
+				);
+
+				return connection;
+			},
+			(acquireError: unknown) => {
+				auditConnectionWait(audit, undefined, performance.now() - startedAt);
+
+				throw acquireError;
+			},
+		);
+	};
+}
+
 function auditedDriverMethod(runDriverMethod: DriverQuery): DriverQuery {
-	return function (this: unknown, connection, queryObject, ...streamArguments) {
+	return function (this, connection, queryObject, ...streamArguments) {
 		const audit = queryAuditStore.getStore();
 
 		if (!audit) {
@@ -199,8 +302,62 @@ function auditedDriverMethod(runDriverMethod: DriverQuery): DriverQuery {
 
 		return runDriverMethod
 			.call(this, connection, queryObject, ...streamArguments)
-			.finally(finishStatement);
+			.then(
+				(driverResult) => {
+					finishStatement({ rows: rowsOfQuery(this.dialect, queryObject) });
+
+					return driverResult;
+				},
+				(driverError: unknown) => {
+					finishStatement({ error: errorCodeOf(driverError) });
+
+					throw driverError;
+				},
+			);
 	};
+}
+
+/**
+ * The rows a statement returned or changed, as each dialect's `_query` stores
+ * them; `undefined` when the driver gives no count.
+ */
+function rowsOfQuery(
+	dialectName: string | undefined,
+	queryObject: DriverQueryObject,
+): number | undefined {
+	const { response, context } = queryObject;
+	let rowCount: unknown;
+
+	if (dialectName === 'mysql' || dialectName === 'mysql2') {
+		const [mysqlRows] = Array.isArray(response)
+			? response
+			: [];
+
+		rowCount = Array.isArray(mysqlRows)
+			? mysqlRows.length
+			: (mysqlRows as { affectedRows?: unknown } | undefined)?.affectedRows;
+	}
+	else if (dialectName === 'sqlite3') {
+		rowCount = Array.isArray(response)
+			? response.length
+			: (context as { changes?: unknown } | undefined)?.changes;
+	}
+	else {
+		rowCount = (response as { rowCount?: unknown } | undefined)?.rowCount;
+	}
+
+	return typeof rowCount === 'number'
+		? rowCount
+		: undefined;
+}
+
+// pg's SQLSTATE, the driver's code string on the others.
+function errorCodeOf(driverError: unknown): string {
+	const errorCode = (driverError as { code?: unknown } | undefined)?.code;
+
+	return typeof errorCode === 'string' || typeof errorCode === 'number'
+		? String(errorCode)
+		: 'unknown';
 }
 
 /**
@@ -212,20 +369,26 @@ export function auditStatementStart(
 	sql: string,
 	connectionId: string,
 	bindings: unknown[] = [],
-): () => void {
+): (statementOutcome?: StatementOutcome) => void {
 	if (audit.closed) {
 		return () => {};
 	}
 
 	const startedAt = performance.now();
 	const keyword = leadingKeyword(sql);
+	const waitMs = audit.connectionWaits.get(connectionId) ?? 0;
+
+	audit.connectionWaits.delete(connectionId);
+	holdConnection(audit, connectionId);
 
 	if (keyword === 'begin' || keyword === 'start') {
 		const transactionAudit = newTransactionAudit(audit, startedAt, false);
 
+		transactionAudit.wait = waitMs;
 		audit.openTransactionAudits.set(connectionId, transactionAudit);
+		holdConnection(audit, connectionId);
 
-		return () => {};
+		return () => releaseConnection(audit, connectionId);
 	}
 
 	const openTransactionAudit = audit.openTransactionAudits.get(connectionId);
@@ -235,7 +398,7 @@ export function auditStatementStart(
 			|| (keyword === 'rollback' && !/^\s*rollback\s+to\b/i.test(sql));
 
 		if (!endsTransaction || !openTransactionAudit) {
-			return () => {};
+			return () => releaseConnection(audit, connectionId);
 		}
 
 		audit.openTransactionAudits.delete(connectionId);
@@ -247,6 +410,9 @@ export function auditStatementStart(
 		return () => {
 			openTransactionAudit.ms = performance.now()
 				- openTransactionAudit.startedAt;
+
+			releaseConnection(audit, connectionId);
+			releaseConnection(audit, connectionId);
 		};
 	}
 
@@ -264,11 +430,12 @@ export function auditStatementStart(
 		?? newTransactionAudit(audit, startedAt, true);
 
 	const statementAudit = transactionAudit.statementAudits.get(stmt)
-		?? { stmt, cutStmt, count: 0, ms: 0, bindings: [] };
+		?? { stmt, cutStmt, count: 0, ms: 0, wait: 0, bindings: [] };
 
-	const runAudit: RunAudit = { stmt, cutStmt, bindings: [] };
+	const runAudit: RunAudit = { stmt, cutStmt, wait: waitMs, bindings: [] };
 
 	statementAudit.count++;
+	statementAudit.wait += waitMs;
 
 	if (audit.recordsBindings()) {
 		statementAudit.bindings.push(bindings);
@@ -281,16 +448,49 @@ export function auditStatementStart(
 		transactionAudit.runAudits.push(runAudit);
 	}
 
-	return () => {
+	return ({ rows, error } = {}) => {
 		const elapsedMs = performance.now() - startedAt;
 
 		statementAudit.ms += elapsedMs;
 		runAudit.ms = elapsedMs;
+		audit.dbMs += elapsedMs;
+
+		if (rows !== undefined) {
+			statementAudit.rows = (statementAudit.rows ?? 0) + rows;
+			runAudit.rows = rows;
+		}
+
+		if (error !== undefined) {
+			statementAudit.error ??= error;
+			runAudit.error = error;
+		}
 
 		if (!openTransactionAudit) {
 			transactionAudit.ms = elapsedMs;
 		}
+
+		releaseConnection(audit, connectionId);
 	};
+}
+
+// A connection is held while a statement runs on it, and from its `BEGIN`
+// until its `COMMIT` / `ROLLBACK` returns.
+function holdConnection(audit: QueryAudit, connectionId: string): void {
+	const { connectionHolds } = audit;
+
+	connectionHolds.set(connectionId, (connectionHolds.get(connectionId) ?? 0) + 1);
+	audit.maxConnections = Math.max(audit.maxConnections, connectionHolds.size);
+}
+
+function releaseConnection(audit: QueryAudit, connectionId: string): void {
+	const holdCount = (audit.connectionHolds.get(connectionId) ?? 0) - 1;
+
+	if (holdCount > 0) {
+		audit.connectionHolds.set(connectionId, holdCount);
+	}
+	else {
+		audit.connectionHolds.delete(connectionId);
+	}
 }
 
 /**
@@ -317,17 +517,27 @@ export function formatQueryAudit(
 		return entryValueOf(auditEntry, timings);
 	};
 
+	const requestValue = requestValueOf(audit, timings);
+
+	const headerOf = (keptValues: unknown[]) => {
+		return asciiJson([requestValue, ...keptValues]);
+	};
+
 	const entrySizes = auditEntries.map((auditEntry) => {
 		return asciiJson(jsonValueOf(auditEntry)).length;
 	});
+
+	// The size `request` and its comma leave the entries, which `request`
+	// stands before whatever is cut.
+	const entriesMaxSize = maxSize - asciiJson(requestValue).length - 1;
 
 	// The entries, the commas between them and the brackets around them.
 	let headerSize = entrySizes.reduce((total, entrySize) => total + entrySize, 0)
 		+ Math.max(entrySizes.length - 1, 0)
 		+ 2;
 
-	if (maxSize <= 0 || headerSize <= maxSize) {
-		return asciiJson(auditEntries.map(jsonValueOf));
+	if (maxSize <= 0 || headerSize <= entriesMaxSize) {
+		return headerOf(auditEntries.map(jsonValueOf));
 	}
 
 	for (const { detailSizeOf, dropDetail } of DROPPED_DETAILS) {
@@ -337,8 +547,8 @@ export function formatQueryAudit(
 		);
 
 		for (const entryIndex of largestFirst) {
-			if (headerSize <= maxSize) {
-				return asciiJson(auditEntries.map(jsonValueOf));
+			if (headerSize <= entriesMaxSize) {
+				return headerOf(auditEntries.map(jsonValueOf));
 			}
 
 			dropDetail(auditEntries[entryIndex]!);
@@ -350,16 +560,35 @@ export function formatQueryAudit(
 		}
 	}
 
-	if (headerSize <= maxSize) {
-		return asciiJson(auditEntries.map(jsonValueOf));
+	if (headerSize <= entriesMaxSize) {
+		return headerOf(auditEntries.map(jsonValueOf));
 	}
 
-	const keptCount = keptEntryCount(entrySizes, maxSize);
+	const keptCount = keptEntryCount(entrySizes, entriesMaxSize);
 
-	return asciiJson([
+	return headerOf([
 		...auditEntries.slice(0, keptCount).map(jsonValueOf),
 		{ entriesDropped: auditEntries.length - keptCount },
 	]);
+}
+
+/**
+ * `ms` from the audit's start until the headers flush, `db` the statements'
+ * `ms`, `wait` the pool's, and `maxConnections` the most the request held at
+ * once.
+ */
+function requestValueOf(audit: QueryAudit, timings: boolean): unknown {
+	const requestTimings = timings
+		? {
+			ms: Math.round(performance.now() - audit.startedAt),
+			db: Math.round(audit.dbMs),
+			wait: Math.round(audit.waitMs),
+		}
+		: {};
+
+	return {
+		request: { ...requestTimings, maxConnections: audit.maxConnections },
+	};
 }
 
 function newTransactionAudit(
@@ -369,6 +598,7 @@ function newTransactionAudit(
 ): TransactionAudit {
 	const transactionAudit: TransactionAudit = {
 		startedAt,
+		wait: 0,
 		outsideTransaction,
 		statementAudits: new Map(),
 		runAudits: [],
@@ -392,6 +622,9 @@ function auditEntryOf(
 				cutStmt: runAudit.cutStmt,
 				count: 1,
 				ms: runAudit.ms,
+				wait: runAudit.wait,
+				rows: runAudit.rows,
+				error: runAudit.error,
 				bindings: [runAudit.bindings],
 			};
 		})
@@ -413,6 +646,7 @@ function auditEntryOf(
 
 	const auditEntry: AuditEntry = {
 		ms: transactionAudit.ms,
+		wait: transactionAudit.wait,
 		runsInOrder: level === 'full',
 		statementItems: levelItems,
 	};
@@ -444,6 +678,7 @@ function entryValueOf(auditEntry: AuditEntry, timings: boolean): unknown {
 	return {
 		transaction: auditEntry.transaction,
 		...msValueOf(auditEntry.ms, timings),
+		...waitValueOf(auditEntry.wait, timings),
 		statements: statementValues,
 		...droppedDetails,
 	};
@@ -460,7 +695,19 @@ function statementValueOf(
 		statementValue['count'] = statementItem.count;
 	}
 
-	Object.assign(statementValue, msValueOf(statementItem.ms, timings));
+	Object.assign(
+		statementValue,
+		msValueOf(statementItem.ms, timings),
+		waitValueOf(statementItem.wait, timings),
+	);
+
+	if (statementItem.rows !== undefined) {
+		statementValue['rows'] = statementItem.rows;
+	}
+
+	if (statementItem.error !== undefined) {
+		statementValue['error'] = statementItem.error;
+	}
 
 	if (statementItem.bindings) {
 		statementValue['bindings'] = runsInOrder
@@ -477,9 +724,16 @@ function msValueOf(ms: number | undefined, timings: boolean) {
 		: {};
 }
 
+function waitValueOf(wait: number, timings: boolean) {
+	return timings
+		? { wait: Math.round(wait) }
+		: {};
+}
+
 /**
  * The items sharing a `stmt` as one, in first-seen order: their runs counted,
- * their `ms` summed, the bound values of each run kept.
+ * their `ms`, `wait` and `rows` summed, the first `error` and the bound values
+ * of each run kept.
  */
 function mergedStatementItems(
 	statementItems: StatementItem[],
@@ -497,6 +751,12 @@ function mergedStatementItems(
 
 		mergedItem.count += statementItem.count;
 		mergedItem.ms = (mergedItem.ms ?? 0) + (statementItem.ms ?? 0);
+		mergedItem.wait += statementItem.wait;
+		mergedItem.error ??= statementItem.error;
+
+		if (statementItem.rows !== undefined) {
+			mergedItem.rows = (mergedItem.rows ?? 0) + statementItem.rows;
+		}
 
 		if (mergedItem.bindings && statementItem.bindings) {
 			mergedItem.bindings = mergedItem.bindings.concat(statementItem.bindings);

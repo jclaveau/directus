@@ -3,6 +3,7 @@ import type { Knex } from 'knex';
 import { performance } from 'node:perf_hooks';
 import { afterEach, expect, test, vi } from 'vitest';
 import {
+	auditConnectionWait,
 	auditQueriesOf,
 	auditStatementStart,
 	closeQueryAudit,
@@ -66,18 +67,22 @@ test('audits a transaction: its statements, length and outcome', () => {
 		level: 'statements',
 		maxSize: 0,
 	}))).toEqual([
+		{ request: { ms: 14, db: 12, wait: 0, maxConnections: 1 } },
 		{
 			transaction: 'commit',
 			ms: 14,
+			wait: 0,
 			statements: [
 				{
 					stmt: 'select "id" from "articles" where "id" = ?',
 					count: 2,
 					ms: 5,
+					wait: 0,
 				},
 				{
 					stmt: 'insert into "articles" ("title") values (?)',
 					ms: 7,
+					wait: 0,
 				},
 			],
 		},
@@ -98,11 +103,12 @@ test('counts a statement outside a transaction as its kind and table', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"stmt":"select authors...","ms":0},'
-			+ '{"transaction":"rollback","ms":0,'
-			+ '"statements":[{"stmt":"update articles...","ms":0}]},'
-			+ '{"stmt":"select authors...","ms":0},'
-			+ '{"stmt":"set...","ms":0}]',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":2}},'
+			+ '{"stmt":"select authors...","ms":0,"wait":0},'
+			+ '{"transaction":"rollback","ms":0,"wait":0,'
+			+ '"statements":[{"stmt":"update articles...","ms":0,"wait":0}]},'
+			+ '{"stmt":"select authors...","ms":0,"wait":0},'
+			+ '{"stmt":"set...","ms":0,"wait":0}]',
 		);
 });
 
@@ -122,7 +128,7 @@ test('counts the statements of a transaction by kind and table', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":['
+		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
 		+ '{"stmt":"select a...","count":2},{"stmt":"insert b..."}]}]',
 	);
 });
@@ -140,7 +146,7 @@ test('reports a statement outside a transaction as its SQL', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"stmt":"select * from \\"authors\\""},'
+		'[{"request":{"maxConnections":1}},{"stmt":"select * from \\"authors\\""},'
 		+ '{"stmt":"SET search_path TO public"}]',
 	);
 });
@@ -156,26 +162,37 @@ test('pairs a statement outside a transaction with its bound values', () => {
 		level: 'bindings',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]}]');
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]}]',
+	);
 });
 
 test('gives a run outside a transaction its own values at the full level', () => {
-	vi.spyOn(performance, 'now')
-		.mockReturnValueOnce(0)
-		.mockReturnValueOnce(2);
+	let now = 0;
+	vi.spyOn(performance, 'now').mockImplementation(() => now);
 
 	const audit = emptyQueryAudit('full');
 
-	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+	const finishRead = auditStatementStart(
+		audit,
+		'select * from "a" where "id" = ?',
+		'a',
+		[1],
+	);
+
+	now = 2;
+	finishRead();
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
 		.toBe(
-			'[{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"ms":2,"bindings":[1]}]',
+			'[{"request":{"ms":2,"db":2,"wait":0,"maxConnections":1}},'
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"ms":2,"wait":0,"bindings":[1]}]',
 		);
 });
 
-test('cuts a statement outside a transaction to its kind and table past the size', () => {
+test('cuts a lone statement to its kind and table past the size', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const audit = emptyQueryAudit('full');
@@ -184,14 +201,18 @@ test('cuts a statement outside a transaction to its kind and table past the size
 		'a value long enough to matter',
 	])();
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 80, timings: false }))
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 113, timings: false }))
 		.toBe(
-			'[{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
+			'[{"request":{"maxConnections":1}},'
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 			+ '"bindingsDropped":1}]',
 		);
 
-	expect(formatQueryAudit(audit, { level: 'full', maxSize: 65, timings: false }))
-		.toBe('[{"stmt":"select a...","bindingsDropped":1,"statementsCut":1}]');
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 98, timings: false }))
+		.toBe(
+			'[{"request":{"maxConnections":1}},'
+			+ '{"stmt":"select a...","bindingsDropped":1,"statementsCut":1}]',
+		);
 });
 
 test('counts a statement of no other kind as other', () => {
@@ -211,7 +232,10 @@ test('counts a statement of no other kind as other', () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"stmt":"delete articles..."},{"stmt":"other kept..."}]');
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"delete articles..."},{"stmt":"other kept..."}]',
+	);
 });
 
 test('keeps two transactions open at once apart', () => {
@@ -227,10 +251,11 @@ test('keeps two transactions open at once apart', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"transaction":"open",'
-			+ '"statements":[{"stmt":"insert articles...","ms":0}]},'
-			+ '{"transaction":"commit","ms":0,'
-			+ '"statements":[{"stmt":"insert authors...","ms":0}]}]',
+			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":2}},'
+			+ '{"transaction":"open","wait":0,'
+			+ '"statements":[{"stmt":"insert articles...","ms":0,"wait":0}]},'
+			+ '{"transaction":"commit","ms":0,"wait":0,'
+			+ '"statements":[{"stmt":"insert authors...","ms":0,"wait":0}]}]',
 		);
 });
 
@@ -249,10 +274,11 @@ test('cuts the SQL of the largest entries first past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'statements',
-		maxSize: 180,
+		maxSize: 213,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":['
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"commit","statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"x\\" = ?"}]},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select b...","count":2}],'
 		+ '"statementsCut":2}]',
@@ -260,10 +286,11 @@ test('cuts the SQL of the largest entries first past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'statements',
-		maxSize: 175,
+		maxSize: 208,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":[{"stmt":"select a..."}],'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"commit","statements":[{"stmt":"select a..."}],'
 		+ '"statementsCut":1},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select b...","count":2}],'
 		+ '"statementsCut":2}]',
@@ -279,11 +306,14 @@ test('drops the last entries once no entry holds more to cut', () => {
 	auditStatementStart(audit, 'select * from "b"', 'a')();
 	auditStatementStart(audit, 'select * from "c"', 'a')();
 
-	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 50, timings: false }))
-		.toBe('[{"stmt":"select a..."},{"entriesDropped":2}]');
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 83, timings: false }))
+		.toBe(
+			'[{"request":{"maxConnections":1}},'
+			+ '{"stmt":"select a..."},{"entriesDropped":2}]',
+		);
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 10, timings: false }))
-		.toBe('[{"entriesDropped":3}]');
+		.toBe('[{"request":{"maxConnections":1}},{"entriesDropped":3}]');
 });
 
 // Dropping one entry's detail used to serialise the whole header again: 2000
@@ -327,7 +357,7 @@ test('reports each run\'s bound values at the bindings level', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":['
+		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":[[1],[2]]},'
 		+ '{"stmt":"select * from \\"a\\"","bindings":[[]]}'
@@ -354,20 +384,22 @@ test('drops bound values before cutting the SQL past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'bindings',
-		maxSize: 120,
+		maxSize: 153,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":[{'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2}],"bindingsDropped":2}]',
 	);
 
 	expect(formatQueryAudit(audit, {
 		level: 'bindings',
-		maxSize: 115,
+		maxSize: 148,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":[{"stmt":"select a...","count":2}],'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"commit","statements":[{"stmt":"select a...","count":2}],'
 		+ '"bindingsDropped":2,"statementsCut":1}]',
 	);
 });
@@ -388,37 +420,62 @@ test('reports a BigInt bound value as its digits', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"stmt":"select * from \\"a\\" where \\"n\\" = ?",'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"select * from \\"a\\" where \\"n\\" = ?",'
 		+ '"bindings":[["9007199254740993"]]}]',
 	);
 });
 
 test('lists every run in order at the full level', () => {
-	vi.spyOn(performance, 'now')
-		.mockReturnValueOnce(0)
-		.mockReturnValueOnce(0)
-		.mockReturnValueOnce(1)
-		.mockReturnValueOnce(1)
-		.mockReturnValueOnce(3)
-		.mockReturnValueOnce(3)
-		.mockReturnValueOnce(7)
-		.mockReturnValueOnce(7)
-		.mockReturnValueOnce(8);
+	let now = 0;
+	vi.spyOn(performance, 'now').mockImplementation(() => now);
 
 	const audit = emptyQueryAudit('full');
 
 	auditStatementStart(audit, 'BEGIN;', 'a')();
-	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
-	auditStatementStart(audit, 'update "a" set "b" = ?', 'a', [2])();
-	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
-	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	const finishFirstRead = auditStatementStart(
+		audit,
+		'select * from "a" where "id" = ?',
+		'a',
+		[1],
+	);
+
+	now = 1;
+	finishFirstRead();
+
+	const finishUpdate = auditStatementStart(
+		audit,
+		'update "a" set "b" = ?',
+		'a',
+		[2],
+	);
+
+	now = 3;
+	finishUpdate();
+
+	const finishSecondRead = auditStatementStart(
+		audit,
+		'select * from "a" where "id" = ?',
+		'a',
+		[1],
+	);
+
+	now = 7;
+	finishSecondRead();
+	const finishCommit = auditStatementStart(audit, 'COMMIT;', 'a');
+	now = 8;
+	finishCommit();
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
 		.toBe(
-			'[{"transaction":"commit","ms":8,"statements":['
-			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","ms":1,"bindings":[1]},'
-			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":2,"bindings":[2]},'
-			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","ms":4,"bindings":[1]}'
+			'[{"request":{"ms":8,"db":7,"wait":0,"maxConnections":1}},'
+			+ '{"transaction":"commit","ms":8,"wait":0,"statements":['
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"ms":1,"wait":0,"bindings":[1]},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":2,"wait":0,"bindings":[2]},'
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
+			+ '"ms":4,"wait":0,"bindings":[1]}'
 			+ ']}]',
 		);
 });
@@ -442,10 +499,11 @@ test('groups the runs before dropping bound values past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'full',
-		maxSize: 220,
+		maxSize: 253,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":[{'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":['
 		+ '["a first value long enough to matter"],'
@@ -455,10 +513,11 @@ test('groups the runs before dropping bound values past the size', () => {
 
 	expect(formatQueryAudit(audit, {
 		level: 'full',
-		maxSize: 150,
+		maxSize: 183,
 		timings: false,
 	})).toBe(
-		'[{"transaction":"commit","statements":[{'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2}],"runsGrouped":2,"bindingsDropped":2}]',
 	);
@@ -475,6 +534,7 @@ test('records no SQL at the counts level', () => {
 		{
 			startedAt: 0,
 			ms: 0,
+			wait: 0,
 			outsideTransaction: true,
 			statementAudits: new Map([
 				[
@@ -484,6 +544,7 @@ test('records no SQL at the counts level', () => {
 						cutStmt: 'select a...',
 						count: 1,
 						ms: 0,
+						wait: 0,
 						bindings: [],
 					},
 				],
@@ -508,7 +569,8 @@ test('records bound values only while they are allowed', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]},'
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]},'
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[]}]',
 	);
 });
@@ -530,7 +592,10 @@ test('records nothing once closed', () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"transaction":"open","statements":[{"stmt":"select a..."}]}]');
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"open","statements":[{"stmt":"select a..."}]}]',
+	);
 });
 
 test('escapes what a header cannot carry', () => {
@@ -544,7 +609,10 @@ test('escapes what a header cannot carry', () => {
 		level: 'statements',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"stmt":"select *\\nfrom \\"caf\\u00e9\\""}]');
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"select *\\nfrom \\"caf\\u00e9\\""}]',
+	);
 });
 
 test('audits every statement sent through the driver', async () => {
@@ -570,7 +638,7 @@ test('audits every statement sent through the driver', async () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"stmt":"select authors..."}]');
+	})).toBe('[{"request":{"maxConnections":1}},{"stmt":"select authors..."}]');
 });
 
 test('leaves a statement sent outside any request unaudited', async () => {
@@ -625,7 +693,7 @@ test('audits a statement streamed through the driver', async () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"stmt":"select authors..."}]');
+	})).toBe('[{"request":{"maxConnections":1}},{"stmt":"select authors..."}]');
 });
 
 test('wraps a dialect prototype once, however many pools share it', () => {
@@ -650,7 +718,377 @@ test('wraps a dialect prototype once, however many pools share it', () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"stmt":"select authors..."}]');
+	})).toBe('[{"request":{"maxConnections":1}},{"stmt":"select authors..."}]');
+});
+
+test('reports how long a statement waited for its pool connection', async () => {
+	let now = 0;
+	vi.spyOn(performance, 'now').mockImplementation(() => now);
+
+	let handConnectionOut: (connection: { __knexUid: string }) => void = () => {};
+
+	const driverClient = new (class {
+		acquireConnection() {
+			return new Promise<{ __knexUid: string }>((resolve) => {
+				handConnectionOut = resolve;
+			});
+		}
+
+		_query(_connection: object, _queryObject: object) {
+			return Promise.resolve();
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		const pendingConnection = driverClient.acquireConnection();
+
+		now = 40;
+		handConnectionOut({ __knexUid: 'a' });
+
+		await driverClient._query(await pendingConnection, {
+			sql: 'select * from "authors"',
+		});
+	});
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
+		.toBe(
+			'[{"request":{"ms":40,"db":0,"wait":40,"maxConnections":1}},'
+			+ '{"stmt":"select authors...","ms":0,"wait":40}]',
+		);
+});
+
+test('counts the wait for a connection the pool never handed out', async () => {
+	let now = 0;
+	vi.spyOn(performance, 'now').mockImplementation(() => now);
+
+	let refuseConnection: (poolError: Error) => void = () => {};
+
+	const driverClient = new (class {
+		acquireConnection() {
+			return new Promise<object>((_resolve, reject) => {
+				refuseConnection = reject;
+			});
+		}
+
+		_query(_connection: object, _queryObject: object) {
+			return Promise.resolve();
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	const acquireResult = queryAuditStore.run(audit, () => {
+		const pendingConnection = driverClient.acquireConnection();
+
+		now = 30;
+		refuseConnection(new Error('pool exhausted'));
+
+		return pendingConnection;
+	});
+
+	await expect(acquireResult).rejects.toThrow('pool exhausted');
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
+		.toBe('[{"request":{"ms":30,"db":0,"wait":30,"maxConnections":0}}]');
+});
+
+test('gives a transaction the wait of its BEGIN, its statements none', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	auditConnectionWait(audit, 'a', 5);
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+	auditStatementStart(audit, 'select * from "a"', 'a')();
+	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
+		.toBe(
+			'[{"request":{"ms":0,"db":0,"wait":5,"maxConnections":1}},'
+			+ '{"transaction":"commit","ms":0,"wait":5,'
+			+ '"statements":[{"stmt":"select a...","ms":0,"wait":0}]}]',
+		);
+});
+
+test('sums the rows of grouped runs, each run its own at full', async () => {
+	const driverClient = new (class {
+		_query(
+			_connection: object,
+			queryObject: { sql: string; bindings: number[]; response?: object },
+		) {
+			queryObject.response = { rowCount: queryObject.bindings[0] };
+
+			return Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit('full');
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;', bindings: [] });
+
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'update "a" set "b" = ?',
+			bindings: [2],
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'update "a" set "b" = ?',
+			bindings: [3],
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'COMMIT;', bindings: [] });
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'statements',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
+		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","count":2,"rows":5}]}]',
+	);
+
+	expect(formatQueryAudit(audit, {
+		level: 'full',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'[{"request":{"maxConnections":1}},{"transaction":"commit","statements":['
+		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":2,"bindings":[2]},'
+		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindings":[3]}]}]',
+	);
+});
+
+test('sums rows and keeps the first error of statements a cut merges', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('statements');
+
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+	auditStatementStart(audit, 'update "a" set "b" = 1', 'a')({ rows: 2 });
+	auditStatementStart(audit, 'update "a" set "c" = 1', 'a')({ rows: 3 });
+	auditStatementStart(audit, 'update "a" set "d" = 1', 'a')({ error: '23505' });
+	auditStatementStart(audit, 'update "a" set "e" = 1', 'a')({ error: '23503' });
+	auditStatementStart(audit, 'ROLLBACK', 'a')();
+
+	expect(formatQueryAudit(audit, {
+		level: 'statements',
+		maxSize: 200,
+		timings: false,
+	})).toBe(
+		'[{"request":{"maxConnections":1}},{"transaction":"rollback","statements":['
+		+ '{"stmt":"update a...","count":4,"rows":5,"error":"23505"}],'
+		+ '"statementsCut":4}]',
+	);
+});
+
+test('leaves out the rows of a statement pg counts none for', async () => {
+	const driverClient = new (class {
+		_query(
+			_connection: object,
+			queryObject: { sql: string; response?: object },
+		) {
+			queryObject.response = { rowCount: null };
+
+			return Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit('counts');
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'SET search_path' });
+	});
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0, timings: false }))
+		.toBe('[{"request":{"maxConnections":1}},{"stmt":"set..."}]');
+});
+
+test('reads the rows sqlite3 returned or changed', async () => {
+	const driverClient = new (class {
+		dialect = 'sqlite3';
+
+		_query(
+			_connection: object,
+			queryObject: { sql: string; response?: unknown; context?: unknown },
+		) {
+			return Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'select * from "a"',
+			response: [{ id: 1 }, { id: 2 }],
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'delete from "b"',
+			context: { changes: 4 },
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'PRAGMA foreign_keys' });
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"select a...","rows":2},{"stmt":"delete b...","rows":4},'
+		+ '{"stmt":"pragma..."}]',
+	);
+});
+
+test('reads the rows mysql returned or changed', async () => {
+	const driverClient = new (class {
+		dialect = 'mysql';
+
+		_query(
+			_connection: object,
+			queryObject: { sql: string; response?: unknown },
+		) {
+			return Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'select * from `a`',
+			response: [[{ id: 1 }], []],
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'delete from `b`',
+			response: [{ affectedRows: 6 }, undefined],
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'select * from `c`' });
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"stmt":"select a...","rows":1},{"stmt":"delete b...","rows":6},'
+		+ '{"stmt":"select c..."}]',
+	);
+});
+
+test('reports a failed statement\'s code and the rollback after it', async () => {
+	let driverError: unknown;
+
+	const driverClient = new (class {
+		_query(_connection: object, _queryObject: object) {
+			return driverError === undefined
+				? Promise.resolve()
+				: Promise.reject(driverError);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+	const insertStatement = { sql: 'insert into "a" ("b") values (?)' };
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' });
+		driverError = { code: '23505' };
+
+		await expect(driverClient._query({ __knexUid: 'a' }, insertStatement))
+			.rejects.toBe(driverError);
+
+		driverError = { code: '23503' };
+
+		await expect(driverClient._query({ __knexUid: 'a' }, insertStatement))
+			.rejects.toBe(driverError);
+
+		driverError = undefined;
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'ROLLBACK' });
+		driverError = { code: 1062 };
+
+		await expect(driverClient._query({ __knexUid: 'b' }, {
+			sql: 'select * from "c"',
+		})).rejects.toBe(driverError);
+
+		driverError = new Error('connection reset');
+
+		await expect(driverClient._query({ __knexUid: 'b' }, {
+			sql: 'select * from "d"',
+		})).rejects.toBe(driverError);
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'[{"request":{"maxConnections":1}},'
+		+ '{"transaction":"rollback",'
+		+ '"statements":[{"stmt":"insert a...","count":2,"error":"23505"}]},'
+		+ '{"stmt":"select c...","error":"1062"},'
+		+ '{"stmt":"select d...","error":"unknown"}]',
+	);
+});
+
+test('keeps the rows and the error of an item past the size', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('full');
+
+	auditStatementStart(audit, 'update "a" set "b" = ?', 'a', [
+		'a value long enough to matter',
+	])({ rows: 3 });
+
+	auditStatementStart(audit, 'insert into "c" ("d") values (?)', 'a', [
+		'another value long enough to matter',
+	])({ error: '23505' });
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0, timings: false }))
+		.toBe(
+			'[{"request":{"maxConnections":1}},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,'
+			+ '"bindings":["a value long enough to matter"]},'
+			+ '{"stmt":"insert into \\"c\\" (\\"d\\") values (?)","error":"23505",'
+			+ '"bindings":["another value long enough to matter"]}]',
+		);
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 184, timings: false }))
+		.toBe(
+			'[{"request":{"maxConnections":1}},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindingsDropped":1},'
+			+ '{"stmt":"insert c...","error":"23505",'
+			+ '"bindingsDropped":1,"statementsCut":1}]',
+		);
+
+	expect(formatQueryAudit(audit, { level: 'full', maxSize: 177, timings: false }))
+		.toBe(
+			'[{"request":{"maxConnections":1}},'
+			+ '{"stmt":"update a...","rows":3,"bindingsDropped":1,"statementsCut":1},'
+			+ '{"entriesDropped":1}]',
+		);
 });
 
 test('is enabled by QUERY_AUDIT_HEADER alone', () => {
