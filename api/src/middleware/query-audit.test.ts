@@ -173,10 +173,10 @@ test('lists every run in order to an admin asking full', () => {
 			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":1}},'
 			+ '{"transaction":"commit","ms":0,"wait":0,"statements":['
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"ms":0,"wait":0,"bindings":[7]},'
-			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":0,"wait":0,"bindings":[8]},'
+			+ '"ms":0,"bindings":[7]},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":0,"bindings":[8]},'
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"ms":0,"wait":0,"bindings":[7]}'
+			+ '"ms":0,"bindings":[7]}'
 			+ ']}]',
 		],
 	]);

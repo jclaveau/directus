@@ -77,12 +77,10 @@ test('audits a transaction: its statements, length and outcome', () => {
 					stmt: 'select "id" from "articles" where "id" = ?',
 					count: 2,
 					ms: 5,
-					wait: 0,
 				},
 				{
 					stmt: 'insert into "articles" ("title") values (?)',
 					ms: 7,
-					wait: 0,
 				},
 			],
 		},
@@ -106,7 +104,7 @@ test('counts a statement outside a transaction as its kind and table', () => {
 			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":2}},'
 			+ '{"stmt":"select authors...","ms":0,"wait":0},'
 			+ '{"transaction":"rollback","ms":0,"wait":0,'
-			+ '"statements":[{"stmt":"update articles...","ms":0,"wait":0}]},'
+			+ '"statements":[{"stmt":"update articles...","ms":0}]},'
 			+ '{"stmt":"select authors...","ms":0,"wait":0},'
 			+ '{"stmt":"set...","ms":0,"wait":0}]',
 		);
@@ -253,9 +251,9 @@ test('keeps two transactions open at once apart', () => {
 		.toBe(
 			'[{"request":{"ms":0,"db":0,"wait":0,"maxConnections":2}},'
 			+ '{"transaction":"open","wait":0,'
-			+ '"statements":[{"stmt":"insert articles...","ms":0,"wait":0}]},'
+			+ '"statements":[{"stmt":"insert articles...","ms":0}]},'
 			+ '{"transaction":"commit","ms":0,"wait":0,'
-			+ '"statements":[{"stmt":"insert authors...","ms":0,"wait":0}]}]',
+			+ '"statements":[{"stmt":"insert authors...","ms":0}]}]',
 		);
 });
 
@@ -472,10 +470,10 @@ test('lists every run in order at the full level', () => {
 			'[{"request":{"ms":8,"db":7,"wait":0,"maxConnections":1}},'
 			+ '{"transaction":"commit","ms":8,"wait":0,"statements":['
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"ms":1,"wait":0,"bindings":[1]},'
-			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":2,"wait":0,"bindings":[2]},'
+			+ '"ms":1,"bindings":[1]},'
+			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":2,"bindings":[2]},'
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"ms":4,"wait":0,"bindings":[1]}'
+			+ '"ms":4,"bindings":[1]}'
 			+ ']}]',
 		);
 });
@@ -798,7 +796,7 @@ test('counts the wait for a connection the pool never handed out', async () => {
 		.toBe('[{"request":{"ms":30,"db":0,"wait":30,"maxConnections":0}}]');
 });
 
-test('gives a transaction the wait of its BEGIN, its statements none', () => {
+test('gives a transaction the wait of its BEGIN, its statements no wait', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const audit = emptyQueryAudit();
@@ -812,7 +810,24 @@ test('gives a transaction the wait of its BEGIN, its statements none', () => {
 		.toBe(
 			'[{"request":{"ms":0,"db":0,"wait":5,"maxConnections":1}},'
 			+ '{"transaction":"commit","ms":0,"wait":5,'
-			+ '"statements":[{"stmt":"select a...","ms":0,"wait":0}]}]',
+			+ '"statements":[{"stmt":"select a...","ms":0}]}]',
+		);
+});
+
+test('reports a pool wait on the one statement that waited', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	auditConnectionWait(audit, 'a', 5);
+	auditStatementStart(audit, 'select * from "a"', 'a')();
+	auditStatementStart(audit, 'select * from "b"', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
+		.toBe(
+			'[{"request":{"ms":0,"db":0,"wait":5,"maxConnections":1}},'
+			+ '{"stmt":"select a...","ms":0,"wait":5},'
+			+ '{"stmt":"select b...","ms":0,"wait":0}]',
 		);
 });
 

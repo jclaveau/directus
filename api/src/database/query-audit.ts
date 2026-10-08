@@ -667,11 +667,17 @@ function entryValueOf(auditEntry: AuditEntry, timings: boolean): unknown {
 		statementsCut,
 	}).filter(([, droppedCount]) => droppedCount !== undefined));
 
+	const outsideTransaction = auditEntry.transaction === undefined;
+
 	const statementValues = auditEntry.statementItems.map((statementItem) => {
-		return statementValueOf(statementItem, auditEntry.runsInOrder, timings);
+		return statementValueOf(statementItem, {
+			runsInOrder: auditEntry.runsInOrder,
+			timings,
+			carriesWait: outsideTransaction,
+		});
 	});
 
-	if (auditEntry.transaction === undefined) {
+	if (outsideTransaction) {
 		return { ...statementValues[0], ...droppedDetails };
 	}
 
@@ -684,10 +690,15 @@ function entryValueOf(auditEntry: AuditEntry, timings: boolean): unknown {
 	};
 }
 
+// A statement inside a transaction reuses its connection, so only the
+// transaction's own `BEGIN` waited for one.
 function statementValueOf(
 	statementItem: StatementItem,
-	runsInOrder: boolean,
-	timings: boolean,
+	{ runsInOrder, timings, carriesWait }: {
+		runsInOrder: boolean;
+		timings: boolean;
+		carriesWait: boolean;
+	},
 ): Record<string, unknown> {
 	const statementValue: Record<string, unknown> = { stmt: statementItem.stmt };
 
@@ -698,7 +709,7 @@ function statementValueOf(
 	Object.assign(
 		statementValue,
 		msValueOf(statementItem.ms, timings),
-		waitValueOf(statementItem.wait, timings),
+		waitValueOf(statementItem.wait, timings && carriesWait),
 	);
 
 	if (statementItem.rows !== undefined) {
