@@ -515,6 +515,35 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 			});
 
+			it(oneLine`
+				refuses sparse grouped entries carrying a property of their own
+			`, async () => {
+				const batchInsert = vi.fn();
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => {
+						return callback({ ...db, batchInsert } as any);
+					});
+
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce(Object.assign(new Array(3), {
+						0: { data: { name: 'a' } },
+						2: { data: { name: 'c' } },
+						extra: true,
+					}));
+
+				await expect(
+					batchService().createMany([{ name: 'a' }, { name: 'b' }, { name: 'c' }]),
+				).rejects.toThrow(InvalidPayloadError);
+
+				expect(batchInsert).not.toHaveBeenCalled();
+
+				emitFilterSpy.mockRestore();
+				transactionSpy.mockRestore();
+			});
+
 			it('refuses a grouped hook deleting a field off the entries', async () => {
 				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
@@ -923,6 +952,26 @@ describe('Integration Tests', () => {
 				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
 					/items\.update\.one/,
 				);
+
+				expect(tracker.history.all).toHaveLength(0);
+
+				emitFilterSpy.mockRestore();
+			});
+
+			it(oneLine`
+				refuses a sparse grouped answer carrying a property of its own
+			`, async () => {
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce(Object.assign(new Array(3), {
+						0: { data: { name: 'Test' }, keys: [1, 2] },
+						2: { data: { name: 'Test' }, keys: [3] },
+						extra: true,
+					}));
+
+				await expect(
+					service.updateMany([1, 2, 3], { name: 'Test' }),
+				).rejects.toThrow(InvalidPayloadError);
 
 				expect(tracker.history.all).toHaveLength(0);
 
