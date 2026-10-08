@@ -363,8 +363,6 @@ test('sizes the count of dropped entries by the count it ends up', () => {
 		);
 });
 
-// Dropping one entry's detail used to serialise the whole header again: 2000
-// entries took 20 s of the event loop.
 test('cuts thousands of entries down to the size in milliseconds', () => {
 	const audit = emptyQueryAudit('bindings');
 
@@ -388,6 +386,37 @@ test('cuts thousands of entries down to the size in milliseconds', () => {
 	expect(headerValue).toMatch(/,"entriesDropped":\d+,"statements":\[/);
 });
 
+test('groups forty thousand runs of a transaction in milliseconds', () => {
+	const audit = emptyQueryAudit('full');
+
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+
+	for (let runNumber = 0; runNumber < 40000; runNumber++) {
+		auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+	}
+
+	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	const startedAt = Date.now();
+
+	const headerValue = formatQueryAudit(audit, {
+		level: 'full',
+		maxSize: 8192,
+		timings: false,
+	});
+
+	expect({
+		headerValue,
+		withinOneSecond: Date.now() - startedAt < 1000,
+	}).toEqual({
+		headerValue: '{"maxPoolConnections":1,"statements":['
+			+ '{"transaction":"commit","statements":['
+			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","count":40000}],'
+			+ '"runsGrouped":40000,"bindingsDropped":40000}]}',
+		withinOneSecond: true,
+	});
+});
+
 test('reports each run\'s bound values at the bindings level', () => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
@@ -408,6 +437,31 @@ test('reports each run\'s bound values at the bindings level', () => {
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":[[1],[2]]},'
 		+ '{"stmt":"select * from \\"a\\"","bindings":[[]]}'
+		+ ']}]}',
+	);
+});
+
+test('leaves the recorded values as they were once formatted', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit('bindings');
+
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+	auditStatementStart(audit, 'select * from "a" where "id" = ?', 'a', [1])();
+	auditStatementStart(audit, 'select * from "a" where "name" = ?', 'a', ['x'])();
+	auditStatementStart(audit, 'COMMIT;', 'a')();
+
+	formatQueryAudit(audit, { level: 'counts', maxSize: 0, timings: false });
+
+	expect(formatQueryAudit(audit, {
+		level: 'bindings',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'{"maxPoolConnections":1,"statements":[{"transaction":"commit","statements":['
+		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]},'
+		+ '{"stmt":"select * from \\"a\\" where \\"name\\" = ?",'
+		+ '"bindings":[["x"]]}'
 		+ ']}]}',
 	);
 });
@@ -650,7 +704,7 @@ test('escapes what a header cannot carry', () => {
 
 	const audit = emptyQueryAudit();
 
-	auditStatementStart(audit, 'select *\nfrom "café"', 'a')();
+	auditStatementStart(audit, 'select *\nfrom "café\x7f"', 'a')();
 
 	expect(formatQueryAudit(audit, {
 		level: 'statements',
@@ -658,7 +712,7 @@ test('escapes what a header cannot carry', () => {
 		timings: false,
 	})).toBe(
 		'{"maxPoolConnections":1,"statements":['
-		+ '{"stmt":"select *\\nfrom \\"caf\\u00e9\\""}]}',
+		+ '{"stmt":"select *\\nfrom \\"caf\\u00e9\\u007f\\""}]}',
 	);
 });
 
@@ -1115,6 +1169,182 @@ test('reports a failed statement\'s code and the rollback after it', async () =>
 		+ '{"stmt":"select c...","error":"1062"},'
 		+ '{"stmt":"select d...","error":"unknown"}]}',
 	);
+});
+
+test('reports a rollback when the COMMIT fails or pg rolls it back', async () => {
+	let commitError: unknown;
+	let commitCommand: string | undefined;
+
+	const driverClient = new (class {
+		_query(
+			_connection: object,
+			queryObject: { sql: string; response?: unknown },
+		) {
+			if (queryObject.sql !== 'COMMIT;') {
+				return Promise.resolve(queryObject);
+			}
+
+			queryObject.response = { command: commitCommand };
+
+			return commitError === undefined
+				? Promise.resolve(queryObject)
+				: Promise.reject(commitError);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' });
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'select * from "a"' });
+		commitError = { code: '40001' };
+
+		await expect(driverClient._query({ __knexUid: 'a' }, { sql: 'COMMIT;' }))
+			.rejects.toBe(commitError);
+
+		commitError = undefined;
+		commitCommand = 'ROLLBACK';
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' });
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'select * from "b"' });
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'COMMIT;' });
+		commitCommand = 'COMMIT';
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' });
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'select * from "c"' });
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'COMMIT;' });
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"transaction":"rollback","error":"40001",'
+		+ '"statements":[{"stmt":"select a..."}]},'
+		+ '{"transaction":"rollback","statements":[{"stmt":"select b..."}]},'
+		+ '{"transaction":"commit","statements":[{"stmt":"select c..."}]}]}',
+	);
+});
+
+test('reports a failed BEGIN and releases its connection', async () => {
+	const driverClient = new (class {
+		_query(_connection: object, queryObject: { sql: string }) {
+			return queryObject.sql === 'BEGIN;'
+				? Promise.reject({ code: '57P01' })
+				: Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		await expect(driverClient._query({ __knexUid: 'a' }, { sql: 'BEGIN;' }))
+			.rejects.toEqual({ code: '57P01' });
+
+		await driverClient._query({ __knexUid: 'a' }, { sql: 'select * from "a"' });
+		await driverClient._query({ __knexUid: 'b' }, { sql: 'select * from "b"' });
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"transaction":"rollback","error":"57P01","statements":[]},'
+		+ '{"stmt":"select a..."},{"stmt":"select b..."}]}',
+	);
+});
+
+test('reports a statement the driver throws on before answering', async () => {
+	const driverError = new Error('The query is empty');
+
+	const driverClient = new (class {
+		_query(_connection: object, queryObject: { sql: string }) {
+			if (queryObject.sql === '') {
+				throw driverError;
+			}
+
+			return Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		expect(() => driverClient._query({ __knexUid: 'a' }, { sql: '' }))
+			.toThrow(driverError);
+
+		await driverClient._query({ __knexUid: 'b' }, { sql: 'select * from "b"' });
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"stmt":"...","error":"unknown"},{"stmt":"select b..."}]}',
+	);
+});
+
+test('reads no rows off a raw statement sqlite3 ran for its rows', async () => {
+	const driverClient = new (class {
+		dialect = 'sqlite3';
+
+		_query(_connection: object, queryObject: object) {
+			return Promise.resolve(queryObject);
+		}
+	})();
+
+	auditQueriesOf({ client: driverClient } as unknown as Knex);
+
+	const audit = emptyQueryAudit();
+
+	await queryAuditStore.run(audit, async () => {
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'delete from "a" where "id" = ?',
+			method: 'raw',
+			response: [],
+		});
+
+		await driverClient._query({ __knexUid: 'a' }, {
+			sql: 'select * from "b"',
+			method: 'raw',
+			response: [{ id: 1 }],
+		});
+	});
+
+	expect(formatQueryAudit(audit, {
+		level: 'counts',
+		maxSize: 0,
+		timings: false,
+	})).toBe(
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"stmt":"delete a..."},{"stmt":"select b...","rows":1}]}',
+	);
+});
+
+test('lets go of what it recorded once closed', () => {
+	const audit = emptyQueryAudit();
+
+	auditConnectionWait(audit, 'a', 3);
+	auditConnectionWait(audit, 'b', 2);
+	auditStatementStart(audit, 'BEGIN;', 'a')();
+	auditStatementStart(audit, 'select * from "a"', 'a');
+	closeQueryAudit(audit);
+
+	expect(audit).toMatchObject({
+		connectionWaits: new Map(),
+		connectionHolds: new Map(),
+		openTransactionAudits: new Map(),
+	});
 });
 
 test('keeps the rows and the error of an item past the size', () => {

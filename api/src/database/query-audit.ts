@@ -33,14 +33,20 @@ type RunAudit = {
 };
 
 // What the driver answered: the rows it returned or changed, or the code of
-// the error it failed with.
-type StatementOutcome = { rows?: number | undefined; error?: string };
+// the error it failed with, and pg's command tag, `ROLLBACK` for a `COMMIT` of
+// a transaction a failed statement aborted.
+type StatementOutcome = {
+	rows?: number | undefined;
+	error?: string;
+	command?: string | undefined;
+};
 
 type TransactionAudit = {
 	startedAt: number;
 	ms?: number;
 	wait: number;
 	outcome?: TransactionOutcome;
+	error?: string;
 	outsideTransaction: boolean;
 	statementAudits: Map<string, StatementAudit>;
 	runAudits: RunAudit[];
@@ -94,6 +100,7 @@ type StatementItem = {
  */
 type AuditEntry = {
 	transaction?: TransactionOutcome | 'open';
+	error?: string | undefined;
 	ms: number | undefined;
 	wait: number;
 	runsInOrder: boolean;
@@ -123,6 +130,7 @@ type AcquireConnection = (
 // driver answered.
 type DriverQueryObject = {
 	sql: string;
+	method?: string;
 	bindings?: unknown[];
 	response?: unknown;
 	context?: unknown;
@@ -142,6 +150,10 @@ const TRANSACTION_KEYWORDS = new Set([
 const TABLE_PATTERN = /\b(?:from|into|update)\s+["`[]?([^\s"`\]().,;]+)/i;
 
 const auditedPrototypes = new WeakSet<object>();
+
+// The smallest nonzero QUERY_AUDIT_HEADER_MAX_SIZE: below it, the request's own
+// fields and `entriesDropped` alone could outgrow the size.
+export const QUERY_AUDIT_MIN_SIZE = 256;
 
 export function queryAuditEnabled(): boolean {
 	return Boolean(useEnv()['QUERY_AUDIT_HEADER']);
@@ -246,7 +258,17 @@ export function auditConnectionWait(
  */
 export function closeQueryAudit(audit: QueryAudit): void {
 	audit.closed = true;
+	audit.connectionWaits.clear();
+	audit.connectionHolds.clear();
 	audit.openTransactionAudits.clear();
+}
+
+/**
+ * Let go of the statements once the header is written: a long-lived resource
+ * first created during the request keeps its audit alive, bound values included.
+ */
+export function discardAuditedStatements(audit: QueryAudit): void {
+	audit.transactionAudits = [];
 }
 
 function auditedAcquireConnection(
@@ -300,11 +322,29 @@ function auditedDriverMethod(runDriverMethod: DriverQuery): DriverQuery {
 			queryObject.bindings,
 		);
 
-		return runDriverMethod
-			.call(this, connection, queryObject, ...streamArguments)
+		let driverAnswer: Promise<unknown>;
+
+		try {
+			driverAnswer = runDriverMethod.call(
+				this,
+				connection,
+				queryObject,
+				...streamArguments,
+			);
+		}
+		catch (driverError) {
+			finishStatement({ error: errorCodeOf(driverError) });
+
+			throw driverError;
+		}
+
+		return driverAnswer
 			.then(
 				(driverResult) => {
-					finishStatement({ rows: rowsOfQuery(this.dialect, queryObject) });
+					finishStatement({
+						rows: rowsOfQuery(this.dialect, queryObject),
+						command: commandOfQuery(queryObject),
+					});
 
 					return driverResult;
 				},
@@ -338,9 +378,17 @@ function rowsOfQuery(
 			: (mysqlRows as { affectedRows?: unknown } | undefined)?.affectedRows;
 	}
 	else if (dialectName === 'sqlite3') {
-		rowCount = Array.isArray(response)
-			? response.length
-			: (context as { changes?: unknown } | undefined)?.changes;
+		// A raw statement runs through `all`, which returns no count of the rows
+		// a write changed.
+		const readsRows = queryObject.method !== 'raw'
+			|| leadingKeyword(queryObject.sql) === 'select';
+
+		if (!Array.isArray(response)) {
+			rowCount = (context as { changes?: unknown } | undefined)?.changes;
+		}
+		else if (readsRows) {
+			rowCount = response.length;
+		}
 	}
 	else {
 		rowCount = (response as { rowCount?: unknown } | undefined)?.rowCount;
@@ -348,6 +396,15 @@ function rowsOfQuery(
 
 	return typeof rowCount === 'number'
 		? rowCount
+		: undefined;
+}
+
+function commandOfQuery(queryObject: DriverQueryObject): string | undefined {
+	const command = (queryObject.response as { command?: unknown } | undefined)
+		?.command;
+
+	return typeof command === 'string'
+		? command
 		: undefined;
 }
 
@@ -388,7 +445,23 @@ export function auditStatementStart(
 		audit.openTransactionAudits.set(connectionId, transactionAudit);
 		holdConnection(audit, connectionId);
 
-		return () => releaseConnection(audit, connectionId);
+		return ({ error } = {}) => {
+			releaseConnection(audit, connectionId);
+
+			if (error === undefined) {
+				return;
+			}
+
+			// No transaction opened: nothing that follows on the connection is in it.
+			if (audit.openTransactionAudits.get(connectionId) === transactionAudit) {
+				audit.openTransactionAudits.delete(connectionId);
+			}
+
+			transactionAudit.outcome = 'rollback';
+			transactionAudit.error = error;
+			transactionAudit.ms = performance.now() - startedAt;
+			releaseConnection(audit, connectionId);
+		};
 	}
 
 	const openTransactionAudit = audit.openTransactionAudits.get(connectionId);
@@ -403,11 +476,19 @@ export function auditStatementStart(
 
 		audit.openTransactionAudits.delete(connectionId);
 
-		openTransactionAudit.outcome = keyword === 'commit'
-			? 'commit'
-			: 'rollback';
+		// A `COMMIT` the database refused, or that pg answered `ROLLBACK` for a
+		// transaction a failed statement aborted, committed nothing.
+		return ({ error, command } = {}) => {
+			openTransactionAudit.outcome = keyword === 'commit'
+				&& error === undefined
+				&& command !== 'ROLLBACK'
+				? 'commit'
+				: 'rollback';
 
-		return () => {
+			if (error !== undefined) {
+				openTransactionAudit.error = error;
+			}
+
 			openTransactionAudit.ms = performance.now()
 				- openTransactionAudit.startedAt;
 
@@ -665,6 +746,7 @@ function auditEntryOf(
 
 	if (!transactionAudit.outsideTransaction) {
 		auditEntry.transaction = transactionAudit.outcome ?? 'open';
+		auditEntry.error = transactionAudit.error;
 	}
 
 	return auditEntry;
@@ -695,6 +777,9 @@ function entryValueOf(auditEntry: AuditEntry, timings: boolean): unknown {
 
 	return {
 		transaction: auditEntry.transaction,
+		...(auditEntry.error === undefined
+			? {}
+			: { error: auditEntry.error }),
 		...msValueOf(auditEntry.ms, timings),
 		...waitValueOf(auditEntry.wait, timings),
 		statements: statementValues,
@@ -767,7 +852,12 @@ function mergedStatementItems(
 		const mergedItem = itemsByStmt.get(statementItem.stmt);
 
 		if (!mergedItem) {
-			itemsByStmt.set(statementItem.stmt, { ...statementItem });
+			itemsByStmt.set(statementItem.stmt, {
+				...statementItem,
+				...(statementItem.bindings && {
+					bindings: statementItem.bindings.slice(),
+				}),
+			});
 
 			continue;
 		}
@@ -781,8 +871,11 @@ function mergedStatementItems(
 			mergedItem.rows = (mergedItem.rows ?? 0) + statementItem.rows;
 		}
 
+		// Appended in place: a copy per run is quadratic in the runs.
 		if (mergedItem.bindings && statementItem.bindings) {
-			mergedItem.bindings = mergedItem.bindings.concat(statementItem.bindings);
+			for (const runBindings of statementItem.bindings) {
+				mergedItem.bindings.push(runBindings);
+			}
 		}
 	}
 

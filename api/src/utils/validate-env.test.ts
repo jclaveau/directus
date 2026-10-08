@@ -136,6 +136,31 @@ test.each([
 		message: '"BYTES_TEST_VARIABLE" Environment Variable is '
 			+ '"eight kilobytes", which is not a size of 0 or more.',
 	},
+	{
+		value: '16k',
+		message: '"BYTES_TEST_VARIABLE" Environment Variable is "16k", '
+			+ 'which is not a size of 0 or more.',
+	},
+	{
+		value: '8KiB',
+		message: '"BYTES_TEST_VARIABLE" Environment Variable is "8KiB", '
+			+ 'which is not a size of 0 or more.',
+	},
+	{
+		value: '8,192',
+		message: '"BYTES_TEST_VARIABLE" Environment Variable is "8,192", '
+			+ 'which is not a size of 0 or more.',
+	},
+	{
+		value: '12abc',
+		message: '"BYTES_TEST_VARIABLE" Environment Variable is "12abc", '
+			+ 'which is not a size of 0 or more.',
+	},
+	{
+		value: '1e3',
+		message: '"BYTES_TEST_VARIABLE" Environment Variable is "1e3", '
+			+ 'which is not a size of 0 or more.',
+	},
 ])('refuses the size $value', ({ value, message }) => {
 	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
@@ -145,10 +170,32 @@ test.each([
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
 });
 
-test.each(['0', '8kb', '512'])('takes the size %j', (value) => {
+test.each(['0', '8kb', '512', '1.5mb', '8 KB'])('takes the size %j', (value) => {
 	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
 
 	validateBytesEnv(['BYTES_TEST_VARIABLE']);
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+test('refuses a size below the minimum other than 0', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: '255' });
+
+	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
+
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+		'"BYTES_TEST_VARIABLE" Environment Variable is "255", '
+			+ 'which is neither 0 nor a size of 256 bytes or more.',
+	);
+
+	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+});
+
+test.each(['0', '256', '1kb'])('takes the size %j past the minimum', (value) => {
+	vi.mocked(useEnv).mockReturnValueOnce({ BYTES_TEST_VARIABLE: value });
+
+	validateBytesEnv(['BYTES_TEST_VARIABLE'], 256);
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
@@ -189,6 +236,24 @@ test('refuses a header name Node cannot write', () => {
 
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
 });
+
+// A boolean would turn the audit on under a header of that name.
+test.each(['false', 'true', 'FALSE', '0', '1'])(
+	'refuses a header name that reads as the boolean %j',
+	(value) => {
+		vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: value });
+
+		validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+
+		expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+			`"HEADER_TEST_VARIABLE" Environment Variable is "${value}", `
+				+ 'which reads as a boolean, not a header name: leave it unset '
+				+ 'to send none.',
+		);
+
+		expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+	},
+);
 
 test('takes a header name Node can write', () => {
 	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });

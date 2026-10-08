@@ -71,7 +71,11 @@ import {
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
-import { QUERY_AUDIT_LEVELS, queryAuditEnabled } from './database/query-audit.js';
+import {
+	QUERY_AUDIT_LEVELS,
+	QUERY_AUDIT_MIN_SIZE,
+	queryAuditEnabled,
+} from './database/query-audit.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -184,7 +188,7 @@ export default async function createApp(): Promise<express.Application> {
 	if (queryAuditEnabled()) {
 		validateHeaderNameEnv('QUERY_AUDIT_HEADER');
 		validateChoiceEnv('QUERY_AUDIT_LEVEL', QUERY_AUDIT_LEVELS);
-		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE']);
+		validateBytesEnv(['QUERY_AUDIT_HEADER_MAX_SIZE'], QUERY_AUDIT_MIN_SIZE);
 		validateBooleanEnv(['QUERY_AUDIT_TIMINGS']);
 	}
 

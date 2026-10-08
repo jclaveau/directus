@@ -4,6 +4,7 @@ import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler, Response } from 'express';
 import {
 	closeQueryAudit,
+	discardAuditedStatements,
 	emptyQueryAudit,
 	formatQueryAudit,
 	isQueryAuditLevel,
@@ -46,7 +47,10 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 
 	const writeHead = res.writeHead;
 
-	res.once('close', () => closeQueryAudit(audit));
+	res.once('close', () => {
+		closeQueryAudit(audit);
+		discardAuditedStatements(audit);
+	});
 
 	res.writeHead = function (this: Response, ...headArguments: any[]) {
 		closeQueryAudit(audit);
@@ -60,6 +64,8 @@ const auditRequestQueries: RequestHandler = (req, res, next) => {
 			) ?? 0,
 			timings: env['QUERY_AUDIT_TIMINGS'] !== false,
 		}));
+
+		discardAuditedStatements(audit);
 
 		return writeHead.apply(this, headArguments as any);
 	} as Response['writeHead'];

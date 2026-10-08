@@ -88,27 +88,44 @@ export function validateDurationEnv(keys: string[]): void {
 }
 
 /**
- * Refuse a size variable that is not a size of 0 or more, at boot like
+ * A number of bytes, or of a unit `bytes` knows. Checked before parsing:
+ * `bytes` reads what follows the leading digits as nothing, `16k` as 16.
+ */
+const SIZE_PATTERN = /^\d+(?:\.\d+)?\s*(?:b|kb|mb|gb|tb|pb)?$/i;
+
+/**
+ * Refuse a size variable that is not a size of 0 or more, nor 0 or
+ * `nonzeroMinimum` bytes or more when given, at boot like
  * {@link validateDurationEnv}. Read off `useEnv`, so an unset variable takes its
  * default.
  */
-export function validateBytesEnv(keys: string[]): void {
+export function validateBytesEnv(keys: string[], nonzeroMinimum = 0): void {
 	const env = useEnv();
 	const logger = useLogger();
 
 	for (const key of keys) {
-		const parsedBytes = parseBytesConfiguration(String(env[key]));
+		const sizeValue = String(env[key]);
 
-		if (parsedBytes !== null && parsedBytes >= 0) {
-			continue;
+		const parsedBytes = SIZE_PATTERN.test(sizeValue)
+			? parseBytesConfiguration(sizeValue)
+			: null;
+
+		if (parsedBytes === null) {
+			logger.error(
+				`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
+					+ 'which is not a size of 0 or more.',
+			);
+
+			process.exit(1);
 		}
+		else if (parsedBytes > 0 && parsedBytes < nonzeroMinimum) {
+			logger.error(
+				`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
+					+ `which is neither 0 nor a size of ${nonzeroMinimum} bytes or more.`,
+			);
 
-		logger.error(
-			`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
-				+ 'which is not a size of 0 or more.',
-		);
-
-		process.exit(1);
+			process.exit(1);
+		}
 	}
 }
 
@@ -137,10 +154,22 @@ export function validateChoiceEnv(
 
 /**
  * Refuse a variable naming a response header Node cannot write, which would
- * otherwise fail every response, at boot like {@link validateDurationEnv}.
+ * otherwise fail every response, at boot like {@link validateDurationEnv}. A
+ * boolean is refused too: the variable turns its feature on by being set, so
+ * `false` would turn it on under a header named `false`.
  */
 export function validateHeaderNameEnv(key: string): void {
 	const env = useEnv();
+
+	if (BOOLEANS.includes(String(env[key]).toLowerCase())) {
+		useLogger().error(
+			`"${key}" Environment Variable is ${JSON.stringify(env[key])}, `
+				+ 'which reads as a boolean, not a header name: leave it unset '
+				+ 'to send none.',
+		);
+
+		process.exit(1);
+	}
 
 	try {
 		validateHeaderName(String(env[key]));

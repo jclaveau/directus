@@ -279,10 +279,11 @@ test('writes the request entry alone for a request that ran no statement', () =>
 	]);
 });
 
-test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
+test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is 0', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
 		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '0',
 	});
 
 	vi.spyOn(performance, 'now').mockReturnValue(0);
@@ -299,7 +300,7 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 	auditRequestQueries(req, res, () => {
 		const audit = queryAuditStore.getStore()!;
 
-		auditStatementStart(audit, 'select * from "articles"', 'a')();
+		auditStatementStart(audit, `select * from "${'a'.repeat(9000)}"`, 'a')();
 	});
 
 	res.writeHead(200);
@@ -308,7 +309,7 @@ test('caps nothing when QUERY_AUDIT_HEADER_MAX_SIZE is unset', () => {
 		[
 			'X-Query-Audit',
 			'{"ms":0,"db":0,"wait":0,"maxPoolConnections":1,"statements":['
-			+ '{"stmt":"select * from \\"articles\\"","ms":0,"wait":0}]}',
+			+ `{"stmt":"select * from \\"${'a'.repeat(9000)}\\"","ms":0,"wait":0}]}`,
 		],
 	]);
 });
@@ -401,6 +402,45 @@ test('records nothing once the connection closed', () => {
 	auditStatementStart(requestAudit!, 'select * from "articles"', 'a')();
 
 	expect(requestAudit!.transactionAudits).toEqual([]);
+});
+
+test.each([
+	{
+		flush: 'the headers flush',
+		endRequest: (res: Response) => res.writeHead(200),
+	},
+	{
+		flush: 'the connection closes',
+		endRequest: (res: Response) => res.emit('close'),
+	},
+])('lets go of the statements once $flush', ({ endRequest }) => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'full',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const res = Object.assign(new EventEmitter(), {
+		writeHead: vi.fn(),
+		setHeader: vi.fn(),
+	}) as unknown as Response;
+
+	const req = { get: vi.fn() } as unknown as Request;
+	let requestAudit = queryAuditStore.getStore();
+
+	auditRequestQueries(req, res, () => {
+		requestAudit = queryAuditStore.getStore();
+		auditStatementStart(requestAudit!, 'BEGIN;', 'a')();
+		auditStatementStart(requestAudit!, 'select * from "a"', 'a', [1]);
+	});
+
+	endRequest(res);
+
+	expect(requestAudit).toMatchObject({
+		transactionAudits: [],
+		connectionHolds: new Map(),
+		openTransactionAudits: new Map(),
+	});
 });
 
 test('records no bound value once anyone else authenticated', () => {
