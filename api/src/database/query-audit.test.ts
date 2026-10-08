@@ -66,25 +66,30 @@ test('audits a transaction: its statements, length and outcome', () => {
 	expect(JSON.parse(formatQueryAudit(audit, {
 		level: 'statements',
 		maxSize: 0,
-	}))).toEqual([
-		{ request: { ms: 14, db: 12, wait: 0, maxPoolConnections: 1 } },
-		{
-			transaction: 'commit',
-			ms: 14,
-			wait: 0,
-			statements: [
-				{
-					stmt: 'select "id" from "articles" where "id" = ?',
-					count: 2,
-					ms: 5,
-				},
-				{
-					stmt: 'insert into "articles" ("title") values (?)',
-					ms: 7,
-				},
-			],
-		},
-	]);
+	}))).toEqual({
+		ms: 14,
+		db: 12,
+		wait: 0,
+		maxPoolConnections: 1,
+		statements: [
+			{
+				transaction: 'commit',
+				ms: 14,
+				wait: 0,
+				statements: [
+					{
+						stmt: 'select "id" from "articles" where "id" = ?',
+						count: 2,
+						ms: 5,
+					},
+					{
+						stmt: 'insert into "articles" ("title") values (?)',
+						ms: 7,
+					},
+				],
+			},
+		],
+	});
 });
 
 test('counts a statement outside a transaction as its kind and table', () => {
@@ -101,12 +106,12 @@ test('counts a statement outside a transaction as its kind and table', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":0,"maxPoolConnections":2}},'
+			'{"ms":0,"db":0,"wait":0,"maxPoolConnections":2,"statements":['
 			+ '{"stmt":"select authors...","ms":0,"wait":0},'
 			+ '{"transaction":"rollback","ms":0,"wait":0,'
 			+ '"statements":[{"stmt":"update articles...","ms":0}]},'
 			+ '{"stmt":"select authors...","ms":0,"wait":0},'
-			+ '{"stmt":"set...","ms":0,"wait":0}]',
+			+ '{"stmt":"set...","ms":0,"wait":0}]}',
 		);
 });
 
@@ -126,8 +131,8 @@ test('counts the statements of a transaction by kind and table', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
-		+ '{"stmt":"select a...","count":2},{"stmt":"insert b..."}]}]',
+		'{"maxPoolConnections":1,"statements":[{"transaction":"commit","statements":['
+		+ '{"stmt":"select a...","count":2},{"stmt":"insert b..."}]}]}',
 	);
 });
 
@@ -144,8 +149,8 @@ test('reports a statement outside a transaction as its SQL', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},{"stmt":"select * from \\"authors\\""},'
-		+ '{"stmt":"SET search_path TO public"}]',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select * from \\"authors\\""},'
+		+ '{"stmt":"SET search_path TO public"}]}',
 	);
 });
 
@@ -161,8 +166,8 @@ test('pairs a statement outside a transaction with its bound values', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
-		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]}]',
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]}]}',
 	);
 });
 
@@ -184,9 +189,9 @@ test('gives a run outside a transaction its own values at the full level', () =>
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":2,"db":2,"wait":0,"maxPoolConnections":1}},'
+			'{"ms":2,"db":2,"wait":0,"maxPoolConnections":1,"statements":['
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"ms":2,"wait":0,"bindings":[1]}]',
+			+ '"ms":2,"wait":0,"bindings":[1]}]}',
 		);
 });
 
@@ -201,15 +206,15 @@ test('cuts a lone statement to its kind and table past the size', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 117, timings: false }))
 		.toBe(
-			'[{"request":{"maxPoolConnections":1}},'
+			'{"maxPoolConnections":1,"statements":['
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-			+ '"bindingsDropped":1}]',
+			+ '"bindingsDropped":1}]}',
 		);
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 102, timings: false }))
 		.toBe(
-			'[{"request":{"maxPoolConnections":1}},'
-			+ '{"stmt":"select a...","bindingsDropped":1,"statementsCut":1}]',
+			'{"maxPoolConnections":1,"statements":['
+			+ '{"stmt":"select a...","bindingsDropped":1,"statementsCut":1}]}',
 		);
 });
 
@@ -231,8 +236,8 @@ test('counts a statement of no other kind as other', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
-		+ '{"stmt":"delete articles..."},{"stmt":"other kept..."}]',
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"stmt":"delete articles..."},{"stmt":"other kept..."}]}',
 	);
 });
 
@@ -249,11 +254,11 @@ test('keeps two transactions open at once apart', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":0,"maxPoolConnections":2}},'
+			'{"ms":0,"db":0,"wait":0,"maxPoolConnections":2,"statements":['
 			+ '{"transaction":"open","wait":0,'
 			+ '"statements":[{"stmt":"insert articles...","ms":0}]},'
 			+ '{"transaction":"commit","ms":0,"wait":0,'
-			+ '"statements":[{"stmt":"insert authors...","ms":0}]}]',
+			+ '"statements":[{"stmt":"insert authors...","ms":0}]}]}',
 		);
 });
 
@@ -275,11 +280,11 @@ test('cuts the SQL of the largest entries first past the size', () => {
 		maxSize: 217,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"commit","statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"x\\" = ?"}]},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select b...","count":2}],'
-		+ '"statementsCut":2}]',
+		+ '"statementsCut":2}]}',
 	);
 
 	expect(formatQueryAudit(audit, {
@@ -287,11 +292,11 @@ test('cuts the SQL of the largest entries first past the size', () => {
 		maxSize: 212,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"commit","statements":[{"stmt":"select a..."}],'
 		+ '"statementsCut":1},'
 		+ '{"transaction":"commit","statements":[{"stmt":"select b...","count":2}],'
-		+ '"statementsCut":2}]',
+		+ '"statementsCut":2}]}',
 	);
 });
 
@@ -306,12 +311,56 @@ test('drops the last entries once no entry holds more to cut', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 87, timings: false }))
 		.toBe(
-			'[{"request":{"maxPoolConnections":1}},'
-			+ '{"stmt":"select a..."},{"entriesDropped":2}]',
+			'{"maxPoolConnections":1,"entriesDropped":2,"statements":['
+			+ '{"stmt":"select a..."}]}',
 		);
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 10, timings: false }))
-		.toBe('[{"request":{"maxPoolConnections":1}},{"entriesDropped":3}]');
+		.toBe('{"maxPoolConnections":1,"entriesDropped":3,"statements":[]}');
+});
+
+test('keeps every entry of a header exactly the size', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	auditStatementStart(audit, 'select * from "a"', 'a')();
+	auditStatementStart(audit, 'select * from "b"', 'a')();
+	auditStatementStart(audit, 'select * from "c"', 'a')();
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 108, timings: false }))
+		.toBe(
+			'{"maxPoolConnections":1,"statements":['
+			+ '{"stmt":"select a..."},{"stmt":"select b..."},{"stmt":"select c..."}]}',
+		);
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 104, timings: false }))
+		.toBe(
+			'{"maxPoolConnections":1,"entriesDropped":1,"statements":['
+			+ '{"stmt":"select a..."},{"stmt":"select b..."}]}',
+		);
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 103, timings: false }))
+		.toBe(
+			'{"maxPoolConnections":1,"entriesDropped":2,"statements":['
+			+ '{"stmt":"select a..."}]}',
+		);
+});
+
+test('sizes the count of dropped entries by the count it ends up', () => {
+	vi.spyOn(performance, 'now').mockReturnValue(0);
+
+	const audit = emptyQueryAudit();
+
+	for (let statementNumber = 0; statementNumber < 11; statementNumber++) {
+		auditStatementStart(audit, 'select * from "a"', 'a')();
+	}
+
+	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 104, timings: false }))
+		.toBe(
+			'{"maxPoolConnections":1,"entriesDropped":9,"statements":['
+			+ '{"stmt":"select a..."},{"stmt":"select a..."}]}',
+		);
 });
 
 // Dropping one entry's detail used to serialise the whole header again: 2000
@@ -336,7 +385,7 @@ test('cuts thousands of entries down to the size in milliseconds', () => {
 		withinOneSecond: Date.now() - startedAt < 1000,
 	}).toEqual({ within8kb: true, withinOneSecond: true });
 
-	expect(headerValue).toMatch(/,\{"entriesDropped":\d+\}\]$/);
+	expect(headerValue).toMatch(/,"entriesDropped":\d+,"statements":\[/);
 });
 
 test('reports each run\'s bound values at the bindings level', () => {
@@ -355,11 +404,11 @@ test('reports each run\'s bound values at the bindings level', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
+		'{"maxPoolConnections":1,"statements":[{"transaction":"commit","statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":[[1],[2]]},'
 		+ '{"stmt":"select * from \\"a\\"","bindings":[[]]}'
-		+ ']}]',
+		+ ']}]}',
 	);
 });
 
@@ -385,10 +434,10 @@ test('drops bound values before cutting the SQL past the size', () => {
 		maxSize: 157,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-		+ '"count":2}],"bindingsDropped":2}]',
+		+ '"count":2}],"bindingsDropped":2}]}',
 	);
 
 	expect(formatQueryAudit(audit, {
@@ -396,9 +445,9 @@ test('drops bound values before cutting the SQL past the size', () => {
 		maxSize: 152,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"commit","statements":[{"stmt":"select a...","count":2}],'
-		+ '"bindingsDropped":2,"statementsCut":1}]',
+		+ '"bindingsDropped":2,"statementsCut":1}]}',
 	);
 });
 
@@ -418,9 +467,9 @@ test('reports a BigInt bound value as its digits', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"n\\" = ?",'
-		+ '"bindings":[["9007199254740993"]]}]',
+		+ '"bindings":[["9007199254740993"]]}]}',
 	);
 });
 
@@ -467,14 +516,14 @@ test('lists every run in order at the full level', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":8,"db":7,"wait":0,"maxPoolConnections":1}},'
+			'{"ms":8,"db":7,"wait":0,"maxPoolConnections":1,"statements":['
 			+ '{"transaction":"commit","ms":8,"wait":0,"statements":['
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 			+ '"ms":1,"bindings":[1]},'
 			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","ms":2,"bindings":[2]},'
 			+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 			+ '"ms":4,"bindings":[1]}'
-			+ ']}]',
+			+ ']}]}',
 		);
 });
 
@@ -500,13 +549,13 @@ test('groups the runs before dropping bound values past the size', () => {
 		maxSize: 253,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
 		+ '"count":2,"bindings":['
 		+ '["a first value long enough to matter"],'
 		+ '["a second value long enough to matter"]'
-		+ ']}],"runsGrouped":2}]',
+		+ ']}],"runsGrouped":2}]}',
 	);
 
 	expect(formatQueryAudit(audit, {
@@ -514,10 +563,10 @@ test('groups the runs before dropping bound values past the size', () => {
 		maxSize: 183,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"commit","statements":[{'
 		+ '"stmt":"select * from \\"a\\" where \\"id\\" = ?",'
-		+ '"count":2}],"runsGrouped":2,"bindingsDropped":2}]',
+		+ '"count":2}],"runsGrouped":2,"bindingsDropped":2}]}',
 	);
 });
 
@@ -567,9 +616,9 @@ test('records bound values only while they are allowed', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[[1]]},'
-		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[]}]',
+		+ '{"stmt":"select * from \\"a\\" where \\"id\\" = ?","bindings":[]}]}',
 	);
 });
 
@@ -591,8 +640,8 @@ test('records nothing once closed', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
-		+ '{"transaction":"open","statements":[{"stmt":"select a..."}]}]',
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"transaction":"open","statements":[{"stmt":"select a..."}]}]}',
 	);
 });
 
@@ -608,8 +657,8 @@ test('escapes what a header cannot carry', () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
-		+ '{"stmt":"select *\\nfrom \\"caf\\u00e9\\""}]',
+		'{"maxPoolConnections":1,"statements":['
+		+ '{"stmt":"select *\\nfrom \\"caf\\u00e9\\""}]}',
 	);
 });
 
@@ -636,7 +685,7 @@ test('audits every statement sent through the driver', async () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"select authors..."}]');
+	})).toBe('{"maxPoolConnections":1,"statements":[{"stmt":"select authors..."}]}');
 });
 
 test('leaves a statement sent outside any request unaudited', async () => {
@@ -691,7 +740,7 @@ test('audits a statement streamed through the driver', async () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"select authors..."}]');
+	})).toBe('{"maxPoolConnections":1,"statements":[{"stmt":"select authors..."}]}');
 });
 
 test('wraps a dialect prototype once, however many pools share it', () => {
@@ -716,7 +765,7 @@ test('wraps a dialect prototype once, however many pools share it', () => {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"select authors..."}]');
+	})).toBe('{"maxPoolConnections":1,"statements":[{"stmt":"select authors..."}]}');
 });
 
 test('reports how long a statement waited for its pool connection', async () => {
@@ -754,8 +803,8 @@ test('reports how long a statement waited for its pool connection', async () => 
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":40,"db":0,"wait":40,"maxPoolConnections":1}},'
-			+ '{"stmt":"select authors...","ms":0,"wait":40}]',
+			'{"ms":40,"db":0,"wait":40,"maxPoolConnections":1,"statements":['
+			+ '{"stmt":"select authors...","ms":0,"wait":40}]}',
 		);
 });
 
@@ -793,7 +842,7 @@ test('counts the wait for a connection the pool never handed out', async () => {
 	await expect(acquireResult).rejects.toThrow('pool exhausted');
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
-		.toBe('[{"request":{"ms":30,"db":0,"wait":30,"maxPoolConnections":0}}]');
+		.toBe('{"ms":30,"db":0,"wait":30,"maxPoolConnections":0,"statements":[]}');
 });
 
 test('gives a transaction the wait of its BEGIN, its statements no wait', () => {
@@ -808,9 +857,9 @@ test('gives a transaction the wait of its BEGIN, its statements no wait', () => 
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":5,"maxPoolConnections":1}},'
+			'{"ms":0,"db":0,"wait":5,"maxPoolConnections":1,"statements":['
 			+ '{"transaction":"commit","ms":0,"wait":5,'
-			+ '"statements":[{"stmt":"select a...","ms":0}]}]',
+			+ '"statements":[{"stmt":"select a...","ms":0}]}]}',
 		);
 });
 
@@ -825,9 +874,9 @@ test('reports a pool wait on the one statement that waited', () => {
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0 }))
 		.toBe(
-			'[{"request":{"ms":0,"db":0,"wait":5,"maxPoolConnections":1}},'
+			'{"ms":0,"db":0,"wait":5,"maxPoolConnections":1,"statements":['
 			+ '{"stmt":"select a...","ms":0,"wait":5},'
-			+ '{"stmt":"select b...","ms":0,"wait":0}]',
+			+ '{"stmt":"select b...","ms":0,"wait":0}]}',
 		);
 });
 
@@ -868,8 +917,8 @@ test('sums the rows of grouped runs, each run its own at full', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
-		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","count":2,"rows":5}]}]',
+		'{"maxPoolConnections":1,"statements":[{"transaction":"commit","statements":['
+		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","count":2,"rows":5}]}]}',
 	);
 
 	expect(formatQueryAudit(audit, {
@@ -877,9 +926,9 @@ test('sums the rows of grouped runs, each run its own at full', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},{"transaction":"commit","statements":['
+		'{"maxPoolConnections":1,"statements":[{"transaction":"commit","statements":['
 		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":2,"bindings":[2]},'
-		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindings":[3]}]}]',
+		+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindings":[3]}]}]}',
 	);
 });
 
@@ -900,9 +949,9 @@ test('sums rows and keeps the first error of statements a cut merges', () => {
 		maxSize: 200,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},{"transaction":"rollback","statements":['
+		'{"maxPoolConnections":1,"statements":[{"transaction":"rollback","statements":['
 		+ '{"stmt":"update a...","count":4,"rows":5,"error":"23505"}],'
-		+ '"statementsCut":4}]',
+		+ '"statementsCut":4}]}',
 	);
 });
 
@@ -927,7 +976,7 @@ test('leaves out the rows of a statement pg counts none for', async () => {
 	});
 
 	expect(formatQueryAudit(audit, { level: 'counts', maxSize: 0, timings: false }))
-		.toBe('[{"request":{"maxPoolConnections":1}},{"stmt":"set..."}]');
+		.toBe('{"maxPoolConnections":1,"statements":[{"stmt":"set..."}]}');
 });
 
 test('reads the rows sqlite3 returned or changed', async () => {
@@ -965,9 +1014,9 @@ test('reads the rows sqlite3 returned or changed', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"stmt":"select a...","rows":2},{"stmt":"delete b...","rows":4},'
-		+ '{"stmt":"pragma..."}]',
+		+ '{"stmt":"pragma..."}]}',
 	);
 });
 
@@ -1006,9 +1055,9 @@ test('reads the rows mysql returned or changed', async () => {
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"stmt":"select a...","rows":1},{"stmt":"delete b...","rows":6},'
-		+ '{"stmt":"select c..."}]',
+		+ '{"stmt":"select c..."}]}',
 	);
 });
 
@@ -1060,11 +1109,11 @@ test('reports a failed statement\'s code and the rollback after it', async () =>
 		maxSize: 0,
 		timings: false,
 	})).toBe(
-		'[{"request":{"maxPoolConnections":1}},'
+		'{"maxPoolConnections":1,"statements":['
 		+ '{"transaction":"rollback",'
 		+ '"statements":[{"stmt":"insert a...","count":2,"error":"23505"}]},'
 		+ '{"stmt":"select c...","error":"1062"},'
-		+ '{"stmt":"select d...","error":"unknown"}]',
+		+ '{"stmt":"select d...","error":"unknown"}]}',
 	);
 });
 
@@ -1083,26 +1132,25 @@ test('keeps the rows and the error of an item past the size', () => {
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 0, timings: false }))
 		.toBe(
-			'[{"request":{"maxPoolConnections":1}},'
+			'{"maxPoolConnections":1,"statements":['
 			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,'
 			+ '"bindings":["a value long enough to matter"]},'
 			+ '{"stmt":"insert into \\"c\\" (\\"d\\") values (?)","error":"23505",'
-			+ '"bindings":["another value long enough to matter"]}]',
+			+ '"bindings":["another value long enough to matter"]}]}',
 		);
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 184, timings: false }))
 		.toBe(
-			'[{"request":{"maxPoolConnections":1}},'
+			'{"maxPoolConnections":1,"statements":['
 			+ '{"stmt":"update \\"a\\" set \\"b\\" = ?","rows":3,"bindingsDropped":1},'
 			+ '{"stmt":"insert c...","error":"23505",'
-			+ '"bindingsDropped":1,"statementsCut":1}]',
+			+ '"bindingsDropped":1,"statementsCut":1}]}',
 		);
 
 	expect(formatQueryAudit(audit, { level: 'full', maxSize: 177, timings: false }))
 		.toBe(
-			'[{"request":{"maxPoolConnections":1}},'
-			+ '{"stmt":"update a...","rows":3,"bindingsDropped":1,"statementsCut":1},'
-			+ '{"entriesDropped":1}]',
+			'{"maxPoolConnections":1,"entriesDropped":1,"statements":['
+			+ '{"stmt":"update a...","rows":3,"bindingsDropped":1,"statementsCut":1}]}',
 		);
 });
 

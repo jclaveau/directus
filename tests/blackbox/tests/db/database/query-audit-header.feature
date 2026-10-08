@@ -4,8 +4,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
     `statements`, QUERY_AUDIT_TIMINGS `false`, CORS on.
   - A request authenticates as the admin unless its headers say otherwise.
   - A response states the keys it checks; `x-query-audit` reads parsed.
-  - Every header starts with its `request:` entry, then the read that
-    authenticates it, outside any transaction.
+  - Every header is a map of the request's own fields and its `statements`,
+    the first being the read that authenticates it, outside any transaction.
   - At `counts`, `stmt` is `<kind> <table>...`; at the other levels, the SQL.
 
   Scenario: a create reports its transaction and the reads around it
@@ -14,8 +14,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: POST                | code: 200                                  |+
       | path: /items/audit_articles | headers:                                   |
       | headers:                    |   x-query-audit:                           |
-      |   x-query-audit: counts     |     - request:                             |
-      | payload:                    |         maxPoolConnections: 1              |
+      |   x-query-audit: counts     |     maxPoolConnections: 1                  |
+      | payload:                    |     statements:                            |
       |   - title: a                |     - stmt: select directus_users...       |
       |   - title: b                |     - transaction: commit                  |
       |   - title: c                |       statements:                          |
@@ -31,8 +31,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                  | code: 200                                 |+
       | path: /audit-probe/pool-read | headers:                                  |
       | headers:                     |   x-query-audit:                          |
-      |   x-query-audit: counts      |     - request:                            |
-      |                              |         maxPoolConnections: 2             |
+      |   x-query-audit: counts      |     maxPoolConnections: 2                 |
+      |                              |     statements:                           |
       |                              |     - stmt: select directus_users...      |
       |                              |     - transaction: commit                 |
       |                              |       statements:                         |
@@ -45,8 +45,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                                 |+
       | path: /audit-probe/transaction-read | headers:                                  |
       | headers:                            |   x-query-audit:                          |
-      |   x-query-audit: counts             |     - request:                            |
-      |                                     |         maxPoolConnections: 1             |
+      |   x-query-audit: counts             |     maxPoolConnections: 1                 |
+      |                                     |     statements:                           |
       |                                     |     - stmt: select directus_users...      |
       |                                     |     - transaction: commit                 |
       |                                     |       statements:                         |
@@ -58,8 +58,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                             |+
       | path: /audit-probe/transaction-read | headers:                              |
       |                                     |   x-query-audit:                      |
-      |                                     |     - request:                        |
-      |                                     |         maxPoolConnections: 1         |
+      |                                     |     maxPoolConnections: 1             |
+      |                                     |     statements:                       |
       |                                     |     - stmt: >-                        |
       |                                     |         select "directus_users"."id", |
       |                                     |         "directus_users"."role"       |
@@ -81,8 +81,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                       | code: 200                            |+
       | path: /audit-probe/update-nothing | headers:                             |
       | headers:                          |   x-query-audit:                     |
-      |   x-query-audit: counts           |     - request:                       |
-      |                                   |         maxPoolConnections: 1        |
+      |   x-query-audit: counts           |     maxPoolConnections: 1            |
+      |                                   |     statements:                      |
       |                                   |     - stmt: select directus_users... |
       |                                   |     - stmt: update audit_articles... |
       |                                   |       rows: 0                        |
@@ -93,8 +93,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 500                              |+
       | path: /audit-probe/duplicate-insert | headers:                               |
       | headers:                            |   x-query-audit:                       |
-      |   x-query-audit: counts             |     - request:                         |
-      |                                     |         maxPoolConnections: 1          |
+      |   x-query-audit: counts             |     maxPoolConnections: 1              |
+      |                                     |     statements:                        |
       |                                     |     - stmt: select directus_users...   |
       |                                     |     - transaction: rollback            |
       |                                     |       statements:                      |
@@ -107,8 +107,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                             |+
       | path: /audit-probe/transaction-read | headers:                              |
       | headers:                            |   x-query-audit:                      |
-      |   x-query-audit: bindings           |     - request:                        |
-      |                                     |         maxPoolConnections: 1         |
+      |   x-query-audit: bindings           |     maxPoolConnections: 1             |
+      |                                     |     statements:                       |
       |                                     |     - stmt: >-                        |
       |                                     |         select "directus_users"."id", |
       |                                     |         "directus_users"."role"       |
@@ -137,8 +137,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                         | code: 200                             |+
       | path: /audit-probe/transaction-read | headers:                              |
       | headers:                            |   x-query-audit:                      |
-      |   x-query-audit: full               |     - request:                        |
-      |                                     |         maxPoolConnections: 1         |
+      |   x-query-audit: full               |     maxPoolConnections: 1             |
+      |                                     |     statements:                       |
       |                                     |     - stmt: >-                        |
       |                                     |         select "directus_users"."id", |
       |                                     |         "directus_users"."role"       |
@@ -204,8 +204,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                       | code: 200                                 |+
       | path: /audit-probe/savepoint-undo | headers:                                  |
       | headers:                          |   x-query-audit:                          |
-      |   x-query-audit: counts           |     - request:                            |
-      |                                   |         maxPoolConnections: 1             |
+      |   x-query-audit: counts           |     maxPoolConnections: 1                 |
+      |                                   |     statements:                           |
       |                                   |     - stmt: select directus_users...      |
       |                                   |     - transaction: rollback               |
       |                                   |       statements:                         |
@@ -218,8 +218,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                     | code: 200                               |+
       | path: /audit-probe/accented-sql | headers:                                |
       |                                 |   x-query-audit:                        |
-      |                                 |     - request:                          |
-      |                                 |         maxPoolConnections: 1           |
+      |                                 |     maxPoolConnections: 1               |
+      |                                 |     statements:                         |
       |                                 |     - stmt: >-                          |
       |                                 |         select "directus_users"."id",   |
       |                                 |         "directus_users"."role"         |
@@ -238,8 +238,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                       | code: 200                             |+
       | path: /audit-probe/bigint-binding | headers:                              |
       | headers:                          |   x-query-audit:                      |
-      |   x-query-audit: bindings         |     - request:                        |
-      |                                   |         maxPoolConnections: 1         |
+      |   x-query-audit: bindings         |     maxPoolConnections: 1             |
+      |                                   |     statements:                       |
       |                                   |     - stmt: >-                        |
       |                                   |         select "directus_users"."id", |
       |                                   |         "directus_users"."role"       |
@@ -254,14 +254,14 @@ Feature: A request reports the SQL it ran, one entry per transaction
       |                                   |         - - "9007199254740993"        |
 
   Scenario: past QUERY_AUDIT_HEADER_MAX_SIZE, details are dropped and counted
-    Given an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 284
+    Given an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 285
     Then on postgres these requests get these responses:
       | request                             | response                             |
       | method: GET                         | code: 200                            |+
       | path: /audit-probe/transaction-read | headers:                             |
       | headers:                            |   x-query-audit:                     |
-      |   x-query-audit: bindings           |     - request:                       |
-      |                                     |         maxPoolConnections: 1        |
+      |   x-query-audit: bindings           |     maxPoolConnections: 1            |
+      |                                     |     statements:                      |
       |                                     |     - stmt: select directus_users... |
       |                                     |       rows: 1                        |
       |                                     |       bindingsDropped: 1             |
@@ -281,7 +281,7 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | request                            | response  |
       | method: GET                        | code: 200 |+
       | path: /audit-probe/many-pool-reads |           |
-    And the query audit header fits in 8kb, its last entry counting the entries dropped
+    And the query audit header fits in 8kb, counting the entries dropped
 
   Scenario: an instance with a level outside the list refuses to start
     When an instance starts with QUERY_AUDIT_LEVEL every
@@ -308,8 +308,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
       | method: GET                | code: 403                            |+
       | path: /items/audit_missing | headers:                             |
       | headers:                   |   x-query-audit:                     |
-      |   x-query-audit: counts    |     - request:                       |
-      |                            |         maxPoolConnections: 1        |
+      |   x-query-audit: counts    |     maxPoolConnections: 1            |
+      |                            |     statements:                      |
       |                            |     - stmt: select directus_users... |
 
   Scenario: no header without QUERY_AUDIT_HEADER

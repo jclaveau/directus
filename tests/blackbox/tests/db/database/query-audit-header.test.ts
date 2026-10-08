@@ -120,7 +120,9 @@ describe.each(vendors)('%s', (vendor) => {
 		headers?: Record<string, string>;
 	};
 
-	type AuditEntry = Record<string, unknown>;
+	type QueryAudit = Record<string, unknown> & {
+		statements: Record<string, unknown>[];
+	};
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(instanceUrl: string, requestCell: string) {
@@ -146,7 +148,7 @@ describe.each(vendors)('%s', (vendor) => {
 			: pendingRequest.send(payload as object);
 	}
 
-	function auditOf(response: Response): AuditEntry[] | null {
+	function auditOf(response: Response): QueryAudit | null {
 		return response.headers[queryAuditHeader] === undefined
 			? null
 			: JSON.parse(response.headers[queryAuditHeader]);
@@ -306,7 +308,7 @@ describe.each(vendors)('%s', (vendor) => {
 				and(
 					"the token's lookup reports its SQL alone",
 					() => {
-						expect(auditOf(responses[0]!)![1])
+						expect(auditOf(responses[0]!)!.statements[0])
 							.toEqual({ stmt: expect.any(String), rows: 1 });
 
 						expect(responses[0]!.headers[queryAuditHeader])
@@ -390,12 +392,12 @@ describe.each(vendors)('%s', (vendor) => {
 				const cappedEnv = cloneDeep(env);
 
 				given(
-					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 284',
+					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 285',
 					async () => {
 						const port = await getPort();
 
 						cappedEnv[vendor].PORT = String(port);
-						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '284';
+						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '285';
 
 						cappedInstance = spawn('node', [paths.cli, 'start'], {
 							cwd: paths.cwd,
@@ -439,13 +441,13 @@ describe.each(vendors)('%s', (vendor) => {
 
 				and(
 					'the query audit header fits in 8kb, '
-					+ 'its last entry counting the entries dropped',
+					+ 'counting the entries dropped',
 					() => {
 						expect(responses[0]!.headers[queryAuditHeader].length)
 							.toBeLessThanOrEqual(8192);
 
-						expect(auditOf(responses[0]!)!.at(-1))
-							.toEqual({ entriesDropped: expect.any(Number) });
+						expect(auditOf(responses[0]!)!.entriesDropped)
+							.toEqual(expect.any(Number));
 					},
 				);
 			},

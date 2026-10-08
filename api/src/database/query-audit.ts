@@ -499,15 +499,16 @@ function releaseConnection(audit: QueryAudit, connectionId: string): void {
 
 /**
  * The audit as the JSON header value, non-ASCII escaped so a header can carry
- * it: a transaction is `{ transaction, ms, statements }`, a statement outside
- * one `{ stmt, ms }` on its own, and every statement `{ stmt, count, ms,
- * bindings }`. `timings: false` leaves out every `ms`. Past `maxSize` bytes,
- * the runs of the largest entries are grouped by statement first, then their
- * bound values go, then their SQL is cut to `<kind> <table>...`, each entry
- * naming how many it grouped, dropped or cut, then the last entries go, a
- * closing `{"entriesDropped":N}` naming how many; `0` keeps them all. Each entry
- * is serialised again only when it changes, never the whole header, so a
- * request of thousands of entries is cut in milliseconds.
+ * it: the request's `{ ms, db, wait, maxPoolConnections, statements }`, its
+ * `statements` each a transaction `{ transaction, ms, wait, statements }` or a
+ * statement outside one, and every statement `{ stmt, count, ms, bindings }`.
+ * `timings: false` leaves out every `ms`. Past `maxSize` bytes, the runs of
+ * the largest entries are grouped by statement first, then their bound values
+ * go, then their SQL is cut to `<kind> <table>...`, each entry naming how many
+ * it grouped, dropped or cut, then the last entries go, `entriesDropped`
+ * naming how many; `0` keeps them all. Each entry is serialised again only
+ * when it changes, never the whole header, so a request of thousands of
+ * entries is cut in milliseconds.
  */
 export function formatQueryAudit(
 	audit: QueryAudit,
@@ -521,19 +522,25 @@ export function formatQueryAudit(
 		return entryValueOf(auditEntry, timings);
 	};
 
-	const requestValue = requestValueOf(audit, timings);
+	const requestFields = requestFieldsOf(audit, timings);
 
-	const headerOf = (keptValues: unknown[]) => {
-		return asciiJson([requestValue, ...keptValues]);
+	const headerOf = (keptValues: unknown[], entriesDropped?: number) => {
+		return asciiJson({
+			...requestFields,
+			...(entriesDropped === undefined
+				? {}
+				: { entriesDropped }),
+			statements: keptValues,
+		});
 	};
 
 	const entrySizes = auditEntries.map((auditEntry) => {
 		return asciiJson(jsonValueOf(auditEntry)).length;
 	});
 
-	// The size `request` and its comma leave the entries, which `request`
-	// stands before whatever is cut.
-	const entriesMaxSize = maxSize - asciiJson(requestValue).length - 1;
+	// The size the request's own fields leave the entries, which are kept
+	// whatever is cut.
+	const entriesMaxSize = maxSize - headerOf([]).length + 2;
 
 	// The entries, the commas between them and the brackets around them.
 	let headerSize = entrySizes.reduce((total, entrySize) => total + entrySize, 0)
@@ -570,10 +577,10 @@ export function formatQueryAudit(
 
 	const keptCount = keptEntryCount(entrySizes, entriesMaxSize);
 
-	return headerOf([
-		...auditEntries.slice(0, keptCount).map(jsonValueOf),
-		{ entriesDropped: auditEntries.length - keptCount },
-	]);
+	return headerOf(
+		auditEntries.slice(0, keptCount).map(jsonValueOf),
+		auditEntries.length - keptCount,
+	);
 }
 
 /**
@@ -581,7 +588,10 @@ export function formatQueryAudit(
  * `ms`, `wait` the pool's, and `maxPoolConnections` the most pool connections
  * the request held at once.
  */
-function requestValueOf(audit: QueryAudit, timings: boolean): unknown {
+function requestFieldsOf(
+	audit: QueryAudit,
+	timings: boolean,
+): Record<string, number> {
 	const requestTimings = timings
 		? {
 			ms: Math.round(performance.now() - audit.startedAt),
@@ -590,9 +600,7 @@ function requestValueOf(audit: QueryAudit, timings: boolean): unknown {
 		}
 		: {};
 
-	return {
-		request: { ...requestTimings, maxPoolConnections: audit.maxPoolConnections },
-	};
+	return { ...requestTimings, maxPoolConnections: audit.maxPoolConnections };
 }
 
 function newTransactionAudit(
@@ -859,7 +867,7 @@ function entryIndexesByDetailSize(
 }
 
 /**
- * How many of the earliest entries fit beside `{"entriesDropped":N}`; none
+ * How many of the earliest entries fit beside `"entriesDropped":N,`; none
  * when not even the first does.
  */
 function keptEntryCount(entrySizes: number[], maxSize: number): number {
@@ -867,15 +875,19 @@ function keptEntryCount(entrySizes: number[], maxSize: number): number {
 	let keptCount = 0;
 
 	for (const entrySize of entrySizes) {
-		const droppedEntrySize = asciiJson({
+		const droppedFieldSize = asciiJson({
 			entriesDropped: entrySizes.length - keptCount - 1,
-		}).length;
+		}).length - 1;
 
-		if (keptSize + entrySize + 1 + droppedEntrySize > maxSize) {
+		const commaSize = keptCount > 0
+			? 1
+			: 0;
+
+		if (keptSize + commaSize + entrySize + droppedFieldSize > maxSize) {
 			break;
 		}
 
-		keptSize += entrySize + 1;
+		keptSize += commaSize + entrySize;
 		keptCount++;
 	}
 
