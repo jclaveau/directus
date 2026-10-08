@@ -91,6 +91,78 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:               |   data:                      |
       |   fields: parent     |     parent: null             |
 
+  Scenario: a batch putting two roles under each other is refused, writing nothing
+    Given the rows of /roles:
+      | as    | name  |
+      | left  | left  |
+      | right | right |
+    Then these requests get these responses:
+      | request              | response                     |
+      | method: PATCH        | code: 400                    |+
+      | path: /roles         | body:                        |
+      | payload:             |   errors:                    |
+      |   - id: <left>       |     - extensions:            |
+      |     parent: <right>  |         reason: >-           |
+      |   - id: <right>      |           A role cannot have |
+      |     parent: <left>   |           a parent that is   |
+      |                      |           already a          |
+      |                      |           descendant of      |
+      |                      |           itself             |
+      | method: GET          | code: 200                    |+
+      | path: /roles/<left>  | body:                        |
+      | query:               |   data:                      |
+      |   fields: parent     |     parent: null             |
+      | method: GET          | code: 200                    |+
+      | path: /roles/<right> | body:                        |
+      | query:               |   data:                      |
+      |   fields: parent     |     parent: null             |
+
+  Scenario: a batch closing a loop through three roles is refused, writing nothing
+    Given the rows of /roles:
+      | as     | name   |
+      | first  | first  |
+      | second | second |
+      | third  | third  |
+    Then these requests get these responses:
+      | request              | response                     |
+      | method: PATCH        | code: 400                    |+
+      | path: /roles         | body:                        |
+      | payload:             |   errors:                    |
+      |   - id: <first>      |     - extensions:            |
+      |     parent: <second> |         reason: >-           |
+      |   - id: <second>     |           A role cannot have |
+      |     parent: <third>  |           a parent that is   |
+      |   - id: <third>      |           already a          |
+      |     parent: <first>  |           descendant of      |
+      |                      |           itself             |
+      | method: GET          | code: 200                    |+
+      | path: /roles/<third> | body:                        |
+      | query:               |   data:                      |
+      |   fields: parent     |     parent: null             |
+
+  Scenario: a batch moving a role under its child while freeing the child is applied
+    Given the rows of /roles:
+      | as    | name  | parent  |
+      | elder | elder |         |
+      | child | child | <elder> |
+    Then these requests get these responses:
+      | request              | response            |
+      | method: PATCH        | code: 200           |+
+      | path: /roles         |                     |
+      | payload:             |                     |
+      |   - id: <elder>      |                     |
+      |     parent: <child>  |                     |
+      |   - id: <child>      |                     |
+      |     parent: null     |                     |
+      | method: GET          | code: 200           |+
+      | path: /roles/<elder> | body:               |
+      | query:               |   data:             |
+      |   fields: parent     |     parent: <child> |
+      | method: GET          | code: 200           |+
+      | path: /roles/<child> | body:               |
+      | query:               |   data:             |
+      |   fields: parent     |     parent: null    |
+
   Scenario: a batch setting an invalid ip_access on a policy is refused
     Given the rows of /policies:
       | as     | name   |
