@@ -1673,6 +1673,26 @@ implements AbstractService<Item> {
 				let userIntegrityCheckFlags =
 					opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 
+				// Every group before any is applied, so a row the caller may not update
+				// is refused whatever error a guard stored for another row.
+				if (this.accountability) {
+					for (const group of writingGroups) {
+						await validateAccess(
+							{
+								accountability: this.accountability,
+								action: 'update',
+								collection: this.collection,
+								primaryKeys: [...group.keys].sort(),
+								fields: Object.keys(group.data),
+							},
+							{
+								schema: this.schema,
+								knex: trx,
+							},
+						);
+					}
+				}
+
 				for (const group of writingGroups) {
 					const result = await service.applyUpdateGroup(
 						group,
@@ -1857,7 +1877,8 @@ implements AbstractService<Item> {
 	 * The `items.update` events belong to the whole update and are emitted by
 	 * `updateGroups` around the loop, never here. Returns what was written: the
 	 * payload after presets, and the keys it reached. A group that changes nothing
-	 * never gets here — `updateGroups` filters those out before the transaction.
+	 * never gets here — `updateGroups` filters those out before the transaction —
+	 * and `updateGroups` has checked the caller may update every group's rows.
 	 */
 	private async applyUpdateGroup(
 		group: UpdateGroup<Item>,
@@ -1875,22 +1896,6 @@ implements AbstractService<Item> {
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
-
-		if (this.accountability) {
-			await validateAccess(
-				{
-					accountability: this.accountability,
-					action: 'update',
-					collection: this.collection,
-					primaryKeys: keys,
-					fields: Object.keys(payloadAfterHooks),
-				},
-				{
-					schema: this.schema,
-					knex: this.knex,
-				},
-			);
-		}
 
 		const payloadWithPresets = this.accountability
 			? await processPayload(
