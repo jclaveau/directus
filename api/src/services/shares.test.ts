@@ -51,15 +51,20 @@ beforeAll(() => {
 afterEach(() => {
 	tracker.reset();
 	vi.restoreAllMocks();
+	vi.mocked(clearPermissionsCache).mockClear();
+	send.mockClear();
 });
 
 describe('Services / Shares', () => {
 	describe('updateBatch', () => {
 		it('clears the permissions cache', async () => {
-			vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1]);
+			vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1, 2]);
 			const service = new SharesService({ knex: db, schema });
 
-			await service.updateBatch([{ id: 1, max_uses: 3 }]);
+			await service.updateBatch([
+				{ id: 1, max_uses: 3 },
+				{ id: 2, max_uses: 5 },
+			]);
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 		});
