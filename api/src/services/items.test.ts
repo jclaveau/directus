@@ -639,16 +639,21 @@ describe('Integration Tests', () => {
 			});
 
 			it('returns the keys in the order the caller sent the rows', async () => {
-				// Adjacent rows carrying the same change merge into one group, and the
-				// group is then applied by a single `WHERE id IN (…)`. The keys still
-				// belong to the caller's rows, so they come back in the caller's order.
+				// Rows carrying the same change merge into one group, wherever they sit,
+				// and the group is then applied by a single `WHERE id IN (…)`. The keys
+				// still belong to the caller's rows, so they come back in the caller's
+				// order.
 				const keys = await service.updateBatch([
 					{ id: 5, name: 'same' },
-					{ id: 3, name: 'same' },
 					{ id: 4, name: 'other' },
+					{ id: 3, name: 'same' },
 				]);
 
-				expect(keys).toEqual([5, 3, 4]);
+				expect(keys).toEqual([5, 4, 3]);
+
+				expect(tracker.history.all).toHaveLength(2);
+				expect(tracker.history.all[0]!.bindings).toEqual(['same', 3, 5]);
+				expect(tracker.history.all[1]!.bindings).toEqual(['other', 4]);
 			});
 
 			it(oneLine`
