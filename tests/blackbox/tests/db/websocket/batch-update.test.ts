@@ -39,7 +39,7 @@ describe.each(vendors)('%s', (vendor) => {
 					});
 				});
 
-				when('the batch sends:', async (table: Record<string, string>[]) => {
+				const sendChanges = async (table: Record<string, string>[]) => {
 					const response = await request(getUrl(vendor))
 						.patch(`/items/${collectionBatchUpdate}`)
 						.send(parseGherkinTable<{ name: string; status: string }>(table)
@@ -52,23 +52,46 @@ describe.each(vendors)('%s', (vendor) => {
 						.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 					expect(response.statusCode).toEqual(200);
-				});
+				};
+
+				when('the batch sends:', sendChanges);
+
+				and('a lone update then sends:', sendChanges);
+
+				let messages: Awaited<ReturnType<typeof ws.getMessages>>;
 
 				// One message per group, or per row, would hold only part of the batch.
 				then(
 					'the subscriber\'s first update message holds:',
 					async (table: Record<string, string>[]) => {
-						const messages = await ws.getMessages(1);
+						messages = await ws.getMessages(2);
 
-						ws.conn.close();
-
-						expect(messages![0]).toMatchObject({
+						expect(messages![0]).toEqual({
 							type: 'subscription',
 							event: 'update',
 							data: parseGherkinTable(table),
 						});
 					},
 				);
+
+				// A second message for the batch would come before the lone update's.
+				and(
+					'its second update message, the lone update\'s, holds:',
+					async (table: Record<string, string>[]) => {
+						expect(messages![1]).toEqual({
+							type: 'subscription',
+							event: 'update',
+							data: parseGherkinTable(table),
+						});
+					},
+				);
+
+				// The subscribe reply, the batch's message and the lone update's.
+				and('the subscriber received no other message', async () => {
+					ws.conn.close();
+
+					expect(ws.getMessageCount()).toBe(3);
+				});
 			},
 			60_000,
 		);
