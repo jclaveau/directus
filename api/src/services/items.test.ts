@@ -693,6 +693,19 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
+				writes rows carrying the same bigint change in one statement
+			`, async () => {
+				const keys = await service.updateBatch([
+					{ id: 1, name: 10n },
+					{ id: 2, name: 10n },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual([10n, 1, 2]);
+			});
+
+			it(oneLine`
 				keeps the caller's order between two changes to the same row
 			`, async () => {
 				// Row 1's third change equals its first, but merging the two would
@@ -1001,6 +1014,48 @@ describe('Integration Tests', () => {
 			it('refuses a grouped hook deleting a field off the list', async () => {
 				const groupHook = (payload: any) => {
 					delete payload.name;
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it('refuses a grouped hook setting a field on the list', async () => {
+				const groupHook = (payload: any) => {
+					payload.name = 'Changed';
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it('refuses a grouped hook defining a field on the list', async () => {
+				const groupHook = (payload: any) => {
+					Object.defineProperty(payload, 'name', { value: 'Changed' });
 
 					return payload;
 				};

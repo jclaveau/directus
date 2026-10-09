@@ -90,5 +90,34 @@ describe('Services / Versions', () => {
 
 			expect(updateGroups).not.toHaveBeenCalled();
 		});
+
+		it('refuses a row changing a field a version cannot change', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([1]);
+
+			await expect(new VersionsService({ knex: db, schema })
+				.updateBatch([{ id: 1, delta: {} }]))
+				.rejects.toThrowError('"delta" is not allowed');
+
+			expect(updateGroups).not.toHaveBeenCalled();
+		});
+
+		it('writes a row keeping its version key without reading it', async () => {
+			const readOne = vi.spyOn(ItemsService.prototype, 'readOne');
+
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([1]);
+
+			const keys = await new VersionsService({ knex: db, schema })
+				.updateBatch([{ id: 1, name: 'Renamed' }]);
+
+			expect(keys).toEqual([1]);
+			expect(readOne).not.toHaveBeenCalled();
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[{ data: { name: 'Renamed' }, keys: [1] }],
+				{},
+			);
+		});
 	});
 });
