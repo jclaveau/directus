@@ -9,11 +9,24 @@ Feature: Every file of a shard reports its completion to the sequential gate
   that fails to load. A completion posted from a setup file's `afterAll` is
   then never sent, so it has to come from somewhere every file reaches.
 
+  The gate counts the completions posted, so one posted twice opens it a file
+  early: an `after` file then drops what a file still running reads.
+
   Scenario: a skipped file and a file that fails to load report like a passing one
     Given a shard of these files:
       | file               |
       | passing.fixture.ts |
       | skipped.fixture.ts |
       | broken.fixture.ts  |
+    When the shard runs with the suite's setup files and reporters
+    Then each of them posted its completion
+
+  Scenario: a completion whose answer is lost is not posted again
+    Given a shard of these files:
+      | file               |
+      | passing.fixture.ts |
+      | skipped.fixture.ts |
+      | broken.fixture.ts  |
+    And the answer to the first completion posted is lost
     When the shard runs with the suite's setup files and reporters
     Then each of them posted its completion
