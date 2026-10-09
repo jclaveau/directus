@@ -13,9 +13,10 @@ beforeAll(() => {
 		// Busy on purpose: a timer would hand the loop back, not age the clock.
 	}
 
-	vi.useFakeTimers();
+	// Timers only: faked, `performance` would be another object than the
+	// `node:perf_hooks` one stall() reads, and the spy would mock nothing it sees.
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
-	// fake timers doesn't fake performance.now(), so this is used to mock it
 	performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
 });
 
