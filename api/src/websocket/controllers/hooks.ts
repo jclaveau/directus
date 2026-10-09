@@ -57,6 +57,23 @@ function updateEvent(
 	};
 }
 
+// A `directus_relations` subscriber is sent the payload as is, and a
+// `directus_fields` one reads `collection` and `field` off it, so each group
+// goes out as the flat change it carries.
+function updateEventPerGroup(
+	{ payload = [] }: Record<string, any>,
+	collection: string,
+): WebSocketEvent[] {
+	return payload.map((group: UpdateGroup) => {
+		return {
+			collection,
+			action: 'update',
+			keys: group.keys,
+			payload: group.data,
+		};
+	});
+}
+
 function registerActionHooks(modules: string[]) {
 	// register event hooks that can be handled in an uniform manner
 	for (const module of modules) {
@@ -110,7 +127,7 @@ function registerFieldsHooks() {
 
 	registerAction('fields.update', (meta) => {
 		if (Array.isArray(meta['payload'])) {
-			return { ...updateEvent(meta), collection: 'directus_fields' };
+			return updateEventPerGroup(meta, 'directus_fields');
 		}
 
 		return {
@@ -160,7 +177,7 @@ function registerRelationsHooks() {
 	});
 
 	registerAction('relations.update', (meta) => {
-		return { ...updateEvent(meta), collection: 'directus_relations' };
+		return updateEventPerGroup(meta, 'directus_relations');
 	});
 
 	registerAction('relations.delete', ({ collection, payload = [] }) => ({
@@ -187,18 +204,22 @@ function registerSortHooks() {
  */
 function registerAction(
 	event: string,
-	transform: (args: Record<string, any>) => WebSocketEvent | null,
+	transform: (
+		args: Record<string, any>,
+	) => WebSocketEvent | WebSocketEvent[] | null,
 ) {
 	const messenger = useBus();
 
 	emitter.onAction(event, (data: Record<string, any>) => {
-		const websocketEvent = transform(data);
+		const websocketEvents = transform(data);
 
-		if (websocketEvent === null) {
+		if (websocketEvents === null) {
 			return;
 		}
 
 		// push the event through the Redis pub/sub
-		messenger.publish('websocket.event', websocketEvent as Record<string, any>);
+		for (const websocketEvent of [websocketEvents].flat()) {
+			messenger.publish('websocket.event', websocketEvent as Record<string, any>);
+		}
 	});
 }
