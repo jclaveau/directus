@@ -1455,6 +1455,11 @@ implements AbstractService<Item> {
 
 		validateKeys(this.schema, this.collection, primaryKeyField, inputKeys);
 
+		// Answered like an empty batch or a query matching nothing: no row, no hook.
+		if (inputKeys.length === 0) {
+			return [];
+		}
+
 		const updateEvent = this.eventScope === 'items'
 			? ['items.update', `${this.collection}.items.update`]
 			: `${this.eventScope}.update`;
@@ -1672,7 +1677,7 @@ implements AbstractService<Item> {
 		);
 
 		const writingGroups = mergedGroups.filter((group) => {
-			return !this.groupChangesNothing(group, aliases);
+			return group.keys.length > 0 && !this.groupChangesNothing(group, aliases);
 		});
 
 		// Snapshot the scope values these rows hold before the update so an update that
