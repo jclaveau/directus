@@ -1,0 +1,9 @@
+import { EXTENSION_LANGUAGES } from "./shared/constants/languages.js";
+import { EXTENSION_PKG_KEY } from "./shared/constants/pkg-key.js";
+import { API_SHARED_DEPS, APP_SHARED_DEPS } from "./shared/constants/shared-deps.js";
+import { API_EXTENSION_TYPES, APP_EXTENSION_TYPES, APP_OR_HYBRID_EXTENSION_PACKAGE_TYPES, APP_OR_HYBRID_EXTENSION_TYPES, BUNDLE_EXTENSION_TYPES, EXTENSION_TYPES, HYBRID_EXTENSION_TYPES, NESTED_EXTENSION_TYPES } from "./shared/constants/index.js";
+import { ExtensionOptions, ExtensionOptionsApi, ExtensionOptionsApp, ExtensionOptionsBase, ExtensionOptionsBundle, ExtensionOptionsBundleEntries, ExtensionOptionsBundleEntry, ExtensionOptionsHybrid, ExtensionSandboxOptions, ExtensionSandboxRequestedScopes, SplitEntrypoint } from "./shared/schemas/options.js";
+import { ExtensionManifest } from "./shared/schemas/manifest.js";
+import { defineDisplay, defineEndpoint, defineHook, defineInterface, defineLayout, defineModule, defineOperationApi, defineOperationApp, definePanel } from "./shared/utils/define-extension.js";
+
+export { API_EXTENSION_TYPES, API_SHARED_DEPS, APP_EXTENSION_TYPES, APP_OR_HYBRID_EXTENSION_PACKAGE_TYPES, APP_OR_HYBRID_EXTENSION_TYPES, APP_SHARED_DEPS, BUNDLE_EXTENSION_TYPES, EXTENSION_LANGUAGES, EXTENSION_PKG_KEY, EXTENSION_TYPES, ExtensionManifest, ExtensionOptions, ExtensionOptionsApi, ExtensionOptionsApp, ExtensionOptionsBase, ExtensionOptionsBundle, ExtensionOptionsBundleEntries, ExtensionOptionsBundleEntry, ExtensionOptionsHybrid, ExtensionSandboxOptions, ExtensionSandboxRequestedScopes, HYBRID_EXTENSION_TYPES, NESTED_EXTENSION_TYPES, SplitEntrypoint, defineDisplay, defineEndpoint, defineHook, defineInterface, defineLayout, defineModule, defineOperationApi, defineOperationApp, definePanel };

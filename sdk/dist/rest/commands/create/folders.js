@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/folders`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/folders`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createFolder,e as createFolders};
+//# sourceMappingURL=folders.js.map
