@@ -26,9 +26,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // The limiter is put under pressure with the marker itself: a page of marked
 // reads of STALL, each a stall the limiter cannot shed, and none a fill (a
 // marked read never writes the cache back), so the queue stays what was
-// warmed. The limiter reads the mean delay of a window, and a stall or two in
-// a window of idle ticks does not move it; 2.4s of stalls back to back leave
-// a whole window inside the block, whatever the sampling clock.
+// warmed. The limiter reads the mean of 10ms loop-delay samples: a 300ms
+// stall is one sample, and every 10ms the loop runs free between two stalls
+// is another. Sent one at a time, each read pays a whole round trip between
+// stalls, and from about 35ms of it the mean falls under the ceiling. Sent
+// together, the stalls queue behind each other and run back to back.
 //
 // Every count is read off the run's own answer: the history is a plain request
 // too, shed with everyone else. After the run nothing is asserted of the
@@ -179,10 +181,12 @@ describe('The cache audit replays through the pressure limiter', () => {
 				.update('cache-audit-replay')
 				.digest('hex');
 
-			for (const id of ids) {
-				const primed = await readRow(id).set(replayHeader, marker);
+			const primedReads = await Promise.all(ids.map((id) => {
+				return readRow(id).set(replayHeader, marker);
+			}));
 
-				expect(primed.statusCode).toBe(200);
+			for (const primedRead of primedReads) {
+				expect(primedRead.statusCode).toBe(200);
 			}
 
 			const before = await ping();
