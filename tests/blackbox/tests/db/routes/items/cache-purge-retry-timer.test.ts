@@ -223,7 +223,16 @@ describe(oneLine`
 
 			expect(served.headers[cacheStatusHeader]).toBe('MISS');
 			expect(served.body.data[0].label).toBe('v2');
-			expect(await ownRows().select('id')).toEqual([]);
+
+			// The record goes in the retry's next statement, after the MISS above.
+			let pendingRows = await ownRows().select('id');
+
+			for (let attempt = 0; attempt < 20 && pendingRows.length > 0; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				pendingRows = await ownRows().select('id');
+			}
+
+			expect(pendingRows).toEqual([]);
 		}, 60_000);
 	});
 });
