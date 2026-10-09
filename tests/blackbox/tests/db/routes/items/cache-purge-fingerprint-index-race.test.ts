@@ -26,20 +26,22 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // — and the counter guard cannot help, because the read snapshotted AFTER the bump
 // and is right to cache.
 //
-// The pass is as long as the set is wide, which is why this inflates the index set
-// first: every member costs a parse and a compare, so ~120k of them take long enough
-// to aim a read at. The cache-purge-fingerprint-index-race hook does the aiming — it
-// holds a read between its query and the fill that files its fingerprint.
+// A write's purge reads the bare set and the set its row's slot names together, a
+// page of each per round trip, until both are read. So the inflated bare set is what
+// keeps the pass running, while the held slot's set — empty when the pass starts —
+// is read whole on its first page. Every read filed into it after that page is one
+// this pass already went by: the window is the whole rest of the pass, not the luck
+// of where SSCAN's cursor stands. The cache-purge-fingerprint-index-race hook holds
+// a read between its query and the fill that files its fingerprint.
 
 const COLLECTION = 'purge_fingerprint_index_race';
 const HELD_SLOT = 'window';
 const REDIS_PORT = 6108;
 const cacheStatusHeader = 'x-cache-status';
 
-// Enough members that the purge's pass over the set is hundreds of ms. Planted
-// straight into it, in the set's own grammar: a member naming a slice no write
-// touches is read and compared like any other, and reading it is the cost this
-// needs.
+// Enough members that the purge's pass over the set is seconds. Planted straight
+// into it, in the set's own grammar: a member naming a slice no write touches is
+// read and compared like any other, and reading it is the cost this needs.
 const decoyMemberCount = 120_000;
 const decoyChunkSize = 4_000;
 
@@ -48,14 +50,10 @@ const decoyChunkSize = 4_000;
 // while the pass is still running.
 const readHoldMs = 400;
 
-// Reads fired at staggered offsets after the purge bumps its counter, which it does
-// right before its pass. A member filed mid-pass survives only if the pass already
-// went by the slot SSCAN finds it in, so the later in the pass a read files, the
-// likelier it survives: a 4s pass found all five reads fired 300-1100ms in. Spread
-// across 2s, the last reads land late in a long pass, and past the end of a short
-// one. Each carries a distinct `limit`, so each is its own cache entry rather than
+// Reads fired after the purge bumps its counter, which it does right before its
+// pass. Each carries a distinct `limit`, so each is its own cache entry rather than
 // overwriting the last.
-const readLeadsMs = [300, 700, 1100, 1500, 1900];
+const readLeadsMs = [100, 200, 300, 400, 500];
 
 const startedAt = Date.now();
 
@@ -110,6 +108,10 @@ describe(oneLine`
 		const heldIndexKey =
 			`${namespace}:scoped-cache-index:fingerprint:${COLLECTION}:slot=${HELD_SLOT}`;
 
+		// The set of the reads that pin nothing, which every write's purge reads.
+		const bareIndexKey =
+			`${namespace}:scoped-cache-index:fingerprint:${COLLECTION}:`;
+
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
 				collections: [{
@@ -159,7 +161,8 @@ describe(oneLine`
 			sweeperInstance?.kill();
 			readerInstance?.kill();
 
-			await redisCommand(REDIS_PORT, ['DEL', heldIndexKey]).catch(() => '');
+			await redisCommand(REDIS_PORT, ['DEL', heldIndexKey, bareIndexKey])
+				.catch(() => '');
 
 			await DeleteCollection(vendor, { collection: COLLECTION });
 		});
@@ -199,11 +202,11 @@ describe(oneLine`
 		 * The narrowest thing that has to stay true for any of this to witness
 		 * anything: the purge has to still be reading the set when the aimed reads
 		 * file their fingerprints. A faster runner, or a cheaper pass, ends it before
-		 * the first lead lands — every entry is then filed after the pass, trivially
+		 * the last lead lands — that entry is then filed after the pass, trivially
 		 * reachable, and the assertions below pass without having tested the race. So
 		 * the purge's own duration is asserted, not just measured.
 		 */
-		const purgeMustOutlastMs = readLeadsMs[0]! + readHoldMs;
+		const purgeMustOutlastMs = readLeadsMs.at(-1)! + readHoldMs;
 
 		const purgeCounterKey = `${namespace}:scoped-cache-epoch:${COLLECTION}`;
 
@@ -216,9 +219,9 @@ describe(oneLine`
 			]);
 		}
 
-		async function plantDecoys() {
+		async function plantDecoys(decoyIndexKey: string) {
 			for (let sent = 0; sent < decoyMemberCount; sent += decoyChunkSize) {
-				await redisCommand(REDIS_PORT, ['SADD', heldIndexKey, ...Array.from(
+				await redisCommand(REDIS_PORT, ['SADD', decoyIndexKey, ...Array.from(
 					{ length: Math.min(decoyChunkSize, decoyMemberCount - sent) },
 					(_unused, index) => {
 						return `${COLLECTION}:&slot=,decoy-${sent + index},&`
@@ -232,7 +235,7 @@ describe(oneLine`
 			await redisCommand(REDIS_PORT, [
 				'SADD',
 				`${namespace}:scoped-cache-index:collection-index-keys:${COLLECTION}`,
-				heldIndexKey,
+				decoyIndexKey,
 			]);
 
 			mark(`decoys planted (${decoyMemberCount})`);
@@ -241,10 +244,11 @@ describe(oneLine`
 		/**
 		 * Run one purge with reads aimed into it, and answer with the limits those
 		 * reads cached under. The purge is the write's own, over the held slice; the
-		 * decoys are what make its pass over that slice's set long enough to aim at.
+		 * decoys in the bare set it reads beside that slice's are what keep its pass
+		 * running once that slice's set is read.
 		 */
 		async function fillDuringPurge(label: string): Promise<number[]> {
-			await plantDecoys();
+			await plantDecoys(bareIndexKey);
 
 			const counterBefore = await readPurgeCounter();
 			let purgeStartedAt = 0;
@@ -298,29 +302,8 @@ describe(oneLine`
 			return limits;
 		}
 
-		/**
-		 * Which of the reads fired into the purge actually left an entry behind.
-		 *
-		 * A read whose fingerprint was filed into the set before the pass reached that
-		 * page is purged by it and is a miss now — correctly, and it proves nothing
-		 * either way. What the assertions below are about is the rest: entries that
-		 * outlived the purge, and so must be reachable to the next one. At least one
-		 * has to exist, or the aim missed entirely and a green would be vacuous.
-		 */
-		async function survivorsOf(limits: number[]): Promise<number[]> {
-			const cached: number[] = [];
-
-			for (const limit of limits) {
-				const served = await readHeld(limit);
-
-				if (served.headers[cacheStatusHeader] === 'HIT') {
-					cached.push(limit);
-				}
-			}
-
-			expect(cached.length).toBeGreaterThan(0);
-
-			return cached;
+		function readEveryHeld(limits: number[]) {
+			return Promise.all(limits.map((limit) => readHeld(limit)));
 		}
 
 		it(oneLine`
@@ -329,13 +312,18 @@ describe(oneLine`
 		`, async () => {
 			await clearAwaitingEveryReap();
 
-			const limits = await survivorsOf(await fillDuringPurge('v2'));
+			const limits = await fillDuringPurge('v2');
 
-			mark(`${limits.length} entries survived the purge and are cached`);
+			// Every read filed after the pass read the held set, so the pass left each
+			// one cached and indexed.
+			const filled = await readEveryHeld(limits);
+
+			expect(filled.map((response) => response.headers[cacheStatusHeader]))
+				.toEqual(['HIT', 'HIT', 'HIT', 'HIT', 'HIT']);
 
 			expect((await writeHeldLabel('v3')).status).toBe(200);
 
-			const served = await Promise.all(limits.map((limit) => readHeld(limit)));
+			const served = await readEveryHeld(limits);
 
 			mark(`after the second purge: ${
 				served.map((r) => r.headers[cacheStatusHeader]).join(',')
@@ -344,10 +332,10 @@ describe(oneLine`
 			// A HIT here is an entry the second purge could not see, because the first
 			// one dropped the index set it had just been filed into.
 			expect(served.map((response) => response.headers[cacheStatusHeader]))
-				.toEqual(limits.map(() => 'MISS'));
+				.toEqual(['MISS', 'MISS', 'MISS', 'MISS', 'MISS']);
 
 			expect(served.map((response) => response.body.data[0].label))
-				.toEqual(limits.map(() => 'v3'));
+				.toEqual(['v3', 'v3', 'v3', 'v3', 'v3']);
 		}, 120_000);
 
 		it(oneLine`
@@ -356,7 +344,11 @@ describe(oneLine`
 		`, async () => {
 			await clearAwaitingEveryReap();
 
-			const limits = await survivorsOf(await fillDuringPurge('v4'));
+			const limits = await fillDuringPurge('v4');
+			const filled = await readEveryHeld(limits);
+
+			expect(filled.map((response) => response.headers[cacheStatusHeader]))
+				.toEqual(['HIT', 'HIT', 'HIT', 'HIT', 'HIT']);
 
 			// A create purges the bare pin, the new row's own slice and its key — never
 			// the held slice. The hook it carries raises the collection-wide sweep, so
@@ -369,21 +361,21 @@ describe(oneLine`
 
 			expect(created.status).toBe(200);
 
-			const served = await Promise.all(limits.map((limit) => readHeld(limit)));
+			const served = await readEveryHeld(limits);
 
 			mark(`after the collection purge: ${
 				served.map((r) => r.headers[cacheStatusHeader]).join(',')
 			}`);
 
 			expect(served.map((response) => response.headers[cacheStatusHeader]))
-				.toEqual(limits.map(() => 'MISS'));
+				.toEqual(['MISS', 'MISS', 'MISS', 'MISS', 'MISS']);
 		}, 120_000);
 
 		it(oneLine`
 			a collection-wide purge of a set holding 120k reads never holds Redis for
 			10 ms, and leaves no index set behind
 		`, async () => {
-			await plantDecoys();
+			await plantDecoys(heldIndexKey);
 
 			// Redis's own clock rather than a probe's round trip, so a busy runner
 			// cannot pass for a stall. The slowlog keeps every command slower than
