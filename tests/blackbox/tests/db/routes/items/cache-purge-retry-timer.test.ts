@@ -161,6 +161,20 @@ describe(oneLine`
 			expect(await redisCommand(REDIS_PORT, ['DEL', noteIndexKey]))
 				.toBe(':1');
 
+			// The retry drops the entry, then deletes its record in a second
+			// statement, so a read can see the MISS while the record is still there.
+			// Holding the record's rows opens that window for as long as the hold
+			// lasts, rather than the few milliseconds a run happens to land in.
+			// sqlite has no row lock, and its transaction would stall the instance.
+			const recordHold = vendor === 'sqlite3'
+				? null
+				: await db.transaction();
+
+			await recordHold?.(PENDING)
+				.where({ collection: NOTE })
+				.forUpdate()
+				.select('id');
+
 			// The timer is the only thing that can fire now: the link never dropped,
 			// so no `ready` is coming, and nothing else writes to this collection.
 			let served = stale;
@@ -204,6 +218,8 @@ describe(oneLine`
 					}));
 				}
 			}
+
+			setTimeout(() => recordHold?.commit(), 3000);
 
 			expect(served.headers[cacheStatusHeader]).toBe('MISS');
 			expect(served.body.data[0].label).toBe('v2');
