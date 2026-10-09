@@ -154,6 +154,16 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
+			/^no row is updated to the status "(.*)"$/,
+			async (status: string) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${collectionGrouped}`)
+					.send({ keys: [], data: { status } })
+					.set('Authorization', AUTH);
+			},
+		);
+
+		when.optional(
 			/^the rows are updated to point at a new owner named "(.*)"$/,
 			async (ownerName: string) => {
 				update.response = await request(getUrl(vendor))
@@ -341,6 +351,7 @@ describe.each(vendors)('%s', (vendor) => {
 				nothing
 			`,
 			'a malformed key is refused before any update hook runs',
+			'an update naming no row runs no update hook',
 			'a batch no update hook listens to is written as it was sent',
 			'a per-row hook cancels its row and its siblings are written',
 			oneLine`

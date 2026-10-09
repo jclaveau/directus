@@ -169,6 +169,11 @@ Feature: An update reaches its hooks as groups, then once per row
     Then the update is refused with a reason naming "must be an integer"
     And no update event was logged
 
+  Scenario: an update naming no row runs no update hook
+    When no row is updated to the status "archived"
+    Then the update succeeds
+    And no update event was logged
+
   Scenario: a batch no update hook listens to is written as it was sent
     Given the rows, in the collection no update hook listens to:
       | name   |

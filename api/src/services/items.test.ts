@@ -718,6 +718,27 @@ describe('Integration Tests', () => {
 				expect(filterSpy).not.toHaveBeenCalled();
 			});
 
+			it('answers an update naming no row without emitting anything', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				const keys = await service.updateMany([], { name: 'unused' });
+
+				expect(keys).toEqual([]);
+				expect(filterSpy).not.toHaveBeenCalled();
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('writes nothing for a group naming no row', async () => {
+				const keys = await service.updateGroups([
+					{ data: { name: 'unused' }, keys: [] },
+					{ data: { name: 'written' }, keys: [1] },
+				]);
+
+				expect(keys).toEqual([1]);
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual(['written', 1]);
+			});
+
 			it('creates one related item per row that nests the same one', async () => {
 				tracker.reset();
 				tracker.on.insert('test').response([{ id: 9 }]);
