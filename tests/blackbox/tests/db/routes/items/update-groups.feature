@@ -5,7 +5,8 @@ Feature: An update reaches its hooks as groups, then once per row
   `test_update_groups`, whose events the update-groups-probe hook writes into a
   log read back here. A row is named by the `name` it was created with; a
   blank cell in what a batch sends leaves that field out, so the row sends its
-  key alone.
+  key alone. The log is emptied before each scenario.
+  `test_update_groups_owner` holds rows too, and no update hook listens to it.
 
   The probe acts on these markers:
   - name "cancel-me": the per-row filter cancels the row.
@@ -166,7 +167,30 @@ Feature: An update reaches its hooks as groups, then once per row
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"
     Then the update is refused with a reason naming "must be an integer"
-    And no update event names the malformed key
+    And no update event was logged
+
+  Scenario: a batch no update hook listens to is written as it was sent
+    Given the rows, in the collection no update hook listens to:
+      | name   |
+      | bare-a |
+      | bare-b |
+      | bare-c |
+    When the batch sends:
+      | name   | status   |
+      | bare-a | archived |
+      | bare-b | kept     |
+      | bare-c | archived |
+    Then the update answers:
+      | name   | status   |
+      | bare-a | archived |
+      | bare-b | kept     |
+      | bare-c | archived |
+    And the rows hold:
+      | name   | status   |
+      | bare-a | archived |
+      | bare-b | kept     |
+      | bare-c | archived |
+    And no update event was logged
 
   Scenario: a per-row hook cancels its row and its siblings are written
     Given the rows:

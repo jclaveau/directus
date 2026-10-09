@@ -11,7 +11,7 @@ import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
-import { describe, expect } from 'vitest';
+import { beforeEach, describe, expect } from 'vitest';
 import {
 	collectionGrouped,
 	collectionGroupedLog,
@@ -23,6 +23,7 @@ type UpdateGroupLogged = { data: { status?: string }; keys: number[] };
 type RowLogged = { id: number; status?: string };
 
 type Update = {
+	collection: string;
 	rows: GroupedRow[];
 	malformedKey: string;
 	authorization: string;
@@ -36,8 +37,16 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
-	// The log is shared by every scenario, and is never cleared: a step reads back
-	// only the entries naming its own rows.
+	// Every scenario starts on an empty log, so a count holds only its own events.
+	beforeEach(async () => {
+		const response = await request(getUrl(vendor))
+			.delete(`/items/${collectionGroupedLog}`)
+			.send({ query: { limit: -1 } })
+			.set('Authorization', AUTH);
+
+		expect(response.statusCode).toEqual(204);
+	});
+
 	async function readLoggedPayloads(event: string, phase: string) {
 		const response = await request(getUrl(vendor))
 			.get(`/items/${collectionGroupedLog}`)
@@ -77,6 +86,18 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		given.optional(
+			'the rows, in the collection no update hook listens to:',
+			async (table: Record<string, string>[]) => {
+				update.collection = collectionGroupedOwner;
+
+				update.rows = await CreateItem(vendor, {
+					collection: collectionGroupedOwner,
+					item: parseGherkinTable<{ name: string }>(table),
+				});
+			},
+		);
+
+		given.optional(
 			'the requests authenticate as a user who may read and update the rows',
 			async () => {
 				for (const action of ['read', 'update'] as const) {
@@ -98,7 +119,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
 			update.response = await request(getUrl(vendor))
-				.patch(`/items/${collectionGrouped}`)
+				.patch(`/items/${update.collection}`)
 				.query({ fields: 'name,status', sort: 'id' })
 				.send(parseGherkinTable<{ name: string; status: string | null }>(
 					table,
@@ -198,7 +219,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 		and.optional('the rows hold:', async (table: Record<string, string>[]) => {
 			const response = await request(getUrl(vendor))
-				.get(`/items/${collectionGrouped}`)
+				.get(`/items/${update.collection}`)
 				.query({
 					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
 					fields: 'name,status',
@@ -255,19 +276,14 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
-		// The probe's earlier entries show it logs, so an empty match means
-		// something.
-		and.optional('no update event names the malformed key', async () => {
-			const payloads = [
+		// The other scenarios show the probe logs, so an empty log means something.
+		and.optional('no update event was logged', async () => {
+			expect([
 				...await readLoggedPayloads('items.update', 'filter'),
 				...await readLoggedPayloads('items.update.one', 'filter'),
-			];
-
-			expect(payloads.length).toBeGreaterThan(0);
-
-			expect(payloads.filter((payload: string) => {
-				return payload.includes(update.malformedKey);
-			})).toEqual([]);
+				...await readLoggedPayloads('items.update', 'action'),
+				...await readLoggedPayloads('items.update.one', 'action'),
+			]).toEqual([]);
 		});
 
 		and.optional(
@@ -325,6 +341,7 @@ describe.each(vendors)('%s', (vendor) => {
 				nothing
 			`,
 			'a malformed key is refused before any update hook runs',
+			'a batch no update hook listens to is written as it was sent',
 			'a per-row hook cancels its row and its siblings are written',
 			oneLine`
 				a per-row hook rewriting one row splits its group, the rewrite
@@ -337,6 +354,7 @@ describe.each(vendors)('%s', (vendor) => {
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {
+					collection: collectionGrouped,
 					rows: [],
 					malformedKey: `not-a-key-${randomUUID()}`,
 					authorization: AUTH,

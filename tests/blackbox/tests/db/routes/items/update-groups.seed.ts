@@ -43,7 +43,10 @@ export const seedDBStructure = () => {
 						{
 							collection: collectionGroupedOwner,
 							meta: {},
-							fields: [{ field: 'name', type: 'string', meta: {} }],
+							fields: [
+								{ field: 'name', type: 'string', meta: {} },
+								{ field: 'status', type: 'string', meta: {} },
+							],
 						},
 					],
 				});
