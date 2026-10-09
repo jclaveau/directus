@@ -98,12 +98,18 @@ describe('sequential gate', () => {
 								serverUrl: `http://127.0.0.1:${port}`,
 							},
 							stdio: 'inherit',
+							// A shard left waiting on the gate is killed and reaped inside
+							// the scenario's 60s, not left running to the gate's timeout.
+							timeout: 50_000,
 						}), 'exit');
 					},
 				);
 
 				then('each of them posted its completion', () => {
-					expect(new Set(completedFiles)).toEqual(new Set([
+					// Once each: the gate counts posts, so a duplicate would open it early.
+					expect(completedFiles).toHaveLength(3);
+
+					expect(completedFiles).toEqual(expect.arrayContaining([
 						'/tests/common/harness/completion-fixtures/passing.fixture.ts',
 						'/tests/common/harness/completion-fixtures/skipped.fixture.ts',
 						'/tests/common/harness/completion-fixtures/broken.fixture.ts',
