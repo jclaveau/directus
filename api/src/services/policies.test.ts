@@ -46,10 +46,11 @@ describe('Services / Policies', () => {
 	describe('updateBatch', () => {
 		it('refuses a row with an invalid ip_access', async () => {
 			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
-				.mockResolvedValue(['policy-id-1']);
+				.mockResolvedValue(['policy-id-1', 'policy-id-2']);
 
 			await expect(new PoliciesService({ knex: db, schema }).updateBatch([
-				{ id: 'policy-id-1', ip_access: ['10.0.0.*'] },
+				{ id: 'policy-id-1', ip_access: ['10.0.0.1'] },
+				{ id: 'policy-id-2', ip_access: ['10.0.0.*'] },
 			])).rejects.toThrowError('IP Access contains an incorrect value');
 
 			expect(updateGroups).not.toHaveBeenCalled();
