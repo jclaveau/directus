@@ -1146,6 +1146,12 @@ describe('Integration Tests', () => {
 
 				expect(keys).toEqual([1, 2]);
 
+				// The emptied group matches no row; both rows take the change they
+				// were moved to.
+				expect(tracker.history.all).toHaveLength(2);
+				expect(tracker.history.all[0]!.bindings).toEqual(['first', 0]);
+				expect(tracker.history.all[1]!.bindings).toEqual(['second', 1, 2]);
+
 				emitFilterSpy.mockRestore();
 			});
 
