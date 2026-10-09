@@ -42,6 +42,11 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const namespace = env[vendor]['CACHE_NAMESPACE'];
 
+	// Another deployment on the same Redis: its namespace must not contain this
+	// one's, or the count would take its scripts for this instance's.
+	const peerEnv = cloneDeep(env);
+	peerEnv[vendor]['CACHE_NAMESPACE'] = `directus-peer-purge-commands-${vendor}`;
+
 	const redis = new Redis({
 		host: env[vendor]['REDIS_HOST'],
 		port: Number(env[vendor]['REDIS_PORT']),
@@ -49,6 +54,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess | undefined;
+	let peerInstance: ChildProcess | undefined;
 	let sentCommands: Record<string, string>[] = [];
 
 	beforeAll(async () => {
@@ -67,19 +73,32 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		env[vendor].PORT = String(await getPort());
+		peerEnv[vendor].PORT = String(await getPort());
 
 		instance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,
 			env: env[vendor],
 		});
 
-		await awaitDirectusConnection(Number(env[vendor].PORT));
+		peerInstance = spawn('node', [paths.cli, 'start'], {
+			cwd: paths.cwd,
+			env: peerEnv[vendor],
+		});
+
+		await Promise.all([
+			awaitDirectusConnection(Number(env[vendor].PORT)),
+			awaitDirectusConnection(Number(peerEnv[vendor].PORT)),
+		]);
 	}, 60_000);
 
 	afterAll(async () => {
 		instance?.kill();
+		peerInstance?.kill();
 
-		for (const key of await redis.keys(`${namespace}*`)) {
+		for (const key of [
+			...await redis.keys(`${namespace}*`),
+			...await redis.keys(`${peerEnv[vendor]['CACHE_NAMESPACE']}*`),
+		]) {
 			await redis.del(key);
 		}
 
@@ -157,6 +176,21 @@ describe.each(vendors)('%s', (vendor) => {
 							expect((await readRows(query!)).headers[cacheStatusHeader])
 								.toBe('HIT');
 						}
+					},
+				);
+
+				// Its system cache takes its permission cache with it.
+				and.optional(
+					'another deployment on this Redis clears its system cache',
+					async () => {
+						const cleared = await request(
+							`http://127.0.0.1:${peerEnv[vendor].PORT}`,
+						)
+							.post('/utils/cache/clear')
+							.query({ targets: 'system' })
+							.set('Authorization', auth);
+
+						expect(cleared.statusCode).toBe(200);
 					},
 				);
 
