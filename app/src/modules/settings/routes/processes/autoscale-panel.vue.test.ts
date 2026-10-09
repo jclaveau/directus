@@ -1252,6 +1252,10 @@ describe('the options a restart carries', () => {
 describe('the load drill', () => {
 	const drill = { until: null, percent: 80 };
 
+	// Under a frozen clock its countdown never reaches the deadline, so the
+	// interval it armed only stops when the panel unmounts.
+	let startedDrillWrapper: Awaited<ReturnType<typeof mounted>> | undefined;
+
 	// The countdown reads the wall clock, so a runner that spends a second
 	// between setting the deadline and reading it shows one second less. Only
 	// `Date` is faked: flushPromises waits on a real timer.
@@ -1260,6 +1264,8 @@ describe('the load drill', () => {
 	});
 
 	afterEach(() => {
+		startedDrillWrapper?.unmount();
+		startedDrillWrapper = undefined;
 		vi.useRealTimers();
 	});
 
@@ -1298,6 +1304,7 @@ describe('the load drill', () => {
 		});
 
 		const wrapper = await mounted({}, [runner()], null, drill);
+		startedDrillWrapper = wrapper;
 		const inputs = wrapper.findAll('.drill input');
 
 		await inputs[0]!.setValue('45');
