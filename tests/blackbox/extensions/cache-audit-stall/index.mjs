@@ -7,6 +7,7 @@
 const STALL = 'test_cache_audit_stall';
 const STALL_FLAG = 'test_cache_audit_stall_flag';
 const STALL_MS = 300;
+const IDLE_GAP_MS = 60;
 
 export default function registerHooks({ filter }) {
 	filter(`${STALL}.items.read`, async (records, _meta, context) => {
@@ -15,6 +16,10 @@ export default function registerHooks({ filter }) {
 		if (flag === undefined || flag.armed !== 'yes') {
 			return records;
 		}
+
+		// A loaded runner's round trip between two reads: idle ticks the
+		// limiter's mean counts between one stall and the next.
+		await new Promise((resolve) => setTimeout(resolve, IDLE_GAP_MS));
 
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, STALL_MS);
 

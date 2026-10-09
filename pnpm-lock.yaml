@@ -3161,6 +3161,9 @@ importers:
       '@directus/env':
         specifier: workspace:*
         version: link:../../packages/env
+      '@directus/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       '@directus/tsconfig':
         specifier: 'catalog:'
         version: 4.0.0

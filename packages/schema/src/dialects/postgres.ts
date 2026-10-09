@@ -443,6 +443,9 @@ export default class Postgres implements SchemaInspector {
 		 `,
 				bindings,
 			),
+			// The auto-increment is read off pg_depend: pg_get_serial_sequence looks
+			// the table up by name in the current catalog, so a table another
+			// connection dropped after this statement's snapshot fails it (42P01).
 			knex.raw<{ rows: Constraint[] }>(
 				`
 			SELECT
@@ -453,7 +456,16 @@ export default class Postgres implements SchemaInspector {
 			  frel.relname AS foreign_key_table,
 			  fatt.attname AS foreign_key_column,
 			  CASE
-				 WHEN con.contype = 'p' THEN pg_get_serial_sequence(att.attrelid::regclass::text, att.attname) != ''
+				 WHEN con.contype = 'p' THEN EXISTS (
+				   SELECT 1
+				   FROM pg_depend dep
+				   JOIN pg_class seq ON seq.oid = dep.objid AND seq.relkind = 'S'
+				   WHERE dep.classid = 'pg_class'::regclass
+				     AND dep.refclassid = 'pg_class'::regclass
+				     AND dep.refobjid = att.attrelid
+				     AND dep.refobjsubid = att.attnum
+				     AND dep.deptype IN ('a', 'i')
+				 )
 				 ELSE NULL
 			  END AS has_auto_increment
 			FROM

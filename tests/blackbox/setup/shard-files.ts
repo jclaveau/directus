@@ -140,6 +140,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 16_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 37_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
+	'/tests/db/routes/items/graphql-ip-gated-read.test.ts': 3_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 9_000,
 	'/tests/db/routes/collections/schema-cache.test.ts': 6_000,
 	'/tests/db/websocket/general.test.ts': 6_000,
@@ -155,6 +156,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/batch-update.test.ts': 500,
 	'/tests/db/routes/permissions/policy-user-integrity.test.ts': 400,
 	'/tests/db/routes/items/read-hook-null.test.ts': 200,
+	// Not measured yet: one table created, dropped and inspected.
+	'/tests/db/schema/inspector-concurrent-drop.test.ts': 300,
 	// Measured over the postgres run of 2026-10-01; no hint before it.
 	'/tests/db/routes/items/cache-index-marker.test.ts': 87_000,
 	'/tests/db/routes/items/cache-fill-pause-ceiling.test.ts': 85_000,

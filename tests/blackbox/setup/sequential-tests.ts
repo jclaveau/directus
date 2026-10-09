@@ -112,6 +112,12 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// parallel middle its creates reach the subscriber's queue, and
 			// `getMessages(1)` returns a row the assertion never asked for.
 			'/tests/db/routes/items/batch-insert.test.ts',
+			// Reads through the GraphQL schema its given step cached for the user,
+			// and every `schemaChanged` drops it: any system write by a sibling,
+			// from a collection or field to a user or permission. The read from
+			// outside the range then builds a schema without the collection and
+			// fails validation before it reaches the refusal under test.
+			'/tests/db/routes/items/graphql-ip-gated-read.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
 			'/tests/db/app/cache.test.ts',
