@@ -2349,31 +2349,37 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				await new ItemsService('test', { knex: db, schema: shapesSchema })
 					.createMany([{ name: 'a' }, { name: 'b' }]);
 
-				expect(filterSpy).toHaveBeenCalledWith(
-					['items.create.one', 'test.items.create.one'],
-					expect.objectContaining({ name: 'a' }),
-					{ collection: 'test' },
-					expect.anything(),
-				);
+				expect(filterSpy.mock.calls).toEqual([
+					[
+						['items.create', 'test.items.create'],
+						[{ data: { id: 1, name: 'a' } }, { data: { name: 'b' } }],
+						{ collection: 'test' },
+						expect.anything(),
+					],
+					[
+						['items.create.one', 'test.items.create.one'],
+						{ id: 1, name: 'a' },
+						{ collection: 'test' },
+						expect.anything(),
+					],
+				]);
 
-				expect(filterSpy).not.toHaveBeenCalledWith(
-					['items.create.one', 'test.items.create.one'],
-					expect.objectContaining({ name: 'b' }),
-					{ collection: 'test' },
-					expect.anything(),
-				);
-
-				expect(actionSpy).toHaveBeenCalledWith(
-					['items.create.one', 'test.items.create.one'],
-					{ payload: { id: 1, name: 'a' }, key: 1, collection: 'test' },
-					expect.anything(),
-				);
-
-				expect(actionSpy).not.toHaveBeenCalledWith(
-					['items.create.one', 'test.items.create.one'],
-					{ payload: { id: 9, name: 'b' }, key: 9, collection: 'test' },
-					expect.anything(),
-				);
+				expect(actionSpy.mock.calls).toEqual([
+					[
+						['items.create', 'test.items.create'],
+						{
+							payload: [{ id: 1, name: 'a' }],
+							keys: [1],
+							collection: 'test',
+						},
+						expect.anything(),
+					],
+					[
+						['items.create.one', 'test.items.create.one'],
+						{ payload: { id: 1, name: 'a' }, key: 1, collection: 'test' },
+						expect.anything(),
+					],
+				]);
 			}
 			finally {
 				emitter.offFilter('test.items.create', answerStored);
