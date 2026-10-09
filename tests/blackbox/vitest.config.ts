@@ -8,7 +8,11 @@ export default defineConfig({
 	test: {
 		maxWorkers: MAX_WORKERS,
 		// The timings land in `timings/` for CI to upload with each shard.
-		reporters: ['default', './setup/timings-reporter.ts'],
+		reporters: [
+			'default',
+			'./setup/timings-reporter.ts',
+			'./setup/completion-reporter.ts',
+		],
 		setupFiles: ['./setup/sequential-gate.ts'],
 		sequence: {
 			sequencer: Sequencer,
