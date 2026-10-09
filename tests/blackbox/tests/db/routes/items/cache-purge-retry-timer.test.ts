@@ -161,53 +161,91 @@ describe(oneLine`
 			expect(await redisCommand(REDIS_PORT, ['DEL', noteIndexKey]))
 				.toBe(':1');
 
+			// The retry drops the entry, then deletes its record in a second
+			// statement, so a read can see the MISS while the record is still there.
+			// Holding the record's rows opens that window for as long as the hold
+			// lasts, rather than the few milliseconds a run happens to land in.
+			// sqlite has no row lock, and its transaction would stall the instance.
+			const recordHold = vendor === 'sqlite3'
+				? null
+				: await db.transaction();
+
+			await recordHold?.(PENDING)
+				.where({ collection: NOTE })
+				.forUpdate()
+				.select('id');
+
 			// The timer is the only thing that can fire now: the link never dropped,
 			// so no `ready` is coming, and nothing else writes to this collection.
-			let served = stale;
+			// Released whatever happens in between: a hold left open keeps its lock,
+			// and the cleanup's delete of these rows would wait on it.
+			try {
+				let served = stale;
 
-			for (let attempt = 0; attempt < 20; attempt++) {
-				await new Promise((resolve) => setTimeout(resolve, 1000));
+				for (let attempt = 0; attempt < 20; attempt++) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
 
-				served = await readSlotA();
-				const pending = (await ownRows().select('id')).length;
+					served = await readSlotA();
+					const pending = (await ownRows().select('id')).length;
 
-				// The two failures this can end in are indistinguishable from the
-				// header alone: a drain that never ran, and one that cleared the record
-				// without dropping the entry. The record count separates them.
-				// eslint-disable-next-line no-console
-				console.info(oneLine`
-					[retry-timer] ${attempt} ${served.headers[cacheStatusHeader]}
-					pending=${pending}
-				`);
+					// The two failures this can end in are indistinguishable from the
+					// header alone: a drain that never ran, and one that cleared the
+					// record without dropping the entry. The record count separates them.
+					// eslint-disable-next-line no-console
+					console.info(oneLine`
+						[retry-timer] ${attempt} ${served.headers[cacheStatusHeader]}
+						pending=${pending}
+					`);
 
-				if (served.headers[cacheStatusHeader] === 'MISS') {
-					break;
+					if (served.headers[cacheStatusHeader] === 'MISS') {
+						break;
+					}
+
+					// Every process on this database drains the same table and the
+					// shard runs several, so a sibling instance can finish these records
+					// against ITS namespace — dropping nothing here and leaving nothing
+					// to retry. A record that went without the purge it names is written
+					// again.
+					if (pending === 0) {
+						await db(PENDING).insert(recorded.map((row) => {
+							return {
+								...row,
+								// pg reads the json column back parsed, and would write an
+								// array back as a Postgres array literal.
+								scoped_cache_fingerprints: JSON.stringify(
+									row.scoped_cache_fingerprints,
+								),
+								failed_at: new Date(),
+								attempts: 0,
+								last_error: 'reseeded after a sibling took the record',
+							};
+						}));
+					}
 				}
 
-				// Every process on this database drains the same table and the shard
-				// runs several, so a sibling instance can finish these records against
-				// ITS namespace — dropping nothing here and leaving nothing to retry.
-				// A record that went without the purge it names is written again.
-				if (pending === 0) {
-					await db(PENDING).insert(recorded.map((row) => {
-						return {
-							...row,
-							// pg reads the json column back parsed, and would write an
-							// array back as a Postgres array literal.
-							scoped_cache_fingerprints: JSON.stringify(
-								row.scoped_cache_fingerprints,
-							),
-							failed_at: new Date(),
-							attempts: 0,
-							last_error: 'reseeded after a sibling took the record',
-						};
-					}));
-				}
+				expect(served.headers[cacheStatusHeader]).toBe('MISS');
+				expect(served.body.data[0].label).toBe('v2');
+
+				// Held past the MISS, for the retry's delete to find the rows locked.
+				// Briefly: every instance's retry clears the whole table, so a
+				// sibling's delete waits on this hold too, its own records with it.
+				await new Promise((resolve) => setTimeout(resolve, 500));
+			}
+			finally {
+				// The hold only read, so a failed release loses nothing, and must
+				// not take the place of the assertion that failed before it.
+				await recordHold?.commit().catch(() => undefined);
 			}
 
-			expect(served.headers[cacheStatusHeader]).toBe('MISS');
-			expect(served.body.data[0].label).toBe('v2');
-			expect(await ownRows().select('id')).toEqual([]);
+			// The record goes in the retry's next statement, after the MISS above.
+			let pendingRows = await ownRows().select('id');
+
+			for (let attempt = 0; attempt < 20 && pendingRows.length > 0; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				pendingRows = await ownRows().select('id');
+			}
+
+			expect(pendingRows).toEqual([]);
 		}, 60_000);
 	});
 });

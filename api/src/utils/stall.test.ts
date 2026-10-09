@@ -1,16 +1,27 @@
+import { performance as realPerformance } from 'node:perf_hooks';
 import { afterAll, beforeAll, expect, test, vi, type MockInstance } from 'vitest';
 import { stall } from './stall.js';
 
 let performanceNowSpy: MockInstance;
 
-beforeAll(() => {
-	vi.useFakeTimers();
+// The worker's real clock, as a loaded run hands it over: up for longer than
+// both tests' stall windows, so neither can pass on how early the file started.
+const LATE_WORKER_MS = 1100;
 
-	// fake timers doesn't fake performance.now(), so this is used to mock it
+beforeAll(() => {
+	while (realPerformance.now() < LATE_WORKER_MS) {
+		// Busy on purpose: a timer would hand the loop back, not age the clock.
+	}
+
+	// Timers only: faked, `performance` would be another object than the
+	// `node:perf_hooks` one stall() reads, and the spy would mock nothing it sees.
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
 	performanceNowSpy = vi.spyOn(performance, 'now').mockReturnValue(0);
 });
 
 afterAll(() => {
+	performanceNowSpy.mockRestore();
 	vi.useRealTimers();
 });
 

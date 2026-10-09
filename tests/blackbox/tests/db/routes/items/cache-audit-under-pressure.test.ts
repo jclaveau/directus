@@ -30,7 +30,8 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 // stall is one sample, and every 10ms the loop runs free between two stalls
 // is another. Sent one at a time, each read pays a whole round trip between
 // stalls, and from about 35ms of it the mean falls under the ceiling. Sent
-// together, the stalls queue behind each other and run back to back.
+// together, the stalls queue behind each other and run back to back, each on
+// its own turn of the loop: stalls run inside one turn are one sample.
 //
 // Every count is read off the run's own answer: the history is a plain request
 // too, shed with everyone else. After the run nothing is asserted of the
@@ -185,7 +186,8 @@ describe('The cache audit replays through the pressure limiter', () => {
 			});
 
 			// Armed off the API: a write through it would purge STALL's entries.
-			await db(STALL_FLAG).update({ armed: 'yes' });
+			// `together`: the primed reads all arrive before any of them stalls.
+			await db(STALL_FLAG).update({ armed: `together:${ENTRIES}` });
 
 			// The marker is the audit's HMAC over SECRET, computed as the engine
 			// does. The stalls it buys are the limiter's pressure.
@@ -205,6 +207,8 @@ describe('The cache audit replays through the pressure limiter', () => {
 
 			expect(before.statusCode).toBe(503);
 			expect(before.body.errors[0].extensions.reason).toBe('Under pressure');
+
+			await db(STALL_FLAG).update({ armed: 'yes' });
 
 			// The trigger is a plain request too, shed like any other: it goes
 			// in marked, as the audit's own.
