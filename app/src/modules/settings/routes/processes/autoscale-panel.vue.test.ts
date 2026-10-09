@@ -2,7 +2,7 @@ import type { AutoscaleNodeState, AutoscaleRunner } from '@directus/types';
 import { createTestingPinia } from '@pinia/testing';
 import { flushPromises, mount } from '@vue/test-utils';
 import { setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { i18n } from '@/lang';
 
 const notified = vi.hoisted(() => {
@@ -1252,6 +1252,17 @@ describe('the options a restart carries', () => {
 describe('the load drill', () => {
 	const drill = { until: null, percent: 80 };
 
+	// The countdown reads the wall clock, so a runner that spends a second
+	// between setting the deadline and reading it shows one second less. Only
+	// `Date` is faked: flushPromises waits on a real timer.
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	// The route only exists where the deployment asked for it, so its absence
 	// is the answer to "can load be made here".
 	test('a deployment without the drill is offered none', async () => {
@@ -1301,7 +1312,7 @@ describe('the load drill', () => {
 			{ seconds: 45, percent: 70 },
 		);
 
-		expect(wrapper.find('.drill').text()).toContain('60s left');
+		expect(wrapper.find('.drilling').text()).toBe('60s left');
 	});
 
 	test('a running drill offers the way out of it', async () => {
@@ -1312,7 +1323,7 @@ describe('the load drill', () => {
 		const running = { until: Date.now() + 30_000, percent: 80 };
 		const wrapper = await mounted({}, [runner()], null, running);
 
-		expect(wrapper.find('.drill').text()).toContain('30s left');
+		expect(wrapper.find('.drilling').text()).toBe('30s left');
 
 		await wrapper.find('.drill-stop button').trigger('click');
 
