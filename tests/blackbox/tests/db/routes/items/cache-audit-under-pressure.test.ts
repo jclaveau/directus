@@ -185,7 +185,8 @@ describe('The cache audit replays through the pressure limiter', () => {
 			});
 
 			// Armed off the API: a write through it would purge STALL's entries.
-			await db(STALL_FLAG).update({ armed: 'yes' });
+			// `together`: the primed reads all arrive before any of them stalls.
+			await db(STALL_FLAG).update({ armed: 'together' });
 
 			// The marker is the audit's HMAC over SECRET, computed as the engine
 			// does. The stalls it buys are the limiter's pressure.
@@ -205,6 +206,8 @@ describe('The cache audit replays through the pressure limiter', () => {
 
 			expect(before.statusCode).toBe(503);
 			expect(before.body.errors[0].extensions.reason).toBe('Under pressure');
+
+			await db(STALL_FLAG).update({ armed: 'yes' });
 
 			// The trigger is a plain request too, shed like any other: it goes
 			// in marked, as the audit's own.
