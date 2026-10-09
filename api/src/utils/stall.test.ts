@@ -21,6 +21,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+	performanceNowSpy.mockRestore();
 	vi.useRealTimers();
 });
 

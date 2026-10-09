@@ -227,10 +227,14 @@ describe(oneLine`
 				expect(served.body.data[0].label).toBe('v2');
 
 				// Held past the MISS, for the retry's delete to find the rows locked.
-				await new Promise((resolve) => setTimeout(resolve, 3000));
+				// Briefly: every instance's retry clears the whole table, so a
+				// sibling's delete waits on this hold too, its own records with it.
+				await new Promise((resolve) => setTimeout(resolve, 500));
 			}
 			finally {
-				await recordHold?.commit();
+				// The hold only read, so a failed release loses nothing, and must
+				// not take the place of the assertion that failed before it.
+				await recordHold?.commit().catch(() => undefined);
 			}
 
 			// The record goes in the retry's next statement, after the MISS above.
