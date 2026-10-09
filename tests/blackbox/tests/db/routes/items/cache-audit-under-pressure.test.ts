@@ -30,7 +30,8 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 // stall is one sample, and every 10ms the loop runs free between two stalls
 // is another. Sent one at a time, each read pays a whole round trip between
 // stalls, and from about 35ms of it the mean falls under the ceiling. Sent
-// together, the stalls queue behind each other and run back to back.
+// together, the stalls queue behind each other and run back to back, each on
+// its own turn of the loop: stalls run inside one turn are one sample.
 //
 // Every count is read off the run's own answer: the history is a plain request
 // too, shed with everyone else. After the run nothing is asserted of the

@@ -18,6 +18,7 @@ const TICK_PIN_STALL_MS = 1100;
 const TICK_PIN_IDLE_MS = 600;
 
 let waitingReads = [];
+let stallChain = Promise.resolve();
 
 export default function registerHooks({ filter }) {
 	filter(`${STALL}.items.read`, async (records, _meta, context) => {
@@ -43,7 +44,13 @@ export default function registerHooks({ filter }) {
 				}, TICK_PIN_IDLE_MS);
 			});
 
-			blockLoop(STALL_MS);
+			// One stall per turn of the loop, so the limiter's histogram records
+			// each as its own sample: stalls run inside one turn record as one.
+			stallChain = stallChain
+				.then(() => new Promise((resolve) => setTimeout(resolve, 0)))
+				.then(() => blockLoop(STALL_MS));
+
+			await stallChain;
 
 			return records;
 		}
