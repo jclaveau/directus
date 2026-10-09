@@ -10,7 +10,7 @@ import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest';
 
 // The cache audit replays entries over the process's own loopback, and the
 // pressure limiter sat in front of those replays: a run's bookkeeping stalled
@@ -67,11 +67,15 @@ describe('The cache audit replays through the pressure limiter', () => {
 		env[vendor]['PRESSURE_LIMITER_ENABLED'] = 'true';
 		env[vendor]['PRESSURE_LIMITER_SAMPLE_INTERVAL'] = '1000';
 		env[vendor]['PRESSURE_LIMITER_MAX_EVENT_LOOP_DELAY'] = '100';
+		// Every request it answers, for a run that hangs past the test's timeout.
+		env[vendor]['LOG_LEVEL'] = 'info';
 
 		let instance: ChildProcess;
 		let db: Knex;
 		let url: string;
 		let ids: string[];
+
+		const instanceLog: string[] = [];
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -110,6 +114,9 @@ describe('The cache audit replays through the pressure limiter', () => {
 				env: env[vendor],
 			});
 
+			instance.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
+			instance.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
+
 			db = knex(config.knexConfig[vendor]!);
 			url = getUrl(vendor, env);
 
@@ -146,6 +153,11 @@ describe('The cache audit replays through the pressure limiter', () => {
 			reports every replay fresh through a limiter already shedding, while each
 			of them stalls the loop past its ceiling again
 		`, async () => {
+			onTestFailed(() => {
+				// eslint-disable-next-line no-console
+				console.log(instanceLog.join('').slice(-20_000));
+			});
+
 			for (const id of ids) {
 				await readRow(id);
 				const warmed = await readRow(id);
