@@ -2,8 +2,8 @@ import vendors from '@common/get-dbs-to-test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeSharedSettings,
+	decisionAfter,
 	reportOf,
-	sizesOver,
 	startAutoscaler,
 	startPool,
 	stopRig,
@@ -78,10 +78,12 @@ describe('The autoscaler does not take apart a pool that is churning', () => {
 			PM2_AUTOSCALE_WARMUP_SECONDS: '5',
 		});
 
-		// `sizesOver` rather than a floor assertion: a released pool reaches 1
-		// and stays, and a pool between a crash and its replacement dips
-		// through 1 on its way back to 2 — only the order they are first seen
-		// in tells those apart.
-		expect(await sizesOver(rig, 30_000), reportOf(rig)).toEqual([2]);
+		// The decisions, not the pool size: pm2 lists a crashed worker as
+		// `stopped` until its restart timer fires, so a poll can read this pool
+		// at 1 with nothing released. A release always logs its line first.
+		expect(await decisionAfter(rig, 0, 30_000), reportOf(rig)).toEqual([]);
+
+		// An autoscaler that died decides nothing either.
+		expect(reportOf(rig)).toMatch(/^autoscaler running;/);
 	}, 300_000);
 });
