@@ -144,6 +144,14 @@ describe.each(vendors)('%s', (vendor) => {
 				await expectEventCounts([name], table);
 			},
 		);
+
+		and.optional(
+			/^the grouped action naming "(.*)" carries that row alone$/,
+			async (name: string) => {
+				expect(await readLoggedPayloads('items.create', 'action', [name]))
+					.toEqual([[{ id: expect.any(Number), name }]]);
+			},
+		);
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -160,6 +168,7 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			'a grouped hook marking a twin inserts the row once',
 			'a grouped hook cancelling one row writes its siblings',
+			'a row a grouped hook takes over is left out of the grouped action',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, { responses: [] });

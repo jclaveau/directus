@@ -12,6 +12,7 @@ Feature: A create reaches its hooks as entries, then once per row
     - "strip-name": deletes `name` off the list itself.
     - "check-name": reads `name` off the list itself, throwing when it reads
       "check-name".
+    - "take-over": inserts that row itself and answers `{ key }` with its id.
   - A request authenticates as the admin.
 
   Scenario: a create fires the grouped event once, then the per-row one per row
@@ -116,3 +117,25 @@ Feature: A create reaches its hooks as entries, then once per row
       | items.create     | filter | 1     |
       | items.create.one | filter | 0     |
       | items.create.one | action | 0     |
+
+  Scenario: a row a grouped hook takes over is left out of the grouped action
+    When these requests get these responses:
+      | request                                      | response                  |
+      | method: POST                                 | code: 200                 |+
+      | path: /items/test_create_groups              |                           |
+      | payload:                                     |                           |
+      |   - name: takeover-peer                      |                           |
+      |   - name: take-over                          |                           |
+      | method: GET                                  | code: 200                 |+
+      | path: /items/test_create_groups              | body:                     |
+      | query:                                       |   data:                   |
+      |   fields: name                               |     - name: take-over     |
+      |   sort: name                                 |     - name: takeover-peer |
+      |   filter[name][_in]: take-over,takeover-peer |                           |
+    Then the create events naming "take-over" are:
+      | event            | phase  | count |
+      | items.create     | filter | 1     |
+      | items.create.one | filter | 0     |
+      | items.create     | action | 0     |
+      | items.create.one | action | 0     |
+    And the grouped action naming "takeover-peer" carries that row alone

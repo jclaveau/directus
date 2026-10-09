@@ -13,6 +13,8 @@
 //     payload strips a field.
 //   'check-name' → reads `name` off the list, the way a hook written for one
 //     payload refuses a value.
+//   'take-over' → inserts that row itself and answers { key } with its id,
+//     taking the row over.
 
 const COLLECTION = 'test_create_groups';
 const LOG = 'test_create_groups_log';
@@ -62,7 +64,14 @@ export default function registerHooks({ filter, action }, { database }) {
 			return legacyEntry.data;
 		}
 
-		return entries.map((entry) => {
+		return Promise.all(entries.map(async (entry) => {
+			if (entry?.data?.name === 'take-over') {
+				const [insertedRow] = await database(COLLECTION)
+					.insert({ name: 'take-over' }, ['id']);
+
+				return { key: insertedRow.id };
+			}
+
 			if (entry?.data?.name === 'twin-of-first') {
 				return { sameRowAs: 0 };
 			}
@@ -72,7 +81,7 @@ export default function registerHooks({ filter, action }, { database }) {
 			}
 
 			return entry;
-		});
+		}));
 	});
 
 	filter(`${COLLECTION}.items.create.one`, async (payload) => {
