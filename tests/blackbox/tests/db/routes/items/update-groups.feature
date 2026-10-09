@@ -47,6 +47,10 @@ Feature: An update reaches its hooks as groups, then once per row
       | name   | status |
       | noop-a |        |
       | noop-b |        |
+    And the rows hold:
+      | name   | status |
+      | noop-a |        |
+      | noop-b |        |
 
   Scenario: a batch answers with every row it was sent, no-op rows included
     Given the rows:
@@ -102,13 +106,18 @@ Feature: An update reaches its hooks as groups, then once per row
 
   Scenario: a grouped hook answering with one payload is refused, naming the per-row event
     Given the rows:
-      | name   |
-      | legacy |
-    When the rows are updated to the status "legacy-shape"
+      | name     |
+      | legacy-a |
+      | legacy-b |
+    When the batch sends:
+      | name     | status       |
+      | legacy-a | archived     |
+      | legacy-b | legacy-shape |
     Then the update is refused with a reason naming "items.update.one"
     And the rows hold:
-      | name   | status |
-      | legacy |        |
+      | name     | status       |
+      | legacy-a |              |
+      | legacy-b |              |
 
   Scenario: a grouped hook dropping a key is refused, naming the per-row event
     Given the rows:
@@ -126,23 +135,33 @@ Feature: An update reaches its hooks as groups, then once per row
     Given the rows:
       | name    |
       | strip-a |
-    When the rows are updated to the status "strip-name"
+      | strip-b |
+    When the batch sends:
+      | name    | status     |
+      | strip-a | archived   |
+      | strip-b | strip-name |
     Then the update is refused with a reason naming "items.update.one"
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status |
-      | strip-a |        |
+      | name    | status     |
+      | strip-a |            |
+      | strip-b |            |
 
   Scenario: a grouped hook reading a field off the list is refused, writing nothing
     Given the rows:
       | name    |
       | check-a |
-    When the rows are updated to the status "check-status"
+      | check-b |
+    When the batch sends:
+      | name    | status       |
+      | check-a | archived     |
+      | check-b | check-status |
     Then the update is refused with a reason naming "items.update.one"
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status |
-      | check-a |        |
+      | name    | status       |
+      | check-a |              |
+      | check-b |              |
 
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"

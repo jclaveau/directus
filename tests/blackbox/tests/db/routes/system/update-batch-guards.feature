@@ -45,6 +45,11 @@ Feature: A batch update of a system collection is checked as a single update is
       |   - id: <bob>                     |           RECORD_NOT_UNIQUE |
       |     email: same-<run>@example.com |         field: email        |
       | method: GET                       | code: 200                   |+
+      | path: /users/<ann>                | body:                       |
+      | query:                            |   data:                     |
+      |   fields: email                   |     email: >-               |
+      |                                   |       ann-<run>@example.com |
+      | method: GET                       | code: 200                   |+
       | path: /users/<bob>                | body:                       |
       | query:                            |   data:                     |
       |   fields: email                   |     email: >-               |
@@ -150,21 +155,29 @@ Feature: A batch update of a system collection is checked as a single update is
       | second | second |
       | third  | third  |
     Then these requests get these responses:
-      | request              | response                     |
-      | method: PATCH        | code: 400                    |+
-      | path: /roles         | body:                        |
-      | payload:             |   errors:                    |
-      |   - id: <first>      |     - extensions:            |
-      |     parent: <second> |         reason: >-           |
-      |   - id: <second>     |           A role cannot have |
-      |     parent: <third>  |           a parent that is   |
-      |   - id: <third>      |           already a          |
-      |     parent: <first>  |           descendant of      |
-      |                      |           itself             |
-      | method: GET          | code: 200                    |+
-      | path: /roles/<third> | body:                        |
-      | query:               |   data:                      |
-      |   fields: parent     |     parent: null             |
+      | request               | response                     |
+      | method: PATCH         | code: 400                    |+
+      | path: /roles          | body:                        |
+      | payload:              |   errors:                    |
+      |   - id: <first>       |     - extensions:            |
+      |     parent: <second>  |         reason: >-           |
+      |   - id: <second>      |           A role cannot have |
+      |     parent: <third>   |           a parent that is   |
+      |   - id: <third>       |           already a          |
+      |     parent: <first>   |           descendant of      |
+      |                       |           itself             |
+      | method: GET           | code: 200                    |+
+      | path: /roles/<first>  | body:                        |
+      | query:                |   data:                      |
+      |   fields: parent      |     parent: null             |
+      | method: GET           | code: 200                    |+
+      | path: /roles/<second> | body:                        |
+      | query:                |   data:                      |
+      |   fields: parent      |     parent: null             |
+      | method: GET           | code: 200                    |+
+      | path: /roles/<third>  | body:                        |
+      | query:                |   data:                      |
+      |   fields: parent      |     parent: null             |
 
   Scenario: a batch moving a role under its child while freeing the child is applied
     Given the rows of /roles:
@@ -228,6 +241,10 @@ Feature: A batch update of a system collection is checked as a single update is
       |     key: same-<run>         |           and language  |
       |                             |           combination   |
       | method: GET                 | code: 200               |+
+      | path: /translations/<first> | body:                   |
+      | query:                      |   data:                 |
+      |   fields: key               |     key: first-<run>    |
+      | method: GET                 | code: 200               |+
       | path: /translations/<other> | body:                   |
       | query:                      |   data:                 |
       |   fields: key               |     key: other-<run>    |
@@ -274,6 +291,10 @@ Feature: A batch update of a system collection is checked as a single update is
       |                           |           collection                    |
       |                           |           "test_batch_guards_versioned" |
       |                           |           to the same key "final"       |
+      | method: GET               | code: 200                               |+
+      | path: /versions/<draft-a> | body:                                   |
+      | query:                    |   data:                                 |
+      |   fields: key             |     key: draft-a                        |
       | method: GET               | code: 200                               |+
       | path: /versions/<draft-b> | body:                                   |
       | query:                    |   data:                                 |

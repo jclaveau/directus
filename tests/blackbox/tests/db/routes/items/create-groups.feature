@@ -37,44 +37,44 @@ Feature: A create reaches its hooks as entries, then once per row
 
   Scenario: a grouped hook answering with one payload is refused
     When these requests get these responses:
-      | request                           | response                      |
-      | method: POST                      | code: 400                     |+
-      | path: /items/test_create_groups   | body:                         |
-      | payload:                          |   errors:                     |
-      |   - name: legacy-shape            |     - extensions:             |
-      |                                   |         code: INVALID_PAYLOAD |
-      | method: GET                       | code: 200                     |+
-      | path: /items/test_create_groups   | body:                         |
-      | query:                            |   data: []                    |
-      |   filter[name][_eq]: legacy-shape |                               |
+      | request                                       | response                      |
+      | method: POST                                  | code: 400                     |+
+      | path: /items/test_create_groups               | body:                         |
+      | payload:                                      |   errors:                     |
+      |   - name: legacy-peer                         |     - extensions:             |
+      |   - name: legacy-shape                        |         code: INVALID_PAYLOAD |
+      | method: GET                                   | code: 200                     |+
+      | path: /items/test_create_groups               | body:                         |
+      | query:                                        |   data: []                    |
+      |   filter[name][_in]: legacy-peer,legacy-shape |                               |
     Then the first refusal names "items.create.one"
 
   Scenario: a grouped hook deleting a field off the list is refused, creating nothing
     When these requests get these responses:
-      | request                         | response                      |
-      | method: POST                    | code: 400                     |+
-      | path: /items/test_create_groups | body:                         |
-      | payload:                        |   errors:                     |
-      |   - name: strip-name            |     - extensions:             |
-      |                                 |         code: INVALID_PAYLOAD |
-      | method: GET                     | code: 200                     |+
-      | path: /items/test_create_groups | body:                         |
-      | query:                          |   data: []                    |
-      |   filter[name][_eq]: strip-name |                               |
+      | request                                    | response                      |
+      | method: POST                               | code: 400                     |+
+      | path: /items/test_create_groups            | body:                         |
+      | payload:                                   |   errors:                     |
+      |   - name: strip-peer                       |     - extensions:             |
+      |   - name: strip-name                       |         code: INVALID_PAYLOAD |
+      | method: GET                                | code: 200                     |+
+      | path: /items/test_create_groups            | body:                         |
+      | query:                                     |   data: []                    |
+      |   filter[name][_in]: strip-peer,strip-name |                               |
     Then the first refusal names "items.create.one"
 
   Scenario: a grouped hook reading a field off the list is refused, creating nothing
     When these requests get these responses:
-      | request                         | response                      |
-      | method: POST                    | code: 400                     |+
-      | path: /items/test_create_groups | body:                         |
-      | payload:                        |   errors:                     |
-      |   - name: check-name            |     - extensions:             |
-      |                                 |         code: INVALID_PAYLOAD |
-      | method: GET                     | code: 200                     |+
-      | path: /items/test_create_groups | body:                         |
-      | query:                          |   data: []                    |
-      |   filter[name][_eq]: check-name |                               |
+      | request                                    | response                      |
+      | method: POST                               | code: 400                     |+
+      | path: /items/test_create_groups            | body:                         |
+      | payload:                                   |   errors:                     |
+      |   - name: check-peer                       |     - extensions:             |
+      |   - name: check-name                       |         code: INVALID_PAYLOAD |
+      | method: GET                                | code: 200                     |+
+      | path: /items/test_create_groups            | body:                         |
+      | query:                                     |   data: []                    |
+      |   filter[name][_in]: check-peer,check-name |                               |
     Then the first refusal names "items.create.one"
 
   Scenario: a grouped hook marking a twin inserts the row once
