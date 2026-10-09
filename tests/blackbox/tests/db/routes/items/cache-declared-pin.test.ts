@@ -428,6 +428,10 @@ describe.each(vendors)('%s', (vendor) => {
 			.get(`/collections/${SLOT}`)
 			.set('Authorization', auth);
 
+		expect(fields.statusCode, JSON.stringify(fields.body)).toBe(200);
+
+		expect(collection.statusCode, JSON.stringify(collection.body)).toBe(200);
+
 		const scopedCacheFields: string[]
 			= collection.body.data.meta.scoped_cache_fields;
 
