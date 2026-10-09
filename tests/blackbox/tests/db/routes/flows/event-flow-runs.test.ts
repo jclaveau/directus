@@ -1,4 +1,4 @@
-import { getUrl } from '@common/config';
+import { getNoCacheUrl, getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
@@ -11,7 +11,7 @@ import { USER } from '@common/variables';
 import { sleep } from '@utils/sleep';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
-import { beforeAll, describe, expect } from 'vitest';
+import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { collectionFlowRefusals, eventFlows } from './event-flow-runs.seed';
 
 type FlowRow = { id: number | string; name: string };
@@ -68,6 +68,34 @@ describe.each(vendors)('%s', (vendor) => {
 
 		throw new Error('the flows never loaded on this server');
 	}, 30_000);
+
+	// Left active, the users flows would run on every later update of a user. A
+	// write to a flow reloads only the server it reaches, and both servers hold
+	// them: the seed server since the seed, this one since the reload above.
+	afterAll(async () => {
+		const deactivation = await request(getNoCacheUrl(vendor))
+			.patch('/flows')
+			.send({
+				keys: [
+					'6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f06',
+					'6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f07',
+				],
+				data: { status: 'inactive' },
+			})
+			.set('Authorization', AUTH);
+
+		expect(deactivation.statusCode).toEqual(200);
+
+		const deletion = await request(getUrl(vendor))
+			.delete('/flows')
+			.send([
+				'6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f06',
+				'6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f07',
+			])
+			.set('Authorization', AUTH);
+
+		expect(deletion.statusCode).toEqual(204);
+	});
 
 	// Every run of a flow leaves a revision holding its $trigger; the flows are
 	// shared by every scenario, so a step keeps only the runs naming its own rows.
