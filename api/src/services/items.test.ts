@@ -186,6 +186,7 @@ describe('Integration Tests', () => {
 
 	afterEach(() => {
 		tracker.reset();
+		vi.restoreAllMocks();
 	});
 
 	describe('Services / Items', () => {
@@ -524,13 +525,13 @@ describe('Integration Tests', () => {
 			`, async () => {
 				const batchInsert = vi.fn();
 
-				const transactionSpy = vi
+				vi
 					.spyOn(db, 'transaction')
 					.mockImplementation(async (callback) => {
 						return callback({ ...db, batchInsert } as any);
 					});
 
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce(Object.assign(new Array(3), {
 						0: { data: { name: 'a' } },
@@ -543,9 +544,6 @@ describe('Integration Tests', () => {
 				).rejects.toThrow(InvalidPayloadError);
 
 				expect(batchInsert).not.toHaveBeenCalled();
-
-				emitFilterSpy.mockRestore();
-				transactionSpy.mockRestore();
 			});
 
 			it('refuses a grouped hook deleting a field off the entries', async () => {
@@ -791,8 +789,6 @@ describe('Integration Tests', () => {
 				expect(snapshot).toHaveBeenCalledTimes(2);
 				expect(snapshot.mock.calls[0]![0]).toEqual([2]);
 				expect(snapshot.mock.calls[1]![0]).toEqual([2]);
-
-				snapshot.mockRestore();
 			});
 		});
 
@@ -936,7 +932,7 @@ describe('Integration Tests', () => {
 
 			it('refuses a grouped hook that answers with a single payload', async () => {
 				// A hook written for one row answers with that row.
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce({ name: 'changed' });
 
@@ -945,12 +941,10 @@ describe('Integration Tests', () => {
 				);
 
 				expect(tracker.history.all).toHaveLength(0);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it('refuses a grouped answer carrying a property of its own', async () => {
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce(
 						Object.assign([{ data: { name: 'Test' }, keys: [1] }], {
@@ -963,14 +957,12 @@ describe('Integration Tests', () => {
 				);
 
 				expect(tracker.history.all).toHaveLength(0);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it(oneLine`
 				refuses a sparse grouped answer carrying a property of its own
 			`, async () => {
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce(Object.assign(new Array(3), {
 						0: { data: { name: 'Test' }, keys: [1, 2] },
@@ -983,8 +975,6 @@ describe('Integration Tests', () => {
 				).rejects.toThrow(InvalidPayloadError);
 
 				expect(tracker.history.all).toHaveLength(0);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it('refuses a grouped hook deleting a field off the list', async () => {
@@ -1058,8 +1048,6 @@ describe('Integration Tests', () => {
 				);
 
 				expect(filterSpy).not.toHaveBeenCalled();
-
-				filterSpy.mockRestore();
 			});
 
 			it(oneLine`
@@ -1083,7 +1071,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('still validates a key a hook added', async () => {
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce([
 						{ data: { name: 'y' }, keys: [1, 'abc'] },
@@ -1092,12 +1080,10 @@ describe('Integration Tests', () => {
 				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(/integer/);
 
 				expect(tracker.history.all).toHaveLength(0);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it('refuses an update hook that drops a key', async () => {
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce([
 						{ data: { name: 'y' }, keys: [1] },
@@ -1108,14 +1094,12 @@ describe('Integration Tests', () => {
 				);
 
 				expect(tracker.history.all).toHaveLength(0);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it(oneLine`
 				refuses an update hook that drops one of a row's two changes
 			`, async () => {
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce([
 						{ data: { name: 'first' }, keys: [1] },
@@ -1127,12 +1111,10 @@ describe('Integration Tests', () => {
 				])).rejects.toThrow(/must keep every key it received/);
 
 				expect(tracker.history.all).toHaveLength(0);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it('lets an update hook move a key to another group', async () => {
-				const emitFilterSpy = vi
+				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce([
 						{ data: { name: 'first' }, keys: [] },
@@ -1151,8 +1133,6 @@ describe('Integration Tests', () => {
 				expect(tracker.history.all).toHaveLength(2);
 				expect(tracker.history.all[0]!.bindings).toEqual(['first', 0]);
 				expect(tracker.history.all[1]!.bindings).toEqual(['second', 1, 2]);
-
-				emitFilterSpy.mockRestore();
 			});
 
 			it('still counts a key a hook added against the batch limit', async () => {
@@ -1488,6 +1468,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		revisionParentWrites.length = 0;
 		revisionIds.issued = 0;
 		vi.clearAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	describe('system collection event scope', () => {
@@ -2079,7 +2060,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
 
-			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (event, payload: any) => {
 					if (!event.includes('items.update.one')) {
 						return payload;
@@ -2098,12 +2079,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(keys).toEqual([null, 2]);
 			expect(tracker.history.update[0]!.bindings).toEqual(['after', 2]);
-
-			filterSpy.mockRestore();
 		});
 
 		it('answers a null per row when every row is cancelled', async () => {
-			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (event, payload) => {
 					return event.includes('items.update.one')
 						? null
@@ -2118,12 +2097,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(keys).toEqual([null, null]);
 			expect(tracker.history.update).toHaveLength(0);
-
-			filterSpy.mockRestore();
 		});
 
 		it('refuses a per-row cancel the caller did not opt into', async () => {
-			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (event, payload: any) => {
 					if (!event.includes('items.update.one')) {
 						return payload;
@@ -2141,15 +2118,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			).rejects.toThrow(InvalidPayloadError);
 
 			expect(tracker.history.update).toHaveLength(0);
-
-			filterSpy.mockRestore();
 		});
 
 		it('splits off only the row a per-row hook rewrote', async () => {
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
-			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (event, payload: any) => {
 					if (!event.includes('items.update.one')) {
 						return payload;
@@ -2167,8 +2142,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			// Rows 1 and 3 still carry the same change, so they share one statement.
 			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1, 3]);
 			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
-
-			filterSpy.mockRestore();
 		});
 	});
 
