@@ -1244,9 +1244,19 @@ describe('The cache audit replays live entries against the database', () => {
 			// A stale entry nothing has flagged yet, for the schedule to find.
 			await clearCache();
 			await warm(() => readOwner('globex'));
+			await warm(() => readCollection(HOLD));
+			// Both in the queue, so the scheduled run replays them in one page.
+			await auditSettled({}, 2);
 
 			await db(ROWS).where({ owner: 'globex' })
 				.update({ amount: '13' });
+
+			// The HOLD replay answers 6s late: the run records its counts that
+			// long after the globex replay raised its anomaly.
+			await request(url)
+				.patch(`/items/${HOLD_FLAG}/${holdFlagId}`)
+				.send({ armed: 'yes' })
+				.set('Authorization', auth);
 
 			const before = Date.now();
 
