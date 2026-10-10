@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/flows`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/flows`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/flows/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updateFlow=r,exports.updateFlows=t,exports.updateFlowsBatch=n;
+//# sourceMappingURL=flows.cjs.map

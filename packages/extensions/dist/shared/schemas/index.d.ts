@@ -1,0 +1,2 @@
+import { ExtensionManifest } from "./manifest.js";
+import { ExtensionOptions, ExtensionOptionsApi, ExtensionOptionsApp, ExtensionOptionsBase, ExtensionOptionsBundle, ExtensionOptionsBundleEntries, ExtensionOptionsBundleEntry, ExtensionOptionsHybrid, ExtensionSandboxOptions, ExtensionSandboxRequestedScopes, SplitEntrypoint } from "./options.js";

@@ -1,0 +1,47 @@
+import { ItemsService } from "../../services/items.js";
+import { sanitizeQuery } from "../../utils/sanitize-query.js";
+import { getAccountabilityForRole } from "../../utils/get-accountability-for-role.js";
+import { optionToObject, toArray } from "@directus/utils";
+import { defineOperationApi } from "@directus/extensions";
+
+//#region src/operations/item-delete/index.ts
+var item_delete_default = defineOperationApi({
+	id: "item-delete",
+	handler: async ({ collection, key, query, emitEvents, permissions }, { accountability, database, getSchema }) => {
+		const schema = await getSchema({ database });
+		let customAccountability;
+		if (!permissions || permissions === "$trigger") customAccountability = accountability;
+		else if (permissions === "$full") customAccountability = await getAccountabilityForRole("system", {
+			database,
+			schema,
+			accountability
+		});
+		else if (permissions === "$public") customAccountability = await getAccountabilityForRole(null, {
+			database,
+			schema,
+			accountability
+		});
+		else customAccountability = await getAccountabilityForRole(permissions, {
+			database,
+			schema,
+			accountability
+		});
+		const itemsService = new ItemsService(collection, {
+			schema: await getSchema({ database }),
+			accountability: customAccountability,
+			knex: database
+		});
+		const sanitizedQueryObject = await sanitizeQuery(query ? optionToObject(query) : {}, schema, customAccountability);
+		let result;
+		if (!key || Array.isArray(key) && key.length === 0) result = await itemsService.deleteByQuery(sanitizedQueryObject, { emitEvents: !!emitEvents });
+		else {
+			const keys = toArray(key);
+			if (keys.length === 1) result = await itemsService.deleteOne(keys[0], { emitEvents: !!emitEvents });
+			else result = await itemsService.deleteMany(keys, { emitEvents: !!emitEvents });
+		}
+		return result;
+	}
+});
+
+//#endregion
+export { item_delete_default as default };

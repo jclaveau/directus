@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r,i)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),e.throwIfEmpty(n,`Field cannot be empty`),{path:`/fields/${t}/${n}`,params:i??{},body:JSON.stringify(r),method:`PATCH`});exports.updateField=t;
+//# sourceMappingURL=fields.cjs.map
