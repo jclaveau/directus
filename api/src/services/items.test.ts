@@ -637,10 +637,6 @@ describe('Integration Tests', () => {
 			});
 
 			it('returns the keys in the order the caller sent the rows', async () => {
-				// Rows carrying the same change merge into one group, wherever they sit,
-				// and the group is then applied by a single `WHERE id IN (…)`. The keys
-				// still belong to the caller's rows, so they come back in the caller's
-				// order.
 				const keys = await service.updateBatch([
 					{ id: 5, name: 'same' },
 					{ id: 4, name: 'other' },
@@ -648,10 +644,6 @@ describe('Integration Tests', () => {
 				]);
 
 				expect(keys).toEqual([5, 4, 3]);
-
-				expect(tracker.history.all).toHaveLength(2);
-				expect(tracker.history.all[0]!.bindings).toEqual(['same', 3, 5]);
-				expect(tracker.history.all[1]!.bindings).toEqual(['other', 4]);
 			});
 
 			it(oneLine`
@@ -677,8 +669,10 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				writes rows carrying the same change in one statement, however far apart
+				writes rows apart carrying the same change in the order sent
 			`, async () => {
+				// Row 1 may free a value row 2 takes, or row 2 one row 3 takes, so
+				// writing rows 1 and 3 together would reorder the batch.
 				const keys = await service.updateBatch([
 					{ id: 1, name: 'same' },
 					{ id: 2, name: 'other' },
@@ -687,9 +681,10 @@ describe('Integration Tests', () => {
 
 				expect(keys).toEqual([1, 2, 3]);
 
-				expect(tracker.history.all).toHaveLength(2);
-				expect(tracker.history.all[0]!.bindings).toEqual(['same', 1, 3]);
+				expect(tracker.history.all).toHaveLength(3);
+				expect(tracker.history.all[0]!.bindings).toEqual(['same', 1]);
 				expect(tracker.history.all[1]!.bindings).toEqual(['other', 2]);
+				expect(tracker.history.all[2]!.bindings).toEqual(['same', 3]);
 			});
 
 			it(oneLine`

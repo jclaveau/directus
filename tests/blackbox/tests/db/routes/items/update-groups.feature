@@ -7,6 +7,8 @@ Feature: An update reaches its hooks as groups, then once per row
   blank cell in what a batch sends leaves that field out, so the row sends its
   key alone. The log is emptied before each scenario.
   `test_update_groups_owner` holds rows too, and no update hook listens to it.
+  `test_update_groups_slot` lets a holder hold each slot once (a unique
+  `(holder, slot)`), and no update hook listens to it either.
 
   The probe acts on these markers:
   - name "cancel-me": the per-row filter cancels the row.
@@ -67,7 +69,23 @@ Feature: An update reaches its hooks as groups, then once per row
       | noop-one |          |
       | noop-two | archived |
 
-  Scenario: rows carrying the same change are written together, however far apart
+  Scenario: rows side by side carrying the same change are written together
+    Given the rows:
+      | name   |
+      | next-a |
+      | next-b |
+      | next-c |
+    When the batch sends:
+      | name   | status   |
+      | next-a | archived |
+      | next-b | archived |
+      | next-c | kept     |
+    Then the grouped action carries:
+      | status   | names               |
+      | archived | ["next-a","next-b"] |
+      | kept     | ["next-c"]          |
+
+  Scenario: rows apart carrying the same change are written in the order sent
     Given the rows:
       | name    |
       | apart-a |
@@ -79,15 +97,66 @@ Feature: An update reaches its hooks as groups, then once per row
       | apart-b | kept     |
       | apart-c | archived |
     Then the grouped action carries:
-      | status   | names                 |
-      | archived | ["apart-a","apart-c"] |
-      | kept     | ["apart-b"]           |
+      | status   | names       |
+      | archived | ["apart-a"] |
+      | kept     | ["apart-b"] |
+      | archived | ["apart-c"] |
     And the update events naming these rows are:
       | event            | phase  | count |
       | items.update     | filter | 1     |
       | items.update.one | filter | 3     |
       | items.update     | action | 1     |
       | items.update.one | action | 3     |
+
+  Scenario: a batch writes its revisions in the order it sends its rows
+    Given the rows, in the collection no update hook listens to:
+      | name      |
+      | ordered-a |
+      | ordered-b |
+      | ordered-c |
+    When the batch sends:
+      | name      | status   |
+      | ordered-a | archived |
+      | ordered-b | kept     |
+      | ordered-c | archived |
+    Then the update succeeds
+    And the revisions name the rows in this order:
+      | name      |
+      | ordered-a |
+      | ordered-b |
+      | ordered-c |
+
+  Scenario: a batch hands a slot over when a row frees it before the next takes it
+    Given the rows, in the collection holding each slot once per holder:
+      | name   | holder | slot |
+      | hand-a | first  |      |
+      | hand-b | second | open |
+      | hand-c | second |      |
+    When the batch sends the slots:
+      | name   | slot   |
+      | hand-a | open   |
+      | hand-b | closed |
+      | hand-c | open   |
+    Then the update succeeds
+    And the slots hold:
+      | name   | holder | slot   |
+      | hand-a | first  | open   |
+      | hand-b | second | closed |
+      | hand-c | second | open   |
+
+  Scenario: a row a batch changes back and forth keeps the last change it was sent
+    Given the rows:
+      | name       |
+      | back-forth |
+    When the batch sends:
+      | name       | status   |
+      | back-forth | archived |
+      | back-forth | kept     |
+      | back-forth | archived |
+    Then the update succeeds
+    And the rows hold:
+      | name       | status   |
+      | back-forth | archived |
 
   Scenario: a row a non-admin sends twice with one change is checked and written once
     Given the rows:

@@ -16,6 +16,7 @@ import {
 	collectionGrouped,
 	collectionGroupedLog,
 	collectionGroupedOwner,
+	collectionGroupedSlot,
 } from './update-groups.seed';
 
 type GroupedRow = { id: number; name: string; status: string | null };
@@ -98,6 +99,22 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		given.optional(
+			'the rows, in the collection holding each slot once per holder:',
+			async (table: Record<string, string>[]) => {
+				update.collection = collectionGroupedSlot;
+
+				update.rows = await CreateItem(vendor, {
+					collection: collectionGroupedSlot,
+					item: parseGherkinTable<{
+						name: string;
+						holder: string;
+						slot: string | null;
+					}>(table),
+				});
+			},
+		);
+
+		given.optional(
 			'the requests authenticate as a user who may read and update the rows',
 			async () => {
 				for (const action of ['read', 'update'] as const) {
@@ -132,6 +149,22 @@ describe.each(vendors)('%s', (vendor) => {
 				}))
 				.set('Authorization', update.authorization);
 		});
+
+		when.optional(
+			'the batch sends the slots:',
+			async (table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send(parseGherkinTable<{ name: string; slot: string }>(table)
+						.map((change) => {
+							return {
+								id: update.rows.find((row) => row.name === change.name)!.id,
+								slot: change.slot,
+							};
+						}))
+					.set('Authorization', update.authorization);
+			},
+		);
 
 		when.optional(
 			/^the rows are updated to the status "(.*)"$/,
@@ -240,6 +273,19 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
+		and.optional('the slots hold:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.get(`/items/${update.collection}`)
+				.query({
+					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+					fields: 'name,holder,slot',
+					sort: 'id',
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.body.data).toEqual(parseGherkinTable(table));
+		});
+
 		// A grouped payload names a row in a group's keys, a per-row one in its id.
 		and.optional(
 			'the update events naming these rows are:',
@@ -325,6 +371,33 @@ describe.each(vendors)('%s', (vendor) => {
 				]);
 			},
 		);
+
+		// One revision per row written, in the order the rows were written.
+		and.optional(
+			'the revisions name the rows in this order:',
+			async (table: Record<string, string>[]) => {
+				const response = await request(getUrl(vendor))
+					.get('/revisions')
+					.query({
+						'filter[collection][_eq]': update.collection,
+						'filter[item][_in]': update.rows.map((row) => row.id).join(','),
+						fields: 'item',
+						sort: 'id',
+					})
+					.set('Authorization', AUTH);
+
+				expect(response.statusCode).toEqual(200);
+
+				expect(namesOf(
+					update,
+					response.body.data.map((revision: { item: string }) => {
+						return Number(revision.item);
+					}),
+				)).toEqual(
+					parseGherkinTable<{ name: string }>(table).map((row) => row.name),
+				);
+			},
+		);
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -332,7 +405,19 @@ describe.each(vendors)('%s', (vendor) => {
 			'an update fires the grouped event once, then the per-row one per row',
 			'a batch where every row writes nothing answers with every row',
 			'a batch answers with every row it was sent, no-op rows included',
-			'rows carrying the same change are written together, however far apart',
+			'rows side by side carrying the same change are written together',
+			oneLine`
+				rows apart carrying the same change are written in the order sent
+			`,
+			'a batch writes its revisions in the order it sends its rows',
+			oneLine`
+				a batch hands a slot over when a row frees it before the next takes
+				it
+			`,
+			oneLine`
+				a row a batch changes back and forth keeps the last change it was
+				sent
+			`,
 			oneLine`
 				a row a non-admin sends twice with one change is checked and written
 				once

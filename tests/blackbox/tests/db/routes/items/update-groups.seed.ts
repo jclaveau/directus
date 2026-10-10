@@ -1,14 +1,17 @@
+import config from '@common/config';
 import {
 	CreateCollections,
 	CreateFieldM2O,
 	DeleteCollection,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
+import knex from 'knex';
 import { expect, it } from 'vitest';
 
 export const collectionGrouped = 'test_update_groups';
 export const collectionGroupedLog = 'test_update_groups_log';
 export const collectionGroupedOwner = 'test_update_groups_owner';
+export const collectionGroupedSlot = 'test_update_groups_slot';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -18,6 +21,7 @@ export const seedDBStructure = () => {
 				await DeleteCollection(vendor, { collection: collectionGrouped });
 				await DeleteCollection(vendor, { collection: collectionGroupedLog });
 				await DeleteCollection(vendor, { collection: collectionGroupedOwner });
+				await DeleteCollection(vendor, { collection: collectionGroupedSlot });
 
 				await CreateCollections(vendor, {
 					collections: [
@@ -48,8 +52,29 @@ export const seedDBStructure = () => {
 								{ field: 'status', type: 'string', meta: {} },
 							],
 						},
+						{
+							collection: collectionGroupedSlot,
+							meta: {},
+							fields: [
+								{ field: 'name', type: 'string', meta: {} },
+								{ field: 'holder', type: 'string', meta: {} },
+								{ field: 'slot', type: 'string', meta: {} },
+							],
+						},
 					],
 				});
+
+				// The fields API has no composite unique.
+				const db = knex(config.knexConfig[vendor]!);
+
+				try {
+					await db.schema.alterTable(collectionGroupedSlot, (table) => {
+						table.unique(['holder', 'slot']);
+					});
+				}
+				finally {
+					await db.destroy();
+				}
 
 				await CreateFieldM2O(vendor, {
 					collection: collectionGrouped,
