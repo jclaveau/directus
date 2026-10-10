@@ -2209,9 +2209,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			await new ItemsService('test', { knex: db, schema: shapesSchema })
 				.updateMany([1, 2, 3], { name: 'after' });
 
-			// Rows 1 and 3 still carry the same change, so they share one statement.
-			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1, 3]);
+			// Rows 1 and 3 still carry the same change, but row 2 sits between them.
+			expect(tracker.history.update).toHaveLength(3);
+			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1]);
 			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
+			expect(tracker.history.update[2]!.bindings).toEqual(['after', 3]);
 		});
 	});
 

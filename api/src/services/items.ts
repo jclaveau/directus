@@ -214,9 +214,10 @@ function isCreateEntryList(
 }
 
 /**
- * Merge the groups carrying the same change, wherever they sit, so one statement
- * writes them all. A group never joins one written before a later change to one of
- * its own rows, so two changes to the same row still land in the caller's order.
+ * Merge each group into the one before it when both carry the same change, so one
+ * statement writes rows sent side by side. Rows apart are never merged: a row in
+ * between may take a value the earlier row frees, or free one the later row takes,
+ * so the rows are written in the order the caller sent them.
  *
  * A group writing a nested item creates it once per group and walks its O2M rows
  * per group, so it merges only with the rows split off the same caller group: two
@@ -229,9 +230,8 @@ function mergeUpdateGroups<Item extends AnyItem>(
 	writesNestedItems: (groupData: Partial<Item>) => boolean,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
-	const keyNamesByGroupIndex: Set<string>[] = [];
-	const groupIndexByData = new Map<string, number>();
-	const lastGroupIndexByKey = new Map<string, number>();
+	let lastSerializedData: string | null = null;
+	let lastKeyNames = new Set<string>();
 
 	for (const [candidateIndex, candidateGroup] of candidateGroups.entries()) {
 		const serializedChange = JSON.stringify(
@@ -247,48 +247,27 @@ function mergeUpdateGroups<Item extends AnyItem>(
 			? `${callerGroupIndexes[candidateIndex]}:${serializedChange}`
 			: serializedChange;
 
-		let latestConflictIndex = -1;
-
-		for (const key of candidateGroup.keys) {
-			latestConflictIndex = Math.max(
-				latestConflictIndex,
-				lastGroupIndexByKey.get(String(key)) ?? -1,
-			);
-		}
-
-		const sameDataIndex = groupIndexByData.get(serializedData);
-
-		let targetIndex: number;
+		const lastGroup = mergedGroups.at(-1);
 
 		if (
-			sameDataIndex !== undefined &&
-			sameDataIndex >= latestConflictIndex &&
-			isEqual(mergedGroups[sameDataIndex]!.data, candidateGroup.data)
+			lastGroup === undefined ||
+			serializedData !== lastSerializedData ||
+			!isEqual(lastGroup.data, candidateGroup.data)
 		) {
-			targetIndex = sameDataIndex;
-		}
-		else {
-			targetIndex = mergedGroups.length;
-
 			mergedGroups.push({ data: candidateGroup.data, keys: [] });
-			keyNamesByGroupIndex.push(new Set());
-
-			groupIndexByData.set(serializedData, targetIndex);
+			lastSerializedData = serializedData;
+			lastKeyNames = new Set();
 		}
+
+		const targetGroup = mergedGroups.at(-1)!;
 
 		// The access check counts the stored rows against the keys, so a row the
 		// caller sent twice with one change is written, and checked, once.
 		for (const key of candidateGroup.keys) {
-			const keyNames = keyNamesByGroupIndex[targetIndex]!;
-
-			if (!keyNames.has(String(key))) {
-				keyNames.add(String(key));
-				mergedGroups[targetIndex]!.keys.push(key);
+			if (!lastKeyNames.has(String(key))) {
+				lastKeyNames.add(String(key));
+				targetGroup.keys.push(key);
 			}
-		}
-
-		for (const key of candidateGroup.keys) {
-			lastGroupIndexByKey.set(String(key), targetIndex);
 		}
 	}
 
