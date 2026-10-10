@@ -18,7 +18,7 @@ import {
  *
  * The rule is `directus_settings.cache_audit_schedule` when set, else
  * `CACHE_AUDIT_SCHEDULE`, else nothing runs. The settings one is live: the
- * cache page edits it, the `settings.update` action announces it on the bus,
+ * cache page edits it, the `settings.update.one` action announces it on the bus,
  * and every node drops its job and schedules the new rule (the same shape as
  * `cache-config.ts`). A node that missed the announcement re-seeds on boot.
  */
@@ -192,7 +192,9 @@ export default async function schedule(): Promise<boolean> {
 	// the service (a config import, a seed) still reaches every node.
 	const { default: emitter } = await import('../emitter.js');
 
-	emitter.onAction('settings.update', ({ payload }) => {
+	// The per-row event, not the grouped one: this reads a single row's fields, and
+	// a singleton only ever has the one.
+	emitter.onAction('settings.update.one', ({ payload }) => {
 		if (!payload || 'cache_audit_schedule' in payload === false) {
 			return;
 		}

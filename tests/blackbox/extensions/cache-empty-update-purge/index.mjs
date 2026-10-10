@@ -4,7 +4,9 @@
 const COLLECTION = 'test_b4_scoped';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${COLLECTION}.items.update`, async (payload, _meta, context) => {
+	// The per-row event: it reads one row's fields, and the grouped one carries a
+	// list of groups.
+	filter(`${COLLECTION}.items.update.one`, async (payload, _meta, context) => {
 		if (payload.slot !== '__drop__') {
 			return payload;
 		}

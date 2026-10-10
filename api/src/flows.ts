@@ -5,12 +5,14 @@ import { isSystemCollection } from '@directus/system-data';
 import type {
 	Accountability,
 	ActionHandler,
+	EventContext,
 	FilterHandler,
 	Flow,
 	Operation,
 	PrimaryKey,
 	SchemaOverview,
 	OperationHandler,
+	UpdateGroup,
 } from '@directus/types';
 import { applyOptionsData, deepMap, getRedactedString, isValidJSON, parseJSON, toArray } from '@directus/utils';
 import type { Knex } from 'knex';
@@ -58,6 +60,75 @@ const TRIGGER_KEY = '$trigger';
 const ACCOUNTABILITY_KEY = '$accountability';
 const LAST_KEY = '$last';
 const ENV_KEY = '$env';
+
+/**
+ * An event an event flow listens on, and the base event name its `$trigger`
+ * carries. ItemsService emits a create grouped and then per row on `.create.one`,
+ * an update grouped; a service writing with `emitEvents: false` emits the bare
+ * event itself with one row (FieldsService), so the same name carries both
+ * shapes and the handler tells them apart by the payload.
+ */
+type FlowEventRoute = {
+	eventName: string;
+	triggerEvent: string;
+	payloadShape: 'row' | 'update-groups' | 'service-create';
+};
+
+function flowEventRoutes(flowOptions: Record<string, any>): FlowEventRoute[] {
+	if (!flowOptions['scope']) {
+		return [];
+	}
+
+	return toArray(flowOptions['scope']).flatMap((scope: string): FlowEventRoute[] => {
+		if (!['items.create', 'items.update', 'items.delete'].includes(scope)) {
+			return [{ eventName: scope, triggerEvent: scope, payloadShape: 'row' }];
+		}
+
+		if (!flowOptions['collections']) {
+			return [];
+		}
+
+		return toArray(flowOptions['collections']).flatMap((collection: string) => {
+			return collectionEventRoutes(scope, collection);
+		});
+	});
+}
+
+function collectionEventRoutes(
+	scope: string,
+	collection: string,
+): FlowEventRoute[] {
+	const triggerEvent = isSystemCollection(collection)
+		? `${collection.substring(9)}.${scope.split('.')[1]}`
+		: `${collection}.${scope}`;
+
+	if (scope === 'items.update') {
+		return [{
+			eventName: triggerEvent,
+			triggerEvent,
+			payloadShape: 'update-groups',
+		}];
+	}
+
+	if (scope === 'items.delete') {
+		return [{ eventName: triggerEvent, triggerEvent, payloadShape: 'row' }];
+	}
+
+	const rowRoute: FlowEventRoute = {
+		eventName: `${triggerEvent}.one`,
+		triggerEvent,
+		payloadShape: 'row',
+	};
+
+	if (!isSystemCollection(collection)) {
+		return [rowRoute];
+	}
+
+	return [
+		rowRoute,
+		{ eventName: triggerEvent, triggerEvent, payloadShape: 'service-create' },
+	];
+}
 
 interface FlowMessage {
 	type: 'reload';
@@ -163,61 +234,30 @@ class FlowManager {
 
 		for (const flow of flowTrees) {
 			if (flow.trigger === 'event') {
-				let events: string[] = [];
-
-				if (flow.options?.['scope']) {
-					events = toArray(flow.options['scope'])
-						.map((scope: string) => {
-							if (['items.create', 'items.update', 'items.delete'].includes(scope)) {
-								if (!flow.options?.['collections']) return [];
-
-								return toArray(flow.options['collections']).map((collection: string) => {
-									if (isSystemCollection(collection)) {
-										const action = scope.split('.')[1];
-										return collection.substring(9) + '.' + action;
-									}
-
-									return `${collection}.${scope}`;
-								});
-							}
-
-							return scope;
-						})
-						.flat();
-				}
-
 				if (flow.options['type'] === 'filter') {
-					const handler: FilterHandler = (payload, meta, context) =>
-						this.executeFlow(
-							flow,
-							{ payload, ...meta },
-							{
-								accountability: context['accountability'],
-								database: context['database'],
-								getSchema: context['schema'] ? () => context['schema'] : getSchema,
-							},
-						);
-
-					events.forEach((event) => emitter.onFilter(event, handler));
-
-					this.triggerHandlers.push({
-						id: flow.id,
-						events: events.map((event) => ({ type: 'filter', name: event, handler })),
+					const handlers = flowEventRoutes(flow.options).map((route) => {
+						return {
+							type: 'filter' as const,
+							name: route.eventName,
+							handler: this.filterFlowHandler(flow, route),
+						};
 					});
+
+					handlers.forEach(({ name, handler }) => emitter.onFilter(name, handler));
+
+					this.triggerHandlers.push({ id: flow.id, events: handlers });
 				} else if (flow.options['type'] === 'action') {
-					const handler: ActionHandler = (meta, context) =>
-						this.executeFlow(flow, meta, {
-							accountability: context['accountability'],
-							database: getDatabase(),
-							getSchema: context['schema'] ? () => context['schema'] : getSchema,
-						});
-
-					events.forEach((event) => emitter.onAction(event, handler));
-
-					this.triggerHandlers.push({
-						id: flow.id,
-						events: events.map((event) => ({ type: 'action', name: event, handler })),
+					const handlers = flowEventRoutes(flow.options).map((route) => {
+						return {
+							type: 'action' as const,
+							name: route.eventName,
+							handler: this.actionFlowHandler(flow, route),
+						};
 					});
+
+					handlers.forEach(({ name, handler }) => emitter.onAction(name, handler));
+
+					this.triggerHandlers.push({ id: flow.id, events: handlers });
 				}
 			} else if (flow.trigger === 'schedule') {
 				if (validateCron(flow.options['cron'])) {
@@ -380,6 +420,106 @@ class FlowManager {
 		this.webhookFlowHandlers = {};
 
 		this.isLoaded = false;
+	}
+
+	/**
+	 * One run per update group, its trigger shaped like the single update the flow
+	 * was written for; a returned value replaces that group's data.
+	 */
+	private filterFlowHandler(flow: Flow, route: FlowEventRoute): FilterHandler {
+		const runFlow: FilterHandler = (payload, meta, context) => {
+			return this.executeFlow(
+				flow,
+				{ payload, ...meta, event: route.triggerEvent },
+				{
+					accountability: context['accountability'],
+					database: context['database'],
+					getSchema: context['schema']
+						? () => context['schema']
+						: getSchema,
+				},
+			);
+		};
+
+		if (route.payloadShape === 'row') {
+			return runFlow;
+		}
+
+		return async (payload, meta, context) => {
+			if (!Array.isArray(payload)) {
+				return runFlow(payload, meta, context);
+			}
+
+			if (route.payloadShape === 'service-create') {
+				return undefined;
+			}
+
+			const groupsAfterFlow: UpdateGroup[] = [];
+
+			for (const group of payload as UpdateGroup[]) {
+				const dataAfterFlow = await runFlow(
+					group.data,
+					{ ...meta, keys: group.keys, originalPayload: group.data },
+					context,
+				);
+
+				groupsAfterFlow.push({
+					data: dataAfterFlow === undefined
+						? group.data
+						: dataAfterFlow as UpdateGroup['data'],
+					keys: group.keys,
+				});
+			}
+
+			return groupsAfterFlow;
+		};
+	}
+
+	private actionFlowHandler(flow: Flow, route: FlowEventRoute): ActionHandler {
+		const runFlow = (meta: Record<string, any>, context: EventContext) => {
+			return this.executeFlow(flow, { ...meta, event: route.triggerEvent }, {
+				accountability: context['accountability'],
+				database: getDatabase(),
+				getSchema: context['schema']
+					? () => context['schema']
+					: getSchema,
+			});
+		};
+
+		if (route.payloadShape === 'row') {
+			return runFlow;
+		}
+
+		return async (meta, context) => {
+			if (!Array.isArray(meta['payload'])) {
+				await runFlow(meta, context);
+				return;
+			}
+
+			if (route.payloadShape === 'service-create') {
+				return;
+			}
+
+			// A group whose run throws leaves the other groups to run.
+			for (const group of meta['payload'] as UpdateGroup[]) {
+				try {
+					await runFlow({
+						payload: group.data,
+						keys: group.keys,
+						collection: meta['collection'],
+					}, context);
+				}
+				catch (error) {
+					const logger = useLogger();
+
+					logger.warn(
+						`An error was thrown while executing action "${meta['event']}"`,
+					);
+
+					logger.warn(error);
+				}
+			}
+		};
 	}
 
 	private async executeFlow(flow: Flow, data: unknown = null, context: Record<string, unknown> = {}): Promise<unknown> {

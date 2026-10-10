@@ -1,8 +1,10 @@
 import type {
+	CreateEntry,
 	FilterHandler,
 	RegisterFunctions,
 	ScopedCachePurgeHandle,
 	ScopedCacheScopeHandle,
+	UpdateGroup,
 } from '@directus/types';
 import { expectTypeOf, test } from 'vitest';
 import emitter from './emitter.js';
@@ -31,17 +33,20 @@ test('a filter may return the output type instead of the payload', () => {
 });
 
 test('emitFilter surfaces the output type alongside the input', () => {
-	const result = emitter.emitFilter<Item, number>('items.create', { a: 1 }, {});
-	expectTypeOf(result).toEqualTypeOf<Promise<Item | number>>();
+	expectTypeOf(emitter.emitFilter<Item, number>('items.create.one', { a: 1 }, {}))
+		.toEqualTypeOf<Promise<Item | number>>();
 });
 
 test('emitFilter defaults the output type to the input type', () => {
-	const result = emitter.emitFilter<Item>('items.update', { a: 1 }, {});
-	expectTypeOf(result).toEqualTypeOf<Promise<Item>>();
+	expectTypeOf(emitter.emitFilter<UpdateGroup<Item>[]>(
+		'items.update',
+		[{ data: { a: 1 }, keys: [1] }],
+		{},
+	)).toEqualTypeOf<Promise<UpdateGroup<Item>[]>>();
 });
 
 test('onFilter accepts a handler whose output type differs from its input', () => {
-	emitter.onFilter<Item, number>('items.create', (payload) => {
+	emitter.onFilter<Item, number>('items.create.one', (payload) => {
 		expectTypeOf(payload).toEqualTypeOf<Item>();
 		return 5;
 	});
@@ -50,7 +55,7 @@ test('onFilter accepts a handler whose output type differs from its input', () =
 test('register.filter plumbs the output type so a hook can return a primary key', () => {
 	const register = {} as RegisterFunctions;
 
-	register.filter<Item, number>('items.create', (payload) => {
+	register.filter<Item, number>('items.create.one', (payload) => {
 		expectTypeOf(payload).toEqualTypeOf<Item>();
 		return 5;
 	});
@@ -62,8 +67,8 @@ test('offFilter accepts the same typed handler shape as onFilter', () => {
 		return 5;
 	};
 
-	emitter.onFilter<Item, number>('items.create', handler);
-	emitter.offFilter<Item, number>('items.create', handler);
+	emitter.onFilter<Item, number>('items.create.one', handler);
+	emitter.offFilter<Item, number>('items.create.one', handler);
 });
 
 test('register.filter hands a read handler the read handle, unnarrowed', () => {
@@ -79,10 +84,36 @@ test('register.filter hands a read handler the read handle, unnarrowed', () => {
 test('register.filter hands a mutation handler the purge handle', () => {
 	const register = {} as RegisterFunctions;
 
-	register.filter<Item>('items.update', (payload, _meta, context) => {
+	register.filter('items.update', (groups, _meta, context) => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
 		context.scopedCache.purgeBy({ collection: 'article' });
+		return groups;
+	});
+});
+
+test('register.filter hands a per-row handler the purge handle', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('items.update.one', (payload, _meta, context) => {
+		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
 		return payload;
+	});
+
+	register.filter<Item>('articles.items.create.one', (payload, _meta, context) => {
+		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
+		return payload;
+	});
+});
+
+test('register.filter types a grouped event by the list it carries', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('users.update', (groups) => {
+		expectTypeOf(groups).toEqualTypeOf<UpdateGroup[]>();
+	});
+
+	register.filter('articles.items.create', (entries) => {
+		expectTypeOf(entries).toEqualTypeOf<CreateEntry[]>();
 	});
 });
 

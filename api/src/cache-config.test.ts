@@ -144,7 +144,7 @@ describe('initCacheConfig', () => {
 		await initCacheConfig();
 
 		expect(mockEmitter.onAction).toHaveBeenCalledWith(
-			'settings.update',
+			'settings.update.one',
 			expect.any(Function),
 		);
 

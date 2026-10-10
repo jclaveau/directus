@@ -42,7 +42,7 @@ export default function registerHooks({ filter }, { scopedCache }) {
 	// new row's own slice and its key — never the held slice — so the collection-wide
 	// sweep this raises is the only thing that can reach the entries under test. An
 	// update would have dropped them through its own slice purge and proved nothing.
-	filter(`${COLLECTION}.items.create`, async (payload) => {
+	filter(`${COLLECTION}.items.create.one`, async (payload) => {
 		if (payload?.label !== SWEEP_LABEL) {
 			return payload;
 		}

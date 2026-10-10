@@ -106,7 +106,13 @@ export const WebSocketEvent = z.discriminatedUnion('action', [
 	z.object({
 		action: z.literal('update'),
 		collection: z.string(),
-		payload: z.record(z.string(), z.any()).optional(),
+		payload: z.union([
+			z.record(z.string(), z.any()),
+			z.array(z.object({
+				data: z.record(z.string(), z.any()),
+				keys: z.array(zodStringOrNumber),
+			})),
+		]).optional(),
 		keys: z.array(zodStringOrNumber),
 	}),
 	z.object({

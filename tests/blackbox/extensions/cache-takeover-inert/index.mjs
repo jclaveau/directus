@@ -14,7 +14,7 @@
 const COLLECTION = 'test_items_inert_dedup';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${COLLECTION}.items.create`, async (payload, _meta, context) => {
+	filter(`${COLLECTION}.items.create.one`, async (payload, _meta, context) => {
 		const itemsService = new services.ItemsService(COLLECTION, {
 			schema: context.schema,
 			accountability: context.accountability,

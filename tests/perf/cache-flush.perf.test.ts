@@ -310,7 +310,13 @@ async function readKeyShapes(arm: Arm): Promise<KeyShapes> {
 
 	for (const client of [redis, cacheRedis]) {
 		const responseKey = await scanFirst(client, `${namespace}_response*`);
-		const indexKey = await scanFirst(client, `${namespace}:scoped-cache-index:*`);
+
+		// A fingerprint set, the kind a flush drops: the index-key sets under the
+		// same prefix outlive it on purpose.
+		const indexKey = await scanFirst(
+			client,
+			`${namespace}:scoped-cache-index:fingerprint:*`,
+		);
 
 		if (responseKey && indexKey) {
 			found.push({ client, responseKey, indexKey });

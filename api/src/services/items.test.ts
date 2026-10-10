@@ -8,8 +8,19 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import {
 	AutoIncrementHelperPostgres,
 } from '../database/helpers/sequence/dialects/postgres.js';
@@ -22,6 +33,7 @@ import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
+import { UsersService } from './users.js';
 
 // Mirrors scoped-cache-purge.test.ts: force auto-purge on so shouldClearCache() routes to a
 // truthy cache, mock the database client to postgres, and stub the scoped-cache module so the
@@ -174,6 +186,7 @@ describe('Integration Tests', () => {
 
 	afterEach(() => {
 		tracker.reset();
+		vi.restoreAllMocks();
 	});
 
 	describe('Services / Items', () => {
@@ -212,7 +225,7 @@ describe('Integration Tests', () => {
 			});
 
 			it('should short-circuit and return the key when a create filter returns a primary key', async () => {
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue(5);
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{ key: 5 }]);
 
 				const insert = vi.fn().mockReturnThis();
 
@@ -506,13 +519,305 @@ describe('Integration Tests', () => {
 
 				transactionSpy.mockRestore();
 			});
+
+			it(oneLine`
+				refuses sparse grouped entries carrying a property of their own
+			`, async () => {
+				const batchInsert = vi.fn();
+
+				vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => {
+						return callback({ ...db, batchInsert } as any);
+					});
+
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce(Object.assign(new Array(3), {
+						0: { data: { name: 'a' } },
+						2: { data: { name: 'c' } },
+						extra: true,
+					}));
+
+				await expect(
+					batchService().createMany([{ name: 'a' }, { name: 'b' }, { name: 'c' }]),
+				).rejects.toThrow(InvalidPayloadError);
+
+				expect(batchInsert).not.toHaveBeenCalled();
+			});
+
+			it('refuses a grouped hook deleting a field off the entries', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => {
+						return callback({ ...db, batchInsert } as any);
+					});
+
+				const groupHook = (entries: any) => {
+					delete entries.name;
+
+					return entries;
+				};
+
+				emitter.onFilter('items.create', groupHook);
+
+				try {
+					await expect(
+						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
+					).rejects.toThrow(/items\.create\.one/);
+
+					expect(batchInsert).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.create', groupHook);
+					transactionSpy.mockRestore();
+				}
+			});
+
+			it('refuses a grouped hook reading a field off the entries', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => {
+						return callback({ ...db, batchInsert } as any);
+					});
+
+				const groupHook = (entries: any) => {
+					if (entries.name === 'a') {
+						throw new Error('The name "a" is refused');
+					}
+
+					return entries;
+				};
+
+				emitter.onFilter('items.create', groupHook);
+
+				try {
+					await expect(
+						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
+					).rejects.toThrow(/items\.create\.one/);
+
+					expect(batchInsert).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.create', groupHook);
+					transactionSpy.mockRestore();
+				}
+			});
 		});
 
 		describe('updateBatch', () => {
 			it('should validate user count if requested', async () => {
-				await service.updateBatch([{ id: 1 }], { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+				await service.updateBatch(
+					[{ id: 1, name: 'test' }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should not validate user count when every row is a no-op', async () => {
+				// `{ id: 1 }` carries nothing but the primary key, so nothing is written and
+				// the user count cannot have moved.
+				await service.updateBatch(
+					[{ id: 1 }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+			});
+
+			it('returns the keys in the order the caller sent the rows', async () => {
+				const keys = await service.updateBatch([
+					{ id: 5, name: 'same' },
+					{ id: 4, name: 'other' },
+					{ id: 3, name: 'same' },
+				]);
+
+				expect(keys).toEqual([5, 4, 3]);
+			});
+
+			it(oneLine`
+				returns a key for a row that writes nothing, alongside one that writes
+			`, async () => {
+				// `{ id: 1 }` carries only the primary key, so it is a no-op — but it is
+				// still a row the caller asked to update, and the REST layer reads every
+				// returned key back into the response body. Dropping it would silently
+				// omit that item from a PATCH response.
+				const keys = await service.updateBatch([
+					{ id: 1 },
+					{ id: 2, name: 'written' },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+			});
+
+			it('returns every key when every row writes nothing', async () => {
+				const keys = await service.updateBatch([{ id: 1 }, { id: 2 }]);
+
+				expect(keys).toEqual([1, 2]);
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				writes rows apart carrying the same change in the order sent
+			`, async () => {
+				// Row 1 may free a value row 2 takes, or row 2 one row 3 takes, so
+				// writing rows 1 and 3 together would reorder the batch.
+				const keys = await service.updateBatch([
+					{ id: 1, name: 'same' },
+					{ id: 2, name: 'other' },
+					{ id: 3, name: 'same' },
+				]);
+
+				expect(keys).toEqual([1, 2, 3]);
+
+				expect(tracker.history.all).toHaveLength(3);
+				expect(tracker.history.all[0]!.bindings).toEqual(['same', 1]);
+				expect(tracker.history.all[1]!.bindings).toEqual(['other', 2]);
+				expect(tracker.history.all[2]!.bindings).toEqual(['same', 3]);
+			});
+
+			it(oneLine`
+				writes rows carrying the same bigint change in one statement
+			`, async () => {
+				const keys = await service.updateBatch([
+					{ id: 1, name: 10n },
+					{ id: 2, name: 10n },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual([10n, 1, 2]);
+			});
+
+			it(oneLine`
+				keeps the caller's order between two changes to the same row
+			`, async () => {
+				// Row 1's third change equals its first, but merging the two would
+				// apply it before the second and leave 'second' as the stored value.
+				await service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 1, name: 'second' },
+					{ id: 1, name: 'first' },
+				]);
+
+				expect(tracker.history.all).toHaveLength(3);
+				expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
+				expect(tracker.history.all[1]!.bindings).toEqual(['second', 1]);
+				expect(tracker.history.all[2]!.bindings).toEqual(['first', 1]);
+			});
+
+			it('answers an empty batch without emitting anything', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				const keys = await service.updateBatch([]);
+
+				expect(keys).toEqual([]);
+				expect(filterSpy).not.toHaveBeenCalled();
+			});
+
+			it('answers an update naming no row without emitting anything', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				const keys = await service.updateMany([], { name: 'unused' });
+
+				expect(keys).toEqual([]);
+				expect(filterSpy).not.toHaveBeenCalled();
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('writes nothing for a group naming no row', async () => {
+				const keys = await service.updateGroups([
+					{ data: { name: 'unused' }, keys: [] },
+					{ data: { name: 'written' }, keys: [1] },
+				]);
+
+				expect(keys).toEqual([1]);
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual(['written', 1]);
+			});
+
+			it('creates one related item per row that nests the same one', async () => {
+				tracker.reset();
+				tracker.on.insert('test').response([{ id: 9 }]);
+				tracker.on.any('test').response({});
+				tracker.on.any('children').response([]);
+
+				const keys = await new ItemsService('children', { knex: db, schema })
+					.updateBatch([
+						{ id: 1, parent_id: { name: 'x' } },
+						{ id: 2, parent_id: { name: 'x' } },
+					]);
+
+				expect(keys).toEqual([1, 2]);
+				expect(tracker.history.insert).toHaveLength(2);
+			});
+
+			it(oneLine`
+				emits each written group once when the transaction is retried
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				// The second group fails its first attempt only, after the first group
+				// was written: the retry writes both again.
+				tracker.on.update((query) => query.bindings.includes('second'))
+					.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					}));
+
+				const updateListener = vi.fn();
+
+				emitter.onAction('test.items.update', updateListener);
+
+				try {
+					await service.updateBatch(
+						[{ id: 1, name: 'first' }, { id: 2, name: 'second' }],
+						{ awaitActionHooks: true },
+					);
+
+					expect(updateListener).toHaveBeenCalledTimes(1);
+
+					expect(updateListener).toHaveBeenCalledWith(
+						expect.objectContaining({
+							payload: [
+								{ data: { name: 'first' }, keys: [1] },
+								{ data: { name: 'second' }, keys: [2] },
+							],
+						}),
+						expect.anything(),
+					);
+				}
+				finally {
+					emitter.offAction('test.items.update', updateListener);
+					vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+				}
+			});
+
+			it('snapshots the same rows before and after the write', async () => {
+				// The pre-update snapshot covers the rows that are actually written; the
+				// post-update one has to cover the same set or it re-reads rows nothing
+				// touched and purges their slices — the exact scope-path query the batch
+				// paths are trying to shed.
+				const snapshot = vi.spyOn(service.scopedCache, 'snapshot');
+
+				await service.updateBatch([
+					{ id: 1 },
+					{ id: 2, name: 'written' },
+				]);
+
+				expect(snapshot).toHaveBeenCalledTimes(2);
+				expect(snapshot.mock.calls[0]![0]).toEqual([2]);
+				expect(snapshot.mock.calls[1]![0]).toEqual([2]);
 			});
 		});
 
@@ -528,7 +833,9 @@ describe('Integration Tests', () => {
 			it('should skip the update and not validate user count when the payload is empty', async () => {
 				const keys = await service.updateMany([1], {}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
-				expect(keys).toEqual([]);
+				// Nothing is written, but the key is still the caller's: the REST layer
+				// reads it back into the response, as it does for a no-op batch row.
+				expect(keys).toEqual([1]);
 				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -536,7 +843,7 @@ describe('Integration Tests', () => {
 			it('should skip the update when the payload only contains the primary key', async () => {
 				const keys = await service.updateMany([1], { id: 1 }, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
-				expect(keys).toEqual([]);
+				expect(keys).toEqual([1]);
 				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -548,7 +855,7 @@ describe('Integration Tests', () => {
 					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
 				);
 
-				expect(keys).toEqual([]);
+				expect(keys).toEqual([1]);
 				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
 				// no query for the parent row nor the nested relation
 				expect(tracker.history.all).toHaveLength(0);
@@ -558,7 +865,7 @@ describe('Integration Tests', () => {
 				for (const alterations of [{ create: [] }, { update: [] }, { delete: [] }, {}]) {
 					const keys = await service.updateMany([1], { children: alterations });
 
-					expect(keys).toEqual([]);
+					expect(keys).toEqual([1]);
 				}
 
 				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
@@ -587,7 +894,7 @@ describe('Integration Tests', () => {
 
 				const keys = await service.updateMany([1], {});
 
-				expect(keys).toEqual([]);
+				expect(keys).toEqual([1]);
 				expect(emitActionSpy).not.toHaveBeenCalled();
 
 				emitActionSpy.mockRestore();
@@ -605,12 +912,13 @@ describe('Integration Tests', () => {
 
 			it('should skip when a filter hook strips the only changed field down to the primary key', async () => {
 				// the decision is made on the post-hook payload, so a hook can turn a write into a no-op
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter')
-					.mockResolvedValue({ id: 1 });
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([{ data: { id: 1 }, keys: [1] }]);
 
 				const keys = await service.updateMany([1], { name: 'changed' });
 
-				expect(keys).toEqual([]);
+				expect(keys).toEqual([1]);
 				expect(tracker.history.all).toHaveLength(0);
 
 				emitFilterSpy.mockRestore();
@@ -618,8 +926,11 @@ describe('Integration Tests', () => {
 
 			it('should write when a filter hook adds a real field to a would-be no-op payload', async () => {
 				// the inverse: a PK-only payload that a hook enriches must no longer be skipped
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter')
-					.mockResolvedValue({ id: 1, name: 'added' });
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { id: 1, name: 'added' }, keys: [1] },
+					]);
 
 				await service.updateMany([1], { id: 1 });
 
@@ -646,6 +957,272 @@ describe('Integration Tests', () => {
 				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(InvalidPayloadError);
 
 				filterSpy.mockRestore();
+			});
+
+			it('refuses a grouped hook that answers with a single payload', async () => {
+				// A hook written for one row answers with that row.
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce({ name: 'changed' });
+
+				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+					/items\.update\.one/,
+				);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('refuses a grouped answer carrying a property of its own', async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce(
+						Object.assign([{ data: { name: 'Test' }, keys: [1] }], {
+							name: 'changed',
+						}),
+					);
+
+				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+					/items\.update\.one/,
+				);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				refuses a sparse grouped answer carrying a property of its own
+			`, async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce(Object.assign(new Array(3), {
+						0: { data: { name: 'Test' }, keys: [1, 2] },
+						2: { data: { name: 'Test' }, keys: [3] },
+						extra: true,
+					}));
+
+				await expect(
+					service.updateMany([1, 2, 3], { name: 'Test' }),
+				).rejects.toThrow(InvalidPayloadError);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('refuses a grouped hook deleting a field off the list', async () => {
+				const groupHook = (payload: any) => {
+					delete payload.name;
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it('refuses a grouped hook setting a field on the list', async () => {
+				const groupHook = (payload: any) => {
+					payload.name = 'Changed';
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it('refuses a grouped hook defining a field on the list', async () => {
+				const groupHook = (payload: any) => {
+					Object.defineProperty(payload, 'name', { value: 'Changed' });
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it('refuses a grouped hook reading a field off the list', async () => {
+				const groupHook = (payload: any) => {
+					if (payload.name === 'Test') {
+						throw new Error('The name "Test" is refused');
+					}
+
+					return payload;
+				};
+
+				emitter.onFilter('items.update', groupHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update', groupHook);
+				}
+			});
+
+			it(oneLine`
+				refuses a per-row hook that answers with something other than a row
+			`, async () => {
+				const rowHook = () => 'changed';
+
+				emitter.onFilter('items.update.one', rowHook);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						/items\.update\.one/,
+					);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('items.update.one', rowHook);
+				}
+			});
+
+			it('refuses a malformed key before any update hook runs', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				await expect(service.updateMany(['abc'], { name: 'Test' })).rejects.toThrow(
+					/integer/,
+				);
+
+				expect(filterSpy).not.toHaveBeenCalled();
+			});
+
+			it(oneLine`
+				refuses an update over the batch limit before any update hook runs
+			`, async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				env['MAX_BATCH_MUTATION'] = 2;
+
+				try {
+					await expect(
+						service.updateMany([1, 2, 3], { name: 'Test' }),
+					).rejects.toThrow('Exceeded max batch mutation limit of 2');
+
+					expect(filterSpy).not.toHaveBeenCalled();
+				}
+				finally {
+					env['MAX_BATCH_MUTATION'] = 100000;
+					filterSpy.mockRestore();
+				}
+			});
+
+			it('still validates a key a hook added', async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'y' }, keys: [1, 'abc'] },
+					]);
+
+				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(/integer/);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('refuses an update hook that drops a key', async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'y' }, keys: [1] },
+					]);
+
+				await expect(service.updateMany([1, 2], { name: 'Test' })).rejects.toThrow(
+					/must keep every key it received/,
+				);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				refuses an update hook that drops one of a row's two changes
+			`, async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'first' }, keys: [1] },
+					]);
+
+				await expect(service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 1, name: 'second' },
+				])).rejects.toThrow(/must keep every key it received/);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('lets an update hook move a key to another group', async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'first' }, keys: [] },
+						{ data: { name: 'second' }, keys: [1, 2] },
+					]);
+
+				const keys = await service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 2, name: 'second' },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+
+				// The emptied group is not written; both rows take the change they
+				// were moved to.
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual(['second', 1, 2]);
+			});
+
+			it('still counts a key a hook added against the batch limit', async () => {
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'y' }, keys: [1, 2, 3] },
+					]);
+
+				env['MAX_BATCH_MUTATION'] = 2;
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
+						'Exceeded max batch mutation limit of 2',
+					);
+				}
+				finally {
+					env['MAX_BATCH_MUTATION'] = 100000;
+					emitFilterSpy.mockRestore();
+				}
 			});
 
 			it('should run the update normally when a filter returns a non-null payload', async () => {
@@ -961,6 +1538,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		revisionParentWrites.length = 0;
 		revisionIds.issued = 0;
 		vi.clearAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	describe('system collection event scope', () => {
@@ -1282,6 +1860,29 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			]);
 		});
 
+		it('emits neither update event when emitEvents is off', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.updateMany(
+				[1],
+				{ name: 'quiet' },
+				{ emitEvents: false },
+			);
+
+			// The write still lands; only the announcing is suppressed — for the grouped
+			// event and the per-row one alike.
+			expect(keys).toEqual([1]);
+			expect(tracker.history.update).toHaveLength(1);
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(actionSpy).not.toHaveBeenCalled();
+		});
+
 		it('pairs snapshots when the keys cross a digit boundary', async () => {
 			const accountabilitySchema = new SchemaBuilder()
 				.collection('tracked', (c) => {
@@ -1323,6 +1924,528 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				[8, 'eight'],
 				[9, 'nine'],
 			]);
+		});
+	});
+
+	describe('items.update.one with nothing listening', () => {
+		it('emits only the grouped events', async () => {
+			tracker.on.update('test').response(3);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			await service.updateMany([1, 2, 3], { name: 'after' });
+
+			expect(filterSpy.mock.calls).toEqual([
+				[
+					['items.update', 'test.items.update'],
+					[{ data: { name: 'after' }, keys: [1, 2, 3] }],
+					{ collection: 'test' },
+					expect.anything(),
+				],
+			]);
+
+			expect(actionSpy.mock.calls).toEqual([
+				[
+					['items.update', 'test.items.update'],
+					{
+						payload: [{ data: { name: 'after' }, keys: [1, 2, 3] }],
+						collection: 'test',
+					},
+					expect.anything(),
+				],
+			]);
+		});
+	});
+
+	describe('a guard error of a row a per-row hook cancels', () => {
+		const cancelGuardedRow = (row: { id: string }) => {
+			return row.id === 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22'
+				? null
+				: row;
+		};
+
+		beforeEach(() => {
+			emitter.onFilter('users.update.one', cancelGuardedRow);
+		});
+
+		afterEach(() => {
+			emitter.offFilter('users.update.one', cancelGuardedRow);
+		});
+
+		it('writes the sibling rows', async () => {
+			tracker.on.update('directus_users').response(1);
+
+			const result = await new UsersService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('first_name').string();
+						c.field('tfa_secret').string();
+					})
+					.build(),
+			}).updateBatch(
+				[
+					{
+						id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+						first_name: 'Ada',
+					},
+					{
+						id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22',
+						tfa_secret: 'secret',
+					},
+				],
+				{ allowFilterCancel: true },
+			);
+
+			expect(result).toEqual(['0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', null]);
+		});
+	});
+
+	describe('items.update.one fires per row alongside the grouped event', () => {
+		// The per-row events fire only when something listens to them.
+		const rowListener = () => undefined;
+
+		beforeEach(() => {
+			emitter.onFilter('items.update.one', rowListener);
+			emitter.onAction('items.update.one', rowListener);
+		});
+
+		afterEach(() => {
+			emitter.offFilter('items.update.one', rowListener);
+			emitter.offAction('items.update.one', rowListener);
+		});
+
+		it('emits the grouped event once and the per-row event per key', async () => {
+			tracker.on.update('test').response(3);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2, 3], { name: 'after' });
+
+			expect(filterSpy.mock.calls).toEqual([
+				[
+					['items.update', 'test.items.update'],
+					[{ data: { name: 'after' }, keys: [1, 2, 3] }],
+					{ collection: 'test' },
+					expect.anything(),
+				],
+				[
+					['items.update.one', 'test.items.update.one'],
+					{ name: 'after', id: 1 },
+					{ collection: 'test' },
+					expect.anything(),
+				],
+				[
+					['items.update.one', 'test.items.update.one'],
+					{ name: 'after', id: 2 },
+					{ collection: 'test' },
+					expect.anything(),
+				],
+				[
+					['items.update.one', 'test.items.update.one'],
+					{ name: 'after', id: 3 },
+					{ collection: 'test' },
+					expect.anything(),
+				],
+			]);
+
+			expect(actionSpy.mock.calls).toEqual([
+				[
+					['items.update', 'test.items.update'],
+					{
+						payload: [{ data: { name: 'after' }, keys: [1, 2, 3] }],
+						collection: 'test',
+					},
+					expect.anything(),
+				],
+				[
+					['items.update.one', 'test.items.update.one'],
+					{ payload: { name: 'after', id: 1 }, collection: 'test' },
+					expect.anything(),
+				],
+				[
+					['items.update.one', 'test.items.update.one'],
+					{ payload: { name: 'after', id: 2 }, collection: 'test' },
+					expect.anything(),
+				],
+				[
+					['items.update.one', 'test.items.update.one'],
+					{ payload: { name: 'after', id: 3 }, collection: 'test' },
+					expect.anything(),
+				],
+			]);
+
+			// With nothing rewritten the group stays whole: one `WHERE id IN (…)`.
+			expect(tracker.history.update).toHaveLength(1);
+		});
+
+		it('puts the row key over a key the change carries', async () => {
+			tracker.on.update('test').response(2);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2], { id: 7, name: 'after' });
+
+			expect(filterSpy).toHaveBeenCalledWith(
+				['items.update.one', 'test.items.update.one'],
+				{ id: 1, name: 'after' },
+				{ collection: 'test' },
+				expect.anything(),
+			);
+
+			expect(filterSpy).toHaveBeenCalledWith(
+				['items.update.one', 'test.items.update.one'],
+				{ id: 2, name: 'after' },
+				{ collection: 'test' },
+				expect.anything(),
+			);
+
+			expect(actionSpy).toHaveBeenCalledWith(
+				['items.update.one', 'test.items.update.one'],
+				{ payload: { id: 1, name: 'after' }, collection: 'test' },
+				expect.anything(),
+			);
+
+			expect(actionSpy).toHaveBeenCalledWith(
+				['items.update.one', 'test.items.update.one'],
+				{ payload: { id: 2, name: 'after' }, collection: 'test' },
+				expect.anything(),
+			);
+		});
+
+		it('cancels one row without touching its siblings', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload: any) => {
+					if (!event.includes('items.update.one')) {
+						return payload;
+					}
+
+					return payload.id === 1
+						? null
+						: payload;
+				},
+			);
+
+			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2], { name: 'after' }, {
+				allowFilterCancel: true,
+			});
+
+			expect(keys).toEqual([null, 2]);
+			expect(tracker.history.update[0]!.bindings).toEqual(['after', 2]);
+		});
+
+		it('answers a null per row when every row is cancelled', async () => {
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload) => {
+					return event.includes('items.update.one')
+						? null
+						: payload;
+				},
+			);
+
+			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2], { name: 'after' }, {
+				allowFilterCancel: true,
+			});
+
+			expect(keys).toEqual([null, null]);
+			expect(tracker.history.update).toHaveLength(0);
+		});
+
+		it('refuses a per-row cancel the caller did not opt into', async () => {
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload: any) => {
+					if (!event.includes('items.update.one')) {
+						return payload;
+					}
+
+					return payload.id === 1
+						? null
+						: payload;
+				},
+			);
+
+			await expect(
+				new ItemsService('test', { knex: db, schema: shapesSchema })
+					.updateMany([1, 2], { name: 'after' }),
+			).rejects.toThrow(InvalidPayloadError);
+
+			expect(tracker.history.update).toHaveLength(0);
+		});
+
+		it('splits off only the row a per-row hook rewrote', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload: any) => {
+					if (!event.includes('items.update.one')) {
+						return payload;
+					}
+
+					return payload.id === 2
+						? { ...payload, name: 'rewritten' }
+						: payload;
+				},
+			);
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2, 3], { name: 'after' });
+
+			// Rows 1 and 3 still carry the same change, so they share one statement.
+			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1, 3]);
+			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
+		});
+	});
+
+	describe('items.create fires once per create', () => {
+		it('emits only the grouped events with nothing listening per row', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			tracker.on.insert('test').response([{ id: 1 }, { id: 2 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.createMany([{ name: 'a' }, { name: 'b' }]);
+
+			// The insert writes each row's key into the data afterwards.
+			expect(filterSpy.mock.calls).toEqual([
+				[
+					['items.create', 'test.items.create'],
+					[{ data: { id: 1, name: 'a' } }, { data: { id: 2, name: 'b' } }],
+					{ collection: 'test' },
+					expect.anything(),
+				],
+			]);
+
+			expect(actionSpy.mock.calls).toEqual([
+				[
+					['items.create', 'test.items.create'],
+					{
+						payload: [{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+						keys: [1, 2],
+						collection: 'test',
+					},
+					expect.anything(),
+				],
+			]);
+		});
+
+		it('inserts once for a row pointed sameRowAs an earlier one', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const collapseTwin = async (entries: any) => {
+				return [entries[0], { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', collapseTwin);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ name: 'a' },
+				]);
+
+				expect(keys).toEqual([1, 1]);
+				expect(tracker.history.insert).toHaveLength(1);
+			}
+			finally {
+				emitter.offFilter('test.items.create', collapseTwin);
+			}
+		});
+
+		it('answers a { key } entry with that key and inserts the others', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const answerStored = async (entries: any) => {
+				return [{ key: 9 }, entries[1]];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([
+					{ name: 'a' },
+					{ name: 'b' },
+				]);
+
+				expect(keys).toEqual([9, 1]);
+				expect(tracker.history.insert).toHaveLength(1);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it('answers null for a row pointed sameRowAs a cancelled one', async () => {
+			const cancelBoth = async () => {
+				return [null, { sameRowAs: 0 }];
+			};
+
+			emitter.onFilter('test.items.create', cancelBoth);
+
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany(
+					[{ name: 'a' }, { name: 'a' }],
+					{ allowFilterCancel: true },
+				);
+
+				expect(keys).toEqual([null, null]);
+				expect(tracker.history.insert).toHaveLength(0);
+				expect(actionSpy).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.create', cancelBoth);
+			}
+		});
+
+		it.each([
+			['a single payload', { data: { name: 'a' } }],
+			['one entry short', [{ data: { name: 'a' } }]],
+			['a sameRowAs pointing forward', [{ sameRowAs: 1 }, { sameRowAs: 0 }]],
+			['a sameRowAs pointing at itself', [{ data: {} }, { sameRowAs: 1 }]],
+			['an entry with two answers', [{ data: { name: 'a' }, key: 9 }, { key: 8 }]],
+			['a bare primary key', [9, { key: 8 }]],
+			[
+				'a list carrying a property of its own',
+				Object.assign([{ data: { name: 'a' } }, { data: { name: 'b' } }], {
+					name: 'x',
+				}),
+			],
+		])('refuses a grouped answer that is %s', async (_label, answer) => {
+			const answerBadly = async () => {
+				return answer;
+			};
+
+			emitter.onFilter('test.items.create', answerBadly);
+
+			try {
+				await expect(
+					new ItemsService('test', { knex: db, schema: shapesSchema })
+						.createMany([{ name: 'a' }, { name: 'b' }]),
+				).rejects.toThrow(InvalidPayloadError);
+
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerBadly);
+			}
+		});
+	});
+
+	describe('items.create.one fires per inserted row', () => {
+		// The per-row events fire only when something listens to them.
+		const rowListener = (payload: unknown) => payload;
+
+		beforeEach(() => {
+			emitter.onFilter('items.create.one', rowListener);
+			emitter.onAction('items.create.one', rowListener);
+		});
+
+		afterEach(() => {
+			emitter.offFilter('items.create.one', rowListener);
+			emitter.offAction('items.create.one', rowListener);
+		});
+
+		it('emits the per-row events for inserted rows only', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const answerStored = async (entries: any) => {
+				return [entries[0], { key: 9 }];
+			};
+
+			emitter.onFilter('test.items.create', answerStored);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			try {
+				await new ItemsService('test', { knex: db, schema: shapesSchema })
+					.createMany([{ name: 'a' }, { name: 'b' }]);
+
+				expect(filterSpy.mock.calls).toEqual([
+					[
+						['items.create', 'test.items.create'],
+						[{ data: { id: 1, name: 'a' } }, { data: { name: 'b' } }],
+						{ collection: 'test' },
+						expect.anything(),
+					],
+					[
+						['items.create.one', 'test.items.create.one'],
+						{ id: 1, name: 'a' },
+						{ collection: 'test' },
+						expect.anything(),
+					],
+				]);
+
+				expect(actionSpy.mock.calls).toEqual([
+					[
+						['items.create', 'test.items.create'],
+						{
+							payload: [{ id: 1, name: 'a' }],
+							keys: [1],
+							collection: 'test',
+						},
+						expect.anything(),
+					],
+					[
+						['items.create.one', 'test.items.create.one'],
+						{ payload: { id: 1, name: 'a' }, key: 1, collection: 'test' },
+						expect.anything(),
+					],
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.create', answerStored);
+			}
+		});
+
+		it('keeps the per-row takeover a hook returns as a primary key', async () => {
+			const takeOver = async () => 7;
+
+			emitter.onFilter('test.items.create.one', takeOver);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany([{ name: 'a' }]);
+
+				expect(keys).toEqual([7]);
+				expect(tracker.history.insert).toHaveLength(0);
+			}
+			finally {
+				emitter.offFilter('test.items.create.one', takeOver);
+			}
 		});
 	});
 
@@ -1402,6 +2525,32 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const keys = await service.updateMany([1], { name: 'y' });
 
 			expect(keys).toEqual([1]);
+		});
+
+		it('checks a row sent twice with one change once', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
+			tracker.on.update('test').response(1);
+			vi.mocked(validateAccess).mockClear();
+
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			});
+
+			const keys = await service.updateBatch([
+				{ id: 1, name: 'y' },
+				{ id: 1, name: 'y' },
+			]);
+
+			expect(keys).toEqual([1, 1]);
+
+			expect(vi.mocked(validateAccess).mock.calls).toEqual([
+				[
+					expect.objectContaining({ action: 'update', primaryKeys: [1] }),
+					expect.anything(),
+				],
+			]);
 		});
 	});
 

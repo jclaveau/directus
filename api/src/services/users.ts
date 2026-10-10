@@ -6,6 +6,7 @@ import type {
 	MutationOptions,
 	PrimaryKey,
 	RegisterUserInput,
+	UpdateGroup,
 	User,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -47,7 +48,10 @@ export class UsersService extends ItemsService {
 	 * User email has to be unique case-insensitive. This is an additional check to make sure that
 	 * the email is unique regardless of casing
 	 */
-	private async checkUniqueEmails(emails: string[], excludeKey?: PrimaryKey): Promise<void> {
+	private async checkUniqueEmails(
+		emails: string[],
+		excludeKeys: PrimaryKey[] = [],
+	): Promise<void> {
 		emails = emails.map((email) => email.toLowerCase());
 
 		const duplicates = emails.filter((value, index, array) => array.indexOf(value) !== index);
@@ -65,8 +69,8 @@ export class UsersService extends ItemsService {
 			.from('directus_users')
 			.whereRaw(`LOWER(??) IN (${emails.map(() => '?')})`, ['email', ...emails]);
 
-		if (excludeKey) {
-			query.whereNot('id', excludeKey);
+		if (excludeKeys.length > 0) {
+			query.whereNotIn('id', excludeKeys);
 		}
 
 		const results = await query;
@@ -251,86 +255,129 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * Update many users by primary key
+	 * Update users in groups, each group one change applied to the keys it names.
+	 * Every update entrypoint funnels through here.
 	 */
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Item>,
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		try {
-			if (data['email']) {
-				if (keys.length > 1) {
-					throw new RecordNotUniqueError({
-						collection: 'directus_users',
-						field: 'email',
-						value: data['email'],
+		const claimedEmails = new Set<string>();
+
+		// A user the batch gives a new email frees its old one; claimedEmails
+		// still refuses two rows claiming one.
+		const rewrittenEmailKeys = groups
+			.filter(({ data }) => {
+				return Boolean(data['email']);
+			})
+			.flatMap(({ keys }) => {
+				return keys;
+			});
+
+		for (const { data, keys } of groups) {
+			try {
+				if (data['email']) {
+					const lowerEmail = String(data['email']).toLowerCase();
+
+					// One email can belong to one user only, across every group.
+					if (keys.length > 1 || claimedEmails.has(lowerEmail)) {
+						throw new RecordNotUniqueError({
+							collection: 'directus_users',
+							field: 'email',
+							value: data['email'],
+						});
+					}
+
+					claimedEmails.add(lowerEmail);
+					this.validateEmail(data['email']);
+					await this.checkUniqueEmails([data['email']], rewrittenEmailKeys);
+				}
+
+				if (data['password']) {
+					await this.checkPasswordPolicy([data['password']]);
+				}
+
+				if (data['tfa_secret'] !== undefined) {
+					throw new InvalidPayloadError({
+						reason: `You can't change the "tfa_secret" value manually`,
 					});
 				}
 
-				this.validateEmail(data['email']);
-				await this.checkUniqueEmails([data['email']], keys[0]);
-			}
+				if (data['provider'] !== undefined) {
+					if (this.accountability && this.accountability.admin !== true) {
+						throw new InvalidPayloadError({
+							reason: `You can't change the "provider" value manually`,
+						});
+					}
 
-			if (data['password']) {
-				await this.checkPasswordPolicy([data['password']]);
-			}
-
-			if (data['tfa_secret'] !== undefined) {
-				throw new InvalidPayloadError({ reason: `You can't change the "tfa_secret" value manually` });
-			}
-
-			if (data['provider'] !== undefined) {
-				if (this.accountability && this.accountability.admin !== true) {
-					throw new InvalidPayloadError({ reason: `You can't change the "provider" value manually` });
+					data['auth_data'] = null;
 				}
 
-				data['auth_data'] = null;
-			}
+				if (data['external_identifier'] !== undefined) {
+					if (this.accountability && this.accountability.admin !== true) {
+						throw new InvalidPayloadError({
+							reason: `You can't change the "external_identifier" value manually`,
+						});
+					}
 
-			if (data['external_identifier'] !== undefined) {
-				if (this.accountability && this.accountability.admin !== true) {
-					throw new InvalidPayloadError({ reason: `You can't change the "external_identifier" value manually` });
+					data['auth_data'] = null;
 				}
-
-				data['auth_data'] = null;
 			}
-		} catch (err: any) {
-			opts.preMutationError = err;
-		}
+			catch (err: any) {
+				opts.preMutationErrorsByKey ??= new Map();
 
-		if ('role' in data) {
-			opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
-		}
-
-		if ('status' in data) {
-			if (data['status'] === 'active') {
-				// User are being activated, no need to check if there are enough admins
-				opts.userIntegrityCheckFlags =
-					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-			} else {
-				opts.userIntegrityCheckFlags = UserIntegrityCheckFlag.All;
+				for (const key of keys) {
+					if (!opts.preMutationErrorsByKey.has(String(key))) {
+						opts.preMutationErrorsByKey.set(String(key), err);
+					}
+				}
 			}
 		}
 
-		if (opts.userIntegrityCheckFlags) {
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
+		return await super.updateGroups(groups, opts);
+	}
+
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Item>[],
+	): UserIntegrityCheckFlag {
+		let integrityCheckFlags = UserIntegrityCheckFlag.None;
+
+		for (const { data } of groups) {
+			if ('role' in data) {
+				integrityCheckFlags |= UserIntegrityCheckFlag.All;
+			}
+
+			if ('status' in data) {
+				if (data['status'] === 'active') {
+					// User are being activated, no need to check if there are enough admins
+					integrityCheckFlags |= UserIntegrityCheckFlag.UserLimits;
+				}
+				else {
+					integrityCheckFlags |= UserIntegrityCheckFlag.All;
+				}
+			}
 		}
 
-		const result = await super.updateMany(keys, data, opts);
+		return integrityCheckFlags;
+	}
 
-		if (data['status'] !== undefined && data['status'] !== 'active') {
-			await this.clearUserSessions(keys);
-		} else if (data['password'] !== undefined || data['email'] !== undefined) {
-			await this.clearUserSessions(keys, this.accountability?.session);
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions,
+	): Promise<void> {
+		for (const { data, keys } of groups) {
+			if (data['status'] !== undefined && data['status'] !== 'active') {
+				await this.clearUserSessions(keys);
+			}
+			else if (data['password'] !== undefined || data['email'] !== undefined) {
+				await this.clearUserSessions(keys, this.accountability?.session);
+			}
 		}
 
 		// Only clear the caches if the role has been updated
-		if ('role' in data) {
+		if (groups.some(({ data }) => 'role' in data)) {
 			await this.clearCaches(opts);
 		}
-
-		return result;
 	}
 
 	/**

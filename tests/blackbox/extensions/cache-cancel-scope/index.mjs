@@ -15,7 +15,7 @@
 const MODERATED = 'test_items_moderated';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${MODERATED}.items.create`, async (payload, _meta, context) => {
+	filter(`${MODERATED}.items.create.one`, async (payload, _meta, context) => {
 		if (payload.body !== 'spam' && payload.body !== 'flagged') {
 			return payload;
 		}
