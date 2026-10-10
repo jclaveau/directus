@@ -381,6 +381,8 @@ describe.each(vendors)('%s', (vendor) => {
 					.query({
 						'filter[collection][_eq]': update.collection,
 						'filter[item][_in]': update.rows.map((row) => row.id).join(','),
+						// The rows' create left a revision each too.
+						'filter[activity][action][_eq]': 'update',
 						fields: 'item',
 						sort: 'id',
 					})
