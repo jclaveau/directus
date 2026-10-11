@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/shares`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/shares/${t}`,params:n??{},method:`GET`});exports.readShare=n,exports.readShares=t;
+//# sourceMappingURL=shares.cjs.map

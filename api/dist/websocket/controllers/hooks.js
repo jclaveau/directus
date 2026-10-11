@@ -1,0 +1,172 @@
+import { useBus } from "../../bus/lib/use-bus.js";
+import "../../bus/index.js";
+import emitter_default from "../../emitter.js";
+
+//#region src/websocket/controllers/hooks.ts
+let actionsRegistered = false;
+function registerWebSocketEvents() {
+	if (actionsRegistered) return;
+	actionsRegistered = true;
+	registerActionHooks([
+		"items",
+		"access",
+		"activity",
+		"collections",
+		"dashboards",
+		"flows",
+		"folders",
+		"notifications",
+		"operations",
+		"panels",
+		"permissions",
+		"policies",
+		"presets",
+		"revisions",
+		"roles",
+		"settings",
+		"shares",
+		"translations",
+		"users",
+		"versions",
+		"webhooks"
+	]);
+	registerFieldsHooks();
+	registerFilesHooks();
+	registerRelationsHooks();
+	registerSortHooks();
+}
+function updateEvent({ collection, payload = [] }) {
+	return {
+		collection,
+		action: "update",
+		keys: [...new Set(payload.flatMap((group) => group.keys))],
+		payload
+	};
+}
+function updateEventPerGroup({ payload = [] }, collection) {
+	return payload.map((group) => {
+		return {
+			collection,
+			action: "update",
+			keys: group.keys,
+			payload: group.data
+		};
+	});
+}
+function registerActionHooks(modules) {
+	for (const module of modules) {
+		registerAction(`${module}.create.one`, ({ key, collection, payload = {} }) => {
+			return {
+				collection,
+				action: "create",
+				key,
+				payload
+			};
+		});
+		registerAction(`${module}.update`, updateEvent);
+		registerAction(module + ".delete", ({ keys, collection, payload = [] }) => ({
+			collection,
+			action: "delete",
+			keys,
+			payload
+		}));
+	}
+}
+function registerFieldsHooks() {
+	registerAction("fields.create", ({ key, payload = {} }) => {
+		if (Array.isArray(payload)) return null;
+		return {
+			collection: "directus_fields",
+			action: "create",
+			key,
+			payload
+		};
+	});
+	registerAction("fields.create.one", ({ key, payload = {} }) => {
+		return {
+			collection: "directus_fields",
+			action: "create",
+			key,
+			payload
+		};
+	});
+	registerAction("fields.update", (meta) => {
+		if (Array.isArray(meta["payload"])) return updateEventPerGroup(meta, "directus_fields");
+		return {
+			collection: "directus_fields",
+			action: "update",
+			keys: meta["keys"] ?? [],
+			payload: meta["payload"] ?? {}
+		};
+	});
+	registerAction("fields.delete", ({ keys, payload = [] }) => ({
+		collection: "directus_fields",
+		action: "delete",
+		keys,
+		payload
+	}));
+}
+function registerFilesHooks() {
+	registerAction("files.upload", ({ key, collection, payload = {} }) => ({
+		collection,
+		action: "create",
+		key,
+		payload
+	}));
+	registerAction("files.update", updateEvent);
+	registerAction("files.delete", ({ keys, collection, payload = [] }) => ({
+		collection,
+		action: "delete",
+		keys,
+		payload
+	}));
+}
+function registerRelationsHooks() {
+	registerAction("relations.create.one", ({ key, payload = {} }) => {
+		return {
+			collection: "directus_relations",
+			action: "create",
+			key,
+			payload: {
+				...payload,
+				key
+			}
+		};
+	});
+	registerAction("relations.update", (meta) => {
+		return updateEventPerGroup(meta, "directus_relations");
+	});
+	registerAction("relations.delete", ({ collection, payload = [] }) => ({
+		collection: "directus_relations",
+		action: "delete",
+		keys: payload,
+		payload: {
+			collection,
+			fields: payload
+		}
+	}));
+}
+function registerSortHooks() {
+	registerAction("items.sort", ({ collection, item }) => ({
+		collection,
+		action: "update",
+		keys: [item],
+		payload: {}
+	}));
+}
+/**
+* Wrapper for emitter.onAction to hook into system events
+* @param event The action event to watch
+* @param transform Transformer function
+*/
+function registerAction(event, transform) {
+	const messenger = useBus();
+	emitter_default.onAction(event, (data) => {
+		const websocketEvents = transform(data);
+		if (websocketEvents === null) return;
+		for (const websocketEvent of [websocketEvents].flat()) messenger.publish("websocket.event", websocketEvent);
+	});
+}
+
+//#endregion
+export { registerWebSocketEvents };
