@@ -15,7 +15,7 @@ const JUNCTION = 'test_items_article_author';
 const PAIR = ['test_items_article_id', 'test_items_author_id'];
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${JUNCTION}.items.create`, async (payload, _meta, context) => {
+	filter(`${JUNCTION}.items.create.one`, async (payload, _meta, context) => {
 		const itemsService = new services.ItemsService(JUNCTION, {
 			schema: context.schema,
 			accountability: context.accountability,

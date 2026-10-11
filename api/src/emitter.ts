@@ -63,6 +63,22 @@ export class Emitter {
 		return updatedPayload;
 	}
 
+	public hasFilterListeners(event: string | string[]): boolean {
+		const events = Array.isArray(event)
+			? event
+			: [event];
+
+		return events.some((name) => this.filterEmitter.listeners(name).length > 0);
+	}
+
+	public hasActionListeners(event: string | string[]): boolean {
+		const events = Array.isArray(event)
+			? event
+			: [event];
+
+		return events.some((name) => this.actionEmitter.listeners(name).length > 0);
+	}
+
 	public async emitAction(
 		event: string | string[],
 		meta: Record<string, any>,

@@ -10,7 +10,7 @@ const ROW = 'merged_purge_row';
 const SIGNAL = 'merged_purge_signal';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${SIGNAL}.items.create`, async (payload, _meta, context) => {
+	filter(`${SIGNAL}.items.create.one`, async (payload, _meta, context) => {
 		const rowService = new services.ItemsService(ROW, {
 			schema: context.schema,
 			accountability: context.accountability,

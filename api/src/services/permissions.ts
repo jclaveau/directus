@@ -8,6 +8,7 @@ import type {
 	PrimaryKey,
 	Query,
 	QueryOptions,
+	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
@@ -68,16 +69,8 @@ export class PermissionsService extends ItemsService {
 		return res;
 	}
 
-	override async updateBatch(data: Partial<Item>[], opts?: MutationOptions) {
-		const res = await super.updateBatch(data, opts);
-
-		await this.clearCaches(opts);
-
-		return res;
-	}
-
-	override async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions) {
-		const res = await super.updateMany(keys, data, opts);
+	override async updateGroups(groups: UpdateGroup<Item>[], opts?: MutationOptions) {
+		const res = await super.updateGroups(groups, opts);
 
 		await this.clearCaches(opts);
 

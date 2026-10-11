@@ -91,7 +91,9 @@ export async function initCacheConfig(): Promise<void> {
 	const { default: emitter } = await import('./emitter.js');
 	const { recordCacheConfigEvent } = await import('./cache-events.js');
 
-	emitter.onAction('settings.update', ({ payload }) => {
+	// The per-row event, not the grouped one: this reads a single row's fields, and
+	// a singleton only ever has the one.
+	emitter.onAction('settings.update.one', ({ payload }) => {
 		if (!payload || 'cache_ttl' in payload === false) {
 			return;
 		}

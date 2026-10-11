@@ -34,7 +34,7 @@ async function purgeSpaceSlice(service, space, context) {
 }
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${EDITABLE}.items.update`, async (payload, meta, context) => {
+	filter(`${EDITABLE}.items.update.one`, async (payload, _meta, context) => {
 		if (payload.note !== 'reject' && payload.note !== 'flag') {
 			return payload;
 		}
@@ -43,7 +43,7 @@ export default function registerHooks({ filter }, { services }) {
 			const service = serviceFor(services, EDITABLE, context);
 
 			const [row] = await service.readMany(
-				meta.keys,
+				[payload.id],
 				{ fields: ['space'], limit: 1 },
 				{ emitEvents: false },
 			);

@@ -1,11 +1,11 @@
 import { defineHook } from '@directus/extensions-sdk';
 
 export default defineHook(({ filter, action }) => {
-	filter('items.create', () => {
+	filter('items.create.one', () => {
 		console.log('Creating Item!');
 	});
 
-	action('items.create', () => {
+	action('items.create.one', () => {
 		console.log('Item created!');
 	});
 });

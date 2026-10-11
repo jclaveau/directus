@@ -4,7 +4,7 @@
 const CHILD = 'test_b3_child';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${CHILD}.items.create`, async (payload, _meta, context) => {
+	filter(`${CHILD}.items.create.one`, async (payload, _meta, context) => {
 		const childService = new services.ItemsService(CHILD, {
 			schema: context.schema,
 			accountability: context.accountability,

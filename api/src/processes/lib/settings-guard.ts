@@ -100,7 +100,7 @@ export async function initSharedSettingsGuard(): Promise<void> {
 
 	// The create as well as the update: a deployment nobody has saved a setting
 	// on yet has no singleton row, and the first write to it makes one.
-	for (const event of ['settings.create', 'settings.update']) {
+	for (const event of ['settings.create.one', 'settings.update.one']) {
 		emitter.onFilter<Partial<Item>>(event, (payload) => {
 			assertUsableSharedSettings(payload);
 

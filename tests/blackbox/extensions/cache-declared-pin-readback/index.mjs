@@ -6,7 +6,7 @@ const ENTRY = 'readback_entry';
 const SIGNAL = 'readback_signal';
 
 export default function registerHooks({ filter }) {
-	filter(`${SIGNAL}.items.create`, async (payload, _meta, context) => {
+	filter(`${SIGNAL}.items.create.one`, async (payload, _meta, context) => {
 		if (payload.rewritten_ids) {
 			await context.database(ENTRY)
 				.whereIn('id', payload.rewritten_ids)

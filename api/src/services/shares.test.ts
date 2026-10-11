@@ -4,6 +4,7 @@ import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 import type { EmailOptions } from './mail/index.js';
@@ -13,6 +14,13 @@ vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
+
+vi.mock('../permissions/cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../permissions/cache.js')>(),
+		clearCache: vi.fn(),
+	};
+});
 
 const { send } = vi.hoisted(() => {
 	return { send: vi.fn(async (_options: EmailOptions): Promise<null> => null) };
@@ -43,9 +51,25 @@ beforeAll(() => {
 afterEach(() => {
 	tracker.reset();
 	vi.restoreAllMocks();
+	vi.mocked(clearPermissionsCache).mockClear();
+	send.mockClear();
 });
 
 describe('Services / Shares', () => {
+	describe('updateBatch', () => {
+		it('clears the permissions cache', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1, 2]);
+			const service = new SharesService({ knex: db, schema });
+
+			await service.updateBatch([
+				{ id: 1, max_uses: 3 },
+				{ id: 2, max_uses: 5 },
+			]);
+
+			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe('invite', () => {
 		it('should throw ForbiddenError when accountability has no user', async () => {
 			const service = new SharesService({ knex: db, schema, accountability: {} as Accountability });

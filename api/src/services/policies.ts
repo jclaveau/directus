@@ -1,5 +1,11 @@
 import { InvalidPayloadError } from '@directus/errors';
-import type { AbstractServiceOptions, MutationOptions, Policy, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	MutationOptions,
+	Policy,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { getMatch } from 'ip-matching';
 import { clearSystemCache } from '../cache.js';
@@ -64,39 +70,53 @@ export class PoliciesService extends ItemsService<Policy> {
 		return result;
 	}
 
-	override async updateMany(
-		keys: PrimaryKey[],
-		data: Partial<Policy>,
+	override async updateGroups(
+		groups: UpdateGroup<Policy>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		this.assertValidIpAccess(data);
+		for (const { data } of groups) {
+			this.assertValidIpAccess(data);
+		}
 
-		if ('admin_access' in data) {
-			let flags = UserIntegrityCheckFlag.RemainingAdmins;
+		return await super.updateGroups(groups, opts);
+	}
 
-			if (data['admin_access'] === true) {
-				// Only need to perform a full user count if the policy allows admin access
-				flags |= UserIntegrityCheckFlag.All;
+	protected override requiredIntegrityChecks(
+		groups: UpdateGroup<Policy>[],
+	): UserIntegrityCheckFlag {
+		let integrityCheckFlags = UserIntegrityCheckFlag.None;
+
+		for (const { data } of groups) {
+			if ('admin_access' in data) {
+				integrityCheckFlags |= UserIntegrityCheckFlag.RemainingAdmins;
+
+				if (data['admin_access'] === true) {
+					// Only need a full user count if the policy allows admin access
+					integrityCheckFlags |= UserIntegrityCheckFlag.All;
+				}
 			}
 
-			opts.userIntegrityCheckFlags = (opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | flags;
+			if ('app_access' in data) {
+				integrityCheckFlags |= UserIntegrityCheckFlag.UserLimits;
+			}
 		}
 
-		if ('app_access' in data) {
-			opts.userIntegrityCheckFlags =
-				(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-		}
+		return integrityCheckFlags;
+	}
 
-		if (opts.userIntegrityCheckFlags) opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
-
-		const result = await super.updateMany(keys, data, opts);
-
-		if ('admin_access' in data || 'app_access' in data || 'ip_access' in data || 'enforce_tfa' in data) {
+	protected override async applyUpdateSideEffects(
+		groups: UpdateGroup<Policy>[],
+		opts: MutationOptions,
+	): Promise<void> {
+		if (
+			groups.some(({ data }) => {
+				return ['admin_access', 'app_access', 'ip_access', 'enforce_tfa']
+					.some((field) => field in data);
+			})
+		) {
 			// Some relevant properties on policies have been updated, clear the caches
 			await this.clearCaches(opts);
 		}
-
-		return result;
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {

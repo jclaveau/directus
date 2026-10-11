@@ -233,7 +233,7 @@ describe('cache-audit schedule', () => {
 		await cacheAuditSchedule();
 
 		expect(mockEmitter.onAction)
-			.toHaveBeenCalledWith('settings.update', expect.any(Function));
+			.toHaveBeenCalledWith('settings.update.one', expect.any(Function));
 
 		settingsUpdateHandler({ payload: { cache_audit_schedule: '0 5 * * *' } });
 

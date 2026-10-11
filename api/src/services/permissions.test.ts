@@ -61,6 +61,8 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 });
 
 const { PermissionsService } = await import('./permissions.js');
+const { ItemsService } = await import('./items.js');
+const { clearSystemCache } = await import('../cache.js');
 
 const plainSchema = new SchemaBuilder()
 	.collection('articles', (c) => {
@@ -201,5 +203,43 @@ describe('PermissionsService.getItemPermissions', () => {
 		expect(result.update.access).toBe(true);
 		expect(result.delete.access).toBe(false);
 		expect(result.share.access).toBe(true);
+	});
+});
+
+describe('PermissionsService updates', () => {
+	const permissionsSchema = new SchemaBuilder()
+		.collection('directus_permissions', (c) => {
+			c.field('id').id();
+		})
+		.build();
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		vi.mocked(clearSystemCache).mockClear();
+	});
+
+	it('clears the system cache once per batch', async () => {
+		vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1, 2]);
+
+		await new PermissionsService({
+			knex: knex.default({ client: MockClient }),
+			schema: permissionsSchema,
+		}).updateBatch([
+			{ id: 1, action: 'read' },
+			{ id: 2, action: 'update' },
+		]);
+
+		expect(clearSystemCache).toHaveBeenCalledTimes(1);
+	});
+
+	it('clears the system cache once per single-row update', async () => {
+		vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1]);
+
+		await new PermissionsService({
+			knex: knex.default({ client: MockClient }),
+			schema: permissionsSchema,
+		}).updateOne(1, { action: 'read' });
+
+		expect(clearSystemCache).toHaveBeenCalledTimes(1);
 	});
 });

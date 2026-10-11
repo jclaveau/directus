@@ -111,10 +111,13 @@ describe('batch update through an array body', () => {
 				.set('Authorization', AUTH);
 
 			// The primary key is not a change to the row, so nothing is left to
-			// write and the update is skipped rather than issued — the echo is the
-			// empty list, not the row.
+			// write and the update is skipped rather than issued — the echo still
+			// answers with the row it was sent.
 			expect(response.statusCode).toEqual(200);
-			expect(response.body.data).toEqual([]);
+
+			expect(response.body.data).toEqual([
+				expect.objectContaining({ id: rows[0]!.id, name: 'pk-only' }),
+			]);
 
 			const after = await readRows(vendor, [rows[0]!.id]);
 
