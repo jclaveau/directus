@@ -39,17 +39,17 @@ Feature: An event flow runs once per change, as it did before updates carried gr
     When the batch sends:
       | name  | status   |
       | two-a | archived |
-      | two-b | kept     |
-      | two-c | archived |
+      | two-b | archived |
+      | two-c | kept     |
     Then the "update filter" flow ran with:
       | status   | names     |
       | archived | ["two-a"] |
-      | kept     | ["two-b"] |
-      | archived | ["two-c"] |
+      | archived | ["two-b"] |
+      | kept     | ["two-c"] |
     And the "update action" flow ran with:
       | status   | names             |
-      | archived | ["two-a","two-c"] |
-      | kept     | ["two-b"]         |
+      | archived | ["two-a","two-b"] |
+      | kept     | ["two-c"]         |
 
   Scenario: a create runs the create flow once per row
     Given the rows of test_event_flow_runs:
