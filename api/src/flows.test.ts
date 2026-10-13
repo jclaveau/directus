@@ -101,6 +101,59 @@ describe('event flows on item updates', () => {
 		]);
 	});
 
+	test('a filter flow leaves a row a hook took over as it was', async () => {
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'record',
+							type: 'record',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const groupsAfterFlow = await emitter.emitFilter(
+			'articles.items.update',
+			[{ key: 7 }, { data: { status: 'a' }, keys: [1] }],
+			{ collection: 'articles' },
+		);
+
+		expect(groupsAfterFlow).toEqual([
+			{ key: 7 },
+			{ data: { status: 'stamped' }, keys: [1] },
+		]);
+
+		expect(recordTrigger.mock.calls).toEqual([
+			[{
+				event: 'articles.items.update',
+				payload: { status: 'a' },
+				keys: [1],
+				collection: 'articles',
+				originalPayload: { status: 'a' },
+			}],
+		]);
+	});
+
 	test('a filter flow with no return keeps each group as it was', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {

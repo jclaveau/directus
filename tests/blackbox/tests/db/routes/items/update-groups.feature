@@ -14,6 +14,8 @@ Feature: An update reaches its hooks as one grouped event
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
   - name "rewrite-me": `mapUpdateRows` renames the row "rewritten".
+  - name "take-over-me": `mapUpdateRows` writes the row's status
+    "taken-over" itself and returns its key, taking the row over.
   - status "legacy-shape": the grouped filter answers with that group's
     payload alone, the shape it had before the event carried groups.
   - status "drop-key": the grouped filter drops that group's first key,
@@ -302,6 +304,22 @@ Feature: An update reaches its hooks as one grouped event
       | d-one     | archived |
       | rewritten | archived |
       | d-three   | archived |
+
+  Scenario: a hook mapping its rows takes one over, Directus writing the others
+    Given the rows:
+      | name         |
+      | take-over-me |
+      | t-two        |
+      | t-three      |
+    When the rows are updated to the status "archived"
+    Then the grouped action carries:
+      | status   | names               |
+      | archived | ["t-two","t-three"] |
+    And the rows hold:
+      | name         | status     |
+      | take-over-me | taken-over |
+      | t-two        | archived   |
+      | t-three      | archived   |
 
   Scenario: a nested owner sent to several rows a hook maps is created once
     Given the rows:

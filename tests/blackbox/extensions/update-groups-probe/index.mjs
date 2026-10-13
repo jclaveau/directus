@@ -9,6 +9,8 @@
 //   name 'cancel-me'  → the grouped filter's mapUpdateRows returns null for that
 //     row, cancelling it.
 //   name 'rewrite-me' → mapUpdateRows rewrites that row, splitting its group.
+//   name 'take-over-me' → mapUpdateRows writes that row's status
+//     'taken-over' itself and returns its key, taking the row over.
 //   status 'legacy-shape' → the grouped filter answers with that group's
 //     payload alone, the shape it had before the event carried groups.
 //   status 'drop-key' → the grouped filter drops that group's first key,
@@ -90,6 +92,14 @@ export default function registerHooks({ filter, action }, { database }) {
 
 			if (row?.name === 'rewrite-me') {
 				return { ...data, name: 'rewritten' };
+			}
+
+			if (row?.name === 'take-over-me') {
+				await database(COLLECTION)
+					.where({ id: key })
+					.update({ status: 'taken-over' });
+
+				return key;
 			}
 
 			return data;

@@ -2111,6 +2111,58 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
 		});
 
+		it(oneLine`
+			answers the key of a row it took over, writing only the others
+		`, async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 2 }]);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, (data, key) => {
+						return key === 1
+							? key
+							: data;
+					});
+				},
+			);
+
+			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2], { name: 'after' });
+
+			expect(keys).toEqual([1, 2]);
+			expect(tracker.history.update).toHaveLength(1);
+			expect(tracker.history.update[0]!.bindings).toEqual(['after', 2]);
+		});
+
+		it('writes nothing when it takes every row over', async () => {
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, (_data, key) => key);
+				},
+			);
+
+			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateOne(1, { name: 'after' });
+
+			expect(keys).toEqual(1);
+			expect(tracker.history.update).toHaveLength(0);
+		});
+
+		it('refuses a key both taken over and left in a group', async () => {
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+				{ data: { name: 'after' }, keys: [1] },
+				{ key: 1 },
+			]);
+
+			await expect(
+				new ItemsService('test', { knex: db, schema: shapesSchema })
+					.updateMany([1], { name: 'after' }),
+			).rejects.toThrow(/mapUpdateRows/);
+
+			expect(tracker.history.update).toHaveLength(0);
+		});
+
 		it('creates a nested owner once for the rows it left equal', async () => {
 			const nestedSchema = new SchemaBuilder()
 				.collection('parent', (c) => {

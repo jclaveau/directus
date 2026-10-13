@@ -429,6 +429,9 @@ describe.each(vendors)('%s', (vendor) => {
 				a hook mapping its rows cancels one, its siblings written together
 			`,
 			'a hook mapping its rows splits off the one it rewrote',
+			oneLine`
+				a hook mapping its rows takes one over, Directus writing the others
+			`,
 			'a nested owner sent to several rows a hook maps is created once',
 		]) {
 			scenario(title, (steps) => {

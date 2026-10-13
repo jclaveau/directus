@@ -1792,6 +1792,209 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an UNDECLARED update take-over falls back to a coarse purge (null) — the
+			hook wrote the row before its old slice could be read
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+			const takeOver = (groups: any) => {
+				return mapUpdateRows(groups, async (_data, key) => key);
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over that DECLARES its footprint narrows to the taken-over
+			row's slice plus the declared fingerprint
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+			const takeOver = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async (_data, key) => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					});
+
+					return key;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).not.toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.objectContaining({
+						declaredFingerprints: [{
+							collection: 'test',
+							pinnedScope: { student: ['a'] },
+						}],
+					}),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over the hook declares wrote nothing purges nothing at all
+		`, async () => {
+			const takeOver = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async (_data, key) => {
+					ctx.scopedCache.skipPurgeFor(key);
+
+					return key;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose update a hook takes over falls back to a coarse purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+			const takeOver = (groups: any) => {
+				return mapUpdateRows(groups, async (_data, key) => key);
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().upsertMany([{ id: 1, student: 'B' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update writing one row while a hook takes another over purges coarse
+			when the hook declared nothing
+		`, async () => {
+			tracker.on.select('test').response([{ id: 2, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOver = (groups: any) => {
+				return mapUpdateRows(groups, async (data, key) => {
+					return key === 1
+						? key
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1, 2], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update that fails still purges a row a hook took over — the hook wrote
+			it outside the transaction that rolled back
+		`, async () => {
+			tracker.on.select('test').response([{ id: 2, student: 'A' }]);
+			tracker.on.update('test').simulateError('boom');
+
+			const takeOver = (groups: any) => {
+				return mapUpdateRows(groups, async (data, key) => {
+					return key === 1
+						? key
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await expect(service().updateMany([1, 2], { student: 'B' }))
+					.rejects
+					.toThrow();
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
 			an update that fails still purges the slice a hook declared — the hook may
 			have written out of band before the update threw
 		`, async () => {

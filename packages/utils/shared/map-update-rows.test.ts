@@ -63,6 +63,42 @@ describe('mapUpdateRows', () => {
 		]);
 	});
 
+	it('takes a row over when the mapping returns its key', async () => {
+		const entries = await mapUpdateRows(
+			[{ data: { status: 'draft' }, keys: [1, 2, 3] }],
+			(data, key) => {
+				return key === 2
+					? key
+					: data;
+			},
+		);
+
+		expect(entries).toEqual([
+			{ data: { status: 'draft' }, keys: [1, 3] },
+			{ key: 2 },
+		]);
+	});
+
+	it('leaves a row an earlier hook already took over as it was', async () => {
+		const mappedKeys: unknown[] = [];
+
+		const entries = await mapUpdateRows(
+			[{ key: 7 }, { data: { status: 'draft' }, keys: [1] }],
+			(data, key) => {
+				mappedKeys.push(key);
+
+				return data;
+			},
+		);
+
+		expect(entries).toEqual([
+			{ key: 7 },
+			{ data: { status: 'draft' }, keys: [1] },
+		]);
+
+		expect(mappedKeys).toEqual([1]);
+	});
+
 	it('never merges rows of two groups, even when they end up equal', async () => {
 		const groups = await mapUpdateRows(
 			[
