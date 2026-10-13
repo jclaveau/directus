@@ -90,6 +90,7 @@ function makeReq(overrides: any = {}) {
 	return {
 		params: { collection: 'articles', pk: '1' },
 		body: {},
+		query: {},
 		sanitizedQuery: {},
 		accountability: null,
 		schema: {},

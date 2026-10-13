@@ -1440,10 +1440,41 @@ implements AbstractService<Item> {
 		const declaredPurgesAtStart =
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
+		const refusesRepeatedRows = opts.onRepeatedRow !== 'lastWins';
+		const sentKeyNames = new Set<string>();
+
 		// Run all hooks that are attached to this event so the end user has the chance to augment the
 		// items that are about to be saved
 		const payload: UpdateEntry<Item>[] = groups.map((group) => {
-			return { data: cloneDeep(group.data), keys: [...group.keys] };
+			if (!refusesRepeatedRows) {
+				return { data: cloneDeep(group.data), keys: [...group.keys] };
+			}
+
+			const groupKeyNames = new Set<string>();
+			const uniqueKeys: PrimaryKey[] = [];
+
+			for (const key of group.keys) {
+				const keyName = String(key);
+
+				if (sentKeyNames.has(keyName)) {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							Row ${keyName} is sent more than once; send each row once, or
+							pass onRepeatedRow=lastWins
+						`,
+					});
+				}
+
+				// One change naming a row twice writes it once.
+				if (!groupKeyNames.has(keyName)) {
+					groupKeyNames.add(keyName);
+					uniqueKeys.push(key);
+				}
+			}
+
+			groupKeyNames.forEach((keyName) => sentKeyNames.add(keyName));
+
+			return { data: cloneDeep(group.data), keys: uniqueKeys };
 		});
 
 		const groupListRefusal = () => {
@@ -1535,18 +1566,31 @@ implements AbstractService<Item> {
 
 		for (const key of keys) {
 			const keyName = String(key);
+			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
-			answeredKeyCounts.set(keyName, (answeredKeyCounts.get(keyName) ?? 0) + 1);
+			if (refusesRepeatedRows && answeredCount > 1) {
+				throw new InvalidPayloadError({
+					reason: oneLine`
+						A "${this.eventScope}.update" filter hook answered with row
+						${keyName} more than once
+					`,
+				});
+			}
+
+			answeredKeyCounts.set(keyName, answeredCount);
 		}
 
 		// One entry per row, in the caller's order: its key, or null for a row the
-		// hook dropped, which cancels it. A key sent twice and kept once keeps its
-		// first change. This is what the update returns.
+		// hook dropped, which cancels it. This is what the update returns. Under
+		// lastWins a key sent twice is matched by count, so a hook dropping one of
+		// its copies cancels the later one.
 		const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
 			const keyName = String(key);
 			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
 
-			answeredKeyCounts.set(keyName, answeredCount - 1);
+			if (!refusesRepeatedRows) {
+				answeredKeyCounts.set(keyName, answeredCount - 1);
+			}
 
 			return answeredCount > 0
 				? key

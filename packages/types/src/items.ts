@@ -74,6 +74,10 @@ export type QueryOptions = {
 	skipScopedCacheEpochs?: boolean;
 };
 
+export const RepeatedRowAnswers = ['refuse', 'lastWins'] as const;
+
+export type RepeatedRowAnswer = (typeof RepeatedRowAnswers)[number];
+
 export type MutationOptions = {
 	/**
 	 * Callback function that's fired whenever a revision is made in the mutation
@@ -145,6 +149,14 @@ export type MutationOptions = {
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
 	allowFilterCancel?: boolean | undefined;
+
+	/**
+	 * What an update does with a row it is sent more than once. `refuse`, the
+	 * default, refuses the update before any hook runs, and refuses a hook
+	 * answering with a row twice; a row sent twice in one change is written
+	 * once. `lastWins` writes every change in the order sent.
+	 */
+	onRepeatedRow?: RepeatedRowAnswer | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so

@@ -1240,10 +1240,13 @@ describe('Integration Tests', () => {
 						{ data: { name: 'first' }, keys: [1] },
 					]);
 
-				await expect(service.updateBatch([
-					{ id: 1, name: 'first' },
-					{ id: 1, name: 'second' },
-				])).rejects.toThrow(/cancelled a row of the update/);
+				await expect(service.updateBatch(
+					[
+						{ id: 1, name: 'first' },
+						{ id: 1, name: 'second' },
+					],
+					{ onRepeatedRow: 'lastWins' },
+				)).rejects.toThrow(/cancelled a row of the update/);
 
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -1260,7 +1263,7 @@ describe('Integration Tests', () => {
 						{ id: 1, name: 'first' },
 						{ id: 1, name: 'second' },
 					],
-					{ allowFilterCancel: true },
+					{ allowFilterCancel: true, onRepeatedRow: 'lastWins' },
 				);
 
 				expect(keys).toEqual([1, null]);
@@ -2608,10 +2611,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				accountability,
 			});
 
-			const keys = await service.updateBatch([
-				{ id: 1, name: 'y' },
-				{ id: 1, name: 'y' },
-			]);
+			const keys = await service.updateBatch(
+				[
+					{ id: 1, name: 'y' },
+					{ id: 1, name: 'y' },
+				],
+				{ onRepeatedRow: 'lastWins' },
+			);
 
 			expect(keys).toEqual([1, 1]);
 

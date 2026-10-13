@@ -1,6 +1,17 @@
-import { ErrorCode, ForbiddenError, RouteNotFoundError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidQueryError,
+	RouteNotFoundError,
+	isDirectusError,
+} from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
-import type { PrimaryKey } from '@directus/types';
+import {
+	RepeatedRowAnswers,
+	type MutationOptions,
+	type PrimaryKey,
+	type RepeatedRowAnswer,
+} from '@directus/types';
 import express from 'express';
 import collectionExists from '../middleware/collection-exists.js';
 import { mergeContentVersions } from '../middleware/merge-content-versions.js';
@@ -192,17 +203,44 @@ router.patch(
 			return next();
 		}
 
+		const onRepeatedRow = req.query['onRepeatedRow'];
+
+		if (
+			onRepeatedRow !== undefined
+			&& !RepeatedRowAnswers.includes(onRepeatedRow as RepeatedRowAnswer)
+		) {
+			throw new InvalidQueryError({
+				reason: `"onRepeatedRow" must be one of ${RepeatedRowAnswers.join(', ')}`,
+			});
+		}
+
+		const updateOptions: MutationOptions = {
+			allowFilterCancel: true,
+			...(onRepeatedRow && {
+				onRepeatedRow: onRepeatedRow as RepeatedRowAnswer,
+			}),
+		};
+
 		let keys: (PrimaryKey | null)[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
+			keys = await service.updateBatch(req.body, updateOptions);
 		}
 		else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data, { allowFilterCancel: true });
+			keys = await service.updateMany(
+				req.body.keys,
+				req.body.data,
+				updateOptions,
+			);
 		}
 		else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data, { allowFilterCancel: true });
+
+			keys = await service.updateByQuery(
+				sanitizedQuery,
+				req.body.data,
+				updateOptions,
+			);
 		}
 
 		res.locals['scopedCachePurged'] = service.scopedCachePurged;
