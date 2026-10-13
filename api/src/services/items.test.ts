@@ -713,12 +713,89 @@ describe('Integration Tests', () => {
 					{ id: 1, name: 'first' },
 					{ id: 1, name: 'second' },
 					{ id: 1, name: 'first' },
-				]);
+				], { onRepeatedRow: 'lastWins' });
 
 				expect(tracker.history.all).toHaveLength(3);
 				expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
 				expect(tracker.history.all[1]!.bindings).toEqual(['second', 1]);
 				expect(tracker.history.all[2]!.bindings).toEqual(['first', 1]);
+			});
+
+			it(oneLine`
+				refuses a batch sending a row twice before any hook runs
+			`, async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				await expect(service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 2, name: 'other' },
+					{ id: 1, name: 'second' },
+				])).rejects.toThrow(/Row 1 is sent more than once.*onRepeatedRow/);
+
+				expect(filterSpy).not.toHaveBeenCalled();
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('refuses a hook answering with a row twice', async () => {
+				const repeatingHook = (groups: UpdateGroup[]) => {
+					return [...groups, groups[0]];
+				};
+
+				emitter.onFilter('test.items.update', repeatingHook);
+
+				try {
+					await expect(service.updateBatch([
+						{ id: 1, name: 'first' },
+						{ id: 2, name: 'other' },
+					])).rejects.toThrow(/answered with row 1 more than once/);
+
+					expect(tracker.history.all).toHaveLength(0);
+				}
+				finally {
+					emitter.offFilter('test.items.update', repeatingHook);
+				}
+			});
+
+			it(oneLine`
+				writes a row a hook answers with twice when a repeated row's last
+				change wins
+			`, async () => {
+				const repeatingHook = (groups: UpdateGroup[]) => {
+					return [...groups, { data: { name: 'last' }, keys: [1] }];
+				};
+
+				emitter.onFilter('test.items.update', repeatingHook);
+
+				try {
+					const keys = await service.updateBatch(
+						[{ id: 1, name: 'first' }],
+						{ onRepeatedRow: 'lastWins' },
+					);
+
+					expect(keys).toEqual([1]);
+					expect(tracker.history.all).toHaveLength(2);
+					expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
+					expect(tracker.history.all[1]!.bindings).toEqual(['last', 1]);
+				}
+				finally {
+					emitter.offFilter('test.items.update', repeatingHook);
+				}
+			});
+
+			it(oneLine`
+				hands the hooks a key sent twice in one change once, answering both
+			`, async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				const keys = await service.updateMany([1, 1], { name: 'same' });
+
+				expect(filterSpy.mock.calls[0]![1]).toEqual([
+					{ data: { name: 'same' }, keys: [1] },
+				]);
+
+				expect(keys).toEqual([1, 1]);
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual(['same', 1]);
 			});
 
 			it('answers an empty batch without emitting anything', async () => {

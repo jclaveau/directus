@@ -15,6 +15,8 @@
 //     payload alone, the shape it had before the event carried groups.
 //   status 'drop-key' → the grouped filter drops that group's first key,
 //     cancelling that row.
+//   status 'repeat-key' → the grouped filter answers with that group's first
+//     key a second time, in a group of its own.
 //   status 'strip-name' → the grouped filter deletes `name` off the list, the
 //     way a hook written for one payload strips a field.
 //   status 'check-status' → the grouped filter reads `status` off the list, the
@@ -75,7 +77,11 @@ export default function registerHooks({ filter, action }, { database }) {
 			return payload;
 		}
 
-		const groups = payload.map((group) => {
+		const groups = payload.flatMap((group) => {
+			if (group?.data?.status === 'repeat-key') {
+				return [group, { ...group, keys: group.keys.slice(0, 1) }];
+			}
+
 			return group?.data?.status === 'drop-key'
 				? { ...group, keys: group.keys.slice(1) }
 				: group;

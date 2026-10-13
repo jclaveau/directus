@@ -134,21 +134,36 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		function batchOf(table: Record<string, string>[]) {
+			return parseGherkinTable<{ name: string; status: string | null }>(
+				table,
+			).map((change) => {
+				const id = update.rows.find((row) => row.name === change.name)!.id;
+
+				return change.status === null
+					? { id }
+					: { id, status: change.status };
+			});
+		}
+
 		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
 			update.response = await request(getUrl(vendor))
 				.patch(`/items/${update.collection}`)
 				.query({ fields: 'name,status', sort: 'id' })
-				.send(parseGherkinTable<{ name: string; status: string | null }>(
-					table,
-				).map((change) => {
-					const id = update.rows.find((row) => row.name === change.name)!.id;
-
-					return change.status === null
-						? { id }
-						: { id, status: change.status };
-				}))
+				.send(batchOf(table))
 				.set('Authorization', update.authorization);
 		});
+
+		when.optional(
+			/^the batch sends, with onRepeatedRow "(.*)":$/,
+			async (onRepeatedRow: string, table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.query({ fields: 'name,status', sort: 'id', onRepeatedRow })
+					.send(batchOf(table))
+					.set('Authorization', update.authorization);
+			},
+		);
 
 		when.optional(
 			'the batch sends the slots:',
@@ -172,6 +187,19 @@ describe.each(vendors)('%s', (vendor) => {
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: update.rows.map((row) => row.id), data: { status } })
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			/^the rows are sent twice, updated to the status "(.*)"$/,
+			async (status: string) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${collectionGrouped}`)
+					.send({
+						keys: update.rows.flatMap((row) => [row.id, row.id]),
+						data: { status },
+					})
 					.set('Authorization', update.authorization);
 			},
 		);
@@ -405,6 +433,17 @@ describe.each(vendors)('%s', (vendor) => {
 			oneLine`
 				a row a non-admin sends twice with one change is checked and written
 				once
+			`,
+			oneLine`
+				a batch sending a row twice is refused before any update hook runs
+			`,
+			oneLine`
+				a batch passing an unknown onRepeatedRow is refused before any hook
+			`,
+			'a row sent twice under one change reaches the hooks once',
+			oneLine`
+				a grouped hook answering with a row twice is refused, writing
+				nothing
 			`,
 			oneLine`
 				a grouped hook answering with one payload is refused, naming the

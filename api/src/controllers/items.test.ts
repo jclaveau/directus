@@ -1,4 +1,4 @@
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidQueryError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -309,6 +309,36 @@ describe('items controller', () => {
 			expect(updateBatch).toHaveBeenCalledOnce();
 			expect(readMany).toHaveBeenCalledWith([1], {});
 			expect(res.locals['payload']).toEqual({ data: [{ id: 1 }] });
+		});
+
+		test('passes onRepeatedRow to the update', async () => {
+			updateBatch.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			const req = makeReq({
+				body: [{ id: 1 }],
+				query: { onRepeatedRow: 'lastWins' },
+			});
+
+			await handler()(req, { locals: {} } as any, vi.fn());
+
+			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
+				allowFilterCancel: true,
+				onRepeatedRow: 'lastWins',
+			});
+		});
+
+		test('refuses an unknown onRepeatedRow before updating', async () => {
+			const req = makeReq({
+				body: [{ id: 1 }],
+				query: { onRepeatedRow: 'merge' },
+			});
+
+			const error = await nextError(handler(), req);
+
+			expect(error).toBeInstanceOf(InvalidQueryError);
+			expect(error.message).toContain('onRepeatedRow');
+			expect(updateBatch).not.toHaveBeenCalled();
 		});
 
 		test('updateMany via body.keys', async () => {

@@ -11,6 +11,9 @@ Feature: An update reaches its hooks as one grouped event
   `test_update_groups_slot` lets a holder hold each slot once (a unique
   `(holder, slot)`), and no update hook listens to it either.
 
+  A batch sending one row twice is refused unless it passes
+  `onRepeatedRow=lastWins`, which writes each change in the order sent.
+
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
   - name "rewrite-me": `mapUpdateRows` renames the row "rewritten".
@@ -20,6 +23,8 @@ Feature: An update reaches its hooks as one grouped event
     payload alone, the shape it had before the event carried groups.
   - status "drop-key": the grouped filter drops that group's first key,
     cancelling that row.
+  - status "repeat-key": the grouped filter answers with that group's first
+    key a second time, in a group of its own.
   - status "strip-name": the grouped filter deletes `name` off the list itself.
   - status "check-status": the grouped filter reads `status` off the list
     itself, throwing when it reads "check-status".
@@ -152,7 +157,7 @@ Feature: An update reaches its hooks as one grouped event
     Given the rows:
       | name       |
       | back-forth |
-    When the batch sends:
+    When the batch sends, with onRepeatedRow "lastWins":
       | name       | status   |
       | back-forth | archived |
       | back-forth | kept     |
@@ -167,7 +172,7 @@ Feature: An update reaches its hooks as one grouped event
       | name  |
       | twice |
     And the requests authenticate as a user who may read and update the rows
-    When the batch sends:
+    When the batch sends, with onRepeatedRow "lastWins":
       | name  | status   |
       | twice | archived |
       | twice | archived |
@@ -177,6 +182,65 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name  | status   |
       | twice | archived |
+
+  Scenario: a batch sending a row twice is refused before any update hook runs
+    Given the rows:
+      | name     |
+      | repeat-a |
+      | repeat-b |
+    When the batch sends:
+      | name     | status   |
+      | repeat-a | archived |
+      | repeat-b | kept     |
+      | repeat-a | kept     |
+    Then the update is refused with a reason naming "onRepeatedRow"
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name     | status |
+      | repeat-a |        |
+      | repeat-b |        |
+    And no update event was logged
+
+  Scenario: a batch passing an unknown onRepeatedRow is refused before any hook
+    Given the rows:
+      | name      |
+      | unknown-a |
+    When the batch sends, with onRepeatedRow "merge":
+      | name      | status   |
+      | unknown-a | archived |
+    Then the update is refused with a reason naming "onRepeatedRow"
+    And the rows hold:
+      | name      | status |
+      | unknown-a |        |
+    And no update event was logged
+
+  Scenario: a row sent twice under one change reaches the hooks once
+    Given the rows:
+      | name     |
+      | same-key |
+    When the rows are sent twice, updated to the status "archived"
+    Then the grouped filter carries:
+      | status   | names        |
+      | archived | ["same-key"] |
+    And the rows hold:
+      | name     | status   |
+      | same-key | archived |
+
+  Scenario: a grouped hook answering with a row twice is refused, writing nothing
+    Given the rows:
+      | name     |
+      | answer-a |
+      | answer-b |
+    When the batch sends:
+      | name     | status     |
+      | answer-a | archived   |
+      | answer-b | repeat-key |
+    Then the update is refused with a reason naming "more than once"
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name     | status |
+      | answer-a |        |
+      | answer-b |        |
 
   Scenario: a grouped hook answering with one payload is refused, naming the helper
     Given the rows:
