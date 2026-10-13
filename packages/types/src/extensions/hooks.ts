@@ -7,7 +7,7 @@ import type {
 	ReadEventContext,
 	ScheduleHandler,
 } from '../events.js';
-import type { CreateEntry, UpdateGroup } from '../items.js';
+import type { CreateEntry, UpdateEntry } from '../items.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
 
 export type HookExtensionContext = ApiExtensionContext & {
@@ -56,7 +56,7 @@ export type RegisterFilter = {
 		event: ItemsCreateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;
-	<TIn = UpdateGroup[], TOut = TIn>(
+	<TIn = UpdateEntry[], TOut = TIn>(
 		event: ItemsUpdateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;

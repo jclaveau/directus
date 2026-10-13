@@ -19,6 +19,15 @@ export type UpdateGroup<GroupItem = any> = {
 };
 
 /**
+ * What the grouped `items.update` filter receives and answers: a change for
+ * Directus to write (`{ data, keys }`), or a row a hook wrote itself (`{ key }`),
+ * whose key the update answers with and Directus does not write.
+ */
+export type UpdateEntry<EntryItem = any> =
+	| UpdateGroup<EntryItem>
+	| { key: PrimaryKey };
+
+/**
  * One row of a create, as the grouped `items.create` filter receives it (`{ data }`)
  * and answers it, position for position: insert it (`{ data }`), answer it with a
  * stored row instead (`{ key }`), answer it with the row of an earlier position of

@@ -17,6 +17,7 @@ import type {
 	QueryOptions,
 	SchemaOverview,
 	ScopedCacheFingerprint,
+	UpdateEntry,
 	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
@@ -211,6 +212,22 @@ function isCreateEntryList(
 			&& entry.sameRowAs >= 0
 			&& entry.sameRowAs < index;
 	});
+}
+
+function isUpdateGroup<Item extends AnyItem>(
+	entry: UpdateEntry<Item>,
+): entry is UpdateGroup<Item> {
+	return isPlainObject(entry)
+		&& isPlainObject((entry as UpdateGroup<Item>).data)
+		&& Array.isArray((entry as UpdateGroup<Item>).keys);
+}
+
+function isTakenOverRow<Item extends AnyItem>(
+	entry: UpdateEntry<Item>,
+): entry is { key: PrimaryKey } {
+	return isPlainObject(entry)
+		&& Object.keys(entry).length === 1
+		&& isPrimaryKey((entry as { key: PrimaryKey }).key);
 }
 
 /**
@@ -1418,9 +1435,14 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
+		// So an undeclared takeover is told from one this call's hook declared,
+		// whatever a parent's injected declarations already held.
+		const declaredPurgesAtStart =
+			scopedCacheHookDeclarations.purgeFingerprints.length;
+
 		// Run all hooks that are attached to this event so the end user has the chance to augment the
 		// items that are about to be saved
-		const payload = groups.map((group) => {
+		const payload: UpdateEntry<Item>[] = groups.map((group) => {
 			return { data: cloneDeep(group.data), keys: [...group.keys] };
 		});
 
@@ -1428,8 +1450,8 @@ implements AbstractService<Item> {
 			return new InvalidPayloadError({
 				reason: oneLine`
 					A "${this.eventScope}.update" filter hook must return the
-					{ data, keys }[] it received; a hook that handles one row maps them
-					with mapUpdateRows
+					{ data, keys }[] it received, a row it wrote itself as { key }, no
+					key both; a hook that handles one row maps them with mapUpdateRows
 				`,
 			});
 		};
@@ -1442,7 +1464,7 @@ implements AbstractService<Item> {
 
 		const answeredGroups =
 			opts.emitEvents !== false
-				? await emitter.emitFilter<UpdateGroup<Item>[], null>(
+				? await emitter.emitFilter<UpdateEntry<Item>[], null>(
 					updateEvent,
 					guardedPayload,
 					{
@@ -1478,17 +1500,36 @@ implements AbstractService<Item> {
 
 		// A hook written before the event carried groups returns one payload, which
 		// would otherwise reach the write as a list of nothing.
-		const isGroupList = Array.isArray(groupsAfterHooks)
+		const isEntryList = Array.isArray(groupsAfterHooks)
 			&& carriesOnlyIndices(groupsAfterHooks)
-			&& groupsAfterHooks.every((group) => {
-				return isPlainObject(group?.data) && Array.isArray(group?.keys);
+			&& groupsAfterHooks.every((entry) => {
+				return isUpdateGroup(entry) || isTakenOverRow(entry);
 			});
 
-		if (!isGroupList) {
+		if (!isEntryList) {
 			throw groupListRefusal();
 		}
 
-		const keys = groupsAfterHooks.flatMap((group) => group.keys);
+		const dataGroups = groupsAfterHooks.filter(isUpdateGroup<Item>);
+
+		const takenOverKeys = groupsAfterHooks
+			.filter(isTakenOverRow<Item>)
+			.map((entry) => entry.key);
+
+		const keys = [
+			...dataGroups.flatMap((group) => group.keys),
+			...takenOverKeys,
+		];
+
+		const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
+			return group.keys.map((key) => String(key));
+		}));
+
+		// Written by the hook and by Directus both, the row would hold whichever
+		// write lands last.
+		if (takenOverKeys.some((key) => groupedKeyNames.has(String(key)))) {
+			throw groupListRefusal();
+		}
 
 		const answeredKeyCounts = new Map<string, number>();
 
@@ -1537,7 +1578,7 @@ implements AbstractService<Item> {
 			.map((relation) => relation.field));
 
 		const mergedGroups = mergeUpdateGroups(
-			groupsAfterHooks,
+			dataGroups,
 			(groupData) => {
 				return Object.entries(groupData).some(([field, value]) => {
 					const nestsAnItem = typeof value === 'object' && value !== null;
@@ -1552,16 +1593,35 @@ implements AbstractService<Item> {
 			return group.keys.length > 0 && !this.groupChangesNothing(group, aliases);
 		});
 
+		for (const key of takenOverKeys) {
+			scopedCacheHookDeclarations.takenOverKeys.add(
+				takenOverScopedCacheKey(this.collection, key),
+			);
+		}
+
+		// A takeover the hook declared inert wrote nothing, so it moved no slice.
+		const changedTakenOverKeys = takenOverKeys.filter((key) => {
+			return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
+		});
+
+		// The hook wrote the row before this snapshot, which sees only the slice it
+		// moved the row to: purged whole unless the hook declared the one it left.
+		const takeoverUndeclared = changedTakenOverKeys.length > 0
+			&& scopedCacheHookDeclarations.purgeFingerprints.length
+				=== declaredPurgesAtStart;
+
+		const directusWrittenKeys = writingGroups.flatMap((group) => group.keys);
+
 		// Snapshot the scope values these rows hold before the update so an update that
 		// moves a row to a new scope value purges both slices (old ∪ new).
 		// Empty when the collection isn't scoped.
-		const writtenKeys = writingGroups.flatMap((group) => group.keys);
+		const writtenKeys = [...directusWrittenKeys, ...changedTakenOverKeys];
 		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
 
 		if (opts.onHookAddedRows && keys.length > inputKeys.length) {
 			const inputKeyNames = new Set(inputKeys.map((key) => String(key)));
 
-			const hookAddedKeys = writtenKeys.filter((key) => {
+			const hookAddedKeys = directusWrittenKeys.filter((key) => {
 				return !inputKeyNames.has(String(key));
 			});
 
@@ -1574,9 +1634,20 @@ implements AbstractService<Item> {
 		}
 
 		if (writingGroups.length === 0) {
-			// Nothing is written — every group was a no-op, or the per-row filter
-			// cancelled every row.
-			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			// Directus writes nothing — every group was a no-op, the per-row filter
+			// cancelled every row, or a hook took every row over.
+			if (changedTakenOverKeys.length > 0) {
+				await this.purgeUpdatedScopedCache(
+					writtenKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclared,
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
 
 			return rowKeys;
 		}
@@ -1652,12 +1723,23 @@ implements AbstractService<Item> {
 			// On a transaction this call opened, the failure rolled every group back,
 			// leaving only what a hook wrote out of band. On the caller's, the groups
 			// written before the failure commit with it.
+			// A takeover was written by the hook, outside this call's transaction.
 			if (this.knex.isTransaction) {
 				await this.purgeUpdatedScopedCache(
 					writtenKeys,
 					oldScopedCacheSnapshot,
 					scopedCacheHookDeclarations,
 					opts,
+					takeoverUndeclared,
+				);
+			}
+			else if (changedTakenOverKeys.length > 0) {
+				await this.purgeUpdatedScopedCache(
+					changedTakenOverKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclared,
 				);
 			}
 			else {
@@ -1672,6 +1754,7 @@ implements AbstractService<Item> {
 			oldScopedCacheSnapshot,
 			scopedCacheHookDeclarations,
 			opts,
+			takeoverUndeclared,
 		);
 
 		if (opts.emitEvents !== false) {
@@ -1722,8 +1805,20 @@ implements AbstractService<Item> {
 		oldScopedCacheSnapshot: ScopedCacheSnapshot,
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
 		opts: MutationOptions,
+		takeoverUndeclared: boolean,
 	): Promise<void> {
 		if (!shouldClearCache(this.cache, opts, this.collection)) {
+			return;
+		}
+
+		if (takeoverUndeclared) {
+			this.scopedCachePurged = await this.scopedCache.purge(
+				null,
+				declarations,
+				[],
+				{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+			);
+
 			return;
 		}
 

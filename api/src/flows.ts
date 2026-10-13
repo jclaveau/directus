@@ -14,6 +14,7 @@ import type {
 	PrimaryKey,
 	SchemaOverview,
 	OperationHandler,
+	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
 import { applyOptionsData, deepMap, getRedactedString, isValidJSON, parseJSON, toArray } from '@directus/utils';
@@ -469,9 +470,14 @@ class FlowManager {
 				return entriesAfterFlow;
 			}
 
-			const groupsAfterFlow: UpdateGroup[] = [];
+			const groupsAfterFlow: UpdateEntry[] = [];
 
-			for (const group of payload as UpdateGroup[]) {
+			for (const group of payload as UpdateEntry[]) {
+				if (!('data' in group)) {
+					groupsAfterFlow.push(group);
+					continue;
+				}
+
 				const dataAfterFlow = await runFlow(
 					group.data,
 					{ ...meta, keys: group.keys, originalPayload: group.data },

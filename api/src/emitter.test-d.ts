@@ -4,6 +4,7 @@ import type {
 	RegisterFunctions,
 	ScopedCachePurgeHandle,
 	ScopedCacheScopeHandle,
+	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
 import { expectTypeOf, test } from 'vitest';
@@ -95,7 +96,7 @@ test('register.filter types a grouped event by the list it carries', () => {
 	const register = {} as RegisterFunctions;
 
 	register.filter('users.update', (groups) => {
-		expectTypeOf(groups).toEqualTypeOf<UpdateGroup[]>();
+		expectTypeOf(groups).toEqualTypeOf<UpdateEntry[]>();
 	});
 
 	register.filter('articles.items.create', (entries) => {
