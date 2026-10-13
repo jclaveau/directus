@@ -71,11 +71,16 @@ export async function resolveMutation(
 			if (action === 'update') {
 				const keys: PrimaryKey[] = [];
 
+				const onRepeatedRow = args['onRepeatedRow'];
+
 				if (batchUpdate) {
-					keys.push(...(await service.updateBatch(args['data'])));
+					keys.push(...(await service.updateBatch(args['data'], { onRepeatedRow })));
 				} else {
 					keys.push(
-						...(await service.updateMany(args['ids'], args['data'], { allowFilterCancel: true })).filter(
+						...(await service.updateMany(args['ids'], args['data'], {
+							allowFilterCancel: true,
+							onRepeatedRow,
+						})).filter(
 							(key): key is PrimaryKey => key !== null,
 						),
 					);

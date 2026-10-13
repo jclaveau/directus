@@ -1,4 +1,10 @@
-import type { ApplyQueryFields, CollectionType, Query, UnpackList } from '../../../types/index.js';
+import type {
+	ApplyQueryFields,
+	CollectionType,
+	Query,
+	QueryUpdate,
+	UnpackList,
+} from '../../../types/index.js';
 import type { RestCommand } from '../../types.js';
 import { throwIfCoreCollection, throwIfEmpty } from '../../utils/index.js';
 
@@ -22,7 +28,11 @@ export type UpdateItemOutput<
  * @throws Will throw if collection is a core collection
  */
 export const updateItems =
-	<Schema, Collection extends keyof Schema, const TQuery extends Query<Schema, Schema[Collection]>>(
+	<
+		Schema,
+		Collection extends keyof Schema,
+		const TQuery extends QueryUpdate<Schema, Schema[Collection]>,
+	>(
 		collection: Collection,
 		keysOrQuery: string[] | number[] | Query<Schema, Schema[Collection]>,
 		item: Partial<UnpackList<Schema[Collection]>>,
@@ -63,7 +73,11 @@ export const updateItems =
  * @throws Will throw if collection is a core collection
  */
 export const updateItemsBatch =
-	<Schema, Collection extends keyof Schema, const TQuery extends Query<Schema, Schema[Collection]>>(
+	<
+		Schema,
+		Collection extends keyof Schema,
+		const TQuery extends QueryUpdate<Schema, Schema[Collection]>,
+	>(
 		collection: Collection,
 		items: Partial<UnpackList<Schema[Collection]>>[],
 		query?: TQuery,
