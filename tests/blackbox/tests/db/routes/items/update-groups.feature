@@ -214,6 +214,53 @@ Feature: An update reaches its hooks as one grouped event
       | unknown-a |        |
     And no update event was logged
 
+  Scenario: a GraphQL batch sending a row twice is refused before any hook
+    Given the rows:
+      | name      |
+      | gql-twice |
+    When the batch is sent over GraphQL:
+      | name      | status   |
+      | gql-twice | archived |
+      | gql-twice | kept     |
+    Then the GraphQL update is refused with a reason naming "onRepeatedRow"
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name      | status |
+      | gql-twice |        |
+    And no update event was logged
+
+  Scenario: a GraphQL batch passing onRepeatedRow lastWins keeps the last change
+    Given the rows:
+      | name     |
+      | gql-last |
+    When the batch is sent over GraphQL, with onRepeatedRow lastWins:
+      | name     | status   |
+      | gql-last | archived |
+      | gql-last | kept     |
+    Then the GraphQL update succeeds
+    And the rows hold:
+      | name     | status |
+      | gql-last | kept   |
+
+  Scenario: a GraphQL batch passing an unknown onRepeatedRow is refused
+    Given the rows:
+      | name        |
+      | gql-unknown |
+    When the batch is sent over GraphQL, with onRepeatedRow merge:
+      | name        | status   |
+      | gql-unknown | archived |
+    Then the GraphQL query is rejected, naming "merge"
+    And the rows hold:
+      | name        | status |
+      | gql-unknown |        |
+    And no update event was logged
+
+  Scenario: the OAS describes onRepeatedRow on a collection's batch update
+    When the OAS is read
+    Then the collection's update takes the query parameter:
+      | name          | required | type   | enum                  | default |
+      | onRepeatedRow | false    | string | ["refuse","lastWins"] | refuse  |
+
   Scenario: a row sent twice under one change reaches the hooks once
     Given the rows:
       | name     |

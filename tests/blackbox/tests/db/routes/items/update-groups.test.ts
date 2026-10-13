@@ -166,6 +166,37 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
+			/^the batch is sent over GraphQL(?:, with onRepeatedRow (\w+))?:$/,
+			async (
+				onRepeatedRow: string | undefined,
+				table: Record<string, string>[],
+			) => {
+				update.response = await request(getUrl(vendor))
+					.post('/graphql')
+					.send({
+						query: `
+							mutation ($rows: [update_${update.collection}_input!]) {
+								update_${update.collection}_batch(
+									data: $rows
+									${onRepeatedRow
+										? `onRepeatedRow: ${onRepeatedRow}`
+										: ''}
+								) { name status }
+							}
+						`,
+						variables: { rows: batchOf(table) },
+					})
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional('the OAS is read', async () => {
+			update.response = await request(getUrl(vendor))
+				.get('/server/specs/oas')
+				.set('Authorization', AUTH);
+		});
+
+		when.optional(
 			'the batch sends the slots:',
 			async (table: Record<string, string>[]) => {
 				update.response = await request(getUrl(vendor))
@@ -281,6 +312,71 @@ describe.each(vendors)('%s', (vendor) => {
 			(reason: string) => {
 				expect(update.response!.statusCode).toEqual(400);
 				expect(update.response!.body.errors[0].message).toContain(reason);
+			},
+		);
+
+		then.optional('the GraphQL update succeeds', () => {
+			expect(update.response!.statusCode).toEqual(200);
+			expect(update.response!.body.errors).toBeUndefined();
+		});
+
+		then.optional(
+			/^the GraphQL update is refused with a reason naming "(.*)"$/,
+			(reason: string) => {
+				expect(update.response!.statusCode).toEqual(200);
+				expect(update.response!.body.errors[0].message).toContain(reason);
+			},
+		);
+
+		// A query the schema refuses never runs, so its reason sits one level down.
+		then.optional(
+			/^the GraphQL query is rejected, naming "(.*)"$/,
+			(reason: string) => {
+				expect(update.response!.statusCode).toEqual(400);
+
+				expect(update.response!.body.errors[0].extensions.code)
+					.toEqual('GRAPHQL_VALIDATION');
+
+				expect(
+					update.response!.body.errors[0].extensions.errors[0].message,
+				).toContain(reason);
+			},
+		);
+
+		then.optional(
+			"the collection's update takes the query parameter:",
+			(table: Record<string, string>[]) => {
+				const oas = update.response!.body;
+
+				const parameters = oas.paths[`/items/${update.collection}`].patch
+					.parameters
+					.map((parameter: { $ref?: string }) => {
+						return parameter.$ref?.startsWith('#/components/parameters/')
+							? oas.components.parameters[
+								parameter.$ref.slice('#/components/parameters/'.length)
+							]
+							: parameter;
+					});
+
+				const [expected] = parseGherkinTable<{
+					name: string;
+					required: boolean;
+					type: string;
+					enum: string[];
+					default: string;
+				}>(table);
+
+				expect(parameters).toContainEqual({
+					name: expected!.name,
+					description: expect.any(String),
+					in: 'query',
+					required: expected!.required,
+					schema: {
+						type: expected!.type,
+						enum: expected!.enum,
+						default: expected!.default,
+					},
+				});
 			},
 		);
 
@@ -439,6 +535,17 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			oneLine`
 				a batch passing an unknown onRepeatedRow is refused before any hook
+			`,
+			oneLine`
+				a GraphQL batch sending a row twice is refused before any hook
+			`,
+			oneLine`
+				a GraphQL batch passing onRepeatedRow lastWins keeps the last
+				change
+			`,
+			'a GraphQL batch passing an unknown onRepeatedRow is refused',
+			oneLine`
+				the OAS describes onRepeatedRow on a collection's batch update
 			`,
 			'a row sent twice under one change reaches the hooks once',
 			oneLine`
