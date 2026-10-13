@@ -2,49 +2,53 @@
 // should invalidate the owner's cached `summary` — another collection that
 // aggregates orders. The framework purges the order's own slice, but nothing reaches
 // the summary. This update hook resolves the owner of the order(s) being updated
-// (read off the per-row payload before the update commits), looks up that
+// (read off each updated key before the update commits), looks up that
 // owner's summary slice, and passes that lookup's own `scopedCacheFingerprints`
 // to `scopedCache.purgeBy`.
 //
 // Resolving the owner from the updated keys keeps the purge precise. Reuses the
 // lookup's fingerprints rather than build one, so the declared purge can't drift.
 
+import { mapUpdateRows } from '@directus/utils';
+
 const ORDER = 'test_items_order';
 const SUMMARY = 'test_items_summary';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${ORDER}.items.update.one`, async (payload, _meta, context) => {
-		const orderService = new services.ItemsService(ORDER, {
-			schema: context.schema,
-			accountability: context.accountability,
-			knex: context.database,
-		});
+	filter(`${ORDER}.items.update`, (groups, _meta, context) => {
+		return mapUpdateRows(groups, async (payload, key) => {
+			const orderService = new services.ItemsService(ORDER, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.database,
+			});
 
-		const [updated] = await orderService.readMany(
-			[payload.id],
-			{ fields: ['owner'], limit: 1 },
-			{ emitEvents: false },
-		);
+			const [updated] = await orderService.readMany(
+				[key],
+				{ fields: ['owner'], limit: 1 },
+				{ emitEvents: false },
+			);
 
-		if (!updated) {
+			if (!updated) {
+				return payload;
+			}
+
+			const summaryService = new services.ItemsService(SUMMARY, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.database,
+			});
+
+			const affected = await summaryService.readByQuery(
+				{ filter: { owner: { _eq: updated.owner } }, fields: ['id'], limit: 1 },
+				{ emitEvents: false },
+			);
+
+			context.scopedCache?.purgeBy(
+				affected.getMeta?.()?.scopedCacheFingerprints ?? [],
+			);
+
 			return payload;
-		}
-
-		const summaryService = new services.ItemsService(SUMMARY, {
-			schema: context.schema,
-			accountability: context.accountability,
-			knex: context.database,
 		});
-
-		const affected = await summaryService.readByQuery(
-			{ filter: { owner: { _eq: updated.owner } }, fields: ['id'], limit: 1 },
-			{ emitEvents: false },
-		);
-
-		context.scopedCache?.purgeBy(
-			affected.getMeta?.()?.scopedCacheFingerprints ?? [],
-		);
-
-		return payload;
 	});
 }

@@ -4,8 +4,12 @@ import {
 	InvalidPayloadError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import { UserIntegrityCheckFlag } from '@directus/types';
-import { oneLine } from '@directus/utils';
+import {
+	type CreateEntry,
+	type UpdateGroup,
+	UserIntegrityCheckFlag,
+} from '@directus/types';
+import { mapCreateRows, mapUpdateRows, oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import {
@@ -569,7 +573,7 @@ describe('Integration Tests', () => {
 				try {
 					await expect(
 						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
-					).rejects.toThrow(/items\.create\.one/);
+					).rejects.toThrow(/mapCreateRows/);
 
 					expect(batchInsert).not.toHaveBeenCalled();
 				}
@@ -604,7 +608,7 @@ describe('Integration Tests', () => {
 				try {
 					await expect(
 						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
-					).rejects.toThrow(/items\.create\.one/);
+					).rejects.toThrow(/mapCreateRows/);
 
 					expect(batchInsert).not.toHaveBeenCalled();
 				}
@@ -966,7 +970,7 @@ describe('Integration Tests', () => {
 					.mockResolvedValueOnce({ name: 'changed' });
 
 				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-					/items\.update\.one/,
+					/mapUpdateRows/,
 				);
 
 				expect(tracker.history.all).toHaveLength(0);
@@ -982,7 +986,7 @@ describe('Integration Tests', () => {
 					);
 
 				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-					/items\.update\.one/,
+					/mapUpdateRows/,
 				);
 
 				expect(tracker.history.all).toHaveLength(0);
@@ -1017,7 +1021,7 @@ describe('Integration Tests', () => {
 
 				try {
 					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/items\.update\.one/,
+						/mapUpdateRows/,
 					);
 
 					expect(tracker.history.all).toHaveLength(0);
@@ -1038,7 +1042,7 @@ describe('Integration Tests', () => {
 
 				try {
 					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/items\.update\.one/,
+						/mapUpdateRows/,
 					);
 
 					expect(tracker.history.all).toHaveLength(0);
@@ -1059,7 +1063,7 @@ describe('Integration Tests', () => {
 
 				try {
 					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/items\.update\.one/,
+						/mapUpdateRows/,
 					);
 
 					expect(tracker.history.all).toHaveLength(0);
@@ -1082,32 +1086,13 @@ describe('Integration Tests', () => {
 
 				try {
 					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/items\.update\.one/,
+						/mapUpdateRows/,
 					);
 
 					expect(tracker.history.all).toHaveLength(0);
 				}
 				finally {
 					emitter.offFilter('items.update', groupHook);
-				}
-			});
-
-			it(oneLine`
-				refuses a per-row hook that answers with something other than a row
-			`, async () => {
-				const rowHook = () => 'changed';
-
-				emitter.onFilter('items.update.one', rowHook);
-
-				try {
-					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/items\.update\.one/,
-					);
-
-					expect(tracker.history.all).toHaveLength(0);
-				}
-				finally {
-					emitter.offFilter('items.update.one', rowHook);
 				}
 			});
 
@@ -1153,7 +1138,9 @@ describe('Integration Tests', () => {
 				expect(tracker.history.all).toHaveLength(0);
 			});
 
-			it('refuses an update hook that drops a key', async () => {
+			it(oneLine`
+				refuses a dropped key the caller did not opt into cancelling
+			`, async () => {
 				vi
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce([
@@ -1161,7 +1148,7 @@ describe('Integration Tests', () => {
 					]);
 
 				await expect(service.updateMany([1, 2], { name: 'Test' })).rejects.toThrow(
-					/must keep every key it received/,
+					/cancelled a row of the update/,
 				);
 
 				expect(tracker.history.all).toHaveLength(0);
@@ -1179,9 +1166,29 @@ describe('Integration Tests', () => {
 				await expect(service.updateBatch([
 					{ id: 1, name: 'first' },
 					{ id: 1, name: 'second' },
-				])).rejects.toThrow(/must keep every key it received/);
+				])).rejects.toThrow(/cancelled a row of the update/);
 
 				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('cancels the later change of a row an update hook dropped', async () => {
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'first' }, keys: [1] },
+					]);
+
+				const keys = await service.updateBatch(
+					[
+						{ id: 1, name: 'first' },
+						{ id: 1, name: 'second' },
+					],
+					{ allowFilterCancel: true },
+				);
+
+				expect(keys).toEqual([1, null]);
+				expect(tracker.history.all).toHaveLength(1);
+				expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
 			});
 
 			it('lets an update hook move a key to another group', async () => {
@@ -1927,8 +1934,20 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
-	describe('items.update.one with nothing listening', () => {
-		it('emits only the grouped events', async () => {
+	describe('items.update fires once per update', () => {
+		const rowListener = () => undefined;
+
+		beforeEach(() => {
+			emitter.onFilter('items.update.one', rowListener);
+			emitter.onAction('items.update.one', rowListener);
+		});
+
+		afterEach(() => {
+			emitter.offFilter('items.update.one', rowListener);
+			emitter.offAction('items.update.one', rowListener);
+		});
+
+		it('emits only the grouped events, whatever listens per row', async () => {
 			tracker.on.update('test').response(3);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
@@ -1961,19 +1980,21 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
-	describe('a guard error of a row a per-row hook cancels', () => {
-		const cancelGuardedRow = (row: { id: string }) => {
-			return row.id === 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22'
-				? null
-				: row;
+	describe('a guard error of a row a hook cancels', () => {
+		const cancelGuardedRow = (groups: UpdateGroup[]) => {
+			return mapUpdateRows(groups, (data, key) => {
+				return key === 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22'
+					? null
+					: data;
+			});
 		};
 
 		beforeEach(() => {
-			emitter.onFilter('users.update.one', cancelGuardedRow);
+			emitter.onFilter('users.update', cancelGuardedRow);
 		});
 
 		afterEach(() => {
-			emitter.offFilter('users.update.one', cancelGuardedRow);
+			emitter.offFilter('users.update', cancelGuardedRow);
 		});
 
 		it('writes the sibling rows', async () => {
@@ -2008,137 +2029,18 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
-	describe('items.update.one fires per row alongside the grouped event', () => {
-		// The per-row events fire only when something listens to them.
-		const rowListener = () => undefined;
-
-		beforeEach(() => {
-			emitter.onFilter('items.update.one', rowListener);
-			emitter.onAction('items.update.one', rowListener);
-		});
-
-		afterEach(() => {
-			emitter.offFilter('items.update.one', rowListener);
-			emitter.offAction('items.update.one', rowListener);
-		});
-
-		it('emits the grouped event once and the per-row event per key', async () => {
-			tracker.on.update('test').response(3);
-			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
-
-			const filterSpy = vi.spyOn(emitter, 'emitFilter');
-			const actionSpy = vi.spyOn(emitter, 'emitAction');
-
-			await new ItemsService('test', { knex: db, schema: shapesSchema })
-				.updateMany([1, 2, 3], { name: 'after' });
-
-			expect(filterSpy.mock.calls).toEqual([
-				[
-					['items.update', 'test.items.update'],
-					[{ data: { name: 'after' }, keys: [1, 2, 3] }],
-					{ collection: 'test' },
-					expect.anything(),
-				],
-				[
-					['items.update.one', 'test.items.update.one'],
-					{ name: 'after', id: 1 },
-					{ collection: 'test' },
-					expect.anything(),
-				],
-				[
-					['items.update.one', 'test.items.update.one'],
-					{ name: 'after', id: 2 },
-					{ collection: 'test' },
-					expect.anything(),
-				],
-				[
-					['items.update.one', 'test.items.update.one'],
-					{ name: 'after', id: 3 },
-					{ collection: 'test' },
-					expect.anything(),
-				],
-			]);
-
-			expect(actionSpy.mock.calls).toEqual([
-				[
-					['items.update', 'test.items.update'],
-					{
-						payload: [{ data: { name: 'after' }, keys: [1, 2, 3] }],
-						collection: 'test',
-					},
-					expect.anything(),
-				],
-				[
-					['items.update.one', 'test.items.update.one'],
-					{ payload: { name: 'after', id: 1 }, collection: 'test' },
-					expect.anything(),
-				],
-				[
-					['items.update.one', 'test.items.update.one'],
-					{ payload: { name: 'after', id: 2 }, collection: 'test' },
-					expect.anything(),
-				],
-				[
-					['items.update.one', 'test.items.update.one'],
-					{ payload: { name: 'after', id: 3 }, collection: 'test' },
-					expect.anything(),
-				],
-			]);
-
-			// With nothing rewritten the group stays whole: one `WHERE id IN (…)`.
-			expect(tracker.history.update).toHaveLength(1);
-		});
-
-		it('puts the row key over a key the change carries', async () => {
-			tracker.on.update('test').response(2);
-			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
-
-			const filterSpy = vi.spyOn(emitter, 'emitFilter');
-			const actionSpy = vi.spyOn(emitter, 'emitAction');
-
-			await new ItemsService('test', { knex: db, schema: shapesSchema })
-				.updateMany([1, 2], { id: 7, name: 'after' });
-
-			expect(filterSpy).toHaveBeenCalledWith(
-				['items.update.one', 'test.items.update.one'],
-				{ id: 1, name: 'after' },
-				{ collection: 'test' },
-				expect.anything(),
-			);
-
-			expect(filterSpy).toHaveBeenCalledWith(
-				['items.update.one', 'test.items.update.one'],
-				{ id: 2, name: 'after' },
-				{ collection: 'test' },
-				expect.anything(),
-			);
-
-			expect(actionSpy).toHaveBeenCalledWith(
-				['items.update.one', 'test.items.update.one'],
-				{ payload: { id: 1, name: 'after' }, collection: 'test' },
-				expect.anything(),
-			);
-
-			expect(actionSpy).toHaveBeenCalledWith(
-				['items.update.one', 'test.items.update.one'],
-				{ payload: { id: 2, name: 'after' }, collection: 'test' },
-				expect.anything(),
-			);
-		});
-
+	describe('an update hook mapping its rows with mapUpdateRows', () => {
 		it('cancels one row without touching its siblings', async () => {
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
 
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
-				async (event, payload: any) => {
-					if (!event.includes('items.update.one')) {
-						return payload;
-					}
-
-					return payload.id === 1
-						? null
-						: payload;
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, (data, key) => {
+						return key === 1
+							? null
+							: data;
+					});
 				},
 			);
 
@@ -2153,10 +2055,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 		it('answers a null per row when every row is cancelled', async () => {
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
-				async (event, payload) => {
-					return event.includes('items.update.one')
-						? null
-						: payload;
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, () => null);
 				},
 			);
 
@@ -2169,51 +2069,83 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tracker.history.update).toHaveLength(0);
 		});
 
-		it('refuses a per-row cancel the caller did not opt into', async () => {
+		it('refuses a row cancel the caller did not opt into', async () => {
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
-				async (event, payload: any) => {
-					if (!event.includes('items.update.one')) {
-						return payload;
-					}
-
-					return payload.id === 1
-						? null
-						: payload;
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, (data, key) => {
+						return key === 1
+							? null
+							: data;
+					});
 				},
 			);
 
 			await expect(
 				new ItemsService('test', { knex: db, schema: shapesSchema })
 					.updateMany([1, 2], { name: 'after' }),
-			).rejects.toThrow(InvalidPayloadError);
+			).rejects.toThrow(/cancelled a row of the update/);
 
 			expect(tracker.history.update).toHaveLength(0);
 		});
 
-		it('splits off only the row a per-row hook rewrote', async () => {
+		it('splits off the row it rewrote and answers in the caller order', async () => {
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
-				async (event, payload: any) => {
-					if (!event.includes('items.update.one')) {
-						return payload;
-					}
-
-					return payload.id === 2
-						? { ...payload, name: 'rewritten' }
-						: payload;
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, (data, key) => {
+						return key === 2
+							? { name: 'rewritten' }
+							: data;
+					});
 				},
 			);
 
-			await new ItemsService('test', { knex: db, schema: shapesSchema })
+			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
 				.updateMany([1, 2, 3], { name: 'after' });
 
-			// Rows 1 and 3 still carry the same change, but row 2 sits between them.
-			expect(tracker.history.update).toHaveLength(3);
-			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1]);
+			expect(keys).toEqual([1, 2, 3]);
+			expect(tracker.history.update).toHaveLength(2);
+			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1, 3]);
 			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
-			expect(tracker.history.update[2]!.bindings).toEqual(['after', 3]);
+		});
+
+		it('creates a nested owner once for the rows it left equal', async () => {
+			const nestedSchema = new SchemaBuilder()
+				.collection('parent', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.collection('child', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('owner').m2o('parent');
+				})
+				.build();
+
+			tracker.on.insert('parent').response([1]);
+			tracker.on.update('child').response(1);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload: any) => {
+					if (!event.includes('child.items.update')) {
+						return payload;
+					}
+
+					return mapUpdateRows(payload, (data, key) => {
+						return key === 2
+							? { name: 'rewritten' }
+							: data;
+					});
+				},
+			);
+
+			await new ItemsService('child', { knex: db, schema: nestedSchema })
+				.updateMany([1, 2, 3], { name: 'after', owner: { name: 'owner' } });
+
+			expect(tracker.history.insert).toHaveLength(1);
+			expect(tracker.history.update).toHaveLength(2);
 		});
 	});
 
@@ -2364,89 +2296,96 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
-	describe('items.create.one fires per inserted row', () => {
-		// The per-row events fire only when something listens to them.
-		const rowListener = (payload: unknown) => payload;
+	describe('an items.create.one listener', () => {
+		const takeOver = async () => 7;
 
 		beforeEach(() => {
-			emitter.onFilter('items.create.one', rowListener);
-			emitter.onAction('items.create.one', rowListener);
+			emitter.onFilter('test.items.create.one', takeOver);
 		});
 
 		afterEach(() => {
-			emitter.offFilter('items.create.one', rowListener);
-			emitter.offAction('items.create.one', rowListener);
+			emitter.offFilter('test.items.create.one', takeOver);
 		});
 
-		it('emits the per-row events for inserted rows only', async () => {
-			tracker.on.insert('test').response([1]);
+		it('is never called: every row is inserted', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			tracker.on.insert('test').response([{ id: 1 }]);
 
-			const answerStored = async (entries: any) => {
-				return [entries[0], { key: 9 }];
-			};
-
-			emitter.onFilter('test.items.create', answerStored);
-
-			const filterSpy = vi.spyOn(emitter, 'emitFilter');
 			const actionSpy = vi.spyOn(emitter, 'emitAction');
 
-			try {
-				await new ItemsService('test', { knex: db, schema: shapesSchema })
-					.createMany([{ name: 'a' }, { name: 'b' }]);
+			const keys = await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			}).createMany([{ name: 'a' }]);
 
-				expect(filterSpy.mock.calls).toEqual([
-					[
-						['items.create', 'test.items.create'],
-						[{ data: { id: 1, name: 'a' } }, { data: { name: 'b' } }],
-						{ collection: 'test' },
-						expect.anything(),
-					],
-					[
-						['items.create.one', 'test.items.create.one'],
-						{ id: 1, name: 'a' },
-						{ collection: 'test' },
-						expect.anything(),
-					],
-				]);
+			expect(keys).toEqual([1]);
+			expect(tracker.history.insert).toHaveLength(1);
 
-				expect(actionSpy.mock.calls).toEqual([
-					[
-						['items.create', 'test.items.create'],
-						{
-							payload: [{ id: 1, name: 'a' }],
-							keys: [1],
-							collection: 'test',
-						},
-						expect.anything(),
-					],
-					[
-						['items.create.one', 'test.items.create.one'],
-						{ payload: { id: 1, name: 'a' }, key: 1, collection: 'test' },
-						expect.anything(),
-					],
-				]);
-			}
-			finally {
-				emitter.offFilter('test.items.create', answerStored);
-			}
+			expect(actionSpy.mock.calls).toEqual([
+				[
+					['items.create', 'test.items.create'],
+					{ payload: [{ id: 1, name: 'a' }], keys: [1], collection: 'test' },
+					expect.anything(),
+				],
+			]);
 		});
+	});
 
-		it('keeps the per-row takeover a hook returns as a primary key', async () => {
-			const takeOver = async () => 7;
+	describe('a create hook mapping its rows with mapCreateRows', () => {
+		it('takes a row over with the key it returns', async () => {
+			tracker.on.insert('test').response([1]);
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			const takeOverStored = (entries: (CreateEntry | null)[]) => {
+				return mapCreateRows(entries, (data) => {
+					return data['name'] === 'stored'
+						? 9
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverStored);
 
 			try {
 				const keys = await new ItemsService('test', {
 					knex: db,
 					schema: shapesSchema,
-				}).createMany([{ name: 'a' }]);
+				}).createMany([{ name: 'a' }, { name: 'stored' }]);
 
-				expect(keys).toEqual([7]);
-				expect(tracker.history.insert).toHaveLength(0);
+				expect(keys).toEqual([1, 9]);
+				expect(tracker.history.insert).toHaveLength(1);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOverStored);
+			}
+		});
+
+		it('cancels the row it returns null for', async () => {
+			tracker.on.insert('test').response([1]);
+
+			const cancelRefused = (entries: (CreateEntry | null)[]) => {
+				return mapCreateRows(entries, (data) => {
+					return data['name'] === 'refused'
+						? null
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.create', cancelRefused);
+
+			try {
+				const keys = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				}).createMany(
+					[{ name: 'refused' }, { name: 'b' }],
+					{ allowFilterCancel: true },
+				);
+
+				expect(keys).toEqual([null, 1]);
+				expect(tracker.history.insert).toHaveLength(1);
+			}
+			finally {
+				emitter.offFilter('test.items.create', cancelRefused);
 			}
 		});
 	});

@@ -314,24 +314,6 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
-		// The per-row actions run together, so their log order is not theirs.
-		and.optional(
-			'the per-row action names, in any order:',
-			async (table: Record<string, string>[]) => {
-				const ownKeys = update.rows.map((row) => row.id);
-
-				const actedKeys = (await readLoggedPayloads('items.update.one', 'action'))
-					.map((payload: string) => (JSON.parse(payload) as RowLogged).id)
-					.filter((key: number) => ownKeys.includes(key));
-
-				expect(namesOf(update, actedKeys).sort()).toEqual(
-					parseGherkinTable<{ name: string }>(table)
-						.map((row) => row.name)
-						.sort(),
-				);
-			},
-		);
-
 		// The other scenarios show the probe logs, so an empty log means something.
 		and.optional('no update event was logged', async () => {
 			expect([
@@ -404,7 +386,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
-			'an update fires the grouped event once, then the per-row one per row',
+			'an update fires the grouped event once, and no event per row',
 			'a batch where every row writes nothing answers with every row',
 			'a batch answers with every row it was sent, no-op rows included',
 			'rows side by side carrying the same change are written together',
@@ -426,9 +408,12 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			oneLine`
 				a grouped hook answering with one payload is refused, naming the
-				per-row event
+				helper
 			`,
-			'a grouped hook dropping a key is refused, naming the per-row event',
+			oneLine`
+				a grouped hook dropping a key cancels that row, its sibling
+				written
+			`,
 			oneLine`
 				a grouped hook deleting a field off the list is refused, writing
 				nothing
@@ -440,15 +425,11 @@ describe.each(vendors)('%s', (vendor) => {
 			'a malformed key is refused before any update hook runs',
 			'an update naming no row runs no update hook',
 			'a batch no update hook listens to is written as it was sent',
-			'a per-row hook cancels its row and its siblings are written',
 			oneLine`
-				a per-row hook rewriting one row splits its group, the rewrite
-				written
+				a hook mapping its rows cancels one, its siblings written together
 			`,
-			oneLine`
-				a nested owner sent to several rows is created once, whatever the
-				per-row hook
-			`,
+			'a hook mapping its rows splits off the one it rewrote',
+			'a nested owner sent to several rows a hook maps is created once',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {

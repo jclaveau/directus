@@ -156,7 +156,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
-			'a create fires the grouped event once, then the per-row one per row',
+			'a create fires the grouped event once, and no event per row',
 			'a grouped hook answering with one payload is refused',
 			oneLine`
 				a grouped hook deleting a field off the list is refused, creating
@@ -167,8 +167,8 @@ describe.each(vendors)('%s', (vendor) => {
 				nothing
 			`,
 			'a grouped hook marking a twin inserts the row once',
-			'a grouped hook cancelling one row writes its siblings',
-			'a row a grouped hook takes over is left out of the grouped action',
+			'a hook mapping its rows cancels one, writing its siblings',
+			'a row a hook mapping its rows takes over is left out of the action',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, { responses: [] });

@@ -11,6 +11,8 @@
 //     - mode 'protect' → veto, declare nothing → no purge, row survives.
 //     - mode 'flag'    → veto, but declare the row's space slice → precise purge.
 
+import { mapUpdateRows } from '@directus/utils';
+
 const EDITABLE = 'test_items_editable';
 const REMOVABLE = 'test_items_removable';
 
@@ -34,26 +36,28 @@ async function purgeSpaceSlice(service, space, context) {
 }
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${EDITABLE}.items.update.one`, async (payload, _meta, context) => {
-		if (payload.note !== 'reject' && payload.note !== 'flag') {
-			return payload;
-		}
-
-		if (payload.note === 'flag') {
-			const service = serviceFor(services, EDITABLE, context);
-
-			const [row] = await service.readMany(
-				[payload.id],
-				{ fields: ['space'], limit: 1 },
-				{ emitEvents: false },
-			);
-
-			if (row) {
-				await purgeSpaceSlice(service, row.space, context);
+	filter(`${EDITABLE}.items.update`, (groups, _meta, context) => {
+		return mapUpdateRows(groups, async (payload, key) => {
+			if (payload.note !== 'reject' && payload.note !== 'flag') {
+				return payload;
 			}
-		}
 
-		return null;
+			if (payload.note === 'flag') {
+				const service = serviceFor(services, EDITABLE, context);
+
+				const [row] = await service.readMany(
+					[key],
+					{ fields: ['space'], limit: 1 },
+					{ emitEvents: false },
+				);
+
+				if (row) {
+					await purgeSpaceSlice(service, row.space, context);
+				}
+			}
+
+			return null;
+		});
 	});
 
 	filter(`${REMOVABLE}.items.delete`, async (keys, _meta, context) => {

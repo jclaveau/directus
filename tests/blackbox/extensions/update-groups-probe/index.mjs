@@ -4,19 +4,24 @@
 // its own collection and swallows its own failures: the log table exists for
 // this suite alone, and a throwing filter would take unrelated suites down.
 //
-// Two row payloads drive the per-row behaviours end to end, so the test needs no
-// control endpoint:
-//   name 'cancel-me'  → the per-row filter returns null, cancelling that row.
-//   name 'rewrite-me' → the per-row filter rewrites it, splitting its group.
+// Row markers drive the behaviours end to end, so the test needs no control
+// endpoint:
+//   name 'cancel-me'  → the grouped filter's mapUpdateRows returns null for that
+//     row, cancelling it.
+//   name 'rewrite-me' → mapUpdateRows rewrites that row, splitting its group.
 //   status 'legacy-shape' → the grouped filter answers with that group's
 //     payload alone, the shape it had before the event carried groups.
-//   status 'drop-key' → the grouped filter drops that group's first key.
+//   status 'drop-key' → the grouped filter drops that group's first key,
+//     cancelling that row.
 //   status 'strip-name' → the grouped filter deletes `name` off the list, the
 //     way a hook written for one payload strips a field.
 //   status 'check-status' → the grouped filter reads `status` off the list, the
 //     way a hook written for one payload refuses a value.
 // The name is read back from the row, since the event carries only what is
-// being written.
+// being written. The per-row events are recorded so the suite can show none
+// fires.
+
+import { mapUpdateRows } from '@directus/utils';
 
 const COLLECTION = 'test_update_groups';
 const LOG = 'test_update_groups_log';
@@ -64,32 +69,35 @@ export default function registerHooks({ filter, action }, { database }) {
 			return legacyGroup.data;
 		}
 
-		return Array.isArray(payload)
-			? payload.map((group) => {
-				return group?.data?.status === 'drop-key'
-					? { ...group, keys: group.keys.slice(1) }
-					: group;
-			})
-			: payload;
+		if (!Array.isArray(payload)) {
+			return payload;
+		}
+
+		const groups = payload.map((group) => {
+			return group?.data?.status === 'drop-key'
+				? { ...group, keys: group.keys.slice(1) }
+				: group;
+		});
+
+		return mapUpdateRows(groups, async (data, key) => {
+			const row = await database(COLLECTION)
+				.where({ id: key })
+				.first();
+
+			if (row?.name === 'cancel-me') {
+				return null;
+			}
+
+			if (row?.name === 'rewrite-me') {
+				return { ...data, name: 'rewritten' };
+			}
+
+			return data;
+		});
 	});
 
 	filter(`${COLLECTION}.items.update.one`, async (payload) => {
 		await record('items.update.one', 'filter', payload);
-
-		// The payload carries the primary key and the fields being written, not the
-		// row's current ones — so the marker has to be read back, the way a real
-		// per-row hook looks up what it is about to change.
-		const row = await database(COLLECTION)
-			.where({ id: payload.id })
-			.first();
-
-		if (row?.name === 'cancel-me') {
-			return null;
-		}
-
-		if (row?.name === 'rewrite-me') {
-			return { ...payload, name: 'rewritten' };
-		}
 
 		return payload;
 	});

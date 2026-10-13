@@ -2,41 +2,59 @@ export default function registerHooks({ action }, { services }) {
 	const logsCollection = 'tests_extensions_log';
 
 	action(
-		'test_items_no_relations_artists_integer.items.create.one',
+		'test_items_no_relations_artists_integer.items.create',
 		collectionsCallback,
 	);
 
 	action(
-		'test_items_no_relations_artists_string.items.create.one',
+		'test_items_no_relations_artists_string.items.create',
 		collectionsCallback,
 	);
 
 	action(
-		'test_items_no_relations_artists_uuid.items.create.one',
+		'test_items_no_relations_artists_uuid.items.create',
 		collectionsCallback,
 	);
 
-	async function collectionsCallback(data, { database, schema, accountability }) {
-		let key = `action-verify-create/${data.collection}`;
+	async function collectionsCallback(data, context) {
+		for (const [index, payload] of data.payload.entries()) {
+			await verifyRow(data.collection, payload, data.keys[index], context);
+		}
+	}
 
-		const itemService = new services.ItemsService(data.collection, { schema, accountability });
+	async function verifyRow(
+		collection,
+		payload,
+		primaryKey,
+		{ database, schema, accountability },
+	) {
+		let key = `action-verify-create/${collection}`;
 
-		if (!data.payload.name) return;
+		const itemService = new services.ItemsService(collection, {
+			schema,
+			accountability,
+		});
 
-		if (data.payload.name.startsWith('one')) {
-			key += '/one';
-		} else if (data.payload.name.startsWith('many')) {
-			key += '/many';
-		} else {
+		if (!payload.name) {
 			return;
 		}
 
-		key += `/${data.key}`;
+		if (payload.name.startsWith('one')) {
+			key += '/one';
+		}
+		else if (payload.name.startsWith('many')) {
+			key += '/many';
+		}
+		else {
+			return;
+		}
+
+		key += `/${primaryKey}`;
 
 		try {
-			const item = await itemService.readOne(data.key);
+			const item = await itemService.readOne(primaryKey);
 
-			if (item.name !== data.payload.name) {
+			if (item.name !== payload.name) {
 				throw 'Invalid item';
 			}
 

@@ -1,8 +1,8 @@
 export default function registerHooks({ action }) {
 	const logsCollection = 'tests_extensions_log';
 
-	action('collections.create.one', collectionsCallback);
-	action('collections.update.one', collectionsCallback);
+	action('collections.create', collectionsCallback);
+	action('collections.update', collectionsCallback);
 	action('collections.delete', collectionsCallback);
 	action('fields.create', fieldsCallback);
 	action('fields.update', fieldsCallback);
@@ -12,34 +12,42 @@ export default function registerHooks({ action }) {
 		let key = 'action-verify-schema';
 
 		switch (data.event) {
-			case 'collections.create.one':
-				if (!data.key.startsWith('test_collections_crud')) break;
-				if (data.key.includes('folder')) break;
+			case 'collections.create':
+				for (const collection of data.keys) {
+					if (!collection.startsWith('test_collections_crud')) {
+						continue;
+					}
 
-				key += `/${data.key}/${data.event}`;
+					if (collection.includes('folder')) {
+						continue;
+					}
 
-				if (schema.collections[data.key]) {
-					await database(logsCollection).insert({ key, value: '1' });
-				} else {
-					await database(logsCollection).insert({ key, value: '0' });
+					await database(logsCollection).insert({
+						key: `${key}/${collection}/${data.event}`,
+						value: schema.collections[collection]
+							? '1'
+							: '0',
+					});
 				}
 
 				break;
-			// The grouped `collections.update` carries every group at once; this hook is
-			// per-collection work, so it reads the per-row event, whose payload is the
-			// row itself with its key merged in.
-			case 'collections.update.one':
-				if (!data.payload.collection.startsWith('test_collections_crud')) {
-					break;
-				}
+			case 'collections.update':
+				for (const group of data.payload) {
+					for (const collection of group.keys) {
+						if (!collection.startsWith('test_collections_crud')) {
+							continue;
+						}
 
+						const noteWritten = group.data.note
+							=== schema.collections[collection].note;
 
-				key += `/${data.payload.collection}/${data.event}`;
-
-				if (data.payload.note === schema.collections[data.payload.collection].note) {
-					await database(logsCollection).insert({ key, value: '1' });
-				} else {
-					await database(logsCollection).insert({ key, value: '0' });
+						await database(logsCollection).insert({
+							key: `${key}/${collection}/${data.event}`,
+							value: noteWritten
+								? '1'
+								: '0',
+						});
+					}
 				}
 
 				break;

@@ -8,34 +8,38 @@
 // post-commit re-read, so the framework MUST purge coarse; a narrow guess leaves the
 // old post's cached read stale. This proves the coarse fallback holds.
 
+import { mapCreateRows } from '@directus/utils';
+
 const JUNCTION = 'test_items_post_tag';
 const POST_FK = 'test_items_post_id';
 const TAG_FK = 'test_items_tag_id';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${JUNCTION}.items.create.one`, async (payload, _meta, context) => {
-		const itemsService = new services.ItemsService(JUNCTION, {
-			schema: context.schema,
-			accountability: context.accountability,
-			knex: context.database,
+	filter(`${JUNCTION}.items.create`, (entries, _meta, context) => {
+		return mapCreateRows(entries, async (payload) => {
+			const itemsService = new services.ItemsService(JUNCTION, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.database,
+			});
+
+			const [existing] = await itemsService.readByQuery(
+				{ filter: { [TAG_FK]: { _eq: payload[TAG_FK] } }, fields: ['id'], limit: 1 },
+				{ emitEvents: false },
+			);
+
+			if (!existing) {
+				return payload;
+			}
+
+			// Re-assign the existing link to the new post — the row moves slices. A raw
+			// update on the trx knex, so it doesn't recurse through the service purge.
+			await context
+				.database(JUNCTION)
+				.where({ id: existing.id })
+				.update({ [POST_FK]: payload[POST_FK] });
+
+			return existing.id;
 		});
-
-		const [existing] = await itemsService.readByQuery(
-			{ filter: { [TAG_FK]: { _eq: payload[TAG_FK] } }, fields: ['id'], limit: 1 },
-			{ emitEvents: false },
-		);
-
-		if (!existing) {
-			return payload;
-		}
-
-		// Re-assign the existing link to the new post — the row moves slices. A raw
-		// update on the trx knex, so it doesn't recurse through the service purge.
-		await context
-			.database(JUNCTION)
-			.where({ id: existing.id })
-			.update({ [POST_FK]: payload[POST_FK] });
-
-		return existing.id;
 	});
 }

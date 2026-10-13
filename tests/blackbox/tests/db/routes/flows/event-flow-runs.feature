@@ -78,7 +78,7 @@ Feature: An event flow runs once per change, as it did before updates carried gr
       | refuse-a |
       | refuse-b |
     When the rows are updated to the status "archived"
-    Then the update is refused with a reason naming "items.update.one"
+    Then the update is refused with a reason naming "mapUpdateRows"
     And the rows hold:
       | name     | status |
       | refuse-a |        |

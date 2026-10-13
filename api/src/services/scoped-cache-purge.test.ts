@@ -1,4 +1,4 @@
-import { oneLine } from '@directus/utils';
+import { mapCreateRows, mapUpdateRows, oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { MutationOptions } from '@directus/types';
 import knex, { type Knex } from 'knex';
@@ -724,8 +724,13 @@ describe(oneLine`
 		// The hook stores B, so the post-commit re-snapshot reads B.
 		tracker.on.select('test').response([{ id: 1, student: 'B' }]);
 
-		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
-		emitter.onFilter('test.items.create.one', rewrite);
+		const rewrite = (entries: any) => {
+			return mapCreateRows(entries, async (payload: any) => {
+				return { ...payload, student: 'B' };
+			});
+		};
+
+		emitter.onFilter('test.items.create', rewrite);
 
 		try {
 			await service().createOne({ name: 'x', student: 'A' });
@@ -744,7 +749,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', rewrite);
+			emitter.offFilter('test.items.create', rewrite);
 		}
 	});
 
@@ -808,8 +813,13 @@ describe(oneLine`
 		// The hook returns a PK but declares nothing. It might have moved that row
 		// between slices (an upsert), and createMany has no old∪new snapshot → the old
 		// slice would leak. So without a declaration the purge is coarse (null).
-		const takeOver = async () => 99;
-		emitter.onFilter('test.items.create.one', takeOver);
+		const takeOver = (entries: any) => {
+			return mapCreateRows(entries, async () => {
+				return 99;
+			});
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -823,7 +833,7 @@ describe(oneLine`
 		);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOver);
+			emitter.offFilter('test.items.create', takeOver);
 		}
 	});
 
@@ -832,12 +842,14 @@ describe(oneLine`
 	`, async () => {
 		// Nothing was written, so no entry can have gone stale — and an empty pin
 		// array is not "nothing": it still resolves to this collection's bare pin.
-		const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-			ctx.scopedCache.skipPurgeFor(99);
-			return 99;
+		const takeOver = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async () => {
+				ctx.scopedCache.skipPurgeFor(99);
+				return 99;
+			});
 		};
 
-		emitter.onFilter('test.items.create.one', takeOver);
+		emitter.onFilter('test.items.create', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -845,7 +857,7 @@ describe(oneLine`
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOver);
+			emitter.offFilter('test.items.create', takeOver);
 		}
 	});
 
@@ -855,16 +867,18 @@ describe(oneLine`
 		tracker.on.insert('test').response([1]);
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-		const takeOverDuplicate = async (payload: any, _meta: any, ctx: any) => {
-			if (payload.name !== `dup`) {
-				return payload;
-			}
+		const takeOverDuplicate = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async (payload: any) => {
+				if (payload.name !== `dup`) {
+					return payload;
+				}
 
-			ctx.scopedCache.skipPurgeFor(99);
-			return 99;
+				ctx.scopedCache.skipPurgeFor(99);
+				return 99;
+			});
 		};
 
-		emitter.onFilter('test.items.create.one', takeOverDuplicate);
+		emitter.onFilter('test.items.create', takeOverDuplicate);
 
 		try {
 			await service().createMany([
@@ -889,7 +903,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOverDuplicate);
+			emitter.offFilter('test.items.create', takeOverDuplicate);
 		}
 	});
 
@@ -941,19 +955,21 @@ describe(oneLine`
 
 		// Every row's hook runs before the insert, so the key a hook can share with
 		// another row of the call is one that row sends.
-		const takeOverSibling = async (payload: any) => {
-			if (payload.name !== 'dup') {
-				return payload;
-			}
+		const takeOverSibling = (entries: any) => {
+			return mapCreateRows(entries, async (payload: any) => {
+				if (payload.name !== 'dup') {
+					return payload;
+				}
 
-			await db('test')
-				.where({ id: 5 })
-				.update({ name: 'merged' });
+				await db('test')
+					.where({ id: 5 })
+					.update({ name: 'merged' });
 
-			return 1;
+				return 1;
+			});
 		};
 
-		emitter.onFilter('test.items.create.one', takeOverSibling);
+		emitter.onFilter('test.items.create', takeOverSibling);
 
 		try {
 			await service().createMany([
@@ -970,7 +986,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOverSibling);
+			emitter.offFilter('test.items.create', takeOverSibling);
 		}
 	});
 
@@ -1447,16 +1463,18 @@ describe(oneLine`
 			tracker.on.insert('test').response([1]);
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'authors',
-					pinnedScope: { id: [5] },
-				});
+			const declare = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async (payload: any) => {
+					ctx.scopedCache.purgeBy({
+						collection: 'authors',
+						pinnedScope: { id: [5] },
+					});
 
-				return payload;
+					return payload;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', declare);
+			emitter.onFilter('test.items.create', declare);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1480,7 +1498,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', declare);
+				emitter.offFilter('test.items.create', declare);
 			}
 		});
 
@@ -1627,16 +1645,18 @@ describe(oneLine`
 			// fingerprint — never the coarse null flush.
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
-			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'authors',
-					pinnedScope: { id: [5] },
-				});
+			const takeOver = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'authors',
+						pinnedScope: { id: [5] },
+					});
 
-				return 99;
+					return 99;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			emitter.onFilter('test.items.create', takeOver);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1668,7 +1688,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 
@@ -1728,20 +1748,21 @@ describe(oneLine`
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-			// The grouped filter passes the update through; the per-row one declares a
-			// slice and then cancels its row. With the only row gone there is nothing to
-			// write, so the drain that runs on the written path never fires — the cancel
-			// path has to honour the declaration itself.
-			const declareThenCancelRow = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'authors',
-					pinnedScope: { id: [5] },
-				});
+			// The hook declares a slice and then cancels the row. With the only row
+			// gone there is nothing to write, so the drain that runs on the written
+			// path never fires — the cancel path has to honour the declaration itself.
+			const declareThenCancelRow = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'authors',
+						pinnedScope: { id: [5] },
+					});
 
-				return null;
+					return null;
+				});
 			};
 
-			emitter.onFilter('test.items.update.one', declareThenCancelRow);
+			emitter.onFilter('test.items.update', declareThenCancelRow);
 
 			try {
 				await service().updateMany([1], { student: 'B' }, {
@@ -1766,7 +1787,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.update.one', declareThenCancelRow);
+				emitter.offFilter('test.items.update', declareThenCancelRow);
 			}
 		});
 
@@ -1953,8 +1974,13 @@ describe(oneLine`
 
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
-			const takeOver = async () => 99; // takes over a row, declares nothing new
-			emitter.onFilter('test.items.create.one', takeOver);
+			const takeOver = (entries: any) => {
+				return mapCreateRows(entries, async () => {
+					return 99; // takes over a row, declares nothing new
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
 
 			try {
 				await service().createMany(
@@ -1984,7 +2010,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 	});
@@ -2067,15 +2093,17 @@ describe(oneLine`
 			// purge of 99 alone leaves 5's own keyed read serving the pre-write row.
 			// Before the key axis, an unscoped collection was entirely bare-pinned and
 			// the bare purge covered 5 by accident; now nothing does.
-			const takeOver = async () => {
-				await db('test')
-					.where({ id: 5 })
-					.update({ name: 'merged' });
+			const takeOver = (entries: any) => {
+				return mapCreateRows(entries, async () => {
+					await db('test')
+						.where({ id: 5 })
+						.update({ name: 'merged' });
 
-				return 99;
+					return 99;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			emitter.onFilter('test.items.create', takeOver);
 			tracker.on.update('test').response(1);
 
 			try {
@@ -2090,7 +2118,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 
@@ -2098,16 +2126,18 @@ describe(oneLine`
 			a take-over that DECLARES its footprint keeps the precise purge on a
 			collection declaring no scope field — the claim is what buys the precision
 		`, async () => {
-			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'test',
-					pinnedScope: { id: [5] },
-				});
+			const takeOver = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { id: [5] },
+					});
 
-				return 99;
+					return 99;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			emitter.onFilter('test.items.create', takeOver);
 
 			try {
 				await unscopedService().createMany([{ name: 'x' }]);
@@ -2131,7 +2161,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 	});
