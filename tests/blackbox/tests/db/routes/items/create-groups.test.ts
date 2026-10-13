@@ -132,9 +132,9 @@ describe.each(vendors)('%s', (vendor) => {
 
 		then.optional(
 			/^the first refusal names "(.*)"$/,
-			(eventName: string) => {
+			(helperName: string) => {
 				expect(exchanges.responses[0]!.body.errors[0].message)
-					.toContain(`"${eventName}"`);
+					.toContain(helperName);
 			},
 		);
 
