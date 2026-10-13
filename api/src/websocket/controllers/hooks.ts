@@ -74,17 +74,28 @@ function updateEventPerGroup(
 	});
 }
 
+// `items.create` carries every row of the create, and `keys` theirs in the same
+// order. A subscriber is sent one message per row, as it was before the create
+// was grouped.
+function createEventPerRow(
+	{ keys = [], payload = [] }: Record<string, any>,
+	collection: string,
+): Extract<WebSocketEvent, { action: 'create' }>[] {
+	return payload.map((row: Record<string, any>, index: number) => {
+		return {
+			collection,
+			action: 'create',
+			key: keys[index],
+			payload: row,
+		};
+	});
+}
+
 function registerActionHooks(modules: string[]) {
 	// register event hooks that can be handled in an uniform manner
 	for (const module of modules) {
-		// One message per row; the grouped `create` carries the whole create.
-		registerAction(`${module}.create.one`, ({ key, collection, payload = {} }) => {
-			return {
-				collection,
-				action: 'create',
-				key,
-				payload,
-			};
+		registerAction(`${module}.create`, (meta) => {
+			return createEventPerRow(meta, meta['collection']);
 		});
 
 		registerAction(`${module}.update`, updateEvent);
@@ -101,27 +112,17 @@ function registerActionHooks(modules: string[]) {
 function registerFieldsHooks() {
 	// exception for field hooks that don't report `directus_fields` as being the collection
 	// FieldsService emits `fields.create` and `fields.update` itself with one field;
-	// a `directus_fields` write through ItemsService emits them grouped, its
-	// create's rows reaching `fields.create.one`.
-	registerAction('fields.create', ({ key, payload = {} }) => {
-		if (Array.isArray(payload)) {
-			return null;
+	// a `directus_fields` write through ItemsService emits them grouped.
+	registerAction('fields.create', (meta) => {
+		if (Array.isArray(meta['payload'])) {
+			return createEventPerRow(meta, 'directus_fields');
 		}
 
 		return {
 			collection: 'directus_fields',
 			action: 'create',
-			key,
-			payload,
-		};
-	});
-
-	registerAction('fields.create.one', ({ key, payload = {} }) => {
-		return {
-			collection: 'directus_fields',
-			action: 'create',
-			key,
-			payload,
+			key: meta['key'],
+			payload: meta['payload'] ?? {},
 		};
 	});
 
@@ -167,13 +168,13 @@ function registerFilesHooks() {
 
 function registerRelationsHooks() {
 	// exception for relation hooks that don't report `directus_relations` as being the collection
-	registerAction('relations.create.one', ({ key, payload = {} }) => {
-		return {
-			collection: 'directus_relations',
-			action: 'create',
-			key,
-			payload: { ...payload, key },
-		};
+	registerAction('relations.create', (meta) => {
+		return createEventPerRow(meta, 'directus_relations').map((createEvent) => {
+			return {
+				...createEvent,
+				payload: { ...createEvent.payload, key: createEvent.key },
+			};
+		});
 	});
 
 	registerAction('relations.update', (meta) => {

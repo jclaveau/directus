@@ -5,9 +5,11 @@ import { isSystemCollection } from '@directus/system-data';
 import type {
 	Accountability,
 	ActionHandler,
+	CreateEntry,
 	EventContext,
 	FilterHandler,
 	Flow,
+	Item,
 	Operation,
 	PrimaryKey,
 	SchemaOverview,
@@ -63,15 +65,15 @@ const ENV_KEY = '$env';
 
 /**
  * An event an event flow listens on, and the base event name its `$trigger`
- * carries. ItemsService emits a create grouped and then per row on `.create.one`,
- * an update grouped; a service writing with `emitEvents: false` emits the bare
- * event itself with one row (FieldsService), so the same name carries both
- * shapes and the handler tells them apart by the payload.
+ * carries. ItemsService emits a create and an update grouped; a service writing
+ * with `emitEvents: false` emits the bare event itself with one row
+ * (FieldsService), so the same name carries both shapes and the handler tells
+ * them apart by the payload.
  */
 type FlowEventRoute = {
 	eventName: string;
 	triggerEvent: string;
-	payloadShape: 'row' | 'update-groups' | 'service-create';
+	payloadShape: 'row' | 'update-groups' | 'create-entries';
 };
 
 function flowEventRoutes(flowOptions: Record<string, any>): FlowEventRoute[] {
@@ -114,20 +116,11 @@ function collectionEventRoutes(
 		return [{ eventName: triggerEvent, triggerEvent, payloadShape: 'row' }];
 	}
 
-	const rowRoute: FlowEventRoute = {
-		eventName: `${triggerEvent}.one`,
+	return [{
+		eventName: triggerEvent,
 		triggerEvent,
-		payloadShape: 'row',
-	};
-
-	if (!isSystemCollection(collection)) {
-		return [rowRoute];
-	}
-
-	return [
-		rowRoute,
-		{ eventName: triggerEvent, triggerEvent, payloadShape: 'service-create' },
-	];
+		payloadShape: 'create-entries',
+	}];
 }
 
 interface FlowMessage {
@@ -423,8 +416,9 @@ class FlowManager {
 	}
 
 	/**
-	 * One run per update group, its trigger shaped like the single update the flow
-	 * was written for; a returned value replaces that group's data.
+	 * One run per created row or update group, its trigger shaped like the single
+	 * write the flow was written for; a returned value replaces that row's or
+	 * group's data.
 	 */
 	private filterFlowHandler(flow: Flow, route: FlowEventRoute): FilterHandler {
 		const runFlow: FilterHandler = (payload, meta, context) => {
@@ -450,8 +444,29 @@ class FlowManager {
 				return runFlow(payload, meta, context);
 			}
 
-			if (route.payloadShape === 'service-create') {
-				return undefined;
+			if (route.payloadShape === 'create-entries') {
+				const entriesAfterFlow: (CreateEntry | null)[] = [];
+
+				for (const entry of payload as (CreateEntry | null)[]) {
+					if (entry === null || !('data' in entry)) {
+						entriesAfterFlow.push(entry);
+						continue;
+					}
+
+					const dataAfterFlow = await runFlow(
+						entry.data,
+						{ ...meta, originalPayload: entry.data },
+						context,
+					);
+
+					entriesAfterFlow.push({
+						data: dataAfterFlow === undefined
+							? entry.data
+							: dataAfterFlow as Partial<Item>,
+					});
+				}
+
+				return entriesAfterFlow;
 			}
 
 			const groupsAfterFlow: UpdateGroup[] = [];
@@ -496,18 +511,26 @@ class FlowManager {
 				return;
 			}
 
-			if (route.payloadShape === 'service-create') {
-				return;
-			}
-
-			// A group whose run throws leaves the other groups to run.
-			for (const group of meta['payload'] as UpdateGroup[]) {
-				try {
-					await runFlow({
+			const runMetas = route.payloadShape === 'create-entries'
+				? (meta['payload'] as Partial<Item>[]).map((row, index) => {
+					return {
+						payload: row,
+						key: meta['keys'][index],
+						collection: meta['collection'],
+					};
+				})
+				: (meta['payload'] as UpdateGroup[]).map((group) => {
+					return {
 						payload: group.data,
 						keys: group.keys,
 						collection: meta['collection'],
-					}, context);
+					};
+				});
+
+			// A row or group whose run throws leaves the others to run.
+			for (const runMeta of runMetas) {
+				try {
+					await runFlow(runMeta, context);
 				}
 				catch (error) {
 					const logger = useLogger();

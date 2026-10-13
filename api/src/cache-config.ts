@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import type { UpdateGroup } from '@directus/types';
 import { useBus } from './bus/index.js';
 
 /**
@@ -91,20 +92,24 @@ export async function initCacheConfig(): Promise<void> {
 	const { default: emitter } = await import('./emitter.js');
 	const { recordCacheConfigEvent } = await import('./cache-events.js');
 
-	// The per-row event, not the grouped one: this reads a single row's fields, and
-	// a singleton only ever has the one.
-	emitter.onAction('settings.update.one', ({ payload }) => {
-		if (!payload || 'cache_ttl' in payload === false) {
+	emitter.onAction('settings.update', ({ payload }) => {
+		const ttlGroup = (payload as UpdateGroup[]).find(({ data }) => {
+			return 'cache_ttl' in data;
+		});
+
+		if (!ttlGroup) {
 			return;
 		}
 
-		publishCacheConfigChanged(payload['cache_ttl']);
+		const cacheTtl = ttlGroup.data['cache_ttl'];
+
+		publishCacheConfigChanged(cacheTtl);
 
 		// The marker is what explains a step in the TTL series, so it has to cover the
 		// same writers as the broadcast: a reset that leaves no marker is a change with
 		// no visible cause, which is how a production one stayed invisible until
 		// `directus_revisions` was read by hand (#342). Best-effort — a chart
 		// annotation must never fail a settings save.
-		void recordCacheConfigEvent('ttl_change', payload['cache_ttl']).catch(() => {});
+		void recordCacheConfigEvent('ttl_change', cacheTtl).catch(() => {});
 	});
 }

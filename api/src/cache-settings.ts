@@ -1,6 +1,11 @@
 import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
-import type { EventContext, Item } from '@directus/types';
+import type {
+	CreateEntry,
+	EventContext,
+	Item,
+	UpdateGroup,
+} from '@directus/types';
 import { parse as parseByteSize } from 'bytes';
 import type { Knex } from 'knex';
 import { useLogger } from './logger/index.js';
@@ -9,6 +14,12 @@ import {
 	getMilliseconds,
 	isPositiveDuration,
 } from './utils/get-milliseconds.js';
+
+/**
+ * What a `settings.create` or `settings.update` filter is handed one of: a
+ * create's entry or an update's group, each carrying the row data it writes.
+ */
+export type SettingsWriteEntry = CreateEntry | UpdateGroup | null;
 
 /**
  * `cache_settings`, mirrored so the hot path reads a module variable rather
@@ -508,11 +519,18 @@ export async function initCacheSettings(): Promise<void> {
 
 	// The create as well as the update: a deployment nobody has saved a setting
 	// on yet has no singleton row, and the first write to it makes one.
-	for (const event of ['settings.create.one', 'settings.update.one']) {
-		emitter.onFilter<Partial<Item>>(event, async (payload, _meta, context) => {
-			await flushBeforeEnabling(payload, context);
+	for (const event of ['settings.create', 'settings.update']) {
+		emitter.onFilter<SettingsWriteEntry[]>(
+			event,
+			async (payload, _meta, context) => {
+				for (const entry of payload) {
+					if (entry !== null && 'data' in entry) {
+						await flushBeforeEnabling(entry.data, context);
+					}
+				}
 
-			return payload;
-		});
+				return payload;
+			},
+		);
 	}
 }

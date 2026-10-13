@@ -1,6 +1,9 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type { Item } from '@directus/types';
-import { assertUsableCacheSettings } from '../../cache-settings.js';
+import {
+	assertUsableCacheSettings,
+	type SettingsWriteEntry,
+} from '../../cache-settings.js';
 import { parseSharedSettingsPatch } from '../autoscale/lib/shared-settings.js';
 import { configWithSharedSettings } from '../autoscale/lib/resolve-config.js';
 import {
@@ -100,9 +103,13 @@ export async function initSharedSettingsGuard(): Promise<void> {
 
 	// The create as well as the update: a deployment nobody has saved a setting
 	// on yet has no singleton row, and the first write to it makes one.
-	for (const event of ['settings.create.one', 'settings.update.one']) {
-		emitter.onFilter<Partial<Item>>(event, (payload) => {
-			assertUsableSharedSettings(payload);
+	for (const event of ['settings.create', 'settings.update']) {
+		emitter.onFilter<SettingsWriteEntry[]>(event, (payload) => {
+			for (const entry of payload) {
+				if (entry !== null && 'data' in entry) {
+					assertUsableSharedSettings(entry.data);
+				}
+			}
 
 			return payload;
 		});

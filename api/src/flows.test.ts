@@ -432,7 +432,7 @@ describe('event flows on item updates', () => {
 });
 
 describe('event flows on item creates', () => {
-	test('a create flow listens per row and on the bare system event', async () => {
+	test('a create flow listens on the grouped create, never per row', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -467,7 +467,7 @@ describe('event flows on item creates', () => {
 			emitter.hasFilterListeners('users.create.one'),
 			emitter.hasFilterListeners('articles.items.create'),
 			emitter.hasFilterListeners('users.create'),
-		]).toEqual([true, true, false, true]);
+		]).toEqual([false, false, true, true]);
 	});
 
 	test('a create filter flow sees the base event name', async () => {
@@ -501,8 +501,8 @@ describe('event flows on item creates', () => {
 		await (getFlowManager() as any).load();
 
 		await emitter.emitFilter(
-			'articles.items.create.one',
-			{ title: 'x' },
+			'articles.items.create',
+			[{ data: { title: 'x' } }],
 			{ collection: 'articles' },
 		);
 
@@ -546,9 +546,9 @@ describe('event flows on item creates', () => {
 
 		await (getFlowManager() as any).load();
 
-		await emitter.emitAction('articles.items.create.one', {
-			payload: { title: 'x' },
-			key: 7,
+		await emitter.emitAction('articles.items.create', {
+			payload: [{ title: 'x' }],
+			keys: [7],
 			collection: 'articles',
 		});
 
@@ -611,7 +611,7 @@ describe('event flows on item creates', () => {
 		]);
 	});
 
-	test('a create flow leaves the grouped create to its per-row event', async () => {
+	test('a create flow runs once per row the grouped create inserts', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -644,17 +644,33 @@ describe('event flows on item creates', () => {
 
 		const entriesAfterFlow = await emitter.emitFilter(
 			'fields.create',
-			[{ data: { field: 'title' } }],
+			[{ data: { field: 'title' } }, { key: 3 }, { data: { field: 'body' } }],
 			{ collection: 'directus_fields' },
 		);
 
-		expect([entriesAfterFlow, recordTrigger.mock.calls]).toEqual([
-			[{ data: { field: 'title' } }],
-			[],
+		expect(entriesAfterFlow).toEqual([
+			{ data: { status: 'stamped' } },
+			{ key: 3 },
+			{ data: { status: 'stamped' } },
+		]);
+
+		expect(recordTrigger.mock.calls).toEqual([
+			[{
+				event: 'fields.create',
+				payload: { field: 'title' },
+				collection: 'directus_fields',
+				originalPayload: { field: 'title' },
+			}],
+			[{
+				event: 'fields.create',
+				payload: { field: 'body' },
+				collection: 'directus_fields',
+				originalPayload: { field: 'body' },
+			}],
 		]);
 	});
 
-	test('a create action flow runs on the flat fields create', async () => {
+	test('a create action flow runs on the flat create and per row', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -702,6 +718,12 @@ describe('event flows on item creates', () => {
 				payload: { field: 'title', type: 'string' },
 				key: 'title',
 				collection: 'articles',
+			}],
+			[{
+				event: 'fields.create',
+				payload: { field: 'body' },
+				key: 3,
+				collection: 'directus_fields',
 			}],
 		]);
 	});

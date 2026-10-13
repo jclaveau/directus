@@ -753,21 +753,21 @@ test('clears ahead of the create as well as the update', async () => {
 	await initCacheSettings();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create.one', 'settings.update.one']);
-
-	const write = { cache_settings: { response: true } };
+		.toEqual(['settings.create', 'settings.update']);
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
-		write,
+		[{ data: { cache_settings: { response: true } } }],
 		{} as never,
 		{ accountability: null } as never,
-	)).resolves.toEqual({ cache_settings: { response: true } });
+	)).resolves.toEqual([{ data: { cache_settings: { response: true } } }]);
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
-		write,
+		[{ data: { cache_settings: { response: true } }, keys: [1] }],
 		{} as never,
 		{ accountability: null } as never,
-	)).resolves.toEqual({ cache_settings: { response: true } });
+	)).resolves.toEqual([
+		{ data: { cache_settings: { response: true } }, keys: [1] },
+	]);
 
 	expect(clearCacheTargets).toHaveBeenCalledTimes(2);
 	expect(clearCacheTargets).toHaveBeenCalledWith(['response']);
@@ -779,7 +779,7 @@ test('hands the filter the caller the event carries', async () => {
 	await initCacheSettings();
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
-		{ cache_settings: { response: true } },
+		[{ data: { cache_settings: { response: true } }, keys: [1] }],
 		{} as never,
 		{ accountability: { user: 'editor', admin: false } } as never,
 	))

@@ -131,13 +131,21 @@ test('checks the create as well as the update', async () => {
 	await initSharedSettingsGuard();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create.one', 'settings.update.one']);
+		.toEqual(['settings.create', 'settings.update']);
 
-	const write = { autoscale_settings: { enabled: 'TRUE' } };
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[0]![1](
+			[{ data: { autoscale_settings: { enabled: 'TRUE' } } }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(`'enabled' has to be a boolean`);
 
-	for (const [, check] of vi.mocked(emitter.onFilter).mock.calls) {
-		expect(() => {
-			return check(write, {} as never, {} as never);
-		}).toThrowError(`'enabled' has to be a boolean`);
-	}
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[1]![1](
+			[{ data: { autoscale_settings: { enabled: 'TRUE' } }, keys: [1] }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(`'enabled' has to be a boolean`);
 });

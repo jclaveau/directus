@@ -144,13 +144,15 @@ describe('initCacheConfig', () => {
 		await initCacheConfig();
 
 		expect(mockEmitter.onAction).toHaveBeenCalledWith(
-			'settings.update.one',
+			'settings.update',
 			expect.any(Function),
 		);
 
 		// The write never went through SettingsService — this is the shape a config-sync
 		// import produces — yet the node must both apply and announce it.
-		settingsUpdateHandler({ payload: { cache_ttl: '90s' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_ttl: '90s' }, keys: [1] }],
+		});
 
 		expect(resolvedCacheTtl()).toBe('90s');
 
@@ -167,7 +169,9 @@ describe('initCacheConfig', () => {
 		settingsRow = { cache_ttl: '5m' };
 		await initCacheConfig();
 
-		settingsUpdateHandler({ payload: { cache_ttl: null } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_ttl: null }, keys: [1] }],
+		});
 
 		expect(resolvedCacheTtl()).toBe('10m');
 
@@ -187,7 +191,9 @@ describe('initCacheConfig', () => {
 		mockBus.publish.mockClear();
 		mockRecordCacheConfigEvent.mockClear();
 
-		settingsUpdateHandler({ payload: { project_name: 'Acme' } });
+		settingsUpdateHandler({
+			payload: [{ data: { project_name: 'Acme' }, keys: [1] }],
+		});
 
 		expect(resolvedCacheTtl()).toBe('5m');
 		expect(mockBus.publish).not.toHaveBeenCalled();
@@ -200,7 +206,11 @@ describe('initCacheConfig', () => {
 		mockRecordCacheConfigEvent.mockRejectedValueOnce(new Error('table missing'));
 		await initCacheConfig();
 
-		expect(() => settingsUpdateHandler({ payload: { cache_ttl: '45s' } }))
+		expect(() => {
+			return settingsUpdateHandler({
+				payload: [{ data: { cache_ttl: '45s' }, keys: [1] }],
+			});
+		})
 			.not.toThrow();
 
 		// The value still applied and still went out — losing the annotation must not

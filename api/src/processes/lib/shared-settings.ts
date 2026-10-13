@@ -1,5 +1,9 @@
 import { useEnv } from '@directus/env';
-import type { AbstractServiceOptions } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Item,
+	UpdateGroup,
+} from '@directus/types';
 import type { Knex } from 'knex';
 import { parseJSON } from '@directus/utils/values';
 import { useBus } from '../../bus/index.js';
@@ -245,7 +249,7 @@ export async function readAllSharedSettings(): Promise<
  *
  * Through the settings singleton rather than a knex update: that is what writes
  * the revision answering who moved a threshold and when, and what fires the
- * `settings.update.one` action the announcement below rides on.
+ * `settings.update` action the announcement below rides on.
  */
 export async function writeSharedSettings(
 	column: SharedSettingsColumn,
@@ -305,27 +309,27 @@ export function onSharedSettingsChanged(
 export async function initSharedSettings(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
 
-	for (const event of ['settings.create.one', 'settings.update.one']) {
-		emitter.onAction(event, ({ payload }) => {
-			if (!payload) {
-				return;
-			}
-
-			for (const column of Object.values(SHARED_SETTINGS_COLUMNS)) {
-				if (column in payload === false) {
-					continue;
-				}
-
+	const announceColumnsOf = (writtenRows: Partial<Item>[]) => {
+		for (const column of Object.values(SHARED_SETTINGS_COLUMNS)) {
+			if (writtenRows.some((writtenRow) => column in writtenRow)) {
 				announceSharedSettings(column);
 			}
-		});
-	}
+		}
+	};
+
+	emitter.onAction('settings.create', ({ payload }) => {
+		announceColumnsOf(payload as Partial<Item>[]);
+	});
+
+	emitter.onAction('settings.update', ({ payload }) => {
+		announceColumnsOf((payload as UpdateGroup[]).map(({ data }) => data));
+	});
 }
 
 /**
  * Tell the other nodes `column` changed, so they re-read it.
  *
- * A write made inside a caller's transaction fires its `settings.update.one` action
+ * A write made inside a caller's transaction fires its `settings.update` action
  * before that transaction commits, and a node re-reading on that announcement
  * reads the row it replaces. Such a caller announces again once committed.
  */

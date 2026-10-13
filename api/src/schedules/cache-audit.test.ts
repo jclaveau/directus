@@ -139,7 +139,9 @@ describe('cache-audit schedule', () => {
 		await busHandler({ rule: '*/5 * * * *' });
 		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
 
-		settingsUpdateHandler({ payload: { cache_audit_schedule: '0 4 * * *' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_audit_schedule: '0 4 * * *' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).toHaveBeenCalledWith(
 			'cacheAuditScheduleChanged',
@@ -233,16 +235,20 @@ describe('cache-audit schedule', () => {
 		await cacheAuditSchedule();
 
 		expect(mockEmitter.onAction)
-			.toHaveBeenCalledWith('settings.update.one', expect.any(Function));
+			.toHaveBeenCalledWith('settings.update', expect.any(Function));
 
-		settingsUpdateHandler({ payload: { cache_audit_schedule: '0 5 * * *' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_audit_schedule: '0 5 * * *' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).toHaveBeenCalledWith(
 			'cacheAuditScheduleChanged',
 			{ rule: '0 5 * * *' },
 		);
 
-		settingsUpdateHandler({ payload: { cache_audit_schedule: '' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_audit_schedule: '' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).toHaveBeenLastCalledWith(
 			'cacheAuditScheduleChanged',
@@ -253,8 +259,9 @@ describe('cache-audit schedule', () => {
 	it('leaves the bus alone on a settings write about something else', async () => {
 		await cacheAuditSchedule();
 
-		settingsUpdateHandler({ payload: { project_name: 'x' } });
-		settingsUpdateHandler({ payload: undefined });
+		settingsUpdateHandler({
+			payload: [{ data: { project_name: 'x' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).not.toHaveBeenCalled();
 	});
