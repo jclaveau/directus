@@ -220,21 +220,19 @@ function isCreateEntryList(
  * so the rows are written in the order the caller sent them.
  *
  * A group writing a nested item creates it once per group and walks its O2M rows
- * per group, so it merges only with the rows split off the same caller group: two
- * caller groups merged would create one related item where the caller asked for
- * two, and one caller group left split would create one per row.
+ * per group, so it never merges: two groups merged would create one related item
+ * where the caller asked for two.
  */
 function mergeUpdateGroups<Item extends AnyItem>(
 	candidateGroups: UpdateGroup<Item>[],
-	callerGroupIndexes: number[],
 	writesNestedItems: (groupData: Partial<Item>) => boolean,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
 	let lastSerializedData: string | null = null;
 	let lastKeyNames = new Set<string>();
 
-	for (const [candidateIndex, candidateGroup] of candidateGroups.entries()) {
-		const serializedChange = JSON.stringify(
+	for (const candidateGroup of candidateGroups) {
+		const serializedData = JSON.stringify(
 			candidateGroup.data,
 			(_field, value) => {
 				return typeof value === 'bigint'
@@ -243,14 +241,11 @@ function mergeUpdateGroups<Item extends AnyItem>(
 			},
 		);
 
-		const serializedData = writesNestedItems(candidateGroup.data)
-			? `${callerGroupIndexes[candidateIndex]}:${serializedChange}`
-			: serializedChange;
-
 		const lastGroup = mergedGroups.at(-1);
 
 		if (
 			lastGroup === undefined ||
+			writesNestedItems(candidateGroup.data) ||
 			serializedData !== lastSerializedData ||
 			!isEqual(lastGroup.data, candidateGroup.data)
 		) {
@@ -447,10 +442,6 @@ implements AbstractService<Item> {
 			? ['items.create', `${this.collection}.items.create`]
 			: `${this.eventScope}.create`;
 
-		const rowEvent = this.eventScope === 'items'
-			? ['items.create.one', `${this.collection}.items.create.one`]
-			: `${this.eventScope}.create.one`;
-
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
 		// An `items.create` hook can declare its own purge via
@@ -512,7 +503,7 @@ implements AbstractService<Item> {
 						A "${this.eventScope}.create" filter hook must return one
 						{ data } | { key } | { sameRowAs } | null per row it received, a
 						sameRowAs pointing at an earlier row; a hook that handles one row
-						belongs on "${this.eventScope}.create.one"
+						maps them with mapCreateRows
 					`,
 				});
 			};
@@ -558,20 +549,8 @@ implements AbstractService<Item> {
 				if (entry !== null && 'key' in entry) {
 					payloadAfterHooks = entry.key;
 				}
-				// Then once per row, the seam a hook written for a single item keeps, with
-				// its own takeover and cancel.
 				else if (entry !== null) {
-					const hasRowFilters = opts.emitEvents !== false
-						&& emitter.hasFilterListeners(rowEvent);
-
-					payloadAfterHooks = hasRowFilters
-						? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
-							rowEvent,
-							entry.data,
-							{ collection: this.collection },
-							filterContext,
-						)
-						: entry.data;
+					payloadAfterHooks = entry.data;
 				}
 
 				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
@@ -924,21 +903,6 @@ implements AbstractService<Item> {
 				accountability: this.accountability,
 			};
 
-			const rowActionEvents: ActionEventParams[] = emitter
-				.hasActionListeners(rowEvent)
-				? actionPayloads.map(({ primaryKey, actionHookPayload }) => {
-					return {
-						event: rowEvent,
-						meta: {
-							payload: actionHookPayload,
-							key: primaryKey,
-							collection: this.collection,
-						},
-						context: actionContext,
-					};
-				})
-				: [];
-
 			// Route through emitActionEvents so the create path honours `awaitActionHooks` (#58) and
 			// `bypassEmitAction` (nested mutations), instead of an un-awaited raw emit.
 			await emitActionEvents(
@@ -954,7 +918,6 @@ implements AbstractService<Item> {
 						},
 						context: actionContext,
 					},
-					...rowActionEvents,
 					...nestedActionEvents,
 				],
 				opts,
@@ -1443,10 +1406,6 @@ implements AbstractService<Item> {
 			? ['items.update', `${this.collection}.items.update`]
 			: `${this.eventScope}.update`;
 
-		const rowEvent = this.eventScope === 'items'
-			? ['items.update.one', `${this.collection}.items.update.one`]
-			: `${this.eventScope}.update.one`;
-
 		const eventContext = {
 			database: this.knex,
 			schema: this.schema,
@@ -1469,8 +1428,8 @@ implements AbstractService<Item> {
 			return new InvalidPayloadError({
 				reason: oneLine`
 					A "${this.eventScope}.update" filter hook must return the
-					{ data, keys }[] it received; a hook that handles one row belongs on
-					"${this.eventScope}.update.one"
+					{ data, keys }[] it received; a hook that handles one row maps them
+					with mapUpdateRows
 				`,
 			});
 		};
@@ -1531,31 +1490,33 @@ implements AbstractService<Item> {
 
 		const keys = groupsAfterHooks.flatMap((group) => group.keys);
 
-		// A dropped key would cancel its row with no null in the result, and
-		// without allowFilterCancel; cancelling a row is the per-row event's job.
-		const unmatchedKeyCounts = new Map<string, number>();
+		const answeredKeyCounts = new Map<string, number>();
 
 		for (const key of keys) {
 			const keyName = String(key);
 
-			unmatchedKeyCounts.set(keyName, (unmatchedKeyCounts.get(keyName) ?? 0) + 1);
+			answeredKeyCounts.set(keyName, (answeredKeyCounts.get(keyName) ?? 0) + 1);
 		}
 
-		const dropsInputKey = inputKeys.some((key) => {
+		// One entry per row, in the caller's order: its key, or null for a row the
+		// hook dropped, which cancels it. A key sent twice and kept once keeps its
+		// first change. This is what the update returns.
+		const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
 			const keyName = String(key);
-			const unmatchedCount = unmatchedKeyCounts.get(keyName) ?? 0;
+			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
 
-			unmatchedKeyCounts.set(keyName, unmatchedCount - 1);
+			answeredKeyCounts.set(keyName, answeredCount - 1);
 
-			return unmatchedCount === 0;
+			return answeredCount > 0
+				? key
+				: null;
 		});
 
-		if (dropsInputKey) {
+		if (!opts.allowFilterCancel && rowKeys.includes(null)) {
 			throw new InvalidPayloadError({
 				reason: oneLine`
-					A "${this.eventScope}.update" filter hook must keep every key it
-					received; a hook that cancels one row belongs on
-					"${this.eventScope}.update.one"
+					A filter hook cancelled a row of the update, but this operation
+					requires it
 				`,
 			});
 		}
@@ -1567,73 +1528,6 @@ implements AbstractService<Item> {
 
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
-		// One entry per row, in the caller's order: its key, or null for a row a
-		// per-row hook cancelled. This is what the update returns.
-		let rowKeys: (PrimaryKey | null)[] = [];
-		let candidateGroups: UpdateGroup<Item>[] = [];
-		let callerGroupIndexes: number[] = [];
-
-		// Then once per row, so a hook that only ever handled a single item keeps a seam
-		// that fires exactly once per row — which the group event, by design, does not.
-		// With nothing listening, the per-row copies would be built for nobody.
-		if (opts.emitEvents !== false && emitter.hasFilterListeners(rowEvent)) {
-			for (const [groupIndex, group] of groupsAfterHooks.entries()) {
-				for (const key of group.keys) {
-					const rowAfterHooks = await emitter.emitFilter<Partial<AnyItem>, null>(
-						rowEvent,
-						{
-							...cloneDeep(group.data),
-							[primaryKeyField]: key,
-						} as Partial<AnyItem>,
-						{
-							collection: this.collection,
-						},
-						{
-							...eventContext,
-							scopedCache: scopedCacheHookDeclarations.purge,
-						},
-					);
-
-					if (rowAfterHooks === null) {
-						if (!opts.allowFilterCancel) {
-							throw new InvalidPayloadError({
-								reason: oneLine`
-									A filter hook cancelled a row of the update, but this operation
-									requires it
-								`,
-							});
-						}
-
-						rowKeys.push(null);
-						continue;
-					}
-
-					if (!isPlainObject(rowAfterHooks)) {
-						throw new InvalidPayloadError({
-							reason: oneLine`
-								A "${this.eventScope}.update.one" filter hook must return the row
-								it received, or null to cancel it
-							`,
-						});
-					}
-
-					rowKeys.push(key);
-
-					candidateGroups.push({
-						data: omit(rowAfterHooks, primaryKeyField) as Partial<Item>,
-						keys: [key],
-					});
-
-					callerGroupIndexes.push(groupIndex);
-				}
-			}
-		}
-		else {
-			rowKeys = keys;
-			candidateGroups = groupsAfterHooks;
-			callerGroupIndexes = groupsAfterHooks.map((_group, groupIndex) => groupIndex);
-		}
-
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
@@ -1643,8 +1537,7 @@ implements AbstractService<Item> {
 			.map((relation) => relation.field));
 
 		const mergedGroups = mergeUpdateGroups(
-			candidateGroups,
-			callerGroupIndexes,
+			groupsAfterHooks,
 			(groupData) => {
 				return Object.entries(groupData).some(([field, value]) => {
 					const nestsAnItem = typeof value === 'object' && value !== null;
@@ -1788,25 +1681,6 @@ implements AbstractService<Item> {
 				accountability: this.accountability,
 			};
 
-			// One per written row, after the grouped event, so a per-row consumer sees
-			// exactly the rows that were written. Rows a per-row filter cancelled never
-			// reach here. `emitActionEvents` starts them together, so they are not
-			// ordered against the grouped event.
-			const rowActionEvents = emitter.hasActionListeners(rowEvent)
-				? applied.flatMap((group) => {
-					return group.keys.map((key) => {
-						return {
-							event: rowEvent,
-							meta: {
-								payload: { ...group.data, [primaryKeyField]: key },
-								collection: this.collection,
-							},
-							context: actionContext,
-						};
-					});
-				})
-				: [];
-
 			await emitActionEvents(
 				[
 					{
@@ -1817,7 +1691,6 @@ implements AbstractService<Item> {
 						},
 						context: actionContext,
 					},
-					...rowActionEvents,
 					...nestedActionEvents,
 				],
 				opts,

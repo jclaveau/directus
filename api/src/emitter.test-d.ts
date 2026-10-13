@@ -33,7 +33,7 @@ test('a filter may return the output type instead of the payload', () => {
 });
 
 test('emitFilter surfaces the output type alongside the input', () => {
-	expectTypeOf(emitter.emitFilter<Item, number>('items.create.one', { a: 1 }, {}))
+	expectTypeOf(emitter.emitFilter<Item, number>('items.delete', { a: 1 }, {}))
 		.toEqualTypeOf<Promise<Item | number>>();
 });
 
@@ -46,7 +46,7 @@ test('emitFilter defaults the output type to the input type', () => {
 });
 
 test('onFilter accepts a handler whose output type differs from its input', () => {
-	emitter.onFilter<Item, number>('items.create.one', (payload) => {
+	emitter.onFilter<Item, number>('items.delete', (payload) => {
 		expectTypeOf(payload).toEqualTypeOf<Item>();
 		return 5;
 	});
@@ -55,7 +55,7 @@ test('onFilter accepts a handler whose output type differs from its input', () =
 test('register.filter plumbs the output type so a hook can return a primary key', () => {
 	const register = {} as RegisterFunctions;
 
-	register.filter<Item, number>('items.create.one', (payload) => {
+	register.filter<Item, number>('items.delete', (payload) => {
 		expectTypeOf(payload).toEqualTypeOf<Item>();
 		return 5;
 	});
@@ -67,8 +67,8 @@ test('offFilter accepts the same typed handler shape as onFilter', () => {
 		return 5;
 	};
 
-	emitter.onFilter<Item, number>('items.create.one', handler);
-	emitter.offFilter<Item, number>('items.create.one', handler);
+	emitter.onFilter<Item, number>('items.delete', handler);
+	emitter.offFilter<Item, number>('items.delete', handler);
 });
 
 test('register.filter hands a read handler the read handle, unnarrowed', () => {
@@ -88,20 +88,6 @@ test('register.filter hands a mutation handler the purge handle', () => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
 		context.scopedCache.purgeBy({ collection: 'article' });
 		return groups;
-	});
-});
-
-test('register.filter hands a per-row handler the purge handle', () => {
-	const register = {} as RegisterFunctions;
-
-	register.filter<Item>('items.update.one', (payload, _meta, context) => {
-		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
-		return payload;
-	});
-
-	register.filter<Item>('articles.items.create.one', (payload, _meta, context) => {
-		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
-		return payload;
 	});
 });
 
