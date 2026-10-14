@@ -113,6 +113,7 @@ export const seedDBStructure = () => {
 					collectionFlowRefusals,
 					collectionFlowTakeovers,
 					collectionFlowCancels,
+					collectionFlowKeys,
 				].map((collection) => {
 					return {
 						collection,
