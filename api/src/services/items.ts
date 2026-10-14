@@ -1321,7 +1321,7 @@ implements AbstractService<Item> {
 
 	/**
 	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
-	 * whatever zeros lead it.
+	 * or a bigInteger whatever zeros lead it.
 	 */
 	private primaryKeyNameOf(key: PrimaryKey): string {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -1333,8 +1333,13 @@ implements AbstractService<Item> {
 			return String(key).toLowerCase();
 		}
 
-		return primaryKeyType === 'integer'
-			? String(Number(key))
+		if (primaryKeyType === 'integer') {
+			return String(Number(key));
+		}
+
+		// Past 2^53 a Number would round two rows onto one name.
+		return primaryKeyType === 'bigInteger' && /^[+-]?\d+$/.test(String(key))
+			? String(BigInt(key))
 			: String(key);
 	}
 
@@ -1512,10 +1517,12 @@ implements AbstractService<Item> {
 
 				if (sentKeyNames.has(keyName)) {
 					throw new InvalidPayloadError({
-						reason: oneLine`
-							Row ${keyName} is sent more than once; send each row once, or
-							pass onRepeatedPk=lastWins
-						`,
+						reason: opts.onRepeatedPk === undefined
+							? `Row ${keyName} is sent more than once; send each row once`
+							: oneLine`
+								Row ${keyName} is sent more than once; send each row once, or
+								pass onRepeatedPk=lastWins
+							`,
 					});
 				}
 
@@ -1671,14 +1678,41 @@ implements AbstractService<Item> {
 			...takenOverKeys,
 		];
 
+		const hookAddedKeys = keys.filter((key) => {
+			return !inputKeyNames.has(keyNameOf(key));
+		});
+
+		// Keys a hook added are counted and validated like the caller's own, before
+		// any of them is compared with another.
+		try {
+			if (!opts.bypassLimits && hookAddedKeys.length > 0) {
+				mutationTracker.trackMutations(hookAddedKeys.length);
+			}
+
+			validateKeys(this.schema, this.collection, primaryKeyField, keys);
+		}
+		catch (error) {
+			throw await refuseHookAnswer(error);
+		}
+
 		const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
 			return group.keys.map((key) => keyNameOf(key));
 		}));
 
 		// Written by the hook and by Directus both, the row would hold whichever
 		// write lands last.
-		if (takenOverKeys.some((key) => groupedKeyNames.has(keyNameOf(key)))) {
-			throw await refuseHookAnswer(groupListRefusal());
+		const doublyAnsweredKey = takenOverKeys.find((key) => {
+			return groupedKeyNames.has(keyNameOf(key));
+		});
+
+		if (doublyAnsweredKey !== undefined) {
+			throw await refuseHookAnswer(new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.update" filter hook took row
+					${keyNameOf(doublyAnsweredKey)} over as { key } but also left it in a
+					{ data, keys } group; answer each row one way
+				`,
+			}));
 		}
 
 		const answeredKeyCounts = new Map<string, number>();
@@ -1725,18 +1759,6 @@ implements AbstractService<Item> {
 					requires it
 				`,
 			}));
-		}
-
-		// Keys a hook added are counted and validated like the caller's own.
-		try {
-			if (!opts.bypassLimits && keys.length > inputKeys.length) {
-				mutationTracker.trackMutations(keys.length - inputKeys.length);
-			}
-
-			validateKeys(this.schema, this.collection, primaryKeyField, keys);
-		}
-		catch (error) {
-			throw await refuseHookAnswer(error);
 		}
 
 		const relationalFields = new Set(this.schema.relations
@@ -1800,12 +1822,12 @@ implements AbstractService<Item> {
 			],
 		};
 
-		if (opts.onHookAddedRows && keys.length > inputKeys.length) {
-			const hookAddedKeys = directusWrittenKeys.filter((key) => {
-				return !inputKeyNames.has(keyNameOf(key));
-			});
+		const hookAddedWrittenKeys = directusWrittenKeys.filter((key) => {
+			return !inputKeyNames.has(keyNameOf(key));
+		});
 
-			opts.onHookAddedRows(hookAddedKeys, {
+		if (opts.onHookAddedRows && hookAddedWrittenKeys.length > 0) {
+			opts.onHookAddedRows(hookAddedWrittenKeys, {
 				canResolveSlicesFromRows: oldScopedCacheSnapshot.canResolveSlicesFromRows,
 				rows: oldScopedCacheSnapshot.rows.filter((snapshotRow) => {
 					return !inputKeyNames.has(keyNameOf(snapshotRow.key));
