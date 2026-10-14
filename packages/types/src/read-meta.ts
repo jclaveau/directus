@@ -231,9 +231,10 @@ export interface ScopedCachePurgeHandle {
 	 * slices these are. A take-over is purged narrow only when Directus read the
 	 * row before the hook ran (an update of a row the caller sent) or a hook
 	 * declared its slices for its key here, in a fingerprint of that collection
-	 * pinning one of its scope fields (`scoped_cache_fields`, else the primary
-	 * key); any other take-over purges the collection whole, whatever else was
-	 * declared.
+	 * pinning every one of its scope fields (`scoped_cache_fields`, else the
+	 * primary key); any other take-over purges the collection whole, whatever
+	 * else was declared. Outside production a declaration leaving a scope field
+	 * out throws here instead, naming each one it misses.
 	 */
 	purgeBy(
 		fingerprints: ScopedCacheFingerprintInput,

@@ -11,6 +11,7 @@ import type {
 	ScopedCacheHookDeclarations,
 	WithMeta,
 } from '@directus/types';
+import { getNodeEnv } from '@directus/utils/node';
 import {
 	renderScopedCacheFingerprint,
 	scopedCacheDeclaredPins,
@@ -131,23 +132,23 @@ export function createScopedCacheHookDeclarations(
 		}
 	}
 
-	// A declaration narrows a takeover only through an axis the collection is
-	// scoped by: a pin on any other column names no slice its reads were cached in.
-	function pinsScopeAxis(declared: ScopedCacheDeclaredFingerprint): boolean {
-		const pins = scopedCacheDeclaredPins(declared, schema);
+	// A slice the reads of a collection were cached in is named by every field the
+	// collection is scoped by, so a declaration leaving one out names none of them.
+	function missingScopeFieldsOf(declared: ScopedCacheDeclaredFingerprint): string[] {
 		const collectionSchema = schema.collections[declared.collection];
 
 		if (!collectionSchema) {
-			return pins.length > 0;
+			return [];
 		}
 
-		const scopeAxes = collectionSchema.scopedCacheFields?.length
+		const pinnedFields = scopedCacheDeclaredPins(declared, schema)
+			.map((pin) => pin.field);
+
+		const scopeFields = collectionSchema.scopedCacheFields?.length
 			? collectionSchema.scopedCacheFields
 			: [collectionSchema.primary];
 
-		return pins.some((pin) => {
-			return pin.field !== undefined && scopeAxes.includes(pin.field);
-		});
+		return scopeFields.filter((scopeField) => !pinnedFields.includes(scopeField));
 	}
 
 	function addPurgeFingerprint(
@@ -164,11 +165,29 @@ export function createScopedCacheHookDeclarations(
 		for (const declared of batch) {
 			// `forKey` names a row of the event's collection: only a slice of that
 			// collection is one the row can have left.
-			if (
-				forKey !== undefined
+			const missingScopeFields = forKey !== undefined
 				&& declared.collection === eventCollection
-				&& pinsScopeAxis(declared)
+				? missingScopeFieldsOf(declared)
+				: null;
+
+			// Outside production a declaration that cannot narrow is a hook bug, told
+			// at the call; in production its takeover falls back to the coarse purge.
+			if (
+				missingScopeFields !== null
+				&& missingScopeFields.length > 0
+				&& (getNodeEnv() ?? 'production') !== 'production'
 			) {
+				const missingNames = missingScopeFields
+					.map((scopeField) => `"${scopeField}"`)
+					.join(', ');
+
+				throw new Error(
+					`purgeBy forKey ${forKey} on "${eventCollection}" must pin every`
+					+ ` scope field: missing ${missingNames}`,
+				);
+			}
+
+			if (missingScopeFields !== null && missingScopeFields.length === 0) {
 				const declaredKeys = purgeDeclaredKeys.get(eventCollection)
 					?? new Set<string>();
 
