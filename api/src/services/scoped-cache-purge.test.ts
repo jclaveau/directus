@@ -2185,6 +2185,33 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an upsert whose update hook takes over a row the upsert did not send falls
+			back to a coarse purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any) => [...groups, { key: 2 }];
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().upsertMany([{ id: 1, student: 'B' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only
 			that slice — includeBareFingerprint:false keeps the cancelled
 			collection's bare pin warm, since nothing in it was deleted

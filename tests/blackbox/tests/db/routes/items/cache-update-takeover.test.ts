@@ -1,6 +1,11 @@
 import config, { getUrl, paths } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
-import { CreateCollections, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollections,
+	CreateFieldO2M,
+	CreateItem,
+	DeleteCollection,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -12,6 +17,8 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
 const REFUSED = 'test_takeover_refused';
+const UPSERT_PARENT = 'test_takeover_upsert_parent';
+const UPSERT_CHILD = 'test_takeover_upsert_child';
 const cacheStatusHeader = 'x-cache-status';
 
 const feature = loadFeature(
@@ -32,6 +39,8 @@ describe.each(vendors)('%s', (vendor) => {
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let instance: ChildProcess;
 	let refusedRowId: number;
+	let upsertParentId: number;
+	let sentChildId: number;
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
@@ -40,7 +49,27 @@ describe.each(vendors)('%s', (vendor) => {
 					collection: REFUSED,
 					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
+				{
+					collection: UPSERT_PARENT,
+					fields: [{ field: 'title', type: 'string', meta: {} }],
+				},
+				{
+					collection: UPSERT_CHILD,
+					meta: { scoped_cache_fields: ['slot'] },
+					fields: [
+						{ field: 'slot', type: 'string', meta: {} },
+						{ field: 'marker', type: 'string', meta: {} },
+						{ field: 'body', type: 'string', meta: {} },
+					],
+				},
 			],
+		});
+
+		await CreateFieldO2M(vendor, {
+			collection: UPSERT_PARENT,
+			field: 'children',
+			otherCollection: UPSERT_CHILD,
+			otherField: 'parent',
 		});
 
 		const refusedRow = await CreateItem(vendor, {
@@ -49,6 +78,28 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		refusedRowId = refusedRow.id;
+
+		const upsertParent = await CreateItem(vendor, {
+			collection: UPSERT_PARENT,
+			item: { title: 'parent' },
+		});
+
+		upsertParentId = upsertParent.id;
+
+		const [sentChild] = await CreateItem(vendor, {
+			collection: UPSERT_CHILD,
+			item: [
+				{
+					slot: 'a',
+					marker: 'sent',
+					body: 'original',
+					parent: upsertParentId,
+				},
+				{ slot: 'b', marker: 'sibling', body: 'original' },
+			],
+		});
+
+		sentChildId = sentChild.id;
 
 		env[vendor].PORT = String(await getPort());
 
@@ -64,6 +115,8 @@ describe.each(vendors)('%s', (vendor) => {
 		instance.kill();
 
 		await DeleteCollection(vendor, { collection: REFUSED });
+		await DeleteCollection(vendor, { collection: UPSERT_CHILD });
+		await DeleteCollection(vendor, { collection: UPSERT_PARENT });
 	});
 
 	defineFeature(feature, (scenario) => {
@@ -121,6 +174,55 @@ describe.each(vendors)('%s', (vendor) => {
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answered = await readRefused();
+
+						expect(answered.headers[cacheStatusHeader]).toBe(cache);
+						expect(answered.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'an upsert whose hook takes over a row it never sent purges that row',
+			({ given, when, then }) => {
+				function readSlot(slot: string) {
+					return request(getUrl(vendor, env))
+						.get(`/items/${UPSERT_CHILD}`)
+						.query({ fields: 'body', 'filter[slot][_eq]': slot })
+						.set('Authorization', auth);
+				}
+
+				given(
+					/^the read of \w+ in slot "(.*)" is cached:$/,
+					async (slot: string, table: Record<string, string>[]) => {
+						expect((await readSlot(slot)).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						const cached = await readSlot(slot);
+
+						expect(cached.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cached.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					/^the parent sends its child the body "(.*)"$/,
+					async (body: string) => {
+						const sent = await request(getUrl(vendor, env))
+							.patch(`/items/${UPSERT_PARENT}/${upsertParentId}`)
+							.send({ children: [{ id: sentChildId, body }] })
+							.set('Authorization', auth);
+
+						expect(sent.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					/^the read of \w+ in slot "(.*)" answers:$/,
+					async (slot: string, table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answered = await readSlot(slot);
 
 						expect(answered.headers[cacheStatusHeader]).toBe(cache);
 						expect(answered.body.data).toEqual(loadYaml(response!));

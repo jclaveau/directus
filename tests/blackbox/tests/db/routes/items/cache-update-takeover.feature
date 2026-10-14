@@ -25,3 +25,12 @@ Feature: A row an update hook took over is purged from the response cache
     And the read of test_takeover_refused answers:
       | cache | response               |
       | MISS  | [{body: "taken-over"}] |
+
+  Scenario: an upsert whose hook takes over a row it never sent purges that row
+    Given the read of test_takeover_upsert_child in slot "b" is cached:
+      | response             |
+      | [{body: "original"}] |
+    When the parent sends its child the body "take-over-sibling"
+    Then the read of test_takeover_upsert_child in slot "b" answers:
+      | cache | response               |
+      | MISS  | [{body: "taken-over"}] |
