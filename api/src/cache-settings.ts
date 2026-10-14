@@ -4,7 +4,7 @@ import type {
 	CreateEntry,
 	EventContext,
 	Item,
-	UpdateGroup,
+	UpdateEntry,
 } from '@directus/types';
 import { parse as parseByteSize } from 'bytes';
 import type { Knex } from 'knex';
@@ -17,9 +17,10 @@ import {
 
 /**
  * What a `settings.create` or `settings.update` filter is handed one of: a
- * create's entry or an update's group, each carrying the row data it writes.
+ * create's entry or an update's group, each carrying the row data it writes,
+ * or a row an earlier hook took over as `{ key }`, which carries none.
  */
-export type SettingsWriteEntry = CreateEntry | UpdateGroup | null;
+export type SettingsWriteEntry = CreateEntry | UpdateEntry | null;
 
 /**
  * `cache_settings`, mirrored so the hot path reads a module variable rather

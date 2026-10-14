@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { UpdateGroup } from '@directus/types';
+import type { Item, UpdateGroup } from '@directus/types';
 import { useBus } from './bus/index.js';
 
 /**
@@ -92,16 +92,16 @@ export async function initCacheConfig(): Promise<void> {
 	const { default: emitter } = await import('./emitter.js');
 	const { recordCacheConfigEvent } = await import('./cache-events.js');
 
-	emitter.onAction('settings.update', ({ payload }) => {
-		const ttlGroup = (payload as UpdateGroup[]).findLast(({ data }) => {
-			return 'cache_ttl' in data;
+	const announceTtlOf = (writtenRows: Partial<Item>[]) => {
+		const ttlRow = writtenRows.findLast((writtenRow) => {
+			return 'cache_ttl' in writtenRow;
 		});
 
-		if (!ttlGroup) {
+		if (!ttlRow) {
 			return;
 		}
 
-		const cacheTtl = ttlGroup.data['cache_ttl'];
+		const cacheTtl = ttlRow['cache_ttl'];
 
 		publishCacheConfigChanged(cacheTtl);
 
@@ -111,5 +111,15 @@ export async function initCacheConfig(): Promise<void> {
 		// `directus_revisions` was read by hand (#342). Best-effort — a chart
 		// annotation must never fail a settings save.
 		void recordCacheConfigEvent('ttl_change', cacheTtl).catch(() => {});
+	};
+
+	// The create as well as the update: a deployment nobody has saved a setting
+	// on yet has no singleton row, and the first write to it makes one.
+	emitter.onAction('settings.create', ({ payload }) => {
+		announceTtlOf(payload as Partial<Item>[]);
+	});
+
+	emitter.onAction('settings.update', ({ payload }) => {
+		announceTtlOf((payload as UpdateGroup[]).map(({ data }) => data));
 	});
 }

@@ -10,6 +10,8 @@ import {
 	parseSupervisorPatch,
 } from '../autoscale/lib/supervisor-shared-settings.js';
 import { assertUsableConfig } from '../autoscale/lib/validate-config.js';
+import { isPositiveDuration } from '../../utils/get-milliseconds.js';
+import { validateCron } from '../../utils/validate-cron.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
 	asSharedSettings,
@@ -91,12 +93,40 @@ export function assertUsableSharedSettings(payload: Partial<Item>): void {
 }
 
 /**
+ * Refuse a `cache_ttl` or a `cache_audit_schedule` nothing can run. An empty
+ * value is one: it hands the field back to the environment.
+ *
+ * A TTL ms cannot read as a positive duration would be stored, then fall back
+ * on the hot path and leave the `__expires_at` sidecar out of step with the
+ * entry's real lifetime. A rule node-schedule cannot read would be stored, then
+ * every node would drop its audit job and schedule nothing.
+ */
+export function assertUsableCacheFields(payload: Partial<Item>): void {
+	const ttl = payload['cache_ttl'];
+
+	if (typeof ttl === 'string' && ttl.trim() !== '' && !isPositiveDuration(ttl)) {
+		throw new InvalidPayloadError({
+			reason: `Invalid cache_ttl "${ttl}" — expected a positive `
+				+ `duration like "30s", "5m", "1h"`,
+		});
+	}
+
+	const rule = payload['cache_audit_schedule'];
+
+	if (typeof rule === 'string' && rule.trim() !== '' && !validateCron(rule.trim())) {
+		throw new InvalidPayloadError({
+			reason: `Invalid cache_audit_schedule "${rule}" — expected a cron `
+				+ 'rule like "0 3 * * *"',
+		});
+	}
+}
+
+/**
  * Check every write to the singleton, whatever made it.
  *
- * On the filter rather than the action for the reason `SettingsService` gives
- * for `cache_ttl`: a check has to run before the write, and an action runs
- * after one. On the emitter rather than in that service because the service is
- * only one of the ways the singleton is written.
+ * On the filter rather than the action: a check has to run before the write,
+ * and an action runs after one. On the emitter rather than in `SettingsService`
+ * because the service is only one of the ways the singleton is written.
  */
 export async function initSharedSettingsGuard(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
@@ -113,6 +143,7 @@ export async function initSharedSettingsGuard(): Promise<void> {
 			for (const entry of payload) {
 				if (entry !== null && 'data' in entry) {
 					assertUsableSharedSettings(entry.data);
+					assertUsableCacheFields(entry.data);
 				}
 			}
 
