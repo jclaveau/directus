@@ -5,15 +5,20 @@ Feature: An event flow runs once per change, as it did before updates carried gr
   update the flow was written for: `{ payload: data, keys }`. A batch sends one
   group per row; the rows carrying the same change are merged after the filter,
   so the action runs once per change. A filter flow returning `$last` replaces
-  that group's change. A flow on `items.create` runs
-  once per created row. Every run leaves a revision holding its `$trigger`,
-  read back here. A row is named by the `name` it was created with; a user by
-  its first name.
+  that group's change. A flow on `items.create` runs once per created row, and a
+  filter flow's return answers that row as a hook's does: a key takes it over,
+  null cancels it. Every run leaves a revision holding its `$trigger`, read back
+  here. A row is named by the `name` it was created with; a user by its first
+  name.
 
   The flows on each collection:
   - test_event_flow_runs: an update filter, an update action, a create action.
   - test_event_flow_rewrites: a filter returning `{ "status": "set-by-flow" }`.
   - test_event_flow_refusals: a filter returning `null`.
+  - test_event_flow_takeovers: a create filter returning the key 1, the row the
+    seed inserted before the flow existed.
+  - test_event_flow_cancels: a create filter returning `null`.
+  - test_event_flow_keys: an update filter returning the key 7.
   - directus_users: an update filter, an update action.
 
   Scenario: an update of several rows to one status runs each update flow once
@@ -78,11 +83,33 @@ Feature: An event flow runs once per change, as it did before updates carried gr
       | refuse-a |
       | refuse-b |
     When the rows are updated to the status "archived"
-    Then the update is refused with a reason naming "items.update.one"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A flow on "test_event_flow_refusals.items.update" returned null
+      for rows {refuse-a}, {refuse-b}; an update flow returns the change to write, or
+      nothing to keep the change sent.
+      """
     And the rows hold:
       | name     | status |
       | refuse-a |        |
       | refuse-b |        |
+
+  Scenario: an update filter flow returning a key refuses the update
+    Given the rows of test_event_flow_keys:
+      | name  |
+      | key-a |
+      | key-b |
+    When the rows are updated to the status "archived"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A flow on "test_event_flow_keys.items.update" returned the key 7
+      for rows {key-a}, {key-b}; an update flow returns the change to write, or nothing
+      to keep the change sent.
+      """
+    And the rows hold:
+      | name  | status |
+      | key-a |        |
+      | key-b |        |
 
   Scenario: an update of several users runs each users update flow once
     Given the users:
@@ -96,3 +123,22 @@ Feature: An event flow runs once per change, as it did before updates carried gr
     And the "users update action" flow ran with:
       | status    | names               |
       | suspended | ["user-a","user-b"] |
+
+  Scenario: a create filter flow returning a key takes the row over
+    When the rows are created in test_event_flow_takeovers:
+      | name       |
+      | takeover-a |
+    Then the create answers:
+      | id | name    |
+      | 1  | claimed |
+    And test_event_flow_takeovers holds:
+      | id | name    |
+      | 1  | claimed |
+
+  Scenario: a create filter flow returning null cancels the row
+    When the rows are created in test_event_flow_cancels:
+      | name     |
+      | cancel-a |
+      | cancel-b |
+    Then the create answers no row
+    And test_event_flow_cancels holds no row

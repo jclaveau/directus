@@ -1,4 +1,4 @@
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidQueryError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -90,6 +90,7 @@ function makeReq(overrides: any = {}) {
 	return {
 		params: { collection: 'articles', pk: '1' },
 		body: {},
+		query: {},
 		sanitizedQuery: {},
 		accountability: null,
 		schema: {},
@@ -311,13 +312,51 @@ describe('items controller', () => {
 			expect(res.locals['payload']).toEqual({ data: [{ id: 1 }] });
 		});
 
+		test('passes onRepeatedPk to the update', async () => {
+			updateBatch.mockResolvedValueOnce([1]);
+			readMany.mockResolvedValueOnce([{ id: 1 }]);
+
+			const batchRequest = makeReq({
+				body: [{ id: 1 }],
+				query: { onRepeatedPk: 'lastWins' },
+			});
+
+			await handler()(batchRequest, { locals: {} } as any, vi.fn());
+
+			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
+				allowFilterCancel: true,
+				onRepeatedPk: 'lastWins',
+			});
+		});
+
+		test('refuses an unknown onRepeatedPk before updating', async () => {
+			const batchRequest = makeReq({
+				body: [{ id: 1 }],
+				query: { onRepeatedPk: 'merge' },
+			});
+
+			const refusal = await nextError(handler(), batchRequest);
+
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
+
+			expect(refusal.message).toEqual(
+				'Invalid query. "onRepeatedPk" must be one of refuse, lastWins.',
+			);
+
+			expect(updateBatch).not.toHaveBeenCalled();
+		});
+
 		test('updateMany via body.keys', async () => {
 			updateMany.mockResolvedValueOnce([2]);
 			readMany.mockResolvedValueOnce([{ id: 2 }]);
 			const req = makeReq({ body: { keys: [2], data: { x: 1 } } });
 			const res = { locals: {} } as any;
 			await handler()(req, res, vi.fn());
-			expect(updateMany).toHaveBeenCalledWith([2], { x: 1 }, { allowFilterCancel: true });
+
+			expect(updateMany).toHaveBeenCalledWith([2], { x: 1 }, {
+				allowFilterCancel: true,
+				onRepeatedPk: 'refuse',
+			});
 		});
 
 		test('updateByQuery default branch', async () => {

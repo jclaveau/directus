@@ -3,9 +3,13 @@
 // time a declared purge with no rows of the purged collection written.
 
 export default function registerHooks({ filter }) {
-	filter('perf_declared_signal.items.create.one', (payload, _meta, context) => {
-		context.scopedCache?.purgeBy(payload.declared);
+	filter('perf_declared_signal.items.create', (entries, _meta, context) => {
+		for (const entry of entries) {
+			if (entry?.data) {
+				context.scopedCache?.purgeBy(entry.data.declared);
+			}
+		}
 
-		return payload;
+		return entries;
 	});
 }

@@ -12,6 +12,7 @@ export const collectionGrouped = 'test_update_groups';
 export const collectionGroupedLog = 'test_update_groups_log';
 export const collectionGroupedOwner = 'test_update_groups_owner';
 export const collectionGroupedSlot = 'test_update_groups_slot';
+export const collectionGroupedBadge = 'test_update_groups_badge';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -22,6 +23,7 @@ export const seedDBStructure = () => {
 				await DeleteCollection(vendor, { collection: collectionGroupedLog });
 				await DeleteCollection(vendor, { collection: collectionGroupedOwner });
 				await DeleteCollection(vendor, { collection: collectionGroupedSlot });
+				await DeleteCollection(vendor, { collection: collectionGroupedBadge });
 
 				await CreateCollections(vendor, {
 					collections: [
@@ -59,6 +61,15 @@ export const seedDBStructure = () => {
 								{ field: 'name', type: 'string', meta: {} },
 								{ field: 'holder', type: 'string', meta: {} },
 								{ field: 'slot', type: 'string', meta: {} },
+							],
+						},
+						{
+							collection: collectionGroupedBadge,
+							meta: {},
+							primaryKeyType: 'uuid',
+							fields: [
+								{ field: 'name', type: 'string', meta: {} },
+								{ field: 'status', type: 'string', meta: {} },
 							],
 						},
 					],

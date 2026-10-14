@@ -17,6 +17,7 @@ import type {
 	QueryOptions,
 	SchemaOverview,
 	ScopedCacheFingerprint,
+	UpdateEntry,
 	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
@@ -213,6 +214,28 @@ function isCreateEntryList(
 	});
 }
 
+function isUpdateGroup<Item extends AnyItem>(
+	entry: UpdateEntry<Item>,
+): entry is UpdateGroup<Item> {
+	return isPlainObject(entry)
+		&& isPlainObject((entry as UpdateGroup<Item>).data)
+		&& Array.isArray((entry as UpdateGroup<Item>).keys);
+}
+
+/**
+ * A row a filter hook wrote itself, answered with its key as `{ key }`. Directus
+ * writes nothing for it, so it skips the access check, the revision and activity,
+ * the action event, the action flows and the websocket messages; the mutation
+ * returns its key. A created row a hook answers with a key skips the same.
+ */
+function isTakenOverRow<Item extends AnyItem>(
+	entry: UpdateEntry<Item>,
+): entry is { key: PrimaryKey } {
+	return isPlainObject(entry)
+		&& Object.keys(entry).length === 1
+		&& isPrimaryKey((entry as { key: PrimaryKey }).key);
+}
+
 /**
  * Merge each group into the one before it when both carry the same change, so one
  * statement writes rows sent side by side. Rows apart are never merged: a row in
@@ -220,21 +243,23 @@ function isCreateEntryList(
  * so the rows are written in the order the caller sent them.
  *
  * A group writing a nested item creates it once per group and walks its O2M rows
- * per group, so it merges only with the rows split off the same caller group: two
- * caller groups merged would create one related item where the caller asked for
- * two, and one caller group left split would create one per row.
+ * per group, so it never merges: two groups merged would create one related item
+ * where the caller asked for two.
+ *
+ * TODO(#606): merge them when their nested items share an identity, once #337
+ * brings the by-unique-identity dedup to the fork.
  */
 function mergeUpdateGroups<Item extends AnyItem>(
 	candidateGroups: UpdateGroup<Item>[],
-	callerGroupIndexes: number[],
 	writesNestedItems: (groupData: Partial<Item>) => boolean,
+	keyNameOf: (key: PrimaryKey) => string,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
 	let lastSerializedData: string | null = null;
 	let lastKeyNames = new Set<string>();
 
-	for (const [candidateIndex, candidateGroup] of candidateGroups.entries()) {
-		const serializedChange = JSON.stringify(
+	for (const candidateGroup of candidateGroups) {
+		const serializedData = JSON.stringify(
 			candidateGroup.data,
 			(_field, value) => {
 				return typeof value === 'bigint'
@@ -243,14 +268,11 @@ function mergeUpdateGroups<Item extends AnyItem>(
 			},
 		);
 
-		const serializedData = writesNestedItems(candidateGroup.data)
-			? `${callerGroupIndexes[candidateIndex]}:${serializedChange}`
-			: serializedChange;
-
 		const lastGroup = mergedGroups.at(-1);
 
 		if (
 			lastGroup === undefined ||
+			writesNestedItems(candidateGroup.data) ||
 			serializedData !== lastSerializedData ||
 			!isEqual(lastGroup.data, candidateGroup.data)
 		) {
@@ -264,8 +286,8 @@ function mergeUpdateGroups<Item extends AnyItem>(
 		// The access check counts the stored rows against the keys, so a row the
 		// caller sent twice with one change is written, and checked, once.
 		for (const key of candidateGroup.keys) {
-			if (!lastKeyNames.has(String(key))) {
-				lastKeyNames.add(String(key));
+			if (!lastKeyNames.has(keyNameOf(key))) {
+				lastKeyNames.add(keyNameOf(key));
 				targetGroup.keys.push(key);
 			}
 		}
@@ -447,10 +469,6 @@ implements AbstractService<Item> {
 			? ['items.create', `${this.collection}.items.create`]
 			: `${this.eventScope}.create`;
 
-		const rowEvent = this.eventScope === 'items'
-			? ['items.create.one', `${this.collection}.items.create.one`]
-			: `${this.eventScope}.create.one`;
-
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
 		// An `items.create` hook can declare its own purge via
@@ -459,8 +477,8 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
-		// Baseline so the take-over fallback (below) keys off THIS call's own hook
-		// declarations, not ones a parent's injected declarations already held.
+		// Baseline so the nothing-to-purge return (below) keys off THIS call's own
+		// hook declarations, not ones a parent's injected declarations already held.
 		const declaredPurgesAtStart =
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
@@ -499,7 +517,7 @@ implements AbstractService<Item> {
 				database: trx,
 				schema: this.schema,
 				accountability: this.accountability,
-				scopedCache: scopedCacheHookDeclarations.purge,
+				scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 			};
 
 			const entries = data.map((row): CreateEntry<Item> => {
@@ -512,7 +530,7 @@ implements AbstractService<Item> {
 						A "${this.eventScope}.create" filter hook must return one
 						{ data } | { key } | { sameRowAs } | null per row it received, a
 						sameRowAs pointing at an earlier row; a hook that handles one row
-						belongs on "${this.eventScope}.create.one"
+						maps them with mapCreateRows
 					`,
 				});
 			};
@@ -558,23 +576,21 @@ implements AbstractService<Item> {
 				if (entry !== null && 'key' in entry) {
 					payloadAfterHooks = entry.key;
 				}
-				// Then once per row, the seam a hook written for a single item keeps, with
-				// its own takeover and cancel.
 				else if (entry !== null) {
-					const hasRowFilters = opts.emitEvents !== false
-						&& emitter.hasFilterListeners(rowEvent);
-
-					payloadAfterHooks = hasRowFilters
-						? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
-							rowEvent,
-							entry.data,
-							{ collection: this.collection },
-							filterContext,
-						)
-						: entry.data;
+					payloadAfterHooks = entry.data;
 				}
 
-				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
+				if (
+					typeof payloadAfterHooks === 'string'
+					|| typeof payloadAfterHooks === 'number'
+				) {
+					validateKeys(
+						this.schema,
+						this.collection,
+						primaryKeyField,
+						payloadAfterHooks,
+					);
+
 					// A filter hook returned a primary key instead of a payload: it has taken over the
 					// creation of this row. Surface that key, insert nothing, and let the hook that took
 					// over own the action event.
@@ -924,21 +940,6 @@ implements AbstractService<Item> {
 				accountability: this.accountability,
 			};
 
-			const rowActionEvents: ActionEventParams[] = emitter
-				.hasActionListeners(rowEvent)
-				? actionPayloads.map(({ primaryKey, actionHookPayload }) => {
-					return {
-						event: rowEvent,
-						meta: {
-							payload: actionHookPayload,
-							key: primaryKey,
-							collection: this.collection,
-						},
-						context: actionContext,
-					};
-				})
-				: [];
-
 			// Route through emitActionEvents so the create path honours `awaitActionHooks` (#58) and
 			// `bypassEmitAction` (nested mutations), instead of an un-awaited raw emit.
 			await emitActionEvents(
@@ -954,7 +955,6 @@ implements AbstractService<Item> {
 						},
 						context: actionContext,
 					},
-					...rowActionEvents,
 					...nestedActionEvents,
 				],
 				opts,
@@ -972,10 +972,11 @@ implements AbstractService<Item> {
 			// the create path has no old∪new snapshot, so the post-commit re-read sees
 			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
 			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
-			// its footprint opts back into a precise purge by declaring it via
-			// `scopedCache.purgeBy` (a read-only dedup declares its one slice; an
-			// upsert-move declares old + new) — then we trust it and narrow to the
-			// snapshot ∪ declared fingerprints.
+			// its footprint opts back into a precise purge by declaring it for the key
+			// via `scopedCache.purgeBy(…, { forKey })` (a read-only dedup declares its
+			// one slice; an upsert-move declares old + new) — then we trust it and
+			// narrow to the snapshot ∪ declared fingerprints. Every take-over needs its
+			// own: a declaration for one row says nothing of another's old slice.
 			//
 			// That holds on a collection declaring no scope field too. A takeover cannot
 			// move a row between primary-key slices — the key it returned IS the slice —
@@ -989,10 +990,24 @@ implements AbstractService<Item> {
 				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
 			];
 
+			const takenOverKeyNames = new Set(takenOverRowKeys.map((key) => {
+				return this.primaryKeyNameOf(key);
+			}));
+
+			const skippedKeyNames = this.purgeSkippedKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			const declaredKeyNames = this.purgeDeclaredKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
 			const changedKeys = liveKeys.filter((key) => {
+				const keyName = this.primaryKeyNameOf(key);
+
 				// A take-over the hook declared inert wrote nothing, so it moved no
-				// slice.
-				return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
+				// slice; a row this create inserted is written whatever was declared.
+				return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
 			});
 
 			if (
@@ -1008,21 +1023,19 @@ implements AbstractService<Item> {
 
 			// Counted off the take-overs themselves: one returning a key another row of
 			// this call inserts adds no key to the set above.
-			const someRowTakenOver = takenOverRowKeys.some((key) => {
-				return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
-			});
+			const takeoverUndeclared = takenOverRowKeys.some((key) => {
+				const keyName = this.primaryKeyNameOf(key);
 
-			const takeoverUndeclared =
-				someRowTakenOver &&
-				scopedCacheHookDeclarations.purgeFingerprints.length
-					=== declaredPurgesAtStart;
+				return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
+			});
 
 			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
 			// collection, so an undeclared take-over leaves the other rows' key slices
 			// stale even where no scope field is declared.
+			// A read that fails leaves the slices unknown: purged whole.
 			const scopedCacheSnapshot = takeoverUndeclared
 				? null
-				: await this.scopedCache.snapshot(changedKeys);
+				: await this.scopedCache.snapshot(changedKeys).catch(() => null);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheMutatedFingerprints(scopedCacheSnapshot),
@@ -1333,6 +1346,58 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
+	 * or a bigInteger whatever zeros lead it.
+	 */
+	private primaryKeyNameOf(key: PrimaryKey): string {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const primaryKeyType = this.schema.collections[this.collection]!
+			.fields[primaryKeyField]!.type;
+
+		if (primaryKeyType === 'uuid') {
+			return String(key).toLowerCase();
+		}
+
+		if (primaryKeyType === 'integer') {
+			return String(Number(key));
+		}
+
+		// Past 2^53 a Number would round two rows onto one name.
+		return primaryKeyType === 'bigInteger' && /^[+-]?\d+$/.test(String(key))
+			? String(BigInt(key))
+			: String(key);
+	}
+
+	/**
+	 * The rows of this collection a hook declared inert through `skipPurgeFor`,
+	 * named as primaryKeyNameOf names them, so any spelling of a key finds its row.
+	 */
+	private purgeSkippedKeyNames(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): Set<string> {
+		const skippedKeys = declarations.purgeSkippedKeys.get(this.collection);
+
+		return new Set([...skippedKeys ?? []].map((skippedKey) => {
+			return this.primaryKeyNameOf(skippedKey);
+		}));
+	}
+
+	/**
+	 * The rows of this collection whose slices a hook declared through
+	 * `purgeBy(…, { forKey })`, named as primaryKeyNameOf names them.
+	 */
+	private purgeDeclaredKeyNames(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): Set<string> {
+		const declaredKeys = declarations.purgeDeclaredKeys.get(this.collection);
+
+		return new Set([...declaredKeys ?? []].map((declaredKey) => {
+			return this.primaryKeyNameOf(declaredKey);
+		}));
+	}
+
+	/**
 	 * Whether a group would write nothing: an empty payload, a primary-key-only one,
 	 * or one whose every field is an alterations object carrying no item. Decided
 	 * before the transaction opens, so a no-op update costs no round trip.
@@ -1426,6 +1491,8 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const inputKeys = groups.flatMap((group) => group.keys);
 
+		const keyNameOf = (key: PrimaryKey) => this.primaryKeyNameOf(key);
+
 		// Checked before any hook runs, so a malformed or oversized update never
 		// reaches one.
 		if (!opts.bypassLimits) {
@@ -1443,10 +1510,6 @@ implements AbstractService<Item> {
 			? ['items.update', `${this.collection}.items.update`]
 			: `${this.eventScope}.update`;
 
-		const rowEvent = this.eventScope === 'items'
-			? ['items.update.one', `${this.collection}.items.update.one`]
-			: `${this.eventScope}.update.one`;
-
 		const eventContext = {
 			database: this.knex,
 			schema: this.schema,
@@ -1459,31 +1522,86 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
-		// Run all hooks that are attached to this event so the end user has the chance to augment the
-		// items that are about to be saved
-		const payload = groups.map((group) => {
-			return { data: cloneDeep(group.data), keys: [...group.keys] };
+		const refusesRepeatedPks = opts.onRepeatedPk !== 'lastWins';
+		const sentKeyNames = new Set<string>();
+
+		const sentGroups: UpdateEntry<Item>[] = groups.map((group) => {
+			if (!refusesRepeatedPks) {
+				return { data: cloneDeep(group.data), keys: [...group.keys] };
+			}
+
+			const groupKeyNames = new Set<string>();
+			const uniqueKeys: PrimaryKey[] = [];
+
+			for (const key of group.keys) {
+				const keyName = keyNameOf(key);
+
+				if (sentKeyNames.has(keyName)) {
+					throw new InvalidPayloadError({
+						reason: opts.onRepeatedPk === undefined
+							? `Row ${keyName} is sent more than once; send each row once`
+							: oneLine`
+								Row ${keyName} is sent more than once; send each row once, or
+								pass ${opts.lastWinsSpelling ?? 'onRepeatedPk=lastWins'}
+							`,
+					});
+				}
+
+				// One change naming a row twice writes it once.
+				if (!groupKeyNames.has(keyName)) {
+					groupKeyNames.add(keyName);
+					uniqueKeys.push(key);
+				}
+			}
+
+			groupKeyNames.forEach((keyName) => sentKeyNames.add(keyName));
+
+			return { data: cloneDeep(group.data), keys: uniqueKeys };
 		});
 
 		const groupListRefusal = () => {
 			return new InvalidPayloadError({
 				reason: oneLine`
 					A "${this.eventScope}.update" filter hook must return the
-					{ data, keys }[] it received; a hook that handles one row belongs on
-					"${this.eventScope}.update.one"
+					{ data, keys }[] it received, a row it wrote itself as { key }, no
+					key both; a hook that handles one row maps them with mapUpdateRows
 				`,
 			});
 		};
 
 		const guardedPayload = refuseFieldAccess(
-			payload,
+			sentGroups,
 			Object.keys(this.schema.collections[this.collection]!.fields),
 			groupListRefusal,
 		);
 
+		// Read before any hook, so a row a hook takes over still shows the slice it
+		// leaves: old ∪ new purges it narrow, whatever the hook declared. A row sent
+		// changing nothing is left unread: most never get written.
+		const aliasFields = Object.values(
+			this.schema.collections[this.collection]!.fields,
+		)
+			.filter((field) => field.alias === true)
+			.map((field) => field.field);
+
+		const changedInputKeys = groups.flatMap((group) => {
+			return this.groupChangesNothing(group, aliasFields)
+				? []
+				: group.keys;
+		});
+
+		const inputScopedCacheSnapshot = await this.scopedCache.snapshot(
+			changedInputKeys,
+		);
+
+		const readKeyNames = new Set(changedInputKeys.map((key) => keyNameOf(key)));
+		const inputKeyNames = new Set(inputKeys.map((key) => keyNameOf(key)));
+
+		// Run all hooks that are attached to this event so the end user has the chance
+		// to augment the items that are about to be saved
 		const answeredGroups =
 			opts.emitEvents !== false
-				? await emitter.emitFilter<UpdateGroup<Item>[], null>(
+				? await emitter.emitFilter<UpdateEntry<Item>[], null>(
 					updateEvent,
 					guardedPayload,
 					{
@@ -1491,23 +1609,74 @@ implements AbstractService<Item> {
 					},
 					{
 						...eventContext,
-						scopedCache: scopedCacheHookDeclarations.purge,
+						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 					},
 				)
-				: payload;
+				: sentGroups;
 
 		const groupsAfterHooks = answeredGroups === guardedPayload
-			? payload
+			? sentGroups
 			: answeredGroups;
+
+		// The slice a taken-over row left is known only for a row read above, or one
+		// its hook declared via `purgeBy(…, { forKey })`.
+		const takeoverUndeclaredAmong = (changedKeys: PrimaryKey[]) => {
+			const declaredKeyNames = this.purgeDeclaredKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			return changedKeys.some((key) => {
+				return !readKeyNames.has(keyNameOf(key))
+					&& !declaredKeyNames.has(keyNameOf(key));
+			});
+		};
+
+		// A row a hook took over is written already, out of band, so refusing its
+		// answer still purges it.
+		const refuseHookAnswer = async (refusal: unknown) => {
+			const skippedKeyNames = this.purgeSkippedKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			const changedKeys = Array.isArray(groupsAfterHooks)
+				? groupsAfterHooks
+					.filter(isTakenOverRow<Item>)
+					.map((entry) => entry.key)
+					.filter((key) => !skippedKeyNames.has(keyNameOf(key)))
+				: [];
+
+			if (changedKeys.length > 0) {
+				const changedKeyNames = new Set(changedKeys.map((key) => keyNameOf(key)));
+
+				await this.purgeUpdatedScopedCache(
+					changedKeys,
+					{
+						canResolveSlicesFromRows:
+							inputScopedCacheSnapshot.canResolveSlicesFromRows,
+						rows: inputScopedCacheSnapshot.rows.filter((snapshotRow) => {
+							return changedKeyNames.has(keyNameOf(snapshotRow.key));
+						}),
+					},
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclaredAmong(changedKeys),
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
+
+			return refusal;
+		};
 
 		if (groupsAfterHooks === null) {
 			if (!opts.allowFilterCancel) {
 				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
 				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
 				// option; on its own a null payload is invalid rather than a silent no-op.
-				throw new InvalidPayloadError({
+				throw await refuseHookAnswer(new InvalidPayloadError({
 					reason: `A filter hook cancelled the update, but this operation requires it`,
-				});
+				}));
 			}
 
 			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
@@ -1519,171 +1688,204 @@ implements AbstractService<Item> {
 
 		// A hook written before the event carried groups returns one payload, which
 		// would otherwise reach the write as a list of nothing.
-		const isGroupList = Array.isArray(groupsAfterHooks)
+		const isEntryList = Array.isArray(groupsAfterHooks)
 			&& carriesOnlyIndices(groupsAfterHooks)
-			&& groupsAfterHooks.every((group) => {
-				return isPlainObject(group?.data) && Array.isArray(group?.keys);
+			&& groupsAfterHooks.every((entry) => {
+				return isUpdateGroup(entry) || isTakenOverRow(entry);
 			});
 
-		if (!isGroupList) {
-			throw groupListRefusal();
+		if (!isEntryList) {
+			throw await refuseHookAnswer(groupListRefusal());
 		}
 
-		const keys = groupsAfterHooks.flatMap((group) => group.keys);
+		const dataGroups = groupsAfterHooks.filter(isUpdateGroup<Item>);
 
-		// A dropped key would cancel its row with no null in the result, and
-		// without allowFilterCancel; cancelling a row is the per-row event's job.
-		const unmatchedKeyCounts = new Map<string, number>();
+		const takenOverKeys = groupsAfterHooks
+			.filter(isTakenOverRow<Item>)
+			.map((entry) => entry.key);
 
-		for (const key of keys) {
-			const keyName = String(key);
+		const answeredKeys = [
+			...dataGroups.flatMap((group) => group.keys),
+			...takenOverKeys,
+		];
 
-			unmatchedKeyCounts.set(keyName, (unmatchedKeyCounts.get(keyName) ?? 0) + 1);
-		}
-
-		const dropsInputKey = inputKeys.some((key) => {
-			const keyName = String(key);
-			const unmatchedCount = unmatchedKeyCounts.get(keyName) ?? 0;
-
-			unmatchedKeyCounts.set(keyName, unmatchedCount - 1);
-
-			return unmatchedCount === 0;
+		const hookAddedKeys = answeredKeys.filter((key) => {
+			return !inputKeyNames.has(keyNameOf(key));
 		});
 
-		if (dropsInputKey) {
-			throw new InvalidPayloadError({
-				reason: oneLine`
-					A "${this.eventScope}.update" filter hook must keep every key it
-					received; a hook that cancels one row belongs on
-					"${this.eventScope}.update.one"
-				`,
-			});
-		}
-
-		// Keys a hook added are counted and validated like the caller's own.
-		if (!opts.bypassLimits && keys.length > inputKeys.length) {
-			mutationTracker.trackMutations(keys.length - inputKeys.length);
-		}
-
-		validateKeys(this.schema, this.collection, primaryKeyField, keys);
-
-		// One entry per row, in the caller's order: its key, or null for a row a
-		// per-row hook cancelled. This is what the update returns.
-		let rowKeys: (PrimaryKey | null)[] = [];
-		let candidateGroups: UpdateGroup<Item>[] = [];
-		let callerGroupIndexes: number[] = [];
-
-		// Then once per row, so a hook that only ever handled a single item keeps a seam
-		// that fires exactly once per row — which the group event, by design, does not.
-		// With nothing listening, the per-row copies would be built for nobody.
-		if (opts.emitEvents !== false && emitter.hasFilterListeners(rowEvent)) {
-			for (const [groupIndex, group] of groupsAfterHooks.entries()) {
-				for (const key of group.keys) {
-					const rowAfterHooks = await emitter.emitFilter<Partial<AnyItem>, null>(
-						rowEvent,
-						{
-							...cloneDeep(group.data),
-							[primaryKeyField]: key,
-						} as Partial<AnyItem>,
-						{
-							collection: this.collection,
-						},
-						{
-							...eventContext,
-							scopedCache: scopedCacheHookDeclarations.purge,
-						},
-					);
-
-					if (rowAfterHooks === null) {
-						if (!opts.allowFilterCancel) {
-							throw new InvalidPayloadError({
-								reason: oneLine`
-									A filter hook cancelled a row of the update, but this operation
-									requires it
-								`,
-							});
-						}
-
-						rowKeys.push(null);
-						continue;
-					}
-
-					if (!isPlainObject(rowAfterHooks)) {
-						throw new InvalidPayloadError({
-							reason: oneLine`
-								A "${this.eventScope}.update.one" filter hook must return the row
-								it received, or null to cancel it
-							`,
-						});
-					}
-
-					rowKeys.push(key);
-
-					candidateGroups.push({
-						data: omit(rowAfterHooks, primaryKeyField) as Partial<Item>,
-						keys: [key],
-					});
-
-					callerGroupIndexes.push(groupIndex);
-				}
+		// Keys a hook added are counted and validated like the caller's own, before
+		// any of them is compared with another.
+		try {
+			if (!opts.bypassLimits && hookAddedKeys.length > 0) {
+				mutationTracker.trackMutations(hookAddedKeys.length);
 			}
+
+			validateKeys(this.schema, this.collection, primaryKeyField, answeredKeys);
 		}
-		else {
-			rowKeys = keys;
-			candidateGroups = groupsAfterHooks;
-			callerGroupIndexes = groupsAfterHooks.map((_group, groupIndex) => groupIndex);
+		catch (error) {
+			throw await refuseHookAnswer(error);
 		}
 
-		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
-			.filter((field) => field.alias === true)
-			.map((field) => field.field);
+		const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
+			return group.keys.map((key) => keyNameOf(key));
+		}));
+
+		// Written by the hook and by Directus both, the row would hold whichever
+		// write lands last.
+		const doublyAnsweredKey = takenOverKeys.find((key) => {
+			return groupedKeyNames.has(keyNameOf(key));
+		});
+
+		if (doublyAnsweredKey !== undefined) {
+			throw await refuseHookAnswer(new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.update" filter hook took row
+					${keyNameOf(doublyAnsweredKey)} over as { key } but also left it in a
+					{ data, keys } group; answer each row one way
+				`,
+			}));
+		}
+
+		const answeredKeyCounts = new Map<string, number>();
+
+		for (const key of answeredKeys) {
+			const keyName = keyNameOf(key);
+			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
+
+			if (refusesRepeatedPks && answeredCount > 1) {
+				throw await refuseHookAnswer(new InvalidPayloadError({
+					reason: oneLine`
+						A "${this.eventScope}.update" filter hook answered with row
+						${keyName} more than once
+					`,
+				}));
+			}
+
+			answeredKeyCounts.set(keyName, answeredCount);
+		}
+
+		// One entry per row, in the caller's order: its key, or null for a row the
+		// hook dropped, which cancels it. This is what the update returns. Under
+		// lastWins a key sent twice is matched by count, so a hook dropping one of
+		// its copies cancels the later one.
+		// TODO: if a caller needs the dropped copy itself cancelled, match each
+		// answered row to its input row by position instead of counting keys.
+		const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
+			const keyName = keyNameOf(key);
+			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
+
+			if (!refusesRepeatedPks) {
+				answeredKeyCounts.set(keyName, answeredCount - 1);
+			}
+
+			return answeredCount > 0
+				? key
+				: null;
+		});
+
+		if (!opts.allowFilterCancel && rowKeys.includes(null)) {
+			throw await refuseHookAnswer(new InvalidPayloadError({
+				reason: oneLine`
+					A filter hook cancelled a row of the update, but this operation
+					requires it
+				`,
+			}));
+		}
 
 		const relationalFields = new Set(this.schema.relations
 			.filter((relation) => relation.collection === this.collection)
 			.map((relation) => relation.field));
 
 		const mergedGroups = mergeUpdateGroups(
-			candidateGroups,
-			callerGroupIndexes,
+			dataGroups,
 			(groupData) => {
 				return Object.entries(groupData).some(([field, value]) => {
 					const nestsAnItem = typeof value === 'object' && value !== null;
 
-					return aliases.includes(field)
+					return aliasFields.includes(field)
 						|| (relationalFields.has(field) && nestsAnItem);
 				});
 			},
+			keyNameOf,
 		);
 
 		const writingGroups = mergedGroups.filter((group) => {
-			return group.keys.length > 0 && !this.groupChangesNothing(group, aliases);
+			return group.keys.length > 0 && !this.groupChangesNothing(group, aliasFields);
 		});
 
-		// Snapshot the scope values these rows hold before the update so an update that
-		// moves a row to a new scope value purges both slices (old ∪ new).
+		for (const key of takenOverKeys) {
+			scopedCacheHookDeclarations.takenOverKeys.add(
+				takenOverScopedCacheKey(this.collection, key),
+			);
+		}
+
+		const skippedKeyNames = this.purgeSkippedKeyNames(scopedCacheHookDeclarations);
+
+		// A takeover the hook declared inert wrote nothing, so it moved no slice.
+		const changedTakenOverKeys = takenOverKeys.filter((key) => {
+			return !skippedKeyNames.has(keyNameOf(key));
+		});
+
+		// A row not read above was written by its hook before the read below, which
+		// sees only the slice it moved the row to: purged whole unless the hook
+		// declared the one it left.
+		const takeoverUndeclared = takeoverUndeclaredAmong(changedTakenOverKeys);
+
+		const directusWrittenKeys = writingGroups.flatMap((group) => group.keys);
+
+		// The scope values these rows hold before the update, so an update that moves
+		// a row to a new scope value purges both slices (old ∪ new). Read here only
+		// for the rows not read before the hooks.
 		// Empty when the collection isn't scoped.
-		const writtenKeys = writingGroups.flatMap((group) => group.keys);
-		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
+		const writtenKeys = [...directusWrittenKeys, ...changedTakenOverKeys];
+		const writtenKeyNames = new Set(writtenKeys.map((key) => keyNameOf(key)));
 
-		if (opts.onHookAddedRows && keys.length > inputKeys.length) {
-			const inputKeyNames = new Set(inputKeys.map((key) => String(key)));
-
-			const hookAddedKeys = writtenKeys.filter((key) => {
-				return !inputKeyNames.has(String(key));
+		// A read that fails leaves the rows' slices unknown: purged whole.
+		const hookAddedScopedCacheSnapshot = await this.scopedCache
+			.snapshot(writtenKeys.filter((key) => !readKeyNames.has(keyNameOf(key))))
+			.catch((): ScopedCacheSnapshot => {
+				return { canResolveSlicesFromRows: false, rows: [] };
 			});
 
-			opts.onHookAddedRows(hookAddedKeys, {
+		const oldScopedCacheSnapshot: ScopedCacheSnapshot = {
+			canResolveSlicesFromRows: inputScopedCacheSnapshot.canResolveSlicesFromRows
+				&& hookAddedScopedCacheSnapshot.canResolveSlicesFromRows,
+			rows: [
+				...inputScopedCacheSnapshot.rows.filter((snapshotRow) => {
+					return writtenKeyNames.has(keyNameOf(snapshotRow.key));
+				}),
+				...hookAddedScopedCacheSnapshot.rows,
+			],
+		};
+
+		const hookAddedWrittenKeys = directusWrittenKeys.filter((key) => {
+			return !inputKeyNames.has(keyNameOf(key));
+		});
+
+		if (opts.onHookAddedRows && hookAddedWrittenKeys.length > 0) {
+			opts.onHookAddedRows(hookAddedWrittenKeys, {
 				canResolveSlicesFromRows: oldScopedCacheSnapshot.canResolveSlicesFromRows,
 				rows: oldScopedCacheSnapshot.rows.filter((snapshotRow) => {
-					return !inputKeyNames.has(String(snapshotRow.key));
+					return !inputKeyNames.has(keyNameOf(snapshotRow.key));
 				}),
 			});
 		}
 
 		if (writingGroups.length === 0) {
-			// Nothing is written — every group was a no-op, or the per-row filter
-			// cancelled every row.
-			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			// Directus writes nothing — every group was a no-op, the per-row filter
+			// cancelled every row, or a hook took every row over.
+			if (changedTakenOverKeys.length > 0) {
+				await this.purgeUpdatedScopedCache(
+					writtenKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclared,
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
 
 			return rowKeys;
 		}
@@ -1726,7 +1928,7 @@ implements AbstractService<Item> {
 				for (const group of writingGroups) {
 					const result = await service.applyUpdateGroup(
 						group,
-						aliases,
+						aliasFields,
 						{
 							...opts,
 							mutationTracker,
@@ -1759,12 +1961,23 @@ implements AbstractService<Item> {
 			// On a transaction this call opened, the failure rolled every group back,
 			// leaving only what a hook wrote out of band. On the caller's, the groups
 			// written before the failure commit with it.
+			// A takeover was written by the hook, outside this call's transaction.
 			if (this.knex.isTransaction) {
 				await this.purgeUpdatedScopedCache(
 					writtenKeys,
 					oldScopedCacheSnapshot,
 					scopedCacheHookDeclarations,
 					opts,
+					takeoverUndeclared,
+				);
+			}
+			else if (changedTakenOverKeys.length > 0) {
+				await this.purgeUpdatedScopedCache(
+					changedTakenOverKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclared,
 				);
 			}
 			else {
@@ -1779,6 +1992,7 @@ implements AbstractService<Item> {
 			oldScopedCacheSnapshot,
 			scopedCacheHookDeclarations,
 			opts,
+			takeoverUndeclared,
 		);
 
 		if (opts.emitEvents !== false) {
@@ -1787,25 +2001,6 @@ implements AbstractService<Item> {
 				schema: this.schema,
 				accountability: this.accountability,
 			};
-
-			// One per written row, after the grouped event, so a per-row consumer sees
-			// exactly the rows that were written. Rows a per-row filter cancelled never
-			// reach here. `emitActionEvents` starts them together, so they are not
-			// ordered against the grouped event.
-			const rowActionEvents = emitter.hasActionListeners(rowEvent)
-				? applied.flatMap((group) => {
-					return group.keys.map((key) => {
-						return {
-							event: rowEvent,
-							meta: {
-								payload: { ...group.data, [primaryKeyField]: key },
-								collection: this.collection,
-							},
-							context: actionContext,
-						};
-					});
-				})
-				: [];
 
 			await emitActionEvents(
 				[
@@ -1817,7 +2012,6 @@ implements AbstractService<Item> {
 						},
 						context: actionContext,
 					},
-					...rowActionEvents,
 					...nestedActionEvents,
 				],
 				opts,
@@ -1849,8 +2043,20 @@ implements AbstractService<Item> {
 		oldScopedCacheSnapshot: ScopedCacheSnapshot,
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
 		opts: MutationOptions,
+		takeoverUndeclared: boolean,
 	): Promise<void> {
 		if (!shouldClearCache(this.cache, opts, this.collection)) {
+			return;
+		}
+
+		if (takeoverUndeclared) {
+			this.scopedCachePurged = await this.scopedCache.purge(
+				null,
+				declarations,
+				[],
+				{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+			);
+
 			return;
 		}
 
@@ -2177,6 +2383,46 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations =
 			createScopedCacheHookDeclarations(this.schema);
 
+		const inputKeyNames = new Set(inputKeys.map((key) => {
+			return this.primaryKeyNameOf(key);
+		}));
+
+		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+
+		// The rows of this collection a hook took over, written by the hook itself;
+		// one it declared inert wrote nothing.
+		const changedTakenOverKeys = (): PrimaryKey[] => {
+			const skippedKeyNames = this.purgeSkippedKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			return [...scopedCacheHookDeclarations.takenOverKeys]
+				.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
+				.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
+				.filter((takenOverKey) => {
+					return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
+				});
+		};
+
+		// An insert-shaped payload routes to createOne, where a filter hook can take
+		// the row over and return an existing key — an update in disguise, whose OLD
+		// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
+		// purge leaks it → coarse, unless the hook declared the row via
+		// `purgeBy(…, { forKey })`. An update hook can take over a row no payload
+		// sent, which no returned key names, so every row taken over in this
+		// collection counts.
+		const takeoverUndeclaredAmong = (takenOverKeys: PrimaryKey[]): boolean => {
+			const declaredKeyNames = this.purgeDeclaredKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			return takenOverKeys.some((takenOverKey) => {
+				const keyName = this.primaryKeyNameOf(takenOverKey);
+
+				return !inputKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
+			});
+		};
+
 		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
 		// retryable error.
 		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
@@ -2208,17 +2454,54 @@ implements AbstractService<Item> {
 				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
 			},
 			opts.mutationTracker.snapshot(),
-		);
+		).catch(async (error) => {
+			if (!shouldClearCache(this.cache, opts, this.collection)) {
+				throw error;
+			}
+
+			const takenOverKeys = changedTakenOverKeys();
+
+			// On the caller's transaction, the rows upserted before the failure commit
+			// with it, and nothing tells which they are.
+			if (this.knex.isTransaction) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					null,
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+				);
+			}
+			// A takeover was written by its hook, outside the rolled-back transaction.
+			else if (takenOverKeys.length > 0) {
+				await this.purgeUpdatedScopedCache(
+					takenOverKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclaredAmong(takenOverKeys),
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
+
+			throw error;
+		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
+			const takenOverKeys = changedTakenOverKeys();
+
 			// New scope values for every committed row (inserts + moved updates), re-read
 			// by returned key so a hook's take-over shows as whatever is now stored,
-			// plus the rows an update filter added, which no returned key names.
-			const newScopedCacheSnapshot = await this.scopedCache.snapshot(
-				primaryKeys
-					.filter((key): key is PrimaryKey => key !== null && key !== undefined)
-					.concat(hookAddedKeys),
-			);
+			// plus the rows an update filter added or took over, which no returned key
+			// names. A read that fails leaves the slices unknown: purged whole.
+			const newScopedCacheSnapshot = await this.scopedCache
+				.snapshot(
+					primaryKeys
+						.filter((key): key is PrimaryKey => key !== null && key !== undefined)
+						.concat(hookAddedKeys, takenOverKeys),
+				)
+				.catch(() => null);
 
 			const oldSnapshots = [oldScopedCacheSnapshot, ...hookAddedSnapshots];
 
@@ -2229,19 +2512,7 @@ implements AbstractService<Item> {
 				rows: oldSnapshots.flatMap((oldSnapshot) => oldSnapshot.rows),
 			};
 
-			// An insert-shaped payload routes to createOne, where a filter hook can take
-			// the row over and return an existing key — an update in disguise, whose OLD
-			// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
-			// purge leaks it → coarse, unless the hook declared its own purgeBy.
-			const someRowTakenOver = primaryKeys.some((key) => {
-				return key != null && scopedCacheHookDeclarations.takenOverKeys.has(
-					takenOverScopedCacheKey(this.collection, key),
-				);
-			});
-
-			const takeoverUndeclared =
-				someRowTakenOver
-				&& scopedCacheHookDeclarations.purgeFingerprints.length === 0;
+			const takeoverUndeclared = takeoverUndeclaredAmong(takenOverKeys);
 
 			const scopedCacheFingerprints = takeoverUndeclared
 				? null
@@ -2259,7 +2530,7 @@ implements AbstractService<Item> {
 					// An upsert's two sides never line up — an inserted row has no old
 					// side — so the diff reads as every field, which is what an insert
 					// means anyway.
-					rows: scopedCacheFingerprints === null
+					rows: scopedCacheFingerprints === null || newScopedCacheSnapshot === null
 						? undefined
 						: scopedCacheUpdatedRows(
 							oldScopedCacheRows,
@@ -2349,7 +2620,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
-						scopedCache: scopedCacheHookDeclarations.purge,
+						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 					},
 				)
 				: keys;

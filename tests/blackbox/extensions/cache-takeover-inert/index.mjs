@@ -11,35 +11,39 @@
 // The lookup runs on `context.database` (the mutation trx) so a row created earlier
 // in the same request is visible.
 
+import { mapCreateRows } from '@directus/utils';
+
 const COLLECTION = 'test_items_inert_dedup';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${COLLECTION}.items.create.one`, async (payload, _meta, context) => {
-		const itemsService = new services.ItemsService(COLLECTION, {
-			schema: context.schema,
-			accountability: context.accountability,
-			knex: context.database,
-		});
+	filter(`${COLLECTION}.items.create`, (entries, _meta, context) => {
+		return mapCreateRows(entries, async (payload) => {
+			const itemsService = new services.ItemsService(COLLECTION, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.database,
+			});
 
-		const [existing] = await itemsService.readByQuery(
-			{
-				filter: {
-					channel: { _eq: payload.channel },
-					body: { _eq: payload.body },
+			const [existing] = await itemsService.readByQuery(
+				{
+					filter: {
+						channel: { _eq: payload.channel },
+						body: { _eq: payload.body },
+					},
+					fields: ['id'],
+					limit: 1,
 				},
-				fields: ['id'],
-				limit: 1,
-			},
-			{ emitEvents: false },
-		);
+				{ emitEvents: false },
+			);
 
-		if (!existing) {
-			return payload;
-		}
+			if (!existing) {
+				return payload;
+			}
 
-		// Nothing to write and nothing to drop: the row already holds this payload.
-		context.scopedCache?.skipPurgeFor(existing.id);
+			// Nothing to write and nothing to drop: the row already holds this payload.
+			context.scopedCache?.skipPurgeFor(existing.id);
 
-		return existing.id;
+			return existing.id;
+		});
 	});
 }

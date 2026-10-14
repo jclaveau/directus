@@ -229,6 +229,15 @@ function buildCollectionPayload(
 			});
 
 			break;
+		case 'bigInteger':
+			payload.fields.push({
+				field: 'id',
+				type: 'bigInteger',
+				meta: { hidden: true, interface: 'input', readonly: true },
+				schema: { is_primary_key: true, has_auto_increment: true },
+			});
+
+			break;
 		case 'integer':
 		default:
 			payload.fields.push({

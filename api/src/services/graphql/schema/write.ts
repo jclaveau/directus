@@ -1,3 +1,5 @@
+import { RepeatedPkAnswers } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type { GraphQLResolveInfo } from 'graphql';
 import { GraphQLBoolean, GraphQLID, GraphQLList, GraphQLNonNull } from 'graphql';
 import type { ResolverDefinition, SchemaComposer } from 'graphql-compose';
@@ -86,6 +88,20 @@ export function getWritableTypes(
 		}
 	}
 
+	const repeatedPkArgument = {
+		type: schemaComposer.createEnumTC({
+			name: 'directus_repeated_pk_answer',
+			values: Object.fromEntries(RepeatedPkAnswers.map((repeatedPkAnswer) => {
+				return [repeatedPkAnswer, { value: repeatedPkAnswer }];
+			})),
+		}),
+		description: oneLine`
+			What the update does with a row it is sent more than once: refuse, the
+			default, refuses the update, lastWins writes every change in the order
+			sent.
+		`,
+	};
+
 	for (const collection of Object.values(schema.update.collections)) {
 		if (Object.keys(collection.fields).length === 0) continue;
 		if (SYSTEM_DENY_LIST.includes(collection.collection)) continue;
@@ -125,6 +141,7 @@ export function getWritableTypes(
 								`update_${collection.collection}_input`,
 							).NonNull,
 						],
+						...(gql.scope === 'items' && { onRepeatedPk: repeatedPkArgument }),
 					},
 					resolve: async ({ args, info }: { args: Record<string, any>; info: GraphQLResolveInfo }) =>
 						await resolveMutation(gql, args, info),
@@ -145,6 +162,7 @@ export function getWritableTypes(
 						data: toInputObjectType(UpdateCollectionTypes[collection.collection]!).setTypeName(
 							`update_${collection.collection}_input`,
 						).NonNull,
+						...(gql.scope === 'items' && { onRepeatedPk: repeatedPkArgument }),
 					},
 					resolve: async ({ args, info }: { args: Record<string, any>; info: GraphQLResolveInfo }) =>
 						await resolveMutation(gql, args, info),

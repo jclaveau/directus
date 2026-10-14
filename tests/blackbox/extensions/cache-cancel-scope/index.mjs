@@ -12,33 +12,41 @@
 // dedup hook) rather than build one, so the declaration can't drift from the
 // cached slice.
 
+import { mapCreateRows } from '@directus/utils';
+
 const MODERATED = 'test_items_moderated';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${MODERATED}.items.create.one`, async (payload, _meta, context) => {
-		if (payload.body !== 'spam' && payload.body !== 'flagged') {
-			return payload;
-		}
+	filter(`${MODERATED}.items.create`, (entries, _meta, context) => {
+		return mapCreateRows(entries, async (payload) => {
+			if (payload.body !== 'spam' && payload.body !== 'flagged') {
+				return payload;
+			}
 
-		if (payload.body === 'flagged') {
-			const itemsService = new services.ItemsService(MODERATED, {
-				schema: context.schema,
-				accountability: context.accountability,
-				knex: context.database,
-			});
+			if (payload.body === 'flagged') {
+				const itemsService = new services.ItemsService(MODERATED, {
+					schema: context.schema,
+					accountability: context.accountability,
+					knex: context.database,
+				});
 
-			const result = await itemsService.readByQuery(
-				{ filter: { channel: { _eq: payload.channel } }, fields: ['id'], limit: 1 },
-				{ emitEvents: false },
-			);
+				const result = await itemsService.readByQuery(
+					{
+					filter: { channel: { _eq: payload.channel } },
+					fields: ['id'],
+					limit: 1,
+				},
+					{ emitEvents: false },
+				);
 
-			context.scopedCache?.purgeBy(
-				result.getMeta?.()?.scopedCacheFingerprints ?? [],
-			);
-		}
+				context.scopedCache?.purgeBy(
+					result.getMeta?.()?.scopedCacheFingerprints ?? [],
+				);
+			}
 
-		// Veto the row: Directus cancels it. 'spam' declared nothing; 'flagged' declared
-		// its channel slice above.
-		return null;
+			// Veto the row: Directus cancels it. 'spam' declared nothing;
+			// 'flagged' declared its channel slice above.
+			return null;
+		});
 	});
 }

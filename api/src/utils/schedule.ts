@@ -1,4 +1,3 @@
-import { CronExpressionParser } from 'cron-parser';
 import schedule from 'node-schedule';
 import { useLogger } from '../logger/index.js';
 import { migrationsAreOutstanding } from '../outstanding-migrations.js';
@@ -8,15 +7,7 @@ export interface ScheduledJob {
 	stop(): Promise<void>;
 }
 
-export function validateCron(rule: string): boolean {
-	try {
-		CronExpressionParser.parse(rule);
-	} catch {
-		return false;
-	}
-
-	return true;
-}
+export { validateCron } from './validate-cron.js';
 
 export function scheduleSynchronizedJob(
 	id: string,

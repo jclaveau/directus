@@ -6,21 +6,25 @@
 // A filter (not action) hook, so the writes stay in the awaited critical path and
 // on the signal's transaction.
 
+import { mapCreateRows } from '@directus/utils';
+
 const ROW = 'merged_purge_row';
 const SIGNAL = 'merged_purge_signal';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${SIGNAL}.items.create.one`, async (payload, _meta, context) => {
-		const rowService = new services.ItemsService(ROW, {
-			schema: context.schema,
-			accountability: context.accountability,
-			knex: context.database,
+	filter(`${SIGNAL}.items.create`, (entries, _meta, context) => {
+		return mapCreateRows(entries, async (payload) => {
+			const rowService = new services.ItemsService(ROW, {
+				schema: context.schema,
+				accountability: context.accountability,
+				knex: context.database,
+			});
+
+			for (const updatedId of payload.updated_ids ?? []) {
+				await rowService.updateOne(updatedId, payload.updated_values);
+			}
+
+			return payload;
 		});
-
-		for (const updatedId of payload.updated_ids ?? []) {
-			await rowService.updateOne(updatedId, payload.updated_values);
-		}
-
-		return payload;
 	});
 }

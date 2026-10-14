@@ -30,9 +30,11 @@ vi.mock('./cache-events.js', () => {
 // `cacheConfigChanged` delivery.
 let busHandler: (payload: { ttl: string | null }) => void;
 
-// The last handler `onAction` was registered with — invoked to simulate a settings
-// write landing, whichever service performed it.
+// The handlers `onAction` was registered with for an update and for a create of
+// the singleton — invoked to simulate a settings write landing, whichever service
+// performed it.
 let settingsUpdateHandler: (meta: Record<string, any>) => void;
+let settingsCreateHandler: (meta: Record<string, any>) => void;
 
 let settingsRow: { cache_ttl: string | null } | undefined;
 
@@ -55,7 +57,12 @@ beforeEach(() => {
 		busHandler = handler;
 	});
 
-	mockEmitter.onAction.mockImplementation((_event: string, handler: any) => {
+	mockEmitter.onAction.mockImplementation((event: string, handler: any) => {
+		if (event === 'settings.create') {
+			settingsCreateHandler = handler;
+			return;
+		}
+
 		settingsUpdateHandler = handler;
 	});
 });
@@ -144,13 +151,15 @@ describe('initCacheConfig', () => {
 		await initCacheConfig();
 
 		expect(mockEmitter.onAction).toHaveBeenCalledWith(
-			'settings.update.one',
+			'settings.update',
 			expect.any(Function),
 		);
 
 		// The write never went through SettingsService — this is the shape a config-sync
 		// import produces — yet the node must both apply and announce it.
-		settingsUpdateHandler({ payload: { cache_ttl: '90s' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_ttl: '90s' }, keys: [1] }],
+		});
 
 		expect(resolvedCacheTtl()).toBe('90s');
 
@@ -163,11 +172,53 @@ describe('initCacheConfig', () => {
 			.toHaveBeenCalledWith('ttl_change', '90s');
 	});
 
+	// Under onRepeatedPk=lastWins one update can carry two changes to the
+	// singleton, written in order, so the later one is what the row holds.
+	it('announces the last cache_ttl an update writes', async () => {
+		await initCacheConfig();
+
+		settingsUpdateHandler({
+			payload: [
+				{ data: { cache_ttl: '90s' }, keys: [1] },
+				{ data: { cache_ttl: '5m' }, keys: [1] },
+			],
+		});
+
+		expect(resolvedCacheTtl()).toBe('5m');
+
+		expect(mockBus.publish.mock.calls).toEqual([
+			['cacheConfigChanged', { ttl: '5m' }],
+		]);
+	});
+
+	// A deployment nobody saved a setting on has no singleton row yet; the first
+	// write creates it.
+	it('announces the cache_ttl the create of the singleton writes', async () => {
+		await initCacheConfig();
+
+		expect(mockEmitter.onAction)
+			.toHaveBeenCalledWith('settings.create', expect.any(Function));
+
+		settingsCreateHandler({ payload: [{ cache_ttl: '90s' }] });
+
+		expect(resolvedCacheTtl()).toBe('90s');
+
+		expect(mockBus.publish.mock.calls).toEqual([
+			['cacheConfigChanged', { ttl: '90s' }],
+		]);
+
+		expect(mockRecordCacheConfigEvent.mock.calls).toEqual([
+			['ttl_change', '90s'],
+		]);
+	});
+
 	it('announces a cleared cache_ttl so peers fall back to env', async () => {
 		settingsRow = { cache_ttl: '5m' };
 		await initCacheConfig();
 
-		settingsUpdateHandler({ payload: { cache_ttl: null } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_ttl: null }, keys: [1] }],
+		});
 
 		expect(resolvedCacheTtl()).toBe('10m');
 
@@ -187,7 +238,9 @@ describe('initCacheConfig', () => {
 		mockBus.publish.mockClear();
 		mockRecordCacheConfigEvent.mockClear();
 
-		settingsUpdateHandler({ payload: { project_name: 'Acme' } });
+		settingsUpdateHandler({
+			payload: [{ data: { project_name: 'Acme' }, keys: [1] }],
+		});
 
 		expect(resolvedCacheTtl()).toBe('5m');
 		expect(mockBus.publish).not.toHaveBeenCalled();
@@ -200,7 +253,11 @@ describe('initCacheConfig', () => {
 		mockRecordCacheConfigEvent.mockRejectedValueOnce(new Error('table missing'));
 		await initCacheConfig();
 
-		expect(() => settingsUpdateHandler({ payload: { cache_ttl: '45s' } }))
+		expect(() => {
+			return settingsUpdateHandler({
+				payload: [{ data: { cache_ttl: '45s' }, keys: [1] }],
+			});
+		})
 			.not.toThrow();
 
 		// The value still applied and still went out — losing the annotation must not

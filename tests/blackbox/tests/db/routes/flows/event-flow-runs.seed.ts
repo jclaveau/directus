@@ -1,5 +1,5 @@
 import { getUrl } from '@common/config';
-import { CreateCollections, DeleteCollection } from '@common/functions';
+import { CreateCollections, CreateItem, DeleteCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import request from 'supertest';
@@ -8,6 +8,9 @@ import { expect, it } from 'vitest';
 export const collectionFlowRuns = 'test_event_flow_runs';
 export const collectionFlowRewrites = 'test_event_flow_rewrites';
 export const collectionFlowRefusals = 'test_event_flow_refusals';
+export const collectionFlowTakeovers = 'test_event_flow_takeovers';
+export const collectionFlowCancels = 'test_event_flow_cancels';
+export const collectionFlowKeys = 'test_event_flow_keys';
 
 // A flow holding `transform` is a filter flow whose `$last` return replaces the
 // change it was given.
@@ -45,6 +48,28 @@ export const eventFlows = [
 		transform: null,
 	},
 	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f08',
+		name: 'event-flow-runs takeover filter',
+		collection: collectionFlowTakeovers,
+		options: { type: 'filter', scope: ['items.create'], return: '$last' },
+		// The key of the row the seed inserts before any flow exists.
+		transform: 1,
+	},
+	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f09',
+		name: 'event-flow-runs cancel filter',
+		collection: collectionFlowCancels,
+		options: { type: 'filter', scope: ['items.create'], return: '$last' },
+		transform: null,
+	},
+	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f10',
+		name: 'event-flow-runs key filter',
+		collection: collectionFlowKeys,
+		options: { type: 'filter', scope: ['items.update'], return: '$last' },
+		transform: 7,
+	},
+	{
 		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f06',
 		name: 'event-flow-runs users update filter',
 		collection: 'directus_users',
@@ -68,6 +93,9 @@ export const seedDBStructure = () => {
 				collectionFlowRuns,
 				collectionFlowRewrites,
 				collectionFlowRefusals,
+				collectionFlowTakeovers,
+				collectionFlowCancels,
+				collectionFlowKeys,
 			]) {
 				await DeleteCollection(vendor, { collection });
 			}
@@ -83,6 +111,9 @@ export const seedDBStructure = () => {
 					collectionFlowRuns,
 					collectionFlowRewrites,
 					collectionFlowRefusals,
+					collectionFlowTakeovers,
+					collectionFlowCancels,
+					collectionFlowKeys,
 				].map((collection) => {
 					return {
 						collection,
@@ -93,6 +124,11 @@ export const seedDBStructure = () => {
 						],
 					};
 				}),
+			});
+
+			await CreateItem(vendor, {
+				collection: collectionFlowTakeovers,
+				item: { id: 1, name: 'claimed' },
 			});
 
 			// A run with accountability "all" writes a revision holding its $trigger,

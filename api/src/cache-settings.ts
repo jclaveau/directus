@@ -1,6 +1,11 @@
 import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
-import type { EventContext, Item } from '@directus/types';
+import type {
+	CreateEntry,
+	EventContext,
+	Item,
+	UpdateEntry,
+} from '@directus/types';
 import { parse as parseByteSize } from 'bytes';
 import type { Knex } from 'knex';
 import { useLogger } from './logger/index.js';
@@ -9,6 +14,13 @@ import {
 	getMilliseconds,
 	isPositiveDuration,
 } from './utils/get-milliseconds.js';
+
+/**
+ * What a `settings.create` or `settings.update` filter is handed one of: a
+ * create's entry or an update's group, each carrying the row data it writes,
+ * or a row an earlier hook took over as `{ key }`, which carries none.
+ */
+export type SettingsWriteEntry = CreateEntry | UpdateEntry | null;
 
 /**
  * `cache_settings`, mirrored so the hot path reads a module variable rather
@@ -507,12 +519,25 @@ export async function initCacheSettings(): Promise<void> {
 	const { default: emitter } = await import('./emitter.js');
 
 	// The create as well as the update: a deployment nobody has saved a setting
-	// on yet has no singleton row, and the first write to it makes one.
-	for (const event of ['settings.create.one', 'settings.update.one']) {
-		emitter.onFilter<Partial<Item>>(event, async (payload, _meta, context) => {
-			await flushBeforeEnabling(payload, context);
+	// on yet has no singleton row, and the first write to it makes one. Last, so
+	// it clears for what a flow filter, registered again on every reload, left.
+	for (const event of ['settings.create', 'settings.update']) {
+		emitter.onFilter<SettingsWriteEntry[] | null>(
+			event,
+			async (payload, _meta, context) => {
+				if (payload === null) {
+					return payload;
+				}
 
-			return payload;
-		});
+				for (const entry of payload) {
+					if (entry !== null && 'data' in entry) {
+						await flushBeforeEnabling(entry.data, context);
+					}
+				}
+
+				return payload;
+			},
+			{ runsLast: true },
+		);
 	}
 }

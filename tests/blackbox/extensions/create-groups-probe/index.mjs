@@ -8,13 +8,15 @@
 //   'legacy-shape'  → answers with that row's payload alone, the shape the
 //     event had before it carried entries.
 //   'twin-of-first' → answers { sameRowAs: 0 }, the row the create starts with.
-//   'cancel-in-group' → answers null for that row.
+//   'cancel-in-group' → its mapCreateRows returns null for that row.
 //   'strip-name' → deletes `name` off the list, the way a hook written for one
 //     payload strips a field.
 //   'check-name' → reads `name` off the list, the way a hook written for one
 //     payload refuses a value.
-//   'take-over' → inserts that row itself and answers { key } with its id,
+//   'take-over' → its mapCreateRows inserts that row itself and returns its id,
 //     taking the row over.
+
+import { mapCreateRows } from '@directus/utils';
 
 const COLLECTION = 'test_create_groups';
 const LOG = 'test_create_groups_log';
@@ -64,37 +66,29 @@ export default function registerHooks({ filter, action }, { database }) {
 			return legacyEntry.data;
 		}
 
-		return Promise.all(entries.map(async (entry) => {
-			if (entry?.data?.name === 'take-over') {
+		const markedEntries = entries.map((entry) => {
+			return entry?.data?.name === 'twin-of-first'
+				? { sameRowAs: 0 }
+				: entry;
+		});
+
+		return mapCreateRows(markedEntries, async (data) => {
+			if (data.name === 'take-over') {
 				const [insertedRow] = await database(COLLECTION)
 					.insert({ name: 'take-over' }, ['id']);
 
-				return { key: insertedRow.id };
+				return insertedRow.id;
 			}
 
-			if (entry?.data?.name === 'twin-of-first') {
-				return { sameRowAs: 0 };
-			}
-
-			if (entry?.data?.name === 'cancel-in-group') {
+			if (data.name === 'cancel-in-group') {
 				return null;
 			}
 
-			return entry;
-		}));
-	});
-
-	filter(`${COLLECTION}.items.create.one`, async (payload) => {
-		await record('items.create.one', 'filter', payload);
-
-		return payload;
+			return data;
+		});
 	});
 
 	action(`${COLLECTION}.items.create`, async (meta) => {
 		await record('items.create', 'action', meta.payload);
-	});
-
-	action(`${COLLECTION}.items.create.one`, async (meta) => {
-		await record('items.create.one', 'action', meta.payload);
 	});
 }

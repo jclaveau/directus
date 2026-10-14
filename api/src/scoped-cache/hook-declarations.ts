@@ -1,5 +1,6 @@
 import type {
 	MaybeWithMeta,
+	PrimaryKey,
 	ReadMeta,
 	SchemaOverview,
 	ScopedCacheCollectionPin,
@@ -10,6 +11,7 @@ import type {
 	ScopedCacheHookDeclarations,
 	WithMeta,
 } from '@directus/types';
+import { getNodeEnv } from '@directus/utils/node';
 import {
 	renderScopedCacheFingerprint,
 	scopedCacheDeclaredPins,
@@ -52,8 +54,9 @@ function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
 
 /**
  * The per-operation sink backing the `context.scopedCache` hook handle. The
- * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
- * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
+ * service wires ONE of `scope`/`purgeHandleFor(collection)` as `context.scopedCache`
+ * per the filter event (read → `scope.scopeTo`, mutation → `purgeBy`, its
+ * `skipPurgeFor` recorded under that collection); the hook pushes via it and
  * the service drains `scopeQueryCases` into the read's scope, `purgeFingerprints`
  * into the mutation's purge. Both are idempotent sinks. Safe with purging off
  * (then neither is read).
@@ -65,7 +68,8 @@ export function createScopedCacheHookDeclarations(
 	const seenScopeQueryCases = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
 	const epochs: Record<string, string | null> = {};
-	const purgeSkippedKeys = new Set<string>();
+	const purgeSkippedKeys = new Map<string, Set<string>>();
+	const purgeDeclaredKeys = new Map<string, Set<string>>();
 	const takenOverKeys = new Set<string>();
 	const purgeFingerprints: ScopedCacheFingerprint[] = [];
 	const seenPurgeFingerprints = new Set<string>();
@@ -128,16 +132,69 @@ export function createScopedCacheHookDeclarations(
 		}
 	}
 
+	// A slice the reads of a collection were cached in is named by every field the
+	// collection is scoped by, so a declaration leaving one out names none of them.
+	function missingScopeFieldsOf(declared: ScopedCacheDeclaredFingerprint): string[] {
+		const collectionSchema = schema.collections[declared.collection];
+
+		if (!collectionSchema) {
+			return [];
+		}
+
+		const pinnedFields = scopedCacheDeclaredPins(declared, schema)
+			.map((pin) => pin.field);
+
+		const scopeFields = collectionSchema.scopedCacheFields?.length
+			? collectionSchema.scopedCacheFields
+			: [collectionSchema.primary];
+
+		return scopeFields.filter((scopeField) => !pinnedFields.includes(scopeField));
+	}
+
 	function addPurgeFingerprint(
+		eventCollection: string,
 		input:
 			| ScopedCacheDeclaredFingerprint
 			| readonly ScopedCacheDeclaredFingerprint[],
+		forKey?: PrimaryKey,
 	): void {
 		const batch = Array.isArray(input)
 			? input
 			: [input as ScopedCacheDeclaredFingerprint];
 
 		for (const declared of batch) {
+			// `forKey` names a row of the event's collection: only a slice of that
+			// collection is one the row can have left.
+			const missingScopeFields = forKey !== undefined
+				&& declared.collection === eventCollection
+				? missingScopeFieldsOf(declared)
+				: null;
+
+			// Outside production a declaration that cannot narrow is a hook bug, told
+			// at the call; in production its takeover falls back to the coarse purge.
+			if (
+				missingScopeFields !== null
+				&& missingScopeFields.length > 0
+				&& (getNodeEnv() ?? 'production') !== 'production'
+			) {
+				const missingNames = missingScopeFields
+					.map((scopeField) => `"${scopeField}"`)
+					.join(', ');
+
+				throw new Error(
+					`purgeBy forKey ${forKey} on "${eventCollection}" must pin every`
+					+ ` scope field: missing ${missingNames}`,
+				);
+			}
+
+			if (missingScopeFields !== null && missingScopeFields.length === 0) {
+				const declaredKeys = purgeDeclaredKeys.get(eventCollection)
+					?? new Set<string>();
+
+				declaredKeys.add(String(forKey));
+				purgeDeclaredKeys.set(eventCollection, declaredKeys);
+			}
+
 			// View fields deliberately dropped: they name the columns a READ depends
 			// on, and a purge is answered by the scope alone. Kept, two reads of one
 			// slice through different columns would be two purges of the same thing.
@@ -165,6 +222,7 @@ export function createScopedCacheHookDeclarations(
 		purgeFingerprints,
 		manuallyPurgedKeys,
 		purgeSkippedKeys,
+		purgeDeclaredKeys,
 		takenOverKeys,
 		epochs,
 		scope: {
@@ -181,14 +239,21 @@ export function createScopedCacheHookDeclarations(
 				return resolved;
 			},
 		},
-		purge: {
-			purgeBy: (input) => addPurgeFingerprint(input),
-			// Deliberately not a fingerprint: the take-over check reads how many were
-			// declared, and declaring nothing to purge must not read as declaring a
-			// purge.
-			skipPurgeFor: (key) => {
-				purgeSkippedKeys.add(String(key));
-			},
+		purgeHandleFor: (collection) => {
+			return {
+				purgeBy: (input, options) => {
+					addPurgeFingerprint(collection, input, options?.forKey);
+				},
+				// Not a fingerprint: declaring nothing to purge must not read as
+				// declaring a purge.
+				skipPurgeFor: (key) => {
+					const skippedKeys = purgeSkippedKeys.get(collection)
+						?? new Set<string>();
+
+					skippedKeys.add(String(key));
+					purgeSkippedKeys.set(collection, skippedKeys);
+				},
+			};
 		},
 	};
 }

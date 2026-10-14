@@ -72,6 +72,7 @@ patch:
     - $ref: '../../openapi.yaml#/components/parameters/Sort'
     - $ref: '../../openapi.yaml#/components/parameters/Filter'
     - $ref: '../../openapi.yaml#/components/parameters/Search'
+    - $ref: '../../openapi.yaml#/components/parameters/OnRepeatedPk'
 responses:
   '200':
     description: Successful request

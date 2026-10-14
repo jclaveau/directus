@@ -2,6 +2,7 @@ import { getNoCacheUrl, getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
+	messageOfDocString,
 	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
@@ -221,10 +222,15 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(/^the "(.*)" flow ran with:$/, expectUpdateRuns);
 
 		then.optional(
-			/^the update is refused with a reason naming "(.*)"$/,
-			(reason: string) => {
+			'the update is refused with the message:',
+			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
-				expect(update.response!.body.errors[0].message).toContain(reason);
+
+				expect(update.response!.body.errors[0].message).toEqual(
+					messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}),
+				);
 			},
 		);
 
@@ -238,6 +244,7 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
@@ -256,6 +263,55 @@ describe.each(vendors)('%s', (vendor) => {
 					.sort());
 			},
 		);
+
+		when.optional(
+			/^the rows are created in (\w+):$/,
+			async (collection: string, table: Record<string, string>[]) => {
+				update.path = `/items/${collection}`;
+
+				update.response = await request(getUrl(vendor))
+					.post(update.path)
+					.query({ fields: 'id,name' })
+					.send(parseGherkinTable<{ name: string }>(table))
+					.set('Authorization', AUTH);
+			},
+		);
+
+		then.optional(
+			'the create answers:',
+			(table: Record<string, string>[]) => {
+				expect(update.response!.statusCode).toEqual(200);
+				expect(update.response!.body.data).toEqual(parseGherkinTable(table));
+			},
+		);
+
+		then.optional('the create answers no row', () => {
+			expect(update.response!.statusCode).toEqual(200);
+			expect(update.response!.body.data).toEqual([]);
+		});
+
+		then.optional(
+			/^\w+ holds:$/,
+			async (table: Record<string, string>[]) => {
+				const response = await request(getUrl(vendor))
+					.get(update.path)
+					.query({ fields: 'id,name', sort: 'id' })
+					.set('Authorization', AUTH);
+
+				expect(response.statusCode).toEqual(200);
+				expect(response.body.data).toEqual(parseGherkinTable(table));
+			},
+		);
+
+		then.optional(/^\w+ holds no row$/, async () => {
+			const response = await request(getUrl(vendor))
+				.get(update.path)
+				.query({ fields: 'id,name' })
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.data).toEqual([]);
+		});
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -265,7 +321,10 @@ describe.each(vendors)('%s', (vendor) => {
 			'a create runs the create flow once per row',
 			'a filter flow\'s return replaces the change it was given',
 			'a filter flow returning null refuses the update',
+			'an update filter flow returning a key refuses the update',
 			'an update of several users runs each users update flow once',
+			'a create filter flow returning a key takes the row over',
+			'a create filter flow returning null cancels the row',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, { rows: [], path: '' });

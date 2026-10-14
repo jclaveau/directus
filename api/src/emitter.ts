@@ -5,6 +5,7 @@ import { useLogger } from './logger/index.js';
 
 export class Emitter {
 	private filterEmitter;
+	private lastFilterEmitter;
 	private actionEmitter;
 	private initEmitter;
 
@@ -19,6 +20,7 @@ export class Emitter {
 		};
 
 		this.filterEmitter = new EventEmitter2(emitterOptions);
+		this.lastFilterEmitter = new EventEmitter2(emitterOptions);
 		this.actionEmitter = new EventEmitter2(emitterOptions);
 		this.initEmitter = new EventEmitter2(emitterOptions);
 	}
@@ -39,10 +41,21 @@ export class Emitter {
 	): Promise<TIn | TOut> {
 		const events = Array.isArray(event) ? event : [event];
 
-		const eventListeners = events.map((event) => ({
-			event,
-			listeners: this.filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
-		}));
+		const listenersOf = (filterEmitter: EventEmitter2) => {
+			return events.map((event) => {
+				return {
+					event,
+					listeners: filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
+				};
+			});
+		};
+
+		// A last filter runs after every other filter of every event emitted, so it
+		// sees the payload all of them left.
+		const eventListeners = [
+			...listenersOf(this.filterEmitter),
+			...listenersOf(this.lastFilterEmitter),
+		];
 
 		let updatedPayload: TIn | TOut = payload;
 
@@ -68,7 +81,10 @@ export class Emitter {
 			? event
 			: [event];
 
-		return events.some((name) => this.filterEmitter.listeners(name).length > 0);
+		return events.some((name) => {
+			return this.filterEmitter.listeners(name).length > 0
+				|| this.lastFilterEmitter.listeners(name).length > 0;
+		});
 	}
 
 	public hasActionListeners(event: string | string[]): boolean {
@@ -110,7 +126,16 @@ export class Emitter {
 		}
 	}
 
-	public onFilter<TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>): void {
+	public onFilter<TIn = unknown, TOut = TIn>(
+		event: string,
+		handler: FilterHandler<TIn, TOut>,
+		options?: { runsLast?: boolean },
+	): void {
+		if (options?.runsLast) {
+			this.lastFilterEmitter.on(event, handler);
+			return;
+		}
+
 		this.filterEmitter.on(event, handler);
 	}
 
@@ -124,6 +149,7 @@ export class Emitter {
 
 	public offFilter<TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>): void {
 		this.filterEmitter.off(event, handler);
+		this.lastFilterEmitter.off(event, handler);
 	}
 
 	public offAction(event: string, handler: ActionHandler): void {
@@ -136,6 +162,7 @@ export class Emitter {
 
 	public offAll(): void {
 		this.filterEmitter.removeAllListeners();
+		this.lastFilterEmitter.removeAllListeners();
 		this.actionEmitter.removeAllListeners();
 		this.initEmitter.removeAllListeners();
 	}

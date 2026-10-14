@@ -19,6 +19,15 @@ export type UpdateGroup<GroupItem = any> = {
 };
 
 /**
+ * What the grouped `items.update` filter receives and answers: a change for
+ * Directus to write (`{ data, keys }`), or a row a hook wrote itself (`{ key }`),
+ * whose key the update answers with and Directus does not write.
+ */
+export type UpdateEntry<EntryItem = any> =
+	| UpdateGroup<EntryItem>
+	| { key: PrimaryKey };
+
+/**
  * One row of a create, as the grouped `items.create` filter receives it (`{ data }`)
  * and answers it, position for position: insert it (`{ data }`), answer it with a
  * stored row instead (`{ key }`), answer it with the row of an earlier position of
@@ -64,6 +73,10 @@ export type QueryOptions = {
 	 */
 	skipScopedCacheEpochs?: boolean;
 };
+
+export const RepeatedPkAnswers = ['refuse', 'lastWins'] as const;
+
+export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 
 export type MutationOptions = {
 	/**
@@ -136,6 +149,23 @@ export type MutationOptions = {
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
 	allowFilterCancel?: boolean | undefined;
+
+	/**
+	 * What an update does with a row it is sent more than once. `refuse`, the
+	 * default, refuses the update before any hook runs, and refuses a hook
+	 * answering with a row twice; a row sent twice in one change is written
+	 * once. `lastWins` writes every change in the order sent. Left unset, the
+	 * refusal does not name the option; passing `refuse` names it, for a caller
+	 * that can pass `lastWins`.
+	 */
+	onRepeatedPk?: RepeatedPkAnswer | undefined;
+
+	/**
+	 * How the caller spells passing `onRepeatedPk` as `lastWins`, which the
+	 * refusal of a repeated row names when `onRepeatedPk` is `refuse`:
+	 * `onRepeatedPk=lastWins` when unset.
+	 */
+	lastWinsSpelling?: string | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so

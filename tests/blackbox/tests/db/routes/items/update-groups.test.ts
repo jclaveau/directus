@@ -2,6 +2,7 @@ import { getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
+	messageOfDocString,
 	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
@@ -11,17 +12,21 @@ import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
-import { beforeEach, describe, expect } from 'vitest';
+import { afterAll, beforeEach, describe, expect } from 'vitest';
 import {
 	collectionGrouped,
 	collectionGroupedLog,
 	collectionGroupedOwner,
+	collectionGroupedBadge,
 	collectionGroupedSlot,
 } from './update-groups.seed';
 
-type GroupedRow = { id: number; name: string; status: string | null };
+type GroupedRow = {
+	id: number | string;
+	name: string;
+	status: string | null;
+};
 type UpdateGroupLogged = { data: { status?: string }; keys: number[] };
-type RowLogged = { id: number; status?: string };
 
 type Update = {
 	collection: string;
@@ -38,6 +43,33 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
+	const createdUserIds: string[] = [];
+
+	afterAll(async () => {
+		const usersResponse = await request(getUrl(vendor))
+			.delete('/users')
+			.send(createdUserIds)
+			.set('Authorization', AUTH);
+
+		expect(usersResponse.statusCode).toEqual(204);
+
+		const policiesResponse = await request(getUrl(vendor))
+			.get('/policies')
+			.query({
+				'filter[name][_eq]': `${USER.APP_ACCESS.KEY}-Update Groups`,
+				fields: 'id',
+			})
+			.set('Authorization', AUTH);
+
+		for (const policy of policiesResponse.body.data) {
+			const policyResponse = await request(getUrl(vendor))
+				.delete(`/policies/${policy.id}`)
+				.set('Authorization', AUTH);
+
+			expect(policyResponse.statusCode).toEqual(204);
+		}
+	});
+
 	// Every scenario starts on an empty log, so a count holds only its own events.
 	beforeEach(async () => {
 		const response = await request(getUrl(vendor))
@@ -115,6 +147,18 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		given.optional(
+			'the rows, in the collection keyed by uuid:',
+			async (table: Record<string, string>[]) => {
+				update.collection = collectionGroupedBadge;
+
+				update.rows = await CreateItem(vendor, {
+					collection: collectionGroupedBadge,
+					item: parseGherkinTable<{ name: string }>(table),
+				});
+			},
+		);
+
+		given.optional(
 			'the requests authenticate as a user who may read and update the rows',
 			async () => {
 				for (const action of ['read', 'update'] as const) {
@@ -134,20 +178,148 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		given.optional('the users:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.post('/users')
+				.query({ fields: 'id,first_name,status', sort: 'first_name' })
+				.send(parseGherkinTable<{ name: string }>(table).map((user) => {
+					return {
+						first_name: user.name,
+						email: `${user.name}-${randomUUID()}@example.com`,
+					};
+				}))
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+
+			update.rows = response.body.data.map((user: {
+				id: string;
+				first_name: string;
+				status: string;
+			}) => {
+				return { id: user.id, name: user.first_name, status: user.status };
+			});
+
+			createdUserIds.push(...update.rows.map((row) => String(row.id)));
+		});
+
+		function batchOf(table: Record<string, string>[]) {
+			return parseGherkinTable<{ name: string; status: string | null }>(
+				table,
+			).map((change) => {
+				const id = update.rows.find((row) => row.name === change.name)!.id;
+
+				return change.status === null
+					? { id }
+					: { id, status: change.status };
+			});
+		}
+
 		when.optional('the batch sends:', async (table: Record<string, string>[]) => {
 			update.response = await request(getUrl(vendor))
 				.patch(`/items/${update.collection}`)
 				.query({ fields: 'name,status', sort: 'id' })
-				.send(parseGherkinTable<{ name: string; status: string | null }>(
-					table,
-				).map((change) => {
-					const id = update.rows.find((row) => row.name === change.name)!.id;
-
-					return change.status === null
-						? { id }
-						: { id, status: change.status };
-				}))
+				.send(batchOf(table))
 				.set('Authorization', update.authorization);
+		});
+
+		when.optional(
+			/^the batch sends, with onRepeatedPk "(.*)":$/,
+			async (onRepeatedPk: string, table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.query({ fields: 'name,status', sort: 'id', onRepeatedPk })
+					.send(batchOf(table))
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			'the batch sends, the key of its last row in capitals:',
+			async (table: Record<string, string>[]) => {
+				const sentChanges = batchOf(table);
+				const lastChange = sentChanges.at(-1)!;
+
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send([
+						...sentChanges.slice(0, -1),
+						{ ...lastChange, id: String(lastChange.id).toUpperCase() },
+					])
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			'the batch sends, the key of its last row with a leading zero:',
+			async (table: Record<string, string>[]) => {
+				const sentChanges = batchOf(table);
+				const lastChange = sentChanges.at(-1)!;
+
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send([
+						...sentChanges.slice(0, -1),
+						{ ...lastChange, id: `0${lastChange.id}` },
+					])
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			/^the batch is sent over GraphQL(?:, with onRepeatedPk (\w+))?:$/,
+			async (
+				onRepeatedPk: string | undefined,
+				table: Record<string, string>[],
+			) => {
+				update.response = await request(getUrl(vendor))
+					.post('/graphql')
+					.send({
+						query: `
+							mutation ($rows: [update_${update.collection}_input!]) {
+								update_${update.collection}_batch(
+									data: $rows
+									${onRepeatedPk
+										? `onRepeatedPk: ${onRepeatedPk}`
+										: ''}
+								) { name status }
+							}
+						`,
+						variables: { rows: batchOf(table) },
+					})
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			/^the users batch is sent over GraphQL(?:, with onRepeatedPk (\w+))?:$/,
+			async (
+				onRepeatedPk: string | undefined,
+				table: Record<string, string>[],
+			) => {
+				update.response = await request(getUrl(vendor))
+					.post('/graphql/system')
+					.send({
+						query: `
+							mutation ($rows: [update_directus_users_input!]) {
+								update_users_batch(
+									data: $rows
+									${onRepeatedPk
+										? `onRepeatedPk: ${onRepeatedPk}`
+										: ''}
+								) { id }
+							}
+						`,
+						variables: { rows: batchOf(table) },
+					})
+					.set('Authorization', AUTH);
+			},
+		);
+
+		when.optional('the OAS is read', async () => {
+			update.response = await request(getUrl(vendor))
+				.get('/server/specs/oas')
+				.set('Authorization', AUTH);
 		});
 
 		when.optional(
@@ -172,6 +344,19 @@ describe.each(vendors)('%s', (vendor) => {
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${collectionGrouped}`)
 					.send({ keys: update.rows.map((row) => row.id), data: { status } })
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			/^the rows are sent twice, updated to the status "(.*)"$/,
+			async (status: string) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${collectionGrouped}`)
+					.send({
+						keys: update.rows.flatMap((row) => [row.id, row.id]),
+						data: { status },
+					})
 					.set('Authorization', update.authorization);
 			},
 		);
@@ -209,6 +394,16 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		when.optional(
+			'the users batch sends:',
+			async (table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch('/users')
+					.send(batchOf(table))
+					.set('Authorization', AUTH);
+			},
+		);
+
 		then.optional('the update succeeds', () => {
 			expect(update.response!.statusCode).toEqual(200);
 		});
@@ -223,21 +418,13 @@ describe.each(vendors)('%s', (vendor) => {
 			async (phase: string, table: Record<string, string>[]) => {
 				expect(update.response!.statusCode).toEqual(200);
 
-				const ownKeys = update.rows.map((row) => row.id);
-
-				// Every grouped event naming one of these rows, so a second one fails
-				// the comparison.
-				const ownEvents: UpdateGroupLogged[][] = (
+				// Every grouped event of the scenario, so a second one fails the
+				// comparison.
+				const loggedEvents: UpdateGroupLogged[][] = (
 					await readLoggedPayloads('items.update', phase)
-				)
-					.map((payload: string) => JSON.parse(payload))
-					.filter((logged: UpdateGroupLogged[]) => {
-						return logged.some((group) => {
-							return group.keys.some((key) => ownKeys.includes(key));
-						});
-					});
+				).map((payload: string) => JSON.parse(payload));
 
-				expect(ownEvents.map((groups) => {
+				expect(loggedEvents.map((groups) => {
 					return groups.map((group) => {
 						return {
 							status: group.data.status,
@@ -249,12 +436,91 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		then.optional(
-			/^the update is refused with a reason naming "(.*)"$/,
-			(reason: string) => {
+			'the update is refused with the message:',
+			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
-				expect(update.response!.body.errors[0].message).toContain(reason);
+
+				expect(update.response!.body.errors[0].message)
+					.toEqual(messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}));
 			},
 		);
+
+		then.optional('the GraphQL update succeeds', () => {
+			expect(update.response!.statusCode).toEqual(200);
+			expect(update.response!.body.errors).toBeUndefined();
+		});
+
+		then.optional(
+			'the GraphQL update is refused with the message:',
+			(docString: string) => {
+				expect(update.response!.statusCode).toEqual(200);
+
+				expect(update.response!.body.errors[0].message)
+					.toEqual(messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}));
+			},
+		);
+
+		// A query the schema refuses never runs, so its reason sits one level down.
+		then.optional(
+			'the GraphQL query is rejected with the message:',
+			(docString: string) => {
+				expect(update.response!.statusCode).toEqual(400);
+
+				expect(update.response!.body.errors[0].extensions.code)
+					.toEqual('GRAPHQL_VALIDATION');
+
+				expect(
+					update.response!.body.errors[0].extensions.errors[0].message,
+				).toEqual(messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}));
+			},
+		);
+
+		then.optional(
+			"the collection's update references the OnRepeatedPk parameter",
+			() => {
+				const specDocument = update.response!.body;
+
+				expect(specDocument.paths[`/items/${update.collection}`].patch.parameters)
+					.toEqual([
+						{ $ref: '#/components/parameters/Fields' },
+						{ $ref: '#/components/parameters/Limit' },
+						{ $ref: '#/components/parameters/Meta' },
+						{ $ref: '#/components/parameters/Offset' },
+						{ $ref: '#/components/parameters/Sort' },
+						{ $ref: '#/components/parameters/Filter' },
+						{ $ref: '#/components/parameters/Search' },
+						{ $ref: '#/components/parameters/OnRepeatedPk' },
+					]);
+			},
+		);
+
+		and.optional('the OAS describes the OnRepeatedPk parameter', () => {
+			expect(update.response!.body.components.parameters.OnRepeatedPk)
+				.toEqual({
+					name: 'onRepeatedPk',
+					// The spec's folded scalar keeps its last line break.
+					description: `${oneLine`
+						What the update does with a row it is sent more than once.
+						\`refuse\` refuses the update before any hook runs, and refuses a
+						hook answering with a row twice; a row sent twice in one change
+						is written once. \`lastWins\` writes every change in the order
+						sent.
+					`}\n`,
+					in: 'query',
+					required: false,
+					schema: {
+						type: 'string',
+						enum: ['refuse', 'lastWins'],
+						default: 'refuse',
+					},
+				});
+		});
 
 		and.optional(/^the refusal's code is "(.*)"$/, (code: string) => {
 			expect(update.response!.body.errors[0].extensions.code).toEqual(code);
@@ -270,6 +536,7 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
@@ -283,52 +550,22 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
-		// A grouped payload names a row in a group's keys, a per-row one in its id.
 		and.optional(
-			'the update events naming these rows are:',
+			'the update events are:',
 			async (table: Record<string, string>[]) => {
-				const ownKeys = update.rows.map((row) => row.id);
-
-				const counts = await Promise.all(table.map(async ({ event, phase }) => {
-					const payloads: (UpdateGroupLogged[] | RowLogged)[] = (
-						await readLoggedPayloads(event!, phase!)
-					).map((payload: string) => JSON.parse(payload));
-
+				const eventCounts = await Promise.all(table.map(async ({ event, phase }) => {
 					return {
 						event,
 						phase,
-						count: payloads.filter((payload) => {
-							return Array.isArray(payload)
-								? payload.some((group) => {
-									return group.keys.some((key) => ownKeys.includes(key));
-								})
-								: ownKeys.includes(payload.id);
-						}).length,
+						count: (await readLoggedPayloads(event!, phase!)).length,
 					};
 				}));
 
-				expect(counts).toEqual(parseGherkinTable(table));
-			},
-		);
-
-		// The per-row actions run together, so their log order is not theirs.
-		and.optional(
-			'the per-row action names, in any order:',
-			async (table: Record<string, string>[]) => {
-				const ownKeys = update.rows.map((row) => row.id);
-
-				const actedKeys = (await readLoggedPayloads('items.update.one', 'action'))
-					.map((payload: string) => (JSON.parse(payload) as RowLogged).id)
-					.filter((key: number) => ownKeys.includes(key));
-
-				expect(namesOf(update, actedKeys).sort()).toEqual(
-					parseGherkinTable<{ name: string }>(table)
-						.map((row) => row.name)
-						.sort(),
-				);
+				expect(eventCounts).toEqual(parseGherkinTable(table));
 			},
 		);
 
@@ -336,9 +573,7 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional('no update event was logged', async () => {
 			expect([
 				...await readLoggedPayloads('items.update', 'filter'),
-				...await readLoggedPayloads('items.update.one', 'filter'),
 				...await readLoggedPayloads('items.update', 'action'),
-				...await readLoggedPayloads('items.update.one', 'action'),
 			]).toEqual([]);
 		});
 
@@ -372,6 +607,19 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		and.optional('the users hold:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.get('/users')
+				.query({
+					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+					fields: 'first_name,status',
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.data).toEqual(parseGherkinTable(table));
+		});
+
 		// One revision per row written, in the order the rows were written.
 		and.optional(
 			'the revisions name the rows in this order:',
@@ -404,7 +652,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
-			'an update fires the grouped event once, then the per-row one per row',
+			'an update fires the grouped event once',
 			'a batch where every row writes nothing answers with every row',
 			'a batch answers with every row it was sent, no-op rows included',
 			'rows side by side carrying the same change are written together',
@@ -425,10 +673,39 @@ describe.each(vendors)('%s', (vendor) => {
 				once
 			`,
 			oneLine`
-				a grouped hook answering with one payload is refused, naming the
-				per-row event
+				a batch sending a row twice is refused before any update hook runs
 			`,
-			'a grouped hook dropping a key is refused, naming the per-row event',
+			oneLine`
+				a batch passing an unknown onRepeatedPk is refused before any hook
+			`,
+			'a batch sending a uuid twice, once in capitals, is refused',
+			oneLine`
+				a batch sending a row twice, once with a leading zero, is refused
+			`,
+			oneLine`
+				a GraphQL batch sending a row twice is refused before any hook
+			`,
+			oneLine`
+				a GraphQL batch passing onRepeatedPk lastWins keeps the last
+				change
+			`,
+			'a GraphQL batch passing an unknown onRepeatedPk is refused',
+			oneLine`
+				the OAS describes onRepeatedPk on a collection's batch update
+			`,
+			'a row sent twice under one change reaches the hooks once',
+			oneLine`
+				a grouped hook answering with a row twice is refused, writing
+				nothing
+			`,
+			oneLine`
+				a grouped hook answering with one payload is refused, naming the
+				helper
+			`,
+			oneLine`
+				a grouped hook dropping a key cancels that row, its sibling
+				written
+			`,
 			oneLine`
 				a grouped hook deleting a field off the list is refused, writing
 				nothing
@@ -440,21 +717,27 @@ describe.each(vendors)('%s', (vendor) => {
 			'a malformed key is refused before any update hook runs',
 			'an update naming no row runs no update hook',
 			'a batch no update hook listens to is written as it was sent',
-			'a per-row hook cancels its row and its siblings are written',
 			oneLine`
-				a per-row hook rewriting one row splits its group, the rewrite
-				written
+				a hook mapping its rows cancels one, its siblings written together
 			`,
+			'a hook mapping its rows splits off the one it rewrote',
 			oneLine`
-				a nested owner sent to several rows is created once, whatever the
-				per-row hook
+				a hook mapping its rows takes one over, Directus writing the others
 			`,
+			'a nested owner sent to several rows a hook maps is created once',
+			'a row a hook adds to an update is written, left out of the answer',
+			'a users batch sending a user twice is refused, no onRepeatedPk to pass',
+			oneLine`
+				a GraphQL users batch sending a user twice is refused, naming no
+				option
+			`,
+			'a GraphQL users batch passing onRepeatedPk is rejected',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {
 					collection: collectionGrouped,
 					rows: [],
-					malformedKey: `not-a-key-${randomUUID()}`,
+					malformedKey: 'not-a-key',
 					authorization: AUTH,
 				});
 			}, 60_000);

@@ -110,16 +110,33 @@ describe('update messages', () => {
 });
 
 describe('create messages', () => {
-	test('a relation create sends one message per row', async () => {
-		await emitter.emitAction('relations.create', {
-			payload: [{ many_collection: 'articles' }],
-			keys: [5],
-			collection: 'directus_relations',
+	test('a create sends one message per row, each with its key', async () => {
+		await emitter.emitAction('items.create', {
+			payload: [{ title: 'a' }, { title: 'b' }],
+			keys: [1, 2],
+			collection: 'articles',
 		});
 
-		await emitter.emitAction('relations.create.one', {
-			payload: { many_collection: 'articles' },
-			key: 5,
+		expect(publishEvent.mock.calls).toEqual([
+			['websocket.event', {
+				collection: 'articles',
+				action: 'create',
+				key: 1,
+				payload: { title: 'a' },
+			}],
+			['websocket.event', {
+				collection: 'articles',
+				action: 'create',
+				key: 2,
+				payload: { title: 'b' },
+			}],
+		]);
+	});
+
+	test('a relation create sends one message per row', async () => {
+		await emitter.emitAction('relations.create', {
+			payload: [{ many_collection: 'articles' }, { many_collection: 'authors' }],
+			keys: [5, 6],
 			collection: 'directus_relations',
 		});
 
@@ -129,6 +146,12 @@ describe('create messages', () => {
 				action: 'create',
 				key: 5,
 				payload: { many_collection: 'articles', key: 5 },
+			}],
+			['websocket.event', {
+				collection: 'directus_relations',
+				action: 'create',
+				key: 6,
+				payload: { many_collection: 'authors', key: 6 },
 			}],
 		]);
 	});
@@ -143,12 +166,6 @@ describe('create messages', () => {
 		await emitter.emitAction('fields.create', {
 			payload: [{ field: 'body' }],
 			keys: [7],
-			collection: 'directus_fields',
-		});
-
-		await emitter.emitAction('fields.create.one', {
-			payload: { field: 'body' },
-			key: 7,
 			collection: 'directus_fields',
 		});
 

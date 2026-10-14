@@ -13,6 +13,8 @@
 // It also exposes the collection-wide sweep, which finds its work by scanning for
 // the collection's index sets rather than by naming one.
 
+import { mapCreateRows } from '@directus/utils';
+
 const COLLECTION = 'purge_fingerprint_index_race';
 
 // Only the read asking for this slice is held; every other read of the collection,
@@ -42,15 +44,17 @@ export default function registerHooks({ filter }, { scopedCache }) {
 	// new row's own slice and its key — never the held slice — so the collection-wide
 	// sweep this raises is the only thing that can reach the entries under test. An
 	// update would have dropped them through its own slice purge and proved nothing.
-	filter(`${COLLECTION}.items.create.one`, async (payload) => {
-		if (payload?.label !== SWEEP_LABEL) {
+	filter(`${COLLECTION}.items.create`, (entries) => {
+		return mapCreateRows(entries, async (payload) => {
+			if (payload?.label !== SWEEP_LABEL) {
+				return payload;
+			}
+
+			// A row carrying no primary key is unresolvable, so the host degrades to the
+			// collection-wide purge — the one that scans for the collection's index sets.
+			await scopedCache?.purgeForMutatedRows(COLLECTION, [{}]);
+
 			return payload;
-		}
-
-		// A row carrying no primary key is unresolvable, so the host degrades to the
-		// collection-wide purge — the one that scans for the collection's index sets.
-		await scopedCache?.purgeForMutatedRows(COLLECTION, [{}]);
-
-		return payload;
+		});
 	});
 }

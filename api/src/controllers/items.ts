@@ -1,6 +1,17 @@
-import { ErrorCode, ForbiddenError, RouteNotFoundError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidQueryError,
+	RouteNotFoundError,
+	isDirectusError,
+} from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
-import type { PrimaryKey } from '@directus/types';
+import {
+	RepeatedPkAnswers,
+	type MutationOptions,
+	type PrimaryKey,
+	type RepeatedPkAnswer,
+} from '@directus/types';
 import express from 'express';
 import collectionExists from '../middleware/collection-exists.js';
 import { mergeContentVersions } from '../middleware/merge-content-versions.js';
@@ -192,17 +203,43 @@ router.patch(
 			return next();
 		}
 
+		const onRepeatedPk = req.query['onRepeatedPk'];
+
+		if (
+			onRepeatedPk !== undefined
+			&& !RepeatedPkAnswers.includes(onRepeatedPk as RepeatedPkAnswer)
+		) {
+			throw new InvalidQueryError({
+				reason: `"onRepeatedPk" must be one of ${RepeatedPkAnswers.join(', ')}`,
+			});
+		}
+
+		// Named, so a refusal of a repeated row names the option this route reads.
+		const updateOptions: MutationOptions = {
+			allowFilterCancel: true,
+			onRepeatedPk: (onRepeatedPk ?? 'refuse') as RepeatedPkAnswer,
+		};
+
 		let keys: (PrimaryKey | null)[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
+			keys = await service.updateBatch(req.body, updateOptions);
 		}
 		else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data, { allowFilterCancel: true });
+			keys = await service.updateMany(
+				req.body.keys,
+				req.body.data,
+				updateOptions,
+			);
 		}
 		else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data, { allowFilterCancel: true });
+
+			keys = await service.updateByQuery(
+				sanitizedQuery,
+				req.body.data,
+				updateOptions,
+			);
 		}
 
 		res.locals['scopedCachePurged'] = service.scopedCachePurged;

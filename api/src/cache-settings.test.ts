@@ -753,24 +753,48 @@ test('clears ahead of the create as well as the update', async () => {
 	await initCacheSettings();
 
 	expect(vi.mocked(emitter.onFilter).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create.one', 'settings.update.one']);
-
-	const write = { cache_settings: { response: true } };
+		.toEqual(['settings.create', 'settings.update']);
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
-		write,
+		[{ data: { cache_settings: { response: true } } }],
 		{} as never,
 		{ accountability: null } as never,
-	)).resolves.toEqual({ cache_settings: { response: true } });
+	)).resolves.toEqual([{ data: { cache_settings: { response: true } } }]);
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
-		write,
+		[{ data: { cache_settings: { response: true } }, keys: [1] }],
 		{} as never,
 		{ accountability: null } as never,
-	)).resolves.toEqual({ cache_settings: { response: true } });
+	)).resolves.toEqual([
+		{ data: { cache_settings: { response: true } }, keys: [1] },
+	]);
 
 	expect(clearCacheTargets).toHaveBeenCalledTimes(2);
 	expect(clearCacheTargets).toHaveBeenCalledWith(['response']);
+});
+
+// Flow filters re-register on every flows reload, so they land after this one;
+// registering it to run last lets the clear see what they changed.
+test('clears after every other filter of the write', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await initCacheSettings();
+
+	expect(emitter.onFilter).toHaveBeenCalledTimes(2);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		1,
+		'settings.create',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		2,
+		'settings.update',
+		expect.any(Function),
+		{ runsLast: true },
+	);
 });
 
 test('hands the filter the caller the event carries', async () => {
@@ -779,10 +803,33 @@ test('hands the filter the caller the event carries', async () => {
 	await initCacheSettings();
 
 	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
-		{ cache_settings: { response: true } },
+		[{ data: { cache_settings: { response: true } }, keys: [1] }],
 		{} as never,
 		{ accountability: { user: 'editor', admin: false } } as never,
 	))
 		.rejects
 		.toThrowError(ForbiddenError);
+});
+
+// A filter registered ahead of this one can cancel the whole write by answering
+// null, which the next filter receives as its payload.
+test('passes a write an earlier filter cancelled through', async () => {
+	// Serving is off, where a write switching it on clears first.
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await initCacheSettings();
+
+	await expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
+		null,
+		{} as never,
+		{ accountability: null } as never,
+	)).resolves.toBeNull();
+
+	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
+		null,
+		{} as never,
+		{ accountability: null } as never,
+	)).resolves.toBeNull();
+
+	expect(clearCacheTargets).not.toHaveBeenCalled();
 });

@@ -40,9 +40,10 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 // The handler `subscribe` registered — a peer's (or this node's own) delivery.
 let busHandler: (payload: { rule: string | null }) => Promise<void>;
 
-// The handler `onAction` registered — a settings write landing, whichever
-// service performed it.
+// The handlers `onAction` registered for an update and for a create of the
+// singleton — a settings write landing, whichever service performed it.
 let settingsUpdateHandler: (meta: Record<string, unknown>) => void;
+let settingsCreateHandler: (meta: Record<string, unknown>) => void;
 
 let settingsRow: { cache_audit_schedule: string | null } | undefined;
 
@@ -103,7 +104,12 @@ beforeEach(() => {
 		busHandler = handler;
 	});
 
-	mockEmitter.onAction.mockImplementation((_event: string, handler: any) => {
+	mockEmitter.onAction.mockImplementation((event: string, handler: any) => {
+		if (event === 'settings.create') {
+			settingsCreateHandler = handler;
+			return;
+		}
+
 		settingsUpdateHandler = handler;
 	});
 });
@@ -139,7 +145,9 @@ describe('cache-audit schedule', () => {
 		await busHandler({ rule: '*/5 * * * *' });
 		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
 
-		settingsUpdateHandler({ payload: { cache_audit_schedule: '0 4 * * *' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_audit_schedule: '0 4 * * *' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).toHaveBeenCalledWith(
 			'cacheAuditScheduleChanged',
@@ -233,16 +241,20 @@ describe('cache-audit schedule', () => {
 		await cacheAuditSchedule();
 
 		expect(mockEmitter.onAction)
-			.toHaveBeenCalledWith('settings.update.one', expect.any(Function));
+			.toHaveBeenCalledWith('settings.update', expect.any(Function));
 
-		settingsUpdateHandler({ payload: { cache_audit_schedule: '0 5 * * *' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_audit_schedule: '0 5 * * *' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).toHaveBeenCalledWith(
 			'cacheAuditScheduleChanged',
 			{ rule: '0 5 * * *' },
 		);
 
-		settingsUpdateHandler({ payload: { cache_audit_schedule: '' } });
+		settingsUpdateHandler({
+			payload: [{ data: { cache_audit_schedule: '' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).toHaveBeenLastCalledWith(
 			'cacheAuditScheduleChanged',
@@ -250,11 +262,44 @@ describe('cache-audit schedule', () => {
 		);
 	});
 
+	// Under onRepeatedPk=lastWins one update can carry two changes to the
+	// singleton, written in order, so the later one is what the row holds.
+	it('announces the last rule an update writes', async () => {
+		await cacheAuditSchedule();
+
+		settingsUpdateHandler({
+			payload: [
+				{ data: { cache_audit_schedule: '0 5 * * *' }, keys: [1] },
+				{ data: { cache_audit_schedule: '0 6 * * *' }, keys: [1] },
+			],
+		});
+
+		expect(mockBus.publish.mock.calls).toEqual([
+			['cacheAuditScheduleChanged', { rule: '0 6 * * *' }],
+		]);
+	});
+
+	// A deployment nobody saved a setting on has no singleton row yet; the first
+	// write creates it.
+	it('announces the rule the create of the singleton writes', async () => {
+		await cacheAuditSchedule();
+
+		expect(mockEmitter.onAction)
+			.toHaveBeenCalledWith('settings.create', expect.any(Function));
+
+		settingsCreateHandler({ payload: [{ cache_audit_schedule: '0 5 * * *' }] });
+
+		expect(mockBus.publish.mock.calls).toEqual([
+			['cacheAuditScheduleChanged', { rule: '0 5 * * *' }],
+		]);
+	});
+
 	it('leaves the bus alone on a settings write about something else', async () => {
 		await cacheAuditSchedule();
 
-		settingsUpdateHandler({ payload: { project_name: 'x' } });
-		settingsUpdateHandler({ payload: undefined });
+		settingsUpdateHandler({
+			payload: [{ data: { project_name: 'x' }, keys: [1] }],
+		});
 
 		expect(mockBus.publish).not.toHaveBeenCalled();
 	});

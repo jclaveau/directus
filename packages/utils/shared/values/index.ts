@@ -16,6 +16,8 @@ export { getRedactedString, REDACTED_TEXT } from '../get-redacted-string.js';
 export { getRelation } from '../get-relation.js';
 export { getSimpleHash } from '../get-simple-hash.js';
 export { isObject } from '../is-object.js';
+export { mapCreateRows } from '../map-create-rows.js';
+export { mapUpdateRows } from '../map-update-rows.js';
 export { noproto, parseJSON } from '../parse-json.js';
 export { toArray } from '../to-array.js';
 export { toBoolean } from '../to-boolean.js';

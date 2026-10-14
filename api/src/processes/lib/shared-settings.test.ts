@@ -331,10 +331,13 @@ test('announces a write to either column, and nothing else', async () => {
 	// and reads neither: what it announces is that a column moved.
 	const context = {} as EventContext;
 
-	written({ payload: { project_name: 'planner' } }, context);
+	written({ payload: [{ project_name: 'planner' }] }, context);
 	expect(publish).not.toHaveBeenCalled();
 
-	written({ payload: { supervisor_settings: { listenTimeout: 20_000 } } }, context);
+	written(
+		{ payload: [{ supervisor_settings: { listenTimeout: 20_000 } }] },
+		context,
+	);
 
 	expect(publish).toHaveBeenCalledWith(
 		'sharedSettingsChanged',
@@ -352,13 +355,17 @@ test('announces the create as well as the update', async () => {
 	await initSharedSettings();
 
 	expect(vi.mocked(emitter.onAction).mock.calls.map(([event]) => event))
-		.toEqual(['settings.create.one', 'settings.update.one']);
+		.toEqual(['settings.create', 'settings.update']);
 
-	const written = { payload: { autoscale_settings: { maxWorkers: 8 } } };
+	vi.mocked(emitter.onAction).mock.calls[0]![1](
+		{ payload: [{ autoscale_settings: { maxWorkers: 8 } }] },
+		{} as EventContext,
+	);
 
-	for (const [, announce] of vi.mocked(emitter.onAction).mock.calls) {
-		announce(written, {} as EventContext);
-	}
+	vi.mocked(emitter.onAction).mock.calls[1]![1](
+		{ payload: [{ data: { autoscale_settings: { maxWorkers: 8 } }, keys: [1] }] },
+		{} as EventContext,
+	);
 
 	expect(publish).toHaveBeenCalledTimes(2);
 
@@ -397,7 +404,7 @@ test('outlives a bus it cannot announce on', async () => {
 	const [, written] = vi.mocked(emitter.onAction).mock.calls[0]!;
 
 	written(
-		{ payload: { autoscale_settings: { maxWorkers: 8 } } },
+		{ payload: [{ autoscale_settings: { maxWorkers: 8 } }] },
 		{} as EventContext,
 	);
 

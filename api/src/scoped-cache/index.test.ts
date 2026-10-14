@@ -590,17 +590,161 @@ describe('createScopedCacheHookDeclarations', () => {
 		})
 		.build();
 
-	it('records a key whose purge a hook skipped, without adding a pin', () => {
-		const { purge, scopeQueryCases, purgeSkippedKeys } =
+	it(oneLine`
+		records a key whose purge a hook skipped under the collection of its handle,
+		without adding a pin
+	`, () => {
+		const { purgeHandleFor, scopeQueryCases, purgeSkippedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.skipPurgeFor(7);
+		purgeHandleFor('notes').skipPurgeFor(7);
+		purgeHandleFor('authors').skipPurgeFor(8);
 
-		expect([...purgeSkippedKeys]).toEqual(['7']);
+		expect(purgeSkippedKeys).toEqual(new Map([
+			['notes', new Set(['7'])],
+			['authors', new Set(['8'])],
+		]));
 
-		// Declaring nothing to purge must not read as declaring a purge: the
-		// takeover check keys on the declaration count.
+		// Declaring nothing to purge must not read as declaring a purge.
 		expect(scopeQueryCases).toEqual([]);
+	});
+
+	it(oneLine`
+		records the row a purgeBy names under the collection of its handle, and only
+		when a fingerprint of that collection declares it
+	`, () => {
+		const { purgeHandleFor, purgeDeclaredKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		purgeHandleFor('articles').purgeBy([
+			{ collection: 'authors', pinnedScope: { id: [5] } },
+			{ collection: 'articles', pinnedScope: { id: [6] } },
+		], { forKey: 7 });
+
+		purgeHandleFor('articles').purgeBy({
+			collection: 'books',
+			pinnedScope: { id: [8] },
+		}, { forKey: 9 });
+
+		purgeHandleFor('articles').purgeBy({
+			collection: 'books',
+			pinnedScope: { id: [10] },
+		});
+
+		expect(purgeDeclaredKeys).toEqual(new Map([
+			['articles', new Set(['7'])],
+		]));
+	});
+
+	describe('a forKey declaration on a collection scoped by two fields', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		it('records the row when the declaration pins both', () => {
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor, purgeDeclaredKeys } =
+				createScopedCacheHookDeclarations(teamSchema);
+
+			purgeHandleFor('lessons').purgeBy({
+				collection: 'lessons',
+				pinnedScope: { student: ['A'], team: ['red'] },
+			}, { forKey: 2 });
+
+			expect(purgeDeclaredKeys).toEqual(new Map([
+				['lessons', new Set(['2'])],
+			]));
+		});
+
+		it(oneLine`
+			in production, leaves the row undeclared when the declaration pins one, so
+			its takeover purges coarse
+		`, () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor, purgeDeclaredKeys } =
+				createScopedCacheHookDeclarations(teamSchema);
+
+			purgeHandleFor('lessons').purgeBy({
+				collection: 'lessons',
+				pinnedScope: { student: ['A'] },
+			}, { forKey: 2 });
+
+			expect(purgeDeclaredKeys).toEqual(new Map());
+		});
+
+		it('outside production, refuses a declaration that pins one', () => {
+			vi.stubEnv('NODE_ENV', 'test');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor } = createScopedCacheHookDeclarations(teamSchema);
+
+			expect(() => {
+				purgeHandleFor('lessons').purgeBy({
+					collection: 'lessons',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+			}).toThrow(new Error(oneLine`
+				purgeBy forKey 2 on "lessons" must pin every scope field: missing
+				"team"
+			`));
+		});
+
+		it(oneLine`
+			outside production, names every scope field a declaration leaves out
+		`, () => {
+			vi.stubEnv('NODE_ENV', 'test');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor } = createScopedCacheHookDeclarations(teamSchema);
+
+			expect(() => {
+				purgeHandleFor('lessons').purgeBy({
+					collection: 'lessons',
+					pinnedScope: { id: [2] },
+				}, { forKey: 2 });
+			}).toThrow(new Error(oneLine`
+				purgeBy forKey 2 on "lessons" must pin every scope field: missing
+				"student", "team"
+			`));
+		});
 	});
 
 	it(oneLine`
@@ -663,21 +807,23 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, purgeSkippedKeys } =
+		const { purgeHandleFor, purgeSkippedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.skipPurgeFor(7);
-		purge.skipPurgeFor('7');
+		purgeHandleFor('notes').skipPurgeFor(7);
+		purgeHandleFor('notes').skipPurgeFor('7');
 
-		expect([...purgeSkippedKeys]).toEqual(['7']);
+		expect(purgeSkippedKeys).toEqual(new Map([['notes', new Set(['7'])]]));
 	});
 
 	it('scopeTo and purgeBy fill sinks of their own', () => {
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
+		const purgeHandle = purgeHandleFor('articles');
+
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
-		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
+		purgeHandle.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
 		// The same slice through both handles, and it lands twice: the read side is
 		// composed with the read's own query cases before it becomes a fingerprint,
@@ -696,10 +842,10 @@ describe('createScopedCacheHookDeclarations', () => {
 		takes a fingerprint batch, dropping the viewFields a read's own carries: they
 		say which columns a read depends on, and no purge reads them
 	`, () => {
-		const { purge, purgeFingerprints } =
+		const { purgeHandleFor, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.purgeBy([
+		purgeHandleFor('articles').purgeBy([
 			{
 				collection: 'articles',
 				pinnedScope: { author: [5] },
@@ -725,7 +871,7 @@ describe('createScopedCacheHookDeclarations', () => {
 		reads a pre-fingerprint pin as the slice it names, not as the bare
 		collection — which would purge only the reads pinning nothing
 	`, () => {
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
 		const legacyPin = {
@@ -735,7 +881,7 @@ describe('createScopedCacheHookDeclarations', () => {
 		} as ScopedCacheDeclaredFingerprint;
 
 		scope.scopeTo(legacyPin);
-		purge.purgeBy(legacyPin);
+		purgeHandleFor('articles').purgeBy(legacyPin);
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'articles', field: 'author', value: 5 }],
@@ -805,12 +951,14 @@ describe('createScopedCacheHookDeclarations', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(notesSchema);
+
+		const purgeHandle = purgeHandleFor('articles');
 
 		scope.scopeTo({ collection: 'notes', pinnedScope: { id: [upper] } });
 		// The spelling the driver hands the purge side for the very same row.
-		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
+		purgeHandle.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'notes', field: 'id', value: upper, type: 'uuid' }],
@@ -859,11 +1007,11 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
-		const { scope, purge, manuallyPurgedKeys } =
+		const { scope, purgeHandleFor, manuallyPurgedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
-		purge.purgeBy({ collection: 'authors' });
+		purgeHandleFor('articles').purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
 	});

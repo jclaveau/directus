@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import type { FlowRaw } from '@directus/types';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import emitter from './emitter.js';
@@ -101,6 +102,59 @@ describe('event flows on item updates', () => {
 		]);
 	});
 
+	test('a filter flow leaves a row a hook took over as it was', async () => {
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'record',
+							type: 'record',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const groupsAfterFlow = await emitter.emitFilter(
+			'articles.items.update',
+			[{ key: 7 }, { data: { status: 'a' }, keys: [1] }],
+			{ collection: 'articles' },
+		);
+
+		expect(groupsAfterFlow).toEqual([
+			{ key: 7 },
+			{ data: { status: 'stamped' }, keys: [1] },
+		]);
+
+		expect(recordTrigger.mock.calls).toEqual([
+			[{
+				event: 'articles.items.update',
+				payload: { status: 'a' },
+				keys: [1],
+				collection: 'articles',
+				originalPayload: { status: 'a' },
+			}],
+		]);
+	});
+
 	test('a filter flow with no return keeps each group as it was', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
@@ -140,7 +194,7 @@ describe('event flows on item updates', () => {
 		expect(groupsAfterFlow).toEqual([{ data: { status: 'a' }, keys: [1, 2] }]);
 	});
 
-	test('a filter flow returning null hands the group a null data', async () => {
+	test('refuses a filter flow that returns null for a group', async () => {
 		getFlowManager().addOperation('clear', () => null);
 
 		vi.mocked(FlowsService).mockImplementation(function () {
@@ -173,13 +227,105 @@ describe('event flows on item updates', () => {
 
 		await (getFlowManager() as any).load();
 
-		const groupsAfterFlow = await emitter.emitFilter(
+		const groupsAfterFlow = emitter.emitFilter(
 			'articles.items.update',
 			[{ data: { status: 'a' }, keys: [1, 2] }],
 			{ collection: 'articles' },
 		);
 
-		expect(groupsAfterFlow).toEqual([{ data: null, keys: [1, 2] }]);
+		await expect(groupsAfterFlow).rejects.toThrow(new InvalidPayloadError({
+			reason: 'A flow on "articles.items.update" returned null for rows 1, 2;'
+				+ ' an update flow returns the change to write, or nothing to keep the'
+				+ ' change sent',
+		}));
+	});
+
+	test('refuses a filter flow that returns a key for a group', async () => {
+		getFlowManager().addOperation('answer', () => 7);
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'record',
+							type: 'answer',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const groupsAfterFlow = emitter.emitFilter(
+			'articles.items.update',
+			[{ data: { status: 'a' }, keys: [1, 2] }],
+			{ collection: 'articles' },
+		);
+
+		await expect(groupsAfterFlow).rejects.toThrow(new InvalidPayloadError({
+			reason: 'A flow on "articles.items.update" returned the key 7 for rows'
+				+ ' 1, 2; an update flow returns the change to write, or nothing to keep'
+				+ ' the change sent',
+		}));
+	});
+
+	test('leaves an update an earlier filter cancelled whole cancelled', async () => {
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'record',
+							type: 'record',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		emitter.onFilter('articles.items.update', () => null);
+		await (getFlowManager() as any).load();
+
+		const groupsAfterFlow = await emitter.emitFilter(
+			'articles.items.update',
+			[{ data: { status: 'a' }, keys: [1] }],
+			{ collection: 'articles' },
+		);
+
+		expect(groupsAfterFlow).toBeNull();
+		expect(recordTrigger).not.toHaveBeenCalled();
 	});
 
 	test('an action flow runs once per group, keys beside the data', async () => {
@@ -432,7 +578,7 @@ describe('event flows on item updates', () => {
 });
 
 describe('event flows on item creates', () => {
-	test('a create flow listens per row and on the bare system event', async () => {
+	test('a create flow listens on the grouped create', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -463,11 +609,9 @@ describe('event flows on item creates', () => {
 		await (getFlowManager() as any).load();
 
 		expect([
-			emitter.hasFilterListeners('articles.items.create.one'),
-			emitter.hasFilterListeners('users.create.one'),
 			emitter.hasFilterListeners('articles.items.create'),
 			emitter.hasFilterListeners('users.create'),
-		]).toEqual([true, true, false, true]);
+		]).toEqual([true, true]);
 	});
 
 	test('a create filter flow sees the base event name', async () => {
@@ -501,8 +645,8 @@ describe('event flows on item creates', () => {
 		await (getFlowManager() as any).load();
 
 		await emitter.emitFilter(
-			'articles.items.create.one',
-			{ title: 'x' },
+			'articles.items.create',
+			[{ data: { title: 'x' } }],
 			{ collection: 'articles' },
 		);
 
@@ -546,9 +690,9 @@ describe('event flows on item creates', () => {
 
 		await (getFlowManager() as any).load();
 
-		await emitter.emitAction('articles.items.create.one', {
-			payload: { title: 'x' },
-			key: 7,
+		await emitter.emitAction('articles.items.create', {
+			payload: [{ title: 'x' }],
+			keys: [7],
 			collection: 'articles',
 		});
 
@@ -611,7 +755,7 @@ describe('event flows on item creates', () => {
 		]);
 	});
 
-	test('a create flow leaves the grouped create to its per-row event', async () => {
+	test('a create flow runs once per row the grouped create inserts', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -644,17 +788,117 @@ describe('event flows on item creates', () => {
 
 		const entriesAfterFlow = await emitter.emitFilter(
 			'fields.create',
-			[{ data: { field: 'title' } }],
+			[{ data: { field: 'title' } }, { key: 3 }, { data: { field: 'body' } }],
 			{ collection: 'directus_fields' },
 		);
 
-		expect([entriesAfterFlow, recordTrigger.mock.calls]).toEqual([
-			[{ data: { field: 'title' } }],
-			[],
+		expect(entriesAfterFlow).toEqual([
+			{ data: { status: 'stamped' } },
+			{ key: 3 },
+			{ data: { status: 'stamped' } },
+		]);
+
+		expect(recordTrigger.mock.calls).toEqual([
+			[{
+				event: 'fields.create',
+				payload: { field: 'title' },
+				collection: 'directus_fields',
+				originalPayload: { field: 'title' },
+			}],
+			[{
+				event: 'fields.create',
+				payload: { field: 'body' },
+				collection: 'directus_fields',
+				originalPayload: { field: 'body' },
+			}],
 		]);
 	});
 
-	test('a create action flow runs on the flat fields create', async () => {
+	test('a create filter flow returning a key takes its row over', async () => {
+		getFlowManager().addOperation('claim', () => 7);
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.create'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'claim',
+							type: 'claim',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const entriesAfterFlow = await emitter.emitFilter(
+			'articles.items.create',
+			[{ data: { title: 'a' } }, { key: 3 }],
+			{ collection: 'articles' },
+		);
+
+		expect(entriesAfterFlow).toEqual([{ key: 7 }, { key: 3 }]);
+	});
+
+	test('a create filter flow returning null cancels its row', async () => {
+		getFlowManager().addOperation('clear', () => null);
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.create'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'clear',
+							type: 'clear',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const entriesAfterFlow = await emitter.emitFilter(
+			'articles.items.create',
+			[{ data: { title: 'a' } }, null],
+			{ collection: 'articles' },
+		);
+
+		expect(entriesAfterFlow).toEqual([null, null]);
+	});
+
+	test('a create action flow runs on the flat create and per row', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -702,6 +946,12 @@ describe('event flows on item creates', () => {
 				payload: { field: 'title', type: 'string' },
 				key: 'title',
 				collection: 'articles',
+			}],
+			[{
+				event: 'fields.create',
+				payload: { field: 'body' },
+				key: 3,
+				collection: 'directus_fields',
 			}],
 		]);
 	});

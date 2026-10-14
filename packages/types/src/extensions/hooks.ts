@@ -7,7 +7,7 @@ import type {
 	ReadEventContext,
 	ScheduleHandler,
 } from '../events.js';
-import type { CreateEntry, UpdateGroup } from '../items.js';
+import type { CreateEntry, UpdateEntry } from '../items.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
 
 export type HookExtensionContext = ApiExtensionContext & {
@@ -17,8 +17,8 @@ export type HookExtensionContext = ApiExtensionContext & {
 /**
  * The filter events an `ItemsService` emits, and so the ones whose context carries a
  * scoped-cache handle: `items.<op>`, `<collection>.items.<op>` and, for a system
- * collection, `<name>.<op>`. A create and an update are emitted grouped, then per
- * row on `.create.one` and `.update.one`.
+ * collection, `<name>.<op>`. A create and an update are emitted grouped, once per
+ * mutation.
  */
 export type ItemsReadEvent = `${string}.read`;
 export type ItemsCreateEvent = `${string}.create`;
@@ -27,7 +27,7 @@ export type ItemsUpdateEvent = `${string}.update`;
 export type ItemsMutationEvent =
 	| ItemsCreateEvent
 	| ItemsUpdateEvent
-	| `${string}.${'delete' | 'create.one' | 'update.one'}`;
+	| `${string}.delete`;
 
 /** Same suffixes, no `ItemsService` behind them: their context carries no handle. */
 export type BareFilterEvent =
@@ -52,11 +52,11 @@ export type RegisterFilter = {
 		event: ItemsReadEvent,
 		handler: FilterHandler<TIn, TOut, ReadEventContext>,
 	): void;
-	<TIn = CreateEntry[], TOut = TIn>(
+	<TIn = (CreateEntry | null)[] | null, TOut = TIn>(
 		event: ItemsCreateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;
-	<TIn = UpdateGroup[], TOut = TIn>(
+	<TIn = UpdateEntry[] | null, TOut = TIn>(
 		event: ItemsUpdateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;

@@ -189,6 +189,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/edge-allow-list-cli.test.ts': 13_000,
 	'/tests/db/routes/users/cache-last-page-purge.test.ts': 12_000,
 	'/tests/db/routes/items/cache-o2m-conflict-node-bounds.test.ts': 12_000,
+	'/tests/db/routes/items/cache-update-takeover.test.ts': 12_000,
 	'/tests/db/routes/items/cache-nested-paths-not-bare.test.ts': 12_000,
 	'/tests/db/routes/items/cache-m2o-through-o2m-pin.test.ts': 12_000,
 	'/tests/db/routes/items/cache-o2m-node-query-beyond.test.ts': 12_000,

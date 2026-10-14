@@ -1,4 +1,5 @@
-import { oneLine } from '@directus/utils';
+import { InvalidPayloadError } from '@directus/errors';
+import { mapCreateRows, mapUpdateRows, oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { MutationOptions } from '@directus/types';
 import knex, { type Knex } from 'knex';
@@ -84,6 +85,19 @@ const schema = new SchemaBuilder()
 
 // SchemaBuilder doesn't model the cache meta; attach the scope field directly.
 schema.collections['test']!.scopedCacheFields = ['student'];
+
+const bigIntegerSchema = new SchemaBuilder()
+	.collection('test', (c) => {
+		c.field('id')
+			.bigInteger()
+			.primary();
+
+		c.field('name').string();
+		c.field('student').string();
+	})
+	.build();
+
+bigIntegerSchema.collections['test']!.scopedCacheFields = ['student'];
 
 // Same scoped collection, but with a self-referential relation (`parent` → test). A read
 // that pulls `parent.*` reaches the root collection again through an unbounded path.
@@ -724,8 +738,13 @@ describe(oneLine`
 		// The hook stores B, so the post-commit re-snapshot reads B.
 		tracker.on.select('test').response([{ id: 1, student: 'B' }]);
 
-		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
-		emitter.onFilter('test.items.create.one', rewrite);
+		const rewriteScope = (entries: any) => {
+			return mapCreateRows(entries, async (payload: any) => {
+				return { ...payload, student: 'B' };
+			});
+		};
+
+		emitter.onFilter('test.items.create', rewriteScope);
 
 		try {
 			await service().createOne({ name: 'x', student: 'A' });
@@ -744,7 +763,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', rewrite);
+			emitter.offFilter('test.items.create', rewriteScope);
 		}
 	});
 
@@ -802,14 +821,58 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		create purges coarse when re-reading the committed rows fails
+	`, async () => {
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').simulateError('read failed');
+
+		await service().createMany([{ name: 'x', student: 'A' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+			{ scopedCachePurgeId: expect.any(String) },
+		);
+	});
+
+	it(oneLine`
+		a create hook taking its row over under a key the primary key cannot hold is
+		refused
+	`, async () => {
+		const takeOverMisspelled = (entries: any) => {
+			return mapCreateRows(entries, async () => 'abc');
+		};
+
+		emitter.onFilter('test.items.create', takeOverMisspelled);
+
+		try {
+			await expect(service().createMany([{ name: 'x', student: 'A' }]))
+				.rejects
+				.toThrowError(new InvalidPayloadError({
+					reason: 'Primary key of test must be an integer instead of "abc"',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOverMisspelled);
+		}
+	});
+
+	it(oneLine`
 		an UNDECLARED take-over falls back to a coarse purge (null) — a take-over can be
 		an update-in-disguise whose OLD slice the create path can't recover
 	`, async () => {
 		// The hook returns a PK but declares nothing. It might have moved that row
 		// between slices (an upsert), and createMany has no old∪new snapshot → the old
 		// slice would leak. So without a declaration the purge is coarse (null).
-		const takeOver = async () => 99;
-		emitter.onFilter('test.items.create.one', takeOver);
+		const takeOver = (entries: any) => {
+			return mapCreateRows(entries, async () => {
+				return 99;
+			});
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -823,7 +886,7 @@ describe(oneLine`
 		);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOver);
+			emitter.offFilter('test.items.create', takeOver);
 		}
 	});
 
@@ -832,12 +895,14 @@ describe(oneLine`
 	`, async () => {
 		// Nothing was written, so no entry can have gone stale — and an empty pin
 		// array is not "nothing": it still resolves to this collection's bare pin.
-		const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-			ctx.scopedCache.skipPurgeFor(99);
-			return 99;
+		const takeOver = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async () => {
+				ctx.scopedCache.skipPurgeFor(99);
+				return 99;
+			});
 		};
 
-		emitter.onFilter('test.items.create.one', takeOver);
+		emitter.onFilter('test.items.create', takeOver);
 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
@@ -845,7 +910,30 @@ describe(oneLine`
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOver);
+			emitter.offFilter('test.items.create', takeOver);
+		}
+	});
+
+	it(oneLine`
+		a take-over the hook declares inert under another spelling of its key purges
+		nothing
+	`, async () => {
+		const takeOver = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async () => {
+				ctx.scopedCache.skipPurgeFor('099');
+				return 99;
+			});
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service().createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOver);
 		}
 	});
 
@@ -855,16 +943,18 @@ describe(oneLine`
 		tracker.on.insert('test').response([1]);
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-		const takeOverDuplicate = async (payload: any, _meta: any, ctx: any) => {
-			if (payload.name !== `dup`) {
-				return payload;
-			}
+		const takeOverDuplicate = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async (payload: any) => {
+				if (payload.name !== `dup`) {
+					return payload;
+				}
 
-			ctx.scopedCache.skipPurgeFor(99);
-			return 99;
+				ctx.scopedCache.skipPurgeFor(99);
+				return 99;
+			});
 		};
 
-		emitter.onFilter('test.items.create.one', takeOverDuplicate);
+		emitter.onFilter('test.items.create', takeOverDuplicate);
 
 		try {
 			await service().createMany([
@@ -889,7 +979,97 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOverDuplicate);
+			emitter.offFilter('test.items.create', takeOverDuplicate);
+		}
+	});
+
+	it(oneLine`
+		a create whose hook declares inert the key the create itself inserts still
+		purges the inserted row's slice
+	`, async () => {
+		tracker.on.insert('test').response([7]);
+		tracker.on.select('test').response([{ id: 7, student: 'A' }]);
+
+		const skipInsertedRow = (entries: any, _meta: any, ctx: any) => {
+			ctx.scopedCache.skipPurgeFor(7);
+			return entries;
+		};
+
+		emitter.onFilter('test.items.create', skipInsertedRow);
+
+		try {
+			await service().createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[{ collection: 'test', pinnedScope: { id: ['7'], student: ['a'] } }],
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create', skipInsertedRow);
+		}
+	});
+
+	it(oneLine`
+		a take-over keeps its coarse purge when the key it took over was declared
+		inert for another collection of a shared collector
+	`, async () => {
+		const sharedDeclarations = createScopedCacheHookDeclarations(schema);
+
+		sharedDeclarations.purgeHandleFor('authors').skipPurgeFor(99);
+
+		const takeOver = (entries: any) => {
+			return mapCreateRows(entries, async () => 99);
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service().createMany(
+				[{ name: 'x', student: 'A' }],
+				{ scopedCacheHookDeclarations: sharedDeclarations },
+			);
+
+			expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOver);
+		}
+	});
+
+	it(oneLine`
+		a take-over declared inert with a zero leading its bigInteger key purges
+		nothing
+	`, async () => {
+		const takeOver = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async () => {
+				ctx.scopedCache.skipPurgeFor('05');
+				return 5;
+			});
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service(bigIntegerSchema).createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOver);
 		}
 	});
 
@@ -941,19 +1121,21 @@ describe(oneLine`
 
 		// Every row's hook runs before the insert, so the key a hook can share with
 		// another row of the call is one that row sends.
-		const takeOverSibling = async (payload: any) => {
-			if (payload.name !== 'dup') {
-				return payload;
-			}
+		const takeOverSibling = (entries: any) => {
+			return mapCreateRows(entries, async (payload: any) => {
+				if (payload.name !== 'dup') {
+					return payload;
+				}
 
-			await db('test')
-				.where({ id: 5 })
-				.update({ name: 'merged' });
+				await db('test')
+					.where({ id: 5 })
+					.update({ name: 'merged' });
 
-			return 1;
+				return 1;
+			});
 		};
 
-		emitter.onFilter('test.items.create.one', takeOverSibling);
+		emitter.onFilter('test.items.create', takeOverSibling);
 
 		try {
 			await service().createMany([
@@ -970,7 +1152,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create.one', takeOverSibling);
+			emitter.offFilter('test.items.create', takeOverSibling);
 		}
 	});
 
@@ -1447,16 +1629,18 @@ describe(oneLine`
 			tracker.on.insert('test').response([1]);
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'authors',
-					pinnedScope: { id: [5] },
-				});
+			const declareAuthorSlice = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async (payload: any) => {
+					ctx.scopedCache.purgeBy({
+						collection: 'authors',
+						pinnedScope: { id: [5] },
+					});
 
-				return payload;
+					return payload;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', declare);
+			emitter.onFilter('test.items.create', declareAuthorSlice);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1480,7 +1664,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', declare);
+				emitter.offFilter('test.items.create', declareAuthorSlice);
 			}
 		});
 
@@ -1618,25 +1802,27 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a take-over that DECLARES its footprint narrows to a precise purge — the
-			declaration opts out of the safe coarse fallback
+			a take-over that DECLARES its row's footprint narrows to a precise purge —
+			the declaration opts out of the safe coarse fallback
 		`, async () => {
 			// A take-over is coarse BY DEFAULT (old slice unrecoverable in the create
-			// path). A declaration asserts the hook knows its footprint, so we trust it
-			// and narrow: the taken-over row's re-read slice (Z) plus the declared
-			// fingerprint — never the coarse null flush.
+			// path). A declaration for the row asserts the hook knows its footprint, so
+			// we trust it and narrow: the taken-over row's re-read slice (Z) plus the
+			// declared fingerprint — never the coarse null flush.
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
-			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'authors',
-					pinnedScope: { id: [5] },
-				});
+			const takeOver = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					}, { forKey: 99 });
 
-				return 99;
+					return 99;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			emitter.onFilter('test.items.create', takeOver);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1653,8 +1839,8 @@ describe(oneLine`
 					expect.anything(),
 					expect.objectContaining({
 						declaredFingerprints: [{
-							collection: 'authors',
-							pinnedScope: { id: ['5'] },
+							collection: 'test',
+							pinnedScope: { student: ['a'] },
 						}],
 					}),
 				);
@@ -1668,7 +1854,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 
@@ -1728,20 +1914,21 @@ describe(oneLine`
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-			// The grouped filter passes the update through; the per-row one declares a
-			// slice and then cancels its row. With the only row gone there is nothing to
-			// write, so the drain that runs on the written path never fires — the cancel
-			// path has to honour the declaration itself.
-			const declareThenCancelRow = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'authors',
-					pinnedScope: { id: [5] },
-				});
+			// The hook declares a slice and then cancels the row. With the only row
+			// gone there is nothing to write, so the drain that runs on the written
+			// path never fires — the cancel path has to honour the declaration itself.
+			const declareThenCancelRow = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'authors',
+						pinnedScope: { id: [5] },
+					});
 
-				return null;
+					return null;
+				});
 			};
 
-			emitter.onFilter('test.items.update.one', declareThenCancelRow);
+			emitter.onFilter('test.items.update', declareThenCancelRow);
 
 			try {
 				await service().updateMany([1], { student: 'B' }, {
@@ -1766,7 +1953,365 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.update.one', declareThenCancelRow);
+				emitter.offFilter('test.items.update', declareThenCancelRow);
+			}
+		});
+
+		it(oneLine`
+			an undeclared update take-over of a row the caller sent purges the slice
+			it left and the one it moved to — the row was read before the hook ran
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			// The hook's own write, which the mock cannot replay: every read after it
+			// sees the row moved.
+			const takeOver = (groups: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return mapUpdateRows(groups, async (_data, key) => key);
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over of a row the caller did not send purges coarse when
+			reading where that row landed fails
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = (groups: any, _meta: any, ctx: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').simulateErrorOnce('read failed');
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+				tracker.on.update('test').response(1);
+
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
+			an update take-over that DECLARES its footprint narrows to the taken-over
+			row's slice plus the declared fingerprint
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			// The hook's own write, which the mock cannot replay: every read after it
+			// sees the row moved.
+			const takeOver = (groups: any, _meta: any, ctx: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return mapUpdateRows(groups, async (_data, key) => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					});
+
+					return key;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					{
+						changed: ['student'],
+						changedCollections: [],
+						declaredFingerprints: [{
+							collection: 'test',
+							pinnedScope: { student: ['a'] },
+						}],
+						indexPath: 'student',
+						rowFingerprints: [
+							{
+								collection: 'test',
+								pinnedScope: { id: ['1'], student: ['a'] },
+							},
+							{
+								collection: 'test',
+								pinnedScope: { id: ['1'], student: ['b'] },
+							},
+						],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over the hook declares wrote nothing purges nothing at all
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const takeOver = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async (_data, key) => {
+					ctx.scopedCache.skipPurgeFor(key);
+
+					return key;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over the hook declares inert under another spelling of
+			its key purges nothing
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const takeOver = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async (_data, key) => {
+					ctx.scopedCache.skipPurgeFor('01');
+
+					return key;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose update a hook takes over purges the slice the row left and
+			the one it moved to
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const takeOver = (groups: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return mapUpdateRows(groups, async (_data, key) => key);
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().upsertMany([{ id: 1, student: 'B' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update writing one row while a hook takes another over, declaring
+			nothing, purges the slice the taken-over row left
+		`, async () => {
+			tracker.on.select('test').response([
+				{ id: 1, student: 'A' },
+				{ id: 2, student: 'A' },
+			]);
+
+			const takeOver = (groups: any) => {
+				tracker.resetHandlers();
+
+				tracker.on.select('test').response([
+					{ id: 1, student: 'B' },
+					{ id: 2, student: 'B' },
+				]);
+
+				tracker.on.update('test').response(1);
+
+				return mapUpdateRows(groups, async (data, key) => {
+					return key === 1
+						? key
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1, 2], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update that fails still purges a row a hook took over — the hook wrote
+			it outside the transaction that rolled back
+		`, async () => {
+			tracker.on.select('test').response([
+				{ id: 1, student: 'A' },
+				{ id: 2, student: 'A' },
+			]);
+
+			const takeOver = (groups: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+				tracker.on.update('test').simulateError('boom');
+
+				return mapUpdateRows(groups, async (data, key) => {
+					return key === 1
+						? key
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await expect(service().updateMany([1, 2], { student: 'B' }))
+					.rejects
+					.toThrow(new Error(
+						'update "test" set "student" = \'B\' where "id" in (2) - boom',
+					));
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
 			}
 		});
 
@@ -1789,7 +2334,11 @@ describe(oneLine`
 			emitter.onFilter('test.items.update', declareSlice);
 
 			try {
-				await expect(service().updateMany([1], { student: 'B' })).rejects.toThrow();
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toThrow(new Error(
+						'update "test" set "student" = \'B\' where "id" in (1) - boom',
+					));
 
 				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
@@ -1810,6 +2359,686 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', declareSlice);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a row answered twice still purges a row a hook took
+			over — the hook wrote it before the refusal
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const takeOverTwice = async () => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return [{ key: 1 }, { key: 1 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverTwice);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook '
+							+ 'answered with row 1 more than once.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverTwice);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a cancelled row still purges a row a hook took over
+		`, async () => {
+			tracker.on.select('test').response([
+				{ id: 1, student: 'A' },
+				{ id: 2, student: 'A' },
+			]);
+
+			const takeOverOne = (groups: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return mapUpdateRows(groups, async (_data, key) => {
+					return key === 1
+						? key
+						: null;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOverOne);
+
+			try {
+				await expect(service().updateMany([1, 2], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A filter hook cancelled a row of the '
+							+ 'update, but this operation requires it.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverOne);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a row both taken over and left in a group still
+			purges it
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const takeOverAndKeep = async (groups: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return [...groups, { key: 1 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAndKeep);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook took '
+							+ 'row 1 over as { key } but also left it in a { data, keys } '
+							+ 'group; answer each row one way.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAndKeep);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a malformed answer still purges the slice the hook
+			declared
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const declareThenBreak = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return [{ data: { student: 'B' } }];
+			};
+
+			emitter.onFilter('test.items.update', declareThenBreak);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook must '
+							+ 'return the { data, keys }[] it received, a row it wrote '
+							+ 'itself as { key }, no key both; a hook that handles one '
+							+ 'row maps them with mapUpdateRows.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declareThenBreak);
+			}
+		});
+
+		it(oneLine`
+			an update whose hook takes over two rows the caller did not send purges
+			coarse when it declares only one of them
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverTwo = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }, { key: 3 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverTwo);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverTwo);
+			}
+		});
+
+		it(oneLine`
+			an update whose hook takes over a row the caller did not send purges
+			coarse when its purgeBy names no row
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				});
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it.each([
+			['a field outside its scope', { name: ['x'] }],
+			['only its key', { id: ['2'] }],
+			['nothing', undefined],
+		])(oneLine`
+			in production, an update whose hook takes over a row the caller did not
+			send purges coarse when the purgeBy for that row pins %s
+		`, async (_shape, pinnedScope) => {
+			vi.stubEnv('NODE_ENV', 'production');
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(
+					{ collection: 'test', pinnedScope },
+					{ forKey: 2 },
+				);
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+				vi.unstubAllEnvs();
+			}
+		});
+
+		it.each([
+			['a field outside its scope', { name: ['x'] }],
+			['only its key', { id: ['2'] }],
+			['nothing', undefined],
+		])(oneLine`
+			outside production, an update whose hook takes over a row the caller did
+			not send is refused before any write when the purgeBy for that row pins %s
+		`, async (_shape, pinnedScope) => {
+			vi.stubEnv('NODE_ENV', 'development');
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(
+					{ collection: 'test', pinnedScope },
+					{ forKey: 2 },
+				);
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' })).rejects
+					.toThrow(new Error(oneLine`
+						purgeBy forKey 2 on "test" must pin every scope field: missing
+						"student"
+					`));
+
+				expect(tracker.history.update).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+				vi.unstubAllEnvs();
+			}
+		});
+
+		it(oneLine`
+			an update whose hook takes over a row the caller sent with no change purges
+			coarse — a row changing nothing is not read before the hooks
+		`, async () => {
+			tracker.on.select('test').response([{ id: 2, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverUnchanged = async (groups: any) => {
+				return [{ key: 1 }, groups[1]];
+			};
+
+			emitter.onFilter('test.items.update', takeOverUnchanged);
+
+			try {
+				await service().updateBatch([{ id: 1 }, { id: 2, student: 'B' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverUnchanged);
+			}
+		});
+
+		it(oneLine`
+			an update whose hook takes over a row the caller did not send narrows when
+			it declares that row, under another spelling of its key
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 2, student: 'C' }]);
+
+			tracker.on.select('test').response([
+				{ id: 1, student: 'B' },
+				{ id: 2, student: 'C' },
+			]);
+
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: '02' });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+					],
+					expect.anything(),
+					{
+						rowFingerprints: [
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						],
+						changed: ['student'],
+						indexPath: 'student',
+						declaredFingerprints: [
+							{ collection: 'test', pinnedScope: { student: ['a'] } },
+						],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
+			a create take-over whose purgeBy names no row purges coarse
+		`, async () => {
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOver = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					});
+
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await service().createMany([{ name: 'x', student: 'A' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+
+		it(oneLine`
+			a create whose hook takes over two rows purges coarse when it declares only
+			one of them
+		`, async () => {
+			tracker.on.select('test').response([
+				{ id: 98, student: 'Y' },
+				{ id: 99, student: 'Z' },
+			]);
+
+			const takeOverTwo = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async (_row, index) => {
+					if (index === 0) {
+						ctx.scopedCache.purgeBy({
+							collection: 'test',
+							pinnedScope: { student: ['A'] },
+						}, { forKey: 98 });
+
+						return 98;
+					}
+
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOverTwo);
+
+			try {
+				await service().createMany([
+					{ name: 'x', student: 'A' },
+					{ name: 'y', student: 'A' },
+				]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOverTwo);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose create a hook takes over purges coarse when its purgeBy
+			names no row
+		`, async () => {
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOver = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { student: ['A'] },
+					});
+
+					return 99;
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await service().upsertMany([{ name: 'x', student: 'A' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose update hook takes over a row the upsert did not send falls
+			back to a coarse purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any) => [...groups, { key: 2 }];
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().upsertMany([{ id: 1, student: 'B' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
+			an upsert whose update hook takes over a row the upsert did not send purges
+			the slice that row lands in when the hook declares it
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1 }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 2, student: 'C' }]);
+
+			tracker.on.select('test').responseOnce([
+				{ id: 1, student: 'B' },
+				{ id: 2, student: 'C' },
+			]);
+
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().upsertMany([{ id: 1, student: 'B' }]);
+
+				expect(tracker.history.select[4]!.bindings).toEqual([1, '2']);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+					],
+					expect.anything(),
+					{
+						rowFingerprints: [
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						],
+						changed: null,
+						indexPath: 'student',
+						declaredFingerprints: [
+							{ collection: 'test', pinnedScope: { student: ['a'] } },
+						],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
+			an upsert that fails after its update hook took over a row the upsert did
+			not send still purges that row's slice
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1 }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').response([{ id: 2, student: 'C' }]);
+			tracker.on.update('test').simulateError('write failed');
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await expect(service().upsertMany([{ id: 1, student: 'B' }]))
+					.rejects
+					.toThrowError('write failed');
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+					],
+					expect.anything(),
+					{
+						rowFingerprints: [
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						],
+						changed: null,
+						indexPath: 'student',
+						declaredFingerprints: [
+							{ collection: 'test', pinnedScope: { student: ['a'] } },
+						],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
 			}
 		});
 
@@ -1867,7 +3096,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1 }]);
 			tracker.on.update('test').response(1);
 
-			const declare = async (payload: any, _meta: any, ctx: any) => {
+			const declareAuthorSlice = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.purgeBy({
 					collection: 'authors',
 					pinnedScope: { id: [5] },
@@ -1882,11 +3111,11 @@ describe(oneLine`
 					{ collection: 'authors', pinnedScope: { id: [5] } },
 				]);
 
-			emitter.onFilter('test.items.update', declare);
+			emitter.onFilter('test.items.update', declareAuthorSlice);
 
 			try {
-				const svc = service();
-				await svc.updateMany([1], { name: 'x' });
+				const updatingService = service();
+				await updatingService.updateMany([1], { name: 'x' });
 
 				expect(purgeScopedCache).toHaveBeenNthCalledWith(
 					1,
@@ -1925,13 +3154,13 @@ describe(oneLine`
 				expect(hookCall![4].scopedCachePurgeId)
 					.toBe(coarseCall![4].scopedCachePurgeId);
 
-				expect(svc.scopedCachePurged).toEqual([
+				expect(updatingService.scopedCachePurged).toEqual([
 					{ collection: 'test' },
 					{ collection: 'authors', pinnedScope: { id: [5] } },
 				]);
 			}
 			finally {
-				emitter.offFilter('test.items.update', declare);
+				emitter.offFilter('test.items.update', declareAuthorSlice);
 			}
 		});
 
@@ -1945,7 +3174,11 @@ describe(oneLine`
 			// over a row but declares nothing ITSELF must still fall back to coarse — else
 			// the pre-seeded pin reads as this row's declaration and its old slice leaks.
 			const shared = createScopedCacheHookDeclarations(schema);
-			shared.purge.purgeBy({ collection: 'siblings', pinnedScope: { id: [1] } });
+
+			shared.purgeHandleFor('test').purgeBy({
+				collection: 'siblings',
+				pinnedScope: { id: [1] },
+			});
 
 			// Coarse + hook-pins → purgeScopedCache runs twice and unions results; real
 			// module returns arrays, so give the spy an iterable (args are the check).
@@ -1953,8 +3186,13 @@ describe(oneLine`
 
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
-			const takeOver = async () => 99; // takes over a row, declares nothing new
-			emitter.onFilter('test.items.create.one', takeOver);
+			const takeOver = (entries: any) => {
+				return mapCreateRows(entries, async () => {
+					return 99; // takes over a row, declares nothing new
+				});
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
 
 			try {
 				await service().createMany(
@@ -1984,7 +3222,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 	});
@@ -2067,15 +3305,17 @@ describe(oneLine`
 			// purge of 99 alone leaves 5's own keyed read serving the pre-write row.
 			// Before the key axis, an unscoped collection was entirely bare-pinned and
 			// the bare purge covered 5 by accident; now nothing does.
-			const takeOver = async () => {
-				await db('test')
-					.where({ id: 5 })
-					.update({ name: 'merged' });
+			const takeOver = (entries: any) => {
+				return mapCreateRows(entries, async () => {
+					await db('test')
+						.where({ id: 5 })
+						.update({ name: 'merged' });
 
-				return 99;
+					return 99;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			emitter.onFilter('test.items.create', takeOver);
 			tracker.on.update('test').response(1);
 
 			try {
@@ -2090,24 +3330,26 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 
 		it(oneLine`
-			a take-over that DECLARES its footprint keeps the precise purge on a
+			a take-over that DECLARES its row's footprint keeps the precise purge on a
 			collection declaring no scope field — the claim is what buys the precision
 		`, async () => {
-			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.purgeBy({
-					collection: 'test',
-					pinnedScope: { id: [5] },
-				});
+			const takeOver = (entries: any, _meta: any, ctx: any) => {
+				return mapCreateRows(entries, async () => {
+					ctx.scopedCache.purgeBy({
+						collection: 'test',
+						pinnedScope: { id: [5] },
+					}, { forKey: 99 });
 
-				return 99;
+					return 99;
+				});
 			};
 
-			emitter.onFilter('test.items.create.one', takeOver);
+			emitter.onFilter('test.items.create', takeOver);
 
 			try {
 				await unscopedService().createMany([{ name: 'x' }]);
@@ -2131,7 +3373,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create.one', takeOver);
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 	});
