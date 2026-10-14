@@ -246,6 +246,7 @@ function isTakenOverRow<Item extends AnyItem>(
 function mergeUpdateGroups<Item extends AnyItem>(
 	candidateGroups: UpdateGroup<Item>[],
 	writesNestedItems: (groupData: Partial<Item>) => boolean,
+	keyNameOf: (key: PrimaryKey) => string,
 ): UpdateGroup<Item>[] {
 	const mergedGroups: UpdateGroup<Item>[] = [];
 	let lastSerializedData: string | null = null;
@@ -279,8 +280,8 @@ function mergeUpdateGroups<Item extends AnyItem>(
 		// The access check counts the stored rows against the keys, so a row the
 		// caller sent twice with one change is written, and checked, once.
 		for (const key of candidateGroup.keys) {
-			if (!lastKeyNames.has(String(key))) {
-				lastKeyNames.add(String(key));
+			if (!lastKeyNames.has(keyNameOf(key))) {
+				lastKeyNames.add(keyNameOf(key));
 				targetGroup.keys.push(key);
 			}
 		}
@@ -1409,6 +1410,16 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const inputKeys = groups.flatMap((group) => group.keys);
 
+		const primaryKeyType = this.schema.collections[this.collection]!
+			.fields[primaryKeyField]!.type;
+
+		// A uuid names one row whatever the case of its letters (RFC 9562).
+		const keyNameOf = (key: PrimaryKey) => {
+			return primaryKeyType === 'uuid'
+				? String(key).toLowerCase()
+				: String(key);
+		};
+
 		// Checked before any hook runs, so a malformed or oversized update never
 		// reaches one.
 		if (!opts.bypassLimits) {
@@ -1457,7 +1468,7 @@ implements AbstractService<Item> {
 			const uniqueKeys: PrimaryKey[] = [];
 
 			for (const key of group.keys) {
-				const keyName = String(key);
+				const keyName = keyNameOf(key);
 
 				if (sentKeyNames.has(keyName)) {
 					throw new InvalidPayloadError({
@@ -1556,19 +1567,19 @@ implements AbstractService<Item> {
 		];
 
 		const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
-			return group.keys.map((key) => String(key));
+			return group.keys.map((key) => keyNameOf(key));
 		}));
 
 		// Written by the hook and by Directus both, the row would hold whichever
 		// write lands last.
-		if (takenOverKeys.some((key) => groupedKeyNames.has(String(key)))) {
+		if (takenOverKeys.some((key) => groupedKeyNames.has(keyNameOf(key)))) {
 			throw groupListRefusal();
 		}
 
 		const answeredKeyCounts = new Map<string, number>();
 
 		for (const key of keys) {
-			const keyName = String(key);
+			const keyName = keyNameOf(key);
 			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
 			if (refusesRepeatedPks && answeredCount > 1) {
@@ -1590,7 +1601,7 @@ implements AbstractService<Item> {
 		// TODO: if a caller needs the dropped copy itself cancelled, match each
 		// answered row to its input row by position instead of counting keys.
 		const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
-			const keyName = String(key);
+			const keyName = keyNameOf(key);
 			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
 
 			if (!refusesRepeatedPks) {
@@ -1636,6 +1647,7 @@ implements AbstractService<Item> {
 						|| (relationalFields.has(field) && nestsAnItem);
 				});
 			},
+			keyNameOf,
 		);
 
 		const writingGroups = mergedGroups.filter((group) => {
