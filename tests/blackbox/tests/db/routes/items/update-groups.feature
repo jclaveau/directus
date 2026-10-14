@@ -10,9 +10,12 @@ Feature: An update reaches its hooks as one grouped event
   `test_update_groups_owner` holds rows too, and no update hook listens to it.
   `test_update_groups_slot` lets a holder hold each slot once (a unique
   `(holder, slot)`), and no update hook listens to it either.
+  `test_update_groups_badge` is keyed by uuid, and no update hook listens to
+  it.
 
   A batch sending one row twice is refused unless it passes
-  `onRepeatedPk=lastWins`, which writes each change in the order sent.
+  `onRepeatedPk=lastWins`, which writes each change in the order sent. A uuid
+  names one row whatever the case of its letters.
 
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
@@ -213,6 +216,20 @@ Feature: An update reaches its hooks as one grouped event
       | name      | status |
       | unknown-a |        |
     And no update event was logged
+
+  Scenario: a batch sending a uuid twice, once in capitals, is refused
+    Given the rows, in the collection keyed by uuid:
+      | name    |
+      | badge-a |
+    When the batch sends, the key of its last row in capitals:
+      | name    | status   |
+      | badge-a | archived |
+      | badge-a | kept     |
+    Then the update is refused with a reason naming "onRepeatedPk"
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name    | status |
+      | badge-a |        |
 
   Scenario: a GraphQL batch sending a row twice is refused before any hook
     Given the rows:

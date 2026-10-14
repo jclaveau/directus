@@ -16,6 +16,7 @@ import {
 	collectionGrouped,
 	collectionGroupedLog,
 	collectionGroupedOwner,
+	collectionGroupedBadge,
 	collectionGroupedSlot,
 } from './update-groups.seed';
 
@@ -115,6 +116,18 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		given.optional(
+			'the rows, in the collection keyed by uuid:',
+			async (table: Record<string, string>[]) => {
+				update.collection = collectionGroupedBadge;
+
+				update.rows = await CreateItem(vendor, {
+					collection: collectionGroupedBadge,
+					item: parseGherkinTable<{ name: string }>(table),
+				});
+			},
+		);
+
+		given.optional(
 			'the requests authenticate as a user who may read and update the rows',
 			async () => {
 				for (const action of ['read', 'update'] as const) {
@@ -161,6 +174,22 @@ describe.each(vendors)('%s', (vendor) => {
 					.patch(`/items/${update.collection}`)
 					.query({ fields: 'name,status', sort: 'id', onRepeatedPk })
 					.send(batchOf(table))
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			'the batch sends, the key of its last row in capitals:',
+			async (table: Record<string, string>[]) => {
+				const changes = batchOf(table);
+				const lastChange = changes.at(-1)!;
+
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send([
+						...changes.slice(0, -1),
+						{ ...lastChange, id: String(lastChange.id).toUpperCase() },
+					])
 					.set('Authorization', update.authorization);
 			},
 		);
@@ -536,6 +565,7 @@ describe.each(vendors)('%s', (vendor) => {
 			oneLine`
 				a batch passing an unknown onRepeatedPk is refused before any hook
 			`,
+			'a batch sending a uuid twice, once in capitals, is refused',
 			oneLine`
 				a GraphQL batch sending a row twice is refused before any hook
 			`,

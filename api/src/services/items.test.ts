@@ -1713,6 +1713,94 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(keys).toEqual([1, 2]);
 		});
+
+		it('refuses a batch sending one uuid twice, once in capitals', async () => {
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+			await expect(service().updateBatch([
+				{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'first' },
+				{ id: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', name: 'second' },
+			])).rejects.toThrow(/sent more than once.*onRepeatedPk/);
+
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(tracker.history.all).toHaveLength(0);
+		});
+
+		it(oneLine`
+			hands the hooks a uuid sent twice in one change once, answering both
+		`, async () => {
+			tracker.on.update('uuid_coll').response(1);
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+			const keys = await service().updateMany([
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+			], { name: 'same' });
+
+			expect(filterSpy.mock.calls[0]![1]).toEqual([{
+				data: { name: 'same' },
+				keys: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+			}]);
+
+			expect(keys).toEqual([
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+			]);
+		});
+
+		it(oneLine`
+			writes a uuid sent twice side by side under lastWins once in the
+			statement
+		`, async () => {
+			tracker.on.update('uuid_coll').response(1);
+
+			await service().updateBatch([
+				{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'same' },
+				{ id: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', name: 'same' },
+			], { onRepeatedPk: 'lastWins' });
+
+			expect(tracker.history.update).toHaveLength(1);
+
+			expect(tracker.history.update[0]!.bindings).toEqual([
+				'same',
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+			]);
+		});
+
+		it('keeps a row a hook answers with its uuid in capitals', async () => {
+			tracker.on.update('uuid_coll').response(1);
+
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+				data: { name: 'after' },
+				keys: ['AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
+			}]);
+
+			const keys = await service().updateMany(
+				['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+				{ name: 'after' },
+			);
+
+			expect(keys).toEqual(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
+		});
+
+		it(oneLine`
+			refuses a uuid taken over in capitals and left in a group in lowercase
+		`, async () => {
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+				{
+					data: { name: 'after' },
+					keys: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+				},
+				{ key: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' },
+			]);
+
+			await expect(service().updateMany(
+				['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+				{ name: 'after' },
+			)).rejects.toThrow(/mapUpdateRows/);
+
+			expect(tracker.history.update).toHaveLength(0);
+		});
 	});
 
 	describe('updateByQuery / deleteByQuery key resolution', () => {
