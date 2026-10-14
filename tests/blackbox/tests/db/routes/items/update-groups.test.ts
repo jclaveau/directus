@@ -635,6 +635,7 @@ describe.each(vendors)('%s', (vendor) => {
 				a hook mapping its rows takes one over, Directus writing the others
 			`,
 			'a nested owner sent to several rows a hook maps is created once',
+			'a row a hook adds to an update is written, left out of the answer',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {

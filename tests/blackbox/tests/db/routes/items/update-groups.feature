@@ -32,6 +32,8 @@ Feature: An update reaches its hooks as one grouped event
   - status "strip-name": the grouped filter deletes `name` off the list itself.
   - status "check-status": the grouped filter reads `status` off the list
     itself, throwing when it reads "check-status".
+  - status "add-row": the grouped filter adds the row named "added-by-hook" to
+    that group's keys.
 
   Scenario: an update fires the grouped event once
     Given the rows:
@@ -513,3 +515,19 @@ Feature: An update reaches its hooks as one grouped event
     When the rows are updated to point at a new owner named "shared-owner"
     Then the update succeeds
     And the rows point at the one owner named "shared-owner"
+
+  Scenario: a row a hook adds to an update is written, left out of the answer
+    Given the rows:
+      | name          |
+      | added-by-hook |
+      | add-one       |
+    When the batch sends:
+      | name    | status  |
+      | add-one | add-row |
+    Then the update answers:
+      | name    | status  |
+      | add-one | add-row |
+    And the rows hold:
+      | name          | status  |
+      | added-by-hook | add-row |
+      | add-one       | add-row |

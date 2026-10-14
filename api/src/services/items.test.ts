@@ -1302,6 +1302,22 @@ describe('Integration Tests', () => {
 				expect(tracker.history.all).toHaveLength(0);
 			});
 
+			it('writes a key a hook added but answers only the keys sent', async () => {
+				tracker.on.update('test').response(2);
+
+				vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValueOnce([
+						{ data: { name: 'y' }, keys: [1, 2] },
+					]);
+
+				const keys = await service.updateMany([1], { name: 'Test' });
+
+				expect(keys).toEqual([1]);
+				expect(tracker.history.update).toHaveLength(1);
+				expect(tracker.history.update[0]!.bindings).toEqual(['y', 1, 2]);
+			});
+
 			it(oneLine`
 				refuses a dropped key the caller did not opt into cancelling
 			`, async () => {

@@ -21,6 +21,8 @@
 //     way a hook written for one payload strips a field.
 //   status 'check-status' → the grouped filter reads `status` off the list, the
 //     way a hook written for one payload refuses a value.
+//   status 'add-row' → the grouped filter adds the row named 'added-by-hook' to
+//     that group's keys.
 // The name is read back from the row, since the event carries only what is
 // being written.
 
@@ -76,7 +78,18 @@ export default function registerHooks({ filter, action }, { database }) {
 			return payload;
 		}
 
+		const addedRow = statuses.includes('add-row')
+			? await database(COLLECTION)
+				.where({ name: 'added-by-hook' })
+				.orderBy('id', 'desc')
+				.first()
+			: undefined;
+
 		const groups = payload.flatMap((group) => {
+			if (group?.data?.status === 'add-row') {
+				return { ...group, keys: [...group.keys, addedRow.id] };
+			}
+
 			if (group?.data?.status === 'repeat-key') {
 				return [group, { ...group, keys: group.keys.slice(0, 1) }];
 			}
