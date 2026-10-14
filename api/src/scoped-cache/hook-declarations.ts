@@ -151,6 +151,7 @@ export function createScopedCacheHookDeclarations(
 	}
 
 	function addPurgeFingerprint(
+		eventCollection: string,
 		input:
 			| ScopedCacheDeclaredFingerprint
 			| readonly ScopedCacheDeclaredFingerprint[],
@@ -161,12 +162,18 @@ export function createScopedCacheHookDeclarations(
 			: [input as ScopedCacheDeclaredFingerprint];
 
 		for (const declared of batch) {
-			if (forKey !== undefined && pinsScopeAxis(declared)) {
-				const declaredKeys = purgeDeclaredKeys.get(declared.collection)
+			// `forKey` names a row of the event's collection: only a slice of that
+			// collection is one the row can have left.
+			if (
+				forKey !== undefined
+				&& declared.collection === eventCollection
+				&& pinsScopeAxis(declared)
+			) {
+				const declaredKeys = purgeDeclaredKeys.get(eventCollection)
 					?? new Set<string>();
 
 				declaredKeys.add(String(forKey));
-				purgeDeclaredKeys.set(declared.collection, declaredKeys);
+				purgeDeclaredKeys.set(eventCollection, declaredKeys);
 			}
 
 			// View fields deliberately dropped: they name the columns a READ depends
@@ -215,7 +222,9 @@ export function createScopedCacheHookDeclarations(
 		},
 		purgeHandleFor: (collection) => {
 			return {
-				purgeBy: (input, options) => addPurgeFingerprint(input, options?.forKey),
+				purgeBy: (input, options) => {
+					addPurgeFingerprint(collection, input, options?.forKey);
+				},
 				// Not a fingerprint: declaring nothing to purge must not read as
 				// declaring a purge.
 				skipPurgeFor: (key) => {

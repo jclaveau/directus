@@ -994,11 +994,20 @@ implements AbstractService<Item> {
 				return this.primaryKeyNameOf(key);
 			}));
 
+			const skippedKeyNames = this.purgeSkippedKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			const declaredKeyNames = this.purgeDeclaredKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
 			const changedKeys = liveKeys.filter((key) => {
+				const keyName = this.primaryKeyNameOf(key);
+
 				// A take-over the hook declared inert wrote nothing, so it moved no
 				// slice; a row this create inserted is written whatever was declared.
-				return !takenOverKeyNames.has(this.primaryKeyNameOf(key))
-					|| !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
+				return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
 			});
 
 			if (
@@ -1015,16 +1024,18 @@ implements AbstractService<Item> {
 			// Counted off the take-overs themselves: one returning a key another row of
 			// this call inserts adds no key to the set above.
 			const takeoverUndeclared = takenOverRowKeys.some((key) => {
-				return !this.isPurgeSkipped(scopedCacheHookDeclarations, key)
-					&& !this.isPurgeDeclared(scopedCacheHookDeclarations, key);
+				const keyName = this.primaryKeyNameOf(key);
+
+				return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
 			});
 
 			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
 			// collection, so an undeclared take-over leaves the other rows' key slices
 			// stale even where no scope field is declared.
+			// A read that fails leaves the slices unknown: purged whole.
 			const scopedCacheSnapshot = takeoverUndeclared
 				? null
-				: await this.scopedCache.snapshot(changedKeys);
+				: await this.scopedCache.snapshot(changedKeys).catch(() => null);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheMutatedFingerprints(scopedCacheSnapshot),
@@ -1359,36 +1370,31 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * Whether a hook declared the row inert through `skipPurgeFor`, under whichever
-	 * spelling of its key.
+	 * The rows of this collection a hook declared inert through `skipPurgeFor`,
+	 * named as primaryKeyNameOf names them, so any spelling of a key finds its row.
 	 */
-	private isPurgeSkipped(
+	private purgeSkippedKeyNames(
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
-		key: PrimaryKey,
-	): boolean {
-		const keyName = this.primaryKeyNameOf(key);
-
+	): Set<string> {
 		const skippedKeys = declarations.purgeSkippedKeys.get(this.collection);
 
-		return [...skippedKeys ?? []].some((skippedKey) => {
-			return this.primaryKeyNameOf(skippedKey) === keyName;
-		});
+		return new Set([...skippedKeys ?? []].map((skippedKey) => {
+			return this.primaryKeyNameOf(skippedKey);
+		}));
 	}
 
 	/**
-	 * Whether a hook declared the slices of this collection's row through
-	 * `purgeBy(…, { forKey })`, under whichever spelling of its key.
+	 * The rows of this collection whose slices a hook declared through
+	 * `purgeBy(…, { forKey })`, named as primaryKeyNameOf names them.
 	 */
-	private isPurgeDeclared(
+	private purgeDeclaredKeyNames(
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
-		key: PrimaryKey,
-	): boolean {
-		const keyName = this.primaryKeyNameOf(key);
+	): Set<string> {
 		const declaredKeys = declarations.purgeDeclaredKeys.get(this.collection);
 
-		return [...(declaredKeys ?? [])].some((declaredKey) => {
-			return this.primaryKeyNameOf(declaredKey) === keyName;
-		});
+		return new Set([...declaredKeys ?? []].map((declaredKey) => {
+			return this.primaryKeyNameOf(declaredKey);
+		}));
 	}
 
 	/**
@@ -1613,22 +1619,28 @@ implements AbstractService<Item> {
 		// The slice a taken-over row left is known only for a row read above, or one
 		// its hook declared via `purgeBy(…, { forKey })`.
 		const takeoverUndeclaredAmong = (changedKeys: PrimaryKey[]) => {
+			const declaredKeyNames = this.purgeDeclaredKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
 			return changedKeys.some((key) => {
 				return !readKeyNames.has(keyNameOf(key))
-					&& !this.isPurgeDeclared(scopedCacheHookDeclarations, key);
+					&& !declaredKeyNames.has(keyNameOf(key));
 			});
 		};
 
 		// A row a hook took over is written already, out of band, so refusing its
 		// answer still purges it.
 		const refuseHookAnswer = async (refusal: unknown) => {
+			const skippedKeyNames = this.purgeSkippedKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
 			const changedKeys = Array.isArray(groupsAfterHooks)
 				? groupsAfterHooks
 					.filter(isTakenOverRow<Item>)
 					.map((entry) => entry.key)
-					.filter((key) => {
-						return !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
-					})
+					.filter((key) => !skippedKeyNames.has(keyNameOf(key)))
 				: [];
 
 			if (changedKeys.length > 0) {
@@ -1805,9 +1817,11 @@ implements AbstractService<Item> {
 			);
 		}
 
+		const skippedKeyNames = this.purgeSkippedKeyNames(scopedCacheHookDeclarations);
+
 		// A takeover the hook declared inert wrote nothing, so it moved no slice.
 		const changedTakenOverKeys = takenOverKeys.filter((key) => {
-			return !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
+			return !skippedKeyNames.has(keyNameOf(key));
 		});
 
 		// A row not read above was written by its hook before the read below, which
@@ -1824,9 +1838,12 @@ implements AbstractService<Item> {
 		const writtenKeys = [...directusWrittenKeys, ...changedTakenOverKeys];
 		const writtenKeyNames = new Set(writtenKeys.map((key) => keyNameOf(key)));
 
-		const hookAddedScopedCacheSnapshot = await this.scopedCache.snapshot(
-			writtenKeys.filter((key) => !readKeyNames.has(keyNameOf(key))),
-		);
+		// A read that fails leaves the rows' slices unknown: purged whole.
+		const hookAddedScopedCacheSnapshot = await this.scopedCache
+			.snapshot(writtenKeys.filter((key) => !readKeyNames.has(keyNameOf(key))))
+			.catch((): ScopedCacheSnapshot => {
+				return { canResolveSlicesFromRows: false, rows: [] };
+			});
 
 		const oldScopedCacheSnapshot: ScopedCacheSnapshot = {
 			canResolveSlicesFromRows: inputScopedCacheSnapshot.canResolveSlicesFromRows
@@ -2364,6 +2381,46 @@ implements AbstractService<Item> {
 		const scopedCacheHookDeclarations =
 			createScopedCacheHookDeclarations(this.schema);
 
+		const inputKeyNames = new Set(inputKeys.map((key) => {
+			return this.primaryKeyNameOf(key);
+		}));
+
+		const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+
+		// The rows of this collection a hook took over, written by the hook itself;
+		// one it declared inert wrote nothing.
+		const changedTakenOverKeys = (): PrimaryKey[] => {
+			const skippedKeyNames = this.purgeSkippedKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			return [...scopedCacheHookDeclarations.takenOverKeys]
+				.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
+				.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
+				.filter((takenOverKey) => {
+					return !skippedKeyNames.has(this.primaryKeyNameOf(takenOverKey));
+				});
+		};
+
+		// An insert-shaped payload routes to createOne, where a filter hook can take
+		// the row over and return an existing key — an update in disguise, whose OLD
+		// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
+		// purge leaks it → coarse, unless the hook declared the row via
+		// `purgeBy(…, { forKey })`. An update hook can take over a row no payload
+		// sent, which no returned key names, so every row taken over in this
+		// collection counts.
+		const takeoverUndeclaredAmong = (takenOverKeys: PrimaryKey[]): boolean => {
+			const declaredKeyNames = this.purgeDeclaredKeyNames(
+				scopedCacheHookDeclarations,
+			);
+
+			return takenOverKeys.some((takenOverKey) => {
+				const keyName = this.primaryKeyNameOf(takenOverKey);
+
+				return !inputKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
+			});
+		};
+
 		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
 		// retryable error.
 		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
@@ -2395,17 +2452,54 @@ implements AbstractService<Item> {
 				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
 			},
 			opts.mutationTracker.snapshot(),
-		);
+		).catch(async (error) => {
+			if (!shouldClearCache(this.cache, opts, this.collection)) {
+				throw error;
+			}
+
+			const takenOverKeys = changedTakenOverKeys();
+
+			// On the caller's transaction, the rows upserted before the failure commit
+			// with it, and nothing tells which they are.
+			if (this.knex.isTransaction) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					null,
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+				);
+			}
+			// A takeover was written by its hook, outside the rolled-back transaction.
+			else if (takenOverKeys.length > 0) {
+				await this.purgeUpdatedScopedCache(
+					takenOverKeys,
+					oldScopedCacheSnapshot,
+					scopedCacheHookDeclarations,
+					opts,
+					takeoverUndeclaredAmong(takenOverKeys),
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
+
+			throw error;
+		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
+			const takenOverKeys = changedTakenOverKeys();
+
 			// New scope values for every committed row (inserts + moved updates), re-read
 			// by returned key so a hook's take-over shows as whatever is now stored,
-			// plus the rows an update filter added, which no returned key names.
-			const newScopedCacheSnapshot = await this.scopedCache.snapshot(
-				primaryKeys
-					.filter((key): key is PrimaryKey => key !== null && key !== undefined)
-					.concat(hookAddedKeys),
-			);
+			// plus the rows an update filter added or took over, which no returned key
+			// names. A read that fails leaves the slices unknown: purged whole.
+			const newScopedCacheSnapshot = await this.scopedCache
+				.snapshot(
+					primaryKeys
+						.filter((key): key is PrimaryKey => key !== null && key !== undefined)
+						.concat(hookAddedKeys, takenOverKeys),
+				)
+				.catch(() => null);
 
 			const oldSnapshots = [oldScopedCacheSnapshot, ...hookAddedSnapshots];
 
@@ -2416,27 +2510,7 @@ implements AbstractService<Item> {
 				rows: oldSnapshots.flatMap((oldSnapshot) => oldSnapshot.rows),
 			};
 
-			// An insert-shaped payload routes to createOne, where a filter hook can take
-			// the row over and return an existing key — an update in disguise, whose OLD
-			// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
-			// purge leaks it → coarse, unless the hook declared the row via
-			// `purgeBy(…, { forKey })`. An update hook can take over a row no payload
-			// sent, which no returned key names, so every row taken over in this
-			// collection counts.
-			const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
-
-			const inputKeyNames = new Set(inputKeys.map((key) => {
-				return this.primaryKeyNameOf(key);
-			}));
-
-			const takeoverUndeclared = [...scopedCacheHookDeclarations.takenOverKeys]
-				.filter((takenOverName) => takenOverName.startsWith(takenOverPrefix))
-				.map((takenOverName) => takenOverName.slice(takenOverPrefix.length))
-				.some((takenOverKey) => {
-					return !inputKeyNames.has(this.primaryKeyNameOf(takenOverKey))
-						&& !this.isPurgeSkipped(scopedCacheHookDeclarations, takenOverKey)
-						&& !this.isPurgeDeclared(scopedCacheHookDeclarations, takenOverKey);
-				});
+			const takeoverUndeclared = takeoverUndeclaredAmong(takenOverKeys);
 
 			const scopedCacheFingerprints = takeoverUndeclared
 				? null
@@ -2454,7 +2528,7 @@ implements AbstractService<Item> {
 					// An upsert's two sides never line up — an inserted row has no old
 					// side — so the diff reads as every field, which is what an insert
 					// means anyway.
-					rows: scopedCacheFingerprints === null
+					rows: scopedCacheFingerprints === null || newScopedCacheSnapshot === null
 						? undefined
 						: scopedCacheUpdatedRows(
 							oldScopedCacheRows,

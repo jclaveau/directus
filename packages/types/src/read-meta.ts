@@ -227,12 +227,13 @@ export interface ScopedCachePurgeHandle {
 	 * either. What a read returns is already in this shape, so a hook purging what
 	 * a lookup read hands `result.getMeta().scopedCacheFingerprints` over whole.
 	 *
-	 * `forKey`: the row of the fingerprints' collection a take-over wrote, whose
+	 * `forKey`: the row of the event's collection a take-over wrote, whose
 	 * slices these are. A take-over is purged narrow only when Directus read the
 	 * row before the hook ran (an update of a row the caller sent) or a hook
-	 * declared its slices for its key here, pinning one of the collection's scope
-	 * axes (`scoped_cache_fields`, else the primary key); any other take-over
-	 * purges the collection whole, whatever else was declared.
+	 * declared its slices for its key here, in a fingerprint of that collection
+	 * pinning one of its scope fields (`scoped_cache_fields`, else the primary
+	 * key); any other take-over purges the collection whole, whatever else was
+	 * declared.
 	 */
 	purgeBy(
 		fingerprints: ScopedCacheFingerprintInput,
@@ -347,7 +348,7 @@ export interface ScopedCacheHookDeclarations {
 	purgeSkippedKeys: Map<string, Set<string>>;
 	/**
 	 * Keys a `purgeBy` declared slices for through `forKey`, per collection of
-	 * the declared fingerprints, as strings so `7` and `'7'` agree.
+	 * the handle it was called on, as strings so `7` and `'7'` agree.
 	 */
 	purgeDeclaredKeys: Map<string, Set<string>>;
 	/**
