@@ -517,7 +517,7 @@ implements AbstractService<Item> {
 				database: trx,
 				schema: this.schema,
 				accountability: this.accountability,
-				scopedCache: scopedCacheHookDeclarations.purge,
+				scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 			};
 
 			const entries = data.map((row): CreateEntry<Item> => {
@@ -980,10 +980,15 @@ implements AbstractService<Item> {
 				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
 			];
 
+			const takenOverKeyNames = new Set(takenOverRowKeys.map((key) => {
+				return this.primaryKeyNameOf(key);
+			}));
+
 			const changedKeys = liveKeys.filter((key) => {
 				// A take-over the hook declared inert wrote nothing, so it moved no
-				// slice.
-				return !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
+				// slice; a row this create inserted is written whatever was declared.
+				return !takenOverKeyNames.has(this.primaryKeyNameOf(key))
+					|| !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
 			});
 
 			if (
@@ -1353,7 +1358,9 @@ implements AbstractService<Item> {
 	): boolean {
 		const keyName = this.primaryKeyNameOf(key);
 
-		return [...declarations.purgeSkippedKeys].some((skippedKey) => {
+		const skippedKeys = declarations.purgeSkippedKeys.get(this.collection);
+
+		return [...skippedKeys ?? []].some((skippedKey) => {
 			return this.primaryKeyNameOf(skippedKey) === keyName;
 		});
 	}
@@ -1584,7 +1591,7 @@ implements AbstractService<Item> {
 					},
 					{
 						...eventContext,
-						scopedCache: scopedCacheHookDeclarations.purge,
+						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 					},
 				)
 				: payload;
@@ -2527,7 +2534,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
-						scopedCache: scopedCacheHookDeclarations.purge,
+						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 					},
 				)
 				: keys;

@@ -53,8 +53,9 @@ function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
 
 /**
  * The per-operation sink backing the `context.scopedCache` hook handle. The
- * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
- * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
+ * service wires ONE of `scope`/`purgeHandleFor(collection)` as `context.scopedCache`
+ * per the filter event (read → `scope.scopeTo`, mutation → `purgeBy`, its
+ * `skipPurgeFor` recorded under that collection); the hook pushes via it and
  * the service drains `scopeQueryCases` into the read's scope, `purgeFingerprints`
  * into the mutation's purge. Both are idempotent sinks. Safe with purging off
  * (then neither is read).
@@ -66,7 +67,7 @@ export function createScopedCacheHookDeclarations(
 	const seenScopeQueryCases = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
 	const epochs: Record<string, string | null> = {};
-	const purgeSkippedKeys = new Set<string>();
+	const purgeSkippedKeys = new Map<string, Set<string>>();
 	const purgeDeclaredKeys = new Map<string, Set<string>>();
 	const takenOverKeys = new Set<string>();
 	const purgeFingerprints: ScopedCacheFingerprint[] = [];
@@ -130,6 +131,25 @@ export function createScopedCacheHookDeclarations(
 		}
 	}
 
+	// A declaration narrows a takeover only through an axis the collection is
+	// scoped by: a pin on any other column names no slice its reads were cached in.
+	function pinsScopeAxis(declared: ScopedCacheDeclaredFingerprint): boolean {
+		const pins = scopedCacheDeclaredPins(declared, schema);
+		const collectionSchema = schema.collections[declared.collection];
+
+		if (!collectionSchema) {
+			return pins.length > 0;
+		}
+
+		const scopeAxes = collectionSchema.scopedCacheFields?.length
+			? collectionSchema.scopedCacheFields
+			: [collectionSchema.primary];
+
+		return pins.some((pin) => {
+			return pin.field !== undefined && scopeAxes.includes(pin.field);
+		});
+	}
+
 	function addPurgeFingerprint(
 		input:
 			| ScopedCacheDeclaredFingerprint
@@ -141,7 +161,7 @@ export function createScopedCacheHookDeclarations(
 			: [input as ScopedCacheDeclaredFingerprint];
 
 		for (const declared of batch) {
-			if (forKey !== undefined) {
+			if (forKey !== undefined && pinsScopeAxis(declared)) {
 				const declaredKeys = purgeDeclaredKeys.get(declared.collection)
 					?? new Set<string>();
 
@@ -193,13 +213,19 @@ export function createScopedCacheHookDeclarations(
 				return resolved;
 			},
 		},
-		purge: {
-			purgeBy: (input, options) => addPurgeFingerprint(input, options?.forKey),
-			// Not a fingerprint: declaring nothing to purge must not read as declaring
-			// a purge.
-			skipPurgeFor: (key) => {
-				purgeSkippedKeys.add(String(key));
-			},
+		purgeHandleFor: (collection) => {
+			return {
+				purgeBy: (input, options) => addPurgeFingerprint(input, options?.forKey),
+				// Not a fingerprint: declaring nothing to purge must not read as
+				// declaring a purge.
+				skipPurgeFor: (key) => {
+					const skippedKeys = purgeSkippedKeys.get(collection)
+						?? new Set<string>();
+
+					skippedKeys.add(String(key));
+					purgeSkippedKeys.set(collection, skippedKeys);
+				},
+			};
 		},
 	};
 }

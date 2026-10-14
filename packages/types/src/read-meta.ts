@@ -230,8 +230,9 @@ export interface ScopedCachePurgeHandle {
 	 * `forKey`: the row of the fingerprints' collection a take-over wrote, whose
 	 * slices these are. A take-over is purged narrow only when Directus read the
 	 * row before the hook ran (an update of a row the caller sent) or a hook
-	 * declared its slices for its key here; any other take-over purges the
-	 * collection whole, whatever else was declared.
+	 * declared its slices for its key here, pinning one of the collection's scope
+	 * axes (`scoped_cache_fields`, else the primary key); any other take-over
+	 * purges the collection whole, whatever else was declared.
 	 */
 	purgeBy(
 		fingerprints: ScopedCacheFingerprintInput,
@@ -310,7 +311,8 @@ export interface ScopedCacheExtensionHandle {
  */
 export interface ScopedCacheHookDeclarations {
 	scope: ScopedCacheScopeHandle;
-	purge: ScopedCachePurgeHandle;
+	/** The purge handle of a mutation of `collection`, its skips recorded under it. */
+	purgeHandleFor(collection: string): ScopedCachePurgeHandle;
 	/**
 	 * What a read hook declared through `scopeTo`, one query case per declared
 	 * fingerprint: its axes, typed off the schema, kept together. Not canonicalized
@@ -338,8 +340,11 @@ export interface ScopedCacheHookDeclarations {
 	 * purge must be judged on the earlier value, the only one that shows it moved.
 	 */
 	epochs: Record<string, string | null>;
-	/** Keys a `skipPurgeFor` declared inert, as strings so `7` and `'7'` agree. */
-	purgeSkippedKeys: Set<string>;
+	/**
+	 * Keys a `skipPurgeFor` declared inert, per collection of the handle it was
+	 * called on, as strings so `7` and `'7'` agree.
+	 */
+	purgeSkippedKeys: Map<string, Set<string>>;
 	/**
 	 * Keys a `purgeBy` declared slices for through `forKey`, per collection of
 	 * the declared fingerprints, as strings so `7` and `'7'` agree.
