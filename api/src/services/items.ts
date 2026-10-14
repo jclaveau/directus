@@ -1526,14 +1526,41 @@ implements AbstractService<Item> {
 			? payload
 			: answeredGroups;
 
+		// A row a hook took over is written already, out of band, so refusing its
+		// answer still purges it.
+		const refuseHookAnswer = async (refusal: unknown) => {
+			const someRowTakenOver = Array.isArray(groupsAfterHooks)
+				&& groupsAfterHooks.some((entry) => {
+					return isTakenOverRow(entry)
+						&& !scopedCacheHookDeclarations.purgeSkippedKeys.has(
+							String(entry.key),
+						);
+				});
+
+			if (someRowTakenOver) {
+				await this.purgeUpdatedScopedCache(
+					[],
+					{ canResolveSlicesFromRows: true, rows: [] },
+					scopedCacheHookDeclarations,
+					opts,
+					true,
+				);
+			}
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
+
+			return refusal;
+		};
+
 		if (groupsAfterHooks === null) {
 			if (!opts.allowFilterCancel) {
 				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
 				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
 				// option; on its own a null payload is invalid rather than a silent no-op.
-				throw new InvalidPayloadError({
+				throw await refuseHookAnswer(new InvalidPayloadError({
 					reason: `A filter hook cancelled the update, but this operation requires it`,
-				});
+				}));
 			}
 
 			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
@@ -1552,7 +1579,7 @@ implements AbstractService<Item> {
 			});
 
 		if (!isEntryList) {
-			throw groupListRefusal();
+			throw await refuseHookAnswer(groupListRefusal());
 		}
 
 		const dataGroups = groupsAfterHooks.filter(isUpdateGroup<Item>);
@@ -1573,7 +1600,7 @@ implements AbstractService<Item> {
 		// Written by the hook and by Directus both, the row would hold whichever
 		// write lands last.
 		if (takenOverKeys.some((key) => groupedKeyNames.has(keyNameOf(key)))) {
-			throw groupListRefusal();
+			throw await refuseHookAnswer(groupListRefusal());
 		}
 
 		const answeredKeyCounts = new Map<string, number>();
@@ -1583,12 +1610,12 @@ implements AbstractService<Item> {
 			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
 			if (refusesRepeatedPks && answeredCount > 1) {
-				throw new InvalidPayloadError({
+				throw await refuseHookAnswer(new InvalidPayloadError({
 					reason: oneLine`
 						A "${this.eventScope}.update" filter hook answered with row
 						${keyName} more than once
 					`,
-				});
+				}));
 			}
 
 			answeredKeyCounts.set(keyName, answeredCount);
@@ -1614,20 +1641,25 @@ implements AbstractService<Item> {
 		});
 
 		if (!opts.allowFilterCancel && rowKeys.includes(null)) {
-			throw new InvalidPayloadError({
+			throw await refuseHookAnswer(new InvalidPayloadError({
 				reason: oneLine`
 					A filter hook cancelled a row of the update, but this operation
 					requires it
 				`,
-			});
+			}));
 		}
 
 		// Keys a hook added are counted and validated like the caller's own.
-		if (!opts.bypassLimits && keys.length > inputKeys.length) {
-			mutationTracker.trackMutations(keys.length - inputKeys.length);
-		}
+		try {
+			if (!opts.bypassLimits && keys.length > inputKeys.length) {
+				mutationTracker.trackMutations(keys.length - inputKeys.length);
+			}
 
-		validateKeys(this.schema, this.collection, primaryKeyField, keys);
+			validateKeys(this.schema, this.collection, primaryKeyField, keys);
+		}
+		catch (error) {
+			throw await refuseHookAnswer(error);
+		}
 
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
