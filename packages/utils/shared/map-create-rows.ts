@@ -1,12 +1,13 @@
 import type { CreateEntry, PrimaryKey } from '@directus/types';
 import { cloneDeep } from './lodash-es-used.js';
 
-type MappedCreateRow<Item> = Partial<Item> | PrimaryKey | null;
+type MappedCreateRow<Item> = Partial<Item> | PrimaryKey | null | void;
 
 /**
  * Map the rows of an `items.create` filter's entries one at a time, for a hook
  * that handles a single row. The mapping returns the row to insert, the key of a
- * stored row that answers it instead, or null to cancel it. A row an earlier
+ * stored row that answers it instead, or null to cancel it; returning nothing
+ * keeps the copy it was handed, edits included. A row an earlier
  * hook already answered is left as it was, and a create an earlier hook
  * cancelled whole (null) stays cancelled.
  */
@@ -30,7 +31,12 @@ export async function mapCreateRows<Item = any>(
 		}
 
 		// One row after another, so the rows map in the caller's order.
-		const rowData = await mapRow(cloneDeep(entry.data), index);
+		const rowCopy = cloneDeep(entry.data);
+		const mappedRow = await mapRow(rowCopy, index);
+
+		const rowData = mappedRow === undefined
+			? rowCopy
+			: mappedRow;
 
 		if (rowData === null) {
 			mappedEntries.push(null);
