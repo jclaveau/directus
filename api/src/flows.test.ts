@@ -721,6 +721,90 @@ describe('event flows on item creates', () => {
 		]);
 	});
 
+	test('a create filter flow returning a key takes its row over', async () => {
+		getFlowManager().addOperation('claim', () => 7);
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.create'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'claim',
+							type: 'claim',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const entriesAfterFlow = await emitter.emitFilter(
+			'articles.items.create',
+			[{ data: { title: 'a' } }, { key: 3 }],
+			{ collection: 'articles' },
+		);
+
+		expect(entriesAfterFlow).toEqual([{ key: 7 }, { key: 3 }]);
+	});
+
+	test('a create filter flow returning null cancels its row', async () => {
+		getFlowManager().addOperation('clear', () => null);
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.create'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'clear',
+							type: 'clear',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const entriesAfterFlow = await emitter.emitFilter(
+			'articles.items.create',
+			[{ data: { title: 'a' } }, null],
+			{ collection: 'articles' },
+		);
+
+		expect(entriesAfterFlow).toEqual([null, null]);
+	});
+
 	test('a create action flow runs on the flat create and per row', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
