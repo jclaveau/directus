@@ -222,6 +222,12 @@ function isUpdateGroup<Item extends AnyItem>(
 		&& Array.isArray((entry as UpdateGroup<Item>).keys);
 }
 
+/**
+ * A row a filter hook wrote itself, answered with its key as `{ key }`. Directus
+ * writes nothing for it, so it skips the access check, the revision and activity,
+ * the action event, the action flows and the websocket messages; the mutation
+ * returns its key. A created row a hook answers with a key skips the same.
+ */
 function isTakenOverRow<Item extends AnyItem>(
 	entry: UpdateEntry<Item>,
 ): entry is { key: PrimaryKey } {
