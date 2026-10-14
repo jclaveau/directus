@@ -102,7 +102,8 @@ export async function initSharedSettingsGuard(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
 
 	// The create as well as the update: a deployment nobody has saved a setting
-	// on yet has no singleton row, and the first write to it makes one.
+	// on yet has no singleton row, and the first write to it makes one. Last, so
+	// it checks what a flow filter, registered again on every reload, left.
 	for (const event of ['settings.create', 'settings.update']) {
 		emitter.onFilter<SettingsWriteEntry[] | null>(event, (payload) => {
 			if (payload === null) {
@@ -116,6 +117,6 @@ export async function initSharedSettingsGuard(): Promise<void> {
 			}
 
 			return payload;
-		});
+		}, { runsLast: true });
 	}
 }
