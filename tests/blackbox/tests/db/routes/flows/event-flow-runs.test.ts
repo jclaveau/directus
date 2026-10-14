@@ -225,8 +225,13 @@ describe.each(vendors)('%s', (vendor) => {
 			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
 
-				expect(update.response!.body.errors[0].message)
-					.toEqual(docString.split('\n').join(' '));
+				// {name} reads as that row's key.
+				expect(update.response!.body.errors[0].message).toEqual(docString
+					.split('\n')
+					.join(' ')
+					.replace(/\{([\w-]+)\}/g, (_match, rowName: string) => {
+						return String(update.rows.find((row) => row.name === rowName)!.id);
+					}));
 			},
 		);
 

@@ -84,9 +84,9 @@ Feature: An event flow runs once per change, as it did before updates carried gr
     When the rows are updated to the status "archived"
     Then the update is refused with the message:
       """
-      Invalid payload. A "items.update" filter hook must return the { data, keys }[] it
-      received, a row it wrote itself as { key }, no key both; a hook that handles one row
-      maps them with mapUpdateRows.
+      Invalid payload. A flow on "test_event_flow_refusals.items.update" returned null
+      for rows {refuse-a}, {refuse-b}; an update flow returns the change to write, or
+      nothing to keep the change sent.
       """
     And the rows hold:
       | name     | status |

@@ -2398,10 +2398,9 @@ describe(oneLine`
 				await expect(service().updateMany([1], { student: 'B' }))
 					.rejects
 					.toMatchObject({
-						message: 'Invalid payload. A "items.update" filter hook must '
-							+ 'return the { data, keys }[] it received, a row it wrote '
-							+ 'itself as { key }, no key both; a hook that handles one '
-							+ 'row maps them with mapUpdateRows.',
+						message: 'Invalid payload. A "items.update" filter hook took '
+							+ 'row 1 over as { key } but also left it in a { data, keys } '
+							+ 'group; answer each row one way.',
 					});
 
 				expect(purgeScopedCache).toHaveBeenCalledWith(

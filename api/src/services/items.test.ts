@@ -836,10 +836,14 @@ describe('Integration Tests', () => {
 				expect(updatedKeys).toEqual([1, null]);
 				expect(hookAddedSpy).toHaveBeenCalledTimes(1);
 
-				expect(hookAddedSpy).toHaveBeenCalledWith(
-					[3],
-					{ canResolveSlicesFromRows: true, rows: [] },
-				);
+				expect(hookAddedSpy).toHaveBeenCalledWith([3], {
+					canResolveSlicesFromRows: true,
+					rows: [{
+						fingerprint: { collection: 'test', pinnedScope: { id: ['3'] } },
+						key: 3,
+						row: null,
+					}],
+				});
 			});
 
 			it('refuses a hook answering with a row twice', async () => {
