@@ -155,20 +155,20 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		when.optional(
-			/^the batch sends, with onRepeatedRow "(.*)":$/,
-			async (onRepeatedRow: string, table: Record<string, string>[]) => {
+			/^the batch sends, with onRepeatedPk "(.*)":$/,
+			async (onRepeatedPk: string, table: Record<string, string>[]) => {
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${update.collection}`)
-					.query({ fields: 'name,status', sort: 'id', onRepeatedRow })
+					.query({ fields: 'name,status', sort: 'id', onRepeatedPk })
 					.send(batchOf(table))
 					.set('Authorization', update.authorization);
 			},
 		);
 
 		when.optional(
-			/^the batch is sent over GraphQL(?:, with onRepeatedRow (\w+))?:$/,
+			/^the batch is sent over GraphQL(?:, with onRepeatedPk (\w+))?:$/,
 			async (
-				onRepeatedRow: string | undefined,
+				onRepeatedPk: string | undefined,
 				table: Record<string, string>[],
 			) => {
 				update.response = await request(getUrl(vendor))
@@ -178,8 +178,8 @@ describe.each(vendors)('%s', (vendor) => {
 							mutation ($rows: [update_${update.collection}_input!]) {
 								update_${update.collection}_batch(
 									data: $rows
-									${onRepeatedRow
-										? `onRepeatedRow: ${onRepeatedRow}`
+									${onRepeatedPk
+										? `onRepeatedPk: ${onRepeatedPk}`
 										: ''}
 								) { name status }
 							}
@@ -534,18 +534,18 @@ describe.each(vendors)('%s', (vendor) => {
 				a batch sending a row twice is refused before any update hook runs
 			`,
 			oneLine`
-				a batch passing an unknown onRepeatedRow is refused before any hook
+				a batch passing an unknown onRepeatedPk is refused before any hook
 			`,
 			oneLine`
 				a GraphQL batch sending a row twice is refused before any hook
 			`,
 			oneLine`
-				a GraphQL batch passing onRepeatedRow lastWins keeps the last
+				a GraphQL batch passing onRepeatedPk lastWins keeps the last
 				change
 			`,
-			'a GraphQL batch passing an unknown onRepeatedRow is refused',
+			'a GraphQL batch passing an unknown onRepeatedPk is refused',
 			oneLine`
-				the OAS describes onRepeatedRow on a collection's batch update
+				the OAS describes onRepeatedPk on a collection's batch update
 			`,
 			'a row sent twice under one change reaches the hooks once',
 			oneLine`

@@ -312,33 +312,33 @@ describe('items controller', () => {
 			expect(res.locals['payload']).toEqual({ data: [{ id: 1 }] });
 		});
 
-		test('passes onRepeatedRow to the update', async () => {
+		test('passes onRepeatedPk to the update', async () => {
 			updateBatch.mockResolvedValueOnce([1]);
 			readMany.mockResolvedValueOnce([{ id: 1 }]);
 
 			const req = makeReq({
 				body: [{ id: 1 }],
-				query: { onRepeatedRow: 'lastWins' },
+				query: { onRepeatedPk: 'lastWins' },
 			});
 
 			await handler()(req, { locals: {} } as any, vi.fn());
 
 			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
 				allowFilterCancel: true,
-				onRepeatedRow: 'lastWins',
+				onRepeatedPk: 'lastWins',
 			});
 		});
 
-		test('refuses an unknown onRepeatedRow before updating', async () => {
+		test('refuses an unknown onRepeatedPk before updating', async () => {
 			const req = makeReq({
 				body: [{ id: 1 }],
-				query: { onRepeatedRow: 'merge' },
+				query: { onRepeatedPk: 'merge' },
 			});
 
 			const error = await nextError(handler(), req);
 
 			expect(error).toBeInstanceOf(InvalidQueryError);
-			expect(error.message).toContain('onRepeatedRow');
+			expect(error.message).toContain('onRepeatedPk');
 			expect(updateBatch).not.toHaveBeenCalled();
 		});
 

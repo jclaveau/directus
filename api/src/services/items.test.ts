@@ -713,7 +713,7 @@ describe('Integration Tests', () => {
 					{ id: 1, name: 'first' },
 					{ id: 1, name: 'second' },
 					{ id: 1, name: 'first' },
-				], { onRepeatedRow: 'lastWins' });
+				], { onRepeatedPk: 'lastWins' });
 
 				expect(tracker.history.all).toHaveLength(3);
 				expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
@@ -730,7 +730,7 @@ describe('Integration Tests', () => {
 					{ id: 1, name: 'first' },
 					{ id: 2, name: 'other' },
 					{ id: 1, name: 'second' },
-				])).rejects.toThrow(/Row 1 is sent more than once.*onRepeatedRow/);
+				])).rejects.toThrow(/Row 1 is sent more than once.*onRepeatedPk/);
 
 				expect(filterSpy).not.toHaveBeenCalled();
 				expect(tracker.history.all).toHaveLength(0);
@@ -769,7 +769,7 @@ describe('Integration Tests', () => {
 				try {
 					const keys = await service.updateBatch(
 						[{ id: 1, name: 'first' }],
-						{ onRepeatedRow: 'lastWins' },
+						{ onRepeatedPk: 'lastWins' },
 					);
 
 					expect(keys).toEqual([1]);
@@ -1245,7 +1245,7 @@ describe('Integration Tests', () => {
 						{ id: 1, name: 'first' },
 						{ id: 1, name: 'second' },
 					],
-					{ onRepeatedRow: 'lastWins' },
+					{ onRepeatedPk: 'lastWins' },
 				)).rejects.toThrow(/cancelled a row of the update/);
 
 				expect(tracker.history.all).toHaveLength(0);
@@ -1263,7 +1263,7 @@ describe('Integration Tests', () => {
 						{ id: 1, name: 'first' },
 						{ id: 1, name: 'second' },
 					],
-					{ allowFilterCancel: true, onRepeatedRow: 'lastWins' },
+					{ allowFilterCancel: true, onRepeatedPk: 'lastWins' },
 				);
 
 				expect(keys).toEqual([1, null]);
@@ -2616,7 +2616,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					{ id: 1, name: 'y' },
 					{ id: 1, name: 'y' },
 				],
-				{ onRepeatedRow: 'lastWins' },
+				{ onRepeatedPk: 'lastWins' },
 			);
 
 			expect(keys).toEqual([1, 1]);

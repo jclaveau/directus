@@ -12,7 +12,7 @@ Feature: An update reaches its hooks as one grouped event
   `(holder, slot)`), and no update hook listens to it either.
 
   A batch sending one row twice is refused unless it passes
-  `onRepeatedRow=lastWins`, which writes each change in the order sent.
+  `onRepeatedPk=lastWins`, which writes each change in the order sent.
 
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
@@ -157,7 +157,7 @@ Feature: An update reaches its hooks as one grouped event
     Given the rows:
       | name       |
       | back-forth |
-    When the batch sends, with onRepeatedRow "lastWins":
+    When the batch sends, with onRepeatedPk "lastWins":
       | name       | status   |
       | back-forth | archived |
       | back-forth | kept     |
@@ -172,7 +172,7 @@ Feature: An update reaches its hooks as one grouped event
       | name  |
       | twice |
     And the requests authenticate as a user who may read and update the rows
-    When the batch sends, with onRepeatedRow "lastWins":
+    When the batch sends, with onRepeatedPk "lastWins":
       | name  | status   |
       | twice | archived |
       | twice | archived |
@@ -193,7 +193,7 @@ Feature: An update reaches its hooks as one grouped event
       | repeat-a | archived |
       | repeat-b | kept     |
       | repeat-a | kept     |
-    Then the update is refused with a reason naming "onRepeatedRow"
+    Then the update is refused with a reason naming "onRepeatedPk"
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name     | status |
@@ -201,14 +201,14 @@ Feature: An update reaches its hooks as one grouped event
       | repeat-b |        |
     And no update event was logged
 
-  Scenario: a batch passing an unknown onRepeatedRow is refused before any hook
+  Scenario: a batch passing an unknown onRepeatedPk is refused before any hook
     Given the rows:
       | name      |
       | unknown-a |
-    When the batch sends, with onRepeatedRow "merge":
+    When the batch sends, with onRepeatedPk "merge":
       | name      | status   |
       | unknown-a | archived |
-    Then the update is refused with a reason naming "onRepeatedRow"
+    Then the update is refused with a reason naming "onRepeatedPk"
     And the rows hold:
       | name      | status |
       | unknown-a |        |
@@ -222,18 +222,18 @@ Feature: An update reaches its hooks as one grouped event
       | name      | status   |
       | gql-twice | archived |
       | gql-twice | kept     |
-    Then the GraphQL update is refused with a reason naming "onRepeatedRow"
+    Then the GraphQL update is refused with a reason naming "onRepeatedPk"
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name      | status |
       | gql-twice |        |
     And no update event was logged
 
-  Scenario: a GraphQL batch passing onRepeatedRow lastWins keeps the last change
+  Scenario: a GraphQL batch passing onRepeatedPk lastWins keeps the last change
     Given the rows:
       | name     |
       | gql-last |
-    When the batch is sent over GraphQL, with onRepeatedRow lastWins:
+    When the batch is sent over GraphQL, with onRepeatedPk lastWins:
       | name     | status   |
       | gql-last | archived |
       | gql-last | kept     |
@@ -242,11 +242,11 @@ Feature: An update reaches its hooks as one grouped event
       | name     | status |
       | gql-last | kept   |
 
-  Scenario: a GraphQL batch passing an unknown onRepeatedRow is refused
+  Scenario: a GraphQL batch passing an unknown onRepeatedPk is refused
     Given the rows:
       | name        |
       | gql-unknown |
-    When the batch is sent over GraphQL, with onRepeatedRow merge:
+    When the batch is sent over GraphQL, with onRepeatedPk merge:
       | name        | status   |
       | gql-unknown | archived |
     Then the GraphQL query is rejected, naming "merge"
@@ -255,11 +255,11 @@ Feature: An update reaches its hooks as one grouped event
       | gql-unknown |        |
     And no update event was logged
 
-  Scenario: the OAS describes onRepeatedRow on a collection's batch update
+  Scenario: the OAS describes onRepeatedPk on a collection's batch update
     When the OAS is read
     Then the collection's update takes the query parameter:
-      | name          | required | type   | enum                  | default |
-      | onRepeatedRow | false    | string | ["refuse","lastWins"] | refuse  |
+      | name         | required | type   | enum                  | default |
+      | onRepeatedPk | false    | string | ["refuse","lastWins"] | refuse  |
 
   Scenario: a row sent twice under one change reaches the hooks once
     Given the rows:

@@ -18,10 +18,10 @@ import type { GraphQLService } from '../index.js';
 import { resolveMutation } from './mutation.js';
 
 describe('resolveMutation', () => {
-	test('a batch update passes onRepeatedRow to the service', async () => {
+	test('a batch update passes onRepeatedPk to the service', async () => {
 		await resolveMutation(
 			{ scope: 'items', schema: { collections: {} } } as unknown as GraphQLService,
-			{ data: [{ id: 1 }, { id: 1 }], onRepeatedRow: 'lastWins' },
+			{ data: [{ id: 1 }, { id: 1 }], onRepeatedPk: 'lastWins' },
 			{
 				fieldName: 'update_articles_batch',
 				fieldNodes: [],
@@ -32,14 +32,14 @@ describe('resolveMutation', () => {
 
 		expect(updateBatch).toHaveBeenCalledWith(
 			[{ id: 1 }, { id: 1 }],
-			{ onRepeatedRow: 'lastWins' },
+			{ onRepeatedPk: 'lastWins' },
 		);
 	});
 
-	test('an update by ids passes onRepeatedRow to the service', async () => {
+	test('an update by ids passes onRepeatedPk to the service', async () => {
 		await resolveMutation(
 			{ scope: 'items', schema: { collections: {} } } as unknown as GraphQLService,
-			{ ids: [1, 1], data: { status: 'kept' }, onRepeatedRow: 'lastWins' },
+			{ ids: [1, 1], data: { status: 'kept' }, onRepeatedPk: 'lastWins' },
 			{
 				fieldName: 'update_articles_items',
 				fieldNodes: [],
@@ -51,7 +51,7 @@ describe('resolveMutation', () => {
 		expect(updateMany).toHaveBeenCalledWith(
 			[1, 1],
 			{ status: 'kept' },
-			{ allowFilterCancel: true, onRepeatedRow: 'lastWins' },
+			{ allowFilterCancel: true, onRepeatedPk: 'lastWins' },
 		);
 	});
 });
