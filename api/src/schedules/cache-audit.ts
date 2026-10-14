@@ -194,7 +194,7 @@ export default async function schedule(): Promise<boolean> {
 	const { default: emitter } = await import('../emitter.js');
 
 	emitter.onAction('settings.update', ({ payload }) => {
-		const ruleGroup = (payload as UpdateGroup[]).find(({ data }) => {
+		const ruleGroup = (payload as UpdateGroup[]).findLast(({ data }) => {
 			return 'cache_audit_schedule' in data;
 		});
 

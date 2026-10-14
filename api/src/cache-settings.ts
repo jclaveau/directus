@@ -520,9 +520,13 @@ export async function initCacheSettings(): Promise<void> {
 	// The create as well as the update: a deployment nobody has saved a setting
 	// on yet has no singleton row, and the first write to it makes one.
 	for (const event of ['settings.create', 'settings.update']) {
-		emitter.onFilter<SettingsWriteEntry[]>(
+		emitter.onFilter<SettingsWriteEntry[] | null>(
 			event,
 			async (payload, _meta, context) => {
+				if (payload === null) {
+					return payload;
+				}
+
 				for (const entry of payload) {
 					if (entry !== null && 'data' in entry) {
 						await flushBeforeEnabling(entry.data, context);

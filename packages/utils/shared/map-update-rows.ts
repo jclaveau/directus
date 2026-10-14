@@ -7,19 +7,24 @@ type MappedUpdateRow<Item> = Partial<Item> | PrimaryKey | null;
  * Map the rows of an `items.update` filter's groups one at a time, for a hook
  * that handles a single row. The mapping returns the change to write, the
  * row's key when the hook wrote the row itself, or null to cancel it. A row an
- * earlier hook already took over is left as it was.
+ * earlier hook already took over is left as it was, and an update an earlier
+ * hook cancelled whole (null) stays cancelled.
  *
  * The rows of one group that come back equal stay one group: the caller sent
  * them as one change, so they still write as one statement, and a nested item
  * the change creates is created once. Two groups never merge.
  */
 export async function mapUpdateRows<Item = any>(
-	entries: UpdateEntry<Item>[],
+	entries: UpdateEntry<Item>[] | null,
 	mapRow: (
 		data: Partial<Item>,
 		key: PrimaryKey,
 	) => MappedUpdateRow<Item> | Promise<MappedUpdateRow<Item>>,
-): Promise<UpdateEntry<Item>[]> {
+): Promise<UpdateEntry<Item>[] | null> {
+	if (entries === null) {
+		return null;
+	}
+
 	const mappedEntries: UpdateEntry<Item>[] = [];
 
 	for (const entry of entries) {

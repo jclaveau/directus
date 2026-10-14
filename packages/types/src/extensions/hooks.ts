@@ -52,11 +52,11 @@ export type RegisterFilter = {
 		event: ItemsReadEvent,
 		handler: FilterHandler<TIn, TOut, ReadEventContext>,
 	): void;
-	<TIn = CreateEntry[], TOut = TIn>(
+	<TIn = (CreateEntry | null)[] | null, TOut = TIn>(
 		event: ItemsCreateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;
-	<TIn = UpdateEntry[], TOut = TIn>(
+	<TIn = UpdateEntry[] | null, TOut = TIn>(
 		event: ItemsUpdateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;

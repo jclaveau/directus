@@ -93,7 +93,7 @@ export async function initCacheConfig(): Promise<void> {
 	const { recordCacheConfigEvent } = await import('./cache-events.js');
 
 	emitter.onAction('settings.update', ({ payload }) => {
-		const ttlGroup = (payload as UpdateGroup[]).find(({ data }) => {
+		const ttlGroup = (payload as UpdateGroup[]).findLast(({ data }) => {
 			return 'cache_ttl' in data;
 		});
 
