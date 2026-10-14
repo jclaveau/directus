@@ -75,11 +75,12 @@ describe.each(vendors)('%s', (vendor) => {
 		return keys.map((key) => nameByKey[key]);
 	}
 
-	// A docstring's line breaks read as spaces, and {name} as that row's key.
+	// A docstring's line breaks read as spaces, and {name} as that row's key;
+	// a message's own `{ key }` keeps its spaces, so it is left as written.
 	function messageOf(update: Update, docString: string) {
 		const oneLineMessage = docString.split('\n').join(' ');
 
-		return oneLineMessage.replace(/\{([^}]+)\}/g, (_match, rowName: string) => {
+		return oneLineMessage.replace(/\{([\w-]+)\}/g, (_match, rowName: string) => {
 			return String(update.rows.find((row) => row.name === rowName)!.id);
 		});
 	}

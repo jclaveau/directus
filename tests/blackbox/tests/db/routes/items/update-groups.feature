@@ -279,8 +279,7 @@ Feature: An update reaches its hooks as one grouped event
       | gql-unknown | archived |
     Then the GraphQL query is rejected with the message:
       """
-      Expected value of type "repeated_pk_answer", found merge; Value "merge" does not
-      exist in "repeated_pk_answer" enum.
+      Value "merge" does not exist in "repeated_pk_answer" enum.
       """
     And the rows hold:
       | name        | status |
