@@ -2038,6 +2038,153 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an update refused for a row answered twice still purges a row a hook took
+			over — the hook wrote it before the refusal
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+			const takeOverTwice = async () => [{ key: 1 }, { key: 1 }];
+
+			emitter.onFilter('test.items.update', takeOverTwice);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook '
+							+ 'answered with row 1 more than once.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverTwice);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a cancelled row still purges a row a hook took over
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+			const takeOverOne = (groups: any) => {
+				return mapUpdateRows(groups, async (_data, key) => {
+					return key === 1
+						? key
+						: null;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOverOne);
+
+			try {
+				await expect(service().updateMany([1, 2], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A filter hook cancelled a row of the '
+							+ 'update, but this operation requires it.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverOne);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a row both taken over and left in a group still
+			purges it
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+			const takeOverAndKeep = async (groups: any) => [...groups, { key: 1 }];
+
+			emitter.onFilter('test.items.update', takeOverAndKeep);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook must '
+							+ 'return the { data, keys }[] it received, a row it wrote '
+							+ 'itself as { key }, no key both; a hook that handles one '
+							+ 'row maps them with mapUpdateRows.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAndKeep);
+			}
+		});
+
+		it(oneLine`
+			an update refused for a malformed answer still purges the slice the hook
+			declared
+		`, async () => {
+			const declareThenBreak = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return [{ data: { student: 'B' } }];
+			};
+
+			emitter.onFilter('test.items.update', declareThenBreak);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook must '
+							+ 'return the { data, keys }[] it received, a row it wrote '
+							+ 'itself as { key }, no key both; a hook that handles one '
+							+ 'row maps them with mapUpdateRows.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declareThenBreak);
+			}
+		});
+
+		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only
 			that slice — includeBareFingerprint:false keeps the cancelled
 			collection's bare pin warm, since nothing in it was deleted
