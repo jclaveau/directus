@@ -976,7 +976,7 @@ implements AbstractService<Item> {
 			const changedKeys = liveKeys.filter((key) => {
 				// A take-over the hook declared inert wrote nothing, so it moved no
 				// slice.
-				return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
+				return !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
 			});
 
 			if (
@@ -993,7 +993,7 @@ implements AbstractService<Item> {
 			// Counted off the take-overs themselves: one returning a key another row of
 			// this call inserts adds no key to the set above.
 			const someRowTakenOver = takenOverRowKeys.some((key) => {
-				return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
+				return !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
 			});
 
 			const takeoverUndeclared =
@@ -1317,6 +1317,40 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
+	 * whatever zeros lead it.
+	 */
+	private primaryKeyNameOf(key: PrimaryKey): string {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const primaryKeyType = this.schema.collections[this.collection]!
+			.fields[primaryKeyField]!.type;
+
+		if (primaryKeyType === 'uuid') {
+			return String(key).toLowerCase();
+		}
+
+		return primaryKeyType === 'integer'
+			? String(Number(key))
+			: String(key);
+	}
+
+	/**
+	 * Whether a hook declared the row inert through `skipPurgeFor`, under whichever
+	 * spelling of its key.
+	 */
+	private isPurgeSkipped(
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		key: PrimaryKey,
+	): boolean {
+		const keyName = this.primaryKeyNameOf(key);
+
+		return [...declarations.purgeSkippedKeys].some((skippedKey) => {
+			return this.primaryKeyNameOf(skippedKey) === keyName;
+		});
+	}
+
+	/**
 	 * Whether a group would write nothing: an empty payload, a primary-key-only one,
 	 * or one whose every field is an alterations object carrying no item. Decided
 	 * before the transaction opens, so a no-op update costs no round trip.
@@ -1410,20 +1444,7 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const inputKeys = groups.flatMap((group) => group.keys);
 
-		const primaryKeyType = this.schema.collections[this.collection]!
-			.fields[primaryKeyField]!.type;
-
-		// A uuid names one row whatever the case of its letters (RFC 9562), an
-		// integer whatever zeros lead it.
-		const keyNameOf = (key: PrimaryKey) => {
-			if (primaryKeyType === 'uuid') {
-				return String(key).toLowerCase();
-			}
-
-			return primaryKeyType === 'integer'
-				? String(Number(key))
-				: String(key);
-		};
+		const keyNameOf = (key: PrimaryKey) => this.primaryKeyNameOf(key);
 
 		// Checked before any hook runs, so a malformed or oversized update never
 		// reaches one.
@@ -1537,9 +1558,7 @@ implements AbstractService<Item> {
 			const someRowTakenOver = Array.isArray(groupsAfterHooks)
 				&& groupsAfterHooks.some((entry) => {
 					return isTakenOverRow(entry)
-						&& !scopedCacheHookDeclarations.purgeSkippedKeys.has(
-							String(entry.key),
-						);
+						&& !this.isPurgeSkipped(scopedCacheHookDeclarations, entry.key);
 				});
 
 			if (someRowTakenOver) {
@@ -1699,7 +1718,7 @@ implements AbstractService<Item> {
 
 		// A takeover the hook declared inert wrote nothing, so it moved no slice.
 		const changedTakenOverKeys = takenOverKeys.filter((key) => {
-			return !scopedCacheHookDeclarations.purgeSkippedKeys.has(String(key));
+			return !this.isPurgeSkipped(scopedCacheHookDeclarations, key);
 		});
 
 		// The hook wrote the row before this snapshot, which sees only the slice it
@@ -1717,16 +1736,16 @@ implements AbstractService<Item> {
 		const oldScopedCacheSnapshot = await this.scopedCache.snapshot(writtenKeys);
 
 		if (opts.onHookAddedRows && keys.length > inputKeys.length) {
-			const inputKeyNames = new Set(inputKeys.map((key) => String(key)));
+			const inputKeyNames = new Set(inputKeys.map((key) => keyNameOf(key)));
 
 			const hookAddedKeys = directusWrittenKeys.filter((key) => {
-				return !inputKeyNames.has(String(key));
+				return !inputKeyNames.has(keyNameOf(key));
 			});
 
 			opts.onHookAddedRows(hookAddedKeys, {
 				canResolveSlicesFromRows: oldScopedCacheSnapshot.canResolveSlicesFromRows,
 				rows: oldScopedCacheSnapshot.rows.filter((snapshotRow) => {
-					return !inputKeyNames.has(String(snapshotRow.key));
+					return !inputKeyNames.has(keyNameOf(snapshotRow.key));
 				}),
 			});
 		}
