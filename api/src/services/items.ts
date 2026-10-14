@@ -239,6 +239,9 @@ function isTakenOverRow<Item extends AnyItem>(
  * A group writing a nested item creates it once per group and walks its O2M rows
  * per group, so it never merges: two groups merged would create one related item
  * where the caller asked for two.
+ *
+ * TODO(#606): merge them when their nested items share an identity, once #337
+ * brings the by-unique-identity dedup to the fork.
  */
 function mergeUpdateGroups<Item extends AnyItem>(
 	candidateGroups: UpdateGroup<Item>[],
