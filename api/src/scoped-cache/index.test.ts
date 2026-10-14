@@ -598,9 +598,28 @@ describe('createScopedCacheHookDeclarations', () => {
 
 		expect([...purgeSkippedKeys]).toEqual(['7']);
 
-		// Declaring nothing to purge must not read as declaring a purge: the
-		// takeover check keys on the declaration count.
+		// Declaring nothing to purge must not read as declaring a purge.
 		expect(scopeQueryCases).toEqual([]);
+	});
+
+	it(oneLine`
+		records the row a purgeBy names under the collection of each fingerprint
+		it declares, and no row for a purgeBy naming none
+	`, () => {
+		const { purge, purgeDeclaredKeys } =
+			createScopedCacheHookDeclarations(emptySchema);
+
+		purge.purgeBy([
+			{ collection: 'authors', pinnedScope: { id: [5] } },
+			{ collection: 'articles', pinnedScope: { id: [6] } },
+		], { forKey: 7 });
+
+		purge.purgeBy({ collection: 'books', pinnedScope: { id: [8] } });
+
+		expect(purgeDeclaredKeys).toEqual(new Map([
+			['authors', new Set(['7'])],
+			['articles', new Set(['7'])],
+		]));
 	});
 
 	it(oneLine`

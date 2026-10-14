@@ -936,10 +936,10 @@ describe('Integration Tests', () => {
 			});
 
 			it('snapshots the same rows before and after the write', async () => {
-				// The pre-update snapshot covers the rows that are actually written; the
+				// The pre-update snapshots cover the rows that are actually written; the
 				// post-update one has to cover the same set or it re-reads rows nothing
 				// touched and purges their slices — the exact scope-path query the batch
-				// paths are trying to shed.
+				// paths are trying to shed. The second reads the rows no hook added.
 				const snapshot = vi.spyOn(service.scopedCache, 'snapshot');
 
 				await service.updateBatch([
@@ -947,9 +947,7 @@ describe('Integration Tests', () => {
 					{ id: 2, name: 'written' },
 				]);
 
-				expect(snapshot).toHaveBeenCalledTimes(2);
-				expect(snapshot.mock.calls[0]![0]).toEqual([2]);
-				expect(snapshot.mock.calls[1]![0]).toEqual([2]);
+				expect(snapshot.mock.calls).toEqual([[[2]], [[]], [[2]]]);
 			});
 		});
 

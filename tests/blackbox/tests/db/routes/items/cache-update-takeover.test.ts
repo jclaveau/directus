@@ -11,6 +11,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
+import { oneLine } from '@directus/utils';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -20,6 +21,8 @@ const REFUSED = 'test_takeover_refused';
 const UPSERT_PARENT = 'test_takeover_upsert_parent';
 const UPSERT_CHILD = 'test_takeover_upsert_child';
 const INERT = 'test_takeover_inert';
+const MOVED = 'test_takeover_moved';
+const PARTLY_DECLARED = 'test_takeover_partly_declared';
 const cacheStatusHeader = 'x-cache-status';
 
 const feature = loadFeature(
@@ -43,6 +46,8 @@ describe.each(vendors)('%s', (vendor) => {
 	let upsertParentId: number;
 	let sentChildId: number;
 	let inertRowId: number;
+	let movedRowId: number;
+	let partlyDeclaredRowIds: number[];
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
@@ -67,6 +72,22 @@ describe.each(vendors)('%s', (vendor) => {
 				{
 					collection: INERT,
 					fields: [{ field: 'body', type: 'string', meta: {} }],
+				},
+				{
+					collection: MOVED,
+					meta: { scoped_cache_fields: ['slot'] },
+					fields: [
+						{ field: 'slot', type: 'string', meta: {} },
+						{ field: 'body', type: 'string', meta: {} },
+					],
+				},
+				{
+					collection: PARTLY_DECLARED,
+					meta: { scoped_cache_fields: ['slot'] },
+					fields: [
+						{ field: 'slot', type: 'string', meta: {} },
+						{ field: 'body', type: 'string', meta: {} },
+					],
 				},
 			],
 		});
@@ -114,6 +135,28 @@ describe.each(vendors)('%s', (vendor) => {
 
 		inertRowId = inertRow.id;
 
+		const [movedRow] = await CreateItem(vendor, {
+			collection: MOVED,
+			item: [
+				{ slot: 'a', body: 'original' },
+				{ slot: 'c', body: 'bystander' },
+			],
+		});
+
+		movedRowId = movedRow.id;
+
+		const partlyDeclaredRows = await CreateItem(vendor, {
+			collection: PARTLY_DECLARED,
+			item: [
+				{ slot: 'a', body: 'original' },
+				{ slot: 'b', body: 'original' },
+			],
+		});
+
+		partlyDeclaredRowIds = partlyDeclaredRows.map((row: { id: number }) => {
+			return row.id;
+		});
+
 		env[vendor].PORT = String(await getPort());
 
 		instance = spawn('node', [paths.cli, 'start'], {
@@ -131,6 +174,8 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: UPSERT_CHILD });
 		await DeleteCollection(vendor, { collection: UPSERT_PARENT });
 		await DeleteCollection(vendor, { collection: INERT });
+		await DeleteCollection(vendor, { collection: MOVED });
+		await DeleteCollection(vendor, { collection: PARTLY_DECLARED });
 	});
 
 	defineFeature(feature, (scenario) => {
@@ -289,6 +334,116 @@ describe.each(vendors)('%s', (vendor) => {
 
 						expect(answered.headers[cacheStatusHeader]).toBe(cache);
 						expect(answered.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				an undeclared takeover of a sent row purges only the slices it moved
+				between
+			`,
+			({ given, when, then }) => {
+				function readSlot(slot: string) {
+					return request(getUrl(vendor, env))
+						.get(`/items/${MOVED}`)
+						.query({ fields: 'body', 'filter[slot][_eq]': slot })
+						.set('Authorization', auth);
+				}
+
+				given(
+					`the reads of ${MOVED} are cached:`,
+					async (table: Record<string, string>[]) => {
+						for (const { slot, response } of table) {
+							expect((await readSlot(slot!)).headers[cacheStatusHeader])
+								.toBe('MISS');
+
+							const cached = await readSlot(slot!);
+
+							expect(cached.headers[cacheStatusHeader]).toBe('HIT');
+							expect(cached.body.data).toEqual(loadYaml(response!));
+						}
+					},
+				);
+
+				when(
+					/^its row in slot "a" is sent the body "(.*)"$/,
+					async (body: string) => {
+						const sent = await request(getUrl(vendor, env))
+							.patch(`/items/${MOVED}/${movedRowId}`)
+							.send({ body })
+							.set('Authorization', auth);
+
+						expect(sent.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					`the reads of ${MOVED} answer:`,
+					async (table: Record<string, string>[]) => {
+						for (const { slot, cache, response } of table) {
+							const answered = await readSlot(slot!);
+
+							expect(answered.headers[cacheStatusHeader]).toBe(cache);
+							expect(answered.body.data).toEqual(loadYaml(response!));
+						}
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a takeover declaring one of two rows still purges the slice the other
+				left
+			`,
+			({ given, when, then }) => {
+				function readSlot(slot: string) {
+					return request(getUrl(vendor, env))
+						.get(`/items/${PARTLY_DECLARED}`)
+						.query({ fields: 'body', 'filter[slot][_eq]': slot })
+						.set('Authorization', auth);
+				}
+
+				given(
+					`the reads of ${PARTLY_DECLARED} are cached:`,
+					async (table: Record<string, string>[]) => {
+						for (const { slot, response } of table) {
+							expect((await readSlot(slot!)).headers[cacheStatusHeader])
+								.toBe('MISS');
+
+							const cached = await readSlot(slot!);
+
+							expect(cached.headers[cacheStatusHeader]).toBe('HIT');
+							expect(cached.body.data).toEqual(loadYaml(response!));
+						}
+					},
+				);
+
+				when(
+					/^both its rows are sent the body "(.*)"$/,
+					async (body: string) => {
+						const sent = await request(getUrl(vendor, env))
+							.patch(`/items/${PARTLY_DECLARED}`)
+							.send({ keys: partlyDeclaredRowIds, data: { body } })
+							.set('Authorization', auth);
+
+						expect(sent.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					`the reads of ${PARTLY_DECLARED} answer:`,
+					async (table: Record<string, string>[]) => {
+						for (const { slot, cache, response } of table) {
+							const answered = await readSlot(slot!);
+
+							expect(answered.headers[cacheStatusHeader]).toBe(cache);
+							expect(answered.body.data).toEqual(loadYaml(response!));
+						}
 					},
 				);
 			},
