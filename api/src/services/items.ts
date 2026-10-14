@@ -1538,7 +1538,7 @@ implements AbstractService<Item> {
 							? `Row ${keyName} is sent more than once; send each row once`
 							: oneLine`
 								Row ${keyName} is sent more than once; send each row once, or
-								pass onRepeatedPk=lastWins
+								pass ${opts.lastWinsSpelling ?? 'onRepeatedPk=lastWins'}
 							`,
 					});
 				}

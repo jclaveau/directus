@@ -77,13 +77,21 @@ export async function resolveMutation(
 					? args['onRepeatedPk'] ?? 'refuse'
 					: undefined;
 
+				const lastWinsSpelling = gql.scope === 'items'
+					? 'onRepeatedPk: lastWins'
+					: undefined;
+
 				if (batchUpdate) {
-					keys.push(...(await service.updateBatch(args['data'], { onRepeatedPk })));
+					keys.push(...(await service.updateBatch(args['data'], {
+						onRepeatedPk,
+						lastWinsSpelling,
+					})));
 				} else {
 					keys.push(
 						...(await service.updateMany(args['ids'], args['data'], {
 							allowFilterCancel: true,
 							onRepeatedPk,
+							lastWinsSpelling,
 						})).filter(
 							(key): key is PrimaryKey => key !== null,
 						),

@@ -90,7 +90,7 @@ export function getWritableTypes(
 
 	const repeatedPkArgument = {
 		type: schemaComposer.createEnumTC({
-			name: 'repeated_pk_answer',
+			name: 'directus_repeated_pk_answer',
 			values: Object.fromEntries(RepeatedPkAnswers.map((repeatedPkAnswer) => {
 				return [repeatedPkAnswer, { value: repeatedPkAnswer }];
 			})),

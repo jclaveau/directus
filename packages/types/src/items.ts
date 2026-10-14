@@ -154,9 +154,18 @@ export type MutationOptions = {
 	 * What an update does with a row it is sent more than once. `refuse`, the
 	 * default, refuses the update before any hook runs, and refuses a hook
 	 * answering with a row twice; a row sent twice in one change is written
-	 * once. `lastWins` writes every change in the order sent.
+	 * once. `lastWins` writes every change in the order sent. Left unset, the
+	 * refusal does not name the option; passing `refuse` names it, for a caller
+	 * that can pass `lastWins`.
 	 */
 	onRepeatedPk?: RepeatedPkAnswer | undefined;
+
+	/**
+	 * How the caller spells passing `onRepeatedPk` as `lastWins`, which the
+	 * refusal of a repeated row names when `onRepeatedPk` is `refuse`:
+	 * `onRepeatedPk=lastWins` when unset.
+	 */
+	lastWinsSpelling?: string | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so
