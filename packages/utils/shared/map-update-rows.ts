@@ -1,6 +1,5 @@
 import type { PrimaryKey, UpdateEntry, UpdateGroup } from '@directus/types';
 import { cloneDeep, isEqual } from './lodash-es-used.js';
-import { oneLine } from './one-line.js';
 
 type MappedUpdateRow<Item> = Partial<Item> | PrimaryKey | null | void;
 
@@ -15,6 +14,11 @@ type MappedUpdateRow<Item> = Partial<Item> | PrimaryKey | null | void;
  * The rows of one group that come back equal stay one group: the caller sent
  * them as one change, so they still write as one statement, and a nested item
  * the change creates is created once. Two groups never merge.
+ *
+ * A row mapped to a key is taken over under that key, whichever row it names:
+ * the service judges it. A payload that is no list of groups, such as the change
+ * a `fields.update` filter carries to a hook registered on several events, comes
+ * back unchanged.
  */
 export async function mapUpdateRows<Item = any>(
 	entries: UpdateEntry<Item>[] | null,
@@ -25,6 +29,10 @@ export async function mapUpdateRows<Item = any>(
 ): Promise<UpdateEntry<Item>[] | null> {
 	if (entries === null) {
 		return null;
+	}
+
+	if (!Array.isArray(entries)) {
+		return entries;
 	}
 
 	const mappedEntries: UpdateEntry<Item>[] = [];
@@ -51,14 +59,6 @@ export async function mapUpdateRows<Item = any>(
 			}
 
 			if (typeof rowData === 'string' || typeof rowData === 'number') {
-				// Any other key would write a row the update never named.
-				if (String(rowData) !== String(key)) {
-					throw new Error(oneLine`
-						The mapping of row ${key} answered with the key ${rowData}; return
-						the row's own key to take it over, or null to cancel it
-					`);
-				}
-
 				entriesOfThisGroup.push({ key: rowData });
 				continue;
 			}

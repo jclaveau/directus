@@ -10,6 +10,9 @@ type MappedCreateRow<Item> = Partial<Item> | PrimaryKey | null | void;
  * keeps the copy it was handed, edits included. A row an earlier
  * hook already answered is left as it was, and a create an earlier hook
  * cancelled whole (null) stays cancelled.
+ *
+ * A payload that is no list of rows, such as the field a `fields.create` filter
+ * carries to a hook registered on several events, comes back unchanged.
  */
 export async function mapCreateRows<Item = any>(
 	entries: (CreateEntry<Item> | null)[] | null,
@@ -20,6 +23,10 @@ export async function mapCreateRows<Item = any>(
 ): Promise<(CreateEntry<Item> | null)[] | null> {
 	if (entries === null) {
 		return null;
+	}
+
+	if (!Array.isArray(entries)) {
+		return entries;
 	}
 
 	const mappedEntries: (CreateEntry<Item> | null)[] = [];

@@ -502,6 +502,16 @@ class FlowManager {
 					});
 				}
 
+				if (typeof dataAfterFlow === 'string' || typeof dataAfterFlow === 'number') {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A flow on "${route.triggerEvent}" returned the key ${dataAfterFlow}
+							for rows ${group.keys.join(', ')}; an update flow returns the
+							change to write, or nothing to keep the change sent
+						`,
+					});
+				}
+
 				groupsAfterFlow.push({
 					data: dataAfterFlow === undefined
 						? group.data
