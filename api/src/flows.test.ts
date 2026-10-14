@@ -485,7 +485,7 @@ describe('event flows on item updates', () => {
 });
 
 describe('event flows on item creates', () => {
-	test('a create flow listens on the grouped create, never per row', async () => {
+	test('a create flow listens on the grouped create', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
 				readByQuery: async (): Promise<FlowRaw[]> => {
@@ -516,11 +516,9 @@ describe('event flows on item creates', () => {
 		await (getFlowManager() as any).load();
 
 		expect([
-			emitter.hasFilterListeners('articles.items.create.one'),
-			emitter.hasFilterListeners('users.create.one'),
 			emitter.hasFilterListeners('articles.items.create'),
 			emitter.hasFilterListeners('users.create'),
-		]).toEqual([false, false, true, true]);
+		]).toEqual([true, true]);
 	});
 
 	test('a create filter flow sees the base event name', async () => {

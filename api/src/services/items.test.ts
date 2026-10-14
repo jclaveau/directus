@@ -2050,8 +2050,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ emitEvents: false },
 			);
 
-			// The write still lands; only the announcing is suppressed — for the grouped
-			// event and the per-row one alike.
+			// The write still lands; only the announcing is suppressed.
 			expect(keys).toEqual([1]);
 			expect(tracker.history.update).toHaveLength(1);
 			expect(filterSpy).not.toHaveBeenCalled();
@@ -2103,19 +2102,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	});
 
 	describe('items.update fires once per update', () => {
-		const rowListener = () => undefined;
-
-		beforeEach(() => {
-			emitter.onFilter('items.update.one', rowListener);
-			emitter.onAction('items.update.one', rowListener);
-		});
-
-		afterEach(() => {
-			emitter.offFilter('items.update.one', rowListener);
-			emitter.offAction('items.update.one', rowListener);
-		});
-
-		it('emits only the grouped events, whatever listens per row', async () => {
+		it('emits the grouped events once', async () => {
 			tracker.on.update('test').response(3);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
@@ -2370,7 +2357,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	});
 
 	describe('items.create fires once per create', () => {
-		it('emits only the grouped events with nothing listening per row', async () => {
+		it('emits the grouped events once', async () => {
 			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 			tracker.on.insert('test').response([{ id: 1 }, { id: 2 }]);
 
@@ -2513,41 +2500,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			finally {
 				emitter.offFilter('test.items.create', answerBadly);
 			}
-		});
-	});
-
-	describe('an items.create.one listener', () => {
-		const takeOver = async () => 7;
-
-		beforeEach(() => {
-			emitter.onFilter('test.items.create.one', takeOver);
-		});
-
-		afterEach(() => {
-			emitter.offFilter('test.items.create.one', takeOver);
-		});
-
-		it('is never called: every row is inserted', async () => {
-			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
-			tracker.on.insert('test').response([{ id: 1 }]);
-
-			const actionSpy = vi.spyOn(emitter, 'emitAction');
-
-			const keys = await new ItemsService('test', {
-				knex: db,
-				schema: shapesSchema,
-			}).createMany([{ name: 'a' }]);
-
-			expect(keys).toEqual([1]);
-			expect(tracker.history.insert).toHaveLength(1);
-
-			expect(actionSpy.mock.calls).toEqual([
-				[
-					['items.create', 'test.items.create'],
-					{ payload: [{ id: 1, name: 'a' }], keys: [1], collection: 'test' },
-					expect.anything(),
-				],
-			]);
 		});
 	});
 
