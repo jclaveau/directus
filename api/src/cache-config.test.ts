@@ -165,6 +165,25 @@ describe('initCacheConfig', () => {
 			.toHaveBeenCalledWith('ttl_change', '90s');
 	});
 
+	// Under onRepeatedPk=lastWins one update can carry two changes to the
+	// singleton, written in order, so the later one is what the row holds.
+	it('announces the last cache_ttl an update writes', async () => {
+		await initCacheConfig();
+
+		settingsUpdateHandler({
+			payload: [
+				{ data: { cache_ttl: '90s' }, keys: [1] },
+				{ data: { cache_ttl: '5m' }, keys: [1] },
+			],
+		});
+
+		expect(resolvedCacheTtl()).toBe('5m');
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
+			ttl: '5m',
+		});
+	});
+
 	it('announces a cleared cache_ttl so peers fall back to env', async () => {
 		settingsRow = { cache_ttl: '5m' };
 		await initCacheConfig();

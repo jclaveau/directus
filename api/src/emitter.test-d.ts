@@ -92,15 +92,17 @@ test('register.filter hands a mutation handler the purge handle', () => {
 	});
 });
 
+// null as a whole is an earlier filter cancelling the mutation; a null create
+// entry is one cancelling that row.
 test('register.filter types a grouped event by the list it carries', () => {
 	const register = {} as RegisterFunctions;
 
 	register.filter('users.update', (groups) => {
-		expectTypeOf(groups).toEqualTypeOf<UpdateEntry[]>();
+		expectTypeOf(groups).toEqualTypeOf<UpdateEntry[] | null>();
 	});
 
 	register.filter('articles.items.create', (entries) => {
-		expectTypeOf(entries).toEqualTypeOf<CreateEntry[]>();
+		expectTypeOf(entries).toEqualTypeOf<(CreateEntry | null)[] | null>();
 	});
 });
 

@@ -149,3 +149,23 @@ test('checks the create as well as the update', async () => {
 		);
 	}).toThrowError(`'enabled' has to be a boolean`);
 });
+
+// A filter registered ahead of this one can cancel the whole write by answering
+// null, which the next filter receives as its payload.
+test('passes a write an earlier filter cancelled through', async () => {
+	const { default: emitter } = await import('../../emitter.js');
+
+	await initSharedSettingsGuard();
+
+	expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
+		null,
+		{} as never,
+		{} as never,
+	)).toBeNull();
+
+	expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
+		null,
+		{} as never,
+		{} as never,
+	)).toBeNull();
+});

@@ -786,3 +786,25 @@ test('hands the filter the caller the event carries', async () => {
 		.rejects
 		.toThrowError(ForbiddenError);
 });
+
+// A filter registered ahead of this one can cancel the whole write by answering
+// null, which the next filter receives as its payload.
+test('passes a write an earlier filter cancelled through', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await initCacheSettings();
+
+	await expect(vi.mocked(emitter.onFilter).mock.calls[0]![1](
+		null,
+		{} as never,
+		{ accountability: null } as never,
+	)).resolves.toBeNull();
+
+	await expect(vi.mocked(emitter.onFilter).mock.calls[1]![1](
+		null,
+		{} as never,
+		{ accountability: null } as never,
+	)).resolves.toBeNull();
+
+	expect(clearCacheTargets).not.toHaveBeenCalled();
+});

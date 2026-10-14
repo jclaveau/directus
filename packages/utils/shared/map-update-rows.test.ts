@@ -132,4 +132,29 @@ describe('mapUpdateRows', () => {
 
 		expect(mappedKeys).toEqual([3, 1, 2]);
 	});
+
+	it('keeps a later change to a row after an earlier one', async () => {
+		const groups = await mapUpdateRows(
+			[
+				{ data: { status: 'draft', delayMs: 5 }, keys: [1, 2] },
+				{ data: { status: 'published', delayMs: 0 }, keys: [1] },
+			],
+			async (data) => {
+				await new Promise((resolve) => setTimeout(resolve, data.delayMs));
+
+				return { status: data.status };
+			},
+		);
+
+		expect(groups).toEqual([
+			{ data: { status: 'draft' }, keys: [1, 2] },
+			{ data: { status: 'published' }, keys: [1] },
+		]);
+	});
+
+	it('passes an update an earlier hook cancelled whole through', async () => {
+		const groups = await mapUpdateRows(null, (data) => data);
+
+		expect(groups).toBeNull();
+	});
 });

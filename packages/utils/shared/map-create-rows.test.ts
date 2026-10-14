@@ -81,4 +81,22 @@ describe('mapCreateRows', () => {
 
 		expect(mappedTitles).toEqual(['slow', 'fast']);
 	});
+
+	it('hands the mapping a copy, so its edits leave the entry alone', async () => {
+		const sentEntries = [{ data: { title: 'a', tags: ['x'] } }];
+
+		await mapCreateRows(sentEntries, (data) => {
+			data.tags!.push('y');
+
+			return null;
+		});
+
+		expect(sentEntries).toEqual([{ data: { title: 'a', tags: ['x'] } }]);
+	});
+
+	it('passes a create an earlier hook cancelled whole through', async () => {
+		const entries = await mapCreateRows(null, (data) => data);
+
+		expect(entries).toBeNull();
+	});
 });

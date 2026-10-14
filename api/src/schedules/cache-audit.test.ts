@@ -256,6 +256,24 @@ describe('cache-audit schedule', () => {
 		);
 	});
 
+	// Under onRepeatedPk=lastWins one update can carry two changes to the
+	// singleton, written in order, so the later one is what the row holds.
+	it('announces the last rule an update writes', async () => {
+		await cacheAuditSchedule();
+
+		settingsUpdateHandler({
+			payload: [
+				{ data: { cache_audit_schedule: '0 5 * * *' }, keys: [1] },
+				{ data: { cache_audit_schedule: '0 6 * * *' }, keys: [1] },
+			],
+		});
+
+		expect(mockBus.publish).toHaveBeenCalledWith(
+			'cacheAuditScheduleChanged',
+			{ rule: '0 6 * * *' },
+		);
+	});
+
 	it('leaves the bus alone on a settings write about something else', async () => {
 		await cacheAuditSchedule();
 
