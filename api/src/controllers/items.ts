@@ -214,11 +214,10 @@ router.patch(
 			});
 		}
 
+		// Named, so a refusal of a repeated row names the option this route reads.
 		const updateOptions: MutationOptions = {
 			allowFilterCancel: true,
-			...(onRepeatedPk && {
-				onRepeatedPk: onRepeatedPk as RepeatedPkAnswer,
-			}),
+			onRepeatedPk: (onRepeatedPk ?? 'refuse') as RepeatedPkAnswer,
 		};
 
 		let keys: (PrimaryKey | null)[] = [];

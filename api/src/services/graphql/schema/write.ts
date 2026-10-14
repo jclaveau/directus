@@ -91,8 +91,8 @@ export function getWritableTypes(
 	const repeatedPkArgument = {
 		type: schemaComposer.createEnumTC({
 			name: 'repeated_pk_answer',
-			values: Object.fromEntries(RepeatedPkAnswers.map((answer) => {
-				return [answer, { value: answer }];
+			values: Object.fromEntries(RepeatedPkAnswers.map((repeatedPkAnswer) => {
+				return [repeatedPkAnswer, { value: repeatedPkAnswer }];
 			})),
 		}),
 		description: oneLine`
@@ -141,7 +141,7 @@ export function getWritableTypes(
 								`update_${collection.collection}_input`,
 							).NonNull,
 						],
-											onRepeatedPk: repeatedPkArgument,
+						...(gql.scope === 'items' && { onRepeatedPk: repeatedPkArgument }),
 					},
 					resolve: async ({ args, info }: { args: Record<string, any>; info: GraphQLResolveInfo }) =>
 						await resolveMutation(gql, args, info),
@@ -162,7 +162,7 @@ export function getWritableTypes(
 						data: toInputObjectType(UpdateCollectionTypes[collection.collection]!).setTypeName(
 							`update_${collection.collection}_input`,
 						).NonNull,
-											onRepeatedPk: repeatedPkArgument,
+						...(gql.scope === 'items' && { onRepeatedPk: repeatedPkArgument }),
 					},
 					resolve: async ({ args, info }: { args: Record<string, any>; info: GraphQLResolveInfo }) =>
 						await resolveMutation(gql, args, info),

@@ -71,7 +71,11 @@ export async function resolveMutation(
 			if (action === 'update') {
 				const keys: PrimaryKey[] = [];
 
-				const onRepeatedPk = args['onRepeatedPk'];
+				// Named on the items batches only, so a refusal of a repeated row names
+				// the argument only where the schema carries it.
+				const onRepeatedPk = gql.scope === 'items'
+					? args['onRepeatedPk'] ?? 'refuse'
+					: undefined;
 
 				if (batchUpdate) {
 					keys.push(...(await service.updateBatch(args['data'], { onRepeatedPk })));

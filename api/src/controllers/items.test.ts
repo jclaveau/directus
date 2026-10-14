@@ -352,7 +352,11 @@ describe('items controller', () => {
 			const req = makeReq({ body: { keys: [2], data: { x: 1 } } });
 			const res = { locals: {} } as any;
 			await handler()(req, res, vi.fn());
-			expect(updateMany).toHaveBeenCalledWith([2], { x: 1 }, { allowFilterCancel: true });
+
+			expect(updateMany).toHaveBeenCalledWith([2], { x: 1 }, {
+				allowFilterCancel: true,
+				onRepeatedPk: 'refuse',
+			});
 		});
 
 		test('updateByQuery default branch', async () => {
