@@ -21,7 +21,6 @@ import {
 
 type GroupedRow = { id: number; name: string; status: string | null };
 type UpdateGroupLogged = { data: { status?: string }; keys: number[] };
-type RowLogged = { id: number; status?: string };
 
 type Update = {
 	collection: string;
@@ -452,14 +451,13 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
-		// A grouped payload names a row in a group's keys, a per-row one in its id.
 		and.optional(
 			'the update events naming these rows are:',
 			async (table: Record<string, string>[]) => {
 				const ownKeys = update.rows.map((row) => row.id);
 
 				const counts = await Promise.all(table.map(async ({ event, phase }) => {
-					const payloads: (UpdateGroupLogged[] | RowLogged)[] = (
+					const payloads: UpdateGroupLogged[][] = (
 						await readLoggedPayloads(event!, phase!)
 					).map((payload: string) => JSON.parse(payload));
 
@@ -467,11 +465,9 @@ describe.each(vendors)('%s', (vendor) => {
 						event,
 						phase,
 						count: payloads.filter((payload) => {
-							return Array.isArray(payload)
-								? payload.some((group) => {
-									return group.keys.some((key) => ownKeys.includes(key));
-								})
-								: ownKeys.includes(payload.id);
+							return payload.some((group) => {
+								return group.keys.some((key) => ownKeys.includes(key));
+							});
 						}).length,
 					};
 				}));
