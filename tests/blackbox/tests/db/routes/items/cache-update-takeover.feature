@@ -11,6 +11,8 @@ Feature: A row an update hook took over is purged from the response cache
     and answers with it twice.
   - "take-over-sibling" on test_takeover_upsert_child: writes the row marked
     "sibling" "taken-over" and adds it to its answer.
+  - "take-over-inert" on test_takeover_inert: writes nothing and takes the row
+    over, declaring it inert through `skipPurgeFor` with a zero leading its key.
 
   Scenario: a refused answer still purges the row its hook took over
     Given the read of test_takeover_refused is cached:
@@ -34,3 +36,12 @@ Feature: A row an update hook took over is purged from the response cache
     Then the read of test_takeover_upsert_child in slot "b" answers:
       | cache | response               |
       | MISS  | [{body: "taken-over"}] |
+
+  Scenario: a takeover declared inert under another spelling of its key purges nothing
+    Given the read of test_takeover_inert is cached:
+      | response             |
+      | [{body: "original"}] |
+    When its row is sent the body "take-over-inert"
+    Then the read of test_takeover_inert answers:
+      | cache | response             |
+      | HIT   | [{body: "original"}] |

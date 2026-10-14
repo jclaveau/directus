@@ -862,6 +862,29 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		a take-over the hook declares inert under another spelling of its key purges
+		nothing
+	`, async () => {
+		const takeOver = (entries: any, _meta: any, ctx: any) => {
+			return mapCreateRows(entries, async () => {
+				ctx.scopedCache.skipPurgeFor('099');
+				return 99;
+			});
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service().createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOver);
+		}
+	});
+
+	it(oneLine`
 		a skipped take-over beside a real create still purges the created row's slice
 	`, async () => {
 		tracker.on.insert('test').response([1]);
@@ -1882,6 +1905,30 @@ describe(oneLine`
 			const takeOver = (groups: any, _meta: any, ctx: any) => {
 				return mapUpdateRows(groups, async (_data, key) => {
 					ctx.scopedCache.skipPurgeFor(key);
+
+					return key;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).not.toHaveBeenCalled();
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over the hook declares inert under another spelling of
+			its key purges nothing
+		`, async () => {
+			const takeOver = (groups: any, _meta: any, ctx: any) => {
+				return mapUpdateRows(groups, async (_data, key) => {
+					ctx.scopedCache.skipPurgeFor('01');
 
 					return key;
 				});

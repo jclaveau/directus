@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect } from 'vitest';
 const REFUSED = 'test_takeover_refused';
 const UPSERT_PARENT = 'test_takeover_upsert_parent';
 const UPSERT_CHILD = 'test_takeover_upsert_child';
+const INERT = 'test_takeover_inert';
 const cacheStatusHeader = 'x-cache-status';
 
 const feature = loadFeature(
@@ -41,6 +42,7 @@ describe.each(vendors)('%s', (vendor) => {
 	let refusedRowId: number;
 	let upsertParentId: number;
 	let sentChildId: number;
+	let inertRowId: number;
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
@@ -61,6 +63,10 @@ describe.each(vendors)('%s', (vendor) => {
 						{ field: 'marker', type: 'string', meta: {} },
 						{ field: 'body', type: 'string', meta: {} },
 					],
+				},
+				{
+					collection: INERT,
+					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 			],
 		});
@@ -101,6 +107,13 @@ describe.each(vendors)('%s', (vendor) => {
 
 		sentChildId = sentChild.id;
 
+		const inertRow = await CreateItem(vendor, {
+			collection: INERT,
+			item: { body: 'original' },
+		});
+
+		inertRowId = inertRow.id;
+
 		env[vendor].PORT = String(await getPort());
 
 		instance = spawn('node', [paths.cli, 'start'], {
@@ -117,6 +130,7 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: REFUSED });
 		await DeleteCollection(vendor, { collection: UPSERT_CHILD });
 		await DeleteCollection(vendor, { collection: UPSERT_PARENT });
+		await DeleteCollection(vendor, { collection: INERT });
 	});
 
 	defineFeature(feature, (scenario) => {
@@ -223,6 +237,55 @@ describe.each(vendors)('%s', (vendor) => {
 					async (slot: string, table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answered = await readSlot(slot);
+
+						expect(answered.headers[cacheStatusHeader]).toBe(cache);
+						expect(answered.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a takeover declared inert under another spelling of its key purges nothing',
+			({ given, when, then }) => {
+				function readInert() {
+					return request(getUrl(vendor, env))
+						.get(`/items/${INERT}`)
+						.query({ fields: 'body' })
+						.set('Authorization', auth);
+				}
+
+				given(
+					`the read of ${INERT} is cached:`,
+					async (table: Record<string, string>[]) => {
+						expect((await readInert()).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						const cached = await readInert();
+
+						expect(cached.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cached.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					/^its row is sent the body "(.*)"$/,
+					async (body: string) => {
+						const sent = await request(getUrl(vendor, env))
+							.patch(`/items/${INERT}/${inertRowId}`)
+							.send({ body })
+							.set('Authorization', auth);
+
+						expect(sent.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					`the read of ${INERT} answers:`,
+					async (table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answered = await readInert();
 
 						expect(answered.headers[cacheStatusHeader]).toBe(cache);
 						expect(answered.body.data).toEqual(loadYaml(response!));
