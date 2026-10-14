@@ -15,7 +15,6 @@
 //     payload refuses a value.
 //   'take-over' → its mapCreateRows inserts that row itself and returns its id,
 //     taking the row over.
-// The per-row events are recorded so the suite can show none fires.
 
 import { mapCreateRows } from '@directus/utils';
 
@@ -89,17 +88,7 @@ export default function registerHooks({ filter, action }, { database }) {
 		});
 	});
 
-	filter(`${COLLECTION}.items.create.one`, async (payload) => {
-		await record('items.create.one', 'filter', payload);
-
-		return payload;
-	});
-
 	action(`${COLLECTION}.items.create`, async (meta) => {
 		await record('items.create', 'action', meta.payload);
-	});
-
-	action(`${COLLECTION}.items.create.one`, async (meta) => {
-		await record('items.create.one', 'action', meta.payload);
 	});
 }

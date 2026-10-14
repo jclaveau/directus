@@ -221,10 +221,12 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional(/^the "(.*)" flow ran with:$/, expectUpdateRuns);
 
 		then.optional(
-			/^the update is refused with a reason naming "(.*)"$/,
-			(reason: string) => {
+			'the update is refused with the message:',
+			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
-				expect(update.response!.body.errors[0].message).toContain(reason);
+
+				expect(update.response!.body.errors[0].message)
+					.toEqual(docString.split('\n').join(' '));
 			},
 		);
 

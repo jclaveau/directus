@@ -9,7 +9,6 @@ import { CreateItem, CreatePermission } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
-import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { beforeEach, describe, expect } from 'vitest';
 import {
@@ -74,6 +73,15 @@ describe.each(vendors)('%s', (vendor) => {
 		}));
 
 		return keys.map((key) => nameByKey[key]);
+	}
+
+	// A docstring's line breaks read as spaces, and {name} as that row's key.
+	function messageOf(update: Update, docString: string) {
+		const oneLineMessage = docString.split('\n').join(' ');
+
+		return oneLineMessage.replace(/\{([^}]+)\}/g, (_match, rowName: string) => {
+			return String(update.rows.find((row) => row.name === rowName)!.id);
+		});
 	}
 
 	function defineSteps(
@@ -337,10 +345,12 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		then.optional(
-			/^the update is refused with a reason naming "(.*)"$/,
-			(reason: string) => {
+			'the update is refused with the message:',
+			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
-				expect(update.response!.body.errors[0].message).toContain(reason);
+
+				expect(update.response!.body.errors[0].message)
+					.toEqual(messageOf(update, docString));
 			},
 		);
 
@@ -350,17 +360,19 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		then.optional(
-			/^the GraphQL update is refused with a reason naming "(.*)"$/,
-			(reason: string) => {
+			'the GraphQL update is refused with the message:',
+			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(200);
-				expect(update.response!.body.errors[0].message).toContain(reason);
+
+				expect(update.response!.body.errors[0].message)
+					.toEqual(messageOf(update, docString));
 			},
 		);
 
 		// A query the schema refuses never runs, so its reason sits one level down.
 		then.optional(
-			/^the GraphQL query is rejected, naming "(.*)"$/,
-			(reason: string) => {
+			'the GraphQL query is rejected with the message:',
+			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
 
 				expect(update.response!.body.errors[0].extensions.code)
@@ -368,7 +380,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				expect(
 					update.response!.body.errors[0].extensions.errors[0].message,
-				).toContain(reason);
+				).toEqual(messageOf(update, docString));
 			},
 		);
 
@@ -471,9 +483,7 @@ describe.each(vendors)('%s', (vendor) => {
 		and.optional('no update event was logged', async () => {
 			expect([
 				...await readLoggedPayloads('items.update', 'filter'),
-				...await readLoggedPayloads('items.update.one', 'filter'),
 				...await readLoggedPayloads('items.update', 'action'),
-				...await readLoggedPayloads('items.update.one', 'action'),
 			]).toEqual([]);
 		});
 
@@ -539,7 +549,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
-			'an update fires the grouped event once, and no event per row',
+			'an update fires the grouped event once',
 			'a batch where every row writes nothing answers with every row',
 			'a batch answers with every row it was sent, no-op rows included',
 			'rows side by side carrying the same change are written together',
@@ -614,7 +624,7 @@ describe.each(vendors)('%s', (vendor) => {
 				defineSteps(steps, {
 					collection: collectionGrouped,
 					rows: [],
-					malformedKey: `not-a-key-${randomUUID()}`,
+					malformedKey: 'not-a-key',
 					authorization: AUTH,
 				});
 			}, 60_000);

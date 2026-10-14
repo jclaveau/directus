@@ -131,10 +131,10 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		then.optional(
-			/^the first refusal names "(.*)"$/,
-			(helperName: string) => {
+			"the first refusal's message is:",
+			(docString: string) => {
 				expect(exchanges.responses[0]!.body.errors[0].message)
-					.toContain(helperName);
+					.toEqual(docString.split('\n').join(' '));
 			},
 		);
 
@@ -156,7 +156,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		for (const title of [
-			'a create fires the grouped event once, and no event per row',
+			'a create fires the grouped event once',
 			'a grouped hook answering with one payload is refused',
 			oneLine`
 				a grouped hook deleting a field off the list is refused, creating

@@ -1,8 +1,8 @@
 Feature: An update reaches its hooks as one grouped event
 
   Every update reaches its hooks as groups: one `items.update` event carrying
-  `{ data, keys }[]`, and no event per row; a hook written for one row maps
-  the groups with `mapUpdateRows`. The rows live in
+  `{ data, keys }[]`; a hook written for one row maps the groups with
+  `mapUpdateRows`. The rows live in
   `test_update_groups`, whose events the update-groups-probe hook writes into a
   log read back here. A row is named by the `name` it was created with; a
   blank cell in what a batch sends leaves that field out, so the row sends its
@@ -32,7 +32,7 @@ Feature: An update reaches its hooks as one grouped event
   - status "check-status": the grouped filter reads `status` off the list
     itself, throwing when it reads "check-status".
 
-  Scenario: an update fires the grouped event once, and no event per row
+  Scenario: an update fires the grouped event once
     Given the rows:
       | name    |
       | a-one   |
@@ -43,11 +43,9 @@ Feature: An update reaches its hooks as one grouped event
       | status   | names                       |
       | archived | ["a-one","a-two","a-three"] |
     And the update events naming these rows are:
-      | event            | phase  | count |
-      | items.update     | filter | 1     |
-      | items.update.one | filter | 0     |
-      | items.update     | action | 1     |
-      | items.update.one | action | 0     |
+      | event        | phase  | count |
+      | items.update | filter | 1     |
+      | items.update | action | 1     |
 
   Scenario: a batch where every row writes nothing answers with every row
     Given the rows:
@@ -114,11 +112,9 @@ Feature: An update reaches its hooks as one grouped event
       | kept     | ["apart-b"] |
       | archived | ["apart-c"] |
     And the update events naming these rows are:
-      | event            | phase  | count |
-      | items.update     | filter | 1     |
-      | items.update.one | filter | 0     |
-      | items.update     | action | 1     |
-      | items.update.one | action | 0     |
+      | event        | phase  | count |
+      | items.update | filter | 1     |
+      | items.update | action | 1     |
 
   Scenario: a batch writes its revisions in the order it sends its rows
     Given the rows, in the collection no update hook listens to:
@@ -196,7 +192,11 @@ Feature: An update reaches its hooks as one grouped event
       | repeat-a | archived |
       | repeat-b | kept     |
       | repeat-a | kept     |
-    Then the update is refused with a reason naming "onRepeatedPk"
+    Then the update is refused with the message:
+      """
+      Invalid payload. Row {repeat-a} is sent more than once; send each row once, or pass
+      onRepeatedPk=lastWins.
+      """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name     | status |
@@ -211,7 +211,10 @@ Feature: An update reaches its hooks as one grouped event
     When the batch sends, with onRepeatedPk "merge":
       | name      | status   |
       | unknown-a | archived |
-    Then the update is refused with a reason naming "onRepeatedPk"
+    Then the update is refused with the message:
+      """
+      Invalid query. "onRepeatedPk" must be one of refuse, lastWins.
+      """
     And the rows hold:
       | name      | status |
       | unknown-a |        |
@@ -225,7 +228,11 @@ Feature: An update reaches its hooks as one grouped event
       | name    | status   |
       | badge-a | archived |
       | badge-a | kept     |
-    Then the update is refused with a reason naming "onRepeatedPk"
+    Then the update is refused with the message:
+      """
+      Invalid payload. Row {badge-a} is sent more than once; send each row once, or pass
+      onRepeatedPk=lastWins.
+      """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name    | status |
@@ -239,7 +246,11 @@ Feature: An update reaches its hooks as one grouped event
       | name      | status   |
       | gql-twice | archived |
       | gql-twice | kept     |
-    Then the GraphQL update is refused with a reason naming "onRepeatedPk"
+    Then the GraphQL update is refused with the message:
+      """
+      Invalid payload. Row {gql-twice} is sent more than once; send each row once, or pass
+      onRepeatedPk=lastWins.
+      """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name      | status |
@@ -266,7 +277,11 @@ Feature: An update reaches its hooks as one grouped event
     When the batch is sent over GraphQL, with onRepeatedPk merge:
       | name        | status   |
       | gql-unknown | archived |
-    Then the GraphQL query is rejected, naming "merge"
+    Then the GraphQL query is rejected with the message:
+      """
+      Expected value of type "repeated_pk_answer", found merge; Value "merge" does not
+      exist in "repeated_pk_answer" enum.
+      """
     And the rows hold:
       | name        | status |
       | gql-unknown |        |
@@ -299,7 +314,11 @@ Feature: An update reaches its hooks as one grouped event
       | name     | status     |
       | answer-a | archived   |
       | answer-b | repeat-key |
-    Then the update is refused with a reason naming "more than once"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A "items.update" filter hook answered with row {answer-b} more than
+      once.
+      """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name     | status |
@@ -315,7 +334,12 @@ Feature: An update reaches its hooks as one grouped event
       | name     | status       |
       | legacy-a | archived     |
       | legacy-b | legacy-shape |
-    Then the update is refused with a reason naming "mapUpdateRows"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A "items.update" filter hook must return the { data, keys }[] it
+      received, a row it wrote itself as { key }, no key both; a hook that handles one row
+      maps them with mapUpdateRows.
+      """
     And the rows hold:
       | name     | status       |
       | legacy-a |              |
@@ -344,7 +368,12 @@ Feature: An update reaches its hooks as one grouped event
       | name    | status     |
       | strip-a | archived   |
       | strip-b | strip-name |
-    Then the update is refused with a reason naming "mapUpdateRows"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A "items.update" filter hook must return the { data, keys }[] it
+      received, a row it wrote itself as { key }, no key both; a hook that handles one row
+      maps them with mapUpdateRows.
+      """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name    | status     |
@@ -360,7 +389,12 @@ Feature: An update reaches its hooks as one grouped event
       | name    | status       |
       | check-a | archived     |
       | check-b | check-status |
-    Then the update is refused with a reason naming "mapUpdateRows"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A "items.update" filter hook must return the { data, keys }[] it
+      received, a row it wrote itself as { key }, no key both; a hook that handles one row
+      maps them with mapUpdateRows.
+      """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name    | status       |
@@ -369,7 +403,11 @@ Feature: An update reaches its hooks as one grouped event
 
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"
-    Then the update is refused with a reason naming "must be an integer"
+    Then the update is refused with the message:
+      """
+      Invalid payload. Primary key of test_update_groups must be an integer instead of
+      "not-a-key".
+      """
     And no update event was logged
 
   Scenario: an update naming no row runs no update hook

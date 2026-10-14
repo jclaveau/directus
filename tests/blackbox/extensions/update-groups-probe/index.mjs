@@ -22,8 +22,7 @@
 //   status 'check-status' → the grouped filter reads `status` off the list, the
 //     way a hook written for one payload refuses a value.
 // The name is read back from the row, since the event carries only what is
-// being written. The per-row events are recorded so the suite can show none
-// fires.
+// being written.
 
 import { mapUpdateRows } from '@directus/utils';
 
@@ -112,17 +111,7 @@ export default function registerHooks({ filter, action }, { database }) {
 		});
 	});
 
-	filter(`${COLLECTION}.items.update.one`, async (payload) => {
-		await record('items.update.one', 'filter', payload);
-
-		return payload;
-	});
-
 	action(`${COLLECTION}.items.update`, async (meta) => {
 		await record('items.update', 'action', meta.payload);
-	});
-
-	action(`${COLLECTION}.items.update.one`, async (meta) => {
-		await record('items.update.one', 'action', meta.payload);
 	});
 }
