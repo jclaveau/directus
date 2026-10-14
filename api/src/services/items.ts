@@ -1584,6 +1584,8 @@ implements AbstractService<Item> {
 		// hook dropped, which cancels it. This is what the update returns. Under
 		// lastWins a key sent twice is matched by count, so a hook dropping one of
 		// its copies cancels the later one.
+		// TODO: if a caller needs the dropped copy itself cancelled, match each
+		// answered row to its input row by position instead of counting keys.
 		const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
 			const keyName = String(key);
 			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
