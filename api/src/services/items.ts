@@ -580,7 +580,17 @@ implements AbstractService<Item> {
 					payloadAfterHooks = entry.data;
 				}
 
-				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
+				if (
+					typeof payloadAfterHooks === 'string'
+					|| typeof payloadAfterHooks === 'number'
+				) {
+					validateKeys(
+						this.schema,
+						this.collection,
+						primaryKeyField,
+						payloadAfterHooks,
+					);
+
 					// A filter hook returned a primary key instead of a payload: it has taken over the
 					// creation of this row. Surface that key, insert nothing, and let the hook that took
 					// over own the action event.
