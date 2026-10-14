@@ -1413,10 +1413,15 @@ implements AbstractService<Item> {
 		const primaryKeyType = this.schema.collections[this.collection]!
 			.fields[primaryKeyField]!.type;
 
-		// A uuid names one row whatever the case of its letters (RFC 9562).
+		// A uuid names one row whatever the case of its letters (RFC 9562), an
+		// integer whatever zeros lead it.
 		const keyNameOf = (key: PrimaryKey) => {
-			return primaryKeyType === 'uuid'
-				? String(key).toLowerCase()
+			if (primaryKeyType === 'uuid') {
+				return String(key).toLowerCase();
+			}
+
+			return primaryKeyType === 'integer'
+				? String(Number(key))
 				: String(key);
 		};
 
