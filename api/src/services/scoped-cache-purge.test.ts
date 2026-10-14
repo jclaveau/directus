@@ -2626,9 +2626,10 @@ describe(oneLine`
 			['only its key', { id: ['2'] }],
 			['nothing', undefined],
 		])(oneLine`
-			an update whose hook takes over a row the caller did not send purges
-			coarse when the purgeBy for that row pins %s
+			in production, an update whose hook takes over a row the caller did not
+			send purges coarse when the purgeBy for that row pins %s
 		`, async (_shape, pinnedScope) => {
+			vi.stubEnv('NODE_ENV', 'production');
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 			tracker.on.update('test').response(1);
 
@@ -2656,6 +2657,45 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', takeOverAnother);
+				vi.unstubAllEnvs();
+			}
+		});
+
+		it.each([
+			['a field outside its scope', { name: ['x'] }],
+			['only its key', { id: ['2'] }],
+			['nothing', undefined],
+		])(oneLine`
+			outside production, an update whose hook takes over a row the caller did
+			not send is refused before any write when the purgeBy for that row pins %s
+		`, async (_shape, pinnedScope) => {
+			vi.stubEnv('NODE_ENV', 'development');
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(
+					{ collection: 'test', pinnedScope },
+					{ forKey: 2 },
+				);
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' })).rejects
+					.toThrow(new Error(oneLine`
+						purgeBy forKey 2 on "test" must pin every scope field: missing
+						"student"
+					`));
+
+				expect(tracker.history.update).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+				vi.unstubAllEnvs();
 			}
 		});
 

@@ -636,6 +636,117 @@ describe('createScopedCacheHookDeclarations', () => {
 		]));
 	});
 
+	describe('a forKey declaration on a collection scoped by two fields', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		it('records the row when the declaration pins both', () => {
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor, purgeDeclaredKeys } =
+				createScopedCacheHookDeclarations(teamSchema);
+
+			purgeHandleFor('lessons').purgeBy({
+				collection: 'lessons',
+				pinnedScope: { student: ['A'], team: ['red'] },
+			}, { forKey: 2 });
+
+			expect(purgeDeclaredKeys).toEqual(new Map([
+				['lessons', new Set(['2'])],
+			]));
+		});
+
+		it(oneLine`
+			in production, leaves the row undeclared when the declaration pins one, so
+			its takeover purges coarse
+		`, () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor, purgeDeclaredKeys } =
+				createScopedCacheHookDeclarations(teamSchema);
+
+			purgeHandleFor('lessons').purgeBy({
+				collection: 'lessons',
+				pinnedScope: { student: ['A'] },
+			}, { forKey: 2 });
+
+			expect(purgeDeclaredKeys).toEqual(new Map());
+		});
+
+		it('outside production, refuses a declaration that pins one', () => {
+			vi.stubEnv('NODE_ENV', 'test');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor } = createScopedCacheHookDeclarations(teamSchema);
+
+			expect(() => {
+				purgeHandleFor('lessons').purgeBy({
+					collection: 'lessons',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+			}).toThrow(new Error(oneLine`
+				purgeBy forKey 2 on "lessons" must pin every scope field: missing
+				"team"
+			`));
+		});
+
+		it(oneLine`
+			outside production, names every scope field a declaration leaves out
+		`, () => {
+			vi.stubEnv('NODE_ENV', 'test');
+
+			const teamSchema = new SchemaBuilder()
+				.collection('lessons', (c) => {
+					c.field('id').id();
+					c.field('student').string();
+					c.field('team').string();
+				})
+				.build();
+
+			teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+			const { purgeHandleFor } = createScopedCacheHookDeclarations(teamSchema);
+
+			expect(() => {
+				purgeHandleFor('lessons').purgeBy({
+					collection: 'lessons',
+					pinnedScope: { id: [2] },
+				}, { forKey: 2 });
+			}).toThrow(new Error(oneLine`
+				purgeBy forKey 2 on "lessons" must pin every scope field: missing
+				"student", "team"
+			`));
+		});
+	});
+
 	it(oneLine`
 		keeps the EARLIEST counter a scopeTo handed over per collection — a second
 		dependent read straddling a purge must not overwrite the value that shows it
