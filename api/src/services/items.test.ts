@@ -573,7 +573,13 @@ describe('Integration Tests', () => {
 				try {
 					await expect(
 						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
-					).rejects.toThrow(/mapCreateRows/);
+					).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.create" filter hook must return '
+							+ 'one { data } | { key } | { sameRowAs } | null per row it received, '
+							+ 'a sameRowAs pointing at an earlier row; '
+							+ 'a hook that handles one row maps them with mapCreateRows.',
+					});
 
 					expect(batchInsert).not.toHaveBeenCalled();
 				}
@@ -608,7 +614,13 @@ describe('Integration Tests', () => {
 				try {
 					await expect(
 						batchService().createMany([{ name: 'a' }, { name: 'b' }]),
-					).rejects.toThrow(/mapCreateRows/);
+					).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.create" filter hook must return '
+							+ 'one { data } | { key } | { sameRowAs } | null per row it received, '
+							+ 'a sameRowAs pointing at an earlier row; '
+							+ 'a hook that handles one row maps them with mapCreateRows.',
+					});
 
 					expect(batchInsert).not.toHaveBeenCalled();
 				}
@@ -730,7 +742,11 @@ describe('Integration Tests', () => {
 					{ id: 1, name: 'first' },
 					{ id: 2, name: 'other' },
 					{ id: 1, name: 'second' },
-				])).rejects.toThrow(/Row 1 is sent more than once.*onRepeatedPk/);
+				])).rejects.toMatchObject({
+					message:
+						'Invalid payload. Row 1 is sent more than once; send each row once, or '
+						+ 'pass onRepeatedPk=lastWins.',
+				});
 
 				expect(filterSpy).not.toHaveBeenCalled();
 				expect(tracker.history.all).toHaveLength(0);
@@ -747,7 +763,11 @@ describe('Integration Tests', () => {
 					await expect(service.updateBatch([
 						{ id: 1, name: 'first' },
 						{ id: 2, name: 'other' },
-					])).rejects.toThrow(/answered with row 1 more than once/);
+					])).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.update" filter hook answered with row 1 '
+							+ 'more than once.',
+					});
 
 					expect(tracker.history.all).toHaveLength(0);
 				}
@@ -1046,9 +1066,15 @@ describe('Integration Tests', () => {
 					.spyOn(emitter, 'emitFilter')
 					.mockResolvedValueOnce({ name: 'changed' });
 
-				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-					/mapUpdateRows/,
-				);
+				await expect(
+					service.updateMany([1], { name: 'Test' }),
+				).rejects.toMatchObject({
+					message:
+						'Invalid payload. A "items.update" filter hook must return '
+						+ 'the { data, keys }[] it received, a row it wrote itself as { key }, '
+						+ 'no key both; '
+						+ 'a hook that handles one row maps them with mapUpdateRows.',
+				});
 
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -1062,9 +1088,15 @@ describe('Integration Tests', () => {
 						}),
 					);
 
-				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-					/mapUpdateRows/,
-				);
+				await expect(
+					service.updateMany([1], { name: 'Test' }),
+				).rejects.toMatchObject({
+					message:
+						'Invalid payload. A "items.update" filter hook must return '
+						+ 'the { data, keys }[] it received, a row it wrote itself as { key }, '
+						+ 'no key both; '
+						+ 'a hook that handles one row maps them with mapUpdateRows.',
+				});
 
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -1097,9 +1129,15 @@ describe('Integration Tests', () => {
 				emitter.onFilter('items.update', groupHook);
 
 				try {
-					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/mapUpdateRows/,
-					);
+					await expect(
+						service.updateMany([1], { name: 'Test' }),
+					).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.update" filter hook must return the { '
+							+ 'data, keys }[] it received, a row it wrote itself as { key }, no '
+							+ 'key both; a hook that handles one row maps them with '
+							+ 'mapUpdateRows.',
+					});
 
 					expect(tracker.history.all).toHaveLength(0);
 				}
@@ -1118,9 +1156,15 @@ describe('Integration Tests', () => {
 				emitter.onFilter('items.update', groupHook);
 
 				try {
-					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/mapUpdateRows/,
-					);
+					await expect(
+						service.updateMany([1], { name: 'Test' }),
+					).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.update" filter hook must return the { '
+							+ 'data, keys }[] it received, a row it wrote itself as { key }, no '
+							+ 'key both; a hook that handles one row maps them with '
+							+ 'mapUpdateRows.',
+					});
 
 					expect(tracker.history.all).toHaveLength(0);
 				}
@@ -1139,9 +1183,15 @@ describe('Integration Tests', () => {
 				emitter.onFilter('items.update', groupHook);
 
 				try {
-					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/mapUpdateRows/,
-					);
+					await expect(
+						service.updateMany([1], { name: 'Test' }),
+					).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.update" filter hook must return the { '
+							+ 'data, keys }[] it received, a row it wrote itself as { key }, no '
+							+ 'key both; a hook that handles one row maps them with '
+							+ 'mapUpdateRows.',
+					});
 
 					expect(tracker.history.all).toHaveLength(0);
 				}
@@ -1162,9 +1212,15 @@ describe('Integration Tests', () => {
 				emitter.onFilter('items.update', groupHook);
 
 				try {
-					await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(
-						/mapUpdateRows/,
-					);
+					await expect(
+						service.updateMany([1], { name: 'Test' }),
+					).rejects.toMatchObject({
+						message:
+							'Invalid payload. A "items.update" filter hook must return the { '
+							+ 'data, keys }[] it received, a row it wrote itself as { key }, no '
+							+ 'key both; a hook that handles one row maps them with '
+							+ 'mapUpdateRows.',
+					});
 
 					expect(tracker.history.all).toHaveLength(0);
 				}
@@ -1224,9 +1280,13 @@ describe('Integration Tests', () => {
 						{ data: { name: 'y' }, keys: [1] },
 					]);
 
-				await expect(service.updateMany([1, 2], { name: 'Test' })).rejects.toThrow(
-					/cancelled a row of the update/,
-				);
+				await expect(
+					service.updateMany([1, 2], { name: 'Test' }),
+				).rejects.toMatchObject({
+					message:
+						'Invalid payload. A filter hook cancelled a row of the update, but '
+						+ 'this operation requires it.',
+				});
 
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -1246,7 +1306,11 @@ describe('Integration Tests', () => {
 						{ id: 1, name: 'second' },
 					],
 					{ onRepeatedPk: 'lastWins' },
-				)).rejects.toThrow(/cancelled a row of the update/);
+				)).rejects.toMatchObject({
+					message:
+						'Invalid payload. A filter hook cancelled a row of the update, but '
+						+ 'this operation requires it.',
+				});
 
 				expect(tracker.history.all).toHaveLength(0);
 			});
@@ -1720,7 +1784,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			await expect(service().updateBatch([
 				{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'first' },
 				{ id: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA', name: 'second' },
-			])).rejects.toThrow(/sent more than once.*onRepeatedPk/);
+			])).rejects.toMatchObject({
+				message:
+					'Invalid payload. Row aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa is sent more '
+					+ 'than once; send each row once, or pass onRepeatedPk=lastWins.',
+			});
 
 			expect(filterSpy).not.toHaveBeenCalled();
 			expect(tracker.history.all).toHaveLength(0);
@@ -1797,7 +1865,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			await expect(service().updateMany(
 				['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
 				{ name: 'after' },
-			)).rejects.toThrow(/mapUpdateRows/);
+			)).rejects.toMatchObject({
+				message:
+					'Invalid payload. A "items.update" filter hook must return '
+					+ 'the { data, keys }[] it received, a row it wrote itself as { key }, '
+					+ 'no key both; '
+					+ 'a hook that handles one row maps them with mapUpdateRows.',
+			});
 
 			expect(tracker.history.update).toHaveLength(0);
 		});
@@ -2238,7 +2312,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			await expect(
 				new ItemsService('test', { knex: db, schema: shapesSchema })
 					.updateMany([1, 2], { name: 'after' }),
-			).rejects.toThrow(/cancelled a row of the update/);
+			).rejects.toMatchObject({
+				message:
+					'Invalid payload. A filter hook cancelled a row of the update, but this '
+					+ 'operation requires it.',
+			});
 
 			expect(tracker.history.update).toHaveLength(0);
 		});
@@ -2313,7 +2391,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			await expect(
 				new ItemsService('test', { knex: db, schema: shapesSchema })
 					.updateMany([1], { name: 'after' }),
-			).rejects.toThrow(/mapUpdateRows/);
+			).rejects.toMatchObject({
+				message:
+					'Invalid payload. A "items.update" filter hook must return '
+					+ 'the { data, keys }[] it received, a row it wrote itself as { key }, '
+					+ 'no key both; '
+					+ 'a hook that handles one row maps them with mapUpdateRows.',
+			});
 
 			expect(tracker.history.update).toHaveLength(0);
 		});

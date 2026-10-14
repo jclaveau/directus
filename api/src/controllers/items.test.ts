@@ -338,7 +338,11 @@ describe('items controller', () => {
 			const error = await nextError(handler(), req);
 
 			expect(error).toBeInstanceOf(InvalidQueryError);
-			expect(error.message).toContain('onRepeatedPk');
+
+			expect(error.message).toEqual(
+				'Invalid query. "onRepeatedPk" must be one of refuse, lastWins.',
+			);
+
 			expect(updateBatch).not.toHaveBeenCalled();
 		});
 
