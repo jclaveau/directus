@@ -17,7 +17,15 @@ import type {
 	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
-import { applyOptionsData, deepMap, getRedactedString, isValidJSON, parseJSON, toArray } from '@directus/utils';
+import {
+	applyOptionsData,
+	deepMap,
+	getRedactedString,
+	isValidJSON,
+	mapCreateRows,
+	parseJSON,
+	toArray,
+} from '@directus/utils';
 import type { Knex } from 'knex';
 import { get } from 'micromustache';
 import { useBus } from './bus/index.js';
@@ -419,7 +427,8 @@ class FlowManager {
 	/**
 	 * One run per created row or update group, its trigger shaped like the single
 	 * write the flow was written for; a returned value replaces that row's or
-	 * group's data.
+	 * group's data. A created row's flow can also answer it as a hook does: a
+	 * key takes the row over, null cancels it.
 	 */
 	private filterFlowHandler(flow: Flow, route: FlowEventRoute): FilterHandler {
 		const runFlow: FilterHandler = (payload, meta, context) => {
@@ -446,28 +455,21 @@ class FlowManager {
 			}
 
 			if (route.payloadShape === 'create-entries') {
-				const entriesAfterFlow: (CreateEntry | null)[] = [];
+				const createEntries = payload as (CreateEntry | null)[];
 
-				for (const entry of payload as (CreateEntry | null)[]) {
-					if (entry === null || !('data' in entry)) {
-						entriesAfterFlow.push(entry);
-						continue;
-					}
+				return mapCreateRows(createEntries, async (data, index) => {
+					const originalEntry = createEntries[index] as { data: Item };
 
-					const dataAfterFlow = await runFlow(
-						entry.data,
-						{ ...meta, originalPayload: entry.data },
+					const rowAfterFlow = await runFlow(
+						data,
+						{ ...meta, originalPayload: originalEntry.data },
 						context,
 					);
 
-					entriesAfterFlow.push({
-						data: dataAfterFlow === undefined
-							? entry.data
-							: dataAfterFlow as Partial<Item>,
-					});
-				}
-
-				return entriesAfterFlow;
+					return rowAfterFlow === undefined
+						? data
+						: rowAfterFlow as Partial<Item> | PrimaryKey | null;
+				});
 			}
 
 			const groupsAfterFlow: UpdateEntry[] = [];
