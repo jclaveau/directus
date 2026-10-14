@@ -1,6 +1,6 @@
 import { Action } from '@directus/constants';
 import { useEnv } from '@directus/env';
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import type {
 	Accountability,
@@ -23,6 +23,7 @@ import {
 	getRedactedString,
 	isValidJSON,
 	mapCreateRows,
+	oneLine,
 	parseJSON,
 	toArray,
 } from '@directus/utils';
@@ -450,6 +451,11 @@ class FlowManager {
 		}
 
 		return async (payload, meta, context) => {
+			// An earlier filter cancelled the whole call: there is no row to run for.
+			if (payload === null) {
+				return payload;
+			}
+
 			if (!Array.isArray(payload)) {
 				return runFlow(payload, meta, context);
 			}
@@ -485,6 +491,16 @@ class FlowManager {
 					{ ...meta, keys: group.keys, originalPayload: group.data },
 					context,
 				);
+
+				if (dataAfterFlow === null) {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A flow on "${route.triggerEvent}" returned null for rows
+							${group.keys.join(', ')}; an update flow returns the change to
+							write, or nothing to keep the change sent
+						`,
+					});
+				}
 
 				groupsAfterFlow.push({
 					data: dataAfterFlow === undefined
