@@ -1,5 +1,6 @@
 import type {
 	MaybeWithMeta,
+	PrimaryKey,
 	ReadMeta,
 	SchemaOverview,
 	ScopedCacheCollectionPin,
@@ -66,6 +67,7 @@ export function createScopedCacheHookDeclarations(
 	const manuallyPurgedKeys = new Set<string>();
 	const epochs: Record<string, string | null> = {};
 	const purgeSkippedKeys = new Set<string>();
+	const purgeDeclaredKeys = new Map<string, Set<string>>();
 	const takenOverKeys = new Set<string>();
 	const purgeFingerprints: ScopedCacheFingerprint[] = [];
 	const seenPurgeFingerprints = new Set<string>();
@@ -132,12 +134,21 @@ export function createScopedCacheHookDeclarations(
 		input:
 			| ScopedCacheDeclaredFingerprint
 			| readonly ScopedCacheDeclaredFingerprint[],
+		forKey?: PrimaryKey,
 	): void {
 		const batch = Array.isArray(input)
 			? input
 			: [input as ScopedCacheDeclaredFingerprint];
 
 		for (const declared of batch) {
+			if (forKey !== undefined) {
+				const declaredKeys = purgeDeclaredKeys.get(declared.collection)
+					?? new Set<string>();
+
+				declaredKeys.add(String(forKey));
+				purgeDeclaredKeys.set(declared.collection, declaredKeys);
+			}
+
 			// View fields deliberately dropped: they name the columns a READ depends
 			// on, and a purge is answered by the scope alone. Kept, two reads of one
 			// slice through different columns would be two purges of the same thing.
@@ -165,6 +176,7 @@ export function createScopedCacheHookDeclarations(
 		purgeFingerprints,
 		manuallyPurgedKeys,
 		purgeSkippedKeys,
+		purgeDeclaredKeys,
 		takenOverKeys,
 		epochs,
 		scope: {
@@ -182,10 +194,9 @@ export function createScopedCacheHookDeclarations(
 			},
 		},
 		purge: {
-			purgeBy: (input) => addPurgeFingerprint(input),
-			// Deliberately not a fingerprint: the take-over check reads how many were
-			// declared, and declaring nothing to purge must not read as declaring a
-			// purge.
+			purgeBy: (input, options) => addPurgeFingerprint(input, options?.forKey),
+			// Not a fingerprint: declaring nothing to purge must not read as declaring
+			// a purge.
 			skipPurgeFor: (key) => {
 				purgeSkippedKeys.add(String(key));
 			},
