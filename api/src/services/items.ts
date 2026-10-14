@@ -1525,9 +1525,7 @@ implements AbstractService<Item> {
 		const refusesRepeatedPks = opts.onRepeatedPk !== 'lastWins';
 		const sentKeyNames = new Set<string>();
 
-		// Run all hooks that are attached to this event so the end user has the chance to augment the
-		// items that are about to be saved
-		const payload: UpdateEntry<Item>[] = groups.map((group) => {
+		const sentGroups: UpdateEntry<Item>[] = groups.map((group) => {
 			if (!refusesRepeatedPks) {
 				return { data: cloneDeep(group.data), keys: [...group.keys] };
 			}
@@ -1572,7 +1570,7 @@ implements AbstractService<Item> {
 		};
 
 		const guardedPayload = refuseFieldAccess(
-			payload,
+			sentGroups,
 			Object.keys(this.schema.collections[this.collection]!.fields),
 			groupListRefusal,
 		);
@@ -1580,12 +1578,14 @@ implements AbstractService<Item> {
 		// Read before any hook, so a row a hook takes over still shows the slice it
 		// leaves: old ∪ new purges it narrow, whatever the hook declared. A row sent
 		// changing nothing is left unread: most never get written.
-		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
+		const aliasFields = Object.values(
+			this.schema.collections[this.collection]!.fields,
+		)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
 
 		const changedInputKeys = groups.flatMap((group) => {
-			return this.groupChangesNothing(group, aliases)
+			return this.groupChangesNothing(group, aliasFields)
 				? []
 				: group.keys;
 		});
@@ -1597,6 +1597,8 @@ implements AbstractService<Item> {
 		const readKeyNames = new Set(changedInputKeys.map((key) => keyNameOf(key)));
 		const inputKeyNames = new Set(inputKeys.map((key) => keyNameOf(key)));
 
+		// Run all hooks that are attached to this event so the end user has the chance
+		// to augment the items that are about to be saved
 		const answeredGroups =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<UpdateEntry<Item>[], null>(
@@ -1610,10 +1612,10 @@ implements AbstractService<Item> {
 						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
 					},
 				)
-				: payload;
+				: sentGroups;
 
 		const groupsAfterHooks = answeredGroups === guardedPayload
-			? payload
+			? sentGroups
 			: answeredGroups;
 
 		// The slice a taken-over row left is known only for a row read above, or one
@@ -1702,12 +1704,12 @@ implements AbstractService<Item> {
 			.filter(isTakenOverRow<Item>)
 			.map((entry) => entry.key);
 
-		const keys = [
+		const answeredKeys = [
 			...dataGroups.flatMap((group) => group.keys),
 			...takenOverKeys,
 		];
 
-		const hookAddedKeys = keys.filter((key) => {
+		const hookAddedKeys = answeredKeys.filter((key) => {
 			return !inputKeyNames.has(keyNameOf(key));
 		});
 
@@ -1718,7 +1720,7 @@ implements AbstractService<Item> {
 				mutationTracker.trackMutations(hookAddedKeys.length);
 			}
 
-			validateKeys(this.schema, this.collection, primaryKeyField, keys);
+			validateKeys(this.schema, this.collection, primaryKeyField, answeredKeys);
 		}
 		catch (error) {
 			throw await refuseHookAnswer(error);
@@ -1746,7 +1748,7 @@ implements AbstractService<Item> {
 
 		const answeredKeyCounts = new Map<string, number>();
 
-		for (const key of keys) {
+		for (const key of answeredKeys) {
 			const keyName = keyNameOf(key);
 			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
@@ -1800,7 +1802,7 @@ implements AbstractService<Item> {
 				return Object.entries(groupData).some(([field, value]) => {
 					const nestsAnItem = typeof value === 'object' && value !== null;
 
-					return aliases.includes(field)
+					return aliasFields.includes(field)
 						|| (relationalFields.has(field) && nestsAnItem);
 				});
 			},
@@ -1808,7 +1810,7 @@ implements AbstractService<Item> {
 		);
 
 		const writingGroups = mergedGroups.filter((group) => {
-			return group.keys.length > 0 && !this.groupChangesNothing(group, aliases);
+			return group.keys.length > 0 && !this.groupChangesNothing(group, aliasFields);
 		});
 
 		for (const key of takenOverKeys) {
@@ -1926,7 +1928,7 @@ implements AbstractService<Item> {
 				for (const group of writingGroups) {
 					const result = await service.applyUpdateGroup(
 						group,
-						aliases,
+						aliasFields,
 						{
 							...opts,
 							mutationTracker,

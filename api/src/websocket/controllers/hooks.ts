@@ -75,8 +75,7 @@ function updateEventPerGroup(
 }
 
 // `items.create` carries every row of the create, and `keys` theirs in the same
-// order. A subscriber is sent one message per row, as it was before the create
-// was grouped.
+// order. A subscriber gets one message per row.
 function createEventPerRow(
 	{ keys = [], payload = [] }: Record<string, any>,
 	collection: string,
