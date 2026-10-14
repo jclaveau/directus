@@ -7,10 +7,10 @@ import {
 } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import {
-	RepeatedRowAnswers,
+	RepeatedPkAnswers,
 	type MutationOptions,
 	type PrimaryKey,
-	type RepeatedRowAnswer,
+	type RepeatedPkAnswer,
 } from '@directus/types';
 import express from 'express';
 import collectionExists from '../middleware/collection-exists.js';
@@ -203,21 +203,21 @@ router.patch(
 			return next();
 		}
 
-		const onRepeatedRow = req.query['onRepeatedRow'];
+		const onRepeatedPk = req.query['onRepeatedPk'];
 
 		if (
-			onRepeatedRow !== undefined
-			&& !RepeatedRowAnswers.includes(onRepeatedRow as RepeatedRowAnswer)
+			onRepeatedPk !== undefined
+			&& !RepeatedPkAnswers.includes(onRepeatedPk as RepeatedPkAnswer)
 		) {
 			throw new InvalidQueryError({
-				reason: `"onRepeatedRow" must be one of ${RepeatedRowAnswers.join(', ')}`,
+				reason: `"onRepeatedPk" must be one of ${RepeatedPkAnswers.join(', ')}`,
 			});
 		}
 
 		const updateOptions: MutationOptions = {
 			allowFilterCancel: true,
-			...(onRepeatedRow && {
-				onRepeatedRow: onRepeatedRow as RepeatedRowAnswer,
+			...(onRepeatedPk && {
+				onRepeatedPk: onRepeatedPk as RepeatedPkAnswer,
 			}),
 		};
 

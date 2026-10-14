@@ -1,4 +1,4 @@
-name: onRepeatedRow
+name: onRepeatedPk
 description: >
   What the update does with a row it is sent more than once. `refuse` refuses the update before any hook runs,
   and refuses a hook answering with a row twice; a row sent twice in one change is written once. `lastWins` writes

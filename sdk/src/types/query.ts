@@ -29,12 +29,12 @@ export interface QueryItem<Schema, Item> extends Query<Schema, Item> {
 }
 
 /**
- * All query options with an additional onRepeatedRow option for updateItems and
+ * All query options with an additional onRepeatedPk option for updateItems and
  * updateItemsBatch: `refuse`, the default, refuses an update sending a row more
  * than once, `lastWins` writes every change in the order sent.
  */
 export interface QueryUpdate<Schema, Item> extends Query<Schema, Item> {
-	readonly onRepeatedRow?: 'refuse' | 'lastWins' | undefined;
+	readonly onRepeatedPk?: 'refuse' | 'lastWins' | undefined;
 }
 
 /**

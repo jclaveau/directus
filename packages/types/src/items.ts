@@ -74,9 +74,9 @@ export type QueryOptions = {
 	skipScopedCacheEpochs?: boolean;
 };
 
-export const RepeatedRowAnswers = ['refuse', 'lastWins'] as const;
+export const RepeatedPkAnswers = ['refuse', 'lastWins'] as const;
 
-export type RepeatedRowAnswer = (typeof RepeatedRowAnswers)[number];
+export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 
 export type MutationOptions = {
 	/**
@@ -156,7 +156,7 @@ export type MutationOptions = {
 	 * answering with a row twice; a row sent twice in one change is written
 	 * once. `lastWins` writes every change in the order sent.
 	 */
-	onRepeatedRow?: RepeatedRowAnswer | undefined;
+	onRepeatedPk?: RepeatedPkAnswer | undefined;
 
 	/**
 	 * Shared scoped-cache hook declarations injected by a batch/upsert parent so

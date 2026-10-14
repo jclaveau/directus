@@ -459,8 +459,8 @@ components:
       $ref: './parameters/export.yaml'
     Version:
       $ref: './parameters/version.yaml'
-    OnRepeatedRow:
-      $ref: './parameters/onRepeatedRow.yaml'
+    OnRepeatedPk:
+      $ref: './parameters/onRepeatedPk.yaml'
   responses:
     NotFoundError:
       $ref: './responses/notFoundError.yaml'

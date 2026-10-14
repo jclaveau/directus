@@ -1440,13 +1440,13 @@ implements AbstractService<Item> {
 		const declaredPurgesAtStart =
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
-		const refusesRepeatedRows = opts.onRepeatedRow !== 'lastWins';
+		const refusesRepeatedPks = opts.onRepeatedPk !== 'lastWins';
 		const sentKeyNames = new Set<string>();
 
 		// Run all hooks that are attached to this event so the end user has the chance to augment the
 		// items that are about to be saved
 		const payload: UpdateEntry<Item>[] = groups.map((group) => {
-			if (!refusesRepeatedRows) {
+			if (!refusesRepeatedPks) {
 				return { data: cloneDeep(group.data), keys: [...group.keys] };
 			}
 
@@ -1460,7 +1460,7 @@ implements AbstractService<Item> {
 					throw new InvalidPayloadError({
 						reason: oneLine`
 							Row ${keyName} is sent more than once; send each row once, or
-							pass onRepeatedRow=lastWins
+							pass onRepeatedPk=lastWins
 						`,
 					});
 				}
@@ -1568,7 +1568,7 @@ implements AbstractService<Item> {
 			const keyName = String(key);
 			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
-			if (refusesRepeatedRows && answeredCount > 1) {
+			if (refusesRepeatedPks && answeredCount > 1) {
 				throw new InvalidPayloadError({
 					reason: oneLine`
 						A "${this.eventScope}.update" filter hook answered with row
@@ -1588,7 +1588,7 @@ implements AbstractService<Item> {
 			const keyName = String(key);
 			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
 
-			if (!refusesRepeatedRows) {
+			if (!refusesRepeatedPks) {
 				answeredKeyCounts.set(keyName, answeredCount - 1);
 			}
 
