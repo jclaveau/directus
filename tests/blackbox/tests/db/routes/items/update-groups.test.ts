@@ -9,6 +9,7 @@ import { CreateItem, CreatePermission } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
+import { randomUUID } from 'crypto';
 import request from 'supertest';
 import { beforeEach, describe, expect } from 'vitest';
 import {
@@ -19,7 +20,11 @@ import {
 	collectionGroupedSlot,
 } from './update-groups.seed';
 
-type GroupedRow = { id: number; name: string; status: string | null };
+type GroupedRow = {
+	id: number | string;
+	name: string;
+	status: string | null;
+};
 type UpdateGroupLogged = { data: { status?: string }; keys: number[] };
 
 type Update = {
@@ -154,6 +159,29 @@ describe.each(vendors)('%s', (vendor) => {
 				update.authorization = `Bearer ${USER.APP_ACCESS.TOKEN}`;
 			},
 		);
+
+		given.optional('the users:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.post('/users')
+				.query({ fields: 'id,first_name,status', sort: 'first_name' })
+				.send(parseGherkinTable<{ name: string }>(table).map((user) => {
+					return {
+						first_name: user.name,
+						email: `${user.name}-${randomUUID()}@example.com`,
+					};
+				}))
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+
+			update.rows = response.body.data.map((user: {
+				id: string;
+				first_name: string;
+				status: string;
+			}) => {
+				return { id: user.id, name: user.first_name, status: user.status };
+			});
+		});
 
 		function batchOf(table: Record<string, string>[]) {
 			return parseGherkinTable<{ name: string; status: string | null }>(
@@ -318,6 +346,16 @@ describe.each(vendors)('%s', (vendor) => {
 						data: { owner: { name: ownerName } },
 					})
 					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			'the users batch sends:',
+			async (table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch('/users')
+					.send(batchOf(table))
+					.set('Authorization', AUTH);
 			},
 		);
 
@@ -530,6 +568,18 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		and.optional('the users hold:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.get('/users')
+				.query({
+					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+					fields: 'first_name,status',
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.body.data).toEqual(parseGherkinTable(table));
+		});
+
 		// One revision per row written, in the order the rows were written.
 		and.optional(
 			'the revisions name the rows in this order:',
@@ -636,6 +686,7 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			'a nested owner sent to several rows a hook maps is created once',
 			'a row a hook adds to an update is written, left out of the answer',
+			'a users batch sending a user twice is refused, no onRepeatedPk to pass',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {

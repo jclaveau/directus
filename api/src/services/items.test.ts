@@ -2305,6 +2305,34 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
+	describe('a system collection batch sending a row twice', () => {
+		it('refuses a users batch sending a user twice by default', async () => {
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+			await expect(new UsersService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('first_name').string();
+					})
+					.build(),
+			}).updateBatch([
+				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', first_name: 'Ada' },
+				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', first_name: 'Grace' },
+			])).rejects.toMatchObject({
+				message:
+					'Invalid payload. Row 0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0 is sent '
+					+ 'more than once; send each row once, or pass onRepeatedPk=lastWins.',
+			});
+
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(tracker.history.all).toHaveLength(0);
+		});
+	});
+
 	describe('an update hook mapping its rows with mapUpdateRows', () => {
 		it('cancels one row without touching its siblings', async () => {
 			tracker.on.update('test').response(1);

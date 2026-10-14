@@ -14,9 +14,10 @@ Feature: An update reaches its hooks as one grouped event
   it.
 
   A batch sending one row twice is refused unless it passes
-  `onRepeatedPk=lastWins`, which writes each change in the order sent. A uuid
-  names one row whatever the case of its letters, an integer whatever zeros
-  lead it.
+  `onRepeatedPk=lastWins`, which writes each change in the order sent. A system
+  collection's own route, such as `/users`, reads no `onRepeatedPk`, so it
+  always refuses. A uuid names one row whatever the case of its letters, an
+  integer whatever zeros lead it.
 
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
@@ -531,3 +532,21 @@ Feature: An update reaches its hooks as one grouped event
       | name          | status  |
       | added-by-hook | add-row |
       | add-one       | add-row |
+
+  Scenario: a users batch sending a user twice is refused, no onRepeatedPk to pass
+    Given the users:
+      | name        |
+      | repeat-user |
+    When the users batch sends:
+      | name        | status    |
+      | repeat-user | suspended |
+      | repeat-user | archived  |
+    Then the update is refused with the message:
+      """
+      Invalid payload. Row {repeat-user} is sent more than once; send each row once, or
+      pass onRepeatedPk=lastWins.
+      """
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the users hold:
+      | first_name  | status |
+      | repeat-user | active |
