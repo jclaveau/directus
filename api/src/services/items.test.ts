@@ -752,6 +752,37 @@ describe('Integration Tests', () => {
 				expect(tracker.history.all).toHaveLength(0);
 			});
 
+			it(oneLine`
+				refuses a batch sending an integer row twice, once with a leading zero
+			`, async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+				await expect(service.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: '01', name: 'second' },
+				])).rejects.toMatchObject({
+					message:
+						'Invalid payload. Row 1 is sent more than once; send each row once, or '
+						+ 'pass onRepeatedPk=lastWins.',
+				});
+
+				expect(filterSpy).not.toHaveBeenCalled();
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				keeps a row a hook answers with its integer key with a leading zero
+			`, async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+					data: { name: 'after' },
+					keys: ['01'],
+				}]);
+
+				const keys = await service.updateMany([1], { name: 'after' });
+
+				expect(keys).toEqual([1]);
+			});
+
 			it('refuses a hook answering with a row twice', async () => {
 				const repeatingHook = (groups: UpdateGroup[]) => {
 					return [...groups, groups[0]];

@@ -203,6 +203,22 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
+			'the batch sends, the key of its last row with a leading zero:',
+			async (table: Record<string, string>[]) => {
+				const changes = batchOf(table);
+				const lastChange = changes.at(-1)!;
+
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send([
+						...changes.slice(0, -1),
+						{ ...lastChange, id: `0${lastChange.id}` },
+					])
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
 			/^the batch is sent over GraphQL(?:, with onRepeatedPk (\w+))?:$/,
 			async (
 				onRepeatedPk: string | undefined,
@@ -573,6 +589,9 @@ describe.each(vendors)('%s', (vendor) => {
 				a batch passing an unknown onRepeatedPk is refused before any hook
 			`,
 			'a batch sending a uuid twice, once in capitals, is refused',
+			oneLine`
+				a batch sending a row twice, once with a leading zero, is refused
+			`,
 			oneLine`
 				a GraphQL batch sending a row twice is refused before any hook
 			`,

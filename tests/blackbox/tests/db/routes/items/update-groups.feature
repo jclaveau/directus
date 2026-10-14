@@ -15,7 +15,8 @@ Feature: An update reaches its hooks as one grouped event
 
   A batch sending one row twice is refused unless it passes
   `onRepeatedPk=lastWins`, which writes each change in the order sent. A uuid
-  names one row whatever the case of its letters.
+  names one row whatever the case of its letters, an integer whatever zeros
+  lead it.
 
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
@@ -237,6 +238,24 @@ Feature: An update reaches its hooks as one grouped event
     And the rows hold:
       | name    | status |
       | badge-a |        |
+
+  Scenario: a batch sending a row twice, once with a leading zero, is refused
+    Given the rows:
+      | name   |
+      | zero-a |
+    When the batch sends, the key of its last row with a leading zero:
+      | name   | status   |
+      | zero-a | archived |
+      | zero-a | kept     |
+    Then the update is refused with the message:
+      """
+      Invalid payload. Row {zero-a} is sent more than once; send each row once, or pass
+      onRepeatedPk=lastWins.
+      """
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the rows hold:
+      | name   | status |
+      | zero-a |        |
 
   Scenario: a GraphQL batch sending a row twice is refused before any hook
     Given the rows:
