@@ -6,8 +6,9 @@
 //     'taken-over' and answers with it twice, which Directus refuses.
 //   body 'take-over-sibling' (test_takeover_upsert_child) → writes the row marked
 //     'sibling' 'taken-over' and adds it to the answer, a row the upsert never sent.
-//   body 'take-over-inert' (test_takeover_inert) → writes nothing, declares the
-//     row inert through skipPurgeFor with a zero leading its key, and takes it over.
+//   body 'take-over-inert' (test_takeover_inert, test_takeover_inert_big) →
+//     writes nothing, declares the row inert through skipPurgeFor with a zero
+//     leading its key, and takes it over.
 //   body 'move-to-b' (test_takeover_moved) → moves its rows to slot 'b' and takes
 //     them over, declaring nothing.
 //   body 'move-both' (test_takeover_partly_declared) → moves its first row to slot
@@ -17,6 +18,7 @@
 const REFUSED = 'test_takeover_refused';
 const UPSERT_CHILD = 'test_takeover_upsert_child';
 const INERT = 'test_takeover_inert';
+const INERT_BIG = 'test_takeover_inert_big';
 const MOVED = 'test_takeover_moved';
 const PARTLY_DECLARED = 'test_takeover_partly_declared';
 
@@ -48,18 +50,18 @@ export default function registerHooks({ filter }) {
 			return groups;
 		}
 
-		const sibling = await database(UPSERT_CHILD)
+		const siblingRow = await database(UPSERT_CHILD)
 			.where({ marker: 'sibling' })
 			.first();
 
 		await database(UPSERT_CHILD)
-			.where({ id: sibling.id })
+			.where({ id: siblingRow.id })
 			.update({ body: 'taken-over' });
 
-		return [...groups, { key: sibling.id }];
+		return [...groups, { key: siblingRow.id }];
 	});
 
-	filter(`${INERT}.items.update`, async (groups, _meta, { scopedCache }) => {
+	const takeOverInert = async (groups, _meta, { scopedCache }) => {
 		const inertGroup = groups.find((group) => {
 			return group?.data?.body === 'take-over-inert';
 		});
@@ -73,7 +75,10 @@ export default function registerHooks({ filter }) {
 
 			return { key };
 		});
-	});
+	};
+
+	filter(`${INERT}.items.update`, takeOverInert);
+	filter(`${INERT_BIG}.items.update`, takeOverInert);
 
 	filter(`${MOVED}.items.update`, async (groups, _meta, { database }) => {
 		const movedGroup = groups.find((group) => {

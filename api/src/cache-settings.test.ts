@@ -773,6 +773,30 @@ test('clears ahead of the create as well as the update', async () => {
 	expect(clearCacheTargets).toHaveBeenCalledWith(['response']);
 });
 
+// A flow filter is registered again on every reload of the flows, so after
+// this one; the clear has to see the setting that filter leaves.
+test('clears after every other filter of the write', async () => {
+	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
+
+	await initCacheSettings();
+
+	expect(emitter.onFilter).toHaveBeenCalledTimes(2);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		1,
+		'settings.create',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		2,
+		'settings.update',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+});
+
 test('hands the filter the caller the event carries', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 

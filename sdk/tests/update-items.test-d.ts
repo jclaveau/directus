@@ -8,11 +8,12 @@ import {
 import type { TestSchema } from './schema.js';
 
 describe('onRepeatedPk on an update', () => {
-	const client = createDirectus<TestSchema>('https://directus.example.com').with(rest());
+	const restClient = createDirectus<TestSchema>('https://directus.example.com')
+		.with(rest());
 
 	test('a batch takes refuse or lastWins', () => {
 		assertType(
-			client.request(
+			restClient.request(
 				updateItemsBatch('collection_a', [{ id: 1 }], {
 					onRepeatedPk: 'lastWins',
 				}),
@@ -20,7 +21,7 @@ describe('onRepeatedPk on an update', () => {
 		);
 
 		assertType(
-			client.request(
+			restClient.request(
 				updateItemsBatch('collection_a', [{ id: 1 }], {
 					onRepeatedPk: 'refuse',
 				}),
@@ -30,7 +31,7 @@ describe('onRepeatedPk on an update', () => {
 
 	test('an update by keys takes lastWins', () => {
 		assertType(
-			client.request(
+			restClient.request(
 				updateItems('collection_a', [1, 1], { string_field: 'kept' }, {
 					onRepeatedPk: 'lastWins',
 				}),
@@ -40,7 +41,7 @@ describe('onRepeatedPk on an update', () => {
 
 	test('an unknown answer is refused', () => {
 		assertType(
-			client.request(
+			restClient.request(
 				updateItemsBatch('collection_a', [{ id: 1 }], {
 					fields: ['id'],
 					// @ts-expect-error merge is not an answer onRepeatedPk takes

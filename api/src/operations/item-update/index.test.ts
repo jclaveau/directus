@@ -5,6 +5,7 @@ vi.mock('../../services/items.js', () => {
 	ItemsService.prototype.updateByQuery = vi.fn();
 	ItemsService.prototype.updateOne = vi.fn();
 	ItemsService.prototype.updateMany = vi.fn();
+	ItemsService.prototype.updateBatch = vi.fn();
 	return { ItemsService };
 });
 
@@ -160,5 +161,16 @@ describe('Operations / Item Update', () => {
 		);
 
 		expect(vi.mocked(ItemsService).prototype.updateMany).toHaveBeenCalledWith(keys, testPayload, { emitEvents: false });
+	});
+
+	// No onRepeatedPk to pass, so a refusal names no option.
+	test('a payload of rows updates them as a batch, passing no option', async () => {
+		await config.handler(
+			{ collection: testCollection, payload: [{ id: 1 }, { id: 1 }] } as any,
+			{ accountability: testAccountability, getSchema } as any,
+		);
+
+		expect(vi.mocked(ItemsService).prototype.updateBatch)
+			.toHaveBeenCalledWith([{ id: 1 }, { id: 1 }], { emitEvents: false });
 	});
 });

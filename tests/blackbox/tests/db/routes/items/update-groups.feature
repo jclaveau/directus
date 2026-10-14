@@ -15,9 +15,9 @@ Feature: An update reaches its hooks as one grouped event
 
   A batch sending one row twice is refused unless it passes
   `onRepeatedPk=lastWins`, which writes each change in the order sent. A system
-  collection's own route, such as `/users`, reads no `onRepeatedPk`, so it
-  always refuses. A uuid names one row whatever the case of its letters, an
-  integer whatever zeros lead it.
+  collection's own route, such as `/users` or `update_users_batch`, takes no
+  `onRepeatedPk`, so it always refuses, naming no option. A uuid names one row
+  whatever the case of its letters, an integer whatever zeros lead it.
 
   The probe acts on these markers:
   - name "cancel-me": the grouped filter's `mapUpdateRows` cancels the row.
@@ -310,9 +310,8 @@ Feature: An update reaches its hooks as one grouped event
 
   Scenario: the OAS describes onRepeatedPk on a collection's batch update
     When the OAS is read
-    Then the collection's update takes the query parameter:
-      | name         | required | type   | enum                  | default |
-      | onRepeatedPk | false    | string | ["refuse","lastWins"] | refuse  |
+    Then the collection's update references the OnRepeatedPk parameter
+    And the OAS describes the OnRepeatedPk parameter
 
   Scenario: a row sent twice under one change reaches the hooks once
     Given the rows:
@@ -361,6 +360,7 @@ Feature: An update reaches its hooks as one grouped event
       received, a row it wrote itself as { key }, no key both; a hook that handles one row
       maps them with mapUpdateRows.
       """
+    And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
       | name     | status       |
       | legacy-a |              |
@@ -543,10 +543,41 @@ Feature: An update reaches its hooks as one grouped event
       | repeat-user | archived  |
     Then the update is refused with the message:
       """
-      Invalid payload. Row {repeat-user} is sent more than once; send each row once, or
-      pass onRepeatedPk=lastWins.
+      Invalid payload. Row {repeat-user} is sent more than once; send each row once.
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the users hold:
       | first_name  | status |
       | repeat-user | active |
+
+  Scenario: a GraphQL users batch sending a user twice is refused, naming no option
+    Given the users:
+      | name     |
+      | gql-user |
+    When the users batch is sent over GraphQL:
+      | name     | status    |
+      | gql-user | suspended |
+      | gql-user | archived  |
+    Then the GraphQL update is refused with the message:
+      """
+      Invalid payload. Row {gql-user} is sent more than once; send each row once.
+      """
+    And the refusal's code is "INVALID_PAYLOAD"
+    And the users hold:
+      | first_name | status |
+      | gql-user   | active |
+
+  Scenario: a GraphQL users batch passing onRepeatedPk is rejected
+    Given the users:
+      | name        |
+      | gql-lastwin |
+    When the users batch is sent over GraphQL, with onRepeatedPk lastWins:
+      | name        | status    |
+      | gql-lastwin | suspended |
+    Then the GraphQL query is rejected with the message:
+      """
+      Unknown argument "onRepeatedPk" on field "Mutation.update_users_batch".
+      """
+    And the users hold:
+      | first_name  | status |
+      | gql-lastwin | active |

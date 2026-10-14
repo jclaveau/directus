@@ -744,8 +744,7 @@ describe('Integration Tests', () => {
 					{ id: 1, name: 'second' },
 				])).rejects.toMatchObject({
 					message:
-						'Invalid payload. Row 1 is sent more than once; send each row once, or '
-						+ 'pass onRepeatedPk=lastWins.',
+						'Invalid payload. Row 1 is sent more than once; send each row once.',
 				});
 
 				expect(filterSpy).not.toHaveBeenCalled();
@@ -762,8 +761,7 @@ describe('Integration Tests', () => {
 					{ id: '01', name: 'second' },
 				])).rejects.toMatchObject({
 					message:
-						'Invalid payload. Row 1 is sent more than once; send each row once, or '
-						+ 'pass onRepeatedPk=lastWins.',
+						'Invalid payload. Row 1 is sent more than once; send each row once.',
 				});
 
 				expect(filterSpy).not.toHaveBeenCalled();
@@ -781,6 +779,67 @@ describe('Integration Tests', () => {
 				const keys = await service.updateMany([1], { name: 'after' });
 
 				expect(keys).toEqual([1]);
+			});
+
+			it(oneLine`
+				names the option of a repeated row's last change to a caller who
+				can pass it
+			`, async () => {
+				await expect(service.updateBatch(
+					[{ id: 1, name: 'first' }, { id: 1, name: 'second' }],
+					{ onRepeatedPk: 'refuse' },
+				)).rejects.toMatchObject({
+					message:
+						'Invalid payload. Row 1 is sent more than once; send each row once, or '
+						+ 'pass onRepeatedPk=lastWins.',
+				});
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				refuses a hook answering with a key that is no integer before
+				counting its rows
+			`, async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+					{ data: { name: 'first' }, keys: ['first-row'] },
+					{ data: { name: 'second' }, keys: ['second-row'] },
+				]);
+
+				await expect(service.updateBatch([{ id: 1, name: 'first' }]))
+					.rejects
+					.toMatchObject({
+						message:
+							'Invalid payload. Primary key of test must be an integer instead '
+							+ 'of "first-row".',
+					});
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				reports a row a hook added in place of one it cancelled
+			`, async () => {
+				tracker.on.update('test').response(1);
+
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+					{ data: { name: 'after' }, keys: [1, 3] },
+				]);
+
+				const hookAddedSpy = vi.fn();
+
+				const updatedKeys = await service.updateMany([1, 2], { name: 'after' }, {
+					allowFilterCancel: true,
+					onHookAddedRows: hookAddedSpy,
+				} as never);
+
+				expect(updatedKeys).toEqual([1, null]);
+				expect(hookAddedSpy).toHaveBeenCalledTimes(1);
+
+				expect(hookAddedSpy).toHaveBeenCalledWith(
+					[3],
+					{ canResolveSlicesFromRows: true, rows: [] },
+				);
 			});
 
 			it('refuses a hook answering with a row twice', async () => {
@@ -1698,6 +1757,18 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			c.field('id').id();
 			c.field('name').string();
 		})
+		.collection('big_coll', (c) => {
+			c.field('id').bigInteger()
+				.primary();
+
+			c.field('name').string();
+		})
+		.collection('code_coll', (c) => {
+			c.field('code').string()
+				.primary();
+
+			c.field('name').string();
+		})
 		.collection('uuid_coll', (c) => {
 			c.field('id').uuid()
 				.primary();
@@ -1832,7 +1903,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			])).rejects.toMatchObject({
 				message:
 					'Invalid payload. Row aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa is sent more '
-					+ 'than once; send each row once, or pass onRepeatedPk=lastWins.',
+					+ 'than once; send each row once.',
 			});
 
 			expect(filterSpy).not.toHaveBeenCalled();
@@ -1899,6 +1970,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it(oneLine`
 			refuses a uuid taken over in capitals and left in a group in lowercase
 		`, async () => {
+			tracker.on.update('uuid_coll').response(1);
+
 			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
 				{
 					data: { name: 'after' },
@@ -1912,13 +1985,101 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ name: 'after' },
 			)).rejects.toMatchObject({
 				message:
-					'Invalid payload. A "items.update" filter hook must return '
-					+ 'the { data, keys }[] it received, a row it wrote itself as { key }, '
-					+ 'no key both; '
-					+ 'a hook that handles one row maps them with mapUpdateRows.',
+					'Invalid payload. A "items.update" filter hook took row '
+					+ 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa over as { key } but also left it '
+					+ 'in a { data, keys } group; answer each row one way.',
 			});
 
 			expect(tracker.history.update).toHaveLength(0);
+		});
+	});
+
+	describe('bigInteger primary key', () => {
+		const service = () => {
+			return new ItemsService('big_coll', { knex: db, schema: shapesSchema });
+		};
+
+		it('refuses a batch sending a row twice, once with a leading zero', async () => {
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+			await expect(service().updateBatch([
+				{ id: 5, name: 'first' },
+				{ id: '05', name: 'second' },
+			])).rejects.toMatchObject({
+				message:
+					'Invalid payload. Row 5 is sent more than once; send each row once.',
+			});
+
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(tracker.history.all).toHaveLength(0);
+		});
+
+		it('keeps a row a hook answers with its key with a leading zero', async () => {
+			tracker.on.update('big_coll').response(1);
+
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+				data: { name: 'after' },
+				keys: ['05'],
+			}]);
+
+			const updatedKeys = await service().updateMany([5], { name: 'after' });
+
+			expect(updatedKeys).toEqual([5]);
+		});
+
+		it('keeps two keys apart past the safe integers', async () => {
+			tracker.on.update('big_coll').response(1);
+
+			const updatedKeys = await service().updateBatch([
+				{ id: '9007199254740992', name: 'first' },
+				{ id: '9007199254740993', name: 'second' },
+			]);
+
+			expect(updatedKeys).toEqual(['9007199254740992', '9007199254740993']);
+			expect(tracker.history.update).toHaveLength(2);
+		});
+
+		it('names a key that is no number as it was sent', async () => {
+			await expect(service().updateBatch([
+				{ id: 'first-row', name: 'first' },
+				{ id: 'first-row', name: 'second' },
+			])).rejects.toMatchObject({
+				message:
+					'Invalid payload. Row first-row is sent more than once; send each row '
+					+ 'once.',
+			});
+
+			expect(tracker.history.all).toHaveLength(0);
+		});
+	});
+
+	describe('string primary key', () => {
+		const service = () => {
+			return new ItemsService('code_coll', { knex: db, schema: shapesSchema });
+		};
+
+		it('refuses a batch sending a row twice', async () => {
+			await expect(service().updateBatch([
+				{ code: 'a', name: 'first' },
+				{ code: 'a', name: 'second' },
+			])).rejects.toMatchObject({
+				message:
+					'Invalid payload. Row a is sent more than once; send each row once.',
+			});
+
+			expect(tracker.history.all).toHaveLength(0);
+		});
+
+		it('writes two keys apart that differ in case only', async () => {
+			tracker.on.update('code_coll').response(1);
+
+			const updatedKeys = await service().updateBatch([
+				{ code: 'a', name: 'first' },
+				{ code: 'A', name: 'second' },
+			]);
+
+			expect(updatedKeys).toEqual(['a', 'A']);
+			expect(tracker.history.update).toHaveLength(2);
 		});
 	});
 
@@ -2323,7 +2484,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			])).rejects.toMatchObject({
 				message:
 					'Invalid payload. Row 0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0 is sent '
-					+ 'more than once; send each row once, or pass onRepeatedPk=lastWins.',
+					+ 'more than once; send each row once.',
 			});
 
 			expect(filterSpy).not.toHaveBeenCalled();
@@ -2356,6 +2517,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('answers a null per row when every row is cancelled', async () => {
+			tracker.on.update('test').response(1);
+
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, () => null);
@@ -2372,6 +2535,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('refuses a row cancel the caller did not opt into', async () => {
+			tracker.on.update('test').response(1);
+
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
@@ -2442,6 +2607,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('writes nothing when it takes every row over', async () => {
+			tracker.on.update('test').response(1);
+
 			vi.spyOn(emitter, 'emitFilter').mockImplementation(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
@@ -2456,6 +2623,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('refuses a key both taken over and left in a group', async () => {
+			tracker.on.update('test').response(1);
+
 			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
 				{ data: { name: 'after' }, keys: [1] },
 				{ key: 1 },
@@ -2466,10 +2635,36 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					.updateMany([1], { name: 'after' }),
 			).rejects.toMatchObject({
 				message:
-					'Invalid payload. A "items.update" filter hook must return '
-					+ 'the { data, keys }[] it received, a row it wrote itself as { key }, '
-					+ 'no key both; '
-					+ 'a hook that handles one row maps them with mapUpdateRows.',
+					'Invalid payload. A "items.update" filter hook took row 1 over as '
+					+ '{ key } but also left it in a { data, keys } group; answer each row '
+					+ 'one way.',
+			});
+
+			expect(tracker.history.update).toHaveLength(0);
+		});
+
+		it(oneLine`
+			refuses a key both taken over and left in a group when a repeated
+			row's last change wins
+		`, async () => {
+			tracker.on.update('test').response(1);
+
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+				{ data: { name: 'after' }, keys: [1] },
+				{ key: 1 },
+			]);
+
+			await expect(
+				new ItemsService('test', { knex: db, schema: shapesSchema })
+					.updateBatch(
+						[{ id: 1, name: 'first' }, { id: 1, name: 'after' }],
+						{ onRepeatedPk: 'lastWins' },
+					),
+			).rejects.toMatchObject({
+				message:
+					'Invalid payload. A "items.update" filter hook took row 1 over as '
+					+ '{ key } but also left it in a { data, keys } group; answer each row '
+					+ 'one way.',
 			});
 
 			expect(tracker.history.update).toHaveLength(0);
@@ -2600,6 +2795,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('answers null for a row pointed sameRowAs a cancelled one', async () => {
+			tracker.on.insert('test').response([1]);
+
 			const cancelBoth = async () => {
 				return [null, { sameRowAs: 0 }];
 			};
@@ -2640,6 +2837,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				}),
 			],
 		])('refuses a grouped answer that is %s', async (_label, answer) => {
+			tracker.on.insert('test').response([1]);
+
 			const answerBadly = async () => {
 				return answer;
 			};

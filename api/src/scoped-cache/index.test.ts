@@ -590,13 +590,20 @@ describe('createScopedCacheHookDeclarations', () => {
 		})
 		.build();
 
-	it('records a key whose purge a hook skipped, without adding a pin', () => {
-		const { purge, scopeQueryCases, purgeSkippedKeys } =
+	it(oneLine`
+		records a key whose purge a hook skipped under the collection of its handle,
+		without adding a pin
+	`, () => {
+		const { purgeHandleFor, scopeQueryCases, purgeSkippedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.skipPurgeFor(7);
+		purgeHandleFor('notes').skipPurgeFor(7);
+		purgeHandleFor('authors').skipPurgeFor(8);
 
-		expect([...purgeSkippedKeys]).toEqual(['7']);
+		expect(purgeSkippedKeys).toEqual(new Map([
+			['notes', new Set(['7'])],
+			['authors', new Set(['8'])],
+		]));
 
 		// Declaring nothing to purge must not read as declaring a purge.
 		expect(scopeQueryCases).toEqual([]);
@@ -606,15 +613,17 @@ describe('createScopedCacheHookDeclarations', () => {
 		records the row a purgeBy names under the collection of each fingerprint
 		it declares, and no row for a purgeBy naming none
 	`, () => {
-		const { purge, purgeDeclaredKeys } =
+		const { purgeHandleFor, purgeDeclaredKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.purgeBy([
+		const purgeHandle = purgeHandleFor('articles');
+
+		purgeHandle.purgeBy([
 			{ collection: 'authors', pinnedScope: { id: [5] } },
 			{ collection: 'articles', pinnedScope: { id: [6] } },
 		], { forKey: 7 });
 
-		purge.purgeBy({ collection: 'books', pinnedScope: { id: [8] } });
+		purgeHandle.purgeBy({ collection: 'books', pinnedScope: { id: [8] } });
 
 		expect(purgeDeclaredKeys).toEqual(new Map([
 			['authors', new Set(['7'])],
@@ -682,21 +691,23 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, purgeSkippedKeys } =
+		const { purgeHandleFor, purgeSkippedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.skipPurgeFor(7);
-		purge.skipPurgeFor('7');
+		purgeHandleFor('notes').skipPurgeFor(7);
+		purgeHandleFor('notes').skipPurgeFor('7');
 
-		expect([...purgeSkippedKeys]).toEqual(['7']);
+		expect(purgeSkippedKeys).toEqual(new Map([['notes', new Set(['7'])]]));
 	});
 
 	it('scopeTo and purgeBy fill sinks of their own', () => {
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
+		const purgeHandle = purgeHandleFor('articles');
+
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
-		purge.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
+		purgeHandle.purgeBy({ collection: 'articles', pinnedScope: { author: [5] } });
 
 		// The same slice through both handles, and it lands twice: the read side is
 		// composed with the read's own query cases before it becomes a fingerprint,
@@ -715,10 +726,10 @@ describe('createScopedCacheHookDeclarations', () => {
 		takes a fingerprint batch, dropping the viewFields a read's own carries: they
 		say which columns a read depends on, and no purge reads them
 	`, () => {
-		const { purge, purgeFingerprints } =
+		const { purgeHandleFor, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		purge.purgeBy([
+		purgeHandleFor('articles').purgeBy([
 			{
 				collection: 'articles',
 				pinnedScope: { author: [5] },
@@ -744,7 +755,7 @@ describe('createScopedCacheHookDeclarations', () => {
 		reads a pre-fingerprint pin as the slice it names, not as the bare
 		collection — which would purge only the reads pinning nothing
 	`, () => {
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(emptySchema);
 
 		const legacyPin = {
@@ -754,7 +765,7 @@ describe('createScopedCacheHookDeclarations', () => {
 		} as ScopedCacheDeclaredFingerprint;
 
 		scope.scopeTo(legacyPin);
-		purge.purgeBy(legacyPin);
+		purgeHandleFor('articles').purgeBy(legacyPin);
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'articles', field: 'author', value: 5 }],
@@ -824,12 +835,14 @@ describe('createScopedCacheHookDeclarations', () => {
 	`, () => {
 		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
 
-		const { scope, purge, scopeQueryCases, purgeFingerprints } =
+		const { scope, purgeHandleFor, scopeQueryCases, purgeFingerprints } =
 			createScopedCacheHookDeclarations(notesSchema);
+
+		const purgeHandle = purgeHandleFor('articles');
 
 		scope.scopeTo({ collection: 'notes', pinnedScope: { id: [upper] } });
 		// The spelling the driver hands the purge side for the very same row.
-		purge.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
+		purgeHandle.purgeBy({ collection: 'notes', pinnedScope: { id: [upper] } });
 
 		expect(scopeQueryCases).toEqual([
 			[{ collection: 'notes', field: 'id', value: upper, type: 'uuid' }],
@@ -878,11 +891,11 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
-		const { scope, purge, manuallyPurgedKeys } =
+		const { scope, purgeHandleFor, manuallyPurgedKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', pinnedScope: { author: [5] } });
-		purge.purgeBy({ collection: 'authors' });
+		purgeHandleFor('articles').purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
 	});

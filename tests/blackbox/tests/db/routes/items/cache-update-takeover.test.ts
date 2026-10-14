@@ -21,31 +21,33 @@ const REFUSED = 'test_takeover_refused';
 const UPSERT_PARENT = 'test_takeover_upsert_parent';
 const UPSERT_CHILD = 'test_takeover_upsert_child';
 const INERT = 'test_takeover_inert';
+const INERT_BIG = 'test_takeover_inert_big';
 const MOVED = 'test_takeover_moved';
 const PARTLY_DECLARED = 'test_takeover_partly_declared';
 const cacheStatusHeader = 'x-cache-status';
 
-const feature = loadFeature(
+const takeoverFeature = loadFeature(
 	'./tests/db/routes/items/cache-update-takeover.feature',
 );
 
 describe.each(vendors)('%s', (vendor) => {
-	const env = cloneDeep(config.envs);
-	env[vendor]['CACHE_ENABLED'] = 'true';
-	env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
-	env[vendor]['CACHE_AUTO_PURGE'] = 'true';
-	env[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
-	env[vendor]['CACHE_STORE'] = 'redis';
-	env[vendor]['REDIS_HOST'] = 'localhost';
-	env[vendor]['REDIS_PORT'] = '6108';
-	env[vendor]['CACHE_NAMESPACE'] = `directus-update-takeover-${vendor}`;
+	const cacheEnv = cloneDeep(config.envs);
+	cacheEnv[vendor]['CACHE_ENABLED'] = 'true';
+	cacheEnv[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
+	cacheEnv[vendor]['CACHE_AUTO_PURGE'] = 'true';
+	cacheEnv[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
+	cacheEnv[vendor]['CACHE_STORE'] = 'redis';
+	cacheEnv[vendor]['REDIS_HOST'] = 'localhost';
+	cacheEnv[vendor]['REDIS_PORT'] = '6108';
+	cacheEnv[vendor]['CACHE_NAMESPACE'] = `directus-update-takeover-${vendor}`;
 
-	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
-	let instance: ChildProcess;
+	const adminAuth = `Bearer ${USER.ADMIN.TOKEN}`;
+	let cacheInstance: ChildProcess;
 	let refusedRowId: number;
 	let upsertParentId: number;
 	let sentChildId: number;
 	let inertRowId: number;
+	let bigInertRowId: string;
 	let movedRowId: number;
 	let partlyDeclaredRowIds: number[];
 
@@ -71,6 +73,11 @@ describe.each(vendors)('%s', (vendor) => {
 				},
 				{
 					collection: INERT,
+					fields: [{ field: 'body', type: 'string', meta: {} }],
+				},
+				{
+					collection: INERT_BIG,
+					primaryKeyType: 'bigInteger',
 					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 				{
@@ -135,6 +142,13 @@ describe.each(vendors)('%s', (vendor) => {
 
 		inertRowId = inertRow.id;
 
+		const bigInertRow = await CreateItem(vendor, {
+			collection: INERT_BIG,
+			item: { body: 'original' },
+		});
+
+		bigInertRowId = String(bigInertRow.id);
+
 		const [movedRow] = await CreateItem(vendor, {
 			collection: MOVED,
 			item: [
@@ -157,38 +171,39 @@ describe.each(vendors)('%s', (vendor) => {
 			return row.id;
 		});
 
-		env[vendor].PORT = String(await getPort());
+		cacheEnv[vendor].PORT = String(await getPort());
 
-		instance = spawn('node', [paths.cli, 'start'], {
+		cacheInstance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,
-			env: env[vendor],
+			env: cacheEnv[vendor],
 		});
 
-		await awaitDirectusConnection(Number(env[vendor].PORT));
+		await awaitDirectusConnection(Number(cacheEnv[vendor].PORT));
 	}, 60_000);
 
 	afterAll(async () => {
-		instance.kill();
+		cacheInstance.kill();
 
 		await DeleteCollection(vendor, { collection: REFUSED });
 		await DeleteCollection(vendor, { collection: UPSERT_CHILD });
 		await DeleteCollection(vendor, { collection: UPSERT_PARENT });
 		await DeleteCollection(vendor, { collection: INERT });
+		await DeleteCollection(vendor, { collection: INERT_BIG });
 		await DeleteCollection(vendor, { collection: MOVED });
 		await DeleteCollection(vendor, { collection: PARTLY_DECLARED });
 	});
 
-	defineFeature(feature, (scenario) => {
+	defineFeature(takeoverFeature, (scenario) => {
 		scenario(
 			'a refused answer still purges the row its hook took over',
 			({ given, when, then, and }) => {
-				let refusal: request.Response;
+				let refusedUpdate: request.Response;
 
 				function readRefused() {
-					return request(getUrl(vendor, env))
+					return request(getUrl(vendor, cacheEnv))
 						.get(`/items/${REFUSED}`)
 						.query({ fields: 'body' })
-						.set('Authorization', auth);
+						.set('Authorization', adminAuth);
 				}
 
 				given(
@@ -197,33 +212,33 @@ describe.each(vendors)('%s', (vendor) => {
 						expect((await readRefused()).headers[cacheStatusHeader])
 							.toBe('MISS');
 
-						const cached = await readRefused();
+						const cachedRead = await readRefused();
 
-						expect(cached.headers[cacheStatusHeader]).toBe('HIT');
-						expect(cached.body.data).toEqual(loadYaml(table[0]!.response!));
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
 					},
 				);
 
 				when(
 					/^its row is sent the body "(.*)"$/,
 					async (body: string) => {
-						refusal = await request(getUrl(vendor, env))
+						refusedUpdate = await request(getUrl(vendor, cacheEnv))
 							.patch(`/items/${REFUSED}/${refusedRowId}`)
 							.send({ body })
-							.set('Authorization', auth);
+							.set('Authorization', adminAuth);
 					},
 				);
 
 				then(
 					'the update is refused with the message:',
 					(docString: string) => {
-						expect(refusal.statusCode).toBe(400);
+						expect(refusedUpdate.statusCode).toBe(400);
 
-						expect(refusal.body.errors[0].message).toEqual(
+						expect(refusedUpdate.body.errors[0].message).toEqual(
 							docString
 								.split('\n')
 								.join(' ')
-								.replace('{row}', String(refusedRowId)),
+								.replace(/\{([\w-]+)\}/g, () => String(refusedRowId)),
 						);
 					},
 				);
@@ -232,10 +247,10 @@ describe.each(vendors)('%s', (vendor) => {
 					`the read of ${REFUSED} answers:`,
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
-						const answered = await readRefused();
+						const answeredRead = await readRefused();
 
-						expect(answered.headers[cacheStatusHeader]).toBe(cache);
-						expect(answered.body.data).toEqual(loadYaml(response!));
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
 					},
 				);
 			},
@@ -246,10 +261,10 @@ describe.each(vendors)('%s', (vendor) => {
 			'an upsert whose hook takes over a row it never sent purges that row',
 			({ given, when, then }) => {
 				function readSlot(slot: string) {
-					return request(getUrl(vendor, env))
+					return request(getUrl(vendor, cacheEnv))
 						.get(`/items/${UPSERT_CHILD}`)
 						.query({ fields: 'body', 'filter[slot][_eq]': slot })
-						.set('Authorization', auth);
+						.set('Authorization', adminAuth);
 				}
 
 				given(
@@ -258,22 +273,22 @@ describe.each(vendors)('%s', (vendor) => {
 						expect((await readSlot(slot)).headers[cacheStatusHeader])
 							.toBe('MISS');
 
-						const cached = await readSlot(slot);
+						const cachedRead = await readSlot(slot);
 
-						expect(cached.headers[cacheStatusHeader]).toBe('HIT');
-						expect(cached.body.data).toEqual(loadYaml(table[0]!.response!));
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
 					},
 				);
 
 				when(
 					/^the parent sends its child the body "(.*)"$/,
 					async (body: string) => {
-						const sent = await request(getUrl(vendor, env))
+						const sentUpdate = await request(getUrl(vendor, cacheEnv))
 							.patch(`/items/${UPSERT_PARENT}/${upsertParentId}`)
 							.send({ children: [{ id: sentChildId, body }] })
-							.set('Authorization', auth);
+							.set('Authorization', adminAuth);
 
-						expect(sent.statusCode).toBe(200);
+						expect(sentUpdate.statusCode).toBe(200);
 					},
 				);
 
@@ -281,10 +296,10 @@ describe.each(vendors)('%s', (vendor) => {
 					/^the read of \w+ in slot "(.*)" answers:$/,
 					async (slot: string, table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
-						const answered = await readSlot(slot);
+						const answeredRead = await readSlot(slot);
 
-						expect(answered.headers[cacheStatusHeader]).toBe(cache);
-						expect(answered.body.data).toEqual(loadYaml(response!));
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
 					},
 				);
 			},
@@ -295,10 +310,10 @@ describe.each(vendors)('%s', (vendor) => {
 			'a takeover declared inert under another spelling of its key purges nothing',
 			({ given, when, then }) => {
 				function readInert() {
-					return request(getUrl(vendor, env))
+					return request(getUrl(vendor, cacheEnv))
 						.get(`/items/${INERT}`)
 						.query({ fields: 'body' })
-						.set('Authorization', auth);
+						.set('Authorization', adminAuth);
 				}
 
 				given(
@@ -307,22 +322,22 @@ describe.each(vendors)('%s', (vendor) => {
 						expect((await readInert()).headers[cacheStatusHeader])
 							.toBe('MISS');
 
-						const cached = await readInert();
+						const cachedRead = await readInert();
 
-						expect(cached.headers[cacheStatusHeader]).toBe('HIT');
-						expect(cached.body.data).toEqual(loadYaml(table[0]!.response!));
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
 					},
 				);
 
 				when(
 					/^its row is sent the body "(.*)"$/,
 					async (body: string) => {
-						const sent = await request(getUrl(vendor, env))
+						const sentUpdate = await request(getUrl(vendor, cacheEnv))
 							.patch(`/items/${INERT}/${inertRowId}`)
 							.send({ body })
-							.set('Authorization', auth);
+							.set('Authorization', adminAuth);
 
-						expect(sent.statusCode).toBe(200);
+						expect(sentUpdate.statusCode).toBe(200);
 					},
 				);
 
@@ -330,10 +345,59 @@ describe.each(vendors)('%s', (vendor) => {
 					`the read of ${INERT} answers:`,
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
-						const answered = await readInert();
+						const answeredRead = await readInert();
 
-						expect(answered.headers[cacheStatusHeader]).toBe(cache);
-						expect(answered.body.data).toEqual(loadYaml(response!));
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a bigInteger takeover declared inert under a zero-led key purges nothing',
+			({ given, when, then }) => {
+				function readBigInert() {
+					return request(getUrl(vendor, cacheEnv))
+						.get(`/items/${INERT_BIG}`)
+						.query({ fields: 'body' })
+						.set('Authorization', adminAuth);
+				}
+
+				given(
+					`the read of ${INERT_BIG} is cached:`,
+					async (table: Record<string, string>[]) => {
+						expect((await readBigInert()).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						const cachedRead = await readBigInert();
+
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					/^its row is sent the body "(.*)"$/,
+					async (body: string) => {
+						const sentUpdate = await request(getUrl(vendor, cacheEnv))
+							.patch(`/items/${INERT_BIG}/${bigInertRowId}`)
+							.send({ body })
+							.set('Authorization', adminAuth);
+
+						expect(sentUpdate.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					`the read of ${INERT_BIG} answers:`,
+					async (table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answeredRead = await readBigInert();
+
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
 					},
 				);
 			},
@@ -347,10 +411,10 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			({ given, when, then }) => {
 				function readSlot(slot: string) {
-					return request(getUrl(vendor, env))
+					return request(getUrl(vendor, cacheEnv))
 						.get(`/items/${MOVED}`)
 						.query({ fields: 'body', 'filter[slot][_eq]': slot })
-						.set('Authorization', auth);
+						.set('Authorization', adminAuth);
 				}
 
 				given(
@@ -360,10 +424,10 @@ describe.each(vendors)('%s', (vendor) => {
 							expect((await readSlot(slot!)).headers[cacheStatusHeader])
 								.toBe('MISS');
 
-							const cached = await readSlot(slot!);
+							const cachedRead = await readSlot(slot!);
 
-							expect(cached.headers[cacheStatusHeader]).toBe('HIT');
-							expect(cached.body.data).toEqual(loadYaml(response!));
+							expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+							expect(cachedRead.body.data).toEqual(loadYaml(response!));
 						}
 					},
 				);
@@ -371,12 +435,12 @@ describe.each(vendors)('%s', (vendor) => {
 				when(
 					/^its row in slot "a" is sent the body "(.*)"$/,
 					async (body: string) => {
-						const sent = await request(getUrl(vendor, env))
+						const sentUpdate = await request(getUrl(vendor, cacheEnv))
 							.patch(`/items/${MOVED}/${movedRowId}`)
 							.send({ body })
-							.set('Authorization', auth);
+							.set('Authorization', adminAuth);
 
-						expect(sent.statusCode).toBe(200);
+						expect(sentUpdate.statusCode).toBe(200);
 					},
 				);
 
@@ -384,10 +448,10 @@ describe.each(vendors)('%s', (vendor) => {
 					`the reads of ${MOVED} answer:`,
 					async (table: Record<string, string>[]) => {
 						for (const { slot, cache, response } of table) {
-							const answered = await readSlot(slot!);
+							const answeredRead = await readSlot(slot!);
 
-							expect(answered.headers[cacheStatusHeader]).toBe(cache);
-							expect(answered.body.data).toEqual(loadYaml(response!));
+							expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+							expect(answeredRead.body.data).toEqual(loadYaml(response!));
 						}
 					},
 				);
@@ -402,10 +466,10 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 			({ given, when, then }) => {
 				function readSlot(slot: string) {
-					return request(getUrl(vendor, env))
+					return request(getUrl(vendor, cacheEnv))
 						.get(`/items/${PARTLY_DECLARED}`)
 						.query({ fields: 'body', 'filter[slot][_eq]': slot })
-						.set('Authorization', auth);
+						.set('Authorization', adminAuth);
 				}
 
 				given(
@@ -415,10 +479,10 @@ describe.each(vendors)('%s', (vendor) => {
 							expect((await readSlot(slot!)).headers[cacheStatusHeader])
 								.toBe('MISS');
 
-							const cached = await readSlot(slot!);
+							const cachedRead = await readSlot(slot!);
 
-							expect(cached.headers[cacheStatusHeader]).toBe('HIT');
-							expect(cached.body.data).toEqual(loadYaml(response!));
+							expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+							expect(cachedRead.body.data).toEqual(loadYaml(response!));
 						}
 					},
 				);
@@ -426,12 +490,12 @@ describe.each(vendors)('%s', (vendor) => {
 				when(
 					/^both its rows are sent the body "(.*)"$/,
 					async (body: string) => {
-						const sent = await request(getUrl(vendor, env))
+						const sentUpdate = await request(getUrl(vendor, cacheEnv))
 							.patch(`/items/${PARTLY_DECLARED}`)
 							.send({ keys: partlyDeclaredRowIds, data: { body } })
-							.set('Authorization', auth);
+							.set('Authorization', adminAuth);
 
-						expect(sent.statusCode).toBe(200);
+						expect(sentUpdate.statusCode).toBe(200);
 					},
 				);
 
@@ -439,10 +503,10 @@ describe.each(vendors)('%s', (vendor) => {
 					`the reads of ${PARTLY_DECLARED} answer:`,
 					async (table: Record<string, string>[]) => {
 						for (const { slot, cache, response } of table) {
-							const answered = await readSlot(slot!);
+							const answeredRead = await readSlot(slot!);
 
-							expect(answered.headers[cacheStatusHeader]).toBe(cache);
-							expect(answered.body.data).toEqual(loadYaml(response!));
+							expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+							expect(answeredRead.body.data).toEqual(loadYaml(response!));
 						}
 					},
 				);

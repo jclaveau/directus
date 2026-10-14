@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import type { FlowRaw } from '@directus/types';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import emitter from './emitter.js';
@@ -193,7 +194,7 @@ describe('event flows on item updates', () => {
 		expect(groupsAfterFlow).toEqual([{ data: { status: 'a' }, keys: [1, 2] }]);
 	});
 
-	test('a filter flow returning null hands the group a null data', async () => {
+	test('refuses a filter flow that returns null for a group', async () => {
 		getFlowManager().addOperation('clear', () => null);
 
 		vi.mocked(FlowsService).mockImplementation(function () {
@@ -226,13 +227,58 @@ describe('event flows on item updates', () => {
 
 		await (getFlowManager() as any).load();
 
-		const groupsAfterFlow = await emitter.emitFilter(
+		const groupsAfterFlow = emitter.emitFilter(
 			'articles.items.update',
 			[{ data: { status: 'a' }, keys: [1, 2] }],
 			{ collection: 'articles' },
 		);
 
-		expect(groupsAfterFlow).toEqual([{ data: null, keys: [1, 2] }]);
+		await expect(groupsAfterFlow).rejects.toThrow(new InvalidPayloadError({
+			reason: 'A flow on "articles.items.update" returned null for rows 1, 2;'
+				+ ' an update flow returns the change to write, or nothing to keep the'
+				+ ' change sent',
+		}));
+	});
+
+	test('leaves an update an earlier filter cancelled whole cancelled', async () => {
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'record',
+							type: 'record',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const groupsAfterFlow = await emitter.emitFilter(
+			'articles.items.update',
+			null,
+			{ collection: 'articles' },
+		);
+
+		expect(groupsAfterFlow).toBeNull();
+		expect(recordTrigger).not.toHaveBeenCalled();
 	});
 
 	test('an action flow runs once per group, keys beside the data', async () => {

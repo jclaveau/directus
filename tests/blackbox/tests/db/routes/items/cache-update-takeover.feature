@@ -15,6 +15,8 @@ Feature: A row an update hook took over is purged from the response cache
     "sibling" "taken-over" and adds it to its answer.
   - "take-over-inert" on test_takeover_inert: writes nothing and takes the row
     over, declaring it inert through `skipPurgeFor` with a zero leading its key.
+  - "take-over-inert" on test_takeover_inert_big: the same, on a bigInteger
+    primary key.
   - "move-to-b" on test_takeover_moved: moves the row to slot "b" and takes it
     over, declaring nothing.
   - "move-both" on test_takeover_partly_declared: moves the first row to slot
@@ -50,6 +52,15 @@ Feature: A row an update hook took over is purged from the response cache
       | [{body: "original"}] |
     When its row is sent the body "take-over-inert"
     Then the read of test_takeover_inert answers:
+      | cache | response             |
+      | HIT   | [{body: "original"}] |
+
+  Scenario: a bigInteger takeover declared inert under a zero-led key purges nothing
+    Given the read of test_takeover_inert_big is cached:
+      | response             |
+      | [{body: "original"}] |
+    When its row is sent the body "take-over-inert"
+    Then the read of test_takeover_inert_big answers:
       | cache | response             |
       | HIT   | [{body: "original"}] |
 

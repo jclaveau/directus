@@ -150,6 +150,30 @@ test('checks the create as well as the update', async () => {
 	}).toThrowError(`'enabled' has to be a boolean`);
 });
 
+// A flow filter is registered again on every reload of the flows, so after
+// this one; the check has to see what that filter changed.
+test('checks the write after every other filter of it', async () => {
+	const { default: emitter } = await import('../../emitter.js');
+
+	await initSharedSettingsGuard();
+
+	expect(emitter.onFilter).toHaveBeenCalledTimes(2);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		1,
+		'settings.create',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+
+	expect(emitter.onFilter).toHaveBeenNthCalledWith(
+		2,
+		'settings.update',
+		expect.any(Function),
+		{ runsLast: true },
+	);
+});
+
 // A filter registered ahead of this one can cancel the whole write by answering
 // null, which the next filter receives as its payload.
 test('passes a write an earlier filter cancelled through', async () => {

@@ -299,7 +299,8 @@ describe('WebSocket heartbeat handler', () => {
 
 		await vi.runAllTimersAsync(); // flush promises to make sure the event is handled
 		// expect service functions
-		expect(updateBatch).toBeCalled();
+		// No onRepeatedPk to pass, so a refusal names no option.
+		expect(updateBatch).toHaveBeenCalledWith([{ id: '123' }, { id: '456' }]);
 		expect(getMetaForQuery).toBeCalled();
 		expect(readMany).toBeCalled();
 		expect(fakeClient.send).toBeCalled();

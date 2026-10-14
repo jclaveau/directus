@@ -22,18 +22,18 @@ describe('mapUpdateRows', () => {
 	});
 
 	it('keeps the rows of a group the mapping leaves equal in one group', async () => {
-		const groups = await mapUpdateRows(
+		const mappedGroups = await mapUpdateRows(
 			[{ data: { status: 'draft' }, keys: [1, 2, 3] }],
 			(data) => ({ ...data, checked: true }),
 		);
 
-		expect(groups).toEqual([
+		expect(mappedGroups).toEqual([
 			{ data: { status: 'draft', checked: true }, keys: [1, 2, 3] },
 		]);
 	});
 
 	it('splits off only the row the mapping rewrote', async () => {
-		const groups = await mapUpdateRows(
+		const mappedGroups = await mapUpdateRows(
 			[{ data: { status: 'draft' }, keys: [1, 2, 3] }],
 			(data, key) => {
 				return key === 2
@@ -42,14 +42,14 @@ describe('mapUpdateRows', () => {
 			},
 		);
 
-		expect(groups).toEqual([
+		expect(mappedGroups).toEqual([
 			{ data: { status: 'draft' }, keys: [1, 3] },
 			{ data: { status: 'rewritten' }, keys: [2] },
 		]);
 	});
 
 	it('drops the key of a row the mapping returns null for', async () => {
-		const groups = await mapUpdateRows(
+		const mappedGroups = await mapUpdateRows(
 			[{ data: { status: 'draft' }, keys: [1, 2, 3] }],
 			(data, key) => {
 				return key === 2
@@ -58,13 +58,13 @@ describe('mapUpdateRows', () => {
 			},
 		);
 
-		expect(groups).toEqual([
+		expect(mappedGroups).toEqual([
 			{ data: { status: 'draft' }, keys: [1, 3] },
 		]);
 	});
 
 	it('takes a row over when the mapping returns its key', async () => {
-		const entries = await mapUpdateRows(
+		const mappedEntries = await mapUpdateRows(
 			[{ data: { status: 'draft' }, keys: [1, 2, 3] }],
 			(data, key) => {
 				return key === 2
@@ -73,7 +73,7 @@ describe('mapUpdateRows', () => {
 			},
 		);
 
-		expect(entries).toEqual([
+		expect(mappedEntries).toEqual([
 			{ data: { status: 'draft' }, keys: [1, 3] },
 			{ key: 2 },
 		]);
@@ -82,7 +82,7 @@ describe('mapUpdateRows', () => {
 	it('leaves a row an earlier hook already took over as it was', async () => {
 		const mappedKeys: unknown[] = [];
 
-		const entries = await mapUpdateRows(
+		const mappedEntries = await mapUpdateRows(
 			[{ key: 7 }, { data: { status: 'draft' }, keys: [1] }],
 			(data, key) => {
 				mappedKeys.push(key);
@@ -91,7 +91,7 @@ describe('mapUpdateRows', () => {
 			},
 		);
 
-		expect(entries).toEqual([
+		expect(mappedEntries).toEqual([
 			{ key: 7 },
 			{ data: { status: 'draft' }, keys: [1] },
 		]);
@@ -100,7 +100,7 @@ describe('mapUpdateRows', () => {
 	});
 
 	it('never merges rows of two groups, even when they end up equal', async () => {
-		const groups = await mapUpdateRows(
+		const mappedGroups = await mapUpdateRows(
 			[
 				{ data: { status: 'draft' }, keys: [1] },
 				{ data: { status: 'published' }, keys: [2] },
@@ -108,7 +108,7 @@ describe('mapUpdateRows', () => {
 			() => ({ status: 'archived' }),
 		);
 
-		expect(groups).toEqual([
+		expect(mappedGroups).toEqual([
 			{ data: { status: 'archived' }, keys: [1] },
 			{ data: { status: 'archived' }, keys: [2] },
 		]);
@@ -134,27 +134,64 @@ describe('mapUpdateRows', () => {
 	});
 
 	it('keeps a later change to a row after an earlier one', async () => {
-		const groups = await mapUpdateRows(
+		const mappedStatuses: unknown[] = [];
+
+		const mappedGroups = await mapUpdateRows(
 			[
 				{ data: { status: 'draft', delayMs: 5 }, keys: [1, 2] },
 				{ data: { status: 'published', delayMs: 0 }, keys: [1] },
 			],
 			async (data) => {
 				await new Promise((resolve) => setTimeout(resolve, data.delayMs));
+				mappedStatuses.push(data.status);
 
 				return { status: data.status };
 			},
 		);
 
-		expect(groups).toEqual([
+		expect(mappedStatuses).toEqual(['draft', 'draft', 'published']);
+
+		expect(mappedGroups).toEqual([
 			{ data: { status: 'draft' }, keys: [1, 2] },
 			{ data: { status: 'published' }, keys: [1] },
 		]);
 	});
 
-	it('passes an update an earlier hook cancelled whole through', async () => {
-		const groups = await mapUpdateRows(null, (data) => data);
+	it('keeps the copy the mapping edited when it returns nothing', async () => {
+		const mappedGroups = await mapUpdateRows(
+			[{ data: { status: 'draft' }, keys: [1, 2] }],
+			(data, key) => {
+				if (key === 2) {
+					data.status = 'checked';
+				}
+			},
+		);
 
-		expect(groups).toBeNull();
+		expect(mappedGroups).toEqual([
+			{ data: { status: 'draft' }, keys: [1] },
+			{ data: { status: 'checked' }, keys: [2] },
+		]);
+	});
+
+	it('refuses a mapping that answers a row with another row\'s key', async () => {
+		const mappedGroups = mapUpdateRows(
+			[{ data: { status: 'draft' }, keys: [1, 2] }],
+			(data, key) => {
+				return key === 2
+					? 5
+					: data;
+			},
+		);
+
+		await expect(mappedGroups).rejects.toThrow(new Error(
+			'The mapping of row 2 answered with the key 5; return the row\'s own key'
+			+ ' to take it over, or null to cancel it',
+		));
+	});
+
+	it('passes an update an earlier hook cancelled whole through', async () => {
+		const mappedGroups = await mapUpdateRows(null, (data) => data);
+
+		expect(mappedGroups).toBeNull();
 	});
 });

@@ -3,19 +3,19 @@ import { mapCreateRows } from './map-create-rows.js';
 
 describe('mapCreateRows', () => {
 	it('replaces the data of each row with what the mapping returns', async () => {
-		const entries = await mapCreateRows(
+		const mappedEntries = await mapCreateRows(
 			[{ data: { title: 'a' } }, { data: { title: 'b' } }],
 			(data, index) => ({ ...data, position: index }),
 		);
 
-		expect(entries).toEqual([
+		expect(mappedEntries).toEqual([
 			{ data: { title: 'a', position: 0 } },
 			{ data: { title: 'b', position: 1 } },
 		]);
 	});
 
 	it('takes the insert of a row over when the mapping returns a key', async () => {
-		const entries = await mapCreateRows(
+		const mappedEntries = await mapCreateRows(
 			[{ data: { title: 'a' } }, { data: { title: 'stored' } }],
 			(data) => {
 				return data.title === 'stored'
@@ -24,11 +24,11 @@ describe('mapCreateRows', () => {
 			},
 		);
 
-		expect(entries).toEqual([{ data: { title: 'a' } }, { key: 7 }]);
+		expect(mappedEntries).toEqual([{ data: { title: 'a' } }, { key: 7 }]);
 	});
 
 	it('cancels a row the mapping returns null for', async () => {
-		const entries = await mapCreateRows(
+		const mappedEntries = await mapCreateRows(
 			[{ data: { title: 'a' } }, { data: { title: 'b' } }],
 			(data) => {
 				return data.title === 'b'
@@ -37,13 +37,13 @@ describe('mapCreateRows', () => {
 			},
 		);
 
-		expect(entries).toEqual([{ data: { title: 'a' } }, null]);
+		expect(mappedEntries).toEqual([{ data: { title: 'a' } }, null]);
 	});
 
 	it('leaves a row an earlier hook already answered as it was', async () => {
 		const mappedIndexes: number[] = [];
 
-		const entries = await mapCreateRows(
+		const mappedEntries = await mapCreateRows(
 			[{ key: 7 }, { sameRowAs: 0 }, null, { data: { title: 'd' } }],
 			(data, index) => {
 				mappedIndexes.push(index);
@@ -52,7 +52,7 @@ describe('mapCreateRows', () => {
 			},
 		);
 
-		expect(entries).toEqual([
+		expect(mappedEntries).toEqual([
 			{ key: 7 },
 			{ sameRowAs: 0 },
 			null,
@@ -82,6 +82,22 @@ describe('mapCreateRows', () => {
 		expect(mappedTitles).toEqual(['slow', 'fast']);
 	});
 
+	it('keeps the copy the mapping edited when it returns nothing', async () => {
+		const mappedEntries = await mapCreateRows(
+			[{ data: { title: 'a' } }, { data: { title: 'b' } }],
+			(data, index) => {
+				if (index === 1) {
+					data.title = 'edited';
+				}
+			},
+		);
+
+		expect(mappedEntries).toEqual([
+			{ data: { title: 'a' } },
+			{ data: { title: 'edited' } },
+		]);
+	});
+
 	it('hands the mapping a copy, so its edits leave the entry alone', async () => {
 		const sentEntries = [{ data: { title: 'a', tags: ['x'] } }];
 
@@ -95,8 +111,8 @@ describe('mapCreateRows', () => {
 	});
 
 	it('passes a create an earlier hook cancelled whole through', async () => {
-		const entries = await mapCreateRows(null, (data) => data);
+		const mappedEntries = await mapCreateRows(null, (data) => data);
 
-		expect(entries).toBeNull();
+		expect(mappedEntries).toBeNull();
 	});
 });

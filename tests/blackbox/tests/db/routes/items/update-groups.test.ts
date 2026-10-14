@@ -11,7 +11,7 @@ import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
-import { beforeEach, describe, expect } from 'vitest';
+import { afterAll, beforeEach, describe, expect } from 'vitest';
 import {
 	collectionGrouped,
 	collectionGroupedLog,
@@ -42,6 +42,33 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
+	const createdUserIds: string[] = [];
+
+	afterAll(async () => {
+		const usersResponse = await request(getUrl(vendor))
+			.delete('/users')
+			.send(createdUserIds)
+			.set('Authorization', AUTH);
+
+		expect(usersResponse.statusCode).toEqual(204);
+
+		const policiesResponse = await request(getUrl(vendor))
+			.get('/policies')
+			.query({
+				'filter[name][_eq]': `${USER.APP_ACCESS.KEY}-Update Groups`,
+				fields: 'id',
+			})
+			.set('Authorization', AUTH);
+
+		for (const policy of policiesResponse.body.data) {
+			const policyResponse = await request(getUrl(vendor))
+				.delete(`/policies/${policy.id}`)
+				.set('Authorization', AUTH);
+
+			expect(policyResponse.statusCode).toEqual(204);
+		}
+	});
+
 	// Every scenario starts on an empty log, so a count holds only its own events.
 	beforeEach(async () => {
 		const response = await request(getUrl(vendor))
@@ -181,6 +208,8 @@ describe.each(vendors)('%s', (vendor) => {
 			}) => {
 				return { id: user.id, name: user.first_name, status: user.status };
 			});
+
+			createdUserIds.push(...update.rows.map((row) => String(row.id)));
 		});
 
 		function batchOf(table: Record<string, string>[]) {
@@ -268,6 +297,31 @@ describe.each(vendors)('%s', (vendor) => {
 						variables: { rows: batchOf(table) },
 					})
 					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
+			/^the users batch is sent over GraphQL(?:, with onRepeatedPk (\w+))?:$/,
+			async (
+				onRepeatedPk: string | undefined,
+				table: Record<string, string>[],
+			) => {
+				update.response = await request(getUrl(vendor))
+					.post('/graphql/system')
+					.send({
+						query: `
+							mutation ($rows: [update_directus_users_input!]) {
+								update_users_batch(
+									data: $rows
+									${onRepeatedPk
+										? `onRepeatedPk: ${onRepeatedPk}`
+										: ''}
+								) { id }
+							}
+						`,
+						variables: { rows: batchOf(table) },
+					})
+					.set('Authorization', AUTH);
 			},
 		);
 
@@ -439,41 +493,45 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		then.optional(
-			"the collection's update takes the query parameter:",
-			(table: Record<string, string>[]) => {
+			"the collection's update references the OnRepeatedPk parameter",
+			() => {
 				const oas = update.response!.body;
 
-				const parameters = oas.paths[`/items/${update.collection}`].patch
-					.parameters
-					.map((parameter: { $ref?: string }) => {
-						return parameter.$ref?.startsWith('#/components/parameters/')
-							? oas.components.parameters[
-								parameter.$ref.slice('#/components/parameters/'.length)
-							]
-							: parameter;
-					});
-
-				const [expected] = parseGherkinTable<{
-					name: string;
-					required: boolean;
-					type: string;
-					enum: string[];
-					default: string;
-				}>(table);
-
-				expect(parameters).toContainEqual({
-					name: expected!.name,
-					description: expect.any(String),
-					in: 'query',
-					required: expected!.required,
-					schema: {
-						type: expected!.type,
-						enum: expected!.enum,
-						default: expected!.default,
-					},
-				});
+				expect(oas.paths[`/items/${update.collection}`].patch.parameters)
+					.toEqual([
+						{ $ref: '#/components/parameters/Fields' },
+						{ $ref: '#/components/parameters/Limit' },
+						{ $ref: '#/components/parameters/Meta' },
+						{ $ref: '#/components/parameters/Offset' },
+						{ $ref: '#/components/parameters/Sort' },
+						{ $ref: '#/components/parameters/Filter' },
+						{ $ref: '#/components/parameters/Search' },
+						{ $ref: '#/components/parameters/OnRepeatedPk' },
+					]);
 			},
 		);
+
+		and.optional('the OAS describes the OnRepeatedPk parameter', () => {
+			expect(update.response!.body.components.parameters.OnRepeatedPk)
+				.toEqual({
+					name: 'onRepeatedPk',
+					// The spec's folded scalar keeps its last line break.
+					description: `${oneLine`
+						What the update does with a row it is sent more than once.
+						\`refuse\` refuses the update before any hook runs, and refuses a
+						hook answering with a row twice; a row sent twice in one change
+						is written once. \`lastWins\` writes every change in the order
+						sent.
+					`}\n`,
+					in: 'query',
+					required: false,
+					schema: {
+						type: 'string',
+						enum: ['refuse', 'lastWins'],
+						default: 'refuse',
+					},
+				});
+		});
 
 		and.optional(/^the refusal's code is "(.*)"$/, (code: string) => {
 			expect(update.response!.body.errors[0].extensions.code).toEqual(code);
@@ -687,6 +745,11 @@ describe.each(vendors)('%s', (vendor) => {
 			'a nested owner sent to several rows a hook maps is created once',
 			'a row a hook adds to an update is written, left out of the answer',
 			'a users batch sending a user twice is refused, no onRepeatedPk to pass',
+			oneLine`
+				a GraphQL users batch sending a user twice is refused, naming no
+				option
+			`,
+			'a GraphQL users batch passing onRepeatedPk is rejected',
 		]) {
 			scenario(title, (steps) => {
 				defineSteps(steps, {
