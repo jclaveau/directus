@@ -1,9 +1,10 @@
 Feature: A row an update hook took over is purged from the response cache
 
-  An `items.update` filter hook answering `{ key }` wrote that row itself, out
-  of band, before Directus checks the answer or writes anything. The scoped
-  cache purges it whatever comes next: a refused answer, or an upsert that
-  never sent the row. A row the caller sent was read before the hook ran, so
+  An `items.update` filter hook answering `{ key }` wrote that row itself,
+  through the update's own transaction, before Directus checks the answer or
+  writes anything. The scoped cache purges it whatever comes next: a refused
+  answer, which takes the hook's write back with it, or an upsert that never
+  sent the row. A row the caller sent was read before the hook ran, so
   only the slice it left and the one it moved to are purged. A row it did not
   send is purged with the collection whole, unless the hook declared that row's
   slices through `purgeBy` and `forKey`.
@@ -35,8 +36,8 @@ Feature: A row an update hook took over is purged from the response cache
       once.
       """
     And the read of test_takeover_refused answers:
-      | cache | response               |
-      | MISS  | [{body: "taken-over"}] |
+      | cache | response             |
+      | MISS  | [{body: "original"}] |
 
   Scenario: an upsert whose hook takes over a row it never sent purges that row
     Given the read of test_takeover_upsert_child in slot "b" is cached:

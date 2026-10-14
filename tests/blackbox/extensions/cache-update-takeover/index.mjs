@@ -1,9 +1,10 @@
 // Update hooks taking a row over, for cache-update-takeover.test.ts. Each writes
-// the row it takes over itself, out of band, so the scoped cache has to purge it
-// whatever Directus does next.
+// the row it takes over itself, through the update's transaction, so the scoped
+// cache has to purge it whatever Directus does next.
 //
 //   body 'take-over-twice' (test_takeover_refused) → writes the group's first row
-//     'taken-over' and answers with it twice, which Directus refuses.
+//     'taken-over' and answers with it twice, which Directus refuses, taking the
+//     write back.
 //   body 'take-over-sibling' (test_takeover_upsert_child) → writes the row marked
 //     'sibling' 'taken-over' and adds it to the answer, a row the upsert never sent.
 //   body 'take-over-inert' (test_takeover_inert, test_takeover_inert_big) →

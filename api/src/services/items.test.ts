@@ -30,6 +30,7 @@ import {
 } from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
 import {
+	ItemScopedCacheService,
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
@@ -1020,7 +1021,10 @@ describe('Integration Tests', () => {
 				// touched and purges their slices — the exact scope-path query the batch
 				// paths are trying to shed. The second snapshot reads the rows a hook
 				// added, none here.
-				const snapshotSpy = vi.spyOn(service.scopedCache, 'snapshot');
+				const snapshotSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'snapshot',
+				);
 
 				await service.updateBatch([
 					{ id: 1 },
@@ -1028,6 +1032,8 @@ describe('Integration Tests', () => {
 				]);
 
 				expect(snapshotSpy.mock.calls).toEqual([[[2]], [[]], [[2]]]);
+
+				snapshotSpy.mockRestore();
 			});
 		});
 
@@ -1151,14 +1157,38 @@ describe('Integration Tests', () => {
 
 			it('should cancel the update and return a null per key when a filter returns null and cancel is allowed', async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
-				const transactionSpy = vi.spyOn(db, 'transaction');
 
 				const result = await service.updateMany([1], { name: 'Test' }, { allowFilterCancel: true });
 
 				expect(result).toEqual([null]);
-				expect(transactionSpy).not.toHaveBeenCalled();
+				expect(tracker.history.update).toEqual([]);
 
 				filterSpy.mockRestore();
+			});
+
+			it('runs the update filter inside the mutation transaction', async () => {
+				const updateFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.update', updateFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					expect(updateFilter).toHaveBeenCalledWith(
+						[{ data: { name: 'Test' }, keys: [1] }],
+						{
+							collection: 'test',
+							event: 'items.update',
+							originalPayload: [{ data: { name: 'Test' }, keys: [1] }],
+						},
+						expect.objectContaining({
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.update', updateFilter);
+				}
 			});
 
 			it('should throw when an update filter returns null but cancel is not allowed', async () => {
@@ -1525,14 +1555,38 @@ describe('Integration Tests', () => {
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
 
+			it('runs the delete filter inside the mutation transaction', async () => {
+				const deleteFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.delete', deleteFilter);
+
+				try {
+					await service.deleteMany([1]);
+
+					expect(deleteFilter).toHaveBeenCalledWith(
+						[1],
+						{
+							collection: 'test',
+							event: 'items.delete',
+							originalPayload: [1],
+						},
+						expect.objectContaining({
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.delete', deleteFilter);
+				}
+			});
+
 			it('should cancel the deletion and return a null per key when a filter returns null and cancel is allowed', async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
-				const transactionSpy = vi.spyOn(db, 'transaction');
 
 				const result = await service.deleteMany([1], { allowFilterCancel: true });
 
 				expect(result).toEqual([null]);
-				expect(transactionSpy).not.toHaveBeenCalled();
+				expect(tracker.history.delete).toEqual([]);
 
 				filterSpy.mockRestore();
 			});
