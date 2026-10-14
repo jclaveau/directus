@@ -1555,7 +1555,9 @@ implements AbstractService<Item> {
 			.map((field) => field.field);
 
 		const changedInputKeys = groups.flatMap((group) => {
-			return this.groupChangesNothing(group, aliases) ? [] : group.keys;
+			return this.groupChangesNothing(group, aliases)
+				? []
+				: group.keys;
 		});
 
 		const inputScopedCacheSnapshot = await this.scopedCache.snapshot(
