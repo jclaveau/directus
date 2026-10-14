@@ -110,6 +110,17 @@ describe('mapCreateRows', () => {
 		expect(sentEntries).toEqual([{ data: { title: 'a', tags: ['x'] } }]);
 	});
 
+	it('passes a payload that is no list of rows through unchanged', async () => {
+		const fieldCreate = { field: 'title', type: 'string' };
+
+		const mappedEntries = await mapCreateRows(
+			fieldCreate as never,
+			() => null,
+		);
+
+		expect(mappedEntries).toBe(fieldCreate);
+	});
+
 	it('passes a create an earlier hook cancelled whole through', async () => {
 		const mappedEntries = await mapCreateRows(null, (data) => data);
 

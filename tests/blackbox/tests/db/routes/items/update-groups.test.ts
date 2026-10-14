@@ -2,6 +2,7 @@ import { getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
+	messageOfDocString,
 	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
@@ -104,16 +105,6 @@ describe.each(vendors)('%s', (vendor) => {
 		}));
 
 		return keys.map((key) => nameByKey[key]);
-	}
-
-	// A docstring's line breaks read as spaces, and {name} as that row's key;
-	// a message's own `{ key }` keeps its spaces, so it is left as written.
-	function messageOf(update: Update, docString: string) {
-		const oneLineMessage = docString.split('\n').join(' ');
-
-		return oneLineMessage.replace(/\{([\w-]+)\}/g, (_match, rowName: string) => {
-			return String(update.rows.find((row) => row.name === rowName)!.id);
-		});
 	}
 
 	function defineSteps(
@@ -246,13 +237,13 @@ describe.each(vendors)('%s', (vendor) => {
 		when.optional(
 			'the batch sends, the key of its last row in capitals:',
 			async (table: Record<string, string>[]) => {
-				const changes = batchOf(table);
-				const lastChange = changes.at(-1)!;
+				const sentChanges = batchOf(table);
+				const lastChange = sentChanges.at(-1)!;
 
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${update.collection}`)
 					.send([
-						...changes.slice(0, -1),
+						...sentChanges.slice(0, -1),
 						{ ...lastChange, id: String(lastChange.id).toUpperCase() },
 					])
 					.set('Authorization', update.authorization);
@@ -262,13 +253,13 @@ describe.each(vendors)('%s', (vendor) => {
 		when.optional(
 			'the batch sends, the key of its last row with a leading zero:',
 			async (table: Record<string, string>[]) => {
-				const changes = batchOf(table);
-				const lastChange = changes.at(-1)!;
+				const sentChanges = batchOf(table);
+				const lastChange = sentChanges.at(-1)!;
 
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${update.collection}`)
 					.send([
-						...changes.slice(0, -1),
+						...sentChanges.slice(0, -1),
 						{ ...lastChange, id: `0${lastChange.id}` },
 					])
 					.set('Authorization', update.authorization);
@@ -427,21 +418,13 @@ describe.each(vendors)('%s', (vendor) => {
 			async (phase: string, table: Record<string, string>[]) => {
 				expect(update.response!.statusCode).toEqual(200);
 
-				const ownKeys = update.rows.map((row) => row.id);
-
-				// Every grouped event naming one of these rows, so a second one fails
-				// the comparison.
-				const ownEvents: UpdateGroupLogged[][] = (
+				// Every grouped event of the scenario, so a second one fails the
+				// comparison.
+				const loggedEvents: UpdateGroupLogged[][] = (
 					await readLoggedPayloads('items.update', phase)
-				)
-					.map((payload: string) => JSON.parse(payload))
-					.filter((logged: UpdateGroupLogged[]) => {
-						return logged.some((group) => {
-							return group.keys.some((key) => ownKeys.includes(key));
-						});
-					});
+				).map((payload: string) => JSON.parse(payload));
 
-				expect(ownEvents.map((groups) => {
+				expect(loggedEvents.map((groups) => {
 					return groups.map((group) => {
 						return {
 							status: group.data.status,
@@ -458,7 +441,9 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(update.response!.statusCode).toEqual(400);
 
 				expect(update.response!.body.errors[0].message)
-					.toEqual(messageOf(update, docString));
+					.toEqual(messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}));
 			},
 		);
 
@@ -473,7 +458,9 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(update.response!.statusCode).toEqual(200);
 
 				expect(update.response!.body.errors[0].message)
-					.toEqual(messageOf(update, docString));
+					.toEqual(messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}));
 			},
 		);
 
@@ -488,16 +475,18 @@ describe.each(vendors)('%s', (vendor) => {
 
 				expect(
 					update.response!.body.errors[0].extensions.errors[0].message,
-				).toEqual(messageOf(update, docString));
+				).toEqual(messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}));
 			},
 		);
 
 		then.optional(
 			"the collection's update references the OnRepeatedPk parameter",
 			() => {
-				const oas = update.response!.body;
+				const specDocument = update.response!.body;
 
-				expect(oas.paths[`/items/${update.collection}`].patch.parameters)
+				expect(specDocument.paths[`/items/${update.collection}`].patch.parameters)
 					.toEqual([
 						{ $ref: '#/components/parameters/Fields' },
 						{ $ref: '#/components/parameters/Limit' },
@@ -547,6 +536,7 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
@@ -560,31 +550,22 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
 		and.optional(
-			'the update events naming these rows are:',
+			'the update events are:',
 			async (table: Record<string, string>[]) => {
-				const ownKeys = update.rows.map((row) => row.id);
-
-				const counts = await Promise.all(table.map(async ({ event, phase }) => {
-					const payloads: UpdateGroupLogged[][] = (
-						await readLoggedPayloads(event!, phase!)
-					).map((payload: string) => JSON.parse(payload));
-
+				const eventCounts = await Promise.all(table.map(async ({ event, phase }) => {
 					return {
 						event,
 						phase,
-						count: payloads.filter((payload) => {
-							return payload.some((group) => {
-								return group.keys.some((key) => ownKeys.includes(key));
-							});
-						}).length,
+						count: (await readLoggedPayloads(event!, phase!)).length,
 					};
 				}));
 
-				expect(counts).toEqual(parseGherkinTable(table));
+				expect(eventCounts).toEqual(parseGherkinTable(table));
 			},
 		);
 
@@ -635,6 +616,7 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 

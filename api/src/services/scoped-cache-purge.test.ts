@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { mapCreateRows, mapUpdateRows, oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { MutationOptions } from '@directus/types';
@@ -737,13 +738,13 @@ describe(oneLine`
 		// The hook stores B, so the post-commit re-snapshot reads B.
 		tracker.on.select('test').response([{ id: 1, student: 'B' }]);
 
-		const rewrite = (entries: any) => {
+		const rewriteScope = (entries: any) => {
 			return mapCreateRows(entries, async (payload: any) => {
 				return { ...payload, student: 'B' };
 			});
 		};
 
-		emitter.onFilter('test.items.create', rewrite);
+		emitter.onFilter('test.items.create', rewriteScope);
 
 		try {
 			await service().createOne({ name: 'x', student: 'A' });
@@ -762,7 +763,7 @@ describe(oneLine`
 			);
 		}
 		finally {
-			emitter.offFilter('test.items.create', rewrite);
+			emitter.offFilter('test.items.create', rewriteScope);
 		}
 	});
 
@@ -817,6 +818,45 @@ describe(oneLine`
 			expect.anything(),
 			expect.anything(),
 		);
+	});
+
+	it(oneLine`
+		create purges coarse when re-reading the committed rows fails
+	`, async () => {
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').simulateError('read failed');
+
+		await service().createMany([{ name: 'x', student: 'A' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+			{ scopedCachePurgeId: expect.any(String) },
+		);
+	});
+
+	it(oneLine`
+		a create hook taking its row over under a key the primary key cannot hold is
+		refused
+	`, async () => {
+		const takeOverMisspelled = (entries: any) => {
+			return mapCreateRows(entries, async () => 'abc');
+		};
+
+		emitter.onFilter('test.items.create', takeOverMisspelled);
+
+		try {
+			await expect(service().createMany([{ name: 'x', student: 'A' }]))
+				.rejects
+				.toThrowError(new InvalidPayloadError({
+					reason: 'Primary key of test must be an integer instead of "abc"',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOverMisspelled);
+		}
 	});
 
 	it(oneLine`
@@ -1589,7 +1629,7 @@ describe(oneLine`
 			tracker.on.insert('test').response([1]);
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
-			const declare = (entries: any, _meta: any, ctx: any) => {
+			const declareAuthorSlice = (entries: any, _meta: any, ctx: any) => {
 				return mapCreateRows(entries, async (payload: any) => {
 					ctx.scopedCache.purgeBy({
 						collection: 'authors',
@@ -1600,7 +1640,7 @@ describe(oneLine`
 				});
 			};
 
-			emitter.onFilter('test.items.create', declare);
+			emitter.onFilter('test.items.create', declareAuthorSlice);
 
 			try {
 				await service().createMany([{ name: 'x', student: 'A' }]);
@@ -1624,7 +1664,7 @@ describe(oneLine`
 				);
 			}
 			finally {
-				emitter.offFilter('test.items.create', declare);
+				emitter.offFilter('test.items.create', declareAuthorSlice);
 			}
 		});
 
@@ -1956,6 +1996,45 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', takeOver);
+			}
+		});
+
+		it(oneLine`
+			an update take-over of a row the caller did not send purges coarse when
+			reading where that row landed fails
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = (groups: any, _meta: any, ctx: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').simulateErrorOnce('read failed');
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+				tracker.on.update('test').response(1);
+
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
 			}
 		});
 
@@ -2613,7 +2692,14 @@ describe(oneLine`
 			an update whose hook takes over a row the caller did not send narrows when
 			it declares that row, under another spelling of its key
 		`, async () => {
-			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 2, student: 'C' }]);
+
+			tracker.on.select('test').response([
+				{ id: 1, student: 'B' },
+				{ id: 2, student: 'C' },
+			]);
+
 			tracker.on.update('test').response(1);
 
 			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
@@ -2630,25 +2716,30 @@ describe(oneLine`
 			try {
 				await service().updateMany([1], { student: 'B' });
 
-				expect(purgeScopedCache).not.toHaveBeenCalledWith(
-					expect.anything(),
-					'test',
-					null,
-					expect.anything(),
-					expect.anything(),
-				);
-
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+					],
 					expect.anything(),
-					expect.anything(),
-					expect.objectContaining({
-						declaredFingerprints: [{
-							collection: 'test',
-							pinnedScope: { student: ['a'] },
-						}],
-					}),
+					{
+						rowFingerprints: [
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						],
+						changed: ['student'],
+						indexPath: 'student',
+						declaredFingerprints: [
+							{ collection: 'test', pinnedScope: { student: ['a'] } },
+						],
+						changedCollections: [],
+					},
 				);
 			}
 			finally {
@@ -2798,6 +2889,120 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			an upsert whose update hook takes over a row the upsert did not send purges
+			the slice that row lands in when the hook declares it
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1 }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 2, student: 'C' }]);
+
+			tracker.on.select('test').responseOnce([
+				{ id: 1, student: 'B' },
+				{ id: 2, student: 'C' },
+			]);
+
+			tracker.on.update('test').response(1);
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await service().upsertMany([{ id: 1, student: 'B' }]);
+
+				expect(tracker.history.select[4]!.bindings).toEqual([1, '2']);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+					],
+					expect.anything(),
+					{
+						rowFingerprints: [
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['b'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						],
+						changed: null,
+						indexPath: 'student',
+						declaredFingerprints: [
+							{ collection: 'test', pinnedScope: { student: ['a'] } },
+						],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
+			an upsert that fails after its update hook took over a row the upsert did
+			not send still purges that row's slice
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1 }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').response([{ id: 2, student: 'C' }]);
+			tracker.on.update('test').simulateError('write failed');
+
+			const takeOverAnother = async (groups: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					pinnedScope: { student: ['A'] },
+				}, { forKey: 2 });
+
+				return [...groups, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', takeOverAnother);
+
+			try {
+				await expect(service().upsertMany([{ id: 1, student: 'B' }]))
+					.rejects
+					.toThrowError('write failed');
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+						{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+					],
+					expect.anything(),
+					{
+						rowFingerprints: [
+							{ collection: 'test', pinnedScope: { id: ['1'], student: ['a'] } },
+							{ collection: 'test', pinnedScope: { id: ['2'], student: ['c'] } },
+						],
+						changed: null,
+						indexPath: 'student',
+						declaredFingerprints: [
+							{ collection: 'test', pinnedScope: { student: ['a'] } },
+						],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverAnother);
+			}
+		});
+
+		it(oneLine`
 			a delete hook that declares a slice then cancels (null) purges only
 			that slice — includeBareFingerprint:false keeps the cancelled
 			collection's bare pin warm, since nothing in it was deleted
@@ -2851,7 +3056,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1 }]);
 			tracker.on.update('test').response(1);
 
-			const declare = async (payload: any, _meta: any, ctx: any) => {
+			const declareAuthorSlice = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.purgeBy({
 					collection: 'authors',
 					pinnedScope: { id: [5] },
@@ -2866,11 +3071,11 @@ describe(oneLine`
 					{ collection: 'authors', pinnedScope: { id: [5] } },
 				]);
 
-			emitter.onFilter('test.items.update', declare);
+			emitter.onFilter('test.items.update', declareAuthorSlice);
 
 			try {
-				const svc = service();
-				await svc.updateMany([1], { name: 'x' });
+				const updatingService = service();
+				await updatingService.updateMany([1], { name: 'x' });
 
 				expect(purgeScopedCache).toHaveBeenNthCalledWith(
 					1,
@@ -2909,13 +3114,13 @@ describe(oneLine`
 				expect(hookCall![4].scopedCachePurgeId)
 					.toBe(coarseCall![4].scopedCachePurgeId);
 
-				expect(svc.scopedCachePurged).toEqual([
+				expect(updatingService.scopedCachePurged).toEqual([
 					{ collection: 'test' },
 					{ collection: 'authors', pinnedScope: { id: [5] } },
 				]);
 			}
 			finally {
-				emitter.offFilter('test.items.update', declare);
+				emitter.offFilter('test.items.update', declareAuthorSlice);
 			}
 		});
 

@@ -11,8 +11,8 @@
 //   name 'rewrite-me' → mapUpdateRows rewrites that row, splitting its group.
 //   name 'take-over-me' → mapUpdateRows writes that row's status
 //     'taken-over' itself and returns its key, taking the row over.
-//   status 'legacy-shape' → the grouped filter answers with that group's
-//     payload alone, the shape it had before the event carried groups.
+//   status 'one-row-shape' → the grouped filter answers with that group's
+//     payload alone, the shape a hook written for one row returns.
 //   status 'drop-key' → the grouped filter drops that group's first key,
 //     cancelling that row.
 //   status 'repeat-key' → the grouped filter answers with that group's first
@@ -66,12 +66,12 @@ export default function registerHooks({ filter, action }, { database }) {
 			return payload;
 		}
 
-		const legacyGroup = Array.isArray(payload)
-			? payload.find((group) => group?.data?.status === 'legacy-shape')
+		const oneRowGroup = Array.isArray(payload)
+			? payload.find((group) => group?.data?.status === 'one-row-shape')
 			: undefined;
 
-		if (legacyGroup) {
-			return legacyGroup.data;
+		if (oneRowGroup) {
+			return oneRowGroup.data;
 		}
 
 		if (!Array.isArray(payload)) {
@@ -85,7 +85,7 @@ export default function registerHooks({ filter, action }, { database }) {
 				.first()
 			: undefined;
 
-		const groups = payload.flatMap((group) => {
+		const answeredGroups = payload.flatMap((group) => {
 			if (group?.data?.status === 'add-row') {
 				return { ...group, keys: [...group.keys, addedRow.id] };
 			}
@@ -99,20 +99,20 @@ export default function registerHooks({ filter, action }, { database }) {
 				: group;
 		});
 
-		return mapUpdateRows(groups, async (data, key) => {
-			const row = await database(COLLECTION)
+		return mapUpdateRows(answeredGroups, async (data, key) => {
+			const sentRow = await database(COLLECTION)
 				.where({ id: key })
 				.first();
 
-			if (row?.name === 'cancel-me') {
+			if (sentRow?.name === 'cancel-me') {
 				return null;
 			}
 
-			if (row?.name === 'rewrite-me') {
+			if (sentRow?.name === 'rewrite-me') {
 				return { ...data, name: 'rewritten' };
 			}
 
-			if (row?.name === 'take-over-me') {
+			if (sentRow?.name === 'take-over-me') {
 				await database(COLLECTION)
 					.where({ id: key })
 					.update({ status: 'taken-over' });

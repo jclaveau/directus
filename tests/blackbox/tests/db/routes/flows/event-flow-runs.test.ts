@@ -2,6 +2,7 @@ import { getNoCacheUrl, getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
+	messageOfDocString,
 	parseGherkinTable,
 	type StepFunctions,
 } from '@common/cucumber';
@@ -225,13 +226,11 @@ describe.each(vendors)('%s', (vendor) => {
 			(docString: string) => {
 				expect(update.response!.statusCode).toEqual(400);
 
-				// {name} reads as that row's key.
-				expect(update.response!.body.errors[0].message).toEqual(docString
-					.split('\n')
-					.join(' ')
-					.replace(/\{([\w-]+)\}/g, (_match, rowName: string) => {
-						return String(update.rows.find((row) => row.name === rowName)!.id);
-					}));
+				expect(update.response!.body.errors[0].message).toEqual(
+					messageOfDocString(docString, (rowName) => {
+						return update.rows.find((row) => row.name === rowName)!.id;
+					}),
+				);
 			},
 		);
 
@@ -245,6 +244,7 @@ describe.each(vendors)('%s', (vendor) => {
 				})
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
@@ -298,6 +298,7 @@ describe.each(vendors)('%s', (vendor) => {
 					.query({ fields: 'id,name', sort: 'id' })
 					.set('Authorization', AUTH);
 
+				expect(response.statusCode).toEqual(200);
 				expect(response.body.data).toEqual(parseGherkinTable(table));
 			},
 		);
@@ -308,6 +309,7 @@ describe.each(vendors)('%s', (vendor) => {
 				.query({ fields: 'id,name' })
 				.set('Authorization', AUTH);
 
+			expect(response.statusCode).toEqual(200);
 			expect(response.body.data).toEqual([]);
 		});
 	}
@@ -319,6 +321,7 @@ describe.each(vendors)('%s', (vendor) => {
 			'a create runs the create flow once per row',
 			'a filter flow\'s return replaces the change it was given',
 			'a filter flow returning null refuses the update',
+			'an update filter flow returning a key refuses the update',
 			'an update of several users runs each users update flow once',
 			'a create filter flow returning a key takes the row over',
 			'a create filter flow returning null cancels the row',

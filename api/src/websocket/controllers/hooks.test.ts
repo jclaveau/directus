@@ -135,8 +135,8 @@ describe('create messages', () => {
 
 	test('a relation create sends one message per row', async () => {
 		await emitter.emitAction('relations.create', {
-			payload: [{ many_collection: 'articles' }],
-			keys: [5],
+			payload: [{ many_collection: 'articles' }, { many_collection: 'authors' }],
+			keys: [5, 6],
 			collection: 'directus_relations',
 		});
 
@@ -146,6 +146,12 @@ describe('create messages', () => {
 				action: 'create',
 				key: 5,
 				payload: { many_collection: 'articles', key: 5 },
+			}],
+			['websocket.event', {
+				collection: 'directus_relations',
+				action: 'create',
+				key: 6,
+				payload: { many_collection: 'authors', key: 6 },
 			}],
 		]);
 	});

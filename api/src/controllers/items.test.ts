@@ -316,12 +316,12 @@ describe('items controller', () => {
 			updateBatch.mockResolvedValueOnce([1]);
 			readMany.mockResolvedValueOnce([{ id: 1 }]);
 
-			const req = makeReq({
+			const batchRequest = makeReq({
 				body: [{ id: 1 }],
 				query: { onRepeatedPk: 'lastWins' },
 			});
 
-			await handler()(req, { locals: {} } as any, vi.fn());
+			await handler()(batchRequest, { locals: {} } as any, vi.fn());
 
 			expect(updateBatch).toHaveBeenCalledWith([{ id: 1 }], {
 				allowFilterCancel: true,
@@ -330,16 +330,16 @@ describe('items controller', () => {
 		});
 
 		test('refuses an unknown onRepeatedPk before updating', async () => {
-			const req = makeReq({
+			const batchRequest = makeReq({
 				body: [{ id: 1 }],
 				query: { onRepeatedPk: 'merge' },
 			});
 
-			const error = await nextError(handler(), req);
+			const refusal = await nextError(handler(), batchRequest);
 
-			expect(error).toBeInstanceOf(InvalidQueryError);
+			expect(refusal).toBeInstanceOf(InvalidQueryError);
 
-			expect(error.message).toEqual(
+			expect(refusal.message).toEqual(
 				'Invalid query. "onRepeatedPk" must be one of refuse, lastWins.',
 			);
 

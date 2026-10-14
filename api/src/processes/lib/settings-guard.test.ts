@@ -1,6 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { useEnv } from '@directus/env';
+import { InvalidPayloadError } from '@directus/errors';
 import {
+	assertUsableCacheFields,
 	assertUsableSharedSettings,
 	initSharedSettingsGuard,
 } from './settings-guard.js';
@@ -150,8 +152,8 @@ test('checks the create as well as the update', async () => {
 	}).toThrowError(`'enabled' has to be a boolean`);
 });
 
-// A flow filter is registered again on every reload of the flows, so after
-// this one; the check has to see what that filter changed.
+// Flow filters re-register on every flows reload, so they land after this one;
+// registering it to run last lets the check see what they changed.
 test('checks the write after every other filter of it', async () => {
 	const { default: emitter } = await import('../../emitter.js');
 
@@ -192,4 +194,77 @@ test('passes a write an earlier filter cancelled through', async () => {
 		{} as never,
 		{} as never,
 	)).toBeNull();
+});
+
+test.each([
+	['30s'],
+	[''],
+	[null],
+])('lets the cache_ttl %j through', (cacheTtl) => {
+	expect(() => assertUsableCacheFields({ cache_ttl: cacheTtl })).not.toThrow();
+});
+
+test.each([
+	['abc', 'Invalid cache_ttl "abc" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+	['30x', 'Invalid cache_ttl "30x" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+	['-5m', 'Invalid cache_ttl "-5m" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+	['0', 'Invalid cache_ttl "0" — expected a positive duration like "30s", '
+		+ '"5m", "1h"'],
+])('refuses the cache_ttl %j', (cacheTtl, reason) => {
+	expect(() => assertUsableCacheFields({ cache_ttl: cacheTtl }))
+		.toThrowError(new InvalidPayloadError({ reason }));
+});
+
+test.each([
+	['0 3 * * *'],
+	[''],
+	[null],
+])('lets the cache_audit_schedule %j through', (auditRule) => {
+	expect(() => assertUsableCacheFields({ cache_audit_schedule: auditRule }))
+		.not.toThrow();
+});
+
+test.each([
+	['hourly', 'Invalid cache_audit_schedule "hourly" — expected a cron rule '
+		+ 'like "0 3 * * *"'],
+	['60 * * * *', 'Invalid cache_audit_schedule "60 * * * *" — expected a cron '
+		+ 'rule like "0 3 * * *"'],
+	['99 99 * * *', 'Invalid cache_audit_schedule "99 99 * * *" — expected a '
+		+ 'cron rule like "0 3 * * *"'],
+])('refuses the cache_audit_schedule %j', (auditRule, reason) => {
+	expect(() => assertUsableCacheFields({ cache_audit_schedule: auditRule }))
+		.toThrowError(new InvalidPayloadError({ reason }));
+});
+
+// After the flow filters, so a flow writing a TTL nothing can run is refused
+// too, which a check in the settings service ran too early to see.
+test('checks the cache fields a write carries once its filters ran', async () => {
+	const { default: emitter } = await import('../../emitter.js');
+
+	await initSharedSettingsGuard();
+
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[1]![1](
+			[{ data: { cache_ttl: 'abc' }, keys: [1] }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(new InvalidPayloadError({
+		reason: 'Invalid cache_ttl "abc" — expected a positive duration like '
+			+ '"30s", "5m", "1h"',
+	}));
+
+	expect(() => {
+		return vi.mocked(emitter.onFilter).mock.calls[0]![1](
+			[{ data: { cache_audit_schedule: 'hourly' } }],
+			{} as never,
+			{} as never,
+		);
+	}).toThrowError(new InvalidPayloadError({
+		reason: 'Invalid cache_audit_schedule "hourly" — expected a cron rule '
+			+ 'like "0 3 * * *"',
+	}));
 });

@@ -773,8 +773,8 @@ test('clears ahead of the create as well as the update', async () => {
 	expect(clearCacheTargets).toHaveBeenCalledWith(['response']);
 });
 
-// A flow filter is registered again on every reload of the flows, so after
-// this one; the clear has to see the setting that filter leaves.
+// Flow filters re-register on every flows reload, so they land after this one;
+// registering it to run last lets the clear see what they changed.
 test('clears after every other filter of the write', async () => {
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 
@@ -814,6 +814,7 @@ test('hands the filter the caller the event carries', async () => {
 // A filter registered ahead of this one can cancel the whole write by answering
 // null, which the next filter receives as its payload.
 test('passes a write an earlier filter cancelled through', async () => {
+	// Serving is off, where a write switching it on clears first.
 	vi.mocked(useEnv).mockReturnValue({ CACHE_ENABLED: false });
 
 	await initCacheSettings();

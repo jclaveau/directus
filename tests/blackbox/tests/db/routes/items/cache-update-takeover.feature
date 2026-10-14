@@ -21,7 +21,8 @@ Feature: A row an update hook took over is purged from the response cache
     over, declaring nothing.
   - "move-both" on test_takeover_partly_declared: moves the first row to slot
     "c" and the second to "d", takes both over, and declares the slice only the
-    first one left.
+    first one left. The row in slot "e" is sent nothing, so a purge of the
+    collection whole is the only one reaching its slice.
 
   Scenario: a refused answer still purges the row its hook took over
     Given the read of test_takeover_refused is cached:
@@ -80,10 +81,12 @@ Feature: A row an update hook took over is purged from the response cache
   Scenario: a takeover declaring one of two rows still purges the slice the other left
     Given the reads of test_takeover_partly_declared are cached:
       | slot | response             |
-      | a    | [{body: "original"}] |
-      | b    | [{body: "original"}] |
+      | a    | [{body: "original"}]  |
+      | b    | [{body: "original"}]  |
+      | e    | [{body: "bystander"}] |
     When both its rows are sent the body "move-both"
     Then the reads of test_takeover_partly_declared answer:
-      | slot | cache | response |
-      | a    | MISS  | []       |
-      | b    | MISS  | []       |
+      | slot | cache | response              |
+      | a    | MISS  | []                    |
+      | b    | MISS  | []                    |
+      | e    | HIT   | [{body: "bystander"}] |

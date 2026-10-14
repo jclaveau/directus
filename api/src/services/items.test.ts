@@ -776,9 +776,9 @@ describe('Integration Tests', () => {
 					keys: ['01'],
 				}]);
 
-				const keys = await service.updateMany([1], { name: 'after' });
+				const answeredKeys = await service.updateMany([1], { name: 'after' });
 
-				expect(keys).toEqual([1]);
+				expect(answeredKeys).toEqual([1]);
 			});
 
 			it(oneLine`
@@ -792,6 +792,22 @@ describe('Integration Tests', () => {
 					message:
 						'Invalid payload. Row 1 is sent more than once; send each row once, or '
 						+ 'pass onRepeatedPk=lastWins.',
+				});
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it(oneLine`
+				names the option of a repeated row's last change as the caller spells
+				it
+			`, async () => {
+				await expect(service.updateBatch(
+					[{ id: 1, name: 'first' }, { id: 1, name: 'second' }],
+					{ onRepeatedPk: 'refuse', lastWinsSpelling: 'onRepeatedPk: lastWins' },
+				)).rejects.toMatchObject({
+					message:
+						'Invalid payload. Row 1 is sent more than once; send each row once, or '
+						+ 'pass onRepeatedPk: lastWins.',
 				});
 
 				expect(tracker.history.all).toHaveLength(0);
@@ -881,12 +897,12 @@ describe('Integration Tests', () => {
 				emitter.onFilter('test.items.update', repeatingHook);
 
 				try {
-					const keys = await service.updateBatch(
+					const answeredKeys = await service.updateBatch(
 						[{ id: 1, name: 'first' }],
 						{ onRepeatedPk: 'lastWins' },
 					);
 
-					expect(keys).toEqual([1]);
+					expect(answeredKeys).toEqual([1]);
 					expect(tracker.history.all).toHaveLength(2);
 					expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
 					expect(tracker.history.all[1]!.bindings).toEqual(['last', 1]);
@@ -901,13 +917,13 @@ describe('Integration Tests', () => {
 			`, async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter');
 
-				const keys = await service.updateMany([1, 1], { name: 'same' });
+				const answeredKeys = await service.updateMany([1, 1], { name: 'same' });
 
 				expect(filterSpy.mock.calls[0]![1]).toEqual([
 					{ data: { name: 'same' }, keys: [1] },
 				]);
 
-				expect(keys).toEqual([1, 1]);
+				expect(answeredKeys).toEqual([1, 1]);
 				expect(tracker.history.all).toHaveLength(1);
 				expect(tracker.history.all[0]!.bindings).toEqual(['same', 1]);
 			});
@@ -1002,15 +1018,16 @@ describe('Integration Tests', () => {
 				// The pre-update snapshots cover the rows that are actually written; the
 				// post-update one has to cover the same set or it re-reads rows nothing
 				// touched and purges their slices — the exact scope-path query the batch
-				// paths are trying to shed. The second reads the rows no hook added.
-				const snapshot = vi.spyOn(service.scopedCache, 'snapshot');
+				// paths are trying to shed. The second snapshot reads the rows a hook
+				// added, none here.
+				const snapshotSpy = vi.spyOn(service.scopedCache, 'snapshot');
 
 				await service.updateBatch([
 					{ id: 1 },
 					{ id: 2, name: 'written' },
 				]);
 
-				expect(snapshot.mock.calls).toEqual([[[2]], [[]], [[2]]]);
+				expect(snapshotSpy.mock.calls).toEqual([[[2]], [[]], [[2]]]);
 			});
 		});
 
@@ -1372,9 +1389,9 @@ describe('Integration Tests', () => {
 						{ data: { name: 'y' }, keys: [1, 2] },
 					]);
 
-				const keys = await service.updateMany([1], { name: 'Test' });
+				const answeredKeys = await service.updateMany([1], { name: 'Test' });
 
-				expect(keys).toEqual([1]);
+				expect(answeredKeys).toEqual([1]);
 				expect(tracker.history.update).toHaveLength(1);
 				expect(tracker.history.update[0]!.bindings).toEqual(['y', 1, 2]);
 			});
@@ -1430,7 +1447,7 @@ describe('Integration Tests', () => {
 						{ data: { name: 'first' }, keys: [1] },
 					]);
 
-				const keys = await service.updateBatch(
+				const answeredKeys = await service.updateBatch(
 					[
 						{ id: 1, name: 'first' },
 						{ id: 1, name: 'second' },
@@ -1438,7 +1455,7 @@ describe('Integration Tests', () => {
 					{ allowFilterCancel: true, onRepeatedPk: 'lastWins' },
 				);
 
-				expect(keys).toEqual([1, null]);
+				expect(answeredKeys).toEqual([1, null]);
 				expect(tracker.history.all).toHaveLength(1);
 				expect(tracker.history.all[0]!.bindings).toEqual(['first', 1]);
 			});
@@ -1920,7 +1937,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('uuid_coll').response(1);
 			const filterSpy = vi.spyOn(emitter, 'emitFilter');
 
-			const keys = await service().updateMany([
+			const answeredKeys = await service().updateMany([
 				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 				'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
 			], { name: 'same' });
@@ -1930,7 +1947,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				keys: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
 			}]);
 
-			expect(keys).toEqual([
+			expect(answeredKeys).toEqual([
 				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 				'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
 			]);
@@ -1963,12 +1980,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				keys: ['AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
 			}]);
 
-			const keys = await service().updateMany(
+			const answeredKeys = await service().updateMany(
 				['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
 				{ name: 'after' },
 			);
 
-			expect(keys).toEqual(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
+			expect(answeredKeys).toEqual(['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
 		});
 
 		it(oneLine`
@@ -1999,14 +2016,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	});
 
 	describe('bigInteger primary key', () => {
-		const service = () => {
-			return new ItemsService('big_coll', { knex: db, schema: shapesSchema });
-		};
-
 		it('refuses a batch sending a row twice, once with a leading zero', async () => {
 			const filterSpy = vi.spyOn(emitter, 'emitFilter');
 
-			await expect(service().updateBatch([
+			await expect(new ItemsService('big_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).updateBatch([
 				{ id: 5, name: 'first' },
 				{ id: '05', name: 'second' },
 			])).rejects.toMatchObject({
@@ -2026,7 +2042,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				keys: ['05'],
 			}]);
 
-			const updatedKeys = await service().updateMany([5], { name: 'after' });
+			const updatedKeys = await new ItemsService('big_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).updateMany([5], { name: 'after' });
 
 			expect(updatedKeys).toEqual([5]);
 		});
@@ -2034,7 +2053,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps two keys apart past the safe integers', async () => {
 			tracker.on.update('big_coll').response(1);
 
-			const updatedKeys = await service().updateBatch([
+			const updatedKeys = await new ItemsService('big_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).updateBatch([
 				{ id: '9007199254740992', name: 'first' },
 				{ id: '9007199254740993', name: 'second' },
 			]);
@@ -2043,14 +2065,17 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tracker.history.update).toHaveLength(2);
 		});
 
-		it('names a key that is no number as it was sent', async () => {
-			await expect(service().updateBatch([
-				{ id: 'first-row', name: 'first' },
-				{ id: 'first-row', name: 'second' },
+		it('names a key past the safe integers as it was sent', async () => {
+			await expect(new ItemsService('big_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).updateBatch([
+				{ id: '9007199254740993', name: 'first' },
+				{ id: '9007199254740993', name: 'second' },
 			])).rejects.toMatchObject({
 				message:
-					'Invalid payload. Row first-row is sent more than once; send each row '
-					+ 'once.',
+					'Invalid payload. Row 9007199254740993 is sent more than once; send each '
+					+ 'row once.',
 			});
 
 			expect(tracker.history.all).toHaveLength(0);
@@ -2058,12 +2083,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	});
 
 	describe('string primary key', () => {
-		const service = () => {
-			return new ItemsService('code_coll', { knex: db, schema: shapesSchema });
-		};
-
 		it('refuses a batch sending a row twice', async () => {
-			await expect(service().updateBatch([
+			await expect(new ItemsService('code_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).updateBatch([
 				{ code: 'a', name: 'first' },
 				{ code: 'a', name: 'second' },
 			])).rejects.toMatchObject({
@@ -2077,7 +2101,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('writes two keys apart that differ in case only', async () => {
 			tracker.on.update('code_coll').response(1);
 
-			const updatedKeys = await service().updateBatch([
+			const updatedKeys = await new ItemsService('code_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).updateBatch([
 				{ code: 'a', name: 'first' },
 				{ code: 'A', name: 'second' },
 			]);
@@ -2577,10 +2604,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				},
 			);
 
-			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+			const answeredKeys = await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			})
 				.updateMany([1, 2, 3], { name: 'after' });
 
-			expect(keys).toEqual([1, 2, 3]);
+			expect(answeredKeys).toEqual([1, 2, 3]);
 			expect(tracker.history.update).toHaveLength(2);
 			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1, 3]);
 			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
@@ -2602,10 +2632,13 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				},
 			);
 
-			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+			const answeredKeys = await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			})
 				.updateMany([1, 2], { name: 'after' });
 
-			expect(keys).toEqual([1, 2]);
+			expect(answeredKeys).toEqual([1, 2]);
 			expect(tracker.history.update).toHaveLength(1);
 			expect(tracker.history.update[0]!.bindings).toEqual(['after', 2]);
 		});
@@ -2619,11 +2652,31 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				},
 			);
 
-			const keys = await new ItemsService('test', { knex: db, schema: shapesSchema })
+			const updatedKey = await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			})
 				.updateOne(1, { name: 'after' });
 
-			expect(keys).toEqual(1);
+			expect(updatedKey).toEqual(1);
 			expect(tracker.history.update).toHaveLength(0);
+		});
+
+		it('emits no update action when it takes every row over', async () => {
+			tracker.on.update('test').response(1);
+
+			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (_event, payload: any) => {
+					return mapUpdateRows(payload, (_data, key) => key);
+				},
+			);
+
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1, 2], { name: 'after' });
+
+			expect(actionSpy.mock.calls).toEqual([]);
 		});
 
 		it('refuses a key both taken over and left in a group', async () => {
@@ -2709,6 +2762,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(tracker.history.insert).toHaveLength(1);
 			expect(tracker.history.update).toHaveLength(2);
+			expect(tracker.history.update[0]!.bindings).toEqual(['after', 1, 1, 3]);
+			expect(tracker.history.update[1]!.bindings).toEqual(['rewritten', 2]);
 		});
 	});
 
@@ -2878,12 +2933,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			emitter.onFilter('test.items.create', takeOverStored);
 
 			try {
-				const keys = await new ItemsService('test', {
+				const answeredKeys = await new ItemsService('test', {
 					knex: db,
 					schema: shapesSchema,
 				}).createMany([{ name: 'a' }, { name: 'stored' }]);
 
-				expect(keys).toEqual([1, 9]);
+				expect(answeredKeys).toEqual([1, 9]);
 				expect(tracker.history.insert).toHaveLength(1);
 			}
 			finally {
@@ -3011,7 +3066,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				accountability,
 			});
 
-			const keys = await service.updateBatch(
+			const answeredKeys = await service.updateBatch(
 				[
 					{ id: 1, name: 'y' },
 					{ id: 1, name: 'y' },
@@ -3019,7 +3074,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				{ onRepeatedPk: 'lastWins' },
 			);
 
-			expect(keys).toEqual([1, 1]);
+			expect(answeredKeys).toEqual([1, 1]);
 
 			expect(vi.mocked(validateAccess).mock.calls).toEqual([
 				[

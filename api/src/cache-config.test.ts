@@ -30,9 +30,11 @@ vi.mock('./cache-events.js', () => {
 // `cacheConfigChanged` delivery.
 let busHandler: (payload: { ttl: string | null }) => void;
 
-// The last handler `onAction` was registered with — invoked to simulate a settings
-// write landing, whichever service performed it.
+// The handlers `onAction` was registered with for an update and for a create of
+// the singleton — invoked to simulate a settings write landing, whichever service
+// performed it.
 let settingsUpdateHandler: (meta: Record<string, any>) => void;
+let settingsCreateHandler: (meta: Record<string, any>) => void;
 
 let settingsRow: { cache_ttl: string | null } | undefined;
 
@@ -55,7 +57,12 @@ beforeEach(() => {
 		busHandler = handler;
 	});
 
-	mockEmitter.onAction.mockImplementation((_event: string, handler: any) => {
+	mockEmitter.onAction.mockImplementation((event: string, handler: any) => {
+		if (event === 'settings.create') {
+			settingsCreateHandler = handler;
+			return;
+		}
+
 		settingsUpdateHandler = handler;
 	});
 });
@@ -179,9 +186,30 @@ describe('initCacheConfig', () => {
 
 		expect(resolvedCacheTtl()).toBe('5m');
 
-		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
-			ttl: '5m',
-		});
+		expect(mockBus.publish.mock.calls).toEqual([
+			['cacheConfigChanged', { ttl: '5m' }],
+		]);
+	});
+
+	// A deployment nobody saved a setting on has no singleton row yet; the first
+	// write creates it.
+	it('announces the cache_ttl the create of the singleton writes', async () => {
+		await initCacheConfig();
+
+		expect(mockEmitter.onAction)
+			.toHaveBeenCalledWith('settings.create', expect.any(Function));
+
+		settingsCreateHandler({ payload: [{ cache_ttl: '90s' }] });
+
+		expect(resolvedCacheTtl()).toBe('90s');
+
+		expect(mockBus.publish.mock.calls).toEqual([
+			['cacheConfigChanged', { ttl: '90s' }],
+		]);
+
+		expect(mockRecordCacheConfigEvent.mock.calls).toEqual([
+			['ttl_change', '90s'],
+		]);
 	});
 
 	it('announces a cleared cache_ttl so peers fall back to env', async () => {

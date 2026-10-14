@@ -15,51 +15,57 @@
 //     'c' and its second to 'd', takes both over, and declares the slice only the
 //     first row left.
 
-const REFUSED = 'test_takeover_refused';
-const UPSERT_CHILD = 'test_takeover_upsert_child';
-const INERT = 'test_takeover_inert';
-const INERT_BIG = 'test_takeover_inert_big';
-const MOVED = 'test_takeover_moved';
-const PARTLY_DECLARED = 'test_takeover_partly_declared';
+const refusedCollection = 'test_takeover_refused';
+const upsertChildCollection = 'test_takeover_upsert_child';
+const inertCollection = 'test_takeover_inert';
+const bigInertCollection = 'test_takeover_inert_big';
+const movedCollection = 'test_takeover_moved';
+const partlyDeclaredCollection = 'test_takeover_partly_declared';
 
 export default function registerHooks({ filter }) {
-	filter(`${REFUSED}.items.update`, async (groups, _meta, { database }) => {
-		const takenOverGroup = groups.find((group) => {
-			return group?.data?.body === 'take-over-twice';
-		});
+	filter(
+		`${refusedCollection}.items.update`,
+		async (groups, _meta, { database }) => {
+			const takenOverGroup = groups.find((group) => {
+				return group?.data?.body === 'take-over-twice';
+			});
 
-		if (!takenOverGroup) {
-			return groups;
-		}
+			if (!takenOverGroup) {
+				return groups;
+			}
 
-		const [takenOverKey] = takenOverGroup.keys;
+			const [takenOverKey] = takenOverGroup.keys;
 
-		await database(REFUSED)
-			.where({ id: takenOverKey })
-			.update({ body: 'taken-over' });
+			await database(refusedCollection)
+				.where({ id: takenOverKey })
+				.update({ body: 'taken-over' });
 
-		return [{ key: takenOverKey }, { key: takenOverKey }];
-	});
+			return [{ key: takenOverKey }, { key: takenOverKey }];
+		},
+	);
 
-	filter(`${UPSERT_CHILD}.items.update`, async (groups, _meta, { database }) => {
-		const takesOverSibling = groups.some((group) => {
-			return group?.data?.body === 'take-over-sibling';
-		});
+	filter(
+		`${upsertChildCollection}.items.update`,
+		async (groups, _meta, { database }) => {
+			const takesOverSibling = groups.some((group) => {
+				return group?.data?.body === 'take-over-sibling';
+			});
 
-		if (!takesOverSibling) {
-			return groups;
-		}
+			if (!takesOverSibling) {
+				return groups;
+			}
 
-		const siblingRow = await database(UPSERT_CHILD)
-			.where({ marker: 'sibling' })
-			.first();
+			const siblingRow = await database(upsertChildCollection)
+				.where({ marker: 'sibling' })
+				.first();
 
-		await database(UPSERT_CHILD)
-			.where({ id: siblingRow.id })
-			.update({ body: 'taken-over' });
+			await database(upsertChildCollection)
+				.where({ id: siblingRow.id })
+				.update({ body: 'taken-over' });
 
-		return [...groups, { key: siblingRow.id }];
-	});
+			return [...groups, { key: siblingRow.id }];
+		},
+	);
 
 	const takeOverInert = async (groups, _meta, { scopedCache }) => {
 		const inertGroup = groups.find((group) => {
@@ -77,10 +83,10 @@ export default function registerHooks({ filter }) {
 		});
 	};
 
-	filter(`${INERT}.items.update`, takeOverInert);
-	filter(`${INERT_BIG}.items.update`, takeOverInert);
+	filter(`${inertCollection}.items.update`, takeOverInert);
+	filter(`${bigInertCollection}.items.update`, takeOverInert);
 
-	filter(`${MOVED}.items.update`, async (groups, _meta, { database }) => {
+	filter(`${movedCollection}.items.update`, async (groups, _meta, { database }) => {
 		const movedGroup = groups.find((group) => {
 			return group?.data?.body === 'move-to-b';
 		});
@@ -89,7 +95,7 @@ export default function registerHooks({ filter }) {
 			return groups;
 		}
 
-		await database(MOVED)
+		await database(movedCollection)
 			.whereIn('id', movedGroup.keys)
 			.update({ slot: 'b', body: 'moved' });
 
@@ -97,7 +103,7 @@ export default function registerHooks({ filter }) {
 	});
 
 	filter(
-		`${PARTLY_DECLARED}.items.update`,
+		`${partlyDeclaredCollection}.items.update`,
 		async (groups, _meta, { database, scopedCache }) => {
 			const movedGroup = groups.find((group) => {
 				return group?.data?.body === 'move-both';
@@ -109,16 +115,16 @@ export default function registerHooks({ filter }) {
 
 			const [declaredKey, undeclaredKey] = movedGroup.keys;
 
-			await database(PARTLY_DECLARED)
+			await database(partlyDeclaredCollection)
 				.where({ id: declaredKey })
 				.update({ slot: 'c', body: 'moved' });
 
-			await database(PARTLY_DECLARED)
+			await database(partlyDeclaredCollection)
 				.where({ id: undeclaredKey })
 				.update({ slot: 'd', body: 'moved' });
 
 			scopedCache.purgeBy(
-				{ collection: PARTLY_DECLARED, pinnedScope: { slot: ['a'] } },
+				{ collection: partlyDeclaredCollection, pinnedScope: { slot: ['a'] } },
 				{ forKey: declaredKey },
 			);
 

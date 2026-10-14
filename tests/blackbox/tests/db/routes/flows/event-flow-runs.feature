@@ -18,6 +18,7 @@ Feature: An event flow runs once per change, as it did before updates carried gr
   - test_event_flow_takeovers: a create filter returning the key 1, the row the
     seed inserted before the flow existed.
   - test_event_flow_cancels: a create filter returning `null`.
+  - test_event_flow_keys: an update filter returning the key 7.
   - directus_users: an update filter, an update action.
 
   Scenario: an update of several rows to one status runs each update flow once
@@ -92,6 +93,23 @@ Feature: An event flow runs once per change, as it did before updates carried gr
       | name     | status |
       | refuse-a |        |
       | refuse-b |        |
+
+  Scenario: an update filter flow returning a key refuses the update
+    Given the rows of test_event_flow_keys:
+      | name  |
+      | key-a |
+      | key-b |
+    When the rows are updated to the status "archived"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A flow on "test_event_flow_keys.items.update" returned the key 7
+      for rows {key-a}, {key-b}; an update flow returns the change to write, or nothing
+      to keep the change sent.
+      """
+    And the rows hold:
+      | name  | status |
+      | key-a |        |
+      | key-b |        |
 
   Scenario: an update of several users runs each users update flow once
     Given the users:

@@ -2,7 +2,6 @@ import type { Query } from '@directus/types';
 import type { ClientOptions } from 'ws';
 import type { ClientOptions as ClientOptionsGql } from 'graphql-ws';
 
-/** @TODO Could also be big integer */
 export type PrimaryKeyType = 'integer' | 'bigInteger' | 'uuid' | 'string';
 
 export type WebSocketAuthMethod = 'public' | 'handshake' | 'strict';

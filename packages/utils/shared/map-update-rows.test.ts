@@ -173,8 +173,22 @@ describe('mapUpdateRows', () => {
 		]);
 	});
 
-	it('refuses a mapping that answers a row with another row\'s key', async () => {
-		const mappedGroups = mapUpdateRows(
+	it('takes a row over under the key spelling the mapping returns', async () => {
+		const mappedGroups = await mapUpdateRows(
+			[{
+				data: { status: 'draft' },
+				keys: ['0e1f6e8a-1b2c-4d5e-8f90-a1b2c3d4e5f6'],
+			}],
+			() => '0E1F6E8A-1B2C-4D5E-8F90-A1B2C3D4E5F6',
+		);
+
+		expect(mappedGroups).toEqual([
+			{ key: '0E1F6E8A-1B2C-4D5E-8F90-A1B2C3D4E5F6' },
+		]);
+	});
+
+	it('leaves the service to judge a key that names another row', async () => {
+		const mappedGroups = await mapUpdateRows(
 			[{ data: { status: 'draft' }, keys: [1, 2] }],
 			(data, key) => {
 				return key === 2
@@ -183,10 +197,21 @@ describe('mapUpdateRows', () => {
 			},
 		);
 
-		await expect(mappedGroups).rejects.toThrow(new Error(
-			'The mapping of row 2 answered with the key 5; return the row\'s own key'
-			+ ' to take it over, or null to cancel it',
-		));
+		expect(mappedGroups).toEqual([
+			{ data: { status: 'draft' }, keys: [1] },
+			{ key: 5 },
+		]);
+	});
+
+	it('passes a payload that is no list of groups through unchanged', async () => {
+		const fieldChange = { field: 'title', meta: { note: 'x' } };
+
+		const mappedGroups = await mapUpdateRows(
+			fieldChange as never,
+			() => null,
+		);
+
+		expect(mappedGroups).toBe(fieldChange);
 	});
 
 	it('passes an update an earlier hook cancelled whole through', async () => {

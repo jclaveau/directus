@@ -610,24 +610,61 @@ describe('createScopedCacheHookDeclarations', () => {
 	});
 
 	it(oneLine`
-		records the row a purgeBy names under the collection of each fingerprint
-		it declares, and no row for a purgeBy naming none
+		records the row a purgeBy names under the collection of its handle, and only
+		when a fingerprint of that collection declares it
 	`, () => {
 		const { purgeHandleFor, purgeDeclaredKeys } =
 			createScopedCacheHookDeclarations(emptySchema);
 
-		const purgeHandle = purgeHandleFor('articles');
-
-		purgeHandle.purgeBy([
+		purgeHandleFor('articles').purgeBy([
 			{ collection: 'authors', pinnedScope: { id: [5] } },
 			{ collection: 'articles', pinnedScope: { id: [6] } },
 		], { forKey: 7 });
 
-		purgeHandle.purgeBy({ collection: 'books', pinnedScope: { id: [8] } });
+		purgeHandleFor('articles').purgeBy({
+			collection: 'books',
+			pinnedScope: { id: [8] },
+		}, { forKey: 9 });
+
+		purgeHandleFor('articles').purgeBy({
+			collection: 'books',
+			pinnedScope: { id: [10] },
+		});
 
 		expect(purgeDeclaredKeys).toEqual(new Map([
-			['authors', new Set(['7'])],
 			['articles', new Set(['7'])],
+		]));
+	});
+
+	it(oneLine`
+		records the row of a collection scoped by two fields only when the
+		declaration pins both
+	`, () => {
+		const teamSchema = new SchemaBuilder()
+			.collection('lessons', (c) => {
+				c.field('id').id();
+				c.field('student').string();
+				c.field('team').string();
+			})
+			.build();
+
+		teamSchema.collections['lessons']!.scopedCacheFields = ['student', 'team'];
+
+		const { purgeHandleFor, purgeDeclaredKeys } =
+			createScopedCacheHookDeclarations(teamSchema);
+
+		purgeHandleFor('lessons').purgeBy({
+			collection: 'lessons',
+			pinnedScope: { student: ['A'] },
+		}, { forKey: 1 });
+
+		purgeHandleFor('lessons').purgeBy({
+			collection: 'lessons',
+			pinnedScope: { student: ['A'], team: ['red'] },
+		}, { forKey: 2 });
+
+		expect(purgeDeclaredKeys).toEqual(new Map([
+			['lessons', new Set(['2'])],
 		]));
 	});
 

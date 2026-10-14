@@ -10,6 +10,7 @@ export const collectionFlowRewrites = 'test_event_flow_rewrites';
 export const collectionFlowRefusals = 'test_event_flow_refusals';
 export const collectionFlowTakeovers = 'test_event_flow_takeovers';
 export const collectionFlowCancels = 'test_event_flow_cancels';
+export const collectionFlowKeys = 'test_event_flow_keys';
 
 // A flow holding `transform` is a filter flow whose `$last` return replaces the
 // change it was given.
@@ -62,6 +63,13 @@ export const eventFlows = [
 		transform: null,
 	},
 	{
+		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f10',
+		name: 'event-flow-runs key filter',
+		collection: collectionFlowKeys,
+		options: { type: 'filter', scope: ['items.update'], return: '$last' },
+		transform: 7,
+	},
+	{
 		id: '6f6c8a41-3c55-4c0e-9d0b-2b7d1a5e0f06',
 		name: 'event-flow-runs users update filter',
 		collection: 'directus_users',
@@ -87,6 +95,7 @@ export const seedDBStructure = () => {
 				collectionFlowRefusals,
 				collectionFlowTakeovers,
 				collectionFlowCancels,
+				collectionFlowKeys,
 			]) {
 				await DeleteCollection(vendor, { collection });
 			}

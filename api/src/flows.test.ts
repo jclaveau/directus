@@ -240,6 +240,52 @@ describe('event flows on item updates', () => {
 		}));
 	});
 
+	test('refuses a filter flow that returns a key for a group', async () => {
+		getFlowManager().addOperation('answer', () => 7);
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'record',
+							type: 'answer',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const groupsAfterFlow = emitter.emitFilter(
+			'articles.items.update',
+			[{ data: { status: 'a' }, keys: [1, 2] }],
+			{ collection: 'articles' },
+		);
+
+		await expect(groupsAfterFlow).rejects.toThrow(new InvalidPayloadError({
+			reason: 'A flow on "articles.items.update" returned the key 7 for rows'
+				+ ' 1, 2; an update flow returns the change to write, or nothing to keep'
+				+ ' the change sent',
+		}));
+	});
+
 	test('leaves an update an earlier filter cancelled whole cancelled', async () => {
 		vi.mocked(FlowsService).mockImplementation(function () {
 			return {
@@ -269,11 +315,12 @@ describe('event flows on item updates', () => {
 			} as unknown as FlowsService;
 		});
 
+		emitter.onFilter('articles.items.update', () => null);
 		await (getFlowManager() as any).load();
 
 		const groupsAfterFlow = await emitter.emitFilter(
 			'articles.items.update',
-			null,
+			[{ data: { status: 'a' }, keys: [1] }],
 			{ collection: 'articles' },
 		);
 

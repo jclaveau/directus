@@ -1,5 +1,9 @@
 import config, { getUrl, paths } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import {
+	defineFeature,
+	loadFeature,
+	messageOfDocString,
+} from '@common/cucumber';
 import {
 	CreateCollections,
 	CreateFieldO2M,
@@ -17,13 +21,13 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
-const REFUSED = 'test_takeover_refused';
-const UPSERT_PARENT = 'test_takeover_upsert_parent';
-const UPSERT_CHILD = 'test_takeover_upsert_child';
-const INERT = 'test_takeover_inert';
-const INERT_BIG = 'test_takeover_inert_big';
-const MOVED = 'test_takeover_moved';
-const PARTLY_DECLARED = 'test_takeover_partly_declared';
+const refusedCollection = 'test_takeover_refused';
+const upsertParentCollection = 'test_takeover_upsert_parent';
+const upsertChildCollection = 'test_takeover_upsert_child';
+const inertCollection = 'test_takeover_inert';
+const bigInertCollection = 'test_takeover_inert_big';
+const movedCollection = 'test_takeover_moved';
+const partlyDeclaredCollection = 'test_takeover_partly_declared';
 const cacheStatusHeader = 'x-cache-status';
 
 const takeoverFeature = loadFeature(
@@ -55,15 +59,15 @@ describe.each(vendors)('%s', (vendor) => {
 		await CreateCollections(vendor, {
 			collections: [
 				{
-					collection: REFUSED,
+					collection: refusedCollection,
 					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 				{
-					collection: UPSERT_PARENT,
+					collection: upsertParentCollection,
 					fields: [{ field: 'title', type: 'string', meta: {} }],
 				},
 				{
-					collection: UPSERT_CHILD,
+					collection: upsertChildCollection,
 					meta: { scoped_cache_fields: ['slot'] },
 					fields: [
 						{ field: 'slot', type: 'string', meta: {} },
@@ -72,16 +76,16 @@ describe.each(vendors)('%s', (vendor) => {
 					],
 				},
 				{
-					collection: INERT,
+					collection: inertCollection,
 					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 				{
-					collection: INERT_BIG,
+					collection: bigInertCollection,
 					primaryKeyType: 'bigInteger',
 					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 				{
-					collection: MOVED,
+					collection: movedCollection,
 					meta: { scoped_cache_fields: ['slot'] },
 					fields: [
 						{ field: 'slot', type: 'string', meta: {} },
@@ -89,7 +93,7 @@ describe.each(vendors)('%s', (vendor) => {
 					],
 				},
 				{
-					collection: PARTLY_DECLARED,
+					collection: partlyDeclaredCollection,
 					meta: { scoped_cache_fields: ['slot'] },
 					fields: [
 						{ field: 'slot', type: 'string', meta: {} },
@@ -100,28 +104,28 @@ describe.each(vendors)('%s', (vendor) => {
 		});
 
 		await CreateFieldO2M(vendor, {
-			collection: UPSERT_PARENT,
+			collection: upsertParentCollection,
 			field: 'children',
-			otherCollection: UPSERT_CHILD,
+			otherCollection: upsertChildCollection,
 			otherField: 'parent',
 		});
 
 		const refusedRow = await CreateItem(vendor, {
-			collection: REFUSED,
+			collection: refusedCollection,
 			item: { body: 'original' },
 		});
 
 		refusedRowId = refusedRow.id;
 
 		const upsertParent = await CreateItem(vendor, {
-			collection: UPSERT_PARENT,
+			collection: upsertParentCollection,
 			item: { title: 'parent' },
 		});
 
 		upsertParentId = upsertParent.id;
 
 		const [sentChild] = await CreateItem(vendor, {
-			collection: UPSERT_CHILD,
+			collection: upsertChildCollection,
 			item: [
 				{
 					slot: 'a',
@@ -136,21 +140,21 @@ describe.each(vendors)('%s', (vendor) => {
 		sentChildId = sentChild.id;
 
 		const inertRow = await CreateItem(vendor, {
-			collection: INERT,
+			collection: inertCollection,
 			item: { body: 'original' },
 		});
 
 		inertRowId = inertRow.id;
 
 		const bigInertRow = await CreateItem(vendor, {
-			collection: INERT_BIG,
+			collection: bigInertCollection,
 			item: { body: 'original' },
 		});
 
 		bigInertRowId = String(bigInertRow.id);
 
 		const [movedRow] = await CreateItem(vendor, {
-			collection: MOVED,
+			collection: movedCollection,
 			item: [
 				{ slot: 'a', body: 'original' },
 				{ slot: 'c', body: 'bystander' },
@@ -159,17 +163,16 @@ describe.each(vendors)('%s', (vendor) => {
 
 		movedRowId = movedRow.id;
 
-		const partlyDeclaredRows = await CreateItem(vendor, {
-			collection: PARTLY_DECLARED,
+		const [declaredRow, undeclaredRow] = await CreateItem(vendor, {
+			collection: partlyDeclaredCollection,
 			item: [
 				{ slot: 'a', body: 'original' },
 				{ slot: 'b', body: 'original' },
+				{ slot: 'e', body: 'bystander' },
 			],
 		});
 
-		partlyDeclaredRowIds = partlyDeclaredRows.map((row: { id: number }) => {
-			return row.id;
-		});
+		partlyDeclaredRowIds = [declaredRow.id, undeclaredRow.id];
 
 		cacheEnv[vendor].PORT = String(await getPort());
 
@@ -184,13 +187,13 @@ describe.each(vendors)('%s', (vendor) => {
 	afterAll(async () => {
 		cacheInstance.kill();
 
-		await DeleteCollection(vendor, { collection: REFUSED });
-		await DeleteCollection(vendor, { collection: UPSERT_CHILD });
-		await DeleteCollection(vendor, { collection: UPSERT_PARENT });
-		await DeleteCollection(vendor, { collection: INERT });
-		await DeleteCollection(vendor, { collection: INERT_BIG });
-		await DeleteCollection(vendor, { collection: MOVED });
-		await DeleteCollection(vendor, { collection: PARTLY_DECLARED });
+		await DeleteCollection(vendor, { collection: refusedCollection });
+		await DeleteCollection(vendor, { collection: upsertChildCollection });
+		await DeleteCollection(vendor, { collection: upsertParentCollection });
+		await DeleteCollection(vendor, { collection: inertCollection });
+		await DeleteCollection(vendor, { collection: bigInertCollection });
+		await DeleteCollection(vendor, { collection: movedCollection });
+		await DeleteCollection(vendor, { collection: partlyDeclaredCollection });
 	});
 
 	defineFeature(takeoverFeature, (scenario) => {
@@ -201,13 +204,13 @@ describe.each(vendors)('%s', (vendor) => {
 
 				function readRefused() {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${REFUSED}`)
+						.get(`/items/${refusedCollection}`)
 						.query({ fields: 'body' })
 						.set('Authorization', adminAuth);
 				}
 
 				given(
-					`the read of ${REFUSED} is cached:`,
+					`the read of ${refusedCollection} is cached:`,
 					async (table: Record<string, string>[]) => {
 						expect((await readRefused()).headers[cacheStatusHeader])
 							.toBe('MISS');
@@ -223,7 +226,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^its row is sent the body "(.*)"$/,
 					async (body: string) => {
 						refusedUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${REFUSED}/${refusedRowId}`)
+							.patch(`/items/${refusedCollection}/${refusedRowId}`)
 							.send({ body })
 							.set('Authorization', adminAuth);
 					},
@@ -235,16 +238,13 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(refusedUpdate.statusCode).toBe(400);
 
 						expect(refusedUpdate.body.errors[0].message).toEqual(
-							docString
-								.split('\n')
-								.join(' ')
-								.replace(/\{([\w-]+)\}/g, () => String(refusedRowId)),
+							messageOfDocString(docString, () => refusedRowId),
 						);
 					},
 				);
 
 				and(
-					`the read of ${REFUSED} answers:`,
+					`the read of ${refusedCollection} answers:`,
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answeredRead = await readRefused();
@@ -262,7 +262,7 @@ describe.each(vendors)('%s', (vendor) => {
 			({ given, when, then }) => {
 				function readSlot(slot: string) {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${UPSERT_CHILD}`)
+						.get(`/items/${upsertChildCollection}`)
 						.query({ fields: 'body', 'filter[slot][_eq]': slot })
 						.set('Authorization', adminAuth);
 				}
@@ -284,7 +284,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^the parent sends its child the body "(.*)"$/,
 					async (body: string) => {
 						const sentUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${UPSERT_PARENT}/${upsertParentId}`)
+							.patch(`/items/${upsertParentCollection}/${upsertParentId}`)
 							.send({ children: [{ id: sentChildId, body }] })
 							.set('Authorization', adminAuth);
 
@@ -311,13 +311,13 @@ describe.each(vendors)('%s', (vendor) => {
 			({ given, when, then }) => {
 				function readInert() {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${INERT}`)
+						.get(`/items/${inertCollection}`)
 						.query({ fields: 'body' })
 						.set('Authorization', adminAuth);
 				}
 
 				given(
-					`the read of ${INERT} is cached:`,
+					`the read of ${inertCollection} is cached:`,
 					async (table: Record<string, string>[]) => {
 						expect((await readInert()).headers[cacheStatusHeader])
 							.toBe('MISS');
@@ -333,7 +333,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^its row is sent the body "(.*)"$/,
 					async (body: string) => {
 						const sentUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${INERT}/${inertRowId}`)
+							.patch(`/items/${inertCollection}/${inertRowId}`)
 							.send({ body })
 							.set('Authorization', adminAuth);
 
@@ -342,7 +342,7 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then(
-					`the read of ${INERT} answers:`,
+					`the read of ${inertCollection} answers:`,
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answeredRead = await readInert();
@@ -360,13 +360,13 @@ describe.each(vendors)('%s', (vendor) => {
 			({ given, when, then }) => {
 				function readBigInert() {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${INERT_BIG}`)
+						.get(`/items/${bigInertCollection}`)
 						.query({ fields: 'body' })
 						.set('Authorization', adminAuth);
 				}
 
 				given(
-					`the read of ${INERT_BIG} is cached:`,
+					`the read of ${bigInertCollection} is cached:`,
 					async (table: Record<string, string>[]) => {
 						expect((await readBigInert()).headers[cacheStatusHeader])
 							.toBe('MISS');
@@ -382,7 +382,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^its row is sent the body "(.*)"$/,
 					async (body: string) => {
 						const sentUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${INERT_BIG}/${bigInertRowId}`)
+							.patch(`/items/${bigInertCollection}/${bigInertRowId}`)
 							.send({ body })
 							.set('Authorization', adminAuth);
 
@@ -391,7 +391,7 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then(
-					`the read of ${INERT_BIG} answers:`,
+					`the read of ${bigInertCollection} answers:`,
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answeredRead = await readBigInert();
@@ -412,13 +412,13 @@ describe.each(vendors)('%s', (vendor) => {
 			({ given, when, then }) => {
 				function readSlot(slot: string) {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${MOVED}`)
+						.get(`/items/${movedCollection}`)
 						.query({ fields: 'body', 'filter[slot][_eq]': slot })
 						.set('Authorization', adminAuth);
 				}
 
 				given(
-					`the reads of ${MOVED} are cached:`,
+					`the reads of ${movedCollection} are cached:`,
 					async (table: Record<string, string>[]) => {
 						for (const { slot, response } of table) {
 							expect((await readSlot(slot!)).headers[cacheStatusHeader])
@@ -436,7 +436,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^its row in slot "a" is sent the body "(.*)"$/,
 					async (body: string) => {
 						const sentUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${MOVED}/${movedRowId}`)
+							.patch(`/items/${movedCollection}/${movedRowId}`)
 							.send({ body })
 							.set('Authorization', adminAuth);
 
@@ -445,7 +445,7 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then(
-					`the reads of ${MOVED} answer:`,
+					`the reads of ${movedCollection} answer:`,
 					async (table: Record<string, string>[]) => {
 						for (const { slot, cache, response } of table) {
 							const answeredRead = await readSlot(slot!);
@@ -467,13 +467,13 @@ describe.each(vendors)('%s', (vendor) => {
 			({ given, when, then }) => {
 				function readSlot(slot: string) {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${PARTLY_DECLARED}`)
+						.get(`/items/${partlyDeclaredCollection}`)
 						.query({ fields: 'body', 'filter[slot][_eq]': slot })
 						.set('Authorization', adminAuth);
 				}
 
 				given(
-					`the reads of ${PARTLY_DECLARED} are cached:`,
+					`the reads of ${partlyDeclaredCollection} are cached:`,
 					async (table: Record<string, string>[]) => {
 						for (const { slot, response } of table) {
 							expect((await readSlot(slot!)).headers[cacheStatusHeader])
@@ -491,7 +491,7 @@ describe.each(vendors)('%s', (vendor) => {
 					/^both its rows are sent the body "(.*)"$/,
 					async (body: string) => {
 						const sentUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${PARTLY_DECLARED}`)
+							.patch(`/items/${partlyDeclaredCollection}`)
 							.send({ keys: partlyDeclaredRowIds, data: { body } })
 							.set('Authorization', adminAuth);
 
@@ -500,7 +500,7 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then(
-					`the reads of ${PARTLY_DECLARED} answer:`,
+					`the reads of ${partlyDeclaredCollection} answer:`,
 					async (table: Record<string, string>[]) => {
 						for (const { slot, cache, response } of table) {
 							const answeredRead = await readSlot(slot!);

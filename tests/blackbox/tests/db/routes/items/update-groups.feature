@@ -24,8 +24,8 @@ Feature: An update reaches its hooks as one grouped event
   - name "rewrite-me": `mapUpdateRows` renames the row "rewritten".
   - name "take-over-me": `mapUpdateRows` writes the row's status
     "taken-over" itself and returns its key, taking the row over.
-  - status "legacy-shape": the grouped filter answers with that group's
-    payload alone, the shape it had before the event carried groups.
+  - status "one-row-shape": the grouped filter answers with that group's
+    payload alone, the shape a hook written for one row returns.
   - status "drop-key": the grouped filter drops that group's first key,
     cancelling that row.
   - status "repeat-key": the grouped filter answers with that group's first
@@ -46,7 +46,7 @@ Feature: An update reaches its hooks as one grouped event
     Then the grouped filter carries:
       | status   | names                       |
       | archived | ["a-one","a-two","a-three"] |
-    And the update events naming these rows are:
+    And the update events are:
       | event        | phase  | count |
       | items.update | filter | 1     |
       | items.update | action | 1     |
@@ -115,7 +115,7 @@ Feature: An update reaches its hooks as one grouped event
       | archived | ["apart-a"] |
       | kept     | ["apart-b"] |
       | archived | ["apart-c"] |
-    And the update events naming these rows are:
+    And the update events are:
       | event        | phase  | count |
       | items.update | filter | 1     |
       | items.update | action | 1     |
@@ -219,6 +219,7 @@ Feature: An update reaches its hooks as one grouped event
       """
       Invalid query. "onRepeatedPk" must be one of refuse, lastWins.
       """
+    And the refusal's code is "INVALID_QUERY"
     And the rows hold:
       | name      | status |
       | unknown-a |        |
@@ -271,7 +272,7 @@ Feature: An update reaches its hooks as one grouped event
     Then the GraphQL update is refused with the message:
       """
       Invalid payload. Row {gql-twice} is sent more than once; send each row once, or pass
-      onRepeatedPk=lastWins.
+      onRepeatedPk: lastWins.
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
@@ -301,7 +302,7 @@ Feature: An update reaches its hooks as one grouped event
       | gql-unknown | archived |
     Then the GraphQL query is rejected with the message:
       """
-      Value "merge" does not exist in "repeated_pk_answer" enum.
+      Value "merge" does not exist in "directus_repeated_pk_answer" enum.
       """
     And the rows hold:
       | name        | status |
@@ -348,12 +349,12 @@ Feature: An update reaches its hooks as one grouped event
   Scenario: a grouped hook answering with one payload is refused, naming the helper
     Given the rows:
       | name     |
-      | legacy-a |
-      | legacy-b |
+      | single-a |
+      | single-b |
     When the batch sends:
-      | name     | status       |
-      | legacy-a | archived     |
-      | legacy-b | legacy-shape |
+      | name     | status        |
+      | single-a | archived      |
+      | single-b | one-row-shape |
     Then the update is refused with the message:
       """
       Invalid payload. A "items.update" filter hook must return the { data, keys }[] it
@@ -362,9 +363,9 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name     | status       |
-      | legacy-a |              |
-      | legacy-b |              |
+      | name     | status |
+      | single-a |        |
+      | single-b |        |
 
   Scenario: a grouped hook dropping a key cancels that row, its sibling written
     Given the rows:
@@ -429,6 +430,7 @@ Feature: An update reaches its hooks as one grouped event
       Invalid payload. Primary key of test_update_groups must be an integer instead of
       "not-a-key".
       """
+    And the refusal's code is "INVALID_PAYLOAD"
     And no update event was logged
 
   Scenario: an update naming no row runs no update hook
