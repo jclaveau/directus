@@ -2293,12 +2293,13 @@ implements AbstractService<Item> {
 			// An insert-shaped payload routes to createOne, where a filter hook can take
 			// the row over and return an existing key — an update in disguise, whose OLD
 			// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
-			// purge leaks it → coarse, unless the hook declared its own purgeBy.
-			const someRowTakenOver = primaryKeys.some((key) => {
-				return key != null && scopedCacheHookDeclarations.takenOverKeys.has(
-					takenOverScopedCacheKey(this.collection, key),
-				);
-			});
+			// purge leaks it → coarse, unless the hook declared its own purgeBy. An
+			// update hook can take over a row no payload sent, which no returned key
+			// names, so every row taken over in this collection counts.
+			const takenOverPrefix = takenOverScopedCacheKey(this.collection, '');
+
+			const someRowTakenOver = [...scopedCacheHookDeclarations.takenOverKeys]
+				.some((takenOverName) => takenOverName.startsWith(takenOverPrefix));
 
 			const takeoverUndeclared =
 				someRowTakenOver
