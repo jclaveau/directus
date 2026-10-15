@@ -10,8 +10,8 @@ import type {
 } from '../events.js';
 import type {
 	CreateEntries,
+	DeleteKeys,
 	Item as AnyItem,
-	PrimaryKey,
 	UpdateEntries,
 } from '../items.js';
 import type { PermissionsAction } from '../permissions.js';
@@ -60,8 +60,9 @@ export type BareFilterEvent =
  * Overloads in the order TypeScript tries them: a bare event first, so
  * `fields.create` does not read as a mutation; then the item shapes, a grouped
  * create or update taking the item type and wrapping it in the list it carries,
- * a delete defaulting its payload to its keys; then any other string, which is
- * also where a non-literal event name lands.
+ * a delete taking the item type too, so `filter<Row>` does not type its keys as
+ * a row, and handing them as `DeleteKeys`; then any other string, which is also
+ * where a non-literal event name lands.
  *
  * An item handler may return nothing: `emitFilter` keeps the payload when a
  * handler answers `undefined`.
@@ -98,9 +99,13 @@ export type RegisterFilter = {
 			MutationEventContext
 		>,
 	): void;
-	<TIn = PrimaryKey[] | null, TOut = TIn>(
+	<_DeletedItem = AnyItem>(
 		event: ItemsDeleteEvent,
-		handler: FilterHandler<TIn, TOut | void, MutationEventContext>,
+		handler: FilterHandler<
+			DeleteKeys | null,
+			DeleteKeys | null | void,
+			MutationEventContext
+		>,
 	): void;
 	<TIn = unknown, TOut = TIn, EventName extends string = string>(
 		event: EventName extends ItemsReadEvent | ItemsMutationEvent

@@ -1,6 +1,8 @@
 import type {
 	CreateEntries,
 	CreateEntry,
+	DeleteKey,
+	DeleteKeys,
 	EventContext,
 	FilterHandler,
 	MutationEventContext,
@@ -208,6 +210,29 @@ test('register.filter wraps the item type in a grouped event list', () => {
 	});
 });
 
+// A key arrives as the request spelled it ("5") and may be a uuid.
+test('register.filter hands an item-typed delete its keys as PrimaryKey', () => {
+	const register = {} as RegisterFunctions;
+	const tableName = 'article';
+
+	register.filter<{ id: number; title: string }>(
+		`${tableName}.items.delete`,
+		(keys) => {
+			expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
+			return keys;
+		},
+	);
+
+	register.filter<{ id: string }>('users.delete', (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
+	});
+});
+
+test('DeleteKeys is the list of DeleteKey', () => {
+	expectTypeOf<DeleteKey>().toEqualTypeOf<PrimaryKey>();
+	expectTypeOf<DeleteKeys>().toEqualTypeOf<PrimaryKey[]>();
+});
+
 test('the list aliases name what a grouped filter receives, null aside', () => {
 	expectTypeOf<CreateEntries<Item>>().toEqualTypeOf<(CreateEntry<Item> | null)[]>();
 	expectTypeOf<UpdateEntries<Item>>().toEqualTypeOf<UpdateEntry<Item>[]>();
@@ -237,11 +262,6 @@ test('register.filter keeps the payload type on every other event', () => {
 	register.filter<Item[]>(`${tableName}.items.read`, (rows) => {
 		expectTypeOf(rows).toEqualTypeOf<Item[]>();
 		return rows;
-	});
-
-	register.filter<number[]>(`${tableName}.items.delete`, (keys) => {
-		expectTypeOf(keys).toEqualTypeOf<number[]>();
-		return keys;
 	});
 
 	register.filter<Item>('fields.create', (payload) => {
