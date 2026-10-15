@@ -1849,10 +1849,10 @@ implements AbstractService<Item> {
 						&& !this.groupChangesNothing(group, aliasFields);
 				});
 
-				// TODO: these are this attempt's takeovers only. A row a hook takes over
-				// on an attempt that fails, and not on the retry, is never purged,
-				// though a hook writing through its own connection left that write
-				// committed.
+				// TODO(#610): these are this attempt's takeovers only. A row a hook
+				// takes over on an attempt that fails, and not on the retry, is never
+				// purged, though a hook writing through its own connection left that
+				// write committed.
 				for (const key of takenOverKeys) {
 					scopedCacheHookDeclarations.takenOverKeys.add(
 						takenOverScopedCacheKey(this.collection, key),
