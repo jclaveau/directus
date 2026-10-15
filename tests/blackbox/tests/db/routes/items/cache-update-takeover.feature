@@ -1,4 +1,4 @@
-Feature: A row an update hook took over is purged from the response cache
+Feature: A row a mutation hook took over is purged from the response cache
 
   An `items.update` filter hook answering `{ key }` wrote that row itself,
   through the update's own transaction, before Directus checks the answer or
@@ -8,6 +8,10 @@ Feature: A row an update hook took over is purged from the response cache
   only the slice it left and the one it moved to are purged. A row it did not
   send is purged with the collection whole, unless the hook declared that row's
   slices through `purgeBy` and `forKey`.
+
+  A hook writing through the pool commits that write whatever the mutation
+  does next, so a mutation failing after it, whether the hook threw or a later
+  insert broke a constraint, still purges what the hook took over or declared.
 
   The cache-update-takeover hook acts on the body it is sent:
   - "take-over-twice" on test_takeover_refused: writes the row "taken-over"
@@ -27,6 +31,12 @@ Feature: A row an update hook took over is purged from the response cache
     "c" and the second to "d", takes both over, and declares the slice only the
     first one left. The row in slot "e" is sent nothing, so a purge of the
     collection whole is the only one reaching its slice.
+  - "write-then-throw" on test_takeover_hook_threw: writes the row
+    "written-by-hook" through the pool, declares the collection whole through
+    `purgeBy`, then throws.
+  - "take-over" on test_takeover_create_failed, a create: writes the row marked
+    "taken" "taken-over" through the pool and takes it over. The create's other
+    row reuses the key of the row marked "duplicate", so its insert fails.
 
   Scenario: a refused answer still purges the row its hook took over
     Given the read of test_takeover_refused is cached:
@@ -108,3 +118,30 @@ Feature: A row an update hook took over is purged from the response cache
       | a    | MISS  | []                    |
       | b    | MISS  | []                    |
       | e    | HIT   | [{body: "bystander"}] |
+
+  Scenario: a hook throwing after its own write still purges what it declared
+    Given the read of test_takeover_hook_threw is cached:
+      | response             |
+      | [{body: "original"}] |
+    When its row is sent the body "write-then-throw"
+    Then the update fails with the status 500 and the message:
+      """
+      An unexpected error occurred.
+      """
+    And the read of test_takeover_hook_threw answers:
+      | cache | response                    |
+      | MISS  | [{body: "written-by-hook"}] |
+
+  Scenario: a failed create still purges the row its hook took over
+    Given the read of test_takeover_create_failed marked "taken" is cached:
+      | response             |
+      | [{body: "original"}] |
+    When a create sends "take-over" beside the key of the "duplicate" row
+    Then the create is refused with the message:
+      """
+      Value "{row}" for field "id" in collection "test_takeover_create_failed" has to
+      be unique.
+      """
+    And the read of test_takeover_create_failed marked "taken" answers:
+      | cache | response               |
+      | MISS  | [{body: "taken-over"}] |

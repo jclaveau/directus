@@ -13,7 +13,8 @@ Feature: A mutation hook's write lands only with the mutation
     When the item is updated to the status "repeat-key"
     Then the mutation is refused with the status 400 and the message:
       """
-      Invalid payload. A "items.update" filter hook answered with row 1 more than once.
+      Invalid payload. A "items.update" filter hook answered with row 1 more than
+      once.
       """
     And the witness holds the note "untouched"
 
@@ -28,8 +29,8 @@ Feature: A mutation hook's write lands only with the mutation
     When a user with no role deletes the item
     Then the mutation is refused with the status 403 and the message:
       """
-      You don't have permission to access collection "test_hook_rollback_forbidden_item"
-      or it does not exist. Queried in root.
+      You don't have permission to access collection
+      "test_hook_rollback_forbidden_item" or it does not exist. Queried in root.
       """
     And the witness holds the note "untouched"
 

@@ -18,6 +18,14 @@
 //   body 'move-both' (test_takeover_partly_declared) → moves its first row to slot
 //     'c' and its second to 'd', takes both over, and declares the slice only the
 //     first row left.
+//   body 'write-then-throw' (test_takeover_hook_threw) → writes the row
+//     'written-by-hook' through the extension's `database`, declares the
+//     collection whole through purgeBy, then throws.
+//   body 'take-over' (test_takeover_create_failed), on create → writes the row
+//     marked 'taken' 'taken-over' through the extension's `database` and takes
+//     it over. The create's other row reuses a stored key, so its insert fails.
+
+import { mapCreateRows } from '@directus/utils';
 
 const refusedCollection = 'test_takeover_refused';
 const pooledCollection = 'test_takeover_refused_pooled';
@@ -26,6 +34,8 @@ const inertCollection = 'test_takeover_inert';
 const bigInertCollection = 'test_takeover_inert_big';
 const movedCollection = 'test_takeover_moved';
 const partlyDeclaredCollection = 'test_takeover_partly_declared';
+const hookThrewCollection = 'test_takeover_hook_threw';
+const createFailedCollection = 'test_takeover_create_failed';
 
 export default function registerHooks({ filter }, { database }) {
 	const takeOverTwiceThrough = (collection, writerOf) => {
@@ -148,4 +158,43 @@ export default function registerHooks({ filter }, { database }) {
 			return movedGroup.keys.map((key) => ({ key }));
 		},
 	);
+
+	filter(
+		`${hookThrewCollection}.items.update`,
+		async (groups, _meta, { scopedCache }) => {
+			const throwingGroup = groups.find((group) => {
+				return group?.data?.body === 'write-then-throw';
+			});
+
+			if (!throwingGroup) {
+				return groups;
+			}
+
+			await database(hookThrewCollection)
+				.whereIn('id', throwingGroup.keys)
+				.update({ body: 'written-by-hook' });
+
+			scopedCache.purgeBy({ collection: hookThrewCollection });
+
+			throw new Error('The body "write-then-throw" is refused');
+		},
+	);
+
+	filter(`${createFailedCollection}.items.create`, (entries) => {
+		return mapCreateRows(entries, async (payload) => {
+			if (payload?.body !== 'take-over') {
+				return payload;
+			}
+
+			const takenRow = await database(createFailedCollection)
+				.where({ marker: 'taken' })
+				.first();
+
+			await database(createFailedCollection)
+				.where({ id: takenRow.id })
+				.update({ body: 'taken-over' });
+
+			return takenRow.id;
+		});
+	});
 }
