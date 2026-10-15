@@ -474,6 +474,8 @@ implements AbstractService<Item> {
 		// An `items.create` hook can declare its own purge via
 		// `context.scopedCache.purgeBy`; drained into the purge below. Declared outside
 		// the transaction to outlive it.
+		// TODO(#610): one set for every attempt, so a `skipPurgeFor` a failed attempt
+		// declared still skips the row on the retry, whose hook may have written it.
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
@@ -482,6 +484,9 @@ implements AbstractService<Item> {
 		const declaredPurgesAtStart =
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
+		// The rows the failed attempt's hooks took over, which the catch purges.
+		let attemptTakenOverKeys: PrimaryKey[] = [];
+
 		const {
 			nestedActionEvents,
 			actionPayloads,
@@ -489,6 +494,7 @@ implements AbstractService<Item> {
 		} = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
 			const takenOverRowKeys: PrimaryKey[] = [];
+			attemptTakenOverKeys = takenOverRowKeys;
 			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 			let autoIncrementSequenceNeedsToBeReset = false;
 
@@ -932,7 +938,35 @@ implements AbstractService<Item> {
 				),
 				takenOverRowKeys,
 			};
-		}, opts.mutationTracker.snapshot());
+		}, opts.mutationTracker.snapshot()).catch(async (error) => {
+			if (!shouldClearCache(this.cache, opts, this.collection)) {
+				throw error;
+			}
+
+			// On the caller's transaction, the rows created before the failure commit
+			// with it, and nothing tells which they are.
+			if (this.knex.isTransaction) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					null,
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+				);
+			}
+			// The inserts rolled back; a takeover was written by its hook, outside
+			// the transaction.
+			else {
+				await this.purgeCreatedScopedCache(
+					[...new Set(attemptTakenOverKeys)],
+					attemptTakenOverKeys,
+					scopedCacheHookDeclarations,
+					declaredPurgesAtStart,
+					opts,
+				);
+			}
+
+			throw error;
+		});
 
 		if (opts.emitEvents !== false && actionPayloads.length > 0) {
 			const actionContext = {
@@ -963,89 +997,18 @@ implements AbstractService<Item> {
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Scope off the committed rows' stored values (re-read by returned key), not the
-			// raw input: a create hook can rewrite a scope field, a value left to a DB default
-			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
-			// payload — the row is authoritative, the payload isn't.
-			//
-			// A row a hook *took over* (returned an existing PK) is the unsafe case: it
-			// can be an update-in-disguise — the hook moved that row between slices — and
-			// the create path has no old∪new snapshot, so the post-commit re-read sees
-			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
-			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
-			// its footprint opts back into a precise purge by declaring it for the key
-			// via `scopedCache.purgeBy(…, { forKey })` (a read-only dedup declares its
-			// one slice; an upsert-move declares old + new) — then we trust it and
-			// narrow to the snapshot ∪ declared fingerprints. Every take-over needs its
-			// own: a declaration for one row says nothing of another's old slice.
-			//
-			// That holds on a collection declaring no scope field too. A takeover cannot
-			// move a row between primary-key slices — the key it returned IS the slice —
-			// but the key it returned is not the only row it may have written, and every
-			// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
-			// them stale. Before the key axis the bare fingerprint covered them by
-			// accident.
 			// A `sameRowAs` position repeats its row's key; counted twice it would read
 			// as a takeover.
 			const liveKeys = [
 				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
 			];
 
-			const takenOverKeyNames = new Set(takenOverRowKeys.map((key) => {
-				return this.primaryKeyNameOf(key);
-			}));
-
-			const skippedKeyNames = this.purgeSkippedKeyNames(
+			await this.purgeCreatedScopedCache(
+				liveKeys,
+				takenOverRowKeys,
 				scopedCacheHookDeclarations,
-			);
-
-			const declaredKeyNames = this.purgeDeclaredKeyNames(
-				scopedCacheHookDeclarations,
-			);
-
-			const changedKeys = liveKeys.filter((key) => {
-				const keyName = this.primaryKeyNameOf(key);
-
-				// A take-over the hook declared inert wrote nothing, so it moved no
-				// slice; a row this create inserted is written whatever was declared.
-				return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
-			});
-
-			if (
-				changedKeys.length === 0 &&
-				scopedCacheHookDeclarations.purgeFingerprints.length
-					=== declaredPurgesAtStart
-			) {
-				// Nothing written and nothing declared: no entry can have gone stale.
-				// Returning rather than purging nothing, which would still take this
-				// collection's bare fingerprint and drop its global reads.
-				return results;
-			}
-
-			// Counted off the take-overs themselves: one returning a key another row of
-			// this call inserts adds no key to the set above.
-			const takeoverUndeclared = takenOverRowKeys.some((key) => {
-				const keyName = this.primaryKeyNameOf(key);
-
-				return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
-			});
-
-			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
-			// collection, so an undeclared take-over leaves the other rows' key slices
-			// stale even where no scope field is declared.
-			// A read that fails leaves the slices unknown: purged whole.
-			const scopedCacheSnapshot = takeoverUndeclared
-				? null
-				: await this.scopedCache.snapshot(changedKeys).catch(() => null);
-
-			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheMutatedFingerprints(scopedCacheSnapshot),
-				scopedCacheHookDeclarations,
-				[],
-				{
-					includeBareFingerprint: opts.purgeBareFingerprint !== false,
-					rows: scopedCacheWrittenRows(scopedCacheSnapshot),
-				},
+				declaredPurgesAtStart,
+				opts,
 			);
 		}
 
@@ -1629,6 +1592,8 @@ implements AbstractService<Item> {
 				// What a retried attempt's hooks declare replaces what the failed one's
 				// did. Declarations a caller handed in also hold what its other
 				// mutations declared, so they are kept.
+				// TODO(#610): replacing them drops the failed attempt's `purgeBy` too,
+				// though a hook writing through its own connection committed that write.
 				if (opts.scopedCacheHookDeclarations === undefined) {
 					scopedCacheHookDeclarations = createScopedCacheHookDeclarations(
 						this.schema,
@@ -2067,6 +2032,11 @@ implements AbstractService<Item> {
 					await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
 				}
 			}
+			// A hook threw before the update had an answer: what it wrote through a
+			// connection of its own is known only by what it declared.
+			else {
+				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+			}
 
 			throw error;
 		});
@@ -2172,6 +2142,90 @@ implements AbstractService<Item> {
 						oldScopedCacheSnapshot,
 						newScopedCacheSnapshot,
 					),
+			},
+		);
+	}
+
+	/**
+	 * Purge what a create wrote: the rows it inserted or a hook took over, and
+	 * whatever its hooks declared.
+	 */
+	private async purgeCreatedScopedCache(
+		writtenKeys: PrimaryKey[],
+		takenOverRowKeys: PrimaryKey[],
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		declaredPurgesAtStart: number,
+		opts: MutationOptions,
+	): Promise<void> {
+		// Scope off the committed rows' stored values (re-read by returned key), not
+		// the raw input: a create hook can rewrite a scope field, a value left to a DB
+		// default is only knowable after the insert, and a DB trigger/coercion can
+		// diverge from the payload — the row is authoritative, the payload isn't.
+		//
+		// A row a hook *took over* (returned an existing PK) is the unsafe case: it
+		// can be an update-in-disguise — the hook moved that row between slices — and
+		// the create path has no old∪new snapshot, so the post-commit re-read sees
+		// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
+		// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
+		// its footprint opts back into a precise purge by declaring it for the key
+		// via `scopedCache.purgeBy(…, { forKey })` (a read-only dedup declares its
+		// one slice; an upsert-move declares old + new) — then we trust it and
+		// narrow to the snapshot ∪ declared fingerprints. Every take-over needs its
+		// own: a declaration for one row says nothing of another's old slice.
+		//
+		// That holds on a collection declaring no scope field too. A takeover cannot
+		// move a row between primary-key slices — the key it returned IS the slice —
+		// but the key it returned is not the only row it may have written, and every
+		// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
+		// them stale.
+		const takenOverKeyNames = new Set(takenOverRowKeys.map((key) => {
+			return this.primaryKeyNameOf(key);
+		}));
+
+		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+		const declaredKeyNames = this.purgeDeclaredKeyNames(declarations);
+
+		const changedKeys = writtenKeys.filter((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			// A take-over the hook declared inert wrote nothing, so it moved no
+			// slice; a row this create inserted is written whatever was declared.
+			return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
+		});
+
+		if (
+			changedKeys.length === 0 &&
+			declarations.purgeFingerprints.length === declaredPurgesAtStart
+		) {
+			// Nothing written and nothing declared: no entry can have gone stale.
+			// Returning rather than purging nothing, which would still take this
+			// collection's bare fingerprint and drop its global reads.
+			return;
+		}
+
+		// Counted off the take-overs themselves: one returning a key another row of
+		// this call inserts adds no key to the set above.
+		const takeoverUndeclared = takenOverRowKeys.some((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
+		});
+
+		// No `scopedCacheFields.length > 0` guard: the primary key pins on every
+		// collection, so an undeclared take-over leaves the other rows' key slices
+		// stale even where no scope field is declared.
+		// A read that fails leaves the slices unknown: purged whole.
+		const scopedCacheSnapshot = takeoverUndeclared
+			? null
+			: await this.scopedCache.snapshot(changedKeys).catch(() => null);
+
+		this.scopedCachePurged = await this.scopedCache.purge(
+			scopedCacheMutatedFingerprints(scopedCacheSnapshot),
+			declarations,
+			[],
+			{
+				includeBareFingerprint: opts.purgeBareFingerprint !== false,
+				rows: scopedCacheWrittenRows(scopedCacheSnapshot),
 			},
 		);
 	}
@@ -2473,6 +2527,8 @@ implements AbstractService<Item> {
 
 		// Shared hook declarations: child upserts run with autoPurgeCache off, so a
 		// create/update hook's `purgeBy` reaches the deferred purge only through them.
+		// TODO(#610): one set for every attempt, so a `skipPurgeFor` a failed attempt
+		// declared still skips the row on the retry, whose hook may have written it.
 		const scopedCacheHookDeclarations =
 			createScopedCacheHookDeclarations(this.schema);
 
@@ -2691,6 +2747,9 @@ implements AbstractService<Item> {
 		// An `items.delete` hook can add purge fingerprints via
 		// `context.scopedCache.purgeBy`;
 		// drained into the purge below.
+		// One set for every attempt: a delete reads no `skipPurgeFor`, so what a
+		// failed attempt's hook declared only adds to the purge, which still owes
+		// the write that hook committed through its own connection.
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
