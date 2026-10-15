@@ -1514,7 +1514,7 @@ implements AbstractService<Item> {
 		// An `items.update` hook can add purge fingerprints via
 		// `context.scopedCache.purgeBy`;
 		// drained into the purge below.
-		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+		let scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
 		const refusesRepeatedPks = opts.onRepeatedPk !== 'lastWins';
@@ -1625,6 +1625,15 @@ implements AbstractService<Item> {
 			async (trx) => {
 				refusedAnswer = null;
 				failedWrite = null;
+
+				// What a retried attempt's hooks declare replaces what the failed one's
+				// did. Declarations a caller handed in also hold what its other
+				// mutations declared, so they are kept.
+				if (opts.scopedCacheHookDeclarations === undefined) {
+					scopedCacheHookDeclarations = createScopedCacheHookDeclarations(
+						this.schema,
+					);
+				}
 
 				const service = this.fork({ knex: trx });
 				const applied: UpdateGroup<Item>[] = [];
