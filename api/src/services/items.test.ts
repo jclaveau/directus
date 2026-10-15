@@ -30,6 +30,7 @@ import {
 } from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
 import {
+	ItemScopedCacheService,
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
@@ -222,6 +223,32 @@ describe('Integration Tests', () => {
 		});
 
 		describe('createOne', () => {
+			it('runs the create filter inside the mutation transaction', async () => {
+				const createFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.create', createFilter);
+
+				try {
+					await service.createOne({ name: 'Test' });
+
+					expect(createFilter).toHaveBeenCalledWith(
+						[{ data: { id: undefined, name: 'Test' } }],
+						{
+							collection: 'test',
+							event: 'items.create',
+							originalPayload: [{ data: { id: undefined, name: 'Test' } }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.create', createFilter);
+				}
+			});
+
 			it('should validate user count if requested', async () => {
 				await service.createOne({}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
@@ -1014,13 +1041,63 @@ describe('Integration Tests', () => {
 				}
 			});
 
+			it(oneLine`
+				hands a retried update's hook the data the caller sent, not what the
+				failed attempt's hook made of it
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				tracker.on.update((query) => query.bindings.includes('second!'))
+					.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					}));
+
+				const markGroups = (groups: any) => {
+					for (const group of groups) {
+						group.data.name += '!';
+					}
+
+					return groups;
+				};
+
+				const updateListener = vi.fn();
+
+				emitter.onFilter('test.items.update', markGroups);
+				emitter.onAction('test.items.update', updateListener);
+
+				try {
+					await service.updateBatch(
+						[{ id: 1, name: 'first' }, { id: 2, name: 'second' }],
+						{ awaitActionHooks: true },
+					);
+
+					expect(updateListener).toHaveBeenCalledWith(
+						expect.objectContaining({
+							payload: [
+								{ data: { name: 'first!' }, keys: [1] },
+								{ data: { name: 'second!' }, keys: [2] },
+							],
+						}),
+						expect.anything(),
+					);
+				}
+				finally {
+					emitter.offFilter('test.items.update', markGroups);
+					emitter.offAction('test.items.update', updateListener);
+					vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+				}
+			});
+
 			it('snapshots the same rows before and after the write', async () => {
 				// The pre-update snapshots cover the rows that are actually written; the
 				// post-update one has to cover the same set or it re-reads rows nothing
 				// touched and purges their slices — the exact scope-path query the batch
 				// paths are trying to shed. The second snapshot reads the rows a hook
 				// added, none here.
-				const snapshotSpy = vi.spyOn(service.scopedCache, 'snapshot');
+				const snapshotSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'snapshot',
+				);
 
 				await service.updateBatch([
 					{ id: 1 },
@@ -1028,6 +1105,8 @@ describe('Integration Tests', () => {
 				]);
 
 				expect(snapshotSpy.mock.calls).toEqual([[[2]], [[]], [[2]]]);
+
+				snapshotSpy.mockRestore();
 			});
 		});
 
@@ -1150,21 +1229,179 @@ describe('Integration Tests', () => {
 			});
 
 			it('should cancel the update and return a null per key when a filter returns null and cancel is allowed', async () => {
+				// `history.update` lists only what an update handler matched.
+				tracker.on.update('test').response(1);
+
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
-				const transactionSpy = vi.spyOn(db, 'transaction');
 
 				const result = await service.updateMany([1], { name: 'Test' }, { allowFilterCancel: true });
 
 				expect(result).toEqual([null]);
-				expect(transactionSpy).not.toHaveBeenCalled();
+				expect(tracker.history.update).toEqual([]);
 
 				filterSpy.mockRestore();
 			});
 
-			it('should throw when an update filter returns null but cancel is not allowed', async () => {
+			it('runs the update filter inside the mutation transaction', async () => {
+				const updateFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.update', updateFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					expect(updateFilter).toHaveBeenCalledWith(
+						[{ data: { name: 'Test' }, keys: [1] }],
+						{
+							collection: 'test',
+							event: 'items.update',
+							originalPayload: [{ data: { name: 'Test' }, keys: [1] }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				runs the update's reads, checks and write inside its transaction
+			`, async () => {
+				const snapshotSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'snapshot',
+				);
+
+				await service.updateMany(
+					[1],
+					{ name: 'Test' },
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'committed',
+					queries: [expect.objectContaining({
+						sql: 'update "test" set "name" = ? where "id" in (?)',
+					})],
+				}]);
+
+				// The re-read after the commit is the only one outside it.
+				expect(snapshotSpy.mock.contexts).toEqual([
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+					expect.objectContaining({ knex: db }),
+				]);
+
+				expect(validateUserCountIntegrity).toHaveBeenCalledWith({
+					flags: UserIntegrityCheckFlag.All,
+					knex: expect.objectContaining({ isTransaction: true }),
+				});
+			});
+
+			it(oneLine`
+				hands the update filter one object as transaction and database
+			`, async () => {
+				const updateFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.update', updateFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					const [[, , filterContext]] = updateFilter.mock.calls as any;
+
+					expect(filterContext.transaction).toBe(filterContext.database);
+				}
+				finally {
+					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				hands the update filter the caller's transaction when the service runs
+				on one
+			`, async () => {
+				const updateFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.update', updateFilter);
+
+				try {
+					await db.transaction(async (callerTrx) => {
+						await new ItemsService('test', { knex: callerTrx, schema })
+							.updateMany([1], { name: 'Test' });
+
+						const [[, , filterContext]] = updateFilter.mock.calls as any;
+
+						expect(filterContext.transaction).toBe(callerTrx);
+					});
+				}
+				finally {
+					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				commits what a cancelling update hook wrote through its transaction
+			`, async () => {
+				const writeThenCancel = async (
+					_groups: unknown,
+					_meta: unknown,
+					context: any,
+				) => {
+					await context.transaction('test').update({ name: 'by-hook' });
+
+					return null;
+				};
+
+				emitter.onFilter('items.update', writeThenCancel);
+
+				try {
+					await service.updateMany(
+						[1],
+						{ name: 'Test' },
+						{ allowFilterCancel: true },
+					);
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'committed',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ?',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.update', writeThenCancel);
+				}
+			});
+
+			it(oneLine`
+				refuses an update a filter cancelled without allowFilterCancel, rolling
+				its transaction back
+			`, async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 
-				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(InvalidPayloadError);
+				await expect(service.updateMany([1], { name: 'Test' }))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'A filter hook cancelled the update, but this operation '
+							+ 'requires it',
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
 
 				filterSpy.mockRestore();
 			});
@@ -1525,14 +1762,42 @@ describe('Integration Tests', () => {
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
 
+			it('runs the delete filter inside the mutation transaction', async () => {
+				const deleteFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.delete', deleteFilter);
+
+				try {
+					await service.deleteMany([1]);
+
+					expect(deleteFilter).toHaveBeenCalledWith(
+						[1],
+						{
+							collection: 'test',
+							event: 'items.delete',
+							originalPayload: [1],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.delete', deleteFilter);
+				}
+			});
+
 			it('should cancel the deletion and return a null per key when a filter returns null and cancel is allowed', async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
-				const transactionSpy = vi.spyOn(db, 'transaction');
+
+				// `history.delete` lists only what a delete handler matched.
+				tracker.on.delete('test').response(1);
 
 				const result = await service.deleteMany([1], { allowFilterCancel: true });
 
 				expect(result).toEqual([null]);
-				expect(transactionSpy).not.toHaveBeenCalled();
+				expect(tracker.history.delete).toEqual([]);
 
 				filterSpy.mockRestore();
 			});
@@ -1543,6 +1808,171 @@ describe('Integration Tests', () => {
 				await expect(service.deleteMany([1])).rejects.toThrow(InvalidPayloadError);
 
 				filterSpy.mockRestore();
+			});
+
+			it(oneLine`
+				refuses a delete a filter cancelled without allowFilterCancel, rolling
+				its transaction back
+			`, async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				await expect(service.deleteMany([1]))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'A filter hook cancelled the deletion, but this operation '
+							+ 'requires it',
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+
+				filterSpy.mockRestore();
+			});
+
+			it(oneLine`
+				runs the delete's reads, checks and write inside its transaction
+			`, async () => {
+				const snapshotSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'snapshot',
+				);
+
+				const survivorsSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'selfRelationSurvivorKeys',
+				);
+
+				await service.deleteMany(
+					[1],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'committed',
+					queries: [expect.objectContaining({
+						sql: 'delete from "test" where "id" in (?)',
+					})],
+				}]);
+
+				// The survivors' re-read after the commit is the only one outside it.
+				expect(snapshotSpy.mock.contexts).toEqual([
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+					expect.objectContaining({ knex: db }),
+				]);
+
+				expect(survivorsSpy.mock.contexts).toEqual([
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+				]);
+
+				expect(validateUserCountIntegrity).toHaveBeenCalledWith({
+					flags: UserIntegrityCheckFlag.All,
+					knex: expect.objectContaining({ isTransaction: true }),
+				});
+			});
+
+			it(oneLine`
+				hands the delete filter one object as transaction and database
+			`, async () => {
+				const deleteFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.delete', deleteFilter);
+
+				try {
+					await service.deleteMany([1]);
+
+					const [[, , filterContext]] = deleteFilter.mock.calls as any;
+
+					expect(filterContext.transaction).toBe(filterContext.database);
+				}
+				finally {
+					emitter.offFilter('items.delete', deleteFilter);
+				}
+			});
+
+			it(oneLine`
+				commits what a cancelling delete hook wrote through its transaction
+			`, async () => {
+				const writeThenCancel = async (
+					_keys: unknown,
+					_meta: unknown,
+					context: any,
+				) => {
+					await context.transaction('test').update({ name: 'by-hook' });
+
+					return null;
+				};
+
+				emitter.onFilter('items.delete', writeThenCancel);
+
+				try {
+					await service.deleteMany([1], { allowFilterCancel: true });
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'committed',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ?',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.delete', writeThenCancel);
+				}
+			});
+
+			it(oneLine`
+				deletes the keys the caller sent on every attempt, whatever a hook
+				pushed into the array it was handed
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				tracker.on.delete('test')
+					.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					}));
+
+				const pushKey = (keys: number[]) => {
+					keys.push(9);
+
+					return keys;
+				};
+
+				emitter.onFilter('test.items.delete', pushKey);
+
+				try {
+					await service.deleteMany([1]);
+
+					expect(tracker.history.transactions).toEqual([
+						{
+							id: 0,
+							state: 'rolled back',
+							queries: [expect.objectContaining({
+								sql: 'delete from "test" where "id" in (?)',
+								bindings: [1],
+							})],
+						},
+						{
+							id: 1,
+							state: 'committed',
+							queries: [expect.objectContaining({
+								sql: 'delete from "test" where "id" in (?)',
+								bindings: [1],
+							})],
+						},
+					]);
+				}
+				finally {
+					emitter.offFilter('test.items.delete', pushKey);
+					vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+				}
 			});
 
 			it('should run the deletion normally when a filter returns a non-null payload', async () => {
@@ -3055,6 +3485,37 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(keys).toEqual([1]);
 		});
 
+		it('checks the update\'s access inside its transaction', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
+			tracker.on.update('test').response(1);
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).updateMany([1], { name: 'y' });
+
+			expect(validateAccess).toHaveBeenCalledWith(expect.anything(), {
+				schema: shapesSchema,
+				knex: expect.objectContaining({ isTransaction: true }),
+			});
+		});
+
+		it('checks the delete\'s access inside its transaction', async () => {
+			tracker.on.delete('test').response(1);
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).deleteMany([1]);
+
+			expect(validateAccess).toHaveBeenCalledWith(expect.anything(), {
+				knex: expect.objectContaining({ isTransaction: true }),
+				schema: shapesSchema,
+			});
+		});
+
 		it('checks a row sent twice with one change once', async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
 			tracker.on.update('test').response(1);
@@ -3473,5 +3934,233 @@ describe('Services / Items / purgeScopedCache', () => {
 			// hooks' channel, and this purge answers for no hook.
 			{ declaredFingerprints: [], changedCollections: [] },
 		);
+	});
+});
+
+describe('Services / Items / a failed mutation on the caller\'s transaction', () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+		tracker.on.select('test').response([]);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+	});
+
+	it(oneLine`
+		purges what an update hook declared before throwing, though the caller's
+		transaction rolls back
+	`, async () => {
+		const declareThenThrow = (_groups: unknown, _meta: unknown, context: any) => {
+			context.scopedCache.purgeBy({ collection: 'test' });
+
+			throw new Error('refused by the hook');
+		};
+
+		emitter.onFilter('items.update', declareThenThrow);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.updateMany([1], { name: 'Test' });
+			})).rejects.toThrow(new Error('refused by the hook'));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				[],
+				expect.anything(),
+				{
+					declaredFingerprints: [{ collection: 'test' }],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', declareThenThrow);
+		}
+	});
+
+	it(oneLine`
+		purges the collection whole when an update hook's answer is refused, though
+		the caller's transaction rolls back
+	`, async () => {
+		const answerTwice = () => [{ key: 1 }, { key: 1 }];
+
+		emitter.onFilter('items.update', answerTwice);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.updateMany([1], { name: 'Test' });
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'A "items.update" filter hook answered with row 1 more than once',
+			}));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', answerTwice);
+		}
+	});
+
+	it(oneLine`
+		purges the collection whole when an update fails after its hook took a row
+		over, though the caller's transaction rolls back
+	`, async () => {
+		const takeOverSecond = (groups: UpdateGroup[]) => [...groups, { key: 2 }];
+
+		tracker.on.update('test').simulateError('write refused');
+		emitter.onFilter('items.update', takeOverSecond);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.updateMany([1], { name: 'Test' });
+			})).rejects.toThrow(new Error(
+				`update "test" set "name" = 'Test' where "id" in (1) - write refused`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', takeOverSecond);
+		}
+	});
+
+	it(oneLine`
+		purges the collection whole when a create fails after its hook took a row
+		over, though the caller's transaction rolls back
+	`, async () => {
+		const takeOverFirst = (entries: (CreateEntry | null)[]) => {
+			return mapCreateRows(entries, (payload) => {
+				if (payload['name'] !== 'take-over') {
+					return payload;
+				}
+
+				return 1;
+			});
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', takeOverFirst);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.createMany([{ name: 'take-over' }, { id: 1, name: 'copy' }]);
+			})).rejects.toThrow(new Error(
+				`insert into "test" ("id", "name") values (1, 'copy') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverFirst);
+		}
+	});
+
+	it(oneLine`
+		purges nothing when a failed create's only takeover was declared inert
+	`, async () => {
+		const takeOverInert = (
+			entries: (CreateEntry | null)[],
+			_meta: unknown,
+			context: any,
+		) => {
+			return mapCreateRows(entries, (payload) => {
+				if (payload['name'] !== 'take-over') {
+					return payload;
+				}
+
+				context.scopedCache.skipPurgeFor(1);
+
+				return 1;
+			});
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', takeOverInert);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.createMany([{ name: 'take-over' }, { id: 1, name: 'copy' }]);
+			})).rejects.toThrow(new Error(
+				`insert into "test" ("id", "name") values (1, 'copy') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverInert);
+		}
+	});
+
+	it(oneLine`
+		leaves the global reads cached when a create's only takeover is inert and its
+		hook declared a slice
+	`, async () => {
+		const takeOverInertDeclaring = (
+			entries: (CreateEntry | null)[],
+			_meta: unknown,
+			context: any,
+		) => {
+			return mapCreateRows(entries, () => {
+				context.scopedCache.skipPurgeFor(1);
+				context.scopedCache.purgeBy({ collection: 'children' });
+
+				return 1;
+			});
+		};
+
+		emitter.onFilter('items.create', takeOverInertDeclaring);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.createMany([{ name: 'take-over' }]);
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				[],
+				expect.anything(),
+				{
+					declaredFingerprints: [{ collection: 'children' }],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverInertDeclaring);
+		}
 	});
 });

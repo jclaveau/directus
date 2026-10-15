@@ -474,6 +474,8 @@ implements AbstractService<Item> {
 		// An `items.create` hook can declare its own purge via
 		// `context.scopedCache.purgeBy`; drained into the purge below. Declared outside
 		// the transaction to outlive it.
+		// TODO(#610): one set for every attempt, so a `skipPurgeFor` a failed attempt
+		// declared still skips the row on the retry, whose hook may have written it.
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
@@ -482,6 +484,11 @@ implements AbstractService<Item> {
 		const declaredPurgesAtStart =
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
+		// The rows the failed attempt's hooks took over, which the catch purges.
+		// TODO(#610): only the last attempt's, so a row a retried attempt's hook took
+		// over through a connection of its own, and the retry did not, stays cached.
+		let attemptTakenOverKeys: PrimaryKey[] = [];
+
 		const {
 			nestedActionEvents,
 			actionPayloads,
@@ -489,6 +496,7 @@ implements AbstractService<Item> {
 		} = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
 			const takenOverRowKeys: PrimaryKey[] = [];
+			attemptTakenOverKeys = takenOverRowKeys;
 			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 			let autoIncrementSequenceNeedsToBeReset = false;
 
@@ -514,6 +522,7 @@ implements AbstractService<Item> {
 			const sameRowPositions: { index: number; sameRowAs: number }[] = [];
 
 			const filterContext = {
+				transaction: trx,
 				database: trx,
 				schema: this.schema,
 				accountability: this.accountability,
@@ -931,7 +940,41 @@ implements AbstractService<Item> {
 				),
 				takenOverRowKeys,
 			};
-		}, opts.mutationTracker.snapshot());
+		}, opts.mutationTracker.snapshot()).catch(async (error) => {
+			if (!shouldClearCache(this.cache, opts, this.collection)) {
+				throw error;
+			}
+
+			// On the caller's transaction, the rows created before the failure commit
+			// with it, and nothing tells which they are.
+			if (this.knex.isTransaction) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					null,
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+				);
+
+				await this.purgeHookWrittenScopedCache(
+					attemptTakenOverKeys,
+					scopedCacheHookDeclarations,
+					opts,
+				);
+			}
+			// The inserts rolled back; a takeover was written by its hook, outside
+			// the transaction.
+			else {
+				await this.purgeCreatedScopedCache(
+					[...new Set(attemptTakenOverKeys)],
+					attemptTakenOverKeys,
+					scopedCacheHookDeclarations,
+					declaredPurgesAtStart,
+					opts,
+				);
+			}
+
+			throw error;
+		});
 
 		if (opts.emitEvents !== false && actionPayloads.length > 0) {
 			const actionContext = {
@@ -962,89 +1005,18 @@ implements AbstractService<Item> {
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Scope off the committed rows' stored values (re-read by returned key), not the
-			// raw input: a create hook can rewrite a scope field, a value left to a DB default
-			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
-			// payload — the row is authoritative, the payload isn't.
-			//
-			// A row a hook *took over* (returned an existing PK) is the unsafe case: it
-			// can be an update-in-disguise — the hook moved that row between slices — and
-			// the create path has no old∪new snapshot, so the post-commit re-read sees
-			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
-			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
-			// its footprint opts back into a precise purge by declaring it for the key
-			// via `scopedCache.purgeBy(…, { forKey })` (a read-only dedup declares its
-			// one slice; an upsert-move declares old + new) — then we trust it and
-			// narrow to the snapshot ∪ declared fingerprints. Every take-over needs its
-			// own: a declaration for one row says nothing of another's old slice.
-			//
-			// That holds on a collection declaring no scope field too. A takeover cannot
-			// move a row between primary-key slices — the key it returned IS the slice —
-			// but the key it returned is not the only row it may have written, and every
-			// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
-			// them stale. Before the key axis the bare fingerprint covered them by
-			// accident.
 			// A `sameRowAs` position repeats its row's key; counted twice it would read
 			// as a takeover.
 			const liveKeys = [
 				...new Set(results.filter((key): key is PrimaryKey => key !== null)),
 			];
 
-			const takenOverKeyNames = new Set(takenOverRowKeys.map((key) => {
-				return this.primaryKeyNameOf(key);
-			}));
-
-			const skippedKeyNames = this.purgeSkippedKeyNames(
+			await this.purgeCreatedScopedCache(
+				liveKeys,
+				takenOverRowKeys,
 				scopedCacheHookDeclarations,
-			);
-
-			const declaredKeyNames = this.purgeDeclaredKeyNames(
-				scopedCacheHookDeclarations,
-			);
-
-			const changedKeys = liveKeys.filter((key) => {
-				const keyName = this.primaryKeyNameOf(key);
-
-				// A take-over the hook declared inert wrote nothing, so it moved no
-				// slice; a row this create inserted is written whatever was declared.
-				return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
-			});
-
-			if (
-				changedKeys.length === 0 &&
-				scopedCacheHookDeclarations.purgeFingerprints.length
-					=== declaredPurgesAtStart
-			) {
-				// Nothing written and nothing declared: no entry can have gone stale.
-				// Returning rather than purging nothing, which would still take this
-				// collection's bare fingerprint and drop its global reads.
-				return results;
-			}
-
-			// Counted off the take-overs themselves: one returning a key another row of
-			// this call inserts adds no key to the set above.
-			const takeoverUndeclared = takenOverRowKeys.some((key) => {
-				const keyName = this.primaryKeyNameOf(key);
-
-				return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
-			});
-
-			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
-			// collection, so an undeclared take-over leaves the other rows' key slices
-			// stale even where no scope field is declared.
-			// A read that fails leaves the slices unknown: purged whole.
-			const scopedCacheSnapshot = takeoverUndeclared
-				? null
-				: await this.scopedCache.snapshot(changedKeys).catch(() => null);
-
-			this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheMutatedFingerprints(scopedCacheSnapshot),
-				scopedCacheHookDeclarations,
-				[],
-				{
-					includeBareFingerprint: opts.purgeBareFingerprint !== false,
-					rows: scopedCacheWrittenRows(scopedCacheSnapshot),
-				},
+				declaredPurgesAtStart,
+				opts,
 			);
 		}
 
@@ -1400,7 +1372,7 @@ implements AbstractService<Item> {
 	/**
 	 * Whether a group would write nothing: an empty payload, a primary-key-only one,
 	 * or one whose every field is an alterations object carrying no item. Decided
-	 * before the transaction opens, so a no-op update costs no round trip.
+	 * before any write, so a no-op update writes no row, activity or revision.
 	 */
 	private groupChangesNothing(group: UpdateGroup<Item>, aliases: string[]): boolean {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -1510,24 +1482,18 @@ implements AbstractService<Item> {
 			? ['items.update', `${this.collection}.items.update`]
 			: `${this.eventScope}.update`;
 
-		const eventContext = {
-			database: this.knex,
-			schema: this.schema,
-			accountability: this.accountability,
-		};
-
 		// An `items.update` hook can add purge fingerprints via
 		// `context.scopedCache.purgeBy`;
 		// drained into the purge below.
-		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
+		let scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
 		const refusesRepeatedPks = opts.onRepeatedPk !== 'lastWins';
 		const sentKeyNames = new Set<string>();
 
-		const sentGroups: UpdateEntry<Item>[] = groups.map((group) => {
+		const sentGroups: UpdateGroup<Item>[] = groups.map((group) => {
 			if (!refusesRepeatedPks) {
-				return { data: cloneDeep(group.data), keys: [...group.keys] };
+				return group;
 			}
 
 			const groupKeyNames = new Set<string>();
@@ -1556,7 +1522,7 @@ implements AbstractService<Item> {
 
 			groupKeyNames.forEach((keyName) => sentKeyNames.add(keyName));
 
-			return { data: cloneDeep(group.data), keys: uniqueKeys };
+			return { data: group.data, keys: uniqueKeys };
 		});
 
 		const groupListRefusal = () => {
@@ -1569,57 +1535,24 @@ implements AbstractService<Item> {
 			});
 		};
 
-		const guardedPayload = refuseFieldAccess(
-			sentGroups,
-			Object.keys(this.schema.collections[this.collection]!.fields),
-			groupListRefusal,
-		);
-
-		// Read before any hook, so a row a hook takes over still shows the slice it
-		// leaves: old ∪ new purges it narrow, whatever the hook declared. A row sent
-		// changing nothing is left unread: most never get written.
 		const aliasFields = Object.values(
 			this.schema.collections[this.collection]!.fields,
 		)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
 
+		// A row sent changing nothing is left unread: most never get written.
 		const changedInputKeys = groups.flatMap((group) => {
 			return this.groupChangesNothing(group, aliasFields)
 				? []
 				: group.keys;
 		});
 
-		const inputScopedCacheSnapshot = await this.scopedCache.snapshot(
-			changedInputKeys,
-		);
-
 		const readKeyNames = new Set(changedInputKeys.map((key) => keyNameOf(key)));
 		const inputKeyNames = new Set(inputKeys.map((key) => keyNameOf(key)));
 
-		// Run all hooks that are attached to this event so the end user has the chance
-		// to augment the items that are about to be saved
-		const answeredGroups =
-			opts.emitEvents !== false
-				? await emitter.emitFilter<UpdateEntry<Item>[], null>(
-					updateEvent,
-					guardedPayload,
-					{
-						collection: this.collection,
-					},
-					{
-						...eventContext,
-						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
-					},
-				)
-				: sentGroups;
-
-		const groupsAfterHooks = answeredGroups === guardedPayload
-			? sentGroups
-			: answeredGroups;
-
-		// The slice a taken-over row left is known only for a row read above, or one
-		// its hook declared via `purgeBy(…, { forKey })`.
+		// The slice a taken-over row left is known only for a row read before the
+		// hooks, or one its hook declared via `purgeBy(…, { forKey })`.
 		const takeoverUndeclaredAmong = (changedKeys: PrimaryKey[]) => {
 			const declaredKeyNames = this.purgeDeclaredKeyNames(
 				scopedCacheHookDeclarations,
@@ -1631,275 +1564,356 @@ implements AbstractService<Item> {
 			});
 		};
 
-		// A row a hook took over is written already, out of band, so refusing its
-		// answer still purges it.
-		const refuseHookAnswer = async (refusal: unknown) => {
-			const skippedKeyNames = this.purgeSkippedKeyNames(
-				scopedCacheHookDeclarations,
-			);
+		// Set by the latest attempt, for the purge its failure still owes.
+		let refusedAnswer: {
+			groupsAfterHooks: unknown;
+			inputScopedCacheSnapshot: ScopedCacheSnapshot;
+		} | null = null;
 
-			const changedKeys = Array.isArray(groupsAfterHooks)
-				? groupsAfterHooks
-					.filter(isTakenOverRow<Item>)
-					.map((entry) => entry.key)
-					.filter((key) => !skippedKeyNames.has(keyNameOf(key)))
-				: [];
+		let failedWrite: {
+			writtenKeys: PrimaryKey[];
+			changedTakenOverKeys: PrimaryKey[];
+			oldScopedCacheSnapshot: ScopedCacheSnapshot;
+			takeoverUndeclared: boolean;
+		} | null = null;
 
-			if (changedKeys.length > 0) {
-				const changedKeyNames = new Set(changedKeys.map((key) => keyNameOf(key)));
-
-				await this.purgeUpdatedScopedCache(
-					changedKeys,
-					{
-						canResolveSlicesFromRows:
-							inputScopedCacheSnapshot.canResolveSlicesFromRows,
-						rows: inputScopedCacheSnapshot.rows.filter((snapshotRow) => {
-							return changedKeyNames.has(keyNameOf(snapshotRow.key));
-						}),
-					},
-					scopedCacheHookDeclarations,
-					opts,
-					takeoverUndeclaredAmong(changedKeys),
-				);
-			}
-			else {
-				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
-			}
-
-			return refusal;
-		};
-
-		if (groupsAfterHooks === null) {
-			if (!opts.allowFilterCancel) {
-				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
-				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
-				// option; on its own a null payload is invalid rather than a silent no-op.
-				throw await refuseHookAnswer(new InvalidPayloadError({
-					reason: `A filter hook cancelled the update, but this operation requires it`,
-				}));
-			}
-
-			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
-
-			// The filter cancelled the update: nothing is written; return a null per key
-			// so the result stays index-aligned with the input keys.
-			return inputKeys.map(() => null);
-		}
-
-		// A hook written before the event carried groups returns one payload, which
-		// would otherwise reach the write as a list of nothing.
-		const isEntryList = Array.isArray(groupsAfterHooks)
-			&& carriesOnlyIndices(groupsAfterHooks)
-			&& groupsAfterHooks.every((entry) => {
-				return isUpdateGroup(entry) || isTakenOverRow(entry);
-			});
-
-		if (!isEntryList) {
-			throw await refuseHookAnswer(groupListRefusal());
-		}
-
-		const dataGroups = groupsAfterHooks.filter(isUpdateGroup<Item>);
-
-		const takenOverKeys = groupsAfterHooks
-			.filter(isTakenOverRow<Item>)
-			.map((entry) => entry.key);
-
-		const answeredKeys = [
-			...dataGroups.flatMap((group) => group.keys),
-			...takenOverKeys,
-		];
-
-		const hookAddedKeys = answeredKeys.filter((key) => {
-			return !inputKeyNames.has(keyNameOf(key));
-		});
-
-		// Keys a hook added are counted and validated like the caller's own, before
-		// any of them is compared with another.
-		try {
-			if (!opts.bypassLimits && hookAddedKeys.length > 0) {
-				mutationTracker.trackMutations(hookAddedKeys.length);
-			}
-
-			validateKeys(this.schema, this.collection, primaryKeyField, answeredKeys);
-		}
-		catch (error) {
-			throw await refuseHookAnswer(error);
-		}
-
-		const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
-			return group.keys.map((key) => keyNameOf(key));
-		}));
-
-		// Written by the hook and by Directus both, the row would hold whichever
-		// write lands last.
-		const doublyAnsweredKey = takenOverKeys.find((key) => {
-			return groupedKeyNames.has(keyNameOf(key));
-		});
-
-		if (doublyAnsweredKey !== undefined) {
-			throw await refuseHookAnswer(new InvalidPayloadError({
-				reason: oneLine`
-					A "${this.eventScope}.update" filter hook took row
-					${keyNameOf(doublyAnsweredKey)} over as { key } but also left it in a
-					{ data, keys } group; answer each row one way
-				`,
-			}));
-		}
-
-		const answeredKeyCounts = new Map<string, number>();
-
-		for (const key of answeredKeys) {
-			const keyName = keyNameOf(key);
-			const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
-
-			if (refusesRepeatedPks && answeredCount > 1) {
-				throw await refuseHookAnswer(new InvalidPayloadError({
-					reason: oneLine`
-						A "${this.eventScope}.update" filter hook answered with row
-						${keyName} more than once
-					`,
-				}));
-			}
-
-			answeredKeyCounts.set(keyName, answeredCount);
-		}
-
-		// One entry per row, in the caller's order: its key, or null for a row the
-		// hook dropped, which cancels it. This is what the update returns. Under
-		// lastWins a key sent twice is matched by count, so a hook dropping one of
-		// its copies cancels the later one.
-		// TODO: if a caller needs the dropped copy itself cancelled, match each
-		// answered row to its input row by position instead of counting keys.
-		const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
-			const keyName = keyNameOf(key);
-			const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
-
-			if (!refusesRepeatedPks) {
-				answeredKeyCounts.set(keyName, answeredCount - 1);
-			}
-
-			return answeredCount > 0
-				? key
-				: null;
-		});
-
-		if (!opts.allowFilterCancel && rowKeys.includes(null)) {
-			throw await refuseHookAnswer(new InvalidPayloadError({
-				reason: oneLine`
-					A filter hook cancelled a row of the update, but this operation
-					requires it
-				`,
-			}));
-		}
-
-		const relationalFields = new Set(this.schema.relations
-			.filter((relation) => relation.collection === this.collection)
-			.map((relation) => relation.field));
-
-		const mergedGroups = mergeUpdateGroups(
-			dataGroups,
-			(groupData) => {
-				return Object.entries(groupData).some(([field, value]) => {
-					const nestsAnItem = typeof value === 'object' && value !== null;
-
-					return aliasFields.includes(field)
-						|| (relationalFields.has(field) && nestsAnItem);
-				});
-			},
-			keyNameOf,
-		);
-
-		const writingGroups = mergedGroups.filter((group) => {
-			return group.keys.length > 0 && !this.groupChangesNothing(group, aliasFields);
-		});
-
-		for (const key of takenOverKeys) {
-			scopedCacheHookDeclarations.takenOverKeys.add(
-				takenOverScopedCacheKey(this.collection, key),
-			);
-		}
-
-		const skippedKeyNames = this.purgeSkippedKeyNames(scopedCacheHookDeclarations);
-
-		// A takeover the hook declared inert wrote nothing, so it moved no slice.
-		const changedTakenOverKeys = takenOverKeys.filter((key) => {
-			return !skippedKeyNames.has(keyNameOf(key));
-		});
-
-		// A row not read above was written by its hook before the read below, which
-		// sees only the slice it moved the row to: purged whole unless the hook
-		// declared the one it left.
-		const takeoverUndeclared = takeoverUndeclaredAmong(changedTakenOverKeys);
-
-		const directusWrittenKeys = writingGroups.flatMap((group) => group.keys);
-
-		// The scope values these rows hold before the update, so an update that moves
-		// a row to a new scope value purges both slices (old ∪ new). Read here only
-		// for the rows not read before the hooks.
-		// Empty when the collection isn't scoped.
-		const writtenKeys = [...directusWrittenKeys, ...changedTakenOverKeys];
-		const writtenKeyNames = new Set(writtenKeys.map((key) => keyNameOf(key)));
-
-		// A read that fails leaves the rows' slices unknown: purged whole.
-		const hookAddedScopedCacheSnapshot = await this.scopedCache
-			.snapshot(writtenKeys.filter((key) => !readKeyNames.has(keyNameOf(key))))
-			.catch((): ScopedCacheSnapshot => {
-				return { canResolveSlicesFromRows: false, rows: [] };
-			});
-
-		const oldScopedCacheSnapshot: ScopedCacheSnapshot = {
-			canResolveSlicesFromRows: inputScopedCacheSnapshot.canResolveSlicesFromRows
-				&& hookAddedScopedCacheSnapshot.canResolveSlicesFromRows,
-			rows: [
-				...inputScopedCacheSnapshot.rows.filter((snapshotRow) => {
-					return writtenKeyNames.has(keyNameOf(snapshotRow.key));
-				}),
-				...hookAddedScopedCacheSnapshot.rows,
-			],
-		};
-
-		const hookAddedWrittenKeys = directusWrittenKeys.filter((key) => {
-			return !inputKeyNames.has(keyNameOf(key));
-		});
-
-		if (opts.onHookAddedRows && hookAddedWrittenKeys.length > 0) {
-			opts.onHookAddedRows(hookAddedWrittenKeys, {
-				canResolveSlicesFromRows: oldScopedCacheSnapshot.canResolveSlicesFromRows,
-				rows: oldScopedCacheSnapshot.rows.filter((snapshotRow) => {
-					return !inputKeyNames.has(keyNameOf(snapshotRow.key));
-				}),
-			});
-		}
-
-		if (writingGroups.length === 0) {
-			// Directus writes nothing — every group was a no-op, the per-row filter
-			// cancelled every row, or a hook took every row over.
-			if (changedTakenOverKeys.length > 0) {
-				await this.purgeUpdatedScopedCache(
-					writtenKeys,
-					oldScopedCacheSnapshot,
-					scopedCacheHookDeclarations,
-					opts,
-					takeoverUndeclared,
-				);
-			}
-			else {
-				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
-			}
-
-			return rowKeys;
-		}
-
-		// One transaction around every group, so a failure anywhere rolls the whole
-		// update back and the integrity check below sees the finished state once
-		// rather than once per group. The arrays are per attempt: sqlite and
-		// cockroach re-run the handler after a retryable error.
-		const { applied, nestedActionEvents } = await transaction(
+		// One transaction around the hooks and every group, so a hook writing through
+		// `context.transaction` commits with the update or rolls back with it, the
+		// snapshots read the state the write starts from, and the integrity check
+		// sees the finished state once rather than once per group. Everything built
+		// here is per attempt: sqlite and cockroach re-run the handler, hooks
+		// included, after a retryable error.
+		const {
+			rowKeys,
+			writingGroups,
+			writtenKeys,
+			oldScopedCacheSnapshot,
+			takeoverUndeclared,
+			applied,
+			nestedActionEvents,
+		} = await transaction(
 			this.knex,
 			async (trx) => {
+				refusedAnswer = null;
+				failedWrite = null;
+
+				// What a retried attempt's hooks declare replaces what the failed one's
+				// did. Declarations a caller handed in also hold what its other
+				// mutations declared, so they are kept.
+				// TODO(#610): replacing them drops the failed attempt's `purgeBy` too,
+				// though a hook writing through its own connection committed that write.
+				if (opts.scopedCacheHookDeclarations === undefined) {
+					scopedCacheHookDeclarations = createScopedCacheHookDeclarations(
+						this.schema,
+					);
+				}
+
 				const service = this.fork({ knex: trx });
 				const applied: UpdateGroup<Item>[] = [];
 				const nestedActionEvents: ActionEventParams[] = [];
+
+				const attemptSentGroups: UpdateEntry<Item>[] = sentGroups.map((group) => {
+					return { data: cloneDeep(group.data), keys: [...group.keys] };
+				});
+
+				const guardedPayload = refuseFieldAccess(
+					attemptSentGroups,
+					Object.keys(this.schema.collections[this.collection]!.fields),
+					groupListRefusal,
+				);
+
+				// Read before any hook, so a row a hook takes over still shows the slice
+				// it leaves: old ∪ new purges it narrow, whatever the hook declared.
+				const inputScopedCacheSnapshot = await service.scopedCache.snapshot(
+					changedInputKeys,
+				);
+
+				// Run all hooks that are attached to this event so the end user has the
+				// chance to augment the items that are about to be saved
+				const answeredGroups =
+					opts.emitEvents !== false
+						? await emitter.emitFilter<UpdateEntry<Item>[], null>(
+							updateEvent,
+							guardedPayload,
+							{
+								collection: this.collection,
+							},
+							{
+								transaction: trx,
+								database: trx,
+								schema: this.schema,
+								accountability: this.accountability,
+								scopedCache: scopedCacheHookDeclarations
+									.purgeHandleFor(this.collection),
+							},
+						)
+						: attemptSentGroups;
+
+				const groupsAfterHooks = answeredGroups === guardedPayload
+					? attemptSentGroups
+					: answeredGroups;
+
+				// A row a hook took over may have been written through a connection of
+				// its own, which the rollback leaves standing, so refusing its answer
+				// still purges it, once the transaction settles.
+				const refuseHookAnswer = (refusal: unknown) => {
+					refusedAnswer = { groupsAfterHooks, inputScopedCacheSnapshot };
+
+					return refusal;
+				};
+
+				if (groupsAfterHooks === null) {
+					if (!opts.allowFilterCancel) {
+						// A filter hook cleared the payload to null. Treating that as an
+						// explicit, opt-in cancellation (returning a null per key) is owned
+						// by the `allowFilterCancel` mutation option; on its own a null
+						// payload is invalid rather than a silent no-op.
+						throw refuseHookAnswer(new InvalidPayloadError({
+							reason: oneLine`
+								A filter hook cancelled the update, but this operation
+								requires it
+							`,
+						}));
+					}
+
+					// The filter cancelled the update: nothing is written; a null per key
+					// keeps the result index-aligned with the input keys.
+					return {
+						rowKeys: inputKeys.map(() => null),
+						writingGroups: [],
+						writtenKeys: [],
+						oldScopedCacheSnapshot: inputScopedCacheSnapshot,
+						takeoverUndeclared: false,
+						applied,
+						nestedActionEvents,
+					};
+				}
+
+				// A hook written before the event carried groups returns one payload,
+				// which would otherwise reach the write as a list of nothing.
+				const isEntryList = Array.isArray(groupsAfterHooks)
+					&& carriesOnlyIndices(groupsAfterHooks)
+					&& groupsAfterHooks.every((entry) => {
+						return isUpdateGroup(entry) || isTakenOverRow(entry);
+					});
+
+				if (!isEntryList) {
+					throw refuseHookAnswer(groupListRefusal());
+				}
+
+				const dataGroups = groupsAfterHooks.filter(isUpdateGroup<Item>);
+
+				const takenOverKeys = groupsAfterHooks
+					.filter(isTakenOverRow<Item>)
+					.map((entry) => entry.key);
+
+				const answeredKeys = [
+					...dataGroups.flatMap((group) => group.keys),
+					...takenOverKeys,
+				];
+
+				const hookAddedKeys = answeredKeys.filter((key) => {
+					return !inputKeyNames.has(keyNameOf(key));
+				});
+
+				// Keys a hook added are counted and validated like the caller's own,
+				// before any of them is compared with another.
+				try {
+					if (!opts.bypassLimits && hookAddedKeys.length > 0) {
+						mutationTracker.trackMutations(hookAddedKeys.length);
+					}
+
+					validateKeys(
+						this.schema,
+						this.collection,
+						primaryKeyField,
+						answeredKeys,
+					);
+				}
+				catch (error) {
+					throw refuseHookAnswer(error);
+				}
+
+				const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
+					return group.keys.map((key) => keyNameOf(key));
+				}));
+
+				// Written by the hook and by Directus both, the row would hold
+				// whichever write lands last.
+				const doublyAnsweredKey = takenOverKeys.find((key) => {
+					return groupedKeyNames.has(keyNameOf(key));
+				});
+
+				if (doublyAnsweredKey !== undefined) {
+					throw refuseHookAnswer(new InvalidPayloadError({
+						reason: oneLine`
+							A "${this.eventScope}.update" filter hook took row
+							${keyNameOf(doublyAnsweredKey)} over as { key } but also left it
+							in a { data, keys } group; answer each row one way
+						`,
+					}));
+				}
+
+				const answeredKeyCounts = new Map<string, number>();
+
+				for (const key of answeredKeys) {
+					const keyName = keyNameOf(key);
+					const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
+
+					if (refusesRepeatedPks && answeredCount > 1) {
+						throw refuseHookAnswer(new InvalidPayloadError({
+							reason: oneLine`
+								A "${this.eventScope}.update" filter hook answered with row
+								${keyName} more than once
+							`,
+						}));
+					}
+
+					answeredKeyCounts.set(keyName, answeredCount);
+				}
+
+				// One entry per row, in the caller's order: its key, or null for a row
+				// the hook dropped, which cancels it. This is what the update returns.
+				// Under lastWins a key sent twice is matched by count, so a hook
+				// dropping one of its copies cancels the later one.
+				// TODO: if a caller needs the dropped copy itself cancelled, match each
+				// answered row to its input row by position instead of counting keys.
+				const rowKeys: (PrimaryKey | null)[] = inputKeys.map((key) => {
+					const keyName = keyNameOf(key);
+					const answeredCount = answeredKeyCounts.get(keyName) ?? 0;
+
+					if (!refusesRepeatedPks) {
+						answeredKeyCounts.set(keyName, answeredCount - 1);
+					}
+
+					return answeredCount > 0
+						? key
+						: null;
+				});
+
+				if (!opts.allowFilterCancel && rowKeys.includes(null)) {
+					throw refuseHookAnswer(new InvalidPayloadError({
+						reason: oneLine`
+							A filter hook cancelled a row of the update, but this operation
+							requires it
+						`,
+					}));
+				}
+
+				const relationalFields = new Set(this.schema.relations
+					.filter((relation) => relation.collection === this.collection)
+					.map((relation) => relation.field));
+
+				const mergedGroups = mergeUpdateGroups(
+					dataGroups,
+					(groupData) => {
+						return Object.entries(groupData).some(([field, value]) => {
+							const nestsAnItem = typeof value === 'object' && value !== null;
+
+							return aliasFields.includes(field)
+								|| (relationalFields.has(field) && nestsAnItem);
+						});
+					},
+					keyNameOf,
+				);
+
+				const writingGroups = mergedGroups.filter((group) => {
+					return group.keys.length > 0
+						&& !this.groupChangesNothing(group, aliasFields);
+				});
+
+				// TODO(#610): these are this attempt's takeovers only. A row a hook
+				// takes over on an attempt that fails, and not on the retry, is never
+				// purged, though a hook writing through its own connection left that
+				// write committed.
+				for (const key of takenOverKeys) {
+					scopedCacheHookDeclarations.takenOverKeys.add(
+						takenOverScopedCacheKey(this.collection, key),
+					);
+				}
+
+				const skippedKeyNames = this.purgeSkippedKeyNames(
+					scopedCacheHookDeclarations,
+				);
+
+				// A takeover the hook declared inert wrote nothing, so it moved no slice.
+				const changedTakenOverKeys = takenOverKeys.filter((key) => {
+					return !skippedKeyNames.has(keyNameOf(key));
+				});
+
+				// A row not read above was written by its hook before the read below,
+				// which sees only the slice it moved the row to: purged whole unless
+				// the hook declared the one it left.
+				const takeoverUndeclared = takeoverUndeclaredAmong(changedTakenOverKeys);
+
+				const directusWrittenKeys = writingGroups.flatMap((group) => group.keys);
+
+				// The scope values these rows hold before the update, so an update that
+				// moves a row to a new scope value purges both slices (old ∪ new). Read
+				// here only for the rows not read before the hooks.
+				// Empty when the collection isn't scoped.
+				const writtenKeys = [...directusWrittenKeys, ...changedTakenOverKeys];
+				const writtenKeyNames = new Set(writtenKeys.map((key) => keyNameOf(key)));
+
+				// A read that fails leaves the rows' slices unknown: purged whole.
+				const hookAddedScopedCacheSnapshot = await service.scopedCache
+					.snapshot(
+						writtenKeys.filter((key) => !readKeyNames.has(keyNameOf(key))),
+					)
+					.catch((): ScopedCacheSnapshot => {
+						return { canResolveSlicesFromRows: false, rows: [] };
+					});
+
+				const oldScopedCacheSnapshot: ScopedCacheSnapshot = {
+					canResolveSlicesFromRows:
+						inputScopedCacheSnapshot.canResolveSlicesFromRows
+						&& hookAddedScopedCacheSnapshot.canResolveSlicesFromRows,
+					rows: [
+						...inputScopedCacheSnapshot.rows.filter((snapshotRow) => {
+							return writtenKeyNames.has(keyNameOf(snapshotRow.key));
+						}),
+						...hookAddedScopedCacheSnapshot.rows,
+					],
+				};
+
+				const hookAddedWrittenKeys = directusWrittenKeys.filter((key) => {
+					return !inputKeyNames.has(keyNameOf(key));
+				});
+
+				if (opts.onHookAddedRows && hookAddedWrittenKeys.length > 0) {
+					opts.onHookAddedRows(hookAddedWrittenKeys, {
+						canResolveSlicesFromRows:
+							oldScopedCacheSnapshot.canResolveSlicesFromRows,
+						rows: oldScopedCacheSnapshot.rows.filter((snapshotRow) => {
+							return !inputKeyNames.has(keyNameOf(snapshotRow.key));
+						}),
+					});
+				}
+
+				const answeredUpdate = {
+					rowKeys,
+					writingGroups,
+					writtenKeys,
+					oldScopedCacheSnapshot,
+					takeoverUndeclared,
+					applied,
+					nestedActionEvents,
+				};
+
+				// Set before the early return too: a commit failing after a hook took
+				// every row over still owes those rows their purge.
+				failedWrite = {
+					writtenKeys,
+					changedTakenOverKeys,
+					oldScopedCacheSnapshot,
+					takeoverUndeclared,
+				};
+
+				// Directus writes nothing — every group was a no-op, the per-row filter
+				// cancelled every row, or a hook took every row over.
+				if (writingGroups.length === 0) {
+					return answeredUpdate;
+				}
 
 				let userIntegrityCheckFlags =
 					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
@@ -1954,46 +1968,121 @@ implements AbstractService<Item> {
 					}
 				}
 
-				return { applied, nestedActionEvents };
+				return answeredUpdate;
 			},
 			mutationTracker.snapshot(),
 		).catch(async (error) => {
-			// On a transaction this call opened, the failure rolled every group back,
-			// leaving only what a hook wrote out of band. On the caller's, the groups
-			// written before the failure commit with it.
-			// A takeover was written by the hook, outside this call's transaction.
-			if (this.knex.isTransaction) {
-				await this.purgeUpdatedScopedCache(
+			if (failedWrite !== null) {
+				// On a transaction this call opened, the failure rolled every group back,
+				// leaving only what a hook wrote through a connection of its own. On the
+				// caller's, the groups written before the failure commit with it.
+				const {
 					writtenKeys,
-					oldScopedCacheSnapshot,
-					scopedCacheHookDeclarations,
-					opts,
-					takeoverUndeclared,
-				);
-			}
-			else if (changedTakenOverKeys.length > 0) {
-				await this.purgeUpdatedScopedCache(
 					changedTakenOverKeys,
 					oldScopedCacheSnapshot,
+					takeoverUndeclared,
+				} = failedWrite;
+
+				if (this.knex.isTransaction) {
+					await this.purgeUpdatedScopedCache(
+						writtenKeys,
+						oldScopedCacheSnapshot,
+						scopedCacheHookDeclarations,
+						opts,
+						takeoverUndeclared,
+					);
+
+					await this.purgeHookWrittenScopedCache(
+						changedTakenOverKeys,
+						scopedCacheHookDeclarations,
+						opts,
+					);
+				}
+				else if (changedTakenOverKeys.length > 0) {
+					await this.purgeUpdatedScopedCache(
+						changedTakenOverKeys,
+						oldScopedCacheSnapshot,
+						scopedCacheHookDeclarations,
+						opts,
+						takeoverUndeclared,
+					);
+				}
+				else {
+					await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+				}
+			}
+			else if (refusedAnswer !== null) {
+				const { groupsAfterHooks, inputScopedCacheSnapshot } = refusedAnswer;
+
+				const skippedKeyNames = this.purgeSkippedKeyNames(
+					scopedCacheHookDeclarations,
+				);
+
+				const changedKeys = Array.isArray(groupsAfterHooks)
+					? groupsAfterHooks
+						.filter(isTakenOverRow<Item>)
+						.map((entry) => entry.key)
+						.filter((key) => !skippedKeyNames.has(keyNameOf(key)))
+					: [];
+
+				if (changedKeys.length > 0) {
+					const changedKeyNames = new Set(changedKeys.map((key) => keyNameOf(key)));
+
+					await this.purgeUpdatedScopedCache(
+						changedKeys,
+						{
+							canResolveSlicesFromRows:
+								inputScopedCacheSnapshot.canResolveSlicesFromRows,
+							rows: inputScopedCacheSnapshot.rows.filter((snapshotRow) => {
+								return changedKeyNames.has(keyNameOf(snapshotRow.key));
+							}),
+						},
+						scopedCacheHookDeclarations,
+						opts,
+						takeoverUndeclaredAmong(changedKeys),
+					);
+				}
+				else {
+					await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+				}
+
+				await this.purgeHookWrittenScopedCache(
+					changedKeys,
 					scopedCacheHookDeclarations,
 					opts,
-					takeoverUndeclared,
 				);
 			}
+			// A hook threw before the update had an answer: what it wrote through a
+			// connection of its own is known only by what it declared.
 			else {
 				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+
+				await this.purgeHookWrittenScopedCache(
+					[],
+					scopedCacheHookDeclarations,
+					opts,
+				);
 			}
 
 			throw error;
 		});
 
-		await this.purgeUpdatedScopedCache(
-			writtenKeys,
-			oldScopedCacheSnapshot,
-			scopedCacheHookDeclarations,
-			opts,
-			takeoverUndeclared,
-		);
+		if (writtenKeys.length === 0) {
+			await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+		}
+		else {
+			await this.purgeUpdatedScopedCache(
+				writtenKeys,
+				oldScopedCacheSnapshot,
+				scopedCacheHookDeclarations,
+				opts,
+				takeoverUndeclared,
+			);
+		}
+
+		if (writingGroups.length === 0) {
+			return rowKeys;
+		}
 
 		if (opts.emitEvents !== false) {
 			const actionContext = {
@@ -2084,6 +2173,93 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * Purge what a create wrote: the rows it inserted or a hook took over, and
+	 * whatever its hooks declared.
+	 */
+	private async purgeCreatedScopedCache(
+		writtenKeys: PrimaryKey[],
+		takenOverRowKeys: PrimaryKey[],
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		declaredPurgesAtStart: number,
+		opts: MutationOptions,
+	): Promise<void> {
+		// Scope off the committed rows' stored values (re-read by returned key), not
+		// the raw input: a create hook can rewrite a scope field, a value left to a DB
+		// default is only knowable after the insert, and a DB trigger/coercion can
+		// diverge from the payload — the row is authoritative, the payload isn't.
+		//
+		// A row a hook *took over* (returned an existing PK) is the unsafe case: it
+		// can be an update-in-disguise — the hook moved that row between slices — and
+		// the create path has no old∪new snapshot, so the post-commit re-read sees
+		// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
+		// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
+		// its footprint opts back into a precise purge by declaring it for the key
+		// via `scopedCache.purgeBy(…, { forKey })` (a read-only dedup declares its
+		// one slice; an upsert-move declares old + new) — then we trust it and
+		// narrow to the snapshot ∪ declared fingerprints. Every take-over needs its
+		// own: a declaration for one row says nothing of another's old slice.
+		//
+		// That holds on a collection declaring no scope field too. A takeover cannot
+		// move a row between primary-key slices — the key it returned IS the slice —
+		// but the key it returned is not the only row it may have written, and every
+		// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
+		// them stale.
+		const takenOverKeyNames = new Set(takenOverRowKeys.map((key) => {
+			return this.primaryKeyNameOf(key);
+		}));
+
+		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+		const declaredKeyNames = this.purgeDeclaredKeyNames(declarations);
+
+		const changedKeys = writtenKeys.filter((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			// A take-over the hook declared inert wrote nothing, so it moved no
+			// slice; a row this create inserted is written whatever was declared.
+			return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
+		});
+
+		if (changedKeys.length === 0) {
+			// Nothing written and nothing declared: no entry can have gone stale.
+			// Returning rather than purging nothing, which would still take this
+			// collection's bare fingerprint and drop its global reads.
+			if (declarations.purgeFingerprints.length === declaredPurgesAtStart) {
+				return;
+			}
+
+			// Nothing written, so only what the hooks declared: this collection's
+			// global reads stay.
+			await this.purgeDeclaredScopedCache(declarations, opts);
+
+			return;
+		}
+
+		// Counted off the take-overs themselves: one returning a key another row of
+		// this call inserts adds no key to the set above.
+		// No `scopedCacheFields.length > 0` guard: the primary key pins on every
+		// collection, so an undeclared take-over leaves the other rows' key slices
+		// stale even where no scope field is declared.
+		// A read that fails leaves the slices unknown: purged whole.
+		const scopedCacheSnapshot = takenOverRowKeys.some((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
+		})
+			? null
+			: await this.scopedCache.snapshot(changedKeys).catch(() => null);
+
+		this.scopedCachePurged = await this.scopedCache.purge(
+			scopedCacheMutatedFingerprints(scopedCacheSnapshot),
+			declarations,
+			[],
+			{
+				includeBareFingerprint: opts.purgeBareFingerprint !== false,
+				rows: scopedCacheWrittenRows(scopedCacheSnapshot),
+			},
+		);
+	}
+
+	/**
 	 * Purge only what a hook declared via `purgeBy`, for an update that wrote
 	 * nothing of its own: a cancel, a no-op, or a failure. A cancel or a failure can
 	 * follow a hook's out-of-band write, so the declaration stands, while
@@ -2107,6 +2283,56 @@ implements AbstractService<Item> {
 			[],
 			{ includeBareFingerprint: false },
 		);
+	}
+
+	/**
+	 * Purge, now and through the pool, what a failed mutation's hooks wrote through a
+	 * connection of their own: the rows they took over, and what they declared. On
+	 * the caller's transaction, the mutation's own purge waits for that transaction
+	 * to commit, and its rollback drops the purge while those writes have landed.
+	 *
+	 * A takeover purges the collection whole: its old slice is unknown.
+	 */
+	private async purgeHookWrittenScopedCache(
+		takenOverKeys: PrimaryKey[],
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (
+			!this.knex.isTransaction ||
+			!shouldClearCache(this.cache, opts, this.collection)
+		) {
+			return;
+		}
+
+		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+
+		const poolScopedCache = new ItemScopedCacheService(
+			this.collection,
+			this.schema,
+			getDatabase(),
+			this.cache,
+			this.accountability,
+		);
+
+		if (takenOverKeys.some((key) => {
+			return !skippedKeyNames.has(this.primaryKeyNameOf(key));
+		})) {
+			await poolScopedCache.purge(
+				null,
+				declarations,
+				[],
+				{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+			);
+		}
+		else if (declarations.purgeFingerprints.length > 0) {
+			await poolScopedCache.purge(
+				[],
+				declarations,
+				[],
+				{ includeBareFingerprint: false },
+			);
+		}
 	}
 
 	/**
@@ -2380,6 +2606,8 @@ implements AbstractService<Item> {
 
 		// Shared hook declarations: child upserts run with autoPurgeCache off, so a
 		// create/update hook's `purgeBy` reaches the deferred purge only through them.
+		// TODO(#610): one set for every attempt, so a `skipPurgeFor` a failed attempt
+		// declared still skips the row on the retry, whose hook may have written it.
 		const scopedCacheHookDeclarations =
 			createScopedCacheHookDeclarations(this.schema);
 
@@ -2598,101 +2826,98 @@ implements AbstractService<Item> {
 		// An `items.delete` hook can add purge fingerprints via
 		// `context.scopedCache.purgeBy`;
 		// drained into the purge below.
+		// One set for every attempt: a delete reads no `skipPurgeFor`, so what a
+		// failed attempt's hook declared only adds to the purge, which still owes
+		// the write that hook committed through its own connection.
 		const scopedCacheHookDeclarations = opts.scopedCacheHookDeclarations
 			?? createScopedCacheHookDeclarations(this.schema);
 
-		// NB: this is the sole `items.delete` filter emit and it runs BEFORE
-		// `validateAccess` (below) — deliberately, so a hook can cancel the delete and
-		// snapshot old scope values before the rows go. Upstream emitted it after the
-		// access check; a hook that assumed the keys were already authorized should read
-		// that here (see the PR's disclosure note).
-		const keysAfterHooks =
-			opts.emitEvents !== false
-				? await emitter.emitFilter<PrimaryKey[], null>(
-					this.eventScope === 'items'
-						? ['items.delete', `${this.collection}.items.delete`]
-						: `${this.eventScope}.delete`,
-					keys,
-					{
-						collection: this.collection,
-					},
-					{
-						database: this.knex,
-						schema: this.schema,
-						accountability: this.accountability,
-						scopedCache: scopedCacheHookDeclarations.purgeHandleFor(this.collection),
-					},
-				)
-				: keys;
+		const deleteEvent = this.eventScope === 'items'
+			? ['items.delete', `${this.collection}.items.delete`]
+			: `${this.eventScope}.delete`;
 
-		if (keysAfterHooks === null) {
-			if (!opts.allowFilterCancel) {
-				throw new InvalidPayloadError({
-					reason: `A filter hook cancelled the deletion, but this operation requires it`,
-				});
+		// One transaction around the hooks and the delete, so a hook writing through
+		// `context.transaction` commits with the delete or rolls back with it. Per
+		// attempt: sqlite and cockroach re-run the handler, hooks included, after a
+		// retryable error.
+		const deletion = await transaction(this.knex, async (trx) => {
+			const service = this.fork({ knex: trx });
+
+			// NB: this is the sole `items.delete` filter emit and it runs BEFORE
+			// `validateAccess` (below) — deliberately, so a hook can cancel the delete
+			// and snapshot old scope values before the rows go. Upstream emitted it
+			// after the access check; a hook that assumed the keys were already
+			// authorized should read that here (see the PR's disclosure note).
+			const keysAfterHooks =
+				opts.emitEvents !== false
+					? await emitter.emitFilter<PrimaryKey[], null>(
+						deleteEvent,
+						[...keys],
+						{
+							collection: this.collection,
+						},
+						{
+							transaction: trx,
+							database: trx,
+							schema: this.schema,
+							accountability: this.accountability,
+							scopedCache: scopedCacheHookDeclarations
+								.purgeHandleFor(this.collection),
+						},
+					)
+					: keys;
+
+			if (keysAfterHooks === null) {
+				if (!opts.allowFilterCancel) {
+					throw new InvalidPayloadError({
+						reason: oneLine`
+							A filter hook cancelled the deletion, but this operation
+							requires it
+						`,
+					});
+				}
+
+				return null;
 			}
 
-			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op (the
-			// guard keeps empty declarations from reaching the purge). The cancel purges
-			// only the declared fingerprints — `includeBareFingerprint: false` leaves
-			// this collection's own bare one warm, nothing changed; a declared value
-			// pin still reaches the global reads of the collection it names.
-			if (
-				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
-				shouldClearCache(this.cache, opts, this.collection)
-			) {
-				this.scopedCachePurged = await this.scopedCache.purge(
-					[],
-					scopedCacheHookDeclarations,
-					[],
-					{ includeBareFingerprint: false },
+			// Snapshot the scope values of the rows about to be deleted; after the
+			// delete they're gone and can't be read, so a later purge couldn't tell
+			// which slices to drop. Off `keys`, not the filter's return: the statement
+			// below, the access check and the activity rows all target `keys`, so a
+			// hook that returned a REWRITTEN array (rather than null to cancel) would
+			// otherwise purge rows that survive and leave the deleted ones cached.
+			//
+			// With them, the rows the delete rewrites through a self-relation: the
+			// database moves those between slices under the delete, so they take an
+			// update's old ∪ new snapshot, the new half re-read once the rows are
+			// committed.
+			const selfRelationSurvivorKeys =
+				await service.scopedCache.selfRelationSurvivorKeys(keys);
+
+			const oldScopedCacheSnapshot = await service.scopedCache.snapshot([
+				...keys,
+				...selfRelationSurvivorKeys,
+			]);
+
+			if (this.accountability) {
+				await validateAccess(
+					{
+						accountability: this.accountability,
+						action: 'delete',
+						collection: this.collection,
+						primaryKeys: keys,
+					},
+					{
+						knex: trx,
+						schema: this.schema,
+					},
 				);
 			}
 
-			// The filter cancelled the deletion: nothing is deleted; return a null per key
-			// so the result stays index-aligned with the input keys.
-			return keys.map(() => null);
-		}
+			if (opts.preMutationError) {
+				throw opts.preMutationError;
+			}
 
-		// Snapshot the scope values of the rows about to be deleted; after the delete
-		// they're gone and can't be read, so a later purge couldn't tell which slices to
-		// drop. Off `keys`, not the filter's return: the statement below, the access
-		// check and the activity rows all target `keys`, so a hook that returned a
-		// REWRITTEN array (rather than null to cancel) would otherwise purge rows that
-		// survive and leave the deleted ones cached.
-		//
-		// With them, the rows the delete rewrites through a self-relation: the database
-		// moves those between slices under the delete, so they take an update's old ∪
-		// new snapshot, the new half re-read once the rows are committed.
-		const selfRelationSurvivorKeys =
-			await this.scopedCache.selfRelationSurvivorKeys(keys);
-
-		const oldScopedCacheSnapshot = await this.scopedCache.snapshot([
-			...keys,
-			...selfRelationSurvivorKeys,
-		]);
-
-		if (this.accountability) {
-			await validateAccess(
-				{
-					accountability: this.accountability,
-					action: 'delete',
-					collection: this.collection,
-					primaryKeys: keys,
-				},
-				{
-					knex: this.knex,
-					schema: this.schema,
-				},
-			);
-		}
-
-		if (opts.preMutationError) {
-			throw opts.preMutationError;
-		}
-
-		await transaction(this.knex, async (trx) => {
 			try {
 				await trx(this.collection).whereIn(primaryKeyField, keys)
 					.delete();
@@ -2711,11 +2936,17 @@ implements AbstractService<Item> {
 					opts.onRequireUserIntegrityCheck(opts.userIntegrityCheckFlags);
 				}
 				else {
-					await validateUserCountIntegrity({ flags: opts.userIntegrityCheckFlags, knex: trx });
+					await validateUserCountIntegrity({
+						flags: opts.userIntegrityCheckFlags,
+						knex: trx,
+					});
 				}
 			}
 
-			if (this.accountability && this.schema.collections[this.collection]!.accountability !== null) {
+			if (
+				this.accountability
+				&& this.schema.collections[this.collection]!.accountability !== null
+			) {
 				const activityService = new ActivityService({
 					knex: trx,
 					schema: this.schema,
@@ -2734,7 +2965,51 @@ implements AbstractService<Item> {
 					{ bypassLimits: true },
 				);
 			}
-		}, opts.mutationTracker.snapshot());
+
+			return { selfRelationSurvivorKeys, oldScopedCacheSnapshot };
+		}, opts.mutationTracker.snapshot()).catch(async (error) => {
+			// The rollback leaves standing what a hook wrote through a connection of
+			// its own, so the slices it declared are purged whatever failed.
+			if (
+				scopedCacheHookDeclarations.purgeFingerprints.length > 0
+				&& shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: false },
+				);
+			}
+
+			throw error;
+		});
+
+		if (deletion === null) {
+			// A hook that declared a purge via `purgeBy` before cancelling still gets
+			// it (parity with create's cancel); a plain validation cancel is a no-op
+			// (the guard keeps empty declarations from reaching the purge). The cancel
+			// purges only the declared fingerprints — `includeBareFingerprint: false`
+			// leaves this collection's own bare one warm, nothing changed; a declared
+			// value pin still reaches the global reads of the collection it names.
+			if (
+				scopedCacheHookDeclarations.purgeFingerprints.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: false },
+				);
+			}
+
+			// The filter cancelled the deletion: nothing is deleted; a null per key
+			// keeps the result index-aligned with the input keys.
+			return keys.map(() => null);
+		}
+
+		const { selfRelationSurvivorKeys, oldScopedCacheSnapshot } = deletion;
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const survivorScopedCacheSnapshot =
@@ -2765,10 +3040,7 @@ implements AbstractService<Item> {
 
 		if (opts.emitEvents !== false) {
 			const actionEvent = {
-				event:
-					this.eventScope === 'items'
-						? ['items.delete', `${this.collection}.items.delete`]
-						: `${this.eventScope}.delete`,
+				event: deleteEvent,
 				meta: {
 					payload: keys,
 					keys: keys,

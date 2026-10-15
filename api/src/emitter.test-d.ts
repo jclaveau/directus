@@ -1,12 +1,17 @@
 import type {
 	CreateEntry,
+	EventContext,
 	FilterHandler,
+	MutationEventContext,
+	PrimaryKey,
+	ReadEventContext,
 	RegisterFunctions,
 	ScopedCachePurgeHandle,
 	ScopedCacheScopeHandle,
 	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
+import type { Knex } from 'knex';
 import { expectTypeOf, test } from 'vitest';
 import emitter from './emitter.js';
 
@@ -92,6 +97,74 @@ test('register.filter hands a mutation handler the purge handle', () => {
 	});
 });
 
+test('register.filter hands a mutation handler its transaction', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('items.update', (groups, _meta, context) => {
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+		return groups;
+	});
+
+	register.filter('items.delete', (keys, _meta, context) => {
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+		return keys;
+	});
+});
+
+test('register.filter hands a system collection mutation its transaction', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('users.update', (groups, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
+		return groups;
+	});
+
+	register.filter('items.update', (groups, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+		return groups;
+	});
+
+	register.filter('articles.items.delete', (keys, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+		return keys;
+	});
+});
+
+test('register.filter hands a read context only to an item or system read', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('users.read', (rows, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<ReadEventContext>();
+		return rows;
+	});
+
+	register.filter('articles.items.read', (rows, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<ReadEventContext>();
+		return rows;
+	});
+});
+
+test('register.filter hands an event no service emits the plain context', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('myapp.update', (payload, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<EventContext>();
+		return payload;
+	});
+
+	register.filter('myapp.read', (payload, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<EventContext>();
+		return payload;
+	});
+
+	register.filter('fields.update', (payload, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<EventContext>();
+		return payload;
+	});
+});
+
 // null as a whole is an earlier filter cancelling the mutation; a null create
 // entry is one cancelling that row.
 test('register.filter types a grouped event by the list it carries', () => {
@@ -103,6 +176,18 @@ test('register.filter types a grouped event by the list it carries', () => {
 
 	register.filter('articles.items.create', (entries) => {
 		expectTypeOf(entries).toEqualTypeOf<(CreateEntry | null)[] | null>();
+	});
+});
+
+test('register.filter types a delete by the keys it carries', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('articles.items.delete', (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
+	});
+
+	register.filter('users.delete', (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
 	});
 });
 

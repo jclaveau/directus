@@ -20,7 +20,7 @@ function serviceFor(services, collection, context) {
 	return new services.ItemsService(collection, {
 		schema: context.schema,
 		accountability: context.accountability,
-		knex: context.database,
+		knex: context.transaction,
 	});
 }
 

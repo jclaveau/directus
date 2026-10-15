@@ -17,7 +17,7 @@ export default function registerHooks({ filter }, { services }) {
 			const rowService = new services.ItemsService(ROW, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			for (const updatedId of payload.updated_ids ?? []) {

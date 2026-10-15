@@ -1,5 +1,6 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type { FlowRaw } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import emitter from './emitter.js';
 import { getFlowManager } from './flows.js';
@@ -574,6 +575,65 @@ describe('event flows on item updates', () => {
 				collection: 'articles',
 			}],
 		]);
+	});
+});
+
+describe('event flows inside the mutation transaction', () => {
+	test(oneLine`
+		a filter flow's operation is handed the transaction the update runs in
+	`, async () => {
+		const receivedTransactions: unknown[] = [];
+
+		getFlowManager().addOperation('probe', (_options, context) => {
+			receivedTransactions.push(context['transaction']);
+
+			return { status: 'probed' };
+		});
+
+		vi.mocked(FlowsService).mockImplementation(function () {
+			return {
+				readByQuery: async (): Promise<FlowRaw[]> => {
+					return [{
+						id: 'flow-1',
+						trigger: 'event',
+						accountability: null,
+						options: {
+							type: 'filter',
+							scope: ['items.update'],
+							collections: ['articles'],
+							return: '$last',
+						},
+						operation: 'op-1',
+						operations: [{
+							id: 'op-1',
+							key: 'probe',
+							type: 'probe',
+							options: {},
+							resolve: null,
+							reject: null,
+							flow: 'flow-1',
+						}],
+					} as unknown as FlowRaw];
+				},
+			} as unknown as FlowsService;
+		});
+
+		await (getFlowManager() as any).load();
+
+		const updateTransaction = { isTransaction: true };
+
+		await emitter.emitFilter(
+			'articles.items.update',
+			[{ data: { status: 'a' }, keys: [1] }],
+			{ collection: 'articles' },
+			{
+				transaction: updateTransaction,
+				database: updateTransaction,
+			} as any,
+		);
+
+		expect(receivedTransactions).toEqual([updateTransaction]);
+		expect(receivedTransactions[0]).toBe(updateTransaction);
 	});
 });
 

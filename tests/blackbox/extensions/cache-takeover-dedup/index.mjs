@@ -8,8 +8,8 @@
 // depends on (the lookup's own `scopedCacheFingerprints`) for the row it took over,
 // opting it out of the coarse fallback and into a precise, scoped purge.
 //
-// The lookup runs on `context.database` (the mutation trx) so a junction row created
-// earlier in the same request is visible.
+// The lookup runs on `context.transaction` (the mutation trx) so a junction
+// row created earlier in the same request is visible.
 
 import { mapCreateRows } from '@directus/utils';
 
@@ -22,7 +22,7 @@ export default function registerHooks({ filter }, { services }) {
 			const itemsService = new services.ItemsService(JUNCTION, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			const filterByPair = Object.fromEntries(

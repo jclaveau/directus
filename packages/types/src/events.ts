@@ -24,7 +24,16 @@ export type ReadEventContext = Omit<EventContext, 'scopedCache'> & {
 };
 
 /** What an `ItemsService` create/update/delete filter receives. */
-export type MutationEventContext = Omit<EventContext, 'scopedCache'> & {
+export type MutationEventContext = Omit<EventContext, 'database' | 'scopedCache'> & {
+	/**
+	 * The transaction the filter hooks and the write share: a hook writing through
+	 * it commits with the mutation or rolls back with it. On a service handed the
+	 * caller's transaction it is that one, so the write lands when the caller
+	 * commits.
+	 */
+	transaction: Knex;
+	/** @deprecated Use `transaction`, the same object. */
+	database: Knex;
 	scopedCache: ScopedCachePurgeHandle;
 };
 

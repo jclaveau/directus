@@ -8,8 +8,8 @@
 // nothing rules that out, so the hook says so with `skipPurgeFor` and the service
 // purges nothing — neither the fallback nor a slice.
 //
-// The lookup runs on `context.database` (the mutation trx) so a row created earlier
-// in the same request is visible.
+// The lookup runs on `context.transaction` (the mutation trx) so a row created
+// earlier in the same request is visible.
 
 import { mapCreateRows } from '@directus/utils';
 
@@ -21,7 +21,7 @@ export default function registerHooks({ filter }, { services }) {
 			const itemsService = new services.ItemsService(COLLECTION, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			const [existing] = await itemsService.readByQuery(

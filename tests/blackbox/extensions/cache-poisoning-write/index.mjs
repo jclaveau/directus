@@ -16,7 +16,7 @@ export default function registerHooks({ filter }, { services }) {
 	// runs, no purgeBy declared, so P2_TARGET's cached reads go stale.
 	filter(`${P2_SOURCE}.items.update`, async (payload, _meta, context) => {
 		await context
-			.database(P2_TARGET)
+			.transaction(P2_TARGET)
 			.where({ space: 'x' })
 			.update({ tally: 1 });
 
@@ -29,7 +29,7 @@ export default function registerHooks({ filter }, { services }) {
 		const targetService = new services.ItemsService(P3_TARGET, {
 			schema: context.schema,
 			accountability: context.accountability,
-			knex: context.database,
+			knex: context.transaction,
 		});
 
 		const rows = await targetService.readByQuery(
