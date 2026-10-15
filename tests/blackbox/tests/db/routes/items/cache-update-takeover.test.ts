@@ -34,6 +34,7 @@ const createFailedCollection = 'test_takeover_create_failed';
 const nestedParentCollection = 'test_takeover_nested_parent';
 const nestedChildCollection = 'test_takeover_nested_child';
 const createDeclaredCollection = 'test_takeover_create_declared';
+const createForeignCollection = 'test_takeover_create_foreign';
 const cacheStatusHeader = 'x-cache-status';
 
 const takeoverFeature = loadFeature(
@@ -139,11 +140,11 @@ describe.each(vendors)('%s', (vendor) => {
 				},
 				{
 					collection: createDeclaredCollection,
-					meta: { scoped_cache_fields: ['slot'] },
-					fields: [
-						{ field: 'slot', type: 'string', meta: {} },
-						{ field: 'body', type: 'string', meta: {} },
-					],
+					fields: [{ field: 'body', type: 'string', meta: {} }],
+				},
+				{
+					collection: createForeignCollection,
+					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 			],
 		});
@@ -266,7 +267,12 @@ describe.each(vendors)('%s', (vendor) => {
 
 		await CreateItem(vendor, {
 			collection: createDeclaredCollection,
-			item: { slot: 'a', body: 'original' },
+			item: { body: 'original' },
+		});
+
+		await CreateItem(vendor, {
+			collection: createForeignCollection,
+			item: { body: 'original' },
 		});
 
 		cacheEnv[vendor].PORT = String(await getPort());
@@ -295,6 +301,7 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: nestedChildCollection });
 		await DeleteCollection(vendor, { collection: nestedParentCollection });
 		await DeleteCollection(vendor, { collection: createDeclaredCollection });
+		await DeleteCollection(vendor, { collection: createForeignCollection });
 	});
 
 	defineFeature(takeoverFeature, (scenario) => {
@@ -871,44 +878,39 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'a create whose takeover is inert purges only what its hook declared',
 			({ given, and, when, then }) => {
-				function readAll() {
+				function readAll(collection: string) {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${createDeclaredCollection}`)
+						.get(`/items/${collection}`)
 						.query({ fields: 'body' })
 						.set('Authorization', adminAuth);
 				}
 
-				function readSlot(slot: string) {
-					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${createDeclaredCollection}`)
-						.query({ fields: 'body', 'filter[slot][_eq]': slot })
-						.set('Authorization', adminAuth);
+				async function cacheRead(
+					collection: string,
+					table: Record<string, string>[],
+				) {
+					expect((await readAll(collection)).headers[cacheStatusHeader])
+						.toBe('MISS');
+
+					const cachedRead = await readAll(collection);
+
+					expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+					expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
 				}
 
-				given(
-					`the read of ${createDeclaredCollection} is cached:`,
-					async (table: Record<string, string>[]) => {
-						expect((await readAll()).headers[cacheStatusHeader]).toBe('MISS');
+				async function answerRead(
+					collection: string,
+					table: Record<string, string>[],
+				) {
+					const { cache, response } = table[0]!;
+					const answeredRead = await readAll(collection);
 
-						const cachedRead = await readAll();
+					expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+					expect(answeredRead.body.data).toEqual(loadYaml(response!));
+				}
 
-						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
-						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
-					},
-				);
-
-				and(
-					/^the read of \w+ in slot "(.*)" is cached:$/,
-					async (slot: string, table: Record<string, string>[]) => {
-						expect((await readSlot(slot)).headers[cacheStatusHeader])
-							.toBe('MISS');
-
-						const cachedRead = await readSlot(slot);
-
-						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
-						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
-					},
-				);
+				given(/^the read of (\w+) is cached:$/, cacheRead);
+				and(/^the read of (\w+) is cached:$/, cacheRead);
 
 				when(
 					/^a create sends "(.*)"$/,
@@ -922,27 +924,8 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
-				then(
-					`the read of ${createDeclaredCollection} answers:`,
-					async (table: Record<string, string>[]) => {
-						const { cache, response } = table[0]!;
-						const answeredRead = await readAll();
-
-						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
-						expect(answeredRead.body.data).toEqual(loadYaml(response!));
-					},
-				);
-
-				and(
-					/^the read of \w+ in slot "(.*)" answers:$/,
-					async (slot: string, table: Record<string, string>[]) => {
-						const { cache, response } = table[0]!;
-						const answeredRead = await readSlot(slot);
-
-						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
-						expect(answeredRead.body.data).toEqual(loadYaml(response!));
-					},
-				);
+				then(/^the read of (\w+) answers:$/, answerRead);
+				and(/^the read of (\w+) answers:$/, answerRead);
 			},
 			60_000,
 		);

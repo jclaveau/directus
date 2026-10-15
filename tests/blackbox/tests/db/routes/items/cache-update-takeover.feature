@@ -43,8 +43,9 @@ Feature: A row a mutation hook took over is purged from the response cache
     update of test_takeover_nested_parent: the same as on
     test_takeover_hook_threw.
   - "take-over-inert" on test_takeover_create_declared, a create: writes
-    nothing, takes the row in slot "a" over declaring it inert through
-    `skipPurgeFor`, and declares slot "a" through `purgeBy`.
+    nothing, takes the seeded row over declaring it inert through
+    `skipPurgeFor`, and declares test_takeover_create_foreign through
+    `purgeBy`.
 
   Scenario: a refused answer still purges the row its hook took over
     Given the read of test_takeover_refused is cached:
@@ -185,13 +186,13 @@ Feature: A row a mutation hook took over is purged from the response cache
     Given the read of test_takeover_create_declared is cached:
       | response             |
       | [{body: "original"}] |
-    And the read of test_takeover_create_declared in slot "a" is cached:
+    And the read of test_takeover_create_foreign is cached:
       | response             |
       | [{body: "original"}] |
     When a create sends "take-over-inert"
     Then the read of test_takeover_create_declared answers:
       | cache | response             |
       | HIT   | [{body: "original"}] |
-    And the read of test_takeover_create_declared in slot "a" answers:
+    And the read of test_takeover_create_foreign answers:
       | cache | response             |
       | MISS  | [{body: "original"}] |

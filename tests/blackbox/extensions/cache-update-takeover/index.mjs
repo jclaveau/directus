@@ -29,8 +29,8 @@
 //   body 'write-then-throw' (test_takeover_nested_child) → the same as on
 //     test_takeover_hook_threw, the update nested in a parent's update.
 //   body 'take-over-inert' (test_takeover_create_declared), on create → writes
-//     nothing, takes the row in slot 'a' over declaring it inert through
-//     skipPurgeFor, and declares slot 'a' through purgeBy.
+//     nothing, takes the seeded row over declaring it inert through
+//     skipPurgeFor, and declares test_takeover_create_foreign through purgeBy.
 
 import { mapCreateRows } from '@directus/utils';
 
@@ -45,6 +45,7 @@ const hookThrewCollection = 'test_takeover_hook_threw';
 const createFailedCollection = 'test_takeover_create_failed';
 const nestedChildCollection = 'test_takeover_nested_child';
 const createDeclaredCollection = 'test_takeover_create_declared';
+const createForeignCollection = 'test_takeover_create_foreign';
 
 export default function registerHooks({ filter }, { database }) {
 	const takeOverTwiceThrough = (collection, writerOf) => {
@@ -248,16 +249,10 @@ export default function registerHooks({ filter }, { database }) {
 					return payload;
 				}
 
-				const inertRow = await database(createDeclaredCollection)
-					.where({ slot: 'a' })
-					.first();
+				const inertRow = await database(createDeclaredCollection).first();
 
 				scopedCache.skipPurgeFor(inertRow.id);
-
-				scopedCache.purgeBy({
-					collection: createDeclaredCollection,
-					pinnedScope: { slot: ['a'] },
-				});
+				scopedCache.purgeBy({ collection: createForeignCollection });
 
 				return inertRow.id;
 			});
