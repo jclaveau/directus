@@ -232,11 +232,25 @@ test('register.filter keeps the payload type on every other event', () => {
 	});
 });
 
-test('register.filter refuses a create handler that drops a row', () => {
+// emitFilter keeps the payload when a handler answers undefined.
+test('register.filter takes an item handler that returns nothing', () => {
 	const register = {} as RegisterFunctions;
 
-	// @ts-expect-error -- a create answers every position, cancelled ones as null
-	register.filter<Item>('article.items.create', (entries) => entries?.[0]);
+	register.filter<Item>('article.items.create', (_entries, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter<Item>('article.items.update', (_entries, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter('article.items.delete', (_keys, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter('article.items.read', (_rows, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<ReadEventContext>();
+	});
 });
 
 test('register.filter leaves the handle optional on a bare or runtime event', () => {

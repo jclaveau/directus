@@ -62,6 +62,9 @@ export type BareFilterEvent =
  * create or update taking the item type and wrapping it in the list it carries,
  * a delete defaulting its payload to its keys; then any other string, which is
  * also where a non-literal event name lands.
+ *
+ * An item handler may return nothing: `emitFilter` keeps the payload when a
+ * handler answers `undefined`.
  */
 export type RegisterFilter = {
 	<TIn = unknown, TOut = TIn>(
@@ -70,13 +73,13 @@ export type RegisterFilter = {
 	): void;
 	<TIn = unknown, TOut = TIn>(
 		event: ItemsReadEvent,
-		handler: FilterHandler<TIn, TOut, ReadEventContext>,
+		handler: FilterHandler<TIn, TOut | void, ReadEventContext>,
 	): void;
 	<EntryItem = AnyItem>(
 		event: ItemsCreateEvent,
 		handler: FilterHandler<
 			(CreateEntry<EntryItem> | null)[] | null,
-			(CreateEntry<EntryItem> | null)[] | null,
+			(CreateEntry<EntryItem> | null)[] | null | void,
 			MutationEventContext
 		>,
 	): void;
@@ -84,13 +87,13 @@ export type RegisterFilter = {
 		event: ItemsUpdateEvent,
 		handler: FilterHandler<
 			UpdateEntry<EntryItem>[] | null,
-			UpdateEntry<EntryItem>[] | null,
+			UpdateEntry<EntryItem>[] | null | void,
 			MutationEventContext
 		>,
 	): void;
 	<TIn = PrimaryKey[] | null, TOut = TIn>(
 		event: ItemsDeleteEvent,
-		handler: FilterHandler<TIn, TOut, MutationEventContext>,
+		handler: FilterHandler<TIn, TOut | void, MutationEventContext>,
 	): void;
 	<TIn = unknown, TOut = TIn>(
 		event: string,
