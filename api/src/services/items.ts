@@ -514,6 +514,7 @@ implements AbstractService<Item> {
 			const sameRowPositions: { index: number; sameRowAs: number }[] = [];
 
 			const filterContext = {
+				transaction: trx,
 				database: trx,
 				schema: this.schema,
 				accountability: this.accountability,
@@ -1606,7 +1607,7 @@ implements AbstractService<Item> {
 		} | null = null;
 
 		// One transaction around the hooks and every group, so a hook writing through
-		// `context.database` commits with the update or rolls back with it, the
+		// `context.transaction` commits with the update or rolls back with it, the
 		// snapshots read the state the write starts from, and the integrity check
 		// sees the finished state once rather than once per group. Everything built
 		// here is per attempt: sqlite and cockroach re-run the handler, hooks
@@ -1656,6 +1657,7 @@ implements AbstractService<Item> {
 								collection: this.collection,
 							},
 							{
+								transaction: trx,
 								database: trx,
 								schema: this.schema,
 								accountability: this.accountability,
@@ -2682,7 +2684,7 @@ implements AbstractService<Item> {
 			: `${this.eventScope}.delete`;
 
 		// One transaction around the hooks and the delete, so a hook writing through
-		// `context.database` commits with the delete or rolls back with it. Per
+		// `context.transaction` commits with the delete or rolls back with it. Per
 		// attempt: sqlite and cockroach re-run the handler, hooks included, after a
 		// retryable error.
 		const deletion = await transaction(this.knex, async (trx) => {
@@ -2702,6 +2704,7 @@ implements AbstractService<Item> {
 							collection: this.collection,
 						},
 						{
+							transaction: trx,
 							database: trx,
 							schema: this.schema,
 							accountability: this.accountability,

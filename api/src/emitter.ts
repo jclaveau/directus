@@ -1,4 +1,10 @@
-import type { ActionHandler, EventContext, FilterHandler, InitHandler } from '@directus/types';
+import type {
+	ActionHandler,
+	EventContext,
+	FilterHandler,
+	InitHandler,
+	MutationEventContext,
+} from '@directus/types';
 import EventEmitter2 from 'eventemitter2';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
@@ -37,7 +43,7 @@ export class Emitter {
 		event: string | string[],
 		payload: TIn,
 		meta: Record<string, any>,
-		context: EventContext | null = null,
+		context: EventContext | MutationEventContext | null = null,
 	): Promise<TIn | TOut> {
 		const events = Array.isArray(event) ? event : [event];
 
