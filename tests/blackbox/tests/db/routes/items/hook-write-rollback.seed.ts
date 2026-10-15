@@ -6,6 +6,7 @@ export const scenarioCollectionPrefixes = [
 	'test_hook_rollback_refused',
 	'test_hook_rollback_accepted',
 	'test_hook_rollback_forbidden',
+	'test_hook_rollback_deleted',
 ];
 
 export const seedDBStructure = () => {

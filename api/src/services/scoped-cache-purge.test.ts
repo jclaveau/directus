@@ -63,6 +63,7 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
+const { getDatabaseClient } = await import('../database/index.js');
 
 const { createScopedCacheHookDeclarations, scopedCachePinKeys } =
 	await import('../scoped-cache/index.js');
@@ -2404,6 +2405,251 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', takeOverTwice);
+			}
+		});
+
+		it(oneLine`
+			a retried update purges a row its hook takes over, though the failed
+			attempt's hook declared that row inert
+		`, async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+			tracker.on.select('test').response([
+				{ id: 1, student: 'A' },
+				{ id: 2, student: 'A' },
+			]);
+
+			tracker.on.update('test')
+				.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+					code: 'SQLITE_BUSY',
+				}));
+
+			tracker.on.update('test').response(1);
+
+			let hookRuns = 0;
+
+			const takeOverOne = (groups: any, _meta: any, ctx: any) => {
+				hookRuns += 1;
+
+				if (hookRuns === 1) {
+					ctx.scopedCache.skipPurgeFor(1);
+				}
+				else {
+					tracker.resetHandlers();
+
+					tracker.on.select('test').response([
+						{ id: 1, student: 'B' },
+						{ id: 2, student: 'B' },
+					]);
+
+					tracker.on.update('test').response(1);
+				}
+
+				return mapUpdateRows(groups, async (data, key) => {
+					return key === 1
+						? key
+						: data;
+				});
+			};
+
+			emitter.onFilter('test.items.update', takeOverOne);
+
+			try {
+				await service().updateMany([1, 2], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOverOne);
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			}
+		});
+
+		it(oneLine`
+			a retried update refused for a row answered twice purges that row, not the
+			one the failed attempt's hook took over
+		`, async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+			tracker.on.select('test').response([
+				{ id: 1, student: 'A' },
+				{ id: 2, student: 'A' },
+			]);
+
+			tracker.on.update('test')
+				.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+					code: 'SQLITE_BUSY',
+				}));
+
+			let hookRuns = 0;
+
+			const answerTwiceOnRetry = (groups: any) => {
+				hookRuns += 1;
+
+				if (hookRuns === 1) {
+					return mapUpdateRows(groups, async (data, key) => {
+						return key === 1
+							? key
+							: data;
+					});
+				}
+
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 2, student: 'B' }]);
+
+				return [{ key: 2 }, { key: 2 }];
+			};
+
+			emitter.onFilter('test.items.update', answerTwiceOnRetry);
+
+			try {
+				await expect(service().updateMany([1, 2], { student: 'B' }))
+					.rejects
+					.toMatchObject({
+						message: 'Invalid payload. A "items.update" filter hook '
+							+ 'answered with row 2 more than once.',
+					});
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['2'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', answerTwiceOnRetry);
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			}
+		});
+
+		it(oneLine`
+			an update whose hook took every row over still purges them when its
+			commit fails
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const takeOver = (groups: any) => {
+				tracker.resetHandlers();
+				tracker.on.select('test').response([{ id: 1, student: 'B' }]);
+
+				return mapUpdateRows(groups, async (_data, key) => key);
+			};
+
+			const realTransaction = db.transaction.bind(db);
+
+			const transactionSpy = vi.spyOn(db, 'transaction')
+				.mockImplementationOnce((async (handler: any) => {
+					await realTransaction(handler);
+
+					throw new Error('commit failed');
+				}) as any);
+
+			emitter.onFilter('test.items.update', takeOver);
+
+			try {
+				await expect(service().updateMany([1], { student: 'B' }))
+					.rejects
+					.toThrow(new Error('commit failed'));
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['a'] },
+						},
+						{
+							collection: 'test',
+							pinnedScope: { id: ['1'], student: ['b'] },
+						},
+					],
+					expect.anything(),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', takeOver);
+				transactionSpy.mockRestore();
+			}
+		});
+
+		it(oneLine`
+			a delete that fails still purges the slice a hook declared — the hook may
+			have written out of band before the delete threw
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.delete('test').simulateError('boom');
+
+			const declareSlice = async (keys: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'authors',
+					pinnedScope: { id: [5] },
+				});
+
+				return keys;
+			};
+
+			emitter.onFilter('test.items.delete', declareSlice);
+
+			try {
+				await expect(service().deleteMany([1]))
+					.rejects
+					.toThrow(new Error('delete from "test" where "id" in (1) - boom'));
+
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[],
+					expect.anything(),
+					{
+						includeBareFingerprint: false,
+						declaredFingerprints: [{
+							collection: 'authors',
+							pinnedScope: { id: ['5'] },
+						}],
+						changedCollections: [],
+					},
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.delete', declareSlice);
 			}
 		});
 

@@ -1041,6 +1041,53 @@ describe('Integration Tests', () => {
 				}
 			});
 
+			it(oneLine`
+				hands a retried update's hook the data the caller sent, not what the
+				failed attempt's hook made of it
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				tracker.on.update((query) => query.bindings.includes('second!'))
+					.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					}));
+
+				const markGroups = (groups: any) => {
+					for (const group of groups) {
+						group.data.name += '!';
+					}
+
+					return groups;
+				};
+
+				const updateListener = vi.fn();
+
+				emitter.onFilter('test.items.update', markGroups);
+				emitter.onAction('test.items.update', updateListener);
+
+				try {
+					await service.updateBatch(
+						[{ id: 1, name: 'first' }, { id: 2, name: 'second' }],
+						{ awaitActionHooks: true },
+					);
+
+					expect(updateListener).toHaveBeenCalledWith(
+						expect.objectContaining({
+							payload: [
+								{ data: { name: 'first!' }, keys: [1] },
+								{ data: { name: 'second!' }, keys: [2] },
+							],
+						}),
+						expect.anything(),
+					);
+				}
+				finally {
+					emitter.offFilter('test.items.update', markGroups);
+					emitter.offAction('test.items.update', updateListener);
+					vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+				}
+			});
+
 			it('snapshots the same rows before and after the write', async () => {
 				// The pre-update snapshots cover the rows that are actually written; the
 				// post-update one has to cover the same set or it re-reads rows nothing
@@ -1182,6 +1229,9 @@ describe('Integration Tests', () => {
 			});
 
 			it('should cancel the update and return a null per key when a filter returns null and cancel is allowed', async () => {
+				// `history.update` lists only what an update handler matched.
+				tracker.on.update('test').response(1);
+
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 
 				const result = await service.updateMany([1], { name: 'Test' }, { allowFilterCancel: true });
@@ -1218,10 +1268,140 @@ describe('Integration Tests', () => {
 				}
 			});
 
-			it('should throw when an update filter returns null but cancel is not allowed', async () => {
+			it(oneLine`
+				runs the update's reads, checks and write inside its transaction
+			`, async () => {
+				const snapshotSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'snapshot',
+				);
+
+				await service.updateMany(
+					[1],
+					{ name: 'Test' },
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'committed',
+					queries: [expect.objectContaining({
+						sql: 'update "test" set "name" = ? where "id" in (?)',
+					})],
+				}]);
+
+				// The re-read after the commit is the only one outside it.
+				expect(snapshotSpy.mock.contexts).toEqual([
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+					expect.objectContaining({ knex: db }),
+				]);
+
+				expect(validateUserCountIntegrity).toHaveBeenCalledWith({
+					flags: UserIntegrityCheckFlag.All,
+					knex: expect.objectContaining({ isTransaction: true }),
+				});
+			});
+
+			it(oneLine`
+				hands the update filter one object as transaction and database
+			`, async () => {
+				const updateFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.update', updateFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					const [[, , filterContext]] = updateFilter.mock.calls as any;
+
+					expect(filterContext.transaction).toBe(filterContext.database);
+				}
+				finally {
+					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				hands the update filter the caller's transaction when the service runs
+				on one
+			`, async () => {
+				const updateFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.update', updateFilter);
+
+				try {
+					await db.transaction(async (callerTrx) => {
+						await new ItemsService('test', { knex: callerTrx, schema })
+							.updateMany([1], { name: 'Test' });
+
+						const [[, , filterContext]] = updateFilter.mock.calls as any;
+
+						expect(filterContext.transaction).toBe(callerTrx);
+					});
+				}
+				finally {
+					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				commits what a cancelling update hook wrote through its transaction
+			`, async () => {
+				const writeThenCancel = async (
+					_groups: unknown,
+					_meta: unknown,
+					context: any,
+				) => {
+					await context.transaction('test').update({ name: 'by-hook' });
+
+					return null;
+				};
+
+				emitter.onFilter('items.update', writeThenCancel);
+
+				try {
+					await service.updateMany(
+						[1],
+						{ name: 'Test' },
+						{ allowFilterCancel: true },
+					);
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'committed',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ?',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.update', writeThenCancel);
+				}
+			});
+
+			it(oneLine`
+				refuses an update a filter cancelled without allowFilterCancel, rolling
+				its transaction back
+			`, async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 
-				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(InvalidPayloadError);
+				await expect(service.updateMany([1], { name: 'Test' }))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'A filter hook cancelled the update, but this operation '
+							+ 'requires it',
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
 
 				filterSpy.mockRestore();
 			});
@@ -1611,6 +1791,9 @@ describe('Integration Tests', () => {
 			it('should cancel the deletion and return a null per key when a filter returns null and cancel is allowed', async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 
+				// `history.delete` lists only what a delete handler matched.
+				tracker.on.delete('test').response(1);
+
 				const result = await service.deleteMany([1], { allowFilterCancel: true });
 
 				expect(result).toEqual([null]);
@@ -1625,6 +1808,171 @@ describe('Integration Tests', () => {
 				await expect(service.deleteMany([1])).rejects.toThrow(InvalidPayloadError);
 
 				filterSpy.mockRestore();
+			});
+
+			it(oneLine`
+				refuses a delete a filter cancelled without allowFilterCancel, rolling
+				its transaction back
+			`, async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				await expect(service.deleteMany([1]))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'A filter hook cancelled the deletion, but this operation '
+							+ 'requires it',
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+
+				filterSpy.mockRestore();
+			});
+
+			it(oneLine`
+				runs the delete's reads, checks and write inside its transaction
+			`, async () => {
+				const snapshotSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'snapshot',
+				);
+
+				const survivorsSpy = vi.spyOn(
+					ItemScopedCacheService.prototype,
+					'selfRelationSurvivorKeys',
+				);
+
+				await service.deleteMany(
+					[1],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'committed',
+					queries: [expect.objectContaining({
+						sql: 'delete from "test" where "id" in (?)',
+					})],
+				}]);
+
+				// The survivors' re-read after the commit is the only one outside it.
+				expect(snapshotSpy.mock.contexts).toEqual([
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+					expect.objectContaining({ knex: db }),
+				]);
+
+				expect(survivorsSpy.mock.contexts).toEqual([
+					expect.objectContaining({
+						knex: expect.objectContaining({ isTransaction: true }),
+					}),
+				]);
+
+				expect(validateUserCountIntegrity).toHaveBeenCalledWith({
+					flags: UserIntegrityCheckFlag.All,
+					knex: expect.objectContaining({ isTransaction: true }),
+				});
+			});
+
+			it(oneLine`
+				hands the delete filter one object as transaction and database
+			`, async () => {
+				const deleteFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.delete', deleteFilter);
+
+				try {
+					await service.deleteMany([1]);
+
+					const [[, , filterContext]] = deleteFilter.mock.calls as any;
+
+					expect(filterContext.transaction).toBe(filterContext.database);
+				}
+				finally {
+					emitter.offFilter('items.delete', deleteFilter);
+				}
+			});
+
+			it(oneLine`
+				commits what a cancelling delete hook wrote through its transaction
+			`, async () => {
+				const writeThenCancel = async (
+					_keys: unknown,
+					_meta: unknown,
+					context: any,
+				) => {
+					await context.transaction('test').update({ name: 'by-hook' });
+
+					return null;
+				};
+
+				emitter.onFilter('items.delete', writeThenCancel);
+
+				try {
+					await service.deleteMany([1], { allowFilterCancel: true });
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'committed',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ?',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.delete', writeThenCancel);
+				}
+			});
+
+			it(oneLine`
+				deletes the keys the caller sent on every attempt, whatever a hook
+				pushed into the array it was handed
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+				tracker.on.delete('test')
+					.simulateErrorOnce(Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					}));
+
+				const pushKey = (keys: number[]) => {
+					keys.push(9);
+
+					return keys;
+				};
+
+				emitter.onFilter('test.items.delete', pushKey);
+
+				try {
+					await service.deleteMany([1]);
+
+					expect(tracker.history.transactions).toEqual([
+						{
+							id: 0,
+							state: 'rolled back',
+							queries: [expect.objectContaining({
+								sql: 'delete from "test" where "id" in (?)',
+								bindings: [1],
+							})],
+						},
+						{
+							id: 1,
+							state: 'committed',
+							queries: [expect.objectContaining({
+								sql: 'delete from "test" where "id" in (?)',
+								bindings: [1],
+							})],
+						},
+					]);
+				}
+				finally {
+					emitter.offFilter('test.items.delete', pushKey);
+					vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+				}
 			});
 
 			it('should run the deletion normally when a filter returns a non-null payload', async () => {
@@ -3135,6 +3483,37 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const keys = await service.updateMany([1], { name: 'y' });
 
 			expect(keys).toEqual([1]);
+		});
+
+		it('checks the update\'s access inside its transaction', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
+			tracker.on.update('test').response(1);
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).updateMany([1], { name: 'y' });
+
+			expect(validateAccess).toHaveBeenCalledWith(expect.anything(), {
+				schema: shapesSchema,
+				knex: expect.objectContaining({ isTransaction: true }),
+			});
+		});
+
+		it('checks the delete\'s access inside its transaction', async () => {
+			tracker.on.delete('test').response(1);
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).deleteMany([1]);
+
+			expect(validateAccess).toHaveBeenCalledWith(expect.anything(), {
+				knex: expect.objectContaining({ isTransaction: true }),
+				schema: shapesSchema,
+			});
 		});
 
 		it('checks a row sent twice with one change once', async () => {

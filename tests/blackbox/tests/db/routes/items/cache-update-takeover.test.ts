@@ -22,6 +22,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
 const refusedCollection = 'test_takeover_refused';
+const pooledCollection = 'test_takeover_refused_pooled';
 const upsertParentCollection = 'test_takeover_upsert_parent';
 const upsertChildCollection = 'test_takeover_upsert_child';
 const inertCollection = 'test_takeover_inert';
@@ -47,7 +48,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	const adminAuth = `Bearer ${USER.ADMIN.TOKEN}`;
 	let cacheInstance: ChildProcess;
-	let refusedRowId: number;
+	const refusedRowIds: Record<string, number> = {};
 	let upsertParentId: number;
 	let sentChildId: number;
 	let inertRowId: number;
@@ -60,6 +61,10 @@ describe.each(vendors)('%s', (vendor) => {
 			collections: [
 				{
 					collection: refusedCollection,
+					fields: [{ field: 'body', type: 'string', meta: {} }],
+				},
+				{
+					collection: pooledCollection,
 					fields: [{ field: 'body', type: 'string', meta: {} }],
 				},
 				{
@@ -110,12 +115,14 @@ describe.each(vendors)('%s', (vendor) => {
 			otherField: 'parent',
 		});
 
-		const refusedRow = await CreateItem(vendor, {
-			collection: refusedCollection,
-			item: { body: 'original' },
-		});
+		for (const collection of [refusedCollection, pooledCollection]) {
+			const refusedRow = await CreateItem(vendor, {
+				collection,
+				item: { body: 'original' },
+			});
 
-		refusedRowId = refusedRow.id;
+			refusedRowIds[collection] = refusedRow.id;
+		}
 
 		const upsertParent = await CreateItem(vendor, {
 			collection: upsertParentCollection,
@@ -188,6 +195,7 @@ describe.each(vendors)('%s', (vendor) => {
 		cacheInstance.kill();
 
 		await DeleteCollection(vendor, { collection: refusedCollection });
+		await DeleteCollection(vendor, { collection: pooledCollection });
 		await DeleteCollection(vendor, { collection: upsertChildCollection });
 		await DeleteCollection(vendor, { collection: upsertParentCollection });
 		await DeleteCollection(vendor, { collection: inertCollection });
@@ -197,21 +205,28 @@ describe.each(vendors)('%s', (vendor) => {
 	});
 
 	defineFeature(takeoverFeature, (scenario) => {
-		scenario(
+		for (const scenarioTitle of [
 			'a refused answer still purges the row its hook took over',
-			({ given, when, then, and }) => {
+			oneLine`
+				a refused answer purges the row its hook committed through the pool
+			`,
+		]) {
+			scenario(scenarioTitle, ({ given, when, then, and }) => {
+				let refusedCollectionName = '';
 				let refusedUpdate: request.Response;
 
 				function readRefused() {
 					return request(getUrl(vendor, cacheEnv))
-						.get(`/items/${refusedCollection}`)
+						.get(`/items/${refusedCollectionName}`)
 						.query({ fields: 'body' })
 						.set('Authorization', adminAuth);
 				}
 
 				given(
-					`the read of ${refusedCollection} is cached:`,
-					async (table: Record<string, string>[]) => {
+					/^the read of (\w+) is cached:$/,
+					async (collection: string, table: Record<string, string>[]) => {
+						refusedCollectionName = collection;
+
 						expect((await readRefused()).headers[cacheStatusHeader])
 							.toBe('MISS');
 
@@ -225,8 +240,10 @@ describe.each(vendors)('%s', (vendor) => {
 				when(
 					/^its row is sent the body "(.*)"$/,
 					async (body: string) => {
+						const rowId = refusedRowIds[refusedCollectionName];
+
 						refusedUpdate = await request(getUrl(vendor, cacheEnv))
-							.patch(`/items/${refusedCollection}/${refusedRowId}`)
+							.patch(`/items/${refusedCollectionName}/${rowId}`)
 							.send({ body })
 							.set('Authorization', adminAuth);
 					},
@@ -238,13 +255,15 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(refusedUpdate.statusCode).toBe(400);
 
 						expect(refusedUpdate.body.errors[0].message).toEqual(
-							messageOfDocString(docString, () => refusedRowId),
+							messageOfDocString(docString, () => {
+								return refusedRowIds[refusedCollectionName]!;
+							}),
 						);
 					},
 				);
 
 				and(
-					`the read of ${refusedCollection} answers:`,
+					/^the read of \w+ answers:$/,
 					async (table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answeredRead = await readRefused();
@@ -253,9 +272,8 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(answeredRead.body.data).toEqual(loadYaml(response!));
 					},
 				);
-			},
-			60_000,
-		);
+			}, 60_000);
+		}
 
 		scenario(
 			'an upsert whose hook takes over a row it never sent purges that row',

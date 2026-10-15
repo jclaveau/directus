@@ -7,6 +7,7 @@ import type {
 	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
+import type { Knex } from 'knex';
 import { expectTypeOf, test } from 'vitest';
 import emitter from './emitter.js';
 
@@ -89,6 +90,20 @@ test('register.filter hands a mutation handler the purge handle', () => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
 		context.scopedCache.purgeBy({ collection: 'article' });
 		return groups;
+	});
+});
+
+test('register.filter hands a mutation handler its transaction', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('items.update', (groups, _meta, context) => {
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+		return groups;
+	});
+
+	register.filter('items.delete', (keys, _meta, context) => {
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+		return keys;
 	});
 });
 

@@ -12,6 +12,9 @@ Feature: A row an update hook took over is purged from the response cache
   The cache-update-takeover hook acts on the body it is sent:
   - "take-over-twice" on test_takeover_refused: writes the row "taken-over"
     and answers with it twice.
+  - "take-over-twice" on test_takeover_refused_pooled: the same, written
+    through the extension's `database`, the pool, so the write is committed
+    whether Directus accepts the answer or not.
   - "take-over-sibling" on test_takeover_upsert_child: writes the row marked
     "sibling" "taken-over" and adds it to its answer.
   - "take-over-inert" on test_takeover_inert: writes nothing and takes the row
@@ -38,6 +41,20 @@ Feature: A row an update hook took over is purged from the response cache
     And the read of test_takeover_refused answers:
       | cache | response             |
       | MISS  | [{body: "original"}] |
+
+  Scenario: a refused answer purges the row its hook committed through the pool
+    Given the read of test_takeover_refused_pooled is cached:
+      | response             |
+      | [{body: "original"}] |
+    When its row is sent the body "take-over-twice"
+    Then the update is refused with the message:
+      """
+      Invalid payload. A "items.update" filter hook answered with row {row} more than
+      once.
+      """
+    And the read of test_takeover_refused_pooled answers:
+      | cache | response               |
+      | MISS  | [{body: "taken-over"}] |
 
   Scenario: an upsert whose hook takes over a row it never sent purges that row
     Given the read of test_takeover_upsert_child in slot "b" is cached:

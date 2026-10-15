@@ -5,6 +5,9 @@
 //   body 'take-over-twice' (test_takeover_refused) → writes the group's first row
 //     'taken-over' and answers with it twice, which Directus refuses, taking the
 //     write back.
+//   body 'take-over-twice' (test_takeover_refused_pooled) → the same, written
+//     through the extension's `database`, the pool, so the write is committed
+//     whether Directus accepts the answer or not.
 //   body 'take-over-sibling' (test_takeover_upsert_child) → writes the row marked
 //     'sibling' 'taken-over' and adds it to the answer, a row the upsert never sent.
 //   body 'take-over-inert' (test_takeover_inert, test_takeover_inert_big) →
@@ -17,16 +20,16 @@
 //     first row left.
 
 const refusedCollection = 'test_takeover_refused';
+const pooledCollection = 'test_takeover_refused_pooled';
 const upsertChildCollection = 'test_takeover_upsert_child';
 const inertCollection = 'test_takeover_inert';
 const bigInertCollection = 'test_takeover_inert_big';
 const movedCollection = 'test_takeover_moved';
 const partlyDeclaredCollection = 'test_takeover_partly_declared';
 
-export default function registerHooks({ filter }) {
-	filter(
-		`${refusedCollection}.items.update`,
-		async (groups, _meta, { transaction }) => {
+export default function registerHooks({ filter }, { database }) {
+	const takeOverTwiceThrough = (collection, writerOf) => {
+		return async (groups, _meta, context) => {
 			const takenOverGroup = groups.find((group) => {
 				return group?.data?.body === 'take-over-twice';
 			});
@@ -37,12 +40,22 @@ export default function registerHooks({ filter }) {
 
 			const [takenOverKey] = takenOverGroup.keys;
 
-			await transaction(refusedCollection)
+			await writerOf(context)(collection)
 				.where({ id: takenOverKey })
 				.update({ body: 'taken-over' });
 
 			return [{ key: takenOverKey }, { key: takenOverKey }];
-		},
+		};
+	};
+
+	filter(
+		`${refusedCollection}.items.update`,
+		takeOverTwiceThrough(refusedCollection, ({ transaction }) => transaction),
+	);
+
+	filter(
+		`${pooledCollection}.items.update`,
+		takeOverTwiceThrough(pooledCollection, () => database),
 	);
 
 	filter(

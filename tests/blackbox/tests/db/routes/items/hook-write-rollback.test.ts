@@ -22,6 +22,7 @@ describe.each(vendors)('%s', (vendor) => {
 			'an update the service refuses takes its hook\'s write back',
 			'an update the service accepts keeps its hook\'s write',
 			'a delete the access check refuses takes its hook\'s write back',
+			'a delete the service accepts keeps its hook\'s write',
 		]) {
 			scenario(scenarioTitle, ({ given, when, then, and }) => {
 				const mutation: Mutation = {
@@ -32,17 +33,17 @@ describe.each(vendors)('%s', (vendor) => {
 				};
 
 				given(
-					/^an item and its witness in (\w+)$/,
-					async (collectionPrefix: string) => {
+					/^the item (\d+) and its witness in (\w+)$/,
+					async (itemId: string, collectionPrefix: string) => {
 						mutation.collectionPrefix = collectionPrefix;
+						mutation.itemId = Number(itemId);
 
 						const item = await request(getUrl(vendor))
 							.post(`/items/${collectionPrefix}_item`)
-							.send({ status: 'draft' })
+							.send({ id: mutation.itemId, status: 'draft' })
 							.set('Authorization', adminAuth);
 
 						expect(item.statusCode).toEqual(200);
-						mutation.itemId = item.body.data.id;
 
 						const witness = await request(getUrl(vendor))
 							.post(`/items/${collectionPrefix}_witness`)
@@ -64,6 +65,12 @@ describe.each(vendors)('%s', (vendor) => {
 					},
 				);
 
+				when.optional('the item is deleted', async () => {
+					mutation.response = await request(getUrl(vendor))
+						.delete(`/items/${mutation.collectionPrefix}_item/${mutation.itemId}`)
+						.set('Authorization', adminAuth);
+				});
+
 				when.optional('a user with no role deletes the item', async () => {
 					mutation.response = await request(getUrl(vendor))
 						.delete(`/items/${mutation.collectionPrefix}_item/${mutation.itemId}`)
@@ -75,15 +82,13 @@ describe.each(vendors)('%s', (vendor) => {
 					(status: string, docString: string) => {
 						expect(mutation.response!.statusCode).toEqual(Number(status));
 
-						expect(mutation.response!.body.errors[0].message).toEqual(
-							docString.split('\n').join(' ')
-								.replace('{item}', String(mutation.itemId)),
-						);
+						expect(mutation.response!.body.errors[0].message)
+							.toEqual(docString);
 					},
 				);
 
-				then.optional('the mutation answers 200', () => {
-					expect(mutation.response!.statusCode).toEqual(200);
+				then.optional(/^the mutation answers (\d+)$/, (status: string) => {
+					expect(mutation.response!.statusCode).toEqual(Number(status));
 				});
 
 				and(
