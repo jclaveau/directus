@@ -1,4 +1,4 @@
-import type { PrimaryKey, UpdateEntry, UpdateGroup } from '@directus/types';
+import type { PrimaryKey, UpdateEntries, UpdateGroup } from '@directus/types';
 import { cloneDeep, isEqual } from './lodash-es-used.js';
 
 type MappedUpdateRow<Item> = Partial<Item> | PrimaryKey | null | void;
@@ -21,12 +21,12 @@ type MappedUpdateRow<Item> = Partial<Item> | PrimaryKey | null | void;
  * back unchanged.
  */
 export async function mapUpdateRows<Item = any>(
-	entries: UpdateEntry<Item>[] | null,
+	entries: UpdateEntries<Item> | null,
 	mapRow: (
 		data: Partial<Item>,
 		key: PrimaryKey,
 	) => MappedUpdateRow<Item> | Promise<MappedUpdateRow<Item>>,
-): Promise<UpdateEntry<Item>[] | null> {
+): Promise<UpdateEntries<Item> | null> {
 	if (entries === null) {
 		return null;
 	}
@@ -35,7 +35,7 @@ export async function mapUpdateRows<Item = any>(
 		return entries;
 	}
 
-	const mappedEntries: UpdateEntry<Item>[] = [];
+	const mappedEntries: UpdateEntries<Item> = [];
 
 	for (const entry of entries) {
 		if (!('data' in entry)) {
@@ -43,7 +43,7 @@ export async function mapUpdateRows<Item = any>(
 			continue;
 		}
 
-		const entriesOfThisGroup: UpdateEntry<Item>[] = [];
+		const entriesOfThisGroup: UpdateEntries<Item> = [];
 
 		for (const key of entry.keys) {
 			// One row after another, so the rows map in the caller's order.

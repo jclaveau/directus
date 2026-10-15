@@ -1,4 +1,5 @@
 import type {
+	CreateEntries,
 	CreateEntry,
 	EventContext,
 	FilterHandler,
@@ -8,6 +9,7 @@ import type {
 	RegisterFunctions,
 	ScopedCachePurgeHandle,
 	ScopedCacheScopeHandle,
+	UpdateEntries,
 	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
@@ -189,6 +191,99 @@ test('register.filter types a delete by the keys it carries', () => {
 	register.filter('users.delete', (keys) => {
 		expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
 	});
+});
+
+test('register.filter wraps the item type in a grouped event list', () => {
+	const register = {} as RegisterFunctions;
+	const tableName = 'article';
+
+	register.filter<Item>(`${tableName}.items.create`, (entries) => {
+		expectTypeOf(entries).toEqualTypeOf<(CreateEntry<Item> | null)[] | null>();
+		return entries;
+	});
+
+	register.filter<Item>(`${tableName}.items.update`, (entries) => {
+		expectTypeOf(entries).toEqualTypeOf<UpdateEntry<Item>[] | null>();
+		return entries;
+	});
+});
+
+test('the list aliases name what a grouped filter receives, null aside', () => {
+	expectTypeOf<CreateEntries<Item>>().toEqualTypeOf<(CreateEntry<Item> | null)[]>();
+	expectTypeOf<UpdateEntries<Item>>().toEqualTypeOf<UpdateEntry<Item>[]>();
+});
+
+test('register.filter hands its entries to a helper typed by a list alias', () => {
+	const register = {} as RegisterFunctions;
+	const prepareCreateEntries = (createEntries: CreateEntries<Item>) => createEntries;
+	const prepareUpdateEntries = (updateEntries: UpdateEntries<Item>) => updateEntries;
+
+	register.filter<Item>(
+		'article.items.create',
+		(entries) => entries && prepareCreateEntries(entries),
+	);
+
+	register.filter<Item>(
+		'article.items.update',
+		(entries) => entries && prepareUpdateEntries(entries),
+	);
+});
+
+test('register.filter keeps the payload type on every other event', () => {
+	const register = {} as RegisterFunctions;
+	const tableName = 'article';
+	const event: string = 'auth.login';
+
+	register.filter<Item[]>(`${tableName}.items.read`, (rows) => {
+		expectTypeOf(rows).toEqualTypeOf<Item[]>();
+		return rows;
+	});
+
+	register.filter<number[]>(`${tableName}.items.delete`, (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<number[]>();
+		return keys;
+	});
+
+	register.filter<Item>('fields.create', (payload) => {
+		expectTypeOf(payload).toEqualTypeOf<Item>();
+		return payload;
+	});
+
+	register.filter<Item>(event, (payload) => {
+		expectTypeOf(payload).toEqualTypeOf<Item>();
+		return payload;
+	});
+});
+
+// emitFilter keeps the payload when a handler answers undefined.
+test('register.filter takes an item handler that returns nothing', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('article.items.create', (_entries, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter<Item>('article.items.update', (_entries, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter('article.items.delete', (_keys, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter('article.items.read', (_rows, _meta, context) => {
+		expectTypeOf(context).toEqualTypeOf<ReadEventContext>();
+	});
+});
+
+test('register.filter refuses an item handler that fits no item overload', () => {
+	const register = {} as RegisterFunctions;
+
+	// @ts-expect-error -- a create answers its list, not a row
+	register.filter('article.items.create', () => ({ a: 1 }));
+
+	// @ts-expect-error -- an update answers its list, not a row
+	register.filter('users.update', () => ({ a: 1 }));
 });
 
 test('register.filter leaves the handle optional on a bare or runtime event', () => {

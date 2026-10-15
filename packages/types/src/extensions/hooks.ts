@@ -8,7 +8,12 @@ import type {
 	ReadEventContext,
 	ScheduleHandler,
 } from '../events.js';
-import type { CreateEntry, PrimaryKey, UpdateEntry } from '../items.js';
+import type {
+	CreateEntries,
+	Item as AnyItem,
+	PrimaryKey,
+	UpdateEntries,
+} from '../items.js';
 import type { PermissionsAction } from '../permissions.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
 
@@ -54,9 +59,19 @@ export type BareFilterEvent =
 /**
  * Overloads in the order TypeScript tries them: a bare event first, so
  * `fields.create` does not read as a mutation; then the item shapes, a grouped
- * create or update defaulting its payload to the list it carries and a delete to
- * its keys; then any other string, which is also where a non-literal event name
- * lands.
+ * create or update taking the item type and wrapping it in the list it carries,
+ * a delete defaulting its payload to its keys; then any other string, which is
+ * also where a non-literal event name lands.
+ *
+ * An item handler may return nothing: `emitFilter` keeps the payload when a
+ * handler answers `undefined`.
+ *
+ * The last overload refuses an item event whose name it can infer, so a handler
+ * that does not fit its item overload is an error rather than a silent fall
+ * through to the plain context. TypeScript infers no type argument once the
+ * caller writes one, so `filter<Row>(...)` and `filter<Row, Out>(...)` still
+ * reach it with any event, and an event typed `string` is told apart from no
+ * other: `filter<Row>(eventName, ...)` there types the payload as `Row`.
  */
 export type RegisterFilter = {
 	<TIn = unknown, TOut = TIn>(
@@ -65,22 +80,32 @@ export type RegisterFilter = {
 	): void;
 	<TIn = unknown, TOut = TIn>(
 		event: ItemsReadEvent,
-		handler: FilterHandler<TIn, TOut, ReadEventContext>,
+		handler: FilterHandler<TIn, TOut | void, ReadEventContext>,
 	): void;
-	<TIn = (CreateEntry | null)[] | null, TOut = TIn>(
+	<EntryItem = AnyItem>(
 		event: ItemsCreateEvent,
-		handler: FilterHandler<TIn, TOut, MutationEventContext>,
+		handler: FilterHandler<
+			CreateEntries<EntryItem> | null,
+			CreateEntries<EntryItem> | null | void,
+			MutationEventContext
+		>,
 	): void;
-	<TIn = UpdateEntry[] | null, TOut = TIn>(
+	<EntryItem = AnyItem>(
 		event: ItemsUpdateEvent,
-		handler: FilterHandler<TIn, TOut, MutationEventContext>,
+		handler: FilterHandler<
+			UpdateEntries<EntryItem> | null,
+			UpdateEntries<EntryItem> | null | void,
+			MutationEventContext
+		>,
 	): void;
 	<TIn = PrimaryKey[] | null, TOut = TIn>(
 		event: ItemsDeleteEvent,
-		handler: FilterHandler<TIn, TOut, MutationEventContext>,
+		handler: FilterHandler<TIn, TOut | void, MutationEventContext>,
 	): void;
-	<TIn = unknown, TOut = TIn>(
-		event: string,
+	<TIn = unknown, TOut = TIn, EventName extends string = string>(
+		event: EventName extends ItemsReadEvent | ItemsMutationEvent
+			? never
+			: EventName,
 		handler: FilterHandler<TIn, TOut>,
 	): void;
 };
