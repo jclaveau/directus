@@ -438,6 +438,9 @@ class FlowManager {
 				{ payload, ...meta, event: route.triggerEvent },
 				{
 					accountability: context['accountability'],
+					transaction: 'transaction' in context
+						? context.transaction
+						: undefined,
 					database: context['database'],
 					getSchema: context['schema']
 						? () => context['schema']
