@@ -3936,3 +3936,231 @@ describe('Services / Items / purgeScopedCache', () => {
 		);
 	});
 });
+
+describe('Services / Items / a failed mutation on the caller\'s transaction', () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+		tracker.on.select('test').response([]);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+	});
+
+	it(oneLine`
+		purges what an update hook declared before throwing, though the caller's
+		transaction rolls back
+	`, async () => {
+		const declareThenThrow = (_groups: unknown, _meta: unknown, context: any) => {
+			context.scopedCache.purgeBy({ collection: 'test' });
+
+			throw new Error('refused by the hook');
+		};
+
+		emitter.onFilter('items.update', declareThenThrow);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.updateMany([1], { name: 'Test' });
+			})).rejects.toThrow(new Error('refused by the hook'));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				[],
+				expect.anything(),
+				{
+					declaredFingerprints: [{ collection: 'test' }],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', declareThenThrow);
+		}
+	});
+
+	it(oneLine`
+		purges the collection whole when an update hook's answer is refused, though
+		the caller's transaction rolls back
+	`, async () => {
+		const answerTwice = () => [{ key: 1 }, { key: 1 }];
+
+		emitter.onFilter('items.update', answerTwice);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.updateMany([1], { name: 'Test' });
+			})).rejects.toThrow(new InvalidPayloadError({
+				reason: 'A "items.update" filter hook answered with row 1 more than once',
+			}));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', answerTwice);
+		}
+	});
+
+	it(oneLine`
+		purges the collection whole when an update fails after its hook took a row
+		over, though the caller's transaction rolls back
+	`, async () => {
+		const takeOverSecond = (groups: UpdateGroup[]) => [...groups, { key: 2 }];
+
+		tracker.on.update('test').simulateError('write refused');
+		emitter.onFilter('items.update', takeOverSecond);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.updateMany([1], { name: 'Test' });
+			})).rejects.toThrow(new Error(
+				`update "test" set "name" = 'Test' where "id" in (1) - write refused`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.update', takeOverSecond);
+		}
+	});
+
+	it(oneLine`
+		purges the collection whole when a create fails after its hook took a row
+		over, though the caller's transaction rolls back
+	`, async () => {
+		const takeOverFirst = (entries: (CreateEntry | null)[]) => {
+			return mapCreateRows(entries, (payload) => {
+				if (payload['name'] !== 'take-over') {
+					return payload;
+				}
+
+				return 1;
+			});
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', takeOverFirst);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.createMany([{ name: 'take-over' }, { id: 1, name: 'copy' }]);
+			})).rejects.toThrow(new Error(
+				`insert into "test" ("id", "name") values (1, 'copy') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				null,
+				expect.anything(),
+				{ scopedCachePurgeId: expect.any(String) },
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverFirst);
+		}
+	});
+
+	it(oneLine`
+		purges nothing when a failed create's only takeover was declared inert
+	`, async () => {
+		const takeOverInert = (
+			entries: (CreateEntry | null)[],
+			_meta: unknown,
+			context: any,
+		) => {
+			return mapCreateRows(entries, (payload) => {
+				if (payload['name'] !== 'take-over') {
+					return payload;
+				}
+
+				context.scopedCache.skipPurgeFor(1);
+
+				return 1;
+			});
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', takeOverInert);
+
+		try {
+			await expect(transaction(db, async (callerTrx) => {
+				await new ItemsService('test', { knex: callerTrx, schema })
+					.createMany([{ name: 'take-over' }, { id: 1, name: 'copy' }]);
+			})).rejects.toThrow(new Error(
+				`insert into "test" ("id", "name") values (1, 'copy') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverInert);
+		}
+	});
+
+	it(oneLine`
+		leaves the global reads cached when a create's only takeover is inert and its
+		hook declared a slice
+	`, async () => {
+		const takeOverInertDeclaring = (
+			entries: (CreateEntry | null)[],
+			_meta: unknown,
+			context: any,
+		) => {
+			return mapCreateRows(entries, () => {
+				context.scopedCache.skipPurgeFor(1);
+				context.scopedCache.purgeBy({ collection: 'children' });
+
+				return 1;
+			});
+		};
+
+		emitter.onFilter('items.create', takeOverInertDeclaring);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.createMany([{ name: 'take-over' }]);
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				[],
+				expect.anything(),
+				{
+					declaredFingerprints: [{ collection: 'children' }],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', takeOverInertDeclaring);
+		}
+	});
+});

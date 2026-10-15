@@ -485,6 +485,8 @@ implements AbstractService<Item> {
 			scopedCacheHookDeclarations.purgeFingerprints.length;
 
 		// The rows the failed attempt's hooks took over, which the catch purges.
+		// TODO(#610): only the last attempt's, so a row a retried attempt's hook took
+		// over through a connection of its own, and the retry did not, stays cached.
 		let attemptTakenOverKeys: PrimaryKey[] = [];
 
 		const {
@@ -951,6 +953,12 @@ implements AbstractService<Item> {
 					scopedCacheHookDeclarations,
 					[],
 					{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+				);
+
+				await this.purgeHookWrittenScopedCache(
+					attemptTakenOverKeys,
+					scopedCacheHookDeclarations,
+					opts,
 				);
 			}
 			// The inserts rolled back; a takeover was written by its hook, outside
@@ -1983,6 +1991,12 @@ implements AbstractService<Item> {
 						opts,
 						takeoverUndeclared,
 					);
+
+					await this.purgeHookWrittenScopedCache(
+						changedTakenOverKeys,
+						scopedCacheHookDeclarations,
+						opts,
+					);
 				}
 				else if (changedTakenOverKeys.length > 0) {
 					await this.purgeUpdatedScopedCache(
@@ -2031,11 +2045,23 @@ implements AbstractService<Item> {
 				else {
 					await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
 				}
+
+				await this.purgeHookWrittenScopedCache(
+					changedKeys,
+					scopedCacheHookDeclarations,
+					opts,
+				);
 			}
 			// A hook threw before the update had an answer: what it wrote through a
 			// connection of its own is known only by what it declared.
 			else {
 				await this.purgeDeclaredScopedCache(scopedCacheHookDeclarations, opts);
+
+				await this.purgeHookWrittenScopedCache(
+					[],
+					scopedCacheHookDeclarations,
+					opts,
+				);
 			}
 
 			throw error;
@@ -2193,29 +2219,32 @@ implements AbstractService<Item> {
 			return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
 		});
 
-		if (
-			changedKeys.length === 0 &&
-			declarations.purgeFingerprints.length === declaredPurgesAtStart
-		) {
+		if (changedKeys.length === 0) {
 			// Nothing written and nothing declared: no entry can have gone stale.
 			// Returning rather than purging nothing, which would still take this
 			// collection's bare fingerprint and drop its global reads.
+			if (declarations.purgeFingerprints.length === declaredPurgesAtStart) {
+				return;
+			}
+
+			// Nothing written, so only what the hooks declared: this collection's
+			// global reads stay.
+			await this.purgeDeclaredScopedCache(declarations, opts);
+
 			return;
 		}
 
 		// Counted off the take-overs themselves: one returning a key another row of
 		// this call inserts adds no key to the set above.
-		const takeoverUndeclared = takenOverRowKeys.some((key) => {
-			const keyName = this.primaryKeyNameOf(key);
-
-			return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
-		});
-
 		// No `scopedCacheFields.length > 0` guard: the primary key pins on every
 		// collection, so an undeclared take-over leaves the other rows' key slices
 		// stale even where no scope field is declared.
 		// A read that fails leaves the slices unknown: purged whole.
-		const scopedCacheSnapshot = takeoverUndeclared
+		const scopedCacheSnapshot = takenOverRowKeys.some((key) => {
+			const keyName = this.primaryKeyNameOf(key);
+
+			return !skippedKeyNames.has(keyName) && !declaredKeyNames.has(keyName);
+		})
 			? null
 			: await this.scopedCache.snapshot(changedKeys).catch(() => null);
 
@@ -2254,6 +2283,56 @@ implements AbstractService<Item> {
 			[],
 			{ includeBareFingerprint: false },
 		);
+	}
+
+	/**
+	 * Purge, now and through the pool, what a failed mutation's hooks wrote through a
+	 * connection of their own: the rows they took over, and what they declared. On
+	 * the caller's transaction, the mutation's own purge waits for that transaction
+	 * to commit, and its rollback drops the purge while those writes have landed.
+	 *
+	 * A takeover purges the collection whole: its old slice is unknown.
+	 */
+	private async purgeHookWrittenScopedCache(
+		takenOverKeys: PrimaryKey[],
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+		opts: MutationOptions,
+	): Promise<void> {
+		if (
+			!this.knex.isTransaction ||
+			!shouldClearCache(this.cache, opts, this.collection)
+		) {
+			return;
+		}
+
+		const skippedKeyNames = this.purgeSkippedKeyNames(declarations);
+
+		const poolScopedCache = new ItemScopedCacheService(
+			this.collection,
+			this.schema,
+			getDatabase(),
+			this.cache,
+			this.accountability,
+		);
+
+		if (takenOverKeys.some((key) => {
+			return !skippedKeyNames.has(this.primaryKeyNameOf(key));
+		})) {
+			await poolScopedCache.purge(
+				null,
+				declarations,
+				[],
+				{ includeBareFingerprint: opts.purgeBareFingerprint !== false },
+			);
+		}
+		else if (declarations.purgeFingerprints.length > 0) {
+			await poolScopedCache.purge(
+				[],
+				declarations,
+				[],
+				{ includeBareFingerprint: false },
+			);
+		}
 	}
 
 	/**
