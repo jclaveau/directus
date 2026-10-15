@@ -3,6 +3,7 @@ import type {
 	EventContext,
 	FilterHandler,
 	MutationEventContext,
+	PrimaryKey,
 	ReadEventContext,
 	RegisterFunctions,
 	ScopedCachePurgeHandle,
@@ -175,6 +176,18 @@ test('register.filter types a grouped event by the list it carries', () => {
 
 	register.filter('articles.items.create', (entries) => {
 		expectTypeOf(entries).toEqualTypeOf<(CreateEntry | null)[] | null>();
+	});
+});
+
+test('register.filter types a delete by the keys it carries', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('articles.items.delete', (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
+	});
+
+	register.filter('users.delete', (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<PrimaryKey[] | null>();
 	});
 });
 
