@@ -65,6 +65,13 @@ export type BareFilterEvent =
  *
  * An item handler may return nothing: `emitFilter` keeps the payload when a
  * handler answers `undefined`.
+ *
+ * The last overload refuses an item event whose name it can infer, so a handler
+ * that does not fit its item overload is an error rather than a silent fall
+ * through to the plain context. TypeScript infers no type argument once the
+ * caller writes one, so `filter<Row>(...)` and `filter<Row, Out>(...)` still
+ * reach it with any event, and an event typed `string` is told apart from no
+ * other: `filter<Row>(eventName, ...)` there types the payload as `Row`.
  */
 export type RegisterFilter = {
 	<TIn = unknown, TOut = TIn>(
@@ -95,8 +102,10 @@ export type RegisterFilter = {
 		event: ItemsDeleteEvent,
 		handler: FilterHandler<TIn, TOut | void, MutationEventContext>,
 	): void;
-	<TIn = unknown, TOut = TIn>(
-		event: string,
+	<TIn = unknown, TOut = TIn, EventName extends string = string>(
+		event: EventName extends ItemsReadEvent | ItemsMutationEvent
+			? never
+			: EventName,
 		handler: FilterHandler<TIn, TOut>,
 	): void;
 };

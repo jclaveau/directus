@@ -253,6 +253,16 @@ test('register.filter takes an item handler that returns nothing', () => {
 	});
 });
 
+test('register.filter refuses an item handler that fits no item overload', () => {
+	const register = {} as RegisterFunctions;
+
+	// @ts-expect-error -- a create answers its list, not a row
+	register.filter('article.items.create', () => ({ a: 1 }));
+
+	// @ts-expect-error -- an update answers its list, not a row
+	register.filter('users.update', () => ({ a: 1 }));
+});
+
 test('register.filter leaves the handle optional on a bare or runtime event', () => {
 	const register = {} as RegisterFunctions;
 	const event: string = 'auth.login';
