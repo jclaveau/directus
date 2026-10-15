@@ -191,6 +191,54 @@ test('register.filter types a delete by the keys it carries', () => {
 	});
 });
 
+test('register.filter wraps the item type in a grouped event list', () => {
+	const register = {} as RegisterFunctions;
+	const tableName = 'article';
+
+	register.filter<Item>(`${tableName}.items.create`, (entries) => {
+		expectTypeOf(entries).toEqualTypeOf<(CreateEntry<Item> | null)[] | null>();
+		return entries;
+	});
+
+	register.filter<Item>(`${tableName}.items.update`, (entries) => {
+		expectTypeOf(entries).toEqualTypeOf<UpdateEntry<Item>[] | null>();
+		return entries;
+	});
+});
+
+test('register.filter keeps the payload type on every other event', () => {
+	const register = {} as RegisterFunctions;
+	const tableName = 'article';
+	const event: string = 'auth.login';
+
+	register.filter<Item[]>(`${tableName}.items.read`, (rows) => {
+		expectTypeOf(rows).toEqualTypeOf<Item[]>();
+		return rows;
+	});
+
+	register.filter<number[]>(`${tableName}.items.delete`, (keys) => {
+		expectTypeOf(keys).toEqualTypeOf<number[]>();
+		return keys;
+	});
+
+	register.filter<Item>('fields.create', (payload) => {
+		expectTypeOf(payload).toEqualTypeOf<Item>();
+		return payload;
+	});
+
+	register.filter<Item>(event, (payload) => {
+		expectTypeOf(payload).toEqualTypeOf<Item>();
+		return payload;
+	});
+});
+
+test('register.filter refuses a create handler that drops a row', () => {
+	const register = {} as RegisterFunctions;
+
+	// @ts-expect-error -- a create answers every position, cancelled ones as null
+	register.filter<Item>('article.items.create', (entries) => entries?.[0]);
+});
+
 test('register.filter leaves the handle optional on a bare or runtime event', () => {
 	const register = {} as RegisterFunctions;
 	const event: string = 'auth.login';
