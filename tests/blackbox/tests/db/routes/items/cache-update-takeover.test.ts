@@ -665,9 +665,8 @@ describe.each(vendors)('%s', (vendor) => {
 					(docString: string) => {
 						expect(failedCreate.statusCode).toBe(400);
 
-						expect(failedCreate.body.errors[0].message).toEqual(
-							messageOfDocString(docString, () => duplicateRowId),
-						);
+						expect(failedCreate.body.errors[0].message)
+							.toEqual(messageOfDocString(docString));
 					},
 				);
 

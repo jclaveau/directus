@@ -126,7 +126,7 @@ Feature: A row a mutation hook took over is purged from the response cache
     When its row is sent the body "write-then-throw"
     Then the update fails with the status 500 and the message:
       """
-      An unexpected error occurred.
+      The body "write-then-throw" is refused
       """
     And the read of test_takeover_hook_threw answers:
       | cache | response                    |
@@ -139,8 +139,8 @@ Feature: A row a mutation hook took over is purged from the response cache
     When a create sends "take-over" beside the key of the "duplicate" row
     Then the create is refused with the message:
       """
-      Value "{row}" for field "id" in collection "test_takeover_create_failed" has to
-      be unique.
+      Value for field "id" in collection "test_takeover_create_failed" has to be
+      unique.
       """
     And the read of test_takeover_create_failed marked "taken" answers:
       | cache | response               |
