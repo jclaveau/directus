@@ -20,7 +20,7 @@ export default function registerHooks({ filter }, { services }) {
 			const itemsService = new services.ItemsService(JUNCTION, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			const [existing] = await itemsService.readByQuery(
@@ -35,7 +35,7 @@ export default function registerHooks({ filter }, { services }) {
 			// Re-assign the existing link to the new post — the row moves slices. A raw
 			// update on the trx knex, so it doesn't recurse through the service purge.
 			await context
-				.database(JUNCTION)
+				.transaction(JUNCTION)
 				.where({ id: existing.id })
 				.update({ [POST_FK]: payload[POST_FK] });
 

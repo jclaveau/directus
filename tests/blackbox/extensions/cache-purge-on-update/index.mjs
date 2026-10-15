@@ -20,7 +20,7 @@ export default function registerHooks({ filter }, { services }) {
 			const orderService = new services.ItemsService(ORDER, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			const [updated] = await orderService.readMany(
@@ -36,7 +36,7 @@ export default function registerHooks({ filter }, { services }) {
 			const summaryService = new services.ItemsService(SUMMARY, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			const affected = await summaryService.readByQuery(

@@ -11,7 +11,7 @@ export default function registerHooks({ filter }, { services }) {
 			const childService = new services.ItemsService(CHILD, {
 				schema: context.schema,
 				accountability: context.accountability,
-				knex: context.database,
+				knex: context.transaction,
 			});
 
 			const [movable] = await childService.readByQuery(
@@ -25,7 +25,7 @@ export default function registerHooks({ filter }, { services }) {
 
 			// Raw trx update, no service purge recursion; only the PK is surfaced.
 			await context
-				.database(CHILD)
+				.transaction(CHILD)
 				.where({ id: movable.id })
 				.update({ slot: payload.slot });
 

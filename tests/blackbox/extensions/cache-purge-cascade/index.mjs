@@ -18,7 +18,7 @@ export default function registerHooks({ filter }, { services }) {
 		const chargeService = new services.ItemsService(CHARGE, {
 			schema: context.schema,
 			accountability: context.accountability,
-			knex: context.database,
+			knex: context.transaction,
 		});
 
 		const [deleted] = await chargeService.readMany(
@@ -34,7 +34,7 @@ export default function registerHooks({ filter }, { services }) {
 		const invoiceService = new services.ItemsService(INVOICE, {
 			schema: context.schema,
 			accountability: context.accountability,
-			knex: context.database,
+			knex: context.transaction,
 		});
 
 		const affected = await invoiceService.readByQuery(

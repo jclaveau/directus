@@ -11,17 +11,17 @@ export default function registerHooks({ filter }) {
 	filter(`${SIGNAL}.items.create`, (entries, _meta, context) => {
 		return mapCreateRows(entries, async (payload) => {
 			if (payload.rewritten_ids) {
-				await context.database(ENTRY)
+				await context.transaction(ENTRY)
 					.whereIn('id', payload.rewritten_ids)
 					.update(payload.rewritten_values);
 			}
 
 			if (payload.deleted_account) {
-				await context.database(ENTRY)
+				await context.transaction(ENTRY)
 					.where({ account: payload.deleted_account })
 					.delete();
 
-				await context.database(ACCOUNT)
+				await context.transaction(ACCOUNT)
 					.where({ id: payload.deleted_account })
 					.delete();
 			}

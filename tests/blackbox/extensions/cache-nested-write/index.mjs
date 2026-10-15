@@ -19,7 +19,7 @@ export default function registerHooks({ filter }, { services }) {
 		const targetService = new services.ItemsService(TARGET, {
 			schema: context.schema,
 			accountability: context.accountability,
-			knex: context.database,
+			knex: context.transaction,
 		});
 
 		const rows = await targetService.readByQuery(

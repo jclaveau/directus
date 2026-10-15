@@ -26,7 +26,7 @@ const partlyDeclaredCollection = 'test_takeover_partly_declared';
 export default function registerHooks({ filter }) {
 	filter(
 		`${refusedCollection}.items.update`,
-		async (groups, _meta, { database }) => {
+		async (groups, _meta, { transaction }) => {
 			const takenOverGroup = groups.find((group) => {
 				return group?.data?.body === 'take-over-twice';
 			});
@@ -37,7 +37,7 @@ export default function registerHooks({ filter }) {
 
 			const [takenOverKey] = takenOverGroup.keys;
 
-			await database(refusedCollection)
+			await transaction(refusedCollection)
 				.where({ id: takenOverKey })
 				.update({ body: 'taken-over' });
 
@@ -47,7 +47,7 @@ export default function registerHooks({ filter }) {
 
 	filter(
 		`${upsertChildCollection}.items.update`,
-		async (groups, _meta, { database }) => {
+		async (groups, _meta, { transaction }) => {
 			const takesOverSibling = groups.some((group) => {
 				return group?.data?.body === 'take-over-sibling';
 			});
@@ -56,11 +56,11 @@ export default function registerHooks({ filter }) {
 				return groups;
 			}
 
-			const siblingRow = await database(upsertChildCollection)
+			const siblingRow = await transaction(upsertChildCollection)
 				.where({ marker: 'sibling' })
 				.first();
 
-			await database(upsertChildCollection)
+			await transaction(upsertChildCollection)
 				.where({ id: siblingRow.id })
 				.update({ body: 'taken-over' });
 
@@ -87,25 +87,28 @@ export default function registerHooks({ filter }) {
 	filter(`${inertCollection}.items.update`, takeOverInert);
 	filter(`${bigInertCollection}.items.update`, takeOverInert);
 
-	filter(`${movedCollection}.items.update`, async (groups, _meta, { database }) => {
-		const movedGroup = groups.find((group) => {
-			return group?.data?.body === 'move-to-b';
-		});
+	filter(
+		`${movedCollection}.items.update`,
+		async (groups, _meta, { transaction }) => {
+			const movedGroup = groups.find((group) => {
+				return group?.data?.body === 'move-to-b';
+			});
 
-		if (!movedGroup) {
-			return groups;
-		}
+			if (!movedGroup) {
+				return groups;
+			}
 
-		await database(movedCollection)
-			.whereIn('id', movedGroup.keys)
-			.update({ slot: 'b', body: 'moved' });
+			await transaction(movedCollection)
+				.whereIn('id', movedGroup.keys)
+				.update({ slot: 'b', body: 'moved' });
 
-		return movedGroup.keys.map((key) => ({ key }));
-	});
+			return movedGroup.keys.map((key) => ({ key }));
+		},
+	);
 
 	filter(
 		`${partlyDeclaredCollection}.items.update`,
-		async (groups, _meta, { database, scopedCache }) => {
+		async (groups, _meta, { transaction, scopedCache }) => {
 			const movedGroup = groups.find((group) => {
 				return group?.data?.body === 'move-both';
 			});
@@ -116,11 +119,11 @@ export default function registerHooks({ filter }) {
 
 			const [declaredKey, undeclaredKey] = movedGroup.keys;
 
-			await database(partlyDeclaredCollection)
+			await transaction(partlyDeclaredCollection)
 				.where({ id: declaredKey })
 				.update({ slot: 'c', body: 'moved' });
 
-			await database(partlyDeclaredCollection)
+			await transaction(partlyDeclaredCollection)
 				.where({ id: undeclaredKey })
 				.update({ slot: 'd', body: 'moved' });
 
