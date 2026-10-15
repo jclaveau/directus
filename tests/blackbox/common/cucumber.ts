@@ -218,15 +218,24 @@ export function parseGherkinTable<Row extends Record<string, unknown>>(
  * A docstring as the one-line message it spells: its line breaks read as
  * spaces, and each `{name}` as the key `keyOfName` gives that name. A `{ key }`
  * holding spaces is no placeholder, so a message's own braces stay as written.
+ * Without `keyOfName`, every brace stays as written.
  */
 export function messageOfDocString(
 	docString: string,
-	keyOfName: (name: string) => number | string,
+	keyOfName?: (name: string) => number | string,
 ): string {
-	return docString
+	const oneLineMessage = docString
 		.split('\n')
-		.join(' ')
-		.replace(/\{([\w-]+)\}/g, (_match, placeholderName: string) => {
+		.join(' ');
+
+	if (keyOfName === undefined) {
+		return oneLineMessage;
+	}
+
+	return oneLineMessage.replace(
+		/\{([\w-]+)\}/g,
+		(_match, placeholderName: string) => {
 			return String(keyOfName(placeholderName));
-		});
+		},
+	);
 }

@@ -1,5 +1,9 @@
 import { getUrl } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import {
+	defineFeature,
+	loadFeature,
+	messageOfDocString,
+} from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import request, { type Response } from 'supertest';
@@ -83,7 +87,7 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(mutation.response!.statusCode).toEqual(Number(status));
 
 						expect(mutation.response!.body.errors[0].message)
-							.toEqual(docString);
+							.toEqual(messageOfDocString(docString));
 					},
 				);
 

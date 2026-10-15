@@ -28,7 +28,8 @@ Feature: A mutation hook's write lands only with the mutation
     When a user with no role deletes the item
     Then the mutation is refused with the status 403 and the message:
       """
-      You don't have permission to access collection "test_hook_rollback_forbidden_item" or it does not exist. Queried in root.
+      You don't have permission to access collection "test_hook_rollback_forbidden_item"
+      or it does not exist. Queried in root.
       """
     And the witness holds the note "untouched"
 
