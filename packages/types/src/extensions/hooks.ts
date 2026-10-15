@@ -8,7 +8,7 @@ import type {
 	ReadEventContext,
 	ScheduleHandler,
 } from '../events.js';
-import type { CreateEntry, UpdateEntry } from '../items.js';
+import type { CreateEntry, PrimaryKey, UpdateEntry } from '../items.js';
 import type { PermissionsAction } from '../permissions.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
 
@@ -39,6 +39,7 @@ type ItemsServiceEvent<Action extends PermissionsAction> =
 export type ItemsReadEvent = ItemsServiceEvent<'read'>;
 export type ItemsCreateEvent = ItemsServiceEvent<'create'>;
 export type ItemsUpdateEvent = ItemsServiceEvent<'update'>;
+export type ItemsDeleteEvent = ItemsServiceEvent<'delete'>;
 export type ItemsMutationEvent = ItemsServiceEvent<MutationAction>;
 
 /**
@@ -53,8 +54,9 @@ export type BareFilterEvent =
 /**
  * Overloads in the order TypeScript tries them: a bare event first, so
  * `fields.create` does not read as a mutation; then the item shapes, a grouped
- * create or update defaulting its payload to the list it carries; then any other
- * string, which is also where a non-literal event name lands.
+ * create or update defaulting its payload to the list it carries and a delete to
+ * its keys; then any other string, which is also where a non-literal event name
+ * lands.
  */
 export type RegisterFilter = {
 	<TIn = unknown, TOut = TIn>(
@@ -73,8 +75,8 @@ export type RegisterFilter = {
 		event: ItemsUpdateEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;
-	<TIn = unknown, TOut = TIn>(
-		event: ItemsMutationEvent,
+	<TIn = PrimaryKey[] | null, TOut = TIn>(
+		event: ItemsDeleteEvent,
 		handler: FilterHandler<TIn, TOut, MutationEventContext>,
 	): void;
 	<TIn = unknown, TOut = TIn>(
