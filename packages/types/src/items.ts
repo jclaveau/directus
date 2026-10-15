@@ -44,6 +44,15 @@ export type CreateEntries<EntryItem = any> = (CreateEntry<EntryItem> | null)[];
 /** The changes and taken-over rows of one update. */
 export type UpdateEntries<EntryItem = any> = UpdateEntry<EntryItem>[];
 
+/**
+ * One key of a delete. A key arrives as the request spelled it (`"5"` from
+ * `DELETE /items/<collection>/5`) and may be a uuid, so the item does not type it.
+ */
+export type DeleteKey = PrimaryKey;
+
+/** The keys of one delete. */
+export type DeleteKeys = DeleteKey[];
+
 export type Alterations<T extends Item = Item, K extends keyof T | undefined = undefined> = {
 	create: Partial<T>[];
 	update: (K extends keyof T ? Partial<T> & Pick<T, K> : Partial<T>)[];
