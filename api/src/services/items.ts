@@ -1923,18 +1923,20 @@ implements AbstractService<Item> {
 					nestedActionEvents,
 				};
 
-				// Directus writes nothing — every group was a no-op, the per-row filter
-				// cancelled every row, or a hook took every row over.
-				if (writingGroups.length === 0) {
-					return answeredUpdate;
-				}
-
+				// Set before the early return too: a commit failing after a hook took
+				// every row over still owes those rows their purge.
 				failedWrite = {
 					writtenKeys,
 					changedTakenOverKeys,
 					oldScopedCacheSnapshot,
 					takeoverUndeclared,
 				};
+
+				// Directus writes nothing — every group was a no-op, the per-row filter
+				// cancelled every row, or a hook took every row over.
+				if (writingGroups.length === 0) {
+					return answeredUpdate;
+				}
 
 				let userIntegrityCheckFlags =
 					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
