@@ -2710,7 +2710,7 @@ implements AbstractService<Item> {
 				opts.emitEvents !== false
 					? await emitter.emitFilter<PrimaryKey[], null>(
 						deleteEvent,
-						keys,
+						[...keys],
 						{
 							collection: this.collection,
 						},
