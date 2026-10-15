@@ -31,6 +31,9 @@ const movedCollection = 'test_takeover_moved';
 const partlyDeclaredCollection = 'test_takeover_partly_declared';
 const hookThrewCollection = 'test_takeover_hook_threw';
 const createFailedCollection = 'test_takeover_create_failed';
+const nestedParentCollection = 'test_takeover_nested_parent';
+const nestedChildCollection = 'test_takeover_nested_child';
+const createDeclaredCollection = 'test_takeover_create_declared';
 const cacheStatusHeader = 'x-cache-status';
 
 const takeoverFeature = loadFeature(
@@ -59,6 +62,9 @@ describe.each(vendors)('%s', (vendor) => {
 	let partlyDeclaredRowIds: number[];
 	let hookThrewRowId: number;
 	let duplicateRowId: number;
+	let nestedParentId: number;
+	let nestedDuplicateId: number;
+	let thrownChildId: number;
 
 	beforeAll(async () => {
 		await CreateCollections(vendor, {
@@ -120,6 +126,25 @@ describe.each(vendors)('%s', (vendor) => {
 						{ field: 'body', type: 'string', meta: {} },
 					],
 				},
+				{
+					collection: nestedParentCollection,
+					fields: [{ field: 'title', type: 'string', meta: {} }],
+				},
+				{
+					collection: nestedChildCollection,
+					fields: [
+						{ field: 'marker', type: 'string', meta: {} },
+						{ field: 'body', type: 'string', meta: {} },
+					],
+				},
+				{
+					collection: createDeclaredCollection,
+					meta: { scoped_cache_fields: ['slot'] },
+					fields: [
+						{ field: 'slot', type: 'string', meta: {} },
+						{ field: 'body', type: 'string', meta: {} },
+					],
+				},
 			],
 		});
 
@@ -127,6 +152,13 @@ describe.each(vendors)('%s', (vendor) => {
 			collection: upsertParentCollection,
 			field: 'children',
 			otherCollection: upsertChildCollection,
+			otherField: 'parent',
+		});
+
+		await CreateFieldO2M(vendor, {
+			collection: nestedParentCollection,
+			field: 'children',
+			otherCollection: nestedChildCollection,
 			otherField: 'parent',
 		});
 
@@ -213,6 +245,30 @@ describe.each(vendors)('%s', (vendor) => {
 
 		duplicateRowId = duplicateRow.id;
 
+		const nestedParent = await CreateItem(vendor, {
+			collection: nestedParentCollection,
+			item: { title: 'parent' },
+		});
+
+		nestedParentId = nestedParent.id;
+
+		const [, nestedDuplicate, thrownChild] = await CreateItem(vendor, {
+			collection: nestedChildCollection,
+			item: [
+				{ marker: 'taken', body: 'original' },
+				{ marker: 'duplicate', body: 'original' },
+				{ marker: 'thrown', body: 'original', parent: nestedParentId },
+			],
+		});
+
+		nestedDuplicateId = nestedDuplicate.id;
+		thrownChildId = thrownChild.id;
+
+		await CreateItem(vendor, {
+			collection: createDeclaredCollection,
+			item: { slot: 'a', body: 'original' },
+		});
+
 		cacheEnv[vendor].PORT = String(await getPort());
 
 		cacheInstance = spawn('node', [paths.cli, 'start'], {
@@ -236,6 +292,9 @@ describe.each(vendors)('%s', (vendor) => {
 		await DeleteCollection(vendor, { collection: partlyDeclaredCollection });
 		await DeleteCollection(vendor, { collection: hookThrewCollection });
 		await DeleteCollection(vendor, { collection: createFailedCollection });
+		await DeleteCollection(vendor, { collection: nestedChildCollection });
+		await DeleteCollection(vendor, { collection: nestedParentCollection });
+		await DeleteCollection(vendor, { collection: createDeclaredCollection });
 	});
 
 	defineFeature(takeoverFeature, (scenario) => {
@@ -661,9 +720,9 @@ describe.each(vendors)('%s', (vendor) => {
 				);
 
 				then(
-					'the create is refused with the message:',
-					(docString: string) => {
-						expect(failedCreate.statusCode).toBe(400);
+					/^the create is refused with the status (\d+) and the message:$/,
+					(status: string, docString: string) => {
+						expect(failedCreate.statusCode).toBe(Number(status));
 
 						expect(failedCreate.body.errors[0].message)
 							.toEqual(messageOfDocString(docString));
@@ -675,6 +734,210 @@ describe.each(vendors)('%s', (vendor) => {
 					async (marker: string, table: Record<string, string>[]) => {
 						const { cache, response } = table[0]!;
 						const answeredRead = await readMarked(marker);
+
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a failed nested create still purges the row its hook took over',
+			({ given, when, then, and }) => {
+				let failedUpdate: request.Response;
+
+				function readMarked(marker: string) {
+					return request(getUrl(vendor, cacheEnv))
+						.get(`/items/${nestedChildCollection}`)
+						.query({ fields: 'body', 'filter[marker][_eq]': marker })
+						.set('Authorization', adminAuth);
+				}
+
+				given(
+					/^the read of \w+ marked "(.*)" is cached:$/,
+					async (marker: string, table: Record<string, string>[]) => {
+						expect((await readMarked(marker)).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						const cachedRead = await readMarked(marker);
+
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					/^the parent creates "(.*)" beside the key of the "duplicate" child$/,
+					async (body: string) => {
+						failedUpdate = await request(getUrl(vendor, cacheEnv))
+							.patch(`/items/${nestedParentCollection}/${nestedParentId}`)
+							.send({
+								children: {
+									create: [{ body }, { id: nestedDuplicateId, body: 'copy' }],
+								},
+							})
+							.set('Authorization', adminAuth);
+					},
+				);
+
+				then(
+					/^the update is refused with the status (\d+) and the message:$/,
+					(status: string, docString: string) => {
+						expect(failedUpdate.statusCode).toBe(Number(status));
+
+						expect(failedUpdate.body.errors[0].message)
+							.toEqual(messageOfDocString(docString));
+					},
+				);
+
+				and(
+					/^the read of \w+ marked "(.*)" answers:$/,
+					async (marker: string, table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answeredRead = await readMarked(marker);
+
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			oneLine`
+				a nested hook throwing after its own write still purges what it
+				declared
+			`,
+			({ given, when, then, and }) => {
+				let failedUpdate: request.Response;
+
+				function readMarked(marker: string) {
+					return request(getUrl(vendor, cacheEnv))
+						.get(`/items/${nestedChildCollection}`)
+						.query({ fields: 'body', 'filter[marker][_eq]': marker })
+						.set('Authorization', adminAuth);
+				}
+
+				given(
+					/^the read of \w+ marked "(.*)" is cached:$/,
+					async (marker: string, table: Record<string, string>[]) => {
+						expect((await readMarked(marker)).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						const cachedRead = await readMarked(marker);
+
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					/^the parent sends its "thrown" child the body "(.*)"$/,
+					async (body: string) => {
+						failedUpdate = await request(getUrl(vendor, cacheEnv))
+							.patch(`/items/${nestedParentCollection}/${nestedParentId}`)
+							.send({ children: { update: [{ id: thrownChildId, body }] } })
+							.set('Authorization', adminAuth);
+					},
+				);
+
+				then(
+					/^the update fails with the status (\d+) and the message:$/,
+					(status: string, docString: string) => {
+						expect(failedUpdate.statusCode).toBe(Number(status));
+
+						expect(failedUpdate.body.errors[0].message)
+							.toEqual(messageOfDocString(docString));
+					},
+				);
+
+				and(
+					/^the read of \w+ marked "(.*)" answers:$/,
+					async (marker: string, table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answeredRead = await readMarked(marker);
+
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
+					},
+				);
+			},
+			60_000,
+		);
+
+		scenario(
+			'a create whose takeover is inert purges only what its hook declared',
+			({ given, and, when, then }) => {
+				function readAll() {
+					return request(getUrl(vendor, cacheEnv))
+						.get(`/items/${createDeclaredCollection}`)
+						.query({ fields: 'body' })
+						.set('Authorization', adminAuth);
+				}
+
+				function readSlot(slot: string) {
+					return request(getUrl(vendor, cacheEnv))
+						.get(`/items/${createDeclaredCollection}`)
+						.query({ fields: 'body', 'filter[slot][_eq]': slot })
+						.set('Authorization', adminAuth);
+				}
+
+				given(
+					`the read of ${createDeclaredCollection} is cached:`,
+					async (table: Record<string, string>[]) => {
+						expect((await readAll()).headers[cacheStatusHeader]).toBe('MISS');
+
+						const cachedRead = await readAll();
+
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				and(
+					/^the read of \w+ in slot "(.*)" is cached:$/,
+					async (slot: string, table: Record<string, string>[]) => {
+						expect((await readSlot(slot)).headers[cacheStatusHeader])
+							.toBe('MISS');
+
+						const cachedRead = await readSlot(slot);
+
+						expect(cachedRead.headers[cacheStatusHeader]).toBe('HIT');
+						expect(cachedRead.body.data).toEqual(loadYaml(table[0]!.response!));
+					},
+				);
+
+				when(
+					/^a create sends "(.*)"$/,
+					async (body: string) => {
+						const sentCreate = await request(getUrl(vendor, cacheEnv))
+							.post(`/items/${createDeclaredCollection}`)
+							.send([{ body }])
+							.set('Authorization', adminAuth);
+
+						expect(sentCreate.statusCode).toBe(200);
+					},
+				);
+
+				then(
+					`the read of ${createDeclaredCollection} answers:`,
+					async (table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answeredRead = await readAll();
+
+						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
+						expect(answeredRead.body.data).toEqual(loadYaml(response!));
+					},
+				);
+
+				and(
+					/^the read of \w+ in slot "(.*)" answers:$/,
+					async (slot: string, table: Record<string, string>[]) => {
+						const { cache, response } = table[0]!;
+						const answeredRead = await readSlot(slot);
 
 						expect(answeredRead.headers[cacheStatusHeader]).toBe(cache);
 						expect(answeredRead.body.data).toEqual(loadYaml(response!));

@@ -24,6 +24,13 @@
 //   body 'take-over' (test_takeover_create_failed), on create → writes the row
 //     marked 'taken' 'taken-over' through the extension's `database` and takes
 //     it over. The create's other row reuses a stored key, so its insert fails.
+//   body 'take-over' (test_takeover_nested_child), on create → the same on the
+//     row marked 'taken', the create nested in a parent's update.
+//   body 'write-then-throw' (test_takeover_nested_child) → the same as on
+//     test_takeover_hook_threw, the update nested in a parent's update.
+//   body 'take-over-inert' (test_takeover_create_declared), on create → writes
+//     nothing, takes the row in slot 'a' over declaring it inert through
+//     skipPurgeFor, and declares slot 'a' through purgeBy.
 
 import { mapCreateRows } from '@directus/utils';
 
@@ -36,6 +43,8 @@ const movedCollection = 'test_takeover_moved';
 const partlyDeclaredCollection = 'test_takeover_partly_declared';
 const hookThrewCollection = 'test_takeover_hook_threw';
 const createFailedCollection = 'test_takeover_create_failed';
+const nestedChildCollection = 'test_takeover_nested_child';
+const createDeclaredCollection = 'test_takeover_create_declared';
 
 export default function registerHooks({ filter }, { database }) {
 	const takeOverTwiceThrough = (collection, writerOf) => {
@@ -180,21 +189,78 @@ export default function registerHooks({ filter }, { database }) {
 		},
 	);
 
-	filter(`${createFailedCollection}.items.create`, (entries) => {
-		return mapCreateRows(entries, async (payload) => {
-			if (payload?.body !== 'take-over') {
-				return payload;
+	const takeOverMarkedTaken = (collection) => {
+		return (entries) => {
+			return mapCreateRows(entries, async (payload) => {
+				if (payload?.body !== 'take-over') {
+					return payload;
+				}
+
+				const takenRow = await database(collection)
+					.where({ marker: 'taken' })
+					.first();
+
+				await database(collection)
+					.where({ id: takenRow.id })
+					.update({ body: 'taken-over' });
+
+				return takenRow.id;
+			});
+		};
+	};
+
+	filter(
+		`${createFailedCollection}.items.create`,
+		takeOverMarkedTaken(createFailedCollection),
+	);
+
+	filter(
+		`${nestedChildCollection}.items.create`,
+		takeOverMarkedTaken(nestedChildCollection),
+	);
+
+	filter(
+		`${nestedChildCollection}.items.update`,
+		async (groups, _meta, { scopedCache }) => {
+			const throwingGroup = groups.find((group) => {
+				return group?.data?.body === 'write-then-throw';
+			});
+
+			if (!throwingGroup) {
+				return groups;
 			}
 
-			const takenRow = await database(createFailedCollection)
-				.where({ marker: 'taken' })
-				.first();
+			await database(nestedChildCollection)
+				.whereIn('id', throwingGroup.keys)
+				.update({ body: 'written-by-hook' });
 
-			await database(createFailedCollection)
-				.where({ id: takenRow.id })
-				.update({ body: 'taken-over' });
+			scopedCache.purgeBy({ collection: nestedChildCollection });
 
-			return takenRow.id;
-		});
-	});
+			throw new Error('The body "write-then-throw" is refused');
+		},
+	);
+
+	filter(
+		`${createDeclaredCollection}.items.create`,
+		(entries, _meta, { scopedCache }) => {
+			return mapCreateRows(entries, async (payload) => {
+				if (payload?.body !== 'take-over-inert') {
+					return payload;
+				}
+
+				const inertRow = await database(createDeclaredCollection)
+					.where({ slot: 'a' })
+					.first();
+
+				scopedCache.skipPurgeFor(inertRow.id);
+
+				scopedCache.purgeBy({
+					collection: createDeclaredCollection,
+					pinnedScope: { slot: ['a'] },
+				});
+
+				return inertRow.id;
+			});
+		},
+	);
 }

@@ -37,6 +37,14 @@ Feature: A row a mutation hook took over is purged from the response cache
   - "take-over" on test_takeover_create_failed, a create: writes the row marked
     "taken" "taken-over" through the pool and takes it over. The create's other
     row reuses the key of the row marked "duplicate", so its insert fails.
+  - "take-over" on test_takeover_nested_child, a create nested in an update of
+    test_takeover_nested_parent: the same on the row marked "taken".
+  - "write-then-throw" on test_takeover_nested_child, an update nested in an
+    update of test_takeover_nested_parent: the same as on
+    test_takeover_hook_threw.
+  - "take-over-inert" on test_takeover_create_declared, a create: writes
+    nothing, takes the row in slot "a" over declaring it inert through
+    `skipPurgeFor`, and declares slot "a" through `purgeBy`.
 
   Scenario: a refused answer still purges the row its hook took over
     Given the read of test_takeover_refused is cached:
@@ -137,7 +145,7 @@ Feature: A row a mutation hook took over is purged from the response cache
       | response             |
       | [{body: "original"}] |
     When a create sends "take-over" beside the key of the "duplicate" row
-    Then the create is refused with the message:
+    Then the create is refused with the status 400 and the message:
       """
       Value for field "id" in collection "test_takeover_create_failed" has to be
       unique.
@@ -145,3 +153,45 @@ Feature: A row a mutation hook took over is purged from the response cache
     And the read of test_takeover_create_failed marked "taken" answers:
       | cache | response               |
       | MISS  | [{body: "taken-over"}] |
+
+  Scenario: a failed nested create still purges the row its hook took over
+    Given the read of test_takeover_nested_child marked "taken" is cached:
+      | response             |
+      | [{body: "original"}] |
+    When the parent creates "take-over" beside the key of the "duplicate" child
+    Then the update is refused with the status 400 and the message:
+      """
+      Value for field "id" in collection "test_takeover_nested_child" has to be
+      unique.
+      """
+    And the read of test_takeover_nested_child marked "taken" answers:
+      | cache | response               |
+      | MISS  | [{body: "taken-over"}] |
+
+  Scenario: a nested hook throwing after its own write still purges what it declared
+    Given the read of test_takeover_nested_child marked "thrown" is cached:
+      | response             |
+      | [{body: "original"}] |
+    When the parent sends its "thrown" child the body "write-then-throw"
+    Then the update fails with the status 500 and the message:
+      """
+      The body "write-then-throw" is refused
+      """
+    And the read of test_takeover_nested_child marked "thrown" answers:
+      | cache | response                    |
+      | MISS  | [{body: "written-by-hook"}] |
+
+  Scenario: a create whose takeover is inert purges only what its hook declared
+    Given the read of test_takeover_create_declared is cached:
+      | response             |
+      | [{body: "original"}] |
+    And the read of test_takeover_create_declared in slot "a" is cached:
+      | response             |
+      | [{body: "original"}] |
+    When a create sends "take-over-inert"
+    Then the read of test_takeover_create_declared answers:
+      | cache | response             |
+      | HIT   | [{body: "original"}] |
+    And the read of test_takeover_create_declared in slot "a" answers:
+      | cache | response             |
+      | MISS  | [{body: "original"}] |
