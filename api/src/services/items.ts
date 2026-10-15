@@ -2219,18 +2219,13 @@ implements AbstractService<Item> {
 			return !takenOverKeyNames.has(keyName) || !skippedKeyNames.has(keyName);
 		});
 
-		if (changedKeys.length === 0) {
+		if (
+			changedKeys.length === 0 &&
+			declarations.purgeFingerprints.length === declaredPurgesAtStart
+		) {
 			// Nothing written and nothing declared: no entry can have gone stale.
 			// Returning rather than purging nothing, which would still take this
 			// collection's bare fingerprint and drop its global reads.
-			if (declarations.purgeFingerprints.length === declaredPurgesAtStart) {
-				return;
-			}
-
-			// Nothing written, so only what the hooks declared: this collection's
-			// global reads stay.
-			await this.purgeDeclaredScopedCache(declarations, opts);
-
 			return;
 		}
 
