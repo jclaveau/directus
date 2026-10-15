@@ -1,4 +1,4 @@
-import type { CreateEntry, PrimaryKey } from '@directus/types';
+import type { CreateEntries, PrimaryKey } from '@directus/types';
 import { cloneDeep } from './lodash-es-used.js';
 
 type MappedCreateRow<Item> = Partial<Item> | PrimaryKey | null | void;
@@ -15,12 +15,12 @@ type MappedCreateRow<Item> = Partial<Item> | PrimaryKey | null | void;
  * carries to a hook registered on several events, comes back unchanged.
  */
 export async function mapCreateRows<Item = any>(
-	entries: (CreateEntry<Item> | null)[] | null,
+	entries: CreateEntries<Item> | null,
 	mapRow: (
 		data: Partial<Item>,
 		index: number,
 	) => MappedCreateRow<Item> | Promise<MappedCreateRow<Item>>,
-): Promise<(CreateEntry<Item> | null)[] | null> {
+): Promise<CreateEntries<Item> | null> {
 	if (entries === null) {
 		return null;
 	}
@@ -29,7 +29,7 @@ export async function mapCreateRows<Item = any>(
 		return entries;
 	}
 
-	const mappedEntries: (CreateEntry<Item> | null)[] = [];
+	const mappedEntries: CreateEntries<Item> = [];
 
 	for (const [index, entry] of entries.entries()) {
 		if (entry === null || !('data' in entry)) {

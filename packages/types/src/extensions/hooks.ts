@@ -9,10 +9,10 @@ import type {
 	ScheduleHandler,
 } from '../events.js';
 import type {
-	CreateEntry,
+	CreateEntries,
 	Item as AnyItem,
 	PrimaryKey,
-	UpdateEntry,
+	UpdateEntries,
 } from '../items.js';
 import type { PermissionsAction } from '../permissions.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
@@ -85,16 +85,16 @@ export type RegisterFilter = {
 	<EntryItem = AnyItem>(
 		event: ItemsCreateEvent,
 		handler: FilterHandler<
-			(CreateEntry<EntryItem> | null)[] | null,
-			(CreateEntry<EntryItem> | null)[] | null | void,
+			CreateEntries<EntryItem> | null,
+			CreateEntries<EntryItem> | null | void,
 			MutationEventContext
 		>,
 	): void;
 	<EntryItem = AnyItem>(
 		event: ItemsUpdateEvent,
 		handler: FilterHandler<
-			UpdateEntry<EntryItem>[] | null,
-			UpdateEntry<EntryItem>[] | null | void,
+			UpdateEntries<EntryItem> | null,
+			UpdateEntries<EntryItem> | null | void,
 			MutationEventContext
 		>,
 	): void;

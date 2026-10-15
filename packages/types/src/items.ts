@@ -38,6 +38,12 @@ export type CreateEntry<EntryItem = any> =
 	| { key: PrimaryKey }
 	| { sameRowAs: number };
 
+/** The rows of one create, position for position, a cancelled row as `null`. */
+export type CreateEntries<EntryItem = any> = (CreateEntry<EntryItem> | null)[];
+
+/** The changes and taken-over rows of one update. */
+export type UpdateEntries<EntryItem = any> = UpdateEntry<EntryItem>[];
+
 export type Alterations<T extends Item = Item, K extends keyof T | undefined = undefined> = {
 	create: Partial<T>[];
 	update: (K extends keyof T ? Partial<T> & Pick<T, K> : Partial<T>)[];

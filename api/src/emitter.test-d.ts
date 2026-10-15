@@ -1,4 +1,5 @@
 import type {
+	CreateEntries,
 	CreateEntry,
 	EventContext,
 	FilterHandler,
@@ -8,6 +9,7 @@ import type {
 	RegisterFunctions,
 	ScopedCachePurgeHandle,
 	ScopedCacheScopeHandle,
+	UpdateEntries,
 	UpdateEntry,
 	UpdateGroup,
 } from '@directus/types';
@@ -204,6 +206,27 @@ test('register.filter wraps the item type in a grouped event list', () => {
 		expectTypeOf(entries).toEqualTypeOf<UpdateEntry<Item>[] | null>();
 		return entries;
 	});
+});
+
+test('the list aliases name what a grouped filter receives, null aside', () => {
+	expectTypeOf<CreateEntries<Item>>().toEqualTypeOf<(CreateEntry<Item> | null)[]>();
+	expectTypeOf<UpdateEntries<Item>>().toEqualTypeOf<UpdateEntry<Item>[]>();
+});
+
+test('register.filter hands its entries to a helper typed by a list alias', () => {
+	const register = {} as RegisterFunctions;
+	const prepareCreateEntries = (createEntries: CreateEntries<Item>) => createEntries;
+	const prepareUpdateEntries = (updateEntries: UpdateEntries<Item>) => updateEntries;
+
+	register.filter<Item>(
+		'article.items.create',
+		(entries) => entries && prepareCreateEntries(entries),
+	);
+
+	register.filter<Item>(
+		'article.items.update',
+		(entries) => entries && prepareUpdateEntries(entries),
+	);
 });
 
 test('register.filter keeps the payload type on every other event', () => {

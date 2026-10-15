@@ -5,7 +5,7 @@ import { isSystemCollection } from '@directus/system-data';
 import type {
 	Accountability,
 	ActionHandler,
-	CreateEntry,
+	CreateEntries,
 	EventContext,
 	FilterHandler,
 	Flow,
@@ -14,7 +14,7 @@ import type {
 	PrimaryKey,
 	SchemaOverview,
 	OperationHandler,
-	UpdateEntry,
+	UpdateEntries,
 	UpdateGroup,
 } from '@directus/types';
 import {
@@ -464,7 +464,7 @@ class FlowManager {
 			}
 
 			if (route.payloadShape === 'create-entries') {
-				const createEntries = payload as (CreateEntry | null)[];
+				const createEntries = payload as CreateEntries;
 
 				return mapCreateRows(createEntries, async (data, index) => {
 					const originalEntry = createEntries[index] as { data: Item };
@@ -481,9 +481,9 @@ class FlowManager {
 				});
 			}
 
-			const groupsAfterFlow: UpdateEntry[] = [];
+			const groupsAfterFlow: UpdateEntries = [];
 
-			for (const group of payload as UpdateEntry[]) {
+			for (const group of payload as UpdateEntries) {
 				if (!('data' in group)) {
 					groupsAfterFlow.push(group);
 					continue;

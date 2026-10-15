@@ -8,6 +8,7 @@ import type {
 	Accountability,
 	ActionEventParams,
 	Alterations,
+	CreateEntries,
 	CreateEntry,
 	Item as AnyItem,
 	MutationTracker,
@@ -17,6 +18,7 @@ import type {
 	QueryOptions,
 	SchemaOverview,
 	ScopedCacheFingerprint,
+	UpdateEntries,
 	UpdateEntry,
 	UpdateGroup,
 	WithMeta,
@@ -181,7 +183,7 @@ function refuseFieldAccess<AnsweredList extends unknown[]>(
 function isCreateEntryList(
 	entriesAfterHooks: unknown,
 	rowCount: number,
-): entriesAfterHooks is (CreateEntry | null)[] {
+): entriesAfterHooks is CreateEntries {
 	if (!Array.isArray(entriesAfterHooks) || entriesAfterHooks.length !== rowCount) {
 		return false;
 	}
@@ -1612,7 +1614,7 @@ implements AbstractService<Item> {
 				const applied: UpdateGroup<Item>[] = [];
 				const nestedActionEvents: ActionEventParams[] = [];
 
-				const attemptSentGroups: UpdateEntry<Item>[] = sentGroups.map((group) => {
+				const attemptSentGroups: UpdateEntries<Item> = sentGroups.map((group) => {
 					return { data: cloneDeep(group.data), keys: [...group.keys] };
 				});
 
@@ -1632,7 +1634,7 @@ implements AbstractService<Item> {
 				// chance to augment the items that are about to be saved
 				const answeredGroups =
 					opts.emitEvents !== false
-						? await emitter.emitFilter<UpdateEntry<Item>[], null>(
+						? await emitter.emitFilter<UpdateEntries<Item>, null>(
 							updateEvent,
 							guardedPayload,
 							{
