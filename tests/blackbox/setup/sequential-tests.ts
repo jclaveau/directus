@@ -122,6 +122,12 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/graphql-ip-gated-read.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
+			// Reloading the flow manager unloads every flow for a moment: left in the
+			// parallel middle it would drop the handlers `event-flow-runs` waits on.
+			'/tests/db/routes/system/singular-write-flows.test.ts',
+			// Sets the password policy on the settings singleton, which every user
+			// creation of a sibling would then have to satisfy.
+			'/tests/db/routes/system/singular-write-users-password-policy.test.ts',
 			'/tests/db/app/cache.test.ts',
 			'/tests/db/app/processes.test.ts',
 			'/tests/db/app/pgbouncer.test.ts',
