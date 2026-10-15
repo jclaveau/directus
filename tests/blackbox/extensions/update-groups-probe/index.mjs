@@ -4,6 +4,11 @@
 // its own collection and swallows its own failures: the log table exists for
 // this suite alone, and a throwing filter would take unrelated suites down.
 //
+// The update filters write through the extension's `database`, the pool, while
+// the update's transaction holds a connection of its own. On sqlite that is the
+// pool's only connection, so the filter waits out the acquire timeout there;
+// this suite targets Postgres.
+//
 // Row markers drive the behaviours end to end, so the test needs no control
 // endpoint:
 //   name 'cancel-me'  → the grouped filter's mapUpdateRows returns null for that
