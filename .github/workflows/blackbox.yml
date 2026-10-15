@@ -173,7 +173,10 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
         run: |
-          pnpm --filter tests-blackbox merge-coverage
+          # Plain node, not `pnpm --filter tests-blackbox merge-coverage`: under pnpm 12 a
+          # `run` first re-installs, and after the `deploy --prod` above that install
+          # prunes every devDependency, istanbul-lib-* among them.
+          node tests/blackbox/merge-coverage.mjs
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
 
@@ -325,7 +328,10 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
         run: |
-          pnpm --filter tests-blackbox merge-coverage
+          # Plain node, not `pnpm --filter tests-blackbox merge-coverage`: under pnpm 12 a
+          # `run` first re-installs, and after the `deploy --prod` above that install
+          # prunes every devDependency, istanbul-lib-* among them.
+          node tests/blackbox/merge-coverage.mjs
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
 
