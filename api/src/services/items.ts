@@ -2825,7 +2825,23 @@ implements AbstractService<Item> {
 			}
 
 			return { selfRelationSurvivorKeys, oldScopedCacheSnapshot };
-		}, opts.mutationTracker.snapshot());
+		}, opts.mutationTracker.snapshot()).catch(async (error) => {
+			// The rollback leaves standing what a hook wrote through a connection of
+			// its own, so the slices it declared are purged whatever failed.
+			if (
+				scopedCacheHookDeclarations.purgeFingerprints.length > 0
+				&& shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheHookDeclarations,
+					[],
+					{ includeBareFingerprint: false },
+				);
+			}
+
+			throw error;
+		});
 
 		if (deletion === null) {
 			// A hook that declared a purge via `purgeBy` before cancelling still gets
