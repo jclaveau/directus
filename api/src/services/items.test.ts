@@ -223,6 +223,32 @@ describe('Integration Tests', () => {
 		});
 
 		describe('createOne', () => {
+			it('runs the create filter inside the mutation transaction', async () => {
+				const createFilter = vi.fn((payload: unknown) => payload);
+
+				emitter.onFilter('items.create', createFilter);
+
+				try {
+					await service.createOne({ name: 'Test' });
+
+					expect(createFilter).toHaveBeenCalledWith(
+						[{ data: { id: undefined, name: 'Test' } }],
+						{
+							collection: 'test',
+							event: 'items.create',
+							originalPayload: [{ data: { id: undefined, name: 'Test' } }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.create', createFilter);
+				}
+			});
+
 			it('should validate user count if requested', async () => {
 				await service.createOne({}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
@@ -1182,6 +1208,7 @@ describe('Integration Tests', () => {
 							originalPayload: [{ data: { name: 'Test' }, keys: [1] }],
 						},
 						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
 							database: expect.objectContaining({ isTransaction: true }),
 						}),
 					);
@@ -1571,6 +1598,7 @@ describe('Integration Tests', () => {
 							originalPayload: [1],
 						},
 						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
 							database: expect.objectContaining({ isTransaction: true }),
 						}),
 					);

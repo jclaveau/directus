@@ -1,4 +1,4 @@
-// Update and delete filter hooks writing through `context.database`, for
+// Update and delete filter hooks writing through `context.transaction`, for
 // hook-write-rollback.test.ts.
 //
 // Every extension here loads into every instance, so these react only to the
@@ -15,12 +15,12 @@ function witnessOf(collection) {
 }
 
 export default function registerHooks({ filter }) {
-	filter('items.update', async (groups, { collection }, { database }) => {
+	filter('items.update', async (groups, { collection }, { transaction }) => {
 		if (ITEM_COLLECTION.test(collection) === false) {
 			return groups;
 		}
 
-		await database(witnessOf(collection))
+		await transaction(witnessOf(collection))
 			.whereIn('item', groups.flatMap((group) => group.keys))
 			.update({ note: 'written-by-hook' });
 
@@ -31,12 +31,12 @@ export default function registerHooks({ filter }) {
 		});
 	});
 
-	filter('items.delete', async (keys, { collection }, { database }) => {
+	filter('items.delete', async (keys, { collection }, { transaction }) => {
 		if (ITEM_COLLECTION.test(collection) === false) {
 			return keys;
 		}
 
-		await database(witnessOf(collection))
+		await transaction(witnessOf(collection))
 			.whereIn('item', keys)
 			.update({ note: 'written-by-hook' });
 

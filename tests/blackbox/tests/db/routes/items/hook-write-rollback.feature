@@ -1,6 +1,6 @@
 Feature: A mutation hook's write lands only with the mutation
 
-  An update or delete filter hook writes through `context.database`, the
+  An update or delete filter hook writes through `context.transaction`, the
   transaction the mutation runs in, so a mutation the service refuses takes the
   hook's write back with it. The hook-write-rollback hook writes the note
   "written-by-hook" into the witness pointing at each row it is handed; it
