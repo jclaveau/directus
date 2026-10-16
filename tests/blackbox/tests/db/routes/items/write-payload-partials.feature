@@ -175,31 +175,38 @@ Feature: A write takes the less travelled side of each payload rule
       |     - <dropped-note>         |           |
       | remember: child              |           |
     Then these requests get these responses:
-      | request                                   | response              |
-      | method: PATCH                             | code: 200             |+
-      | path: /items/test_wpp_parent/<parent>     |                       |
-      | payload:                                  |                       |
-      |   children:                               |                       |
-      |     - id: <child>                         |                       |
-      |       leaves:                             |                       |
-      |         - <kept-leaf>                     |                       |
-      |       notes:                              |                       |
-      |         - <kept-note>                     |                       |
-      | method: GET                               | code: 200             |+
-      | path: /items/test_wpp_leaf                | body:                 |
-      | query:                                    |   data:               |
-      |   fields: id                              |     - id: <kept-leaf> |
-      |   filter[child][_eq]: '<child>'           |                       |
-      | method: GET                               | code: 403             |+
-      | path: /items/test_wpp_leaf/<dropped-leaf> |                       |
-      | method: GET                               | code: 200             |+
-      | path: /items/test_wpp_note/<dropped-note> | body:                 |
-      | query:                                    |   data:               |
-      |   fields: child                           |     child: null       |
-      | method: GET                               | code: 200             |+
-      | path: /items/test_wpp_note/<kept-note>    | body:                 |
-      | query:                                    |   data:               |
-      |   fields: child                           |     child: <child>    |
+      | request                                   | response                 |
+      | method: PATCH                             | code: 200                |+
+      | path: /items/test_wpp_parent/<parent>     |                          |
+      | payload:                                  |                          |
+      |   children:                               |                          |
+      |     - id: <child>                         |                          |
+      |       leaves:                             |                          |
+      |         - <kept-leaf>                     |                          |
+      |       notes:                              |                          |
+      |         - <kept-note>                     |                          |
+      | method: GET                               | code: 200                |+
+      | path: /items/test_wpp_leaf                | body:                    |
+      | query:                                    |   data:                  |
+      |   fields: id                              |     - id: <kept-leaf>    |
+      |   filter[child][_eq]: '<child>'           |                          |
+      | method: GET                               | code: 404                |+
+      | path: /items/test_wpp_leaf/<dropped-leaf> | body:                    |
+      |                                           |   errors:                |
+      |                                           |     - message: >-        |
+      |                                           |         Item             |
+      |                                           |         "<dropped-leaf>" |
+      |                                           |         doesn't exist    |
+      |                                           |         in collection    |
+      |                                           |         "test_wpp_leaf". |
+      | method: GET                               | code: 200                |+
+      | path: /items/test_wpp_note/<dropped-note> | body:                    |
+      | query:                                    |   data:                  |
+      |   fields: child                           |     child: null          |
+      | method: GET                               | code: 200                |+
+      | path: /items/test_wpp_note/<kept-note>    | body:                    |
+      | query:                                    |   data:                  |
+      |   fields: child                           |     child: <child>       |
 
   Scenario: a row keyed by a uuid the database draws reads back under it
     Then these requests get these responses:
