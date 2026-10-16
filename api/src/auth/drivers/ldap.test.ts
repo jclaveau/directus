@@ -1354,6 +1354,31 @@ describe('LDAPAuthDriver.verify', () => {
 			.rejects.toStrictEqual(new InvalidCredentialsError());
 	});
 
+	// Many LDAP servers accept an empty password as an anonymous bind.
+	test('refuses an empty password without binding', async () => {
+		const ldapDriver = new LDAPAuthDriver(
+			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
+			{
+				bindDn: 'cn=admin',
+				bindPassword: 'secret',
+				userDn: 'ou=users,dc=example',
+				provider: 'ldap',
+				clientUrl: 'ldap://ldap.example',
+			},
+		);
+
+		mockedDeps.ldapClient.bind.mockImplementationOnce(
+			(_bindDn: string, _bindPassword: string, bindCallback: any) => {
+				bindCallback(null);
+			},
+		);
+
+		await expect(ldapDriver.verify({ external_identifier: 'cn=jdoe' } as any, ''))
+			.rejects.toStrictEqual(new InvalidCredentialsError());
+
+		expect(mockedDeps.ldapClient.bind).not.toHaveBeenCalled();
+	});
+
 	test('binds a fresh non-reconnecting client as the user', async () => {
 		const ldapDriver = new LDAPAuthDriver(
 			{ knex: mockedKnex, schema: { collections: {}, relations: [] } } as any,
