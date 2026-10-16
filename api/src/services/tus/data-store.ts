@@ -162,6 +162,17 @@ export class TusDataStore extends DataStore {
 
 			await filesItemsService.deleteOne(primaryKey!, { emitEvents: false });
 
+			// A local disk cannot hold a file below another file; an object store
+			// can, which is why this is told from the driver's error, not the name.
+			const errorCode = (err as NodeJS.ErrnoException | null)?.code;
+
+			if (errorCode === 'EEXIST' || errorCode === 'ENOTDIR') {
+				throw {
+					status_code: 400,
+					body: '"filename_disk" must not name a path below an existing file',
+				};
+			}
+
 			throw ERRORS.UNKNOWN_ERROR;
 		}
 	}

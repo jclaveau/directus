@@ -234,24 +234,24 @@ Feature: A file is uploaded, replaced and terminated through tus
       |     application/offset+octet-stream |           |
       | body: kept                          |           |
     Then these requests get these responses:
-      | request                                  | response                    |
-      | method: POST                             | code: 500                   |+
-      | path: /files/tus                         | text: "Something went wrong |
-      | headers:                                 |   with that request\\n"     |
-      |   Tus-Resumable: 1.0.0                   |                             |
-      |   Upload-Length: '4'                     |                             |
-      | upload_metadata:                         |                             |
-      |   id: <file>                             |                             |
-      |   filename_download: lost-<run>.txt      |                             |
-      |   filename_disk: <file>.txt/below-a-file |                             |
-      | method: GET                              | code: 200                   |+
-      | path: /files                             | body:                       |
-      | query:                                   |   data: []                  |
-      |   fields: id                             |                             |
-      |   filter[filename_download][_eq]: >-     |                             |
-      |     lost-<run>.txt                       |                             |
-      | method: GET                              | code: 200                   |+
-      | path: /assets/<file>                     | text: kept                  |
+      | request                                  | response                   |
+      | method: POST                             | code: 400                  |+
+      | path: /files/tus                         | text: >-                   |
+      | headers:                                 |   "filename_disk" must not |
+      |   Tus-Resumable: 1.0.0                   |   name a path below an     |
+      |   Upload-Length: '4'                     |   existing file            |
+      | upload_metadata:                         |                            |
+      |   id: <file>                             |                            |
+      |   filename_download: lost-<run>.txt      |                            |
+      |   filename_disk: <file>.txt/below-a-file |                            |
+      | method: GET                              | code: 200                  |+
+      | path: /files                             | body:                      |
+      | query:                                   |   data: []                 |
+      |   fields: id                             |                            |
+      |   filter[filename_download][_eq]: >-     |                            |
+      |     lost-<run>.txt                       |                            |
+      | method: GET                              | code: 200                  |+
+      | path: /assets/<file>                     | text: kept                 |
 
   Scenario: an upload of an unknown type without extension is stored under its id
     Then these requests get these responses:

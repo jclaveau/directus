@@ -701,6 +701,73 @@ describe('TusDataStore.create', () => {
 		expect(mockedDeps.filesService.updateOne).not.toHaveBeenCalled();
 	});
 
+	test('refuses a filename_disk below a file, leaving no row', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		knexTracker.on.select('directus_files').response(undefined);
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-2');
+
+		mockedDeps.storageDriver.createChunkedUpload.mockRejectedValueOnce(
+			Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' }),
+		);
+
+		mockedDeps.storageDriver.createChunkedUpload.mockRejectedValueOnce(
+			Object.assign(new Error('ENOTDIR: not a directory'), { code: 'ENOTDIR' }),
+		);
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				filename_download: 'notes.txt',
+				filename_disk: 'kept.txt/below-a-file',
+			},
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: '"filename_disk" must not name a path below an existing file',
+		});
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-2',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				filename_download: 'notes.txt',
+				filename_disk: 'kept.txt/deeper/below-a-file',
+			},
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: '"filename_disk" must not name a path below an existing file',
+		});
+
+		expect(mockedDeps.filesService.deleteOne).toHaveBeenNthCalledWith(
+			1,
+			'file-1',
+			{ emitEvents: false },
+		);
+
+		expect(mockedDeps.filesService.deleteOne).toHaveBeenNthCalledWith(
+			2,
+			'file-2',
+			{ emitEvents: false },
+		);
+	});
+
 	test('names the disk file by its pk alone for an unknown type', async () => {
 		const tusStore = new TusDataStore({
 			constants: {
