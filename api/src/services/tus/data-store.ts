@@ -132,14 +132,17 @@ export class TusDataStore extends DataStore {
 		const primaryKey = await filesItemsService.createOne(fileData, { emitEvents: false });
 
 		// Set the file id, so it is available to be sent as a header on upload creation / resume
-		if (!upload.metadata['id']) {
+		if (!isReplacement) {
 			upload.metadata['id'] = primaryKey as string;
 		}
 
+		const typeExtension = extension(upload.metadata['type']);
+
 		const fileExtension =
-			extname(upload.metadata['filename_download']) ||
-			(upload.metadata['type'] && '.' + extension(upload.metadata['type'])) ||
-			'';
+			extname(upload.metadata['filename_download'])
+			|| (typeExtension
+				? `.${typeExtension}`
+				: '');
 
 		// The filename_disk is the FINAL filename on disk
 		fileData.filename_disk ||= primaryKey + (fileExtension || '');
@@ -157,11 +160,7 @@ export class TusDataStore extends DataStore {
 			logger.warn(`Couldn't create chunked upload for ${fileData.filename_disk}`);
 			logger.warn(err);
 
-			if (isReplacement) {
-				await filesItemsService.updateOne(primaryKey!, { tus_id: null, tus_data: null }, { emitEvents: false });
-			} else {
-				await filesItemsService.deleteOne(primaryKey!, { emitEvents: false });
-			}
+			await filesItemsService.deleteOne(primaryKey!, { emitEvents: false });
 
 			throw ERRORS.UNKNOWN_ERROR;
 		}

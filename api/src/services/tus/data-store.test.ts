@@ -686,14 +686,103 @@ describe('TusDataStore.create', () => {
 			new Error('disk full'),
 		);
 
-		// The temp row's cleanup is left unasserted: it is known to clear the
-		// tus columns instead of deleting the row.
 		await expect(tusStore.create(new Upload({
 			id: 'tus-1',
 			offset: 0,
 			size: 1024,
 			metadata: { id: 'file-9', filename_download: 'photo.jpg' },
 		}))).rejects.toBe(ERRORS.UNKNOWN_ERROR);
+
+		expect(mockedDeps.filesService.deleteOne).toHaveBeenCalledWith(
+			'file-temp',
+			{ emitEvents: false },
+		);
+
+		expect(mockedDeps.filesService.updateOne).not.toHaveBeenCalled();
+	});
+
+	test('names the disk file by its pk alone for an unknown type', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
+		mockedDeps.storageDriver.createChunkedUpload.mockResolvedValueOnce({});
+
+		await tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				filename_download: 'noext',
+				type: 'application/x-unknown-thing',
+			},
+		}));
+
+		expect(mockedDeps.storageDriver.createChunkedUpload).toHaveBeenCalledWith(
+			'file-1',
+			expect.anything(),
+		);
+	});
+
+	test('reports the created pk for an id no file holds', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		knexTracker.on.select('directus_files').response(undefined);
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
+		mockedDeps.storageDriver.createChunkedUpload.mockResolvedValueOnce({});
+
+		await tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				id: 'file-unknown',
+				filename_download: 'photo.jpg',
+				type: 'image/jpeg',
+			},
+		}));
+
+		expect(mockedDeps.storageDriver.createChunkedUpload).toHaveBeenCalledWith(
+			'file-1.jpg',
+			{
+				id: 'tus-1',
+				size: 1024,
+				offset: 0,
+				storage: undefined,
+				creation_date: '2026-01-01T00:00:00.000Z',
+				metadata: {
+					id: 'file-1',
+					filename_download: 'photo.jpg',
+					type: 'image/jpeg',
+					title: 'Photo.jpg',
+				},
+			},
+		);
 	});
 });
 
