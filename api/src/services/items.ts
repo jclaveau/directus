@@ -60,7 +60,10 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
-import { isPrimaryKey } from '../utils/is-primary-key.js';
+import {
+	isMissingPrimaryKey,
+	isPrimaryKey,
+} from '../utils/is-primary-key.js';
 import {
 	assign,
 	clone,
@@ -683,7 +686,7 @@ implements AbstractService<Item> {
 				// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
 				const primaryKey: PrimaryKey | undefined = payloadWithTypeCasting[primaryKeyField];
 
-				if (primaryKey) {
+				if (!isMissingPrimaryKey(primaryKey)) {
 					validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 				}
 
@@ -730,6 +733,10 @@ implements AbstractService<Item> {
 			const useBatchInsert =
 				prepared.length > 1 && (await getHelpers(trx).capabilities.preservesInsertOrderInReturning());
 
+			// The row the translator reads the duplicate's value off; a batch insert
+			// cannot tell which of its rows the database refused.
+			let insertingRowInput: Partial<Item> = {};
+
 			try {
 				if (useBatchInsert) {
 					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined;
@@ -773,6 +780,8 @@ implements AbstractService<Item> {
 					const returningOptions = getHelpers(trx).capabilities.insertReturningOptions();
 
 					for (const p of prepared) {
+						insertingRowInput = data[p.index]!;
+
 						const result = await trx
 							.insert(p.payloadWithoutAliases)
 							.into(this.collection)
@@ -794,7 +803,7 @@ implements AbstractService<Item> {
 						// Most database support returning, those who don't tend to return the PK anyways
 						// (MySQL/SQLite). In case the primary key isn't know yet, we'll do a best-attempt at
 						// fetching it based on the last inserted row
-						if (!p.primaryKey) {
+						if (isMissingPrimaryKey(p.primaryKey)) {
 							// Fetching it with max should be safe, as we're in the context of the current transaction
 							const maxResult = await trx.max(primaryKeyField, { as: 'id' })
 								.from(this.collection)
@@ -812,7 +821,7 @@ implements AbstractService<Item> {
 			catch (err: any) {
 				const dbError = await translateDatabaseError(
 					err,
-					data,
+					insertingRowInput,
 					this.knex,
 					{ collection: this.collection, operation: 'create' },
 				);
@@ -1297,7 +1306,7 @@ implements AbstractService<Item> {
 			data.map((item): UpdateGroup<Item> => {
 				const primaryKey = item[primaryKeyField];
 
-				if (!primaryKey) {
+				if (isMissingPrimaryKey(primaryKey)) {
 					throw new InvalidPayloadError({
 						reason: `Item in update misses primary key`,
 					});
@@ -2565,12 +2574,12 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
 
-		if (primaryKey) {
+		if (!isMissingPrimaryKey(primaryKey)) {
 			validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 		}
 
 		const exists =
-			primaryKey &&
+			!isMissingPrimaryKey(primaryKey) &&
 			!!(await this.knex
 				.select(primaryKeyField)
 				.from(this.collection)
@@ -3015,6 +3024,12 @@ implements AbstractService<Item> {
 					{ includeBareFingerprint: false },
 				);
 			}
+
+			await this.purgeHookWrittenScopedCache(
+				[],
+				scopedCacheHookDeclarations,
+				opts,
+			);
 
 			throw error;
 		});

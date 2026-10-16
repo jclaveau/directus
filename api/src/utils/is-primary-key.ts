@@ -17,3 +17,13 @@ import type { PrimaryKey } from '@directus/types';
 export function isPrimaryKey(value: unknown): value is PrimaryKey {
 	return typeof value === 'string' || typeof value === 'number';
 }
+
+/**
+ * Whether a payload names no primary key. 0 is a key; an empty string is not,
+ * as it never was before 0 was told apart from it.
+ */
+export function isMissingPrimaryKey(
+	value: unknown,
+): value is undefined | null | '' {
+	return value === undefined || value === null || value === '';
+}

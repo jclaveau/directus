@@ -26,6 +26,7 @@ import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
 import { format, isValid, parseISO } from '../utils/date-fns-used.js';
 import { generateHash } from '../utils/generate-hash.js';
+import { isMissingPrimaryKey } from '../utils/is-primary-key.js';
 import {
 	clone,
 	cloneDeep,
@@ -710,7 +711,7 @@ export class PayloadService {
 				const updates = field || []; // treat falsey values as removing all children
 
 				for (let i = 0; i < updates.length; i++) {
-					const currentId = parent || payload[currentPrimaryKeyField];
+					const currentId = parent ?? payload[currentPrimaryKeyField];
 					const relatedRecord = updates[i];
 
 					const relatedId =
@@ -723,7 +724,7 @@ export class PayloadService {
 					let existingRecord;
 
 					// No relatedId means it's a new record
-					if (relatedId) {
+					if (!isMissingPrimaryKey(relatedId)) {
 						existingRecord = await this.knex
 							.select(relatedPrimaryKeyField, relation.field)
 							.from(relation.collection)
@@ -845,13 +846,13 @@ export class PayloadService {
 
 							return {
 								...record,
-								[relation.field]: parent || payload[currentPrimaryKeyField],
+								[relation.field]: parent ?? payload[currentPrimaryKeyField],
 							};
 						});
 					} else {
 						createPayload = alterations.create.map((item) => ({
 							...item,
-							[relation.field]: parent || payload[currentPrimaryKeyField],
+							[relation.field]: parent ?? payload[currentPrimaryKeyField],
 						}));
 					}
 
@@ -876,7 +877,7 @@ export class PayloadService {
 							.first();
 
 						if (!existingRecord || existingRecord[relation.field] != parent) {
-							record[relation.field] = parent || payload[currentPrimaryKeyField];
+							record[relation.field] = parent ?? payload[currentPrimaryKeyField];
 						}
 
 						await service.updateOne(key, record, {

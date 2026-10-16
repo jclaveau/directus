@@ -3829,11 +3829,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 				expect(error).toBeInstanceOf(RecordNotUniqueError);
 
-				// `value` is left out: the create hands the translator its whole
-				// list of rows, so it reads the value off an array (reported).
-				expect(error.extensions).toMatchObject({
+				// mysql names no field for PRIMARY, so the translator reads no value;
+				// the create names the field afterwards.
+				expect(error.extensions).toEqual({
 					collection: null,
 					field: 'id',
+					value: null,
 				});
 			}
 			finally {
@@ -3863,11 +3864,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 				expect(error).toBeInstanceOf(RecordNotUniqueError);
 
-				// `value` is left out: the create hands the translator its whole
-				// list of rows, so it reads the value off an array (reported).
-				expect(error.extensions).toMatchObject({
+				expect(error.message).toBe(
+					'Value "a" for field "name" in collection "test" has to be unique.',
+				);
+
+				expect(error.extensions).toEqual({
 					collection: 'test',
 					field: 'name',
+					value: 'a',
 					primaryKey: false,
 				});
 			}

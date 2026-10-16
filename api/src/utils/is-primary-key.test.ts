@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isPrimaryKey } from './is-primary-key.js';
+import { isMissingPrimaryKey, isPrimaryKey } from './is-primary-key.js';
 
 describe('isPrimaryKey', () => {
 	test.each([
@@ -20,5 +20,23 @@ describe('isPrimaryKey', () => {
 		['a boolean', true],
 	])('rejects %s', (_label, value) => {
 		expect(isPrimaryKey(value)).toBe(false);
+	});
+});
+
+describe('isMissingPrimaryKey', () => {
+	test.each([
+		['undefined', undefined],
+		['null', null],
+		['an empty string', ''],
+	])('counts %s as no key', (_label, value) => {
+		expect(isMissingPrimaryKey(value)).toBe(true);
+	});
+
+	test.each([
+		['zero', 0],
+		['a numeric key', 42],
+		['a string key', 'abc'],
+	])('counts %s as a key', (_label, value) => {
+		expect(isMissingPrimaryKey(value)).toBe(false);
 	});
 });
