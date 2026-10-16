@@ -26,6 +26,7 @@ const mockedDeps = vi.hoisted(() => {
 			list: vi.fn(),
 			delete: vi.fn(),
 			move: vi.fn(),
+			exists: vi.fn(),
 		},
 		filesService: {
 			createOne: vi.fn(),
@@ -480,6 +481,97 @@ describe('TusDataStore.create', () => {
 
 		expect(mockedDeps.storageDriver.createChunkedUpload).toHaveBeenCalledWith(
 			'custom-name.txt',
+			expect.anything(),
+		);
+	});
+
+	test('refuses a filename_disk another file holds, before any row', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.storageDriver.exists.mockResolvedValueOnce(true);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
+
+		mockedDeps.storageDriver.createChunkedUpload.mockResolvedValueOnce({
+			id: 'tus-1',
+		});
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				filename_download: 'notes.txt',
+				filename_disk: 'file-9.jpg',
+			},
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: '"filename_disk" "file-9.jpg" is already used by another file',
+		});
+
+		expect(mockedDeps.storageDriver.exists).toHaveBeenCalledWith('file-9.jpg');
+		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.storageDriver.createChunkedUpload).not.toHaveBeenCalled();
+	});
+
+	test('lets a replacement keep the disk name of the file it replaces', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		knexTracker.on.select('directus_files').response({
+			folder: null,
+			filename_download: 'photo.jpg',
+			filename_disk: 'file-9.jpg',
+			title: 'Photo',
+			description: null,
+			metadata: null,
+			tus_id: null,
+		});
+
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.storageDriver.exists.mockResolvedValueOnce(true);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-10');
+
+		mockedDeps.storageDriver.createChunkedUpload.mockResolvedValueOnce({
+			id: 'tus-1',
+		});
+
+		await tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				id: 'file-9',
+				filename_download: 'photo.jpg',
+				filename_disk: 'file-9.jpg',
+			},
+		}));
+
+		expect(mockedDeps.storageDriver.createChunkedUpload).toHaveBeenCalledWith(
+			'file-9.jpg',
 			expect.anything(),
 		);
 	});

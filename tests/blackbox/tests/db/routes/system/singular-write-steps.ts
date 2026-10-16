@@ -227,8 +227,12 @@ function sendRequest(vendor: Vendor, requestCell: RequestCell) {
 		: pendingRequest.send(payload as object);
 }
 
-function codeAndBody(response: Response) {
-	return { code: response.statusCode, body: response.body };
+function codeBodyAndText(response: Response) {
+	return {
+		code: response.statusCode,
+		body: response.body,
+		text: response.text,
+	};
 }
 
 // One row at a time, so a row can name the key one before it remembered. A
@@ -258,7 +262,7 @@ async function sendRows(
 
 		if (requestCell.eventually) {
 			await expect.poll(async () => {
-				return codeAndBody(await sendRequest(vendor, requestCell));
+				return codeBodyAndText(await sendRequest(vendor, requestCell));
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
 				expectedResponse,
 			);
@@ -268,7 +272,7 @@ async function sendRows(
 
 		const response = await sendRequest(vendor, requestCell);
 
-		expect(codeAndBody(response)).toMatchObject(expectedResponse);
+		expect(codeBodyAndText(response)).toMatchObject(expectedResponse);
 
 		if (requestCell.remember !== undefined) {
 			scenarioKeys.keysByName[requestCell.remember] = String(

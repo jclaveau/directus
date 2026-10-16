@@ -211,6 +211,47 @@ Feature: A file is uploaded, replaced and terminated through tus
       | method: GET                          | code: 200                   |+
       | path: /assets/<file>                 | text: kept                  |
 
+  Scenario: an upload naming the disk name another file holds is refused
+    Given these requests are sent:
+      | request                             | response  |
+      | method: POST                        | code: 201 |+
+      | path: /files/tus                    |           |
+      | headers:                            |           |
+      |   Tus-Resumable: 1.0.0              |           |
+      |   Upload-Length: '4'                |           |
+      | upload_metadata:                    |           |
+      |   filename_download: kept-<run>.txt |           |
+      |   type: text/plain                  |           |
+      | remember_headers:                   |           |
+      |   kept-upload: Location             |           |
+      |   file: Directus-File-Id            |           |
+      | method: PATCH                       | code: 204 |+
+      | path: /files/tus/<kept-upload>      |           |
+      | headers:                            |           |
+      |   Tus-Resumable: 1.0.0              |           |
+      |   Upload-Offset: '0'                |           |
+      |   Content-Type: >-                  |           |
+      |     application/offset+octet-stream |           |
+      | body: kept                          |           |
+    Then these requests get these responses:
+      | request                              | response                  |
+      | method: POST                         | code: 400                 |+
+      | path: /files/tus                     | text: >-                  |
+      | headers:                             |   "filename_disk"         |
+      |   Tus-Resumable: 1.0.0               |   "<file>.txt" is already |
+      |   Upload-Length: '4'                 |   used by another file    |
+      | upload_metadata:                     |                           |
+      |   filename_download: lost-<run>.txt  |                           |
+      |   filename_disk: <file>.txt          |                           |
+      | method: GET                          | code: 200                 |+
+      | path: /files                         | body:                     |
+      | query:                               |   data: []                |
+      |   fields: id                         |                           |
+      |   filter[filename_download][_eq]: >- |                           |
+      |     lost-<run>.txt                   |                           |
+      | method: GET                          | code: 200                 |+
+      | path: /assets/<file>                 | text: kept                |
+
   Scenario: a replacement that cannot start leaves no row behind
     Given these requests are sent:
       | request                             | response  |
