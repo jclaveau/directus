@@ -77,8 +77,21 @@ export class CommentsService extends ItemsService {
 				fields: ['id', 'first_name', 'last_name', 'email'],
 			});
 
+			const authorReadableIds = await this.readableUserIds(
+				mentions.map((mention) => mention.substring(1)),
+			);
+
 			for (const mention of mentions) {
 				const userID = mention.substring(1);
+
+				if (!authorReadableIds.has(userID)) {
+					logger.warn(
+						`Mention of user "${userID}" skipped:`
+						+ ' the author cannot read that user',
+					);
+
+					continue;
+				}
 
 				const user = await this.usersService.readOne(userID, {
 					fields: ['id', 'first_name', 'last_name', 'email', 'role.id'],
@@ -118,21 +131,14 @@ export class CommentsService extends ItemsService {
 						fields: ['id', 'first_name', 'last_name', 'email'],
 						filter: { id: { _in: mentions.map((mention) => mention.substring(1)) } },
 					}).catch((error: unknown) => {
+						// The recipient is notified all the same: a user they may not
+						// read is previewed as "@Unknown User".
 						if (!isDirectusError(error, ErrorCode.Forbidden)) {
 							throw error;
 						}
 
-						logger.warn(
-							`Mention of user "${userID}" skipped:`
-							+ ' the mentioned user cannot read directus_users',
-						);
-
-						return null;
+						return [];
 					});
-
-					if (templateData === null) {
-						continue;
-					}
 
 					const userPreviews = templateData.reduce(
 						(acc, user) => {
@@ -185,6 +191,32 @@ ${comment}
 		}
 
 		return keys;
+	}
+
+	private async readableUserIds(userIds: string[]): Promise<Set<string>> {
+		if (!this.accountability || this.accountability.admin) {
+			return new Set(userIds);
+		}
+
+		const authorUsersService = new UsersService({
+			schema: this.schema,
+			knex: this.knex,
+			accountability: this.accountability,
+		});
+
+		const readableUsers = await authorUsersService.readByQuery({
+			fields: ['id'],
+			filter: { id: { _in: userIds } },
+			limit: -1,
+		}).catch((error: unknown) => {
+			if (!isDirectusError(error, ErrorCode.Forbidden)) {
+				throw error;
+			}
+
+			return [];
+		});
+
+		return new Set(readableUsers.map((readableUser) => readableUser['id']));
 	}
 
 	override updateOne(key: PrimaryKey, data: Partial<Comment>, opts?: MutationOptions): Promise<PrimaryKey> {

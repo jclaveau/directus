@@ -168,7 +168,7 @@ describe('Services / Comments', () => {
 		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
 	});
 
-	it('logs a mention the mentioned user cannot read users for', async () => {
+	it('notifies a mentioned user who cannot read users', async () => {
 		vi.spyOn(ItemsService.prototype, 'createMany')
 			.mockResolvedValue(['comment-pk-3']);
 
@@ -195,7 +195,7 @@ describe('Services / Comments', () => {
 		vi.mocked(fetchGlobalAccess)
 			.mockResolvedValue({
 				admin: false,
-				app: true,
+				app: false,
 				grantedDbConnections: [],
 			});
 
@@ -211,11 +211,202 @@ describe('Services / Comments', () => {
 		]);
 
 		expect(result).toEqual(['comment-pk-3']);
-		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
 
-		expect(loggerWarn).toHaveBeenCalledExactlyOnceWith(
-			'Mention of user "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" skipped:'
-			+ ' the mentioned user cannot read directus_users',
-		);
+		expect(NotificationsService.prototype.createOne)
+			.toHaveBeenCalledExactlyOnceWith({
+				recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+				subject: 'You were mentioned in articles',
+				message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey @Unknown User please review
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+				collection: 'articles',
+				item: '42',
+			});
+
+		expect(loggerWarn).not.toHaveBeenCalled();
+	});
+
+	describe('as an author who is not an admin', () => {
+		const authorAccountability: Accountability = {
+			user: senderUuid,
+			role: null,
+			admin: false,
+			app: true,
+			roles: [],
+			ip: null,
+		};
+
+		it('skips a mention when the author cannot read users', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['comment-pk-4']);
+
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: authorAccountability,
+			});
+
+			vi.mocked(UsersService.prototype.readOne)
+				.mockResolvedValueOnce(withMeta({
+					id: senderUuid,
+					first_name: 'Sam',
+					last_name: 'Sender',
+					email: 'sam@x.com',
+				}, { scopedCacheFingerprints: [] }));
+
+			vi.mocked(UsersService.prototype.readByQuery)
+				.mockRejectedValue(new ForbiddenError());
+
+			const result = await service.createMany([
+				{
+					comment: `hey @${mentionUuid} please review`,
+					collection: 'articles',
+					item: '42',
+				},
+			]);
+
+			expect(result).toEqual(['comment-pk-4']);
+			expect(UsersService.prototype.readOne).toHaveBeenCalledOnce();
+			expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+
+			expect(loggerWarn).toHaveBeenCalledExactlyOnceWith(
+				'Mention of user "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" skipped:'
+				+ ' the author cannot read that user',
+			);
+		});
+
+		it('skips a mention of a user the author cannot read', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['comment-pk-5']);
+
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: authorAccountability,
+			});
+
+			vi.mocked(UsersService.prototype.readOne)
+				.mockResolvedValueOnce(withMeta({
+					id: senderUuid,
+					first_name: 'Sam',
+					last_name: 'Sender',
+					email: 'sam@x.com',
+				}, { scopedCacheFingerprints: [] }));
+
+			vi.mocked(UsersService.prototype.readByQuery)
+				.mockResolvedValueOnce(withMeta([], { scopedCacheFingerprints: [] }));
+
+			const result = await service.createMany([
+				{
+					comment: `hey @${mentionUuid} please review`,
+					collection: 'articles',
+					item: '42',
+				},
+			]);
+
+			expect(result).toEqual(['comment-pk-5']);
+
+			expect(UsersService.prototype.readByQuery)
+				.toHaveBeenCalledExactlyOnceWith({
+					fields: ['id'],
+					filter: {
+						id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] },
+					},
+					limit: -1,
+				});
+
+			expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+
+			expect(loggerWarn).toHaveBeenCalledExactlyOnceWith(
+				'Mention of user "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" skipped:'
+				+ ' the author cannot read that user',
+			);
+		});
+
+		it('notifies a mentioned user the author can read', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['comment-pk-6']);
+
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: authorAccountability,
+			});
+
+			vi.mocked(UsersService.prototype.readOne)
+				.mockResolvedValueOnce(withMeta({
+					id: senderUuid,
+					first_name: 'Sam',
+					last_name: 'Sender',
+					email: 'sam@x.com',
+				}, { scopedCacheFingerprints: [] }))
+				.mockResolvedValueOnce(withMeta({
+					id: mentionUuid,
+					first_name: 'Jane',
+					last_name: 'Doe',
+					email: 'jane@x.com',
+					role: { id: null },
+				}, { scopedCacheFingerprints: [] }));
+
+			vi.mocked(fetchRolesTree).mockResolvedValue([]);
+			vi.mocked(validateAccess).mockResolvedValue(undefined);
+
+			vi.mocked(fetchGlobalAccess)
+				.mockResolvedValue({
+					admin: false,
+					app: true,
+					grantedDbConnections: [],
+				});
+
+			vi.mocked(UsersService.prototype.readByQuery)
+				.mockResolvedValueOnce(withMeta([
+					{ id: mentionUuid },
+				], { scopedCacheFingerprints: [] }))
+				.mockResolvedValueOnce(withMeta([
+					{
+						id: mentionUuid,
+						first_name: 'Jane',
+						last_name: 'Doe',
+						email: 'jane@x.com',
+					},
+				], { scopedCacheFingerprints: [] }));
+
+			const result = await service.createMany([
+				{
+					comment: `hey @${mentionUuid} please review`,
+					collection: 'articles',
+					item: '42',
+				},
+			]);
+
+			expect(result).toEqual(['comment-pk-6']);
+
+			expect(NotificationsService.prototype.createOne)
+				.toHaveBeenCalledExactlyOnceWith({
+					recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+					sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+					subject: 'You were mentioned in articles',
+					message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey <em>Jane Doe</em> please review
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+					collection: 'articles',
+					item: '42',
+				});
+
+			expect(loggerWarn).not.toHaveBeenCalled();
+		});
 	});
 });
