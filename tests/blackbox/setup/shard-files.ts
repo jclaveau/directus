@@ -202,6 +202,15 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/system/write-path-schema-meta.test.ts': 1_600,
 	'/tests/db/routes/system/write-path-versions.test.ts': 1_600,
 	'/tests/db/routes/system/write-path-websocket.test.ts': 1_600,
+	// Estimated, not measured: each boots its own instance.
+	'/tests/db/routes/items/write-cache-hook-failures.test.ts': 60_000,
+	'/tests/db/routes/items/write-cache-out-of-range-key.test.ts': 30_000,
+	'/tests/db/routes/users/write-url-allow-list.test.ts': 18_000,
+	'/tests/db/routes/files/tus-resumable-upload.test.ts': 12_000,
+	'/tests/db/routes/auth/sso-login.test.ts': 8_000,
+	'/tests/db/routes/items/write-payload-partials.test.ts': 1_600,
+	'/tests/db/routes/system/write-translations-moves.test.ts': 1_600,
+	'/tests/db/routes/system/write-versions-rename.test.ts': 1_600,
 	// Measured over the postgres run of 2026-10-01; no hint before it.
 	'/tests/db/routes/items/cache-index-marker.test.ts': 87_000,
 	'/tests/db/routes/items/cache-fill-pause-ceiling.test.ts': 85_000,

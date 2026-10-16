@@ -145,6 +145,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/system/write-path-apply-diff.test.ts',
 			// Subscribes over a WebSocket, like the other WS suites.
 			'/tests/db/routes/system/write-path-websocket.test.ts',
+			// Turns public registration on and sets the URL allow lists in the
+			// settings singleton, like `singular-write-users-registration`.
+			'/tests/db/routes/users/write-url-allow-list.test.ts',
 			'/tests/db/app/cache.test.ts',
 			'/tests/db/app/processes.test.ts',
 			'/tests/db/app/pgbouncer.test.ts',
