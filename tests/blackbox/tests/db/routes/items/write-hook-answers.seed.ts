@@ -23,12 +23,19 @@ export const seedDBStructure = () => {
 				}
 
 				// Integer keys the scenarios choose, so a hook can add one by value.
+				// No revisions: their delta cannot serialize the BigInt a hook
+				// answers.
 				await CreateCollections(vendor, {
 					collections: [
-						{ collection: collectionAnswerOwner, primaryKeyType: 'string' },
+						{
+							collection: collectionAnswerOwner,
+							primaryKeyType: 'string',
+							meta: { accountability: null },
+						},
 						{
 							collection: collectionAnswerRow,
 							primaryKeyType: 'integer',
+							meta: { accountability: null },
 							fields: [
 								{ field: 'name', type: 'string', meta: {} },
 								{ field: 'status', type: 'string', meta: {} },
