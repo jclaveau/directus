@@ -359,8 +359,13 @@ export class FilesService extends ItemsService<File> {
 
 		for (const holderRow of holderRows) {
 			const isHeldElsewhere = diskNameClaims.some((claim) => {
-				return claim.filenameDisk === holderRow.filename_disk
-					&& String(claim.ownerKey) !== String(holderRow.id);
+				if (claim.filenameDisk !== holderRow.filename_disk) {
+					return false;
+				}
+
+				return claim.ownerKey === null
+					|| this.primaryKeyNameOf(claim.ownerKey)
+						!== this.primaryKeyNameOf(holderRow.id);
 			});
 
 			if (isHeldElsewhere) {
@@ -443,9 +448,18 @@ export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string
 	const listedPrefixes = new Set([path.posix.join(folderPath, baseName), baseName]);
 
 	for (const listedPrefix of listedPrefixes) {
-		for await (const filepath of disk.list(listedPrefix)) {
-			if (filepath === filenameDisk || thumbnailPattern.test(filepath)) {
-				await disk.delete(filepath);
+		try {
+			for await (const filepath of disk.list(listedPrefix)) {
+				if (filepath === filenameDisk || thumbnailPattern.test(filepath)) {
+					await disk.delete(filepath);
+				}
+			}
+		}
+		catch (error) {
+			// A local disk lists a folder by opening it, and a folder that is gone
+			// holds nothing to delete.
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+				throw error;
 			}
 		}
 	}

@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
 import type { Knex } from 'knex';
 import knex from 'knex';
@@ -290,7 +291,12 @@ describe('Integration Tests', () => {
 			beforeEach(() => {
 				service = new FilesService({
 					knex: db,
-					schema: { collections: {}, relations: [] },
+					schema: new SchemaBuilder()
+						.collection('directus_files', (collection) => {
+							collection.field('id').uuid()
+								.primary();
+						})
+						.build(),
 				});
 
 				vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['new-id']);
@@ -392,6 +398,31 @@ describe('Integration Tests', () => {
 					{},
 				);
 			});
+
+			it('updates a row keeping its disk name under an uppercase key', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-00000000000a',
+						filename_disk: 'own.txt',
+					}]);
+
+				await service.updateGroups(
+					[{
+						keys: ['8E2B4C10-5D3A-4F6E-9A7B-00000000000A'],
+						data: { filename_disk: 'own.txt' },
+					}],
+					{},
+				);
+
+				expect(ItemsService.prototype.updateGroups).toHaveBeenCalledWith(
+					[{
+						keys: ['8E2B4C10-5D3A-4F6E-9A7B-00000000000A'],
+						data: { filename_disk: 'own.txt' },
+					}],
+					{},
+				);
+			});
 		});
 
 		describe('deleteMany', () => {
@@ -445,6 +476,47 @@ describe('Integration Tests', () => {
 					[`a__${thumbnailHash}.webp`],
 					['photos/a.jpg'],
 					[`a__${thumbnailHash}.webp`],
+				]);
+			});
+
+			it('deletes the thumbnails of a file whose folder is gone', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'b'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* (listedPrefix: string) {
+						if (listedPrefix === 'gone/x') {
+							throw Object.assign(
+								new Error('ENOENT: no such file or directory, opendir'),
+								{ code: 'ENOENT' },
+							);
+						}
+
+						yield* [`x__${thumbnailHash}.webp`];
+					}),
+					delete: vi.fn(),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[{ id: 'gone-id', storage: 'local', filename_disk: 'gone/x.jpg' }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await expect(service.deleteMany(['gone-id']))
+					.resolves.toStrictEqual(['gone-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					[`x__${thumbnailHash}.webp`],
 				]);
 			});
 		});

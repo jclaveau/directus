@@ -1363,7 +1363,7 @@ implements AbstractService<Item> {
 	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
 	 * or a bigInteger whatever zeros lead it.
 	 */
-	private primaryKeyNameOf(key: PrimaryKey): string {
+	protected primaryKeyNameOf(key: PrimaryKey): string {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
 		const primaryKeyType = this.schema.collections[this.collection]!
