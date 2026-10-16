@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache } from './cache.js';
+import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { dropScopedCacheIndex } from './scoped-cache/index.js';
 
 // hoisted: cache.ts reads `const env = useEnv()` at module load, before a plain
@@ -98,6 +99,33 @@ describe('clearCacheTargets', () => {
 		expect(await lockCache.get('lock-key')).toBeUndefined();
 		expect(await cache.get('response-key')).toBe('r');
 		expect(await systemCache.get('system-key')).toBe('s');
+	});
+
+	it('permissions: clears only the permission cache', async () => {
+		const { cache, systemCache, lockCache } = await seedAllTiers();
+
+		await clearCacheTargets(['permissions']);
+
+		expect(clearPermissionCache).toHaveBeenCalledOnce();
+		expect(await cache.get('response-key')).toBe('r');
+		expect(await systemCache.get('system-key')).toBe('s');
+		expect(await lockCache.get('lock-key')).toBe('l');
+
+		expect(mockBus.publish).not.toHaveBeenCalledWith(
+			'schemaChanged',
+			expect.anything(),
+		);
+	});
+
+	it('permissions: fails the clear redis refused', async () => {
+		vi.mocked(clearPermissionCache).mockRejectedValueOnce(new Error('READONLY'));
+
+		await expect(clearCacheTargets(['permissions'])).rejects.toMatchObject({
+			message: oneLine`
+				Service "cache" is unavailable.
+				redis refused the permissions clear.
+			`,
+		});
 	});
 
 	it('broadcasts the exact targets for peers to drop the same subset', async () => {

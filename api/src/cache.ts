@@ -503,6 +503,16 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		}
 	}
 
+	// `system` already took it with the rest; alone it leaves the schema loaded.
+	if (targets.includes('permissions') && !targets.includes('system')) {
+		try {
+			await clearPermissionCache();
+		}
+		catch {
+			refusedTargets.push('permissions');
+		}
+	}
+
 	if (targets.includes('response')) {
 		let flushedDatabase = false;
 
