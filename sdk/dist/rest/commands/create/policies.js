@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/policies`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/policies`,params:t??{},body:JSON.stringify(e),method:`POST`});export{e as createPolicies,t as createPolicy};
+//# sourceMappingURL=policies.js.map
