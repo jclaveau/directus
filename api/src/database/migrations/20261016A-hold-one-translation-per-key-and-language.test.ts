@@ -51,15 +51,16 @@ describe('holding one translation per key and language', () => {
 		await database('directus_translations').insert([
 			{ id: 'a', key: 'greeting', language: 'en-US', value: 'hello' },
 			{ id: 'b', key: 'greeting', language: 'en-US', value: 'hi' },
-			{ id: 'c', key: 'farewell', language: 'fr-FR', value: 'adieu' },
-			{ id: 'd', key: 'farewell', language: 'fr-FR', value: 'salut' },
-			{ id: 'e', key: 'farewell', language: 'fr-FR', value: 'ciao' },
+			{ id: 'e', key: 'farewell', language: 'fr-FR', value: 'adieu' },
+			{ id: 'c', key: 'farewell', language: 'fr-FR', value: 'salut' },
+			{ id: 'd', key: 'farewell', language: 'fr-FR', value: 'ciao' },
 			{ id: 'f', key: 'farewell', language: 'en-US', value: 'bye' },
 		]);
 
 		await expect(up(database)).rejects.toStrictEqual(new Error(
 			'directus_translations holds more than one translation for'
-			+ ' "farewell" in "fr-FR" (3 rows), "greeting" in "en-US" (2 rows).'
+			+ ' "farewell" in "fr-FR" (rows c, d, e),'
+			+ ' "greeting" in "en-US" (rows a, b).'
 			+ ' Delete the extra rows, then run the migrations again.',
 		));
 

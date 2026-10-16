@@ -46,6 +46,10 @@ describe.each(vendors)('%s', (vendor) => {
 				an alterations object of the wrong shape is refused, writing
 				nothing
 			`,
+			oneLine`
+				an update of several keys updating one child is refused, writing
+				nothing
+			`,
 		]) {
 			scenario(title, (steps) => {
 				defineNestedWriteSteps(steps, vendor, instanceUrl);

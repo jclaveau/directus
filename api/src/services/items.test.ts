@@ -1255,6 +1255,38 @@ describe('Integration Tests', () => {
 				expect(tracker.history.all.length).toBeGreaterThan(0);
 			});
 
+			it.each([
+				{ children: [7] },
+				{ children: [{ id: 7 }] },
+				{ children: { update: [{ id: 7 }] } },
+			])(oneLine`
+				refuses to give one existing child to several rows, writing nothing:
+				%j
+			`, async (payload) => {
+				await expect(service.updateMany([1, 2], payload))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it.each([
+				{ children: [{}] },
+				{ children: { create: [{}], delete: [7] } },
+			])(oneLine`
+				gives each of several rows its own child created inline: %j
+			`, async (payload) => {
+				await expect(service.updateMany([1, 2], payload))
+					.resolves
+					.toEqual([1, 2]);
+			});
+
 			it('should NOT skip an object on a relational alias that is not alterations-shaped', async () => {
 				await expect(service.updateMany([1], { children: { foo: 1 } })).rejects.toThrow();
 			});
@@ -2666,6 +2698,96 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			);
 
 			expect(keys).toEqual([1]);
+		});
+	});
+
+	describe('a create revision names a nested row by its key', () => {
+		const nestingSchema = new SchemaBuilder()
+			.collection('carrier', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('owner').m2o('owner');
+				c.field('collection').string();
+				c.field('item').a2o(['page']);
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('page', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		nestingSchema.collections['carrier']!.accountability = 'all';
+		nestingSchema.collections['owner']!.accountability = null;
+		nestingSchema.collections['page']!.accountability = null;
+
+		const carrierService = () => {
+			return new ItemsService('carrier', {
+				knex: db,
+				schema: nestingSchema,
+				accountability: {
+					user: 'u1',
+					role: 'r1',
+					admin: true,
+					app: true,
+				} as any,
+			});
+		};
+
+		it('stores an M2O row created inline as its key', async () => {
+			// Ahead of the owner's: the carrier's insert names an `owner` column.
+			tracker.on.insert('carrier').response([{ id: 1 }, { id: 2 }]);
+			tracker.on.select('owner').response(undefined);
+			tracker.on.insert('owner').response([{ id: 5 }]);
+			// A key given on a serial column resets its sequence after the insert.
+			tracker.on.any(/SETVAL/).response([]);
+
+			await carrierService().createMany([
+				{ id: 1, title: 'a', owner: { id: 5, name: 'made' } },
+				{ id: 2, title: 'b' },
+			]);
+
+			expect(revisionWrites).toEqual([[
+				{
+					activity: 1,
+					collection: 'carrier',
+					item: 1,
+					data: '{"id":1,"title":"a","owner":5}',
+					delta: '{"id":1,"title":"a","owner":5}',
+				},
+				{
+					activity: 2,
+					collection: 'carrier',
+					item: 2,
+					data: '{"id":2,"title":"b"}',
+					delta: '{"id":2,"title":"b"}',
+				},
+			]]);
+		});
+
+		it('stores an A2O row created inline as its key', async () => {
+			tracker.on.select('page').response(undefined);
+			tracker.on.insert('page').response([{ id: 7 }]);
+			// A key given on a serial column resets its sequence after the insert.
+			tracker.on.any(/SETVAL/).response([]);
+			tracker.on.insert('carrier').response([{ id: 1 }]);
+
+			await carrierService().createOne({
+				id: 1,
+				collection: 'page',
+				item: { id: 7, name: 'made' },
+			});
+
+			expect(revisionWrites).toEqual([[{
+				activity: 1,
+				collection: 'carrier',
+				item: 1,
+				data: '{"id":1,"collection":"page","item":7}',
+				delta: '{"id":1,"collection":"page","item":7}',
+			}]]);
 		});
 	});
 

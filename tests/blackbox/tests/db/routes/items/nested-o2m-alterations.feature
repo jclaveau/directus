@@ -316,3 +316,28 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
     Then the rows of test_nested_o2m_book whose key starts with "iv-" are:
       | id    | shelf |
       | iv-a1 | iv-a  |
+
+  Scenario: an update of several keys updating one child is refused, writing nothing
+    Given the rows of test_nested_o2m_shelf:
+      | id   |
+      | su-a |
+      | su-b |
+    And their children in test_nested_o2m_book:
+      | id    | shelf |
+      | su-a1 | su-a  |
+    When these requests get these responses:
+      | request                            | response                         |
+      | method: PATCH                      | code: 400                        |+
+      | path: /items/test_nested_o2m_shelf | body:                            |
+      | payload:                           |   errors:                        |
+      |   keys:                            |     - message: >-                |
+      |     - su-a                         |         Invalid payload. "su-a1" |
+      |     - su-b                         |         can't join more than one |
+      |   data:                            |         "test_nested_o2m_shelf". |
+      |     books:                         |       extensions:                |
+      |       update:                      |         code: INVALID_PAYLOAD    |
+      |         - id: su-a1                |                                  |
+      |           name: renamed            |                                  |
+    Then the rows of test_nested_o2m_book whose key starts with "su-" are:
+      | id    | shelf | name |
+      | su-a1 | su-a  |      |

@@ -243,7 +243,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list_entry | 15     | 0      | 4      | 0      |
 
-  Scenario: an update of several keys leaves a child they all list on the last key
+  Scenario: an update of several keys naming an existing child is refused, writing nothing
     Given the rows of test_nested_o2m_list:
       | id   |
       | sk-a |
@@ -254,28 +254,32 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | sk-b1 | sk-b |
       | sk-x1 |      |
     When these requests get these responses:
-      | request                           | response  |
-      | method: PATCH                     | code: 200 |+
-      | path: /items/test_nested_o2m_list |           |
-      | payload:                          |           |
-      |   keys:                           |           |
-      |     - sk-a                        |           |
-      |     - sk-b                        |           |
-      |   data:                           |           |
-      |     entries:                      |           |
-      |       - sk-x1                     |           |
+      | request                           | response                         |
+      | method: PATCH                     | code: 400                        |+
+      | path: /items/test_nested_o2m_list | body:                            |
+      | payload:                          |   errors:                        |
+      |   keys:                           |     - message: >-                |
+      |     - sk-a                        |         Invalid payload. "sk-x1" |
+      |     - sk-b                        |         can't join more than one |
+      |   data:                           |         "test_nested_o2m_list".  |
+      |     entries:                      |       extensions:                |
+      |       - sk-x1                     |         code: INVALID_PAYLOAD    |
+      | method: PATCH                     | code: 400                        |+
+      | path: /items/test_nested_o2m_list | body:                            |
+      | payload:                          |   errors:                        |
+      |   query:                          |     - message: >-                |
+      |     filter:                       |         Invalid payload. "sk-x1" |
+      |       id:                         |         can't join more than one |
+      |         _starts_with: sk-         |         "test_nested_o2m_list".  |
+      |   data:                           |       extensions:                |
+      |     entries:                      |         code: INVALID_PAYLOAD    |
+      |       - id: sk-x1                 |                                  |
+      |         name: shared              |                                  |
     Then the rows of test_nested_o2m_list_entry whose key starts with "sk-" are:
-      | id    | list |
-      | sk-a1 |      |
-      | sk-b1 |      |
-      | sk-x1 | sk-b |
-    And on postgres the requests ran these statements:
-      | request | table                      | select | insert | update | delete |
-      | 1       | directus_activity          | 0      | 5      | 0      | 0      |
-      | 1       | directus_revisions         | 0      | 4      | 0      | 0      |
-      | 1       | directus_users             | 1      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list       | 2      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 14     | 0      | 4      | 0      |
+      | id    | list | name |
+      | sk-a1 | sk-a |      |
+      | sk-b1 | sk-b |      |
+      | sk-x1 |      |      |
 
   Scenario: a many-to-many list links junction rows and nullifies the ones left out
     Given the rows of test_nested_o2m_tag:

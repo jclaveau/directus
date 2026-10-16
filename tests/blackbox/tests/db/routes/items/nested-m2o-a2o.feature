@@ -221,12 +221,10 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |     - own-b                       |       data:            |
       |   fields:                         |         id: bat-a      |
       |     - activity.action             |         title: a       |
-      |     - item                        |         owner:         |
-      |     - data                        |           id: own-b    |
-      |     - parent.item                 |           name: made   |
-      |   sort: item                      |       parent: null     |
-      |                                   |     - activity:        |
-      |                                   |         action: create |
+      |     - item                        |         owner: own-b   |
+      |     - data                        |       parent: null     |
+      |     - parent.item                 |     - activity:        |
+      |   sort: item                      |         action: create |
       |                                   |       item: bat-b      |
       |                                   |       data:            |
       |                                   |         id: bat-b      |
@@ -315,25 +313,33 @@ Feature: A nested many-to-one or any-to-one object writes its related row
 
   Scenario: a nested A2O object creates its row in the collection it names
     When these requests get these responses:
-      | request                                | response                   |
-      | method: POST                           | code: 200                  |+
-      | path: /items/test_nested_a2o_link      | body:                      |
-      | query:                                 |   data:                    |
-      |   fields:                              |     item: po-n             |
-      |     - item                             |     target_collection: >-  |
-      |     - target_collection                |       test_nested_a2o_post |
-      | payload:                               |                            |
-      |   id: lk-n                             |                            |
-      |   target_collection: >-                |                            |
-      |     test_nested_a2o_post               |                            |
-      |   item:                                |                            |
-      |     id: po-n                           |                            |
-      |     title: fresh                       |                            |
-      | method: GET                            | code: 200                  |+
-      | path: /items/test_nested_a2o_post/po-n | body:                      |
-      |                                        |   data:                    |
-      |                                        |     id: po-n               |
-      |                                        |     title: fresh           |
+      | request                                | response                       |
+      | method: POST                           | code: 200                      |+
+      | path: /items/test_nested_a2o_link      | body:                          |
+      | query:                                 |   data:                        |
+      |   fields:                              |     item: po-n                 |
+      |     - item                             |     target_collection: >-      |
+      |     - target_collection                |       test_nested_a2o_post     |
+      | payload:                               |                                |
+      |   id: lk-n                             |                                |
+      |   target_collection: >-                |                                |
+      |     test_nested_a2o_post               |                                |
+      |   item:                                |                                |
+      |     id: po-n                           |                                |
+      |     title: fresh                       |                                |
+      | method: GET                            | code: 200                      |+
+      | path: /items/test_nested_a2o_post/po-n | body:                          |
+      |                                        |   data:                        |
+      |                                        |     id: po-n                   |
+      |                                        |     title: fresh               |
+      | method: GET                            | code: 200                      |+
+      | path: /revisions                       | body:                          |
+      | query:                                 |   data:                        |
+      |   filter[item][_eq]: lk-n              |     - data:                    |
+      |   filter[collection][_eq]: >-          |         id: lk-n               |
+      |     test_nested_a2o_link               |         target_collection: >-  |
+      |   fields:                              |           test_nested_a2o_post |
+      |     - data                             |         item: po-n             |
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete |
       | 1       | directus_activity    | 0      | 2      | 0      | 0      |
