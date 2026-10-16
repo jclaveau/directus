@@ -88,11 +88,12 @@ Feature: Extension settings rows are rewritten, toggled and removed
 
   Scenario: an endpoint answers as its extension was just toggled
     Given these requests are sent:
-      | request                         | response  |
-      | method: GET                     | code: 200 |+
-      | path: /extension-settings-probe | body:     |
-      | remember: probe                 |   data:   |
-      | eventually: true                |           |
+      | request                         | response          |
+      | method: GET                     | code: 200         |+
+      | path: /extension-settings-probe | body:             |
+      | remember: probe                 |   data:           |
+      | eventually: true                |                   |
+      |                                 |     source: local |
     Then these requests get these responses:
       | request                         | response                          |
       | method: PATCH                   | code: 200                         |+
