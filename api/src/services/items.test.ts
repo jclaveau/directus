@@ -3956,9 +3956,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				.updateGroups([{ keys: [1], data: null as any }])
 				.catch((updateError) => updateError);
 
-			// The class only: the message blames a filter hook, though none ran
-			// (reported).
 			expect(error).toBeInstanceOf(InvalidPayloadError);
+
+			expect(error.message).toEqual(
+				'Invalid payload. Each update group needs a "data" object.',
+			);
+
 			expect(tracker.history.update).toEqual([]);
 		});
 

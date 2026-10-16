@@ -398,9 +398,9 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status     |
-      | strip-a |            |
-      | strip-b |            |
+      | name    | status |
+      | strip-a |        |
+      | strip-b |        |
 
   Scenario: a grouped hook reading a field off the list is refused, writing nothing
     Given the rows:
@@ -419,9 +419,9 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status       |
-      | check-a |              |
-      | check-b |              |
+      | name    | status |
+      | check-a |        |
+      | check-b |        |
 
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"
@@ -460,6 +460,17 @@ Feature: An update reaches its hooks as one grouped event
       | bare-b | kept     |
       | bare-c | archived |
     And no update event was logged
+
+  Scenario: an update sending null for its data is refused, naming no hook
+    Given the rows, in the collection no update hook listens to:
+      | name      |
+      | no-data-a |
+    When the rows are updated with null for their data
+    Then the update is refused with the message:
+      """
+      Invalid payload. Each update group needs a "data" object.
+      """
+    And the refusal's code is "INVALID_PAYLOAD"
 
   Scenario: a hook mapping its rows cancels one, its siblings written together
     Given the rows:

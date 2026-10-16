@@ -381,6 +381,13 @@ describe.each(vendors)('%s', (vendor) => {
 			},
 		);
 
+		when.optional('the rows are updated with null for their data', async () => {
+			update.response = await request(getUrl(vendor))
+				.patch(`/items/${update.collection}`)
+				.send({ keys: update.rows.map((row) => row.id), data: null })
+				.set('Authorization', update.authorization);
+		});
+
 		when.optional(
 			/^the rows are updated to point at a new owner named "(.*)"$/,
 			async (ownerName: string) => {
@@ -717,6 +724,7 @@ describe.each(vendors)('%s', (vendor) => {
 			'a malformed key is refused before any update hook runs',
 			'an update naming no row runs no update hook',
 			'a batch no update hook listens to is written as it was sent',
+			'an update sending null for its data is refused, naming no hook',
 			oneLine`
 				a hook mapping its rows cancels one, its siblings written together
 			`,

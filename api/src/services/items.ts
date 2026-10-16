@@ -1499,6 +1499,13 @@ implements AbstractService<Item> {
 
 		validateKeys(this.schema, this.collection, primaryKeyField, inputKeys);
 
+		// Refused here, so a missing change is not blamed on a hook's answer.
+		if (groups.some((group) => !isPlainObject(group.data))) {
+			throw new InvalidPayloadError({
+				reason: `Each update group needs a "data" object`,
+			});
+		}
+
 		// Answered like an empty batch or a query matching nothing: no row, no hook.
 		if (inputKeys.length === 0) {
 			return [];
