@@ -7,6 +7,9 @@ Feature: An applied schema diff updates and deletes a relation
   - A diff applies only under the hash of the schema it was taken from: the
     hash is read off a forced diff against an empty snapshot, and the diff
     sent is written by hand.
+  - `retry_stale_hash: <name>` re-sends the diff that remembered `<name>` and
+    the row again when another file moved the schema in between, up to 3
+    times.
 
   Scenario: a diff under a stale hash that edits a relation is refused
     Then these requests get these responses:
@@ -46,6 +49,7 @@ Feature: An applied schema diff updates and deletes a relation
       |   edit_hash: body.data.hash                 |                                   |
       | method: POST                                | code: 204                         |+
       | path: /schema/apply                         |                                   |
+      | retry_stale_hash: edit_hash                 |                                   |
       | payload:                                    |                                   |
       |   hash: <edit_hash>                         |                                   |
       |   diff:                                     |                                   |
@@ -80,6 +84,7 @@ Feature: An applied schema diff updates and deletes a relation
       |   delete_hash: body.data.hash               |                                   |
       | method: POST                                | code: 204                         |+
       | path: /schema/apply                         |                                   |
+      | retry_stale_hash: delete_hash               |                                   |
       | payload:                                    |                                   |
       |   hash: <delete_hash>                       |                                   |
       |   diff:                                     |                                   |

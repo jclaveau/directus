@@ -23,6 +23,7 @@ type WebSocketCell = {
 type RequestCell = (HttpCell | WebSocketCell) & {
 	remember?: string | Record<string, string>;
 	eventually?: boolean;
+	retry_stale_hash?: string;
 };
 
 type Row = { request: string; response: string };
@@ -31,6 +32,10 @@ type ScenarioKeys = {
 	run: string;
 	keysByName: Record<string, string>;
 };
+
+type RememberingRow = { requestText: string; dottedPath: string };
+
+const STALE_HASH_ATTEMPTS = 3;
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -161,6 +166,8 @@ async function sendRows(
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 ) {
+	const rememberingRows: Record<string, RememberingRow> = {};
+
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = loadYaml(
 			withKeys(requestText, scenarioKeys),
@@ -172,7 +179,18 @@ async function sendRows(
 
 		let answer: unknown;
 
-		if (requestCell.eventually) {
+		if (requestCell.retry_stale_hash !== undefined) {
+			answer = await answerRetakingHash(
+				vendor,
+				scenarioKeys,
+				requestText,
+				requestCell.retry_stale_hash,
+				rememberingRows[requestCell.retry_stale_hash]!,
+			);
+
+			expect(answer).toMatchObject(expectedAnswer);
+		}
+		else if (requestCell.eventually) {
 			await expect.poll(async () => {
 				answer = await answerOf(vendor, requestCell);
 
@@ -193,6 +211,56 @@ async function sendRows(
 			scenarioKeys.keysByName[name] = String(
 				valueAtPath(answer, dottedPath),
 			);
+
+			rememberingRows[name] = { requestText, dottedPath };
 		}
 	}
+}
+
+function isStaleHashRefusal(answer: unknown) {
+	const { code, body } = answer as {
+		code?: number;
+		body?: { errors?: { message?: string }[] };
+	};
+
+	return code === 400
+		&& body?.errors?.[0]?.message?.startsWith(
+			'Invalid payload. Provided hash does not match',
+		) === true;
+}
+
+// A diff applies only under the hash it was taken from, and files in the
+// parallel middle move the schema too: on a stale-hash refusal the row takes
+// the hash again from the row that remembered it, then re-sends, as a client
+// of /schema/apply would.
+// TODO(#617): hold a harness lock around every schema-moving file instead.
+async function answerRetakingHash(
+	vendor: Vendor,
+	scenarioKeys: ScenarioKeys,
+	requestText: string,
+	hashName: string,
+	hashRow: RememberingRow,
+) {
+	const sendRow = (rowText: string) => {
+		return answerOf(
+			vendor,
+			loadYaml(withKeys(rowText, scenarioKeys)) as RequestCell,
+		);
+	};
+
+	let answer: unknown = await sendRow(requestText);
+
+	for (
+		let attempt = 1;
+		attempt < STALE_HASH_ATTEMPTS && isStaleHashRefusal(answer);
+		attempt++
+	) {
+		scenarioKeys.keysByName[hashName] = String(
+			valueAtPath(await sendRow(hashRow.requestText), hashRow.dottedPath),
+		);
+
+		answer = await sendRow(requestText);
+	}
+
+	return answer;
 }
