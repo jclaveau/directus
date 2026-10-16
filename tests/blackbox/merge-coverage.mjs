@@ -25,7 +25,20 @@ let merged = 0;
 let skipped = 0;
 
 for (const file of readdirSync(dir)) {
-	if (!file.startsWith('cov-') || !file.endsWith('.json')) continue;
+	if (!file.startsWith('cov-')) {
+		continue;
+	}
+
+	// A server killed between the write and the rename of its dump.
+	if (file.endsWith('.json.partial')) {
+		console.warn(`skipped ${file}: never finished writing`);
+		skipped++;
+		continue;
+	}
+
+	if (!file.endsWith('.json')) {
+		continue;
+	}
 
 	let dumpCoverage;
 
