@@ -19,7 +19,7 @@ Feature: Notifications are written one at a time or in batches
       | method: POST                          | code: 200                  |+
       | path: /notifications                  | body:                      |
       | query:                                |   data:                    |
-      |   fields: recipient,subject,status    |     recipient: <recipient> |
+      |   fields: id,recipient,subject,status |     recipient: <recipient> |
       | payload:                              |     subject: sent-<run>    |
       |   recipient: <recipient>              |     status: inbox          |
       |   subject: sent-<run>                 |                            |

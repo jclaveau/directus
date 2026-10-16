@@ -69,7 +69,7 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | payload:                                 |           |
       |   id: <reader-policy>                    |           |
       |   name: reader-<run>                     |           |
-      |   app_access: false                      |           |
+      |   app_access: true                       |           |
       |   admin_access: false                    |           |
       |   permissions:                           |           |
       |     - collection: test_singular_comments |           |

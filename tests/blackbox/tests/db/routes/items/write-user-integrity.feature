@@ -10,7 +10,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
     `target` is an any-to-one field reaching `directus_users`, the collection
     named in `target_collection`.
   - Every user, role, policy and access row has a literal key starting
-    `5e1f0000-`, and every user an email ending `@write.tests`.
+    `5e1f0000-`, and every user an email ending `@write.email`.
 
   Scenario: an any-to-one field creates the user it holds
     When these requests get these responses:
@@ -22,11 +22,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |   target_collection: directus_users          |                      |
       |   target:                                    |                      |
       |     id: 5e1f0000-0000-4000-8000-000000000011 |                      |
-      |     email: a2o-create@write.tests            |                      |
+      |     email: a2o-create@write.email            |                      |
       | method: GET                                  | code: 200            |+
       | path: /users                                 | body:                |
       | query:                                       |   data:              |
-      |   filter[email][_eq]: a2o-create@write.tests |     - status: active |
+      |   filter[email][_eq]: a2o-create@write.email |     - status: active |
       |   fields: status                             |                      |
 
   Scenario: an any-to-one field activates the existing user it holds
@@ -36,7 +36,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users                                      |                    |
       | payload:                                          |                    |
       |   id: 5e1f0000-0000-4000-8000-000000000012        |                    |
-      |   email: a2o-update@write.tests                   |                    |
+      |   email: a2o-update@write.email                   |                    |
       |   status: draft                                   |                    |
       | method: POST                                      | code: 200          |+
       | path: /items/test_write_user_link                 |                    |
@@ -63,7 +63,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users                                             |            |
       | payload:                                                 |            |
       |   id: 5e1f0000-0000-4000-8000-000000000013               |            |
-      |   email: policies-emptied@write.tests                    |            |
+      |   email: policies-emptied@write.email                    |            |
       | method: POST                                             | code: 200  |+
       | path: /access                                            |            |
       | payload:                                                 |            |
@@ -77,7 +77,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                              | code: 200  |+
       | path: /access                                            | body:      |
       | query:                                                   |   data: [] |
-      |   filter[user][email][_eq]: policies-emptied@write.tests |            |
+      |   filter[user][email][_eq]: policies-emptied@write.email |            |
 
   Scenario: a user's policies deleting an access row delete it
     When these requests get these responses:
@@ -86,7 +86,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users                                             |            |
       | payload:                                                 |            |
       |   id: 5e1f0000-0000-4000-8000-000000000014               |            |
-      |   email: policies-deleted@write.tests                    |            |
+      |   email: policies-deleted@write.email                    |            |
       | method: POST                                             | code: 200  |+
       | path: /access                                            |            |
       | payload:                                                 |            |
@@ -102,7 +102,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                              | code: 200  |+
       | path: /access                                            | body:      |
       | query:                                                   |   data: [] |
-      |   filter[user][email][_eq]: policies-deleted@write.tests |            |
+      |   filter[user][email][_eq]: policies-deleted@write.email |            |
 
   Scenario: a role's users given as an empty list leave the role
     When these requests get these responses:
@@ -116,7 +116,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users                                      |                  |
       | payload:                                          |                  |
       |   id: 5e1f0000-0000-4000-8000-000000000015        |                  |
-      |   email: role-emptied@write.tests                 |                  |
+      |   email: role-emptied@write.email                 |                  |
       |   role: 5e1f0000-0000-4000-8000-000000000001      |                  |
       | method: PATCH                                     | code: 200        |+
       | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                  |
@@ -125,7 +125,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200        |+
       | path: /users                                      | body:            |
       | query:                                            |   data:          |
-      |   filter[email][_eq]: role-emptied@write.tests    |     - role: null |
+      |   filter[email][_eq]: role-emptied@write.email    |     - role: null |
       |   fields: role                                    |                  |
 
   Scenario: a role's users creating a user put it in the role
@@ -137,11 +137,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |   users:                                          |                         |
       |     create:                                       |                         |
       |       - id: 5e1f0000-0000-4000-8000-000000000016  |                         |
-      |         email: role-created@write.tests           |                         |
+      |         email: role-created@write.email           |                         |
       | method: GET                                       | code: 200               |+
       | path: /users                                      | body:                   |
       | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-created@write.tests    |     - role:             |
+      |   filter[email][_eq]: role-created@write.email    |     - role:             |
       |   fields: role.name                               |         name: integrity |
 
   Scenario: a role's users updating a user outside it activate it and move it in
@@ -151,7 +151,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users                                      |                         |
       | payload:                                          |                         |
       |   id: 5e1f0000-0000-4000-8000-000000000017        |                         |
-      |   email: role-updated@write.tests                 |                         |
+      |   email: role-updated@write.email                 |                         |
       |   status: draft                                   |                         |
       | method: PATCH                                     | code: 200               |+
       | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                         |
@@ -163,7 +163,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200               |+
       | path: /users                                      | body:                   |
       | query:                                            |   data:                 |
-      |   filter[email][_eq]: role-updated@write.tests    |     - status: active    |
+      |   filter[email][_eq]: role-updated@write.email    |     - status: active    |
       |   fields:                                         |       role:             |
       |     - status                                      |         name: integrity |
       |     - role.name                                   |                         |
@@ -175,7 +175,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users                                      |                  |
       | payload:                                          |                  |
       |   id: 5e1f0000-0000-4000-8000-000000000018        |                  |
-      |   email: role-deleted@write.tests                 |                  |
+      |   email: role-deleted@write.email                 |                  |
       |   role: 5e1f0000-0000-4000-8000-000000000001      |                  |
       | method: PATCH                                     | code: 200        |+
       | path: /roles/5e1f0000-0000-4000-8000-000000000001 |                  |
@@ -186,5 +186,5 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | method: GET                                       | code: 200        |+
       | path: /users                                      | body:            |
       | query:                                            |   data:          |
-      |   filter[email][_eq]: role-deleted@write.tests    |     - role: null |
+      |   filter[email][_eq]: role-deleted@write.email    |     - role: null |
       |   fields: role                                    |                  |

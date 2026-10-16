@@ -20,7 +20,7 @@ type RequestCell = {
  * the message a response was refused with.
  */
 export function defineWriteSteps(
-	{ when, then, and }: StepFunctions,
+	{ when, then }: StepFunctions,
 	vendor: Vendor,
 ) {
 	const receivedResponses: Response[] = [];
@@ -83,19 +83,14 @@ export function defineWriteSteps(
 		},
 	);
 
-	function expectRefusal(responsePosition: string, docString: string) {
-		expect(
-			receivedResponses[Number(responsePosition) - 1]!.body.errors,
-		).toMatchObject([{ message: messageOfDocString(docString) }]);
-	}
-
+	// One definition whatever the step's keyword: jest-cucumber counts every
+	// registration against the scenario's steps.
 	then.optional(
 		/^response (\d+) is refused with the message:$/,
-		expectRefusal,
-	);
-
-	and.optional(
-		/^response (\d+) is refused with the message:$/,
-		expectRefusal,
+		(responsePosition: string, docString: string) => {
+			expect(
+				receivedResponses[Number(responsePosition) - 1]!.body.errors,
+			).toMatchObject([{ message: messageOfDocString(docString) }]);
+		},
 	);
 }

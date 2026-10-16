@@ -9,6 +9,9 @@ Feature: Extension settings rows are rewritten, toggled and removed
   - Every extension update reloads the extensions in the background, so a
     request marked `eventually` is sent again until its response matches, for
     up to ten seconds.
+  - The load that takes a row back registers the extensions off the rows it
+    read before, so the folder's endpoint answers again only once the next
+    update has reloaded them.
 
   Scenario: a settings row named after the package is taken back by the folder
     Given these requests are sent:
@@ -25,12 +28,18 @@ Feature: Extension settings rows are rewritten, toggled and removed
       |     folder: extension-settings-probe-package |     bundle: null  |
       |                                              |     schema: null  |
     Then these requests get these responses:
-      | request                         | response                             |
-      | method: GET                     | code: 200                            |+
-      | path: /extension-settings-probe | body:                                |
-      | eventually: true                |   data:                              |
-      |                                 |     id: <probe>                      |
-      |                                 |     folder: extension-settings-probe |
+      | request                         | response                               |
+      | method: PATCH                   | code: 200                              |+
+      | path: /extensions/<probe>       | body:                                  |
+      | payload:                        |   data:                                |
+      |   meta:                         |     meta:                              |
+      |     enabled: true               |       folder: extension-settings-probe |
+      | eventually: true                |                                        |
+      | method: GET                     | code: 200                              |+
+      | path: /extension-settings-probe | body:                                  |
+      | eventually: true                |   data:                                |
+      |                                 |     id: <probe>                        |
+      |                                 |     folder: extension-settings-probe   |
 
   Scenario: a GraphQL update of an extension answers with its settings
     Given these requests are sent:

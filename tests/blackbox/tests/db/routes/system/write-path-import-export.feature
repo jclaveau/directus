@@ -24,16 +24,16 @@ Feature: Imports write each row, exports notify whoever asked
 
   Scenario: a CSV import writes each row it holds
     Then these requests get these responses:
-      | request                                      | response            |
-      | method: POST                                 | code: 200           |+
-      | path: /utils/import/test_wp_porter_crates    |                     |
-      | file:                                        |                     |
-      |   name: crates.csv                           |                     |
-      |   content: "id,title\ncsv-<run>,from csv\n"  |                     |
-      | method: GET                                  | code: 200           |+
-      | path: /items/test_wp_porter_crates/csv-<run> | body:               |
-      |                                              |   data:             |
-      |                                              |     title: from csv |
+      | request                                       | response            |
+      | method: POST                                  | code: 200           |+
+      | path: /utils/import/test_wp_porter_crates     |                     |
+      | file:                                         |                     |
+      |   name: crates.csv                            |                     |
+      |   content: "id,title\\ncsv-<run>,from csv\\n" |                     |
+      | method: GET                                   | code: 200           |+
+      | path: /items/test_wp_porter_crates/csv-<run>  | body:               |
+      |                                               |   data:             |
+      |                                               |     title: from csv |
 
   Scenario: a finished export leaves a file and a notification pointing at it
     Given these requests are sent:

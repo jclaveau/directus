@@ -92,16 +92,22 @@ Feature: A single permission reaches its policy's users from the next request on
       |       fields:                               |           |
       |         - '*'                               |           |
     Then these requests get these responses:
-      | request                       | response                       |
-      | method: PATCH                 | code: 200                      |+
-      | path: /permissions            | body:                          |
-      | query:                        |   data:                        |
-      |   fields: policy,fields       |     - policy: <queried-policy> |
-      | payload:                      |       fields:                  |
-      |   query:                      |         - name                 |
-      |     filter:                   |                                |
-      |       policy:                 |                                |
-      |         _eq: <queried-policy> |                                |
-      |   data:                       |                                |
-      |     fields:                   |                                |
-      |       - name                  |                                |
+      | request                                 | response                       |
+      | method: PATCH                           | code: 200                      |+
+      | path: /permissions                      |                                |
+      | query:                                  |                                |
+      |   fields: policy,fields                 |                                |
+      | payload:                                |                                |
+      |   query:                                |                                |
+      |     filter:                             |                                |
+      |       policy:                           |                                |
+      |         _eq: <queried-policy>           |                                |
+      |   data:                                 |                                |
+      |     fields:                             |                                |
+      |       - name                            |                                |
+      | method: GET                             | code: 200                      |+
+      | path: /permissions                      | body:                          |
+      | query:                                  |   data:                        |
+      |   fields: policy,fields                 |     - policy: <queried-policy> |
+      |   filter[policy][_eq]: <queried-policy> |       fields:                  |
+      |                                         |         - name                 |
