@@ -106,3 +106,52 @@ Feature: A single share is created only for an item its sender may share
       |                                     |         "share" from collection      |
       |                                     |         "test_singular_missing" or   |
       |                                     |         it does not exist.           |
+
+  Scenario: a share is renamed one by one and in batches, then deleted
+    Given these requests are sent:
+      | request                            | response  |
+      | method: POST                       | code: 200 |+
+      | path: /items/test_singular_shares  |           |
+      | payload:                           |           |
+      |   name: renamed-<run>              |           |
+      | remember: renamed                  |           |
+      | method: POST                       | code: 200 |+
+      | path: /shares                      |           |
+      | payload:                           |           |
+      |   id: <share>                      |           |
+      |   name: created-<run>              |           |
+      |   collection: test_singular_shares |           |
+      |   item: '<renamed>'                |           |
+    Then these requests get these responses:
+      | request                    | response                |
+      | method: PATCH              | code: 200               |+
+      | path: /shares/<share>      | body:                   |
+      | query:                     |   data:                 |
+      |   fields: name             |     name: one-<run>     |
+      | payload:                   |                         |
+      |   name: one-<run>          |                         |
+      | method: PATCH              | code: 200               |+
+      | path: /shares              | body:                   |
+      | query:                     |   data:                 |
+      |   fields: name             |     - name: batch-<run> |
+      | payload:                   |                         |
+      |   - id: <share>            |                         |
+      |     name: batch-<run>      |                         |
+      | method: PATCH              | code: 200               |+
+      | path: /shares              | body:                   |
+      | query:                     |   data:                 |
+      |   fields: name,max_uses    |     - name: batch-<run> |
+      | payload:                   |       max_uses: 3       |
+      |   query:                   |                         |
+      |     filter:                |                         |
+      |       name:                |                         |
+      |         _eq: batch-<run>   |                         |
+      |   data:                    |                         |
+      |     max_uses: 3            |                         |
+      | method: DELETE             | code: 204               |+
+      | path: /shares/<share>      |                         |
+      | method: GET                | code: 200               |+
+      | path: /shares              | body:                   |
+      | query:                     |   data: []              |
+      |   fields: id               |                         |
+      |   filter[id][_eq]: <share> |                         |

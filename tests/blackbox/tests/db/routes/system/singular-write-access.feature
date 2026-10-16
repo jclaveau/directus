@@ -84,3 +84,52 @@ Feature: A single access row grants its policy from the next request on
       |                                   |         access collection                |
       |                                   |         "test_singular_access" or it     |
       |                                   |         does not exist. Queried in root. |
+
+  Scenario: an access row is moved in batches and by a query
+    Given these requests are sent:
+      | request                           | response  |
+      | method: POST                      | code: 200 |+
+      | path: /policies                   |           |
+      | payload:                          |           |
+      |   id: <first-policy>              |           |
+      |   name: first-<run>               |           |
+      |   app_access: false               |           |
+      |   admin_access: false             |           |
+      | method: POST                      | code: 200 |+
+      | path: /policies                   |           |
+      | payload:                          |           |
+      |   id: <second-policy>             |           |
+      |   name: second-<run>              |           |
+      |   app_access: false               |           |
+      |   admin_access: false             |           |
+      | method: POST                      | code: 200 |+
+      | path: /users                      |           |
+      | payload:                          |           |
+      |   id: <holder>                    |           |
+      |   email: holder-<run>@example.com |           |
+      | method: POST                      | code: 200 |+
+      | path: /access                     |           |
+      | payload:                          |           |
+      |   id: <grant>                     |           |
+      |   policy: <first-policy>          |           |
+      |   user: <holder>                  |           |
+    Then these requests get these responses:
+      | request                     | response                      |
+      | method: PATCH               | code: 200                     |+
+      | path: /access               | body:                         |
+      | query:                      |   data:                       |
+      |   fields: id,policy         |     - id: <grant>             |
+      | payload:                    |       policy: <second-policy> |
+      |   - id: <grant>             |                               |
+      |     policy: <second-policy> |                               |
+      | method: PATCH               | code: 200                     |+
+      | path: /access               | body:                         |
+      | query:                      |   data:                       |
+      |   fields: id,policy         |     - id: <grant>             |
+      | payload:                    |       policy: <first-policy>  |
+      |   query:                    |                               |
+      |     filter:                 |                               |
+      |       user:                 |                               |
+      |         _eq: <holder>       |                               |
+      |   data:                     |                               |
+      |     policy: <first-policy>  |                               |

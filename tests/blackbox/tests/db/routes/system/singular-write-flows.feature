@@ -81,3 +81,91 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | query:                      |   data: [] |
       |   fields: id                |            |
       |   filter[id][_eq]: <flow>   |            |
+
+  Scenario: an inactive flow is renamed in batches and by a query
+    Given these requests are sent:
+      | request                | response  |
+      | method: POST           | code: 200 |+
+      | path: /flows           |           |
+      | payload:               |           |
+      |   id: <flow>           |           |
+      |   name: created-<run>  |           |
+      |   trigger: webhook     |           |
+      |   status: inactive     |           |
+      |   accountability: null |           |
+    Then these requests get these responses:
+      | request                        | response                         |
+      | method: PATCH                  | code: 200                        |+
+      | path: /flows                   | body:                            |
+      | query:                         |   data:                          |
+      |   fields: id,name              |     - id: <flow>                 |
+      | payload:                       |       name: batch-<run>          |
+      |   - id: <flow>                 |                                  |
+      |     name: batch-<run>          |                                  |
+      | method: PATCH                  | code: 200                        |+
+      | path: /flows                   | body:                            |
+      | query:                         |   data:                          |
+      |   fields: id,description       |     - id: <flow>                 |
+      | payload:                       |       description: queried-<run> |
+      |   query:                       |                                  |
+      |     filter:                    |                                  |
+      |       name:                    |                                  |
+      |         _eq: batch-<run>       |                                  |
+      |   data:                        |                                  |
+      |     description: queried-<run> |                                  |
+
+  Scenario: an operation is moved one by one and in batches, then deleted
+    Given these requests are sent:
+      | request                  | response  |
+      | method: POST             | code: 200 |+
+      | path: /flows             |           |
+      | payload:                 |           |
+      |   id: <flow>             |           |
+      |   name: operations-<run> |           |
+      |   trigger: webhook       |           |
+      |   status: inactive       |           |
+      |   accountability: null   |           |
+      | method: POST             | code: 200 |+
+      | path: /operations        |           |
+      | payload:                 |           |
+      |   id: <step>             |           |
+      |   flow: <flow>           |           |
+      |   key: step              |           |
+      |   type: log              |           |
+      |   position_x: 1          |           |
+      |   position_y: 1          |           |
+      |   options:               |           |
+      |     message: step        |           |
+    Then these requests get these responses:
+      | request                         | response            |
+      | method: PATCH                   | code: 200           |+
+      | path: /operations/<step>        | body:               |
+      | query:                          |   data:             |
+      |   fields: position_x            |     position_x: 2   |
+      | payload:                        |                     |
+      |   position_x: 2                 |                     |
+      | method: PATCH                   | code: 200           |+
+      | path: /operations               | body:               |
+      | query:                          |   data:             |
+      |   fields: position_x            |     - position_x: 3 |
+      | payload:                        |                     |
+      |   - id: <step>                  |                     |
+      |     position_x: 3               |                     |
+      | method: PATCH                   | code: 200           |+
+      | path: /operations               | body:               |
+      | query:                          |   data:             |
+      |   fields: position_x,position_y |     - position_x: 3 |
+      | payload:                        |       position_y: 5 |
+      |   query:                        |                     |
+      |     filter:                     |                     |
+      |       flow:                     |                     |
+      |         _eq: <flow>             |                     |
+      |   data:                         |                     |
+      |     position_y: 5               |                     |
+      | method: DELETE                  | code: 204           |+
+      | path: /operations/<step>        |                     |
+      | method: GET                     | code: 200           |+
+      | path: /operations               | body:               |
+      | query:                          |   data: []          |
+      |   fields: id                    |                     |
+      |   filter[flow][_eq]: <flow>     |                     |

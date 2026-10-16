@@ -1,9 +1,10 @@
-import { getUrl } from '@common/config';
+import config, { getUrl } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
-import { randomUUID } from 'crypto';
-import { load as loadYaml } from 'js-yaml';
+import { createHmac, randomUUID } from 'crypto';
+import { DEFAULT_SCHEMA, load as loadYaml, Type } from 'js-yaml';
+import { setTimeout as sleep } from 'node:timers/promises';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 
@@ -13,7 +14,11 @@ type RequestCell = {
 	path: string;
 	query?: Record<string, string>;
 	payload?: unknown;
+	form?: Record<string, string>;
+	file?: { name: string; content: string };
+	headers?: Record<string, string>;
 	remember?: string;
+	remember_session?: string;
 	eventually?: boolean;
 };
 
@@ -30,6 +35,10 @@ type FeatureHooks = {
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
+
+const TOTP_STEP_MS = 30_000;
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /**
  * Binds every scenario of a singular-write feature: each holds an optional
@@ -90,8 +99,96 @@ function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 	});
 }
 
+// The token Directus itself would sign: `!jwt` maps the claims it signs.
+function signedToken(claims: object, secret: string) {
+	const header = Buffer.from(
+		JSON.stringify({ alg: 'HS256', typ: 'JWT' }),
+	).toString('base64url');
+
+	const body = Buffer.from(
+		JSON.stringify({ ...claims, iss: 'directus' }),
+	).toString('base64url');
+
+	return `${header}.${body}.${
+		createHmac('sha256', secret)
+			.update(`${header}.${body}`)
+			.digest('base64url')
+	}`;
+}
+
+function base32Bytes(secret: string) {
+	const octets = [...secret.toUpperCase()]
+		.map((character) => {
+			return BASE32_ALPHABET.indexOf(character)
+				.toString(2)
+				.padStart(5, '0');
+		})
+		.join('')
+		.match(/.{8}/g) ?? [];
+
+	return Buffer.from(octets.map((octet) => parseInt(octet, 2)));
+}
+
+// The one-time password an authenticator app shows for `!totp <secret>` now.
+function currentTotp(secret: string) {
+	const counter = Buffer.alloc(8);
+	counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / TOTP_STEP_MS)));
+
+	const digest = createHmac('sha1', base32Bytes(secret))
+		.update(counter)
+		.digest();
+
+	const offset = digest[digest.length - 1]! & 0x0f;
+	const otpNumber = (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
+
+	return String(otpNumber).padStart(6, '0');
+}
+
+// A password read near the end of its step could expire before the server
+// checks it: wait for the next one instead.
+async function awaitFreshTotpStep() {
+	const msLeft = TOTP_STEP_MS - (Date.now() % TOTP_STEP_MS);
+
+	if (msLeft < 3_000) {
+		await sleep(msLeft);
+	}
+}
+
+function yamlSchemaFor(vendor: Vendor) {
+	const secret = config.envs[vendor]['SECRET']!;
+
+	return DEFAULT_SCHEMA.extend([
+		new Type('!jwt', {
+			kind: 'mapping',
+			construct: (claims: object) => signedToken(claims, secret),
+		}),
+		new Type('!totp', {
+			kind: 'scalar',
+			construct: (totpSecret: string) => currentTotp(totpSecret),
+		}),
+	]);
+}
+
+function sessionTokenOf(response: Response) {
+	return ([] as string[])
+		.concat(response.headers['set-cookie'] ?? [])
+		.find((cookie) => {
+			return cookie.startsWith('directus_session_token=');
+		})
+		?.split(';')[0]
+		?.split('=')[1];
+}
+
 function sendRequest(vendor: Vendor, requestCell: RequestCell) {
-	const { as: token, method, path, query = {}, payload } = requestCell;
+	const {
+		as: token,
+		method,
+		path,
+		query = {},
+		headers = {},
+		payload,
+		file,
+	} = requestCell;
 
 	const pendingRequest = {
 		DELETE: () => request(getUrl(vendor)).delete(path),
@@ -100,12 +197,30 @@ function sendRequest(vendor: Vendor, requestCell: RequestCell) {
 		POST: () => request(getUrl(vendor)).post(path),
 	}[method]();
 
-	pendingRequest.query(query).set(
-		'Authorization',
-		token === undefined
-			? AUTH
-			: `Bearer ${token}`,
-	);
+	pendingRequest
+		.query(query)
+		.set(headers)
+		.set(
+			'Authorization',
+			token === undefined
+				? AUTH
+				: `Bearer ${token}`,
+		);
+
+	// A multipart upload: Directus wants every form field before the file.
+	if (file !== undefined) {
+		for (const [fieldName, fieldValue] of Object.entries(
+			requestCell.form ?? {},
+		)) {
+			pendingRequest.field(fieldName, fieldValue);
+		}
+
+		return pendingRequest.attach(
+			'file',
+			Buffer.from(file.content),
+			file.name,
+		);
+	}
 
 	return payload === undefined
 		? pendingRequest
@@ -124,13 +239,21 @@ async function sendRows(
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 ) {
+	const schema = yamlSchemaFor(vendor);
+
 	for (const { request: requestText, response: responseText } of table) {
+		if (requestText.includes('!totp')) {
+			await awaitFreshTotpStep();
+		}
+
 		const requestCell = loadYaml(
 			withKeys(requestText, scenarioKeys),
+			{ schema },
 		) as RequestCell;
 
 		const expectedResponse = loadYaml(
 			withKeys(responseText, scenarioKeys),
+			{ schema },
 		) ?? {};
 
 		if (requestCell.eventually) {
@@ -150,6 +273,12 @@ async function sendRows(
 		if (requestCell.remember !== undefined) {
 			scenarioKeys.keysByName[requestCell.remember] = String(
 				response.body.data.id,
+			);
+		}
+
+		if (requestCell.remember_session !== undefined) {
+			scenarioKeys.keysByName[requestCell.remember_session] = String(
+				sessionTokenOf(response),
 			);
 		}
 	}

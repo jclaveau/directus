@@ -66,3 +66,33 @@ Feature: A single translation is checked as it is created and deleted
       |                               |         directus_translations    |
       |                               |         must be a uuid instead   |
       |                               |         of "not-a-key".          |
+
+  Scenario: a translation is reworded by its key and by a query
+    Given these requests are sent:
+      | request             | response  |
+      | method: POST        | code: 200 |+
+      | path: /translations |           |
+      | payload:            |           |
+      |   id: <greeting>    |           |
+      |   key: sw-<run>     |           |
+      |   language: en-US   |           |
+      |   value: hello      |           |
+    Then these requests get these responses:
+      | request                        | response             |
+      | method: PATCH                  | code: 200            |+
+      | path: /translations/<greeting> | body:                |
+      | query:                         |   data:              |
+      |   fields: value                |     value: one       |
+      | payload:                       |                      |
+      |   value: one                   |                      |
+      | method: PATCH                  | code: 200            |+
+      | path: /translations            | body:                |
+      | query:                         |   data:              |
+      |   fields: id,value             |     - id: <greeting> |
+      | payload:                       |       value: queried |
+      |   query:                       |                      |
+      |     filter:                    |                      |
+      |       key:                     |                      |
+      |         _eq: sw-<run>          |                      |
+      |   data:                        |                      |
+      |     value: queried             |                      |

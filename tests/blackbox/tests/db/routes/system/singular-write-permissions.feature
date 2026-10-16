@@ -75,3 +75,33 @@ Feature: A single permission reaches its policy's users from the next request on
       |                                         |         "test_singular_permissions"   |
       |                                         |         or it does not exist. Queried |
       |                                         |         in root.                      |
+
+  Scenario: a permission matched by a query takes the update
+    Given these requests are sent:
+      | request                                     | response  |
+      | method: POST                                | code: 200 |+
+      | path: /policies                             |           |
+      | payload:                                    |           |
+      |   id: <queried-policy>                      |           |
+      |   name: queried-<run>                       |           |
+      |   app_access: false                         |           |
+      |   admin_access: false                       |           |
+      |   permissions:                              |           |
+      |     - collection: test_singular_permissions |           |
+      |       action: read                          |           |
+      |       fields:                               |           |
+      |         - '*'                               |           |
+    Then these requests get these responses:
+      | request                       | response                       |
+      | method: PATCH                 | code: 200                      |+
+      | path: /permissions            | body:                          |
+      | query:                        |   data:                        |
+      |   fields: policy,fields       |     - policy: <queried-policy> |
+      | payload:                      |       fields:                  |
+      |   query:                      |         - name                 |
+      |     filter:                   |                                |
+      |       policy:                 |                                |
+      |         _eq: <queried-policy> |                                |
+      |   data:                       |                                |
+      |     fields:                   |                                |
+      |       - name                  |                                |
