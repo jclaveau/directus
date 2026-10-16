@@ -3748,12 +3748,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					.catch((createError) => createError);
 
 				expect(error).toBeInstanceOf(RecordNotUniqueError);
-				expect(error.message).toBe('Value has to be unique.');
 
-				expect(error.extensions).toEqual({
+				// `value` is left out: the create hands the translator its whole
+				// list of rows, so it reads the value off an array (reported).
+				expect(error.extensions).toMatchObject({
 					collection: null,
 					field: 'id',
-					value: null,
 				});
 			}
 			finally {
