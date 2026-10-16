@@ -156,7 +156,7 @@ Feature: A file is uploaded, replaced and terminated through tus
       | headers:                               |           |
       |   Tus-Resumable: 1.0.0                 |           |
 
-  Scenario: an upload whose disk name cannot be written is refused
+  Scenario: an upload whose disk name names a directory is refused
     Given these requests are sent:
       | request                             | response  |
       | method: POST                        | code: 201 |+
@@ -179,28 +179,34 @@ Feature: A file is uploaded, replaced and terminated through tus
       |     application/offset+octet-stream |           |
       | body: kept                          |           |
     Then these requests get these responses:
-      | request                             | response                    |
-      | method: POST                        | code: 500                   |+
-      | path: /files/tus                    | text: >                     |
-      | headers:                            |   Something went wrong with |
-      |   Tus-Resumable: 1.0.0              |   that request              |
-      |   Upload-Length: '4'                |                             |
-      | upload_metadata:                    |                             |
-      |   filename_download: lost-<run>.txt |                             |
-      |   filename_disk: /                  |                             |
-      | method: POST                        | code: 500                   |+
-      | path: /files/tus                    | text: >                     |
-      | headers:                            |   Something went wrong with |
-      |   Tus-Resumable: 1.0.0              |   that request              |
-      |   Upload-Length: '4'                |                             |
-      | upload_metadata:                    |                             |
-      |   id: <file>                        |                             |
-      |   filename_download: lost-<run>.txt |                             |
-      |   filename_disk: /                  |                             |
-      | method: GET                         | code: 200                   |+
-      | path: /files/<file>                 | body:                       |
-      | query:                              |   data:                     |
-      |   fields: filename_download         |     filename_download: >-   |
-      |                                     |       kept-<run>.txt        |
-      | method: GET                         | code: 200                   |+
-      | path: /assets/<file>                | text: kept                  |
+      | request                              | response                    |
+      | method: POST                         | code: 400                   |+
+      | path: /files/tus                     | text: >-                    |
+      | headers:                             |   "filename_disk" must name |
+      |   Tus-Resumable: 1.0.0               |   a file, not a directory   |
+      |   Upload-Length: '4'                 |                             |
+      | upload_metadata:                     |                             |
+      |   filename_download: lost-<run>.txt  |                             |
+      |   filename_disk: /                   |                             |
+      | method: POST                         | code: 400                   |+
+      | path: /files/tus                     | text: >-                    |
+      | headers:                             |   "filename_disk" must name |
+      |   Tus-Resumable: 1.0.0               |   a file, not a directory   |
+      |   Upload-Length: '4'                 |                             |
+      | upload_metadata:                     |                             |
+      |   id: <file>                         |                             |
+      |   filename_download: lost-<run>.txt  |                             |
+      |   filename_disk: /                   |                             |
+      | method: GET                          | code: 200                   |+
+      | path: /files                         | body:                       |
+      | query:                               |   data: []                  |
+      |   fields: id                         |                             |
+      |   filter[filename_download][_eq]: >- |                             |
+      |     lost-<run>.txt                   |                             |
+      | method: GET                          | code: 200                   |+
+      | path: /files/<file>                  | body:                       |
+      | query:                               |   data:                     |
+      |   fields: filename_download          |     filename_download: >-   |
+      |                                      |       kept-<run>.txt        |
+      | method: GET                          | code: 200                   |+
+      | path: /assets/<file>                 | text: kept                  |

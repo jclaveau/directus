@@ -408,6 +408,44 @@ describe('TusDataStore.create', () => {
 		expect(mockedDeps.filesService.createOne).toHaveBeenCalledOnce();
 	});
 
+	test('refuses a filename_disk that names no file, before any row', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: { filename_download: 'notes.txt', filename_disk: '/' },
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: '"filename_disk" must name a file, not a directory',
+		});
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: { filename_download: 'notes.txt', filename_disk: 'notes/' },
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: '"filename_disk" must name a file, not a directory',
+		});
+
+		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
+	});
+
 	test('keeps a filename_disk given in the metadata', async () => {
 		const tusStore = new TusDataStore({
 			constants: {

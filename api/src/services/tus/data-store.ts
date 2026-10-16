@@ -2,7 +2,7 @@ import formatTitle from '@directus/format-title';
 import type { TusDriver } from '@directus/storage';
 import type { Accountability, ChunkedUploadContext, File, SchemaOverview } from '@directus/types';
 import { extension } from 'mime-types';
-import { extname } from 'node:path';
+import { extname, posix } from 'node:path';
 import stream from 'node:stream';
 import { DataStore, ERRORS, Upload } from '@tus/utils';
 import { ItemsService } from '../items.js';
@@ -70,6 +70,21 @@ export class TusDataStore extends DataStore {
 
 		if (!upload.metadata['title']) {
 			upload.metadata['title'] = formatTitle(upload.metadata['filename_download']);
+		}
+
+		const requestedDiskName = upload.metadata['filename_disk'];
+
+		// The storage driver resolves the name under its root, so `/`, `..` or a
+		// trailing separator would make it write over a directory.
+		if (
+			requestedDiskName
+			&& (posix.join('/', requestedDiskName) === '/'
+				|| requestedDiskName.endsWith('/'))
+		) {
+			throw {
+				status_code: 400,
+				body: '"filename_disk" must name a file, not a directory',
+			};
 		}
 
 		let existingFile: Record<string, any> | null = null;
