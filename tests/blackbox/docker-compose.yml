@@ -35,7 +35,7 @@ services:
     # timescaledb-ha bundles timescaledb (+ toolkit) AND postgis, so the
     # directus_cache_stats_events hypertable path is exercised while the geometry
     # suite keeps postgis. init.sql creates both extensions on first boot.
-    image: timescale/timescaledb-ha:pg18
+    image: ghcr.io/jclaveau/timescaledb-ha:pg18
     environment:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: directus
@@ -57,9 +57,9 @@ services:
   # surfaces the real `query_wait_timeout` error, while larger pools keep serving
   # — the tier-isolation the granted-connection feature exists for. The entrypoint is
   # overridden to run the mounted config (the image otherwise regenerates one
-  # from env). Digest-pinned to 1.25.2.
+  # from env). The mirror copies it from a pinned 1.25.2 digest.
   pgbouncer:
-    image: edoburu/pgbouncer@sha256:4c1ca296ef525f108f5d3552cc337c0c09587cf8dae7f0067fd93349e47dc1cd
+    image: ghcr.io/jclaveau/pgbouncer:1.25.2
     entrypoint: ['/usr/bin/pgbouncer']
     command: ['/etc/pgbouncer/pgbouncer.ini']
     depends_on:
@@ -130,7 +130,7 @@ services:
       - 6107:26257
 
   redis:
-    image: valkey/valkey:9.1.2-alpine
+    image: ghcr.io/jclaveau/valkey:9.1.2-alpine
     ports:
       - 6108:6379
 
@@ -163,7 +163,7 @@ services:
       retries: 30
 
   auth-saml:
-    image: kristophjunge/test-saml-idp
+    image: ghcr.io/jclaveau/test-saml-idp:latest
     ports:
       - 8880:8080
     environment:
