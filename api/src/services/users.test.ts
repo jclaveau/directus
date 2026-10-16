@@ -2,12 +2,17 @@ import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@dire
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { FailedValidationError } from '@directus/validation';
+import {
+	FailedValidationError,
+	joiValidationErrorItemToErrorExtensions,
+} from '@directus/validation';
+import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import emitter from '../emitter.js';
+import { useLogger } from '../logger/index.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService, MailService, UsersService } from './index.js';
@@ -32,6 +37,10 @@ vi.mock('@directus/env', () => ({
 		USERS_ADMIN_ACCESS_LIMIT: 3,
 		USERS_APP_ACCESS_LIMIT: 3,
 		USERS_API_ACCESS_LIMIT: 3,
+		PUBLIC_URL: 'http://localhost:8055',
+		USER_INVITE_URL_ALLOW_LIST: 'https://app.example.com/invite',
+		USER_REGISTER_URL_ALLOW_LIST: 'https://app.example.com/verify',
+		PASSWORD_RESET_URL_ALLOW_LIST: 'https://app.example.com/reset',
 	}),
 }));
 
@@ -63,6 +72,10 @@ const schema = new SchemaBuilder()
 
 // Taken before the Users tests replace it on the prototype.
 const itemsUpdateGroups = ItemsService.prototype.updateGroups;
+const usersCheckUniqueEmails = (UsersService.prototype as any).checkUniqueEmails;
+const usersCheckPasswordPolicy = (UsersService.prototype as any).checkPasswordPolicy;
+const usersClearUserSessions = (UsersService.prototype as any).clearUserSessions;
+const usersInviteUrl = (UsersService.prototype as any).inviteUrl;
 
 describe('Integration Tests', () => {
 	const db = knex.default({ client: MockClient });
@@ -817,6 +830,536 @@ describe('Integration Tests', () => {
 
 				await expect(promise).rejects.toThrowError(ForbiddenError);
 				await expect(promise).rejects.toThrowError('Invalid payload');
+			});
+		});
+
+		describe('email uniqueness', () => {
+			it('refuses two new users whose emails differ by casing only', async () => {
+				checkUniqueEmailsSpy.mockImplementationOnce(usersCheckUniqueEmails);
+				const opts: MutationOptions = {};
+
+				await service.createMany([
+					{ email: 'Ada@example.com' },
+					{ email: 'ada@example.com' },
+				], opts);
+
+				expect(opts.preMutationError).toStrictEqual(new RecordNotUniqueError({
+					collection: 'directus_users',
+					field: 'email',
+					value: '[ada@example.com]',
+				}));
+			});
+
+			it('refuses an email another user holds in any casing', async () => {
+				checkUniqueEmailsSpy.mockImplementationOnce(usersCheckUniqueEmails);
+				tracker.on.select('directus_users').response([{ email: 'ada@example.com' }]);
+				const opts: MutationOptions = {};
+
+				await service.createOne({ email: 'Ada@Example.com' }, opts);
+
+				expect(opts.preMutationError).toStrictEqual(new RecordNotUniqueError({
+					collection: 'directus_users',
+					field: 'email',
+					value: '[ada@example.com]',
+				}));
+
+				expect(tracker.history.select[0]?.bindings)
+					.toStrictEqual(['ada@example.com']);
+			});
+
+			it('skips the users the batch rewrites when looking up a holder', async () => {
+				checkUniqueEmailsSpy.mockImplementationOnce(usersCheckUniqueEmails);
+				tracker.on.select('directus_users').response([]);
+				const opts: MutationOptions = {};
+
+				await service.updateBatch(
+					[{ id: 'user-id-40', email: 'new@example.com' }],
+					opts,
+				);
+
+				expect(opts.preMutationErrorsByKey).toBe(undefined);
+
+				expect(tracker.history.select[0]?.bindings)
+					.toStrictEqual(['new@example.com', 'user-id-40']);
+			});
+		});
+
+		describe('password policy', () => {
+			it('accepts any password when no policy is set', async () => {
+				checkPasswordPolicySpy.mockImplementationOnce(usersCheckPasswordPolicy);
+
+				const readSingleton = vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(withMeta(
+						{ auth_password_policy: null },
+						{ scopedCacheFingerprints: [] },
+					));
+
+				const opts: MutationOptions = {};
+
+				await service.createOne({ password: 'x' }, opts);
+
+				expect(opts.preMutationError).toBe(undefined);
+
+				expect(readSingleton)
+					.toHaveBeenCalledWith({ fields: ['auth_password_policy'] });
+			});
+
+			it('refuses a password failing a slash-wrapped policy', async () => {
+				checkPasswordPolicySpy.mockImplementationOnce(usersCheckPasswordPolicy);
+
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(withMeta(
+						{ auth_password_policy: '/^.{8,}$/' },
+						{ scopedCacheFingerprints: [] },
+					));
+
+				const opts: MutationOptions = {};
+
+				await service.createOne({ password: 'short' }, opts);
+
+				expect(opts.preMutationError).toStrictEqual(new FailedValidationError(
+					joiValidationErrorItemToErrorExtensions({
+						message: `Provided password doesn't match password policy`,
+						path: ['password'],
+						type: 'custom.pattern.base',
+						context: { value: 'short' },
+					}),
+				));
+			});
+
+			it('accepts a password matching a slash-wrapped policy', async () => {
+				checkPasswordPolicySpy.mockImplementationOnce(usersCheckPasswordPolicy);
+
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(withMeta(
+						{ auth_password_policy: '/^.{8,}$/' },
+						{ scopedCacheFingerprints: [] },
+					));
+
+				const opts: MutationOptions = {};
+
+				await service.createOne({ password: 'long-enough' }, opts);
+
+				expect(opts.preMutationError).toBe(undefined);
+			});
+
+			it('accepts a password matching a bare policy', async () => {
+				checkPasswordPolicySpy.mockImplementationOnce(usersCheckPasswordPolicy);
+
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(withMeta(
+						{ auth_password_policy: '^.{8,}$' },
+						{ scopedCacheFingerprints: [] },
+					));
+
+				const opts: MutationOptions = {};
+
+				await service.createOne({ password: 'long-enough' }, opts);
+
+				expect(opts.preMutationError).toBe(undefined);
+			});
+		});
+
+		describe('user sessions', () => {
+			it('deletes every session of the deleted users', async () => {
+				clearUserSessionsSpy.mockImplementationOnce(usersClearUserSessions);
+				tracker.on.update('directus_comments').response(0);
+				tracker.on.update('directus_notifications').response(0);
+				tracker.on.update('directus_versions').response(0);
+				tracker.on.delete('directus_sessions').response(1);
+
+				await service.deleteMany(['user-id-41']);
+
+				expect(tracker.history.delete[0]?.bindings)
+					.toStrictEqual(['user-id-41']);
+			});
+
+			it('keeps the caller\'s own session when it changes a password', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				clearUserSessionsSpy.mockImplementationOnce(usersClearUserSessions);
+
+				tracker.on.select('directus_users').response([
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000044' },
+				]);
+
+				tracker.on.update('directus_users').response(1);
+				tracker.on.delete('directus_sessions').response(1);
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: {
+						admin: true,
+						session: 'session-token-1',
+					} as Accountability,
+				}).updateBatch([{
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000044',
+					password: 'new-password',
+				}], { onRequireUserIntegrityCheck: vi.fn() });
+
+				expect(tracker.history.delete[0]?.bindings).toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000044',
+					'session-token-1',
+				]);
+			});
+		});
+
+		describe('deleteMany without a caller integrity hook', () => {
+			it('keeps the last admin refusal for the mutation', async () => {
+				const lastAdminError = new Error('last admin');
+
+				vi.mocked(validateRemainingAdminUsers)
+					.mockRejectedValueOnce(lastAdminError);
+
+				tracker.on.update('directus_comments').response(0);
+				tracker.on.update('directus_notifications').response(0);
+				tracker.on.update('directus_versions').response(0);
+				const opts: MutationOptions = {};
+
+				await service.deleteMany(['user-id-45'], opts);
+
+				expect(opts.preMutationError).toBe(lastAdminError);
+			});
+		});
+
+		describe('verifyRegistration by email', () => {
+			it('activates the unverified user the token names', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'Ada@Example.com',
+					scope: 'pending-registration',
+				} as any);
+
+				tracker.on.select('directus_users').response({
+					id: 'user-id-42',
+					status: 'unverified',
+				});
+
+				await expect(service.verifyRegistration('verify-token'))
+					.resolves.toBe('user-id-42');
+
+				expect(tracker.history.select[0]?.bindings)
+					.toStrictEqual(['ada@example.com', 1]);
+
+				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
+					[{ data: { status: 'active' }, keys: ['user-id-42'] }],
+					expect.anything(),
+				);
+			});
+		});
+
+		describe('mail links', () => {
+			it('invites to an allowed url and logs a mail that fails', async () => {
+				vi.spyOn(UsersService.prototype as any, 'inviteUrl')
+					.mockImplementationOnce(usersInviteUrl);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				vi.spyOn(jwt, 'sign').mockReturnValueOnce('invite-token' as any);
+				const mailError = new Error('SMTP down');
+
+				const send = vi.mocked(MailService.prototype.send)
+					.mockRejectedValueOnce(mailError);
+
+				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
+
+				await service.inviteUser(
+					'ada@example.com',
+					'invite-role',
+					'https://app.example.com/invite',
+				);
+
+				expect(send).toHaveBeenCalledWith({
+					to: 'ada@example.com',
+					subject: 'You\'ve been invited',
+					template: {
+						name: 'user-invitation',
+						data: {
+							url: 'https://app.example.com/invite?token=invite-token',
+							email: 'ada@example.com',
+						},
+					},
+				});
+
+				await vi.waitFor(() => {
+					expect(logError).toHaveBeenCalledWith(
+						mailError,
+						'Could not send user invitation mail',
+					);
+				});
+			});
+
+			it('invites to the admin app when no url is given', async () => {
+				vi.spyOn(UsersService.prototype as any, 'inviteUrl')
+					.mockImplementationOnce(usersInviteUrl);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				vi.spyOn(jwt, 'sign').mockReturnValueOnce('invite-token' as any);
+				const send = vi.mocked(MailService.prototype.send);
+
+				await service.inviteUser('ada@example.com', 'invite-role', null, 'Join');
+
+				expect(send).toHaveBeenCalledWith({
+					to: 'ada@example.com',
+					subject: 'Join',
+					template: {
+						name: 'user-invitation',
+						data: {
+							url: 'http://localhost:8055/admin/accept-invite'
+								+ '?token=invite-token',
+							email: 'ada@example.com',
+						},
+					},
+				});
+			});
+
+			it('refuses a registration verification url off the allow list', async () => {
+				await expect(service.registerUser({
+					email: 'ada@example.com',
+					password: 'new-password',
+					verification_url: 'https://evil.example.com/verify',
+				})).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'URL "https://evil.example.com/verify" can\'t be used'
+						+ ' to verify registered users',
+				}));
+			});
+
+			it('mails the verification to an allowed url and logs a failure', async () => {
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(withMeta({
+						public_registration: true,
+						public_registration_verify_email: true,
+						public_registration_role: 'role-id-1',
+					}, { scopedCacheFingerprints: [] }));
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
+
+				vi.spyOn(jwt, 'sign').mockReturnValueOnce('verify-token' as any);
+				const mailError = new Error('SMTP down');
+
+				const send = vi.mocked(MailService.prototype.send)
+					.mockRejectedValueOnce(mailError);
+
+				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
+
+				await service.registerUser({
+					email: 'ada@example.com',
+					password: 'new-password',
+					first_name: 'Ada',
+					verification_url: 'https://app.example.com/verify',
+				});
+
+				expect(superCreateOneSpy).toHaveBeenCalledWith(
+					{
+						email: 'ada@example.com',
+						password: 'new-password',
+						role: 'role-id-1',
+						status: 'unverified',
+						first_name: 'Ada',
+						last_name: null,
+					},
+					{},
+				);
+
+				expect(send).toHaveBeenCalledWith({
+					to: 'ada@example.com',
+					subject: 'Verify your email address',
+					template: {
+						name: 'user-registration',
+						data: {
+							url: 'https://app.example.com/verify?token=verify-token',
+							email: 'ada@example.com',
+							first_name: 'Ada',
+							last_name: null,
+						},
+					},
+				});
+
+				await vi.waitFor(() => {
+					expect(logError).toHaveBeenCalledWith(
+						mailError,
+						'Could not send email verification mail',
+					);
+				});
+			});
+
+			it('mails the verification to the api when no url is given', async () => {
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(withMeta({
+						public_registration: true,
+						public_registration_verify_email: true,
+					}, { scopedCacheFingerprints: [] }));
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({ id: 'user-id-46', status: 'unverified' });
+
+				vi.spyOn(jwt, 'sign').mockReturnValueOnce('verify-token' as any);
+				const send = vi.mocked(MailService.prototype.send);
+
+				await service.registerUser({
+					email: 'ada@example.com',
+					password: 'new-password',
+				});
+
+				expect(superCreateOneSpy).not.toHaveBeenCalled();
+
+				expect(send).toHaveBeenCalledWith({
+					to: 'ada@example.com',
+					subject: 'Verify your email address',
+					template: {
+						name: 'user-registration',
+						data: {
+							url: 'http://localhost:8055/users/register/verify-email'
+								+ '?token=verify-token',
+							email: 'ada@example.com',
+							first_name: null,
+							last_name: null,
+						},
+					},
+				});
+			});
+
+			it('mails a reset link to an allowed url and logs a failure', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-47',
+						status: 'active',
+						email: 'ada@example.com',
+						password: 'hashed',
+					});
+
+				vi.spyOn(jwt, 'sign').mockReturnValueOnce('reset-token' as any);
+				const mailError = new Error('SMTP down');
+
+				const send = vi.mocked(MailService.prototype.send)
+					.mockRejectedValueOnce(mailError);
+
+				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
+
+				await service.requestPasswordReset(
+					'ada@example.com',
+					'https://app.example.com/reset',
+					'Reset it',
+				);
+
+				expect(send).toHaveBeenCalledWith({
+					to: 'ada@example.com',
+					subject: 'Reset it',
+					template: {
+						name: 'password-reset',
+						data: {
+							url: 'https://app.example.com/reset?token=reset-token',
+							email: 'ada@example.com',
+						},
+					},
+				});
+
+				await vi.waitFor(() => {
+					expect(logError).toHaveBeenCalledWith(
+						mailError,
+						'Could not send password reset mail',
+					);
+				});
+			});
+
+			it('mails a reset link to the admin app when no url is given', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-48',
+						status: 'active',
+						email: 'ada@example.com',
+						password: 'hashed',
+					});
+
+				vi.spyOn(jwt, 'sign').mockReturnValueOnce('reset-token' as any);
+				const send = vi.mocked(MailService.prototype.send);
+
+				await service.requestPasswordReset('ada@example.com', null);
+
+				expect(send).toHaveBeenCalledWith({
+					to: 'ada@example.com',
+					subject: 'Password Reset Request',
+					template: {
+						name: 'password-reset',
+						data: {
+							url: 'http://localhost:8055/admin/reset-password'
+								+ '?token=reset-token',
+							email: 'ada@example.com',
+						},
+					},
+				});
+			});
+		});
+
+		describe('resetPassword as admin', () => {
+			it('updates as an admin built from the default accountability', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'ada@example.com',
+					scope: 'password-reset',
+					hash: '48fb3dd3',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-49',
+						status: 'active',
+						password: 'hashed',
+					});
+
+				await service.resetPassword('reset-token', 'new-password');
+
+				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
+					accountability: {
+						role: null,
+						user: null,
+						roles: [],
+						admin: true,
+						app: false,
+						ip: null,
+					},
+				});
+			});
+
+			it('updates as an admin built from the caller', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'ada@example.com',
+					scope: 'password-reset',
+					hash: '48fb3dd3',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce({
+						id: 'user-id-50',
+						status: 'active',
+						password: 'hashed',
+					});
+
+				await new UsersService({
+					knex: db,
+					schema,
+					accountability: {
+						role: null,
+						user: null,
+						roles: [],
+						admin: false,
+						app: false,
+						ip: '10.0.0.2',
+					},
+				}).resetPassword('reset-token', 'new-password');
+
+				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
+					accountability: {
+						role: null,
+						user: null,
+						roles: [],
+						admin: true,
+						app: false,
+						ip: '10.0.0.2',
+					},
+				});
 			});
 		});
 	});

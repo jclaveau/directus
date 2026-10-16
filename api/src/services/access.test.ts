@@ -34,6 +34,82 @@ afterEach(() => {
 });
 
 describe('Services / Access', () => {
+	describe('createOne', () => {
+		it('adds the user limits check to the requested ones', async () => {
+			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockResolvedValue('access-id-2');
+
+			const onRequireUserIntegrityCheck = vi.fn();
+
+			await expect(new AccessService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createOne(
+				{ policy: 'policy-id-2', user: 'user-id-1' },
+				{
+					onRequireUserIntegrityCheck,
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.RemainingAdmins,
+				},
+			)).resolves.toBe('access-id-2');
+
+			expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(
+				UserIntegrityCheckFlag.RemainingAdmins
+				| UserIntegrityCheckFlag.UserLimits,
+			);
+
+			expect(createOne).toHaveBeenCalledWith(
+				{ policy: 'policy-id-2', user: 'user-id-1' },
+				{
+					onRequireUserIntegrityCheck,
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.RemainingAdmins
+						| UserIntegrityCheckFlag.UserLimits,
+				},
+			);
+
+			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+
+		it('requests the user limits check when none was requested', async () => {
+			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockResolvedValue('access-id-3');
+
+			await new AccessService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createOne({ policy: 'policy-id-3', role: 'role-id-1' });
+
+			expect(createOne).toHaveBeenCalledWith(
+				{ policy: 'policy-id-3', role: 'role-id-1' },
+				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
+			);
+		});
+	});
+
+	describe('deleteMany', () => {
+		it('requests every user integrity check and clears the caches', async () => {
+			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['access-id-4']);
+
+			const onRequireUserIntegrityCheck = vi.fn();
+
+			await expect(new AccessService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).deleteMany(['access-id-4'], { onRequireUserIntegrityCheck }))
+				.resolves.toStrictEqual(['access-id-4']);
+
+			expect(onRequireUserIntegrityCheck)
+				.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+
+			expect(deleteMany).toHaveBeenCalledWith(['access-id-4'], {
+				onRequireUserIntegrityCheck,
+				userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+			});
+
+			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe('updateBatch', () => {
 		it('requests every user integrity check and clears the caches', async () => {
 			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')

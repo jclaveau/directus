@@ -1,6 +1,7 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
-import { MockClient } from 'knex-mock-client';
+import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
@@ -25,6 +26,51 @@ afterEach(() => {
 });
 
 describe('Services / Translations', () => {
+	describe('createOne', () => {
+		it('refuses a key already translated in that language', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+
+			tracker.on.select('directus_translations')
+				.response([{ id: 'translation-id-6' }]);
+
+			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockResolvedValue('translation-id-7');
+
+			await expect(new TranslationsService({ knex: db, schema }).createOne({
+				key: 'greeting',
+				language: 'en-US',
+			})).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: 'Duplicate key and language combination',
+			}));
+
+			expect(createOne).not.toHaveBeenCalled();
+		});
+
+		it('creates a key not yet translated in that language', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+
+			tracker.on.select('directus_translations').response([]);
+
+			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
+				.mockResolvedValue('translation-id-8');
+
+			await expect(new TranslationsService({ knex: db, schema }).createOne({
+				key: 'greeting',
+				language: 'fr-FR',
+			})).resolves.toBe('translation-id-8');
+
+			expect(tracker.history.select[0]?.bindings)
+				.toStrictEqual(['greeting', 'fr-FR', 1]);
+
+			expect(createOne).toHaveBeenCalledWith(
+				{ key: 'greeting', language: 'fr-FR' },
+				undefined,
+			);
+		});
+	});
+
 	describe('updateBatch', () => {
 		it('refuses a row setting both key and language', async () => {
 			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
