@@ -694,9 +694,9 @@ describe('Integration Tests', () => {
 							[{ date_field: 'not-a-date' }],
 							'update',
 						);
-					}).toThrowError(
-						'Invalid payload. Invalid Date format in field "date_field".',
-					);
+					}).toThrowError(new InvalidPayloadError({
+						reason: 'Invalid Date format in field "date_field"',
+					}));
 				});
 			});
 		});

@@ -133,14 +133,10 @@ describe('processA2O', () => {
 
 		await expect(
 			service.processA2O({ item: { title: 'Hello' } }),
-		).rejects.toThrowError(InvalidPayloadError);
-
-		await expect(
-			service.processA2O({ item: { title: 'Hello' } }),
-		).rejects.toThrowError(
-			'Invalid payload. Can\'t update nested record "comment.item" without'
-			+ ' field "comment.collection" being set.',
-		);
+		).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: 'Can\'t update nested record "comment.item" without'
+				+ ' field "comment.collection" being set',
+		}));
 	});
 
 	test('refuses a nested record of a collection not allowed', async () => {
@@ -148,13 +144,9 @@ describe('processA2O', () => {
 
 		await expect(
 			service.processA2O({ collection: 'video', item: { title: 'Hello' } }),
-		).rejects.toThrowError(InvalidPayloadError);
-
-		await expect(
-			service.processA2O({ collection: 'video', item: { title: 'Hello' } }),
-		).rejects.toThrowError(
-			'Invalid payload. "comment.item" can\'t be linked to collection "video".',
-		);
+		).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: '"comment.item" can\'t be linked to collection "video"',
+		}));
 	});
 });
 
