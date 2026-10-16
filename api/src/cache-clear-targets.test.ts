@@ -128,6 +128,12 @@ describe('clearCacheTargets', () => {
 		});
 	});
 
+	it('system, permissions: clears the permission cache once', async () => {
+		await clearCacheTargets(['system', 'permissions']);
+
+		expect(clearPermissionCache).toHaveBeenCalledOnce();
+	});
+
 	it('broadcasts the exact targets for peers to drop the same subset', async () => {
 		await seedAllTiers();
 

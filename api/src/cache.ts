@@ -54,7 +54,8 @@ interface CacheMessage {
 
 // The subset a flush drops, chosen per-target on the cache page. `system` rides the
 // existing `schemaChanged` broadcast; `response`/`locks` are per-node memory tiers a
-// dedicated channel has to reach (see `clearCacheTargets`).
+// dedicated channel has to reach (see `clearCacheTargets`). `permissions` needs
+// neither: its cache's own `clear()` tells the peers to drop their memory tier.
 interface CacheClearMessage {
 	targets: CacheFlushTarget[];
 }
