@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // Dump istanbul coverage accumulated by rolldown-plugin-istanbul (COVERAGE_DIR builds) so the
@@ -12,6 +12,12 @@ export async function dumpCoverage(): Promise<void> {
 	if (coverageDir && coverage) {
 		await mkdir(coverageDir, { recursive: true });
 
-		await writeFile(join(coverageDir, `cov-${process.pid}-${process.hrtime.bigint()}.json`), JSON.stringify(coverage));
+		const dumpName = `cov-${process.pid}-${process.hrtime.bigint()}.json`;
+		const partialPath = join(coverageDir, `${dumpName}.partial`);
+
+		// Write then rename: a server killed mid-write must not leave a
+		// truncated cov-*.json that the merge would then fail to parse.
+		await writeFile(partialPath, JSON.stringify(coverage));
+		await rename(partialPath, join(coverageDir, dumpName));
 	}
 }

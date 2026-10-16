@@ -22,14 +22,43 @@ if (!dir) {
 
 const map = createCoverageMap({});
 let merged = 0;
+let skipped = 0;
 
 for (const file of readdirSync(dir)) {
-	if (!file.startsWith('cov-') || !file.endsWith('.json')) continue;
-	map.merge(JSON.parse(readFileSync(join(dir, file), 'utf8')));
+	if (!file.startsWith('cov-')) {
+		continue;
+	}
+
+	// A server killed between the write and the rename of its dump.
+	if (file.endsWith('.json.partial')) {
+		console.warn(`skipped ${file}: never finished writing`);
+		skipped++;
+		continue;
+	}
+
+	if (!file.endsWith('.json')) {
+		continue;
+	}
+
+	let dumpCoverage;
+
+	// One unreadable dump must not cost the shard every other server's coverage.
+	try {
+		dumpCoverage = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+	}
+	catch (error) {
+		console.warn(`skipped ${file}: ${error.message}`);
+		skipped++;
+		continue;
+	}
+
+	map.merge(dumpCoverage);
 	merged++;
 }
 
-console.log(`merged ${merged} dumps → ${map.files().length} files`);
+const fileCount = map.files().length;
+
+console.log(`merged ${merged} dumps, skipped ${skipped} → ${fileCount} files`);
 
 const context = createContext({ dir, coverageMap: map });
 reports.create('lcovonly', { file: 'lcov.info' }).execute(context);
