@@ -7,7 +7,8 @@
 //   POST /delete-many                 — deleteMany of `keys`, a cancel refused.
 //   POST /upsert-many                 — upsertMany over `payloads`.
 //   POST /upsert-many-shared          — the same on a transaction of this
-//     extension's, committed whether the upsert failed or not.
+//     extension's, committed even when the upsert throws. A statement that
+//     failed has already aborted it on postgres, so that commit rolls back.
 //
 // Routes here have no asyncHandler around them, so an escaping rejection would
 // exit the process: every one answers with a status instead of throwing.
