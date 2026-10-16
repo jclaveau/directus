@@ -655,7 +655,10 @@ describe('Services / Collections / updateOne events', () => {
 	it('emits the nested create events itself without a caller', async () => {
 		tracker.on.select('directus_collections').response(undefined);
 		vi.mocked(getSchema).mockResolvedValueOnce({ collections: {} } as any);
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		vi.spyOn(ItemsService.prototype, 'createOne').mockImplementation(
 			async (_data, opts) => {
@@ -710,7 +713,7 @@ describe('Services / Collections / updateBatch', () => {
 			accountability: admin,
 		});
 
-		const update = service.updateBatch([{ meta: { note: 'Blog posts' } }]);
+		const update = service.updateBatch([{ meta: { note: 'Blog posts' } } as any]);
 
 		await expect(update).rejects.toThrowError(InvalidPayloadError);
 
@@ -762,7 +765,10 @@ describe('Services / Collections / updateBatch', () => {
 
 	it('emits the nested events against the refreshed schema', async () => {
 		vi.mocked(getSchema).mockResolvedValueOnce({ collections: {} } as any);
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		vi.spyOn(CollectionsService.prototype, 'updateOne').mockImplementation(
 			async (collectionKey, _data, opts) => {
@@ -792,7 +798,9 @@ describe('Services / Collections / updateBatch', () => {
 	});
 
 	it('skips the emit when the caller turns events off', async () => {
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		vi.spyOn(CollectionsService.prototype, 'updateOne').mockImplementation(
 			async (collectionKey, _data, opts) => {
@@ -819,7 +827,10 @@ describe('Services / Collections / updateMany', () => {
 	it('updates every key with the same data, then emits once', async () => {
 		vi.mocked(shouldClearCache).mockReturnValueOnce(true);
 		vi.mocked(getSchema).mockResolvedValueOnce({ collections: {} } as any);
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		const updateOneSpy = vi
 			.spyOn(CollectionsService.prototype, 'updateOne')
@@ -882,7 +893,9 @@ describe('Services / Collections / updateMany', () => {
 	});
 
 	it('leaves the caches and events alone when told to', async () => {
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		vi.spyOn(CollectionsService.prototype, 'updateOne').mockImplementation(
 			async (collectionKey, _data, opts) => {
@@ -912,7 +925,10 @@ describe('Services / Collections / deleteMany', () => {
 	it('deletes every key, then emits once', async () => {
 		vi.mocked(shouldClearCache).mockReturnValueOnce(true);
 		vi.mocked(getSchema).mockResolvedValueOnce({ collections: {} } as any);
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		const deleteOneSpy = vi
 			.spyOn(CollectionsService.prototype, 'deleteOne')
@@ -966,7 +982,9 @@ describe('Services / Collections / deleteMany', () => {
 	});
 
 	it('leaves the caches and events alone when told to', async () => {
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		vi.spyOn(CollectionsService.prototype, 'deleteOne').mockImplementation(
 			async (collectionKey, opts) => {
@@ -1112,7 +1130,10 @@ describe('Services / Collections / deleteOne of a table without meta', () => {
 		const deleteOneSpy = vi.spyOn(ItemsService.prototype, 'deleteOne');
 		vi.spyOn(ItemsService.prototype, 'deleteByQuery').mockResolvedValue([]);
 		vi.mocked(getSchema).mockResolvedValueOnce({ collections: {} } as any);
-		const emitActionSpy = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+
+		const emitActionSpy = vi
+			.spyOn(emitter, 'emitAction')
+			.mockResolvedValue(undefined);
 
 		vi.spyOn(FieldsService.prototype, 'deleteField').mockImplementation(
 			async (collection, field, opts) => {

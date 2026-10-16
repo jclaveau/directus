@@ -443,7 +443,7 @@ describe('Services / Extensions / readAll', () => {
 			{ id: 'stale-id', bundle: 'bundle-id', source: 'registry', folder: 'removed' },
 			{ id: 'orphan-id', bundle: 'missing-id', source: 'registry', folder: 'x' },
 			{ id: 'local-id', bundle: null, source: 'local', folder: 'local-folder' },
-		]);
+		] as any);
 
 		const service = new ExtensionsService({
 			knex: knex.default({ client: MockClient }),
