@@ -113,40 +113,6 @@ describe('Integration Tests', () => {
 			vi.clearAllMocks();
 		});
 
-		describe('createOne', () => {
-			it('should not checkUniqueEmails', async () => {
-				await service.createOne({});
-
-				expect(checkUniqueEmailsSpy).not.toBeCalled();
-			});
-
-			it('should checkUniqueEmails once', async () => {
-				await service.createOne({ email: 'test@example.com' });
-
-				expect(checkUniqueEmailsSpy).toBeCalledTimes(1);
-			});
-
-			it('should not checkPasswordPolicy', async () => {
-				await service.createOne({});
-
-				expect(checkPasswordPolicySpy).not.toBeCalled();
-			});
-
-			it('should checkPasswordPolicy once', async () => {
-				await service.createOne({ password: 'testpassword' });
-
-				expect(checkPasswordPolicySpy).toBeCalledTimes(1);
-			});
-
-			it('should request user limits checks', async () => {
-				const opts: MutationOptions = {};
-
-				await service.createOne({}, opts);
-
-				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
-			});
-		});
-
 		describe('createMany', () => {
 			vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([1]);
 
@@ -172,6 +138,24 @@ describe('Integration Tests', () => {
 				await service.createMany([{ password: 'testpassword' }]);
 
 				expect(checkPasswordPolicySpy).toBeCalledTimes(1);
+			});
+
+			it('checks an empty password against the policy', async () => {
+				await service.createMany([{ password: '' }]);
+
+				expect(checkPasswordPolicySpy).toHaveBeenCalledWith(['']);
+			});
+
+			it('refuses an empty email', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{ email: '' }], opts);
+
+				expect(opts.preMutationError).toStrictEqual(new FailedValidationError({
+					field: 'email',
+					type: 'email',
+					path: [],
+				}));
 			});
 
 			it('should request user limits checks', async () => {
@@ -897,7 +881,7 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_users').response([{ email: 'ada@example.com' }]);
 				const opts: MutationOptions = {};
 
-				await service.createOne({ email: 'Ada@Example.com' }, opts);
+				await service.createMany([{ email: 'Ada@Example.com' }], opts);
 
 				expect(opts.preMutationError).toStrictEqual(new RecordNotUniqueError({
 					collection: 'directus_users',
@@ -938,7 +922,7 @@ describe('Integration Tests', () => {
 
 				const opts: MutationOptions = {};
 
-				await service.createOne({ password: 'x' }, opts);
+				await service.createMany([{ password: 'x' }], opts);
 
 				expect(opts.preMutationError).toBe(undefined);
 
@@ -957,7 +941,7 @@ describe('Integration Tests', () => {
 
 				const opts: MutationOptions = {};
 
-				await service.createOne({ password: 'short' }, opts);
+				await service.createMany([{ password: 'short' }], opts);
 
 				expect(opts.preMutationError).toStrictEqual(new FailedValidationError(
 					joiValidationErrorItemToErrorExtensions({
@@ -980,7 +964,7 @@ describe('Integration Tests', () => {
 
 				const opts: MutationOptions = {};
 
-				await service.createOne({ password: 'long-enough' }, opts);
+				await service.createMany([{ password: 'long-enough' }], opts);
 
 				expect(opts.preMutationError).toBe(undefined);
 			});
@@ -996,7 +980,7 @@ describe('Integration Tests', () => {
 
 				const opts: MutationOptions = {};
 
-				await service.createOne({ password: 'long-enough' }, opts);
+				await service.createMany([{ password: 'long-enough' }], opts);
 
 				expect(opts.preMutationError).toBe(undefined);
 			});
@@ -1212,7 +1196,6 @@ describe('Integration Tests', () => {
 						first_name: 'Ada',
 						last_name: null,
 					},
-					{},
 				);
 
 				expect(sendMail).toHaveBeenCalledWith({
