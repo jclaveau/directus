@@ -526,7 +526,7 @@ describe('TusDataStore.create', () => {
 		expect(mockedDeps.storageDriver.createChunkedUpload).not.toHaveBeenCalled();
 	});
 
-	test('lets a replacement keep the disk name of the file it replaces', async () => {
+	test('refuses a replacement naming the disk name it would empty', async () => {
 		const tusStore = new TusDataStore({
 			constants: {
 				ENABLED: true,
@@ -553,13 +553,8 @@ describe('TusDataStore.create', () => {
 
 		knexTracker.on.select('directus_settings').response(undefined);
 		mockedDeps.storageDriver.exists.mockResolvedValueOnce(true);
-		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-10');
 
-		mockedDeps.storageDriver.createChunkedUpload.mockResolvedValueOnce({
-			id: 'tus-1',
-		});
-
-		await tusStore.create(new Upload({
+		await expect(tusStore.create(new Upload({
 			id: 'tus-1',
 			offset: 0,
 			size: 1024,
@@ -568,12 +563,13 @@ describe('TusDataStore.create', () => {
 				filename_download: 'photo.jpg',
 				filename_disk: 'file-9.jpg',
 			},
-		}));
+		}))).rejects.toEqual({
+			status_code: 400,
+			body: '"filename_disk" "file-9.jpg" is already used by another file',
+		});
 
-		expect(mockedDeps.storageDriver.createChunkedUpload).toHaveBeenCalledWith(
-			'file-9.jpg',
-			expect.anything(),
-		);
+		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.storageDriver.createChunkedUpload).not.toHaveBeenCalled();
 	});
 
 	test('refuses to replace a file another upload is still writing', async () => {

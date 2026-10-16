@@ -104,11 +104,11 @@ export class TusDataStore extends DataStore {
 			}
 		}
 
-		// Starting the upload empties the file it names, so a name another file
-		// holds is refused before anything is written.
+		// Starting the upload empties the file it names, so a name a file holds is
+		// refused before anything is written, the replaced file's own name too: tus
+		// writes straight to it, with no temp file.
 		if (
 			requestedDiskName
-			&& requestedDiskName !== existingFile?.['filename_disk']
 			&& (await this.storageDriver.exists(requestedDiskName))
 		) {
 			throw {
