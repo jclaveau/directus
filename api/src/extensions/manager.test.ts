@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 
 // The manager reaches half the api to register an extension, so everything below
 // the import seam is stubbed. What is pinned here is one decision: which loads
@@ -220,4 +221,62 @@ export default ({ filter }) => {
 	const filtered = emitter.emitFilter(SANDBOX_EVENT, { value: 1 }, {}, null);
 
 	await expect(filtered).resolves.toEqual({ value: 1, seen: true });
+});
+
+test('shares the queued reload with a reload asked behind it', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	let releaseFirstLoad: () => void = () => undefined;
+
+	vi.spyOn(manager as any, 'unload').mockResolvedValue(undefined);
+
+	const loadSpy = vi.spyOn(manager as any, 'load')
+		.mockImplementationOnce(() => {
+			return new Promise<void>((resolve) => {
+				releaseFirstLoad = resolve;
+			});
+		})
+		.mockResolvedValue(undefined);
+
+	const runningReload = manager.reload();
+	const queuedReload = manager.reload();
+	const lateReload = manager.reload();
+
+	await expect(Promise.race([lateReload, setImmediate('pending')]))
+		.resolves.toBe('pending');
+
+	releaseFirstLoad();
+
+	await expect(runningReload).resolves.toBeUndefined();
+	await expect(lateReload).resolves.toBeUndefined();
+	expect(loadSpy).toHaveBeenCalledTimes(2);
+	await expect(queuedReload).resolves.toBeUndefined();
+});
+
+test('runs the next reload after one whose load threw', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	vi.spyOn(manager as any, 'unload').mockResolvedValue(undefined);
+
+	const loadSpy = vi.spyOn(manager as any, 'load')
+		.mockRejectedValueOnce(new Error('load failed'))
+		.mockResolvedValue(undefined);
+
+	await expect(Promise.race([manager.reload(), setImmediate('pending')]))
+		.rejects.toThrow(new Error('load failed'));
+
+	await expect(Promise.race([manager.reload(), setImmediate('pending')]))
+		.resolves.toBeUndefined();
+
+	expect(loadSpy).toHaveBeenCalledTimes(2);
 });
