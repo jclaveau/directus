@@ -517,6 +517,7 @@ implements AbstractService<Item> {
 				payloadAfterHooks: AnyItem;
 				payloadWithPresets: AnyItem;
 				payloadWithoutAliases: Record<string, unknown>;
+				revisionPayload: AnyItem;
 				primaryKey: PrimaryKey | undefined;
 				revisionsM2O: Awaited<ReturnType<PayloadService['processM2O']>>['revisions'];
 				revisionsA2O: Awaited<ReturnType<PayloadService['processA2O']>>['revisions'];
@@ -681,6 +682,16 @@ implements AbstractService<Item> {
 				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
 				const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
 
+				const nestedRowFields = this.schema.relations
+					.filter((relation) => relation.collection === this.collection)
+					.map((relation) => relation.field)
+					.filter((field) => field in payloadAfterHooks);
+
+				const revisionPayload = {
+					...payloadAfterHooks,
+					...pick(payloadWithA2O, nestedRowFields),
+				};
+
 				// The primary key can already exist in the payload.
 				// In case of manual string / UUID primary keys it's always provided at this point.
 				// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
@@ -702,6 +713,7 @@ implements AbstractService<Item> {
 					payloadAfterHooks,
 					payloadWithPresets,
 					payloadWithoutAliases,
+					revisionPayload,
 					primaryKey,
 					revisionsM2O,
 					revisionsA2O,
@@ -904,7 +916,8 @@ implements AbstractService<Item> {
 
 					const revisionInputs = await Promise.all(
 						postPrepared.map(async (p, index) => {
-							const revisionPayload = await p.payloadService.prepareDelta(p.payloadAfterHooks);
+							const revisionPayload = await p.payloadService
+								.prepareDelta(p.revisionPayload);
 
 							return {
 								activity: activityIds[index]!,
@@ -1443,6 +1456,63 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * Refuses a change that names an existing o2m child for several rows: each row
+	 * would take the child from the one before, leaving it on the last. A child
+	 * created inline is each row's own, and so is an m2m's junction row.
+	 */
+	private refuseChildJoiningSeveralRows(group: UpdateGroup<Item>): void {
+		if (group.keys.length < 2) {
+			return;
+		}
+
+		const groupData = group.data as Partial<AnyItem>;
+
+		for (const relation of this.schema.relations) {
+			const childrenField = relation.meta?.one_field;
+
+			if (
+				relation.related_collection !== this.collection
+				|| !childrenField
+				|| !(childrenField in groupData)
+				|| relation.meta?.junction_field
+			) {
+				continue;
+			}
+
+			const childrenValue = groupData[childrenField];
+
+			const childPrimaryKeyField = this.schema.collections[relation.collection]!
+				.primary;
+
+			let namedChildren: unknown[] = [childrenValue].flat();
+
+			// The `{ create, update, delete }` form moves only what `update` names.
+			if (!Array.isArray(childrenValue)) {
+				namedChildren = [childrenValue?.update].filter(Array.isArray).flat();
+			}
+
+			const joiningChildKey = namedChildren
+				.map((namedChild) => {
+					if (isPlainObject(namedChild)) {
+						return (namedChild as AnyItem)[childPrimaryKeyField];
+					}
+
+					return namedChild;
+				})
+				.find((childKey) => !isMissingPrimaryKey(childKey));
+
+			if (joiningChildKey !== undefined) {
+				throw new InvalidPayloadError({
+					reason: oneLine`
+						"${String(joiningChildKey)}" can't join more than one
+						"${this.collection}"
+					`,
+				});
+			}
+		}
+	}
+
+	/**
 	 * The user integrity checks writing these groups calls for. Handed the groups
 	 * the hooks left, so a field a hook adds counts like the caller's own.
 	 */
@@ -1951,6 +2021,8 @@ implements AbstractService<Item> {
 				let userIntegrityCheckFlags =
 					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
 					| this.requiredIntegrityChecks(writingGroups);
+
+				writingGroups.forEach((group) => this.refuseChildJoiningSeveralRows(group));
 
 				// Every group before any is applied, so a row the caller may not update
 				// is refused whatever error a guard stored for another row.

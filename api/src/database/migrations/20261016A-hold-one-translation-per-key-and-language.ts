@@ -12,18 +12,35 @@ const INDEX_NAME = 'directus_translations_key_language_unique';
  * of two values is the right one is its owner's call, not a migration's.
  */
 export async function up(knex: Knex): Promise<void> {
-	const duplicatePairs = await knex
+	const duplicatedPairs = knex
 		.select('key', 'language')
-		.count('* as copies')
 		.from(TABLE)
 		.groupBy('key', 'language')
 		.havingRaw('count(*) > 1')
-		.orderBy(['key', 'language']);
+		.as('duplicated');
 
-	if (duplicatePairs.length > 0) {
-		const pairList = duplicatePairs
-			.map(({ key, language, copies }) => {
-				return `"${key}" in "${language}" (${copies} rows)`;
+	const duplicateRows: { id: string; key: string; language: string }[] =
+		await knex
+			.select('translation.id', 'translation.key', 'translation.language')
+			.from({ translation: TABLE })
+			.join(duplicatedPairs, function joinPair() {
+				this.on('translation.key', 'duplicated.key')
+					.andOn('translation.language', 'duplicated.language');
+			})
+			.orderBy(['translation.key', 'translation.language'])
+			.orderBy('translation.id');
+
+	if (duplicateRows.length > 0) {
+		const idsByPair = new Map<string, string[]>();
+
+		for (const { id, key, language } of duplicateRows) {
+			const pairLabel = `"${key}" in "${language}"`;
+			idsByPair.set(pairLabel, [...idsByPair.get(pairLabel) ?? [], id]);
+		}
+
+		const pairList = [...idsByPair]
+			.map(([pairLabel, rowIds]) => {
+				return `${pairLabel} (rows ${rowIds.join(', ')})`;
 			})
 			.join(', ');
 
