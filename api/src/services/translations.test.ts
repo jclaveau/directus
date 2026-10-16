@@ -72,8 +72,17 @@ describe('Services / Translations', () => {
 	});
 
 	describe('updateBatch', () => {
-		it('refuses a row setting both key and language', async () => {
-			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+		it('moves a row by its key and language onto a free pair', async () => {
+			vi.spyOn(ItemsService.prototype, 'readMany')
+				.mockResolvedValueOnce(withMeta(
+					[{ id: 'translation-id-1', key: 'hello', language: 'de-DE' }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+			vi.spyOn(TranslationsService.prototype as any, 'translationKeyExists')
+				.mockResolvedValue(false);
+
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
 				.mockResolvedValue(['translation-id-1']);
 
 			await expect(new TranslationsService({
@@ -81,7 +90,22 @@ describe('Services / Translations', () => {
 				schema,
 			}).updateBatch([
 				{ id: 'translation-id-1', key: 'greeting', language: 'en-US' },
-			])).rejects.toThrowError('Duplicate key and language combination');
+			])).resolves.toStrictEqual(['translation-id-1']);
+		});
+
+		it('refuses one key and language given to several rows', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['translation-id-1', 'translation-id-9']);
+
+			await expect(new TranslationsService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).updateMany(
+				['translation-id-1', 'translation-id-9'],
+				{ key: 'greeting', language: 'en-US' },
+			)).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: 'Duplicate key and language combination',
+			}));
 
 			expect(updateGroups).not.toHaveBeenCalled();
 		});

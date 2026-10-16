@@ -57,7 +57,9 @@ export class TranslationsService extends ItemsService {
 			});
 
 		for (const { data, keys } of groups) {
-			if (keys.length > 0 && 'key' in data && 'language' in data) {
+			// One key and language for several rows is a duplicate whatever the
+			// table holds; a single row is checked like any other move below.
+			if (keys.length > 1 && 'key' in data && 'language' in data) {
 				throw new InvalidPayloadError({
 					reason: 'Duplicate key and language combination',
 				});
