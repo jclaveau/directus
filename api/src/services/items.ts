@@ -697,6 +697,13 @@ implements AbstractService<Item> {
 				// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
 				const primaryKey: PrimaryKey | undefined = payloadWithTypeCasting[primaryKeyField];
 
+				// Stored as is, an empty key reads back as another row's: off max(id).
+				if (primaryKey === '') {
+					throw new InvalidPayloadError({
+						reason: `Primary key of ${this.collection} can't be empty`,
+					});
+				}
+
 				if (!isMissingPrimaryKey(primaryKey)) {
 					validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 				}

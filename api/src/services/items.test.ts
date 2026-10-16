@@ -4057,6 +4057,19 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			}
 		});
 
+		it('refuses an empty string primary key before the insert', async () => {
+			await expect(new ItemsService('code_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).createOne({ code: '', name: 'a' })).rejects.toEqual(
+				new InvalidPayloadError({
+					reason: 'Primary key of code_coll can\'t be empty',
+				}),
+			);
+
+			expect(tracker.history.all).toEqual([]);
+		});
+
 		it('refuses a read the database answers with no row list', async () => {
 			tracker.on.select('test').response(null);
 
