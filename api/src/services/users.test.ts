@@ -696,6 +696,46 @@ describe('Integration Tests', () => {
 					expect.anything(),
 				);
 			});
+
+			it(
+				'refuses re-inviting an invited user to a URL off the allow list',
+				async () => {
+					vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+						.mockResolvedValueOnce({ status: 'invited', role: 'invite-role' });
+
+					const promise = service.inviteUser(
+						'user@example.com',
+						'invite-role',
+						'https://elsewhere.example.com/invite',
+					);
+
+					await expect(promise).rejects.toEqual(new InvalidPayloadError({
+						reason: 'URL "https://elsewhere.example.com/invite" '
+							+ 'can\'t be used to invite users',
+					}));
+
+					expect(mailService.send).not.toBeCalled();
+				},
+			);
+
+			it(
+				'refuses inviting an active user to a URL off the allow list',
+				async () => {
+					vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+						.mockResolvedValueOnce({ status: 'active', role: 'other-role' });
+
+					const promise = service.inviteUser(
+						'user@example.com',
+						'invite-role',
+						'https://elsewhere.example.com/invite',
+					);
+
+					await expect(promise).rejects.toEqual(new InvalidPayloadError({
+						reason: 'URL "https://elsewhere.example.com/invite" '
+							+ 'can\'t be used to invite users',
+					}));
+				},
+			);
 		});
 
 		describe('acceptInvite', () => {
@@ -1021,6 +1061,15 @@ describe('Integration Tests', () => {
 				await service.deleteMany(['user-id-45'], opts);
 
 				expect(opts.preMutationError).toBe(lastAdminError);
+			});
+
+			it('keeps the references to a last admin its refusal keeps', async () => {
+				vi.mocked(validateRemainingAdminUsers)
+					.mockRejectedValueOnce(new Error('last admin'));
+
+				await service.deleteMany(['user-id-46']);
+
+				expect(tracker.history.update).toEqual([]);
 			});
 		});
 

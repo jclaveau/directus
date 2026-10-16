@@ -395,9 +395,20 @@ export class UsersService extends ItemsService {
 		}
 
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
-		await this.knex('directus_comments').update({ user_updated: null }).whereIn('user_updated', keys);
-		await this.knex('directus_notifications').update({ sender: null }).whereIn('sender', keys);
-		await this.knex('directus_versions').update({ user_updated: null }).whereIn('user_updated', keys);
+		// Outside the delete's transaction: a refused delete must keep them.
+		if (!opts.preMutationError) {
+			await this.knex('directus_comments')
+				.update({ user_updated: null })
+				.whereIn('user_updated', keys);
+
+			await this.knex('directus_notifications')
+				.update({ sender: null })
+				.whereIn('sender', keys);
+
+			await this.knex('directus_versions')
+				.update({ user_updated: null })
+				.whereIn('user_updated', keys);
+		}
 
 		await super.deleteMany(keys, opts);
 		await this.clearUserSessions(keys);
@@ -434,6 +445,9 @@ export class UsersService extends ItemsService {
 				// For known users update role if changed
 			} else if (user.status === 'invited' && user.role !== role) {
 				await this.updateOne(user.id, { role }, opts);
+			}
+			else if (opts.preMutationError) {
+				throw opts.preMutationError;
 			}
 
 			// Send invite for new and already invited users

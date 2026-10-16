@@ -344,7 +344,7 @@ export class RelationsService {
 	async updateOne(
 		collection: string,
 		field: string,
-		relation: Partial<Relation>,
+		relationPayload: Partial<Relation>,
 		opts?: MutationOptions,
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
@@ -374,6 +374,14 @@ export class RelationsService {
 				reason: `Field "${field}" in collection "${collection}" doesn't have a relationship.`,
 			});
 		}
+
+		// The FK is re-created off these, so a meta-only payload keeps it.
+		const relation: Partial<Relation> = {
+			...relationPayload,
+			collection,
+			field,
+			related_collection: existingRelation.related_collection,
+		};
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		this.helpers.schema.preRelationChange(relation);
