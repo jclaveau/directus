@@ -133,3 +133,86 @@ Feature: A single access row grants its policy from the next request on
       |         _eq: <holder>       |                               |
       |   data:                     |                               |
       |     policy: <first-policy>  |                               |
+
+  Scenario: a key no item holds is not found for the admin, forbidden to a user
+    Given these requests are sent:
+      | request                                | response  |
+      | method: POST                           | code: 200 |+
+      | path: /policies                        |           |
+      | payload:                               |           |
+      |   id: <writer-policy>                  |           |
+      |   name: writer-<run>                   |           |
+      |   app_access: false                    |           |
+      |   admin_access: false                  |           |
+      |   permissions:                         |           |
+      |     - collection: test_singular_access |           |
+      |       action: read                     |           |
+      |       fields:                          |           |
+      |         - '*'                          |           |
+      |     - collection: test_singular_access |           |
+      |       action: update                   |           |
+      |       fields:                          |           |
+      |         - '*'                          |           |
+      |     - collection: test_singular_access |           |
+      |       action: delete                   |           |
+      | method: POST                           | code: 200 |+
+      | path: /users                           |           |
+      | payload:                               |           |
+      |   email: writer-<run>@example.com      |           |
+      |   token: <writer-token>                |           |
+      |   policies:                            |           |
+      |     - policy: <writer-policy>          |           |
+    Then these requests get these responses:
+      | request                                      | response                        |
+      | method: GET                                  | code: 404                       |+
+      | path: /items/test_singular_access/2147483000 | body:                           |
+      |                                              |   errors:                       |
+      |                                              |     - message: >-               |
+      |                                              |         Item "2147483000"       |
+      |                                              |         doesn't exist in        |
+      |                                              |         collection              |
+      |                                              |         "test_singular_access". |
+      | method: PATCH                                | code: 404                       |+
+      | path: /items/test_singular_access/2147483000 | body:                           |
+      | payload:                                     |   errors:                       |
+      |   name: patched                              |     - message: >-               |
+      |                                              |         Item "2147483000"       |
+      |                                              |         doesn't exist in        |
+      |                                              |         collection              |
+      |                                              |         "test_singular_access". |
+      | method: DELETE                               | code: 404                       |+
+      | path: /items/test_singular_access/2147483000 | body:                           |
+      |                                              |   errors:                       |
+      |                                              |     - message: >-               |
+      |                                              |         Item "2147483000"       |
+      |                                              |         doesn't exist in        |
+      |                                              |         collection              |
+      |                                              |         "test_singular_access". |
+      | as: <writer-token>                           | code: 403                       |+
+      | method: GET                                  | body:                           |
+      | path: /items/test_singular_access/2147483000 |   errors:                       |
+      |                                              |     - message: >-               |
+      |                                              |         No result found for key |
+      |                                              |         2147483000 in           |
+      |                                              |         test_singular_access    |
+      |                                              |         during items.readOne()  |
+      | as: <writer-token>                           | code: 403                       |+
+      | method: PATCH                                | body:                           |
+      | path: /items/test_singular_access/2147483000 |   errors:                       |
+      | payload:                                     |     - message: >-               |
+      |   name: patched                              |         You don't have          |
+      |                                              |         permissions to perform  |
+      |                                              |         "update" for the        |
+      |                                              |         field(s) "name" in      |
+      |                                              |         collection              |
+      |                                              |         "test_singular_access"  |
+      |                                              |         or it does not exist.   |
+      | as: <writer-token>                           | code: 403                       |+
+      | method: DELETE                               | body:                           |
+      | path: /items/test_singular_access/2147483000 |   errors:                       |
+      |                                              |     - message: >-               |
+      |                                              |         You don't have          |
+      |                                              |         permission to perform   |
+      |                                              |         "delete" for collection |
+      |                                              |         "test_singular_access"  |
+      |                                              |         or it does not exist.   |

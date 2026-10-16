@@ -15,8 +15,14 @@ Feature: A single extension is updated and deleted by its key
       |                             |         Invalid payload. "meta" is |
       |                             |         required.                  |
 
-  Scenario: deleting an extension by a key no extension holds answers with no content
+  Scenario: deleting an extension by a key no extension holds is not found
     Then these requests get these responses:
-      | request                     | response  |
-      | method: DELETE              | code: 204 |+
-      | path: /extensions/<missing> |           |
+      | request                     | response                       |
+      | method: DELETE              | code: 404                      |+
+      | path: /extensions/<missing> | body:                          |
+      |                             |   errors:                      |
+      |                             |     - message: >-              |
+      |                             |         Item "<missing>"       |
+      |                             |         doesn't exist in       |
+      |                             |         collection             |
+      |                             |         "directus_extensions". |

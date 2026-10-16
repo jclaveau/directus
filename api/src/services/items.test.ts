@@ -2,6 +2,7 @@ import {
 	ForbiddenError,
 	InvalidForeignKeyError,
 	InvalidPayloadError,
+	ItemNotFoundError,
 	RecordNotUniqueError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
@@ -220,6 +221,85 @@ describe('Integration Tests', () => {
 				expect(error).toBeInstanceOf(ForbiddenError);
 
 				expect(error.message).toBe('No result found for key 999 in test during items.readOne()');
+			});
+
+			it('tells an admin the key no row holds is not found', async () => {
+				tracker.reset();
+				tracker.on.select('test').response(undefined);
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				adminService.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheFingerprints: [] });
+				});
+
+				await expect(adminService.readOne(999)).rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+			});
+
+			it('keeps a row its own filter hides forbidden to an admin', async () => {
+				tracker.reset();
+				tracker.on.select('test').response({ id: 999 });
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				adminService.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheFingerprints: [] });
+				});
+
+				await expect(adminService.readOne(999)).rejects.toStrictEqual(
+					new ForbiddenError({
+						reason: 'No result found for key 999 in test during items.readOne()',
+					}),
+				);
+			});
+		});
+
+		describe('updateOne and deleteOne of a key no row holds', () => {
+			it('refuse an admin with a not found before any write', async () => {
+				tracker.reset();
+				tracker.on.select('test').response(undefined);
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				adminService.updateMany = vi.fn();
+				adminService.deleteMany = vi.fn();
+
+				await expect(
+					adminService.updateOne(999, { name: 'patched' }),
+				).rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+
+				await expect(adminService.deleteOne(999)).rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+
+				expect(adminService.updateMany).not.toHaveBeenCalled();
+				expect(adminService.deleteMany).not.toHaveBeenCalled();
+			});
+
+			it('leave anyone else to the permissions, without a lookup', async () => {
+				service.updateMany = vi.fn(async () => [999]);
+				service.deleteMany = vi.fn(async () => [999]);
+
+				expect(await service.updateOne(999, { name: 'patched' })).toBe(999);
+				expect(await service.deleteOne(999)).toBe(999);
+
+				expect(tracker.history.all).toEqual([]);
 			});
 		});
 

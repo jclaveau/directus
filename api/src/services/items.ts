@@ -1,6 +1,12 @@
 import { Action, ALTERATIONS_KEYS } from '@directus/constants';
 import { useEnv } from '@directus/env';
-import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidPayloadError,
+	isDirectusError,
+	ItemNotFoundError,
+} from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import type {
 	AbstractService,
@@ -1200,8 +1206,10 @@ implements AbstractService<Item> {
 		const results = await this.readByQuery(queryWithKey, opts);
 
 		if (results.length === 0) {
+			// A row the query's own filter excludes still exists, and stays a 403.
+			await this.refuseMissingKeyForAdmin(key);
+
 			throw new ForbiddenError({
-				// 404 / InvalidPayload?
 				reason: `No result found for key ${key} in ${this.collection} during items.readOne()`,
 			});
 		}
@@ -1258,6 +1266,7 @@ implements AbstractService<Item> {
 	 * Uses `this.updateMany` under the hood.
 	 */
 	async updateOne(key: PrimaryKey, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
+		await this.refuseMissingKeyForAdmin(key);
 		await this.updateMany([key], data, opts);
 		return key;
 	}
@@ -2798,8 +2807,35 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
+		await this.refuseMissingKeyForAdmin(key);
 		await this.deleteMany([key], opts);
 		return key;
+	}
+
+	/**
+	 * An admin reaches every item, so a key no row holds is a 404 for them. For
+	 * anyone else the permissions decide, and a missing item stays as forbidden
+	 * as a hidden one.
+	 */
+	private async refuseMissingKeyForAdmin(key: PrimaryKey): Promise<void> {
+		if (this.accountability?.admin !== true) {
+			return;
+		}
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const existingRow = await this.knex
+			.select(primaryKeyField)
+			.from(this.collection)
+			.where(primaryKeyField, key)
+			.first();
+
+		if (!existingRow) {
+			throw new ItemNotFoundError({
+				collection: this.collection,
+				primaryKey: key,
+			});
+		}
 	}
 
 	/**

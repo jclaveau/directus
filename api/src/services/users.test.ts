@@ -686,6 +686,8 @@ describe('Integration Tests', () => {
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce(mockUser);
 
+				tracker.on.select('directus_users').response({ id: mockUser.id });
+
 				const promise = service.inviteUser('user@example.com', 'invite-role', null);
 				await expect(promise).resolves.not.toThrow();
 
@@ -1309,6 +1311,8 @@ describe('Integration Tests', () => {
 						password: 'hashed',
 					});
 
+				tracker.on.select('directus_users').response({ id: 'user-id-49' });
+
 				await service.resetPassword('reset-token', 'new-password');
 
 				expect(superUpdateGroupsSpy.mock.contexts[0]).toMatchObject({
@@ -1336,6 +1340,8 @@ describe('Integration Tests', () => {
 						status: 'active',
 						password: 'hashed',
 					});
+
+				tracker.on.select('directus_users').response({ id: 'user-id-50' });
 
 				await new UsersService({
 					knex: db,
