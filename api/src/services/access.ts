@@ -6,8 +6,7 @@ import type {
 	UpdateGroup,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { ItemsService } from './items.js';
 
 export class AccessService extends ItemsService {
@@ -16,11 +15,7 @@ export class AccessService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 
 	override async createMany(

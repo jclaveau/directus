@@ -10,10 +10,12 @@ import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { verifyJWT } from '../utils/jwt.js';
+import { transaction } from '../utils/transaction.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService, MailService, UsersService } from './index.js';
 import { SettingsService } from './settings.js';
@@ -45,6 +47,13 @@ vi.mock('@directus/env', () => ({
 }));
 
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
+
+vi.mock('../cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache.js')>(),
+		clearSystemCache: vi.fn(),
+	};
+});
 
 vi.mock('../utils/jwt.js', () => ({
 	verifyJWT: vi.fn(),
@@ -244,6 +253,29 @@ describe('Integration Tests', () => {
 				);
 
 				expect(clearCacheSpy).toHaveBeenCalled();
+			});
+
+			it('clears the caches once the parent transaction has committed', async () => {
+				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
+				tracker.on.update('directus_users').response(1);
+
+				const transactionStates: string[][] = [];
+
+				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+					transactionStates.push(
+						tracker.history.transactions.map((trx) => trx.state),
+					);
+				});
+
+				await transaction(db, async (trx) => {
+					await new UsersService({ knex: trx, schema }).updateMany(
+						['8e2b4c10-5d3a-4f6e-9a7b-000000000051'],
+						{ role: testRoleId },
+						{ onRequireUserIntegrityCheck: vi.fn() },
+					);
+				});
+
+				expect(transactionStates).toEqual([['committed']]);
 			});
 
 			it('clears the caches when a users.update hook changes the role', async () => {

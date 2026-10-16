@@ -1,10 +1,11 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
-import { MockClient } from 'knex-mock-client';
+import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { AccessService } from './access.js';
+import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 
 vi.mock('../../src/database/index', () => {
@@ -90,6 +91,28 @@ describe('Services / Access', () => {
 			);
 
 			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+
+		it('clears the caches once the parent transaction has committed', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['access-id-6']);
+
+			const database = knex.default({ client: MockClient });
+			const tracker = createTracker(database);
+			const transactionStates: string[][] = [];
+
+			vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await transaction(database, async (trx) => {
+				await new AccessService({ knex: trx, schema })
+					.createOne({ policy: 'policy-id-6', role: 'role-id-6' });
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
 		});
 	});
 

@@ -5,6 +5,7 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import emitter from '../emitter.js';
+import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 import { PoliciesService } from './policies.js';
 
@@ -101,6 +102,28 @@ describe('Services / Policies', () => {
 				.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 
 			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('deleteMany', () => {
+		it('clears the caches once the parent transaction has committed', async () => {
+			vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['7d3e5f40-1a2b-4c3d-9e8f-000000000006']);
+
+			const transactionStates: string[][] = [];
+
+			vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await transaction(db, async (trx) => {
+				await new PoliciesService({ knex: trx, schema })
+					.deleteMany(['7d3e5f40-1a2b-4c3d-9e8f-000000000006']);
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
 		});
 	});
 });

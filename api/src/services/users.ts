@@ -17,8 +17,7 @@ import Joi from 'joi';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -737,10 +736,6 @@ export class UsersService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 }
