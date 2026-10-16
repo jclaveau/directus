@@ -117,7 +117,22 @@ export class CommentsService extends ItemsService {
 					const templateData = await usersService.readByQuery({
 						fields: ['id', 'first_name', 'last_name', 'email'],
 						filter: { id: { _in: mentions.map((mention) => mention.substring(1)) } },
+					}).catch((error: unknown) => {
+						if (!isDirectusError(error, ErrorCode.Forbidden)) {
+							throw error;
+						}
+
+						logger.warn(
+							`Mention of user "${userID}" skipped:`
+							+ ' the mentioned user cannot read directus_users',
+						);
+
+						return null;
 					});
+
+					if (templateData === null) {
+						continue;
+					}
 
 					const userPreviews = templateData.reduce(
 						(acc, user) => {

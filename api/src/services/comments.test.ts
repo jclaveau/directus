@@ -1,8 +1,16 @@
 import type { Accountability } from '@directus/types';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
+import { ForbiddenError } from '@directus/errors';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
+import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import {
+	fetchGlobalAccess,
+} from '../permissions/modules/fetch-global-access/fetch-global-access.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { withMeta } from '../utils/read-meta.js';
 import { CommentsService } from './comments.js';
 import { ItemsService } from './items.js';
@@ -23,8 +31,10 @@ vi.mock('@directus/env', () => ({
 	useEnv: vi.fn(() => ({ PUBLIC_URL: 'http://example.com' })),
 }));
 
+const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
+
 vi.mock('../logger/index.js', () => ({
-	useLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),
+	useLogger: vi.fn(() => ({ warn: loggerWarn, info: vi.fn(), error: vi.fn() })),
 }));
 
 vi.mock('../permissions/lib/fetch-roles-tree.js', () => ({
@@ -156,5 +166,56 @@ describe('Services / Comments', () => {
 		expect(superCreateManySpy).toHaveBeenCalledTimes(1);
 		expect(UsersService.prototype.readOne).not.toHaveBeenCalled();
 		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+	});
+
+	it('logs a mention the mentioned user cannot read users for', async () => {
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-3']);
+
+		const service = new CommentsService({ knex: db, schema, accountability });
+
+		vi.mocked(UsersService.prototype.readOne)
+			.mockResolvedValueOnce(withMeta({
+				id: senderUuid,
+				first_name: 'Sam',
+				last_name: 'Sender',
+				email: 'sam@x.com',
+			}, { scopedCacheFingerprints: [] }))
+			.mockResolvedValueOnce(withMeta({
+				id: mentionUuid,
+				first_name: 'Jane',
+				last_name: 'Doe',
+				email: 'jane@x.com',
+				role: { id: null },
+			}, { scopedCacheFingerprints: [] }));
+
+		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+		vi.mocked(validateAccess).mockResolvedValue(undefined);
+
+		vi.mocked(fetchGlobalAccess)
+			.mockResolvedValue({
+				admin: false,
+				app: true,
+				grantedDbConnections: [],
+			});
+
+		vi.mocked(UsersService.prototype.readByQuery)
+			.mockRejectedValue(new ForbiddenError());
+
+		const result = await service.createMany([
+			{
+				comment: `hey @${mentionUuid} please review`,
+				collection: 'articles',
+				item: '42',
+			},
+		]);
+
+		expect(result).toEqual(['comment-pk-3']);
+		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+
+		expect(loggerWarn).toHaveBeenCalledExactlyOnceWith(
+			'Mention of user "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" skipped:'
+			+ ' the mentioned user cannot read directus_users',
+		);
 	});
 });
