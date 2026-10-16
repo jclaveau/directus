@@ -391,7 +391,9 @@ export class RelationsService {
 		try {
 			await transaction(this.knex, async (trx) => {
 				if (existingRelation.related_collection) {
-					await trx.schema.alterTable(collection, async (table) => {
+					// Synchronous: knex drops a rejected callback, so a throw would leave
+					// the queued drop running alone and the FK lost.
+					await trx.schema.alterTable(collection, (table) => {
 						let constraintName: string = getDefaultIndexName('foreign', collection, field);
 
 						// If the FK already exists in the DB, drop it first
@@ -400,7 +402,6 @@ export class RelationsService {
 							table.dropForeign(field, constraintName);
 
 							constraintName = this.helpers.schema.constraintName(constraintName);
-							existingRelation.schema.constraint_name = constraintName;
 						}
 
 						this.alterType(table, relation, fieldSchema.nullable);

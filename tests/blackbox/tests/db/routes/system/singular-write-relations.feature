@@ -2,6 +2,8 @@ Feature: A single relation is deleted by its collection and field
 
   - A request authenticates as the admin. A response cell states the keys it
     checks.
+  - Clearing the system cache right before a PATCH makes that PATCH build the
+    schema, so it is handed the frozen copy the cache keeps.
 
   Scenario: a relation deleted by its collection and field is gone
     Given these requests are sent:
@@ -38,6 +40,14 @@ Feature: A single relation is deleted by its collection and field
       |   related_collection: test_sw_owners |           |
     Then these requests get these responses:
       | request                                 | response                          |
+      | method: GET                             | code: 200                         |+
+      | path: /relations/test_sw_pets/owner_ref | body:                             |
+      |                                         |   data:                           |
+      |                                         |     schema:                       |
+      |                                         |       table: test_sw_pets         |
+      |                                         |       column: owner_ref           |
+      | method: POST                            | code: 200                         |+
+      | path: /utils/cache/clear?system         |                                   |
       | method: PATCH                           | code: 200                         |+
       | path: /relations/test_sw_pets/owner_ref |                                   |
       | payload:                                |                                   |
