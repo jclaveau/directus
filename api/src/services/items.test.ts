@@ -292,6 +292,26 @@ describe('Integration Tests', () => {
 				expect(adminService.deleteMany).not.toHaveBeenCalled();
 			});
 
+			it('refuse an admin a key that is no integer before the lookup', async () => {
+				tracker.reset();
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				await expect(
+					adminService.updateOne('abc', { name: 'patched' }),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: 'Primary key of test must be an integer instead of "abc"',
+					}),
+				);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
 			it('leave anyone else to the permissions, without a lookup', async () => {
 				service.updateMany = vi.fn(async () => [999]);
 				service.deleteMany = vi.fn(async () => [999]);
