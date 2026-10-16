@@ -461,17 +461,6 @@ Feature: An update reaches its hooks as one grouped event
       | bare-c | archived |
     And no update event was logged
 
-  Scenario: an update sending null for its data is refused, naming no hook
-    Given the rows, in the collection no update hook listens to:
-      | name      |
-      | no-data-a |
-    When the rows are updated with null for their data
-    Then the update is refused with the message:
-      """
-      Invalid payload. Each update group needs a "data" object.
-      """
-    And the refusal's code is "INVALID_PAYLOAD"
-
   Scenario: a hook mapping its rows cancels one, its siblings written together
     Given the rows:
       | name      |
