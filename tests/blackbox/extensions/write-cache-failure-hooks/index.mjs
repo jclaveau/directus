@@ -106,12 +106,21 @@ export default function registerHooks({ filter }, { database }) {
 				return groups;
 			}
 
-			scopedCache.purgeBy(
-				{ collection: 'test_wca_update', pinnedScope: { slot: ['a'] } },
-				{ forKey: outOfRangeKey },
-			);
+			// The rows sent are taken over too: one left unanswered would cancel
+			// the update, which the probe does not allow.
+			const takenOverKeys = [
+				...groups.flatMap((group) => group.keys),
+				outOfRangeKey,
+			];
 
-			return [{ key: outOfRangeKey }];
+			for (const takenOverKey of takenOverKeys) {
+				scopedCache.purgeBy(
+					{ collection: 'test_wca_update', pinnedScope: { slot: ['a'] } },
+					{ forKey: takenOverKey },
+				);
+			}
+
+			return takenOverKeys.map((takenOverKey) => ({ key: takenOverKey }));
 		},
 	);
 

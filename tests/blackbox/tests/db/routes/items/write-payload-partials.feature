@@ -206,9 +206,11 @@ Feature: A write takes the less travelled side of each payload rule
       | request                         | response                  |
       | method: POST                    | code: 200                 |+
       | path: /items/test_wpp_generated | body:                     |
-      | payload:                        |   data:                   |
-      |   - label: first-<run>          |     - label: first-<run>  |
-      |   - label: second-<run>         |     - label: second-<run> |
+      | query:                          |   data:                   |
+      |   sort: label                   |     - label: first-<run>  |
+      | payload:                        |     - label: second-<run> |
+      |   - label: first-<run>          |                           |
+      |   - label: second-<run>         |                           |
       | method: POST                    | code: 200                 |+
       | path: /items/test_wpp_generated | body:                     |
       | payload:                        |   data:                   |

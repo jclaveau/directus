@@ -10,8 +10,10 @@ Feature: A write whose hook takes over a key the database refuses purges whole
     accountability and answers its keys, or its failure's message.
   - On "take-over-out-of-range", the `write-cache-failure-hooks` hook takes
     over the key 99999999999 and declares slot "a" for it through `purgeBy`
-    and `forKey`. Postgres refuses that key as an integer, so re-reading the
-    slices of the rows written fails.
+    and `forKey`. An update's hook takes the rows it is sent over the same
+    way, since a row left unanswered would cancel the update.
+  - Postgres refuses that key as an integer, so re-reading the slices of the
+    rows written fails.
 
   Scenario: an update whose takeover cannot be re-read purges the collection whole
     When these requests get these responses:
