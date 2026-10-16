@@ -2799,6 +2799,41 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(actionSpy).not.toHaveBeenCalled();
 		});
 
+		it('emits neither create event when emitEvents is off', async () => {
+			tracker.on.insert('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.createMany(
+				[{ name: 'quiet' }],
+				{ emitEvents: false },
+			);
+
+			expect(keys).toEqual([1]);
+			expect(tracker.history.insert).toHaveLength(1);
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(actionSpy).not.toHaveBeenCalled();
+		});
+
+		it('emits neither delete event when emitEvents is off', async () => {
+			tracker.on.delete('test').response(1);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.deleteMany([1], { emitEvents: false });
+
+			expect(keys).toEqual([1]);
+			expect(tracker.history.delete).toHaveLength(1);
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(actionSpy).not.toHaveBeenCalled();
+		});
+
 		it('pairs snapshots when the keys cross a digit boundary', async () => {
 			const accountabilitySchema = new SchemaBuilder()
 				.collection('tracked', (c) => {
