@@ -3982,7 +3982,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it(oneLine`
-			files the object a read hook answered with under every revision
+			refuses the update whose read hook answers its snapshot with an
+			object, before any revision is filed
 		`, async () => {
 			const trackedSchema = new SchemaBuilder()
 				.collection('tracked', (c) => {
@@ -4000,7 +4001,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			emitter.onFilter('tracked.items.read', answerAnObject);
 
 			try {
-				await new ItemsService('tracked', {
+				await expect(new ItemsService('tracked', {
 					knex: db,
 					schema: trackedSchema,
 					accountability: {
@@ -4009,15 +4010,44 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						admin: true,
 						app: true,
 					} as any,
-				}).updateMany([1, 2], { name: 'after' });
+				}).updateMany([1, 2], { name: 'after' })).rejects.toStrictEqual(
+					new Error(
+						'A read filter on "tracked" answered with object instead of'
+						+ ' the list of items it was given.',
+					),
+				);
 
-				expect(revisionWrites[0]).toMatchObject([
-					{ item: 1, data: '{"id":1,"name":"hooked"}' },
-					{ item: 2, data: '{"id":1,"name":"hooked"}' },
-				]);
+				expect(revisionWrites).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('tracked.items.read', answerAnObject);
+			}
+		});
+
+		it('refuses a read whose hook answers with null', async () => {
+			const trackedSchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			const answerNull = () => null;
+
+			tracker.on.select('tracked').response([{ id: 1, name: 'read' }]);
+			emitter.onFilter('tracked.items.read', answerNull);
+
+			try {
+				await expect(new ItemsService('tracked', {
+					knex: db,
+					schema: trackedSchema,
+				}).readByQuery({})).rejects.toStrictEqual(new Error(
+					'A read filter on "tracked" answered with null instead of the'
+					+ ' list of items it was given.',
+				));
+			}
+			finally {
+				emitter.offFilter('tracked.items.read', answerNull);
 			}
 		});
 	});

@@ -1130,6 +1130,19 @@ implements AbstractService<Item> {
 				)
 				: records;
 
+		// emitFilter hands back whatever a listener returned; anything but a list
+		// would be cast to one below and filed under every key that asked for it.
+		if (!Array.isArray(filteredRecords)) {
+			const answerType = filteredRecords === null
+				? 'null'
+				: typeof filteredRecords;
+
+			throw new Error(
+				`A read filter on "${this.collection}" answered with ${answerType}`
+				+ ` instead of the list of items it was given.`,
+			);
+		}
+
 		// Scope this read for cache purging (see
 		// ItemScopedCacheService.readFingerprints); bounded to this read — it rides
 		// the result via `getMeta()`, not a field.
@@ -1168,13 +1181,6 @@ implements AbstractService<Item> {
 			ownershipInjections,
 		);
 
-		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
-		// listener's return verbatim, and the cast above asserts rather than checks)
-		// makes this throw `Object.defineProperty called on non-object`. That is a
-		// 500 raised inside whatever transaction was reading — a write snapshotting
-		// its rows for revisions takes the whole update down with it. The write path
-		// validates its own filter returns (`payloadAfterHooks === null`); this one
-		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheFingerprints,
 			scopedCacheUnautopurgeableFingerprints,
@@ -2498,20 +2504,13 @@ implements AbstractService<Item> {
 					// with `keys` by position files a revision under one item
 					// holding another item's data, which `revert` would then
 					// write straight back onto the wrong row.
-					//
-					// `snapshots` is always an array: a read hook can return
-					// anything, but `withMeta` rejects a non-object before
-					// `readByQuery` returns (see the TODO there), so this guard
-					// and the ternary below it cannot currently fire.
 					const snapshotJsonByKey = new Map<string, string>();
 
-					if (Array.isArray(snapshots)) {
-						for (const snapshot of snapshots) {
-							snapshotJsonByKey.set(
-								String(snapshot[primaryKeyField]),
-								JSON.stringify(snapshot),
-							);
-						}
+					for (const snapshot of snapshots) {
+						snapshotJsonByKey.set(
+							String(snapshot[primaryKeyField]),
+							JSON.stringify(snapshot),
+						);
 					}
 
 					const revisionsService = new RevisionsService({
@@ -2525,10 +2524,7 @@ implements AbstractService<Item> {
 								activity: activity,
 								collection: this.collection,
 								item: keys[index],
-								data:
-									snapshots && Array.isArray(snapshots)
-										? snapshotJsonByKey.get(String(keys[index]))
-										: JSON.stringify(snapshots),
+								data: snapshotJsonByKey.get(String(keys[index])),
 								delta: await payloadService.prepareDelta(payloadWithTypeCasting),
 							})),
 						)
