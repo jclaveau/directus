@@ -9,6 +9,7 @@ import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { getCache } from '../cache.js';
 import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
@@ -35,6 +36,15 @@ vi.mock('../permissions/modules/validate-access/validate-access.js', () => {
 vi.mock('../utils/should-clear-cache.js', () => {
 	return {
 		shouldClearCache: vi.fn(),
+	};
+});
+
+vi.mock('../cache.js', async (importOriginal) => {
+	const actualCache = await importOriginal<typeof import('../cache.js')>();
+
+	return {
+		...actualCache,
+		getCache: vi.fn(actualCache.getCache),
 	};
 });
 
@@ -74,6 +84,7 @@ afterEach(() => {
 	vi.mocked(validateAccess).mockReset();
 	vi.mocked(shouldClearCache).mockReset();
 	vi.mocked(purgeScopedCache).mockReset();
+	vi.mocked(getCache).mockReset();
 	readCollection.mockReset();
 });
 
@@ -453,6 +464,9 @@ describe('Services / Versions', () => {
 
 			vi.mocked(shouldClearCache).mockReturnValue(true);
 
+			vi.mocked(getCache)
+				.mockReturnValue({ cache: { namespace: 'response-cache' } } as any);
+
 			const service = new VersionsService({
 				knex: db,
 				schema,
@@ -496,7 +510,11 @@ describe('Services / Versions', () => {
 				delta: { title: 'Draft', body: 'New' },
 			});
 
-			expect(purgeScopedCache).toHaveBeenCalledWith(null, 'articles', null);
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				{ namespace: 'response-cache' },
+				'articles',
+				null,
+			);
 		});
 
 		it('records an anonymous save and leaves the cache alone', async () => {

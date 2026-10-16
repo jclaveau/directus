@@ -4095,7 +4095,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tracker.history.all).toEqual([]);
 		});
 
-		it('refuses a read the database answers with no row list', async () => {
+		it('refuses a select resolving null, which no real driver answers', async () => {
 			tracker.on.select('test').response(null);
 
 			await expect(new ItemsService('test', {

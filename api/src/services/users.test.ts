@@ -9,7 +9,7 @@ import {
 import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import emitter from '../emitter.js';
@@ -1158,6 +1158,7 @@ describe('Integration Tests', () => {
 					.mockRejectedValueOnce(mailError);
 
 				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
+				onTestFinished(() => logError.mockRestore());
 
 				await service.inviteUser(
 					'ada@example.com',
@@ -1240,6 +1241,7 @@ describe('Integration Tests', () => {
 					.mockRejectedValueOnce(mailError);
 
 				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
+				onTestFinished(() => logError.mockRestore());
 
 				await service.registerUser({
 					email: 'ada@example.com',
@@ -1333,6 +1335,7 @@ describe('Integration Tests', () => {
 					.mockRejectedValueOnce(mailError);
 
 				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
+				onTestFinished(() => logError.mockRestore());
 
 				await service.requestPasswordReset(
 					'ada@example.com',

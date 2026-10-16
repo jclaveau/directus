@@ -1129,7 +1129,7 @@ implements AbstractService<Item> {
 			onRowsWithTemporaryFields: (rows) => scopedCachePlan.pinFromRows(rows),
 		});
 
-		// TODO when would this happen?
+		// Unreachable on a real driver: a select resolves a list, empty or not.
 		if (records === null) {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
