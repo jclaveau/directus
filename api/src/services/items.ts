@@ -792,7 +792,7 @@ implements AbstractService<Item> {
 					const returningOptions = getHelpers(trx).capabilities.insertReturningOptions();
 
 					for (const p of prepared) {
-						insertingRowInput = data[p.index]!;
+						insertingRowInput = p.payloadWithoutAliases as Partial<Item>;
 
 						const result = await trx
 							.insert(p.payloadWithoutAliases)

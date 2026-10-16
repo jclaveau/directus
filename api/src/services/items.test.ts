@@ -4022,6 +4022,41 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			}
 		});
 
+		it('names the value a filter hook wrote in a duplicate refusal', async () => {
+			tracker.on.insert('test').simulateError(Object.assign(
+				new Error('duplicate'),
+				{
+					code: '23505',
+					table: 'test',
+					detail: 'Key (name)=(TAKEN) already exists.',
+				},
+			));
+
+			const upperCaseName = (entries: { data: { name: string } }[]) => {
+				return entries.map(({ data }) => {
+					return { data: { ...data, name: data.name.toUpperCase() } };
+				});
+			};
+
+			emitter.onFilter('items.create', upperCaseName);
+
+			try {
+				const error = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				})
+					.createOne({ name: 'taken' })
+					.catch((createError) => createError);
+
+				expect(error.message).toBe(
+					'Value "TAKEN" for field "name" in collection "test" has to be unique.',
+				);
+			}
+			finally {
+				emitter.offFilter('items.create', upperCaseName);
+			}
+		});
+
 		it('refuses a read the database answers with no row list', async () => {
 			tracker.on.select('test').response(null);
 
