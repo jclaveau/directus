@@ -121,6 +121,36 @@ describe('resolveSystemAdmin', () => {
 		expect(readOneSpy).toHaveBeenCalledWith('articles');
 	});
 
+	test(oneLine`
+		create_collections_item keeps the collection and schema the update strips
+	`, () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+
+		resolveSystemAdmin(gql, {
+			...emptySchema,
+			read: { collections: { directus_collections: { fields: {} } } },
+		}, schemaComposer);
+
+		expect(
+			schemaComposer.Mutation
+				.getFieldArgITC('create_collections_item', 'data')
+				.getFieldNames(),
+		).toEqual(['collection', 'meta', 'schema', 'fields']);
+
+		expect(
+			schemaComposer.Mutation
+				.getFieldArgITC('update_collections_item', 'data')
+				.getFieldNames(),
+		).toEqual(['meta', 'fields']);
+	});
+
 	test('update_collections_item updates, then reads the collection', async () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
@@ -371,6 +401,42 @@ describe('resolveSystemAdmin', () => {
 			field: 'author',
 			meta: { sort_field: 'sort' },
 		});
+	});
+
+	test(oneLine`
+		update_relations_item reads back the relation named by its arguments
+	`, async () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+		resolveSystemAdmin(gql, emptySchema, schemaComposer);
+
+		vi.spyOn(RelationsService.prototype, 'updateOne').mockResolvedValue(undefined);
+
+		const readOneSpy = vi
+			.spyOn(RelationsService.prototype, 'readOne')
+			.mockResolvedValue({ collection: 'articles', field: 'author' } as any);
+
+		const resolved = await schemaComposer.Mutation.getFieldConfig(
+			'update_relations_item',
+		).resolve!(
+			undefined,
+			{
+				collection: 'articles',
+				field: 'author',
+				data: { meta: { sort_field: 'sort' } },
+			},
+			{},
+			{} as any,
+		);
+
+		expect(resolved).toEqual({ collection: 'articles', field: 'author' });
+		expect(readOneSpy).toHaveBeenCalledWith('articles', 'author');
 	});
 
 	test('delete_relations_item deletes and echoes the relation', async () => {

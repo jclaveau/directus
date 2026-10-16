@@ -194,18 +194,20 @@ export class ExtensionsService {
 	}
 
 	async updateOne(id: string, data: DeepPartial<ApiOutput>) {
-		const result = await transaction(this.knex, async (trx) => {
-			if (!isObject(data.meta)) {
-				throw new InvalidPayloadError({ reason: `"meta" is required` });
-			}
+		if (!isObject(data.meta)) {
+			throw new InvalidPayloadError({ reason: `"meta" is required` });
+		}
 
+		const updatedMeta = data.meta;
+
+		const result = await transaction(this.knex, async (trx) => {
 			const service = new ExtensionsService({
 				knex: trx,
 				accountability: this.accountability,
 				schema: this.schema,
 			});
 
-			await service.extensionsItemService.updateOne(id, data.meta);
+			await service.extensionsItemService.updateOne(id, updatedMeta);
 
 			let extension;
 
@@ -215,16 +217,15 @@ export class ExtensionsService {
 				throw new ExtensionReadError(error);
 			}
 
-			if ('enabled' in data.meta) {
+			if ('enabled' in updatedMeta) {
 				await service.checkBundleAndSyncStatus(trx, id, extension);
 			}
 
 			return extension;
 		});
 
-		this.extensionsManager.reload().then(() => {
-			this.extensionsManager.broadcastReloadNotification();
-		});
+		await this.extensionsManager.reload();
+		await this.extensionsManager.broadcastReloadNotification();
 
 		return result;
 	}

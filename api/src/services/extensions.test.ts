@@ -12,6 +12,7 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getExtensionManager } from '../extensions/index.js';
+import { transaction } from '../utils/transaction.js';
 import { ExtensionReadError, ExtensionsService } from './extensions.js';
 import { ItemsService } from './items.js';
 
@@ -540,6 +541,53 @@ describe('Services / Extensions / updateOne', () => {
 			'message',
 			'Invalid payload. "meta" is required.',
 		);
+	});
+
+	it('refuses a payload without meta before opening a transaction', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		await expect(service.updateOne('extension-id', {})).rejects.toThrowError(
+			InvalidPayloadError,
+		);
+
+		expect(transaction).not.toHaveBeenCalled();
+	});
+
+	it('answers only once the extensions are reloaded', async () => {
+		const reloadSteps: string[] = [];
+
+		vi.mocked(getExtensionManager).mockReturnValue({
+			reload: vi.fn(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				reloadSteps.push('reloaded');
+			}),
+			broadcastReloadNotification: vi.fn(async () => {
+				reloadSteps.push('broadcast');
+			}),
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('extension-id');
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'extension-id',
+			bundle: null,
+			schema: null,
+			meta: { options: null },
+		} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		await service.updateOne('extension-id', { meta: { options: null } } as any);
+
+		expect(reloadSteps).toEqual(['reloaded', 'broadcast']);
 	});
 
 	it('wraps a failed read-back in ExtensionReadError', async () => {
