@@ -13,6 +13,12 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
   - `test_nested_o2m_list` keeps the default deselect action,
     `test_nested_o2m_bin` deletes. `test_nested_o2m_post` reaches
     `test_nested_o2m_tag` through the junction `test_nested_o2m_post_tag`.
+  - Every request goes to an instance of the feature's own, sharing the
+    database, that reports the statements each request ran
+    (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
+    table and kind, on postgres alone: other vendors run other statements.
+  - Those counts are the baseline before the batched writes of #414, which
+    are expected to drop them.
 
   Scenario: a child named by its key joins the parent, the ones left out are nullified
     Given the rows of test_nested_o2m_list:
@@ -40,6 +46,13 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | ak-a2 |      |
       | ak-b1 | ak-a |
       | ak-x1 | ak-a |
+    And on postgres the requests ran these statements:
+      | request | table                      | select | insert | update | delete |
+      | 1       | directus_activity          | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
+      | 1       | directus_users             | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 13     | 0      | 3      | 0      |
 
   Scenario: a child named by a key no row has is refused, writing nothing
     Given the rows of test_nested_o2m_list:
@@ -94,6 +107,13 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | ob-a1 | ob-a | renamed |
       | ob-b1 | ob-a | moved   |
       | ob-n1 | ob-a | created |
+    And on postgres the requests ran these statements:
+      | request | table                      | select | insert | update | delete |
+      | 1       | directus_activity          | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
+      | 1       | directus_users             | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 13     | 1      | 2      | 0      |
 
   Scenario: a batch deletes the children each parent leaves out when the relation deletes
     Given the rows of test_nested_o2m_bin:
@@ -121,6 +141,12 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | id    | bin  |
       | dl-a2 | dl-a |
       | dl-b1 | dl-b |
+    And on postgres the requests ran these statements:
+      | request | table                     | select | insert | update | delete |
+      | 1       | directus_activity         | 0      | 4      | 0      | 0      |
+      | 1       | directus_users            | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_bin       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_bin_entry | 7      | 0      | 0      | 2      |
 
   Scenario: a null list deletes every child of its parent when the relation deletes
     Given the rows of test_nested_o2m_bin:
@@ -141,6 +167,12 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
     Then the rows of test_nested_o2m_bin_entry whose key starts with "nl-" are:
       | id    | bin  |
       | nl-b1 | nl-b |
+    And on postgres the requests ran these statements:
+      | request | table                     | select | insert | update | delete |
+      | 1       | directus_activity         | 0      | 2      | 0      | 0      |
+      | 1       | directus_users            | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_bin       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_bin_entry | 3      | 0      | 0      | 1      |
 
   Scenario: a create of several parents links each its own children, moving one over
     Given the rows of test_nested_o2m_list:
@@ -166,6 +198,13 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | mc-a1 | mc-a |
       | mc-b1 | mc-b |
       | mc-o1 | mc-a |
+    And on postgres the requests ran these statements:
+      | request | table                      | select | insert | update | delete |
+      | 1       | directus_activity          | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 4      | 2      | 0      |
+      | 1       | directus_users             | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list       | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 11     | 2      | 1      | 0      |
 
   Scenario: a batch swaps children between its parents, nullifying each one's others
     Given the rows of test_nested_o2m_list:
@@ -196,6 +235,13 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | sw-a2 |      |         |
       | sw-b1 | sw-a |         |
       | sw-b2 |      |         |
+    And on postgres the requests ran these statements:
+      | request | table                      | select | insert | update | delete |
+      | 1       | directus_activity          | 0      | 6      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 4      | 0      | 0      |
+      | 1       | directus_users             | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 15     | 0      | 4      | 0      |
 
   Scenario: an update of several keys leaves a child they all list on the last key
     Given the rows of test_nested_o2m_list:
@@ -223,6 +269,13 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | sk-a1 |      |
       | sk-b1 |      |
       | sk-x1 | sk-b |
+    And on postgres the requests ran these statements:
+      | request | table                      | select | insert | update | delete |
+      | 1       | directus_activity          | 0      | 5      | 0      | 0      |
+      | 1       | directus_revisions         | 0      | 4      | 0      | 0      |
+      | 1       | directus_users             | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list       | 2      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_list_entry | 14     | 0      | 4      | 0      |
 
   Scenario: a many-to-many list links junction rows and nullifies the ones left out
     Given the rows of test_nested_o2m_tag:
@@ -253,3 +306,15 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | mm-j1 | mm-p                    | mm-t1                  |
       | mm-j2 |                         | mm-t2                  |
       | mm-j3 | mm-p                    | mm-t3                  |
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 3      | 1      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_post     | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_o2m_post_tag | 6      | 2      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 3      | 0      | 0      |
+      | 2       | directus_revisions       | 0      | 2      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_o2m_post     | 3      | 0      | 0      | 0      |
+      | 2       | test_nested_o2m_post_tag | 7      | 1      | 1      | 0      |

@@ -17,6 +17,12 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
   - `test_nested_o2m_card` sorts on `sort`; `test_nested_o2m_book` has no sort
     field and keeps the default deselect action; `test_nested_o2m_box_entry`
     deletes.
+  - Every request goes to an instance of the feature's own, sharing the
+    database, that reports the statements each request ran
+    (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
+    table and kind, on postgres alone: other vendors run other statements.
+  - Those counts are the baseline before the batched writes of #414, which
+    are expected to drop them.
 
   Scenario: created children with no sort follow the parent's highest sort
     Given the rows of test_nested_o2m_deck:
@@ -47,6 +53,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | so-a4 | so-a | 2    |
       | so-a5 | so-a | 7    |
       | so-b1 | so-b | 9    |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_card | 3      | 1      | 0      | 0      |
+      | 1       | test_nested_o2m_deck | 3      | 0      | 0      | 0      |
 
   Scenario: a create of several parents numbers each one's children from one
     When these requests get these responses:
@@ -71,6 +84,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | sn-a2 | sn-a | 10   |
       | sn-a3 | sn-a | 3    |
       | sn-b1 | sn-b | 1    |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 3      | 2      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_card | 3      | 2      | 0      | 0      |
+      | 1       | test_nested_o2m_deck | 1      | 1      | 0      | 0      |
 
   Scenario: a highest sort of zero numbers the created children from one
     Given the rows of test_nested_o2m_deck:
@@ -93,6 +113,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | sz-a1 | sz-a | 0    |
       | sz-a2 | sz-a | 1    |
       | sz-a3 | sz-a | 2    |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_card | 3      | 1      | 0      | 0      |
+      | 1       | test_nested_o2m_deck | 3      | 0      | 0      | 0      |
 
   Scenario: children created where the relation has no sort field get only the parent
     When these requests get these responses:
@@ -111,6 +138,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | id    | shelf | name   |
       | ns-a1 | ns-a  | first  |
       | ns-a2 | ns-a  | second |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_book  | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_o2m_shelf | 1      | 1      | 0      | 0      |
 
   Scenario: an updated child keeps its parent, and one of another parent moves over
     Given the rows of test_nested_o2m_shelf:
@@ -136,6 +170,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | id    | shelf | name    |
       | up-a1 | up-a  | renamed |
       | up-b1 | up-a  | moved   |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 3      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 2      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_book  | 8      | 0      | 2      | 0      |
+      | 1       | test_nested_o2m_shelf | 3      | 0      | 0      | 0      |
 
   Scenario: a deleted child is nullified, one of another parent is left alone
     Given the rows of test_nested_o2m_shelf:
@@ -161,6 +202,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | dn-a1 |       |
       | dn-a2 | dn-a  |
       | dn-b1 | dn-b  |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_book  | 4      | 0      | 1      | 0      |
+      | 1       | test_nested_o2m_shelf | 3      | 0      | 0      | 0      |
 
   Scenario: a deleted child is deleted where the relation deletes, another's is kept
     Given the rows of test_nested_o2m_box:
@@ -185,6 +233,12 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | id    | box  |
       | dx-a2 | dx-a |
       | dx-b1 | dx-b |
+    And on postgres the requests ran these statements:
+      | request | table                     | select | insert | update | delete |
+      | 1       | directus_activity         | 0      | 2      | 0      | 0      |
+      | 1       | directus_users            | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_box       | 3      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_box_entry | 3      | 0      | 0      | 1      |
 
   Scenario: a batch moves a child one parent deletes onto the parent updating it
     Given the rows of test_nested_o2m_shelf:
@@ -218,6 +272,13 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | mb-a1 | mb-b  | moved |
       | mb-a2 | mb-a  |       |
       | mb-b1 |       |       |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 6      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 4      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_o2m_book  | 10     | 1      | 3      | 0      |
+      | 1       | test_nested_o2m_shelf | 3      | 0      | 0      | 0      |
 
   Scenario: an alterations object of the wrong shape is refused, writing nothing
     Given the rows of test_nested_o2m_shelf:

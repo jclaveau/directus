@@ -3,10 +3,13 @@ import vendors from '@common/get-dbs-to-test';
 import { oneLine } from '@directus/utils';
 import { describe } from 'vitest';
 import { defineNestedWriteSteps } from './nested-o2m-steps';
+import { startAuditedInstance } from './query-audit-steps';
 
 const feature = loadFeature('./tests/db/routes/items/nested-o2m-array.feature');
 
 describe.each(vendors)('%s', (vendor) => {
+	const instanceUrl = startAuditedInstance(vendor);
+
 	defineFeature(feature, (scenario) => {
 		for (const title of [
 			oneLine`
@@ -44,7 +47,7 @@ describe.each(vendors)('%s', (vendor) => {
 			`,
 		]) {
 			scenario(title, (steps) => {
-				defineNestedWriteSteps(steps, vendor);
+				defineNestedWriteSteps(steps, vendor, instanceUrl);
 			}, 60_000);
 		}
 	});

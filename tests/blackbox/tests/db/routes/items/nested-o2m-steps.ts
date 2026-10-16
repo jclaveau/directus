@@ -1,10 +1,10 @@
-import { getUrl } from '@common/config';
 import { parseGherkinTable, type StepFunctions } from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request, { type Response } from 'supertest';
 import { expect } from 'vitest';
+import { defineStatementCountsStep } from './query-audit-steps';
 
 type RequestCell = {
 	method: 'GET' | 'PATCH' | 'POST';
@@ -17,17 +17,21 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
 /**
  * The steps both nested-o2m features share: rows created through their
- * collection, a request|response table, and the rows read back by key prefix.
+ * collection, a request|response table, the rows read back by key prefix, and
+ * the statements the requests ran, all sent to the instance at `instanceUrl`.
  */
 export function defineNestedWriteSteps(
 	{ given, and, when, then }: StepFunctions,
 	vendor: Vendor,
+	instanceUrl: () => string,
 ) {
+	const receivedResponses: Response[] = [];
+
 	async function createRows(
 		collection: string,
 		table: Record<string, string>[],
 	) {
-		const response = await request(getUrl(vendor))
+		const response = await request(instanceUrl())
 			.post(`/items/${collection}`)
 			.send(parseGherkinTable(table))
 			.set('Authorization', AUTH);
@@ -42,9 +46,9 @@ export function defineNestedWriteSteps(
 		) as RequestCell;
 
 		const pendingRequest = {
-			GET: () => request(getUrl(vendor)).get(path),
-			PATCH: () => request(getUrl(vendor)).patch(path),
-			POST: () => request(getUrl(vendor)).post(path),
+			GET: () => request(instanceUrl()).get(path),
+			PATCH: () => request(instanceUrl()).patch(path),
+			POST: () => request(instanceUrl()).post(path),
 		}[method]();
 
 		pendingRequest.query(query).set('Authorization', AUTH);
@@ -63,8 +67,6 @@ export function defineNestedWriteSteps(
 	when(
 		'these requests get these responses:',
 		async (table: { request: string; response: string }[]) => {
-			const receivedResponses: Response[] = [];
-
 			for (const { request: requestCell } of table) {
 				receivedResponses.push(await sendRequest(requestCell));
 			}
@@ -87,7 +89,7 @@ export function defineNestedWriteSteps(
 			keyPrefix: string,
 			table: Record<string, string>[],
 		) => {
-			const response = await request(getUrl(vendor))
+			const response = await request(instanceUrl())
 				.get(`/items/${collection}`)
 				.query({
 					'filter[id][_starts_with]': keyPrefix,
@@ -101,4 +103,6 @@ export function defineNestedWriteSteps(
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		},
 	);
+
+	defineStatementCountsStep(and, vendor, receivedResponses);
 }

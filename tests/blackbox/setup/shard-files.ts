@@ -161,10 +161,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Not measured yet: one table created, dropped and inspected.
 	'/tests/db/schema/inspector-concurrent-drop.test.ts': 300,
 	// Not measured yet: a few requests each, like nested-upsert.
-	'/tests/db/routes/items/nested-m2o-a2o.test.ts': 1_600,
 	'/tests/db/routes/items/upsert-singleton.test.ts': 1_600,
-	'/tests/db/routes/items/nested-o2m-array.test.ts': 1_600,
-	'/tests/db/routes/items/nested-o2m-alterations.test.ts': 1_600,
 	'/tests/db/routes/system/singular-write-access.test.ts': 1_600,
 	'/tests/db/routes/system/singular-write-flows.test.ts': 6_000,
 	'/tests/db/routes/system/singular-write-permissions.test.ts': 1_600,
@@ -205,6 +202,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/system/write-path-versions.test.ts': 1_600,
 	'/tests/db/routes/system/write-path-websocket.test.ts': 1_600,
 	// Estimated, not measured: each boots its own instance.
+	'/tests/db/routes/items/nested-m2o-a2o.test.ts': 6_000,
+	'/tests/db/routes/items/nested-o2m-array.test.ts': 6_000,
+	'/tests/db/routes/items/nested-o2m-alterations.test.ts': 6_000,
 	'/tests/db/routes/items/write-cache-hook-failures.test.ts': 60_000,
 	'/tests/db/routes/items/write-cache-out-of-range-key.test.ts': 30_000,
 	'/tests/db/routes/users/write-url-allow-list.test.ts': 18_000,

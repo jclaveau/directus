@@ -10,6 +10,12 @@ Feature: A nested many-to-one or any-to-one object writes its related row
     `test_nested_a2o_page` or `test_nested_a2o_post`, named by
     `test_nested_a2o_link.target_collection`. `test_batch_uuid_badge` is keyed
     by uuid.
+  - Every request goes to an instance of the feature's own, sharing the
+    database, that reports the statements each request ran
+    (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
+    table and kind, on postgres alone: other vendors run other statements.
+  - Those counts are the baseline before the batched writes of #414, which
+    are expected to drop them.
 
   Scenario: a nested M2O object naming an existing row with fields updates it
     When these requests get these responses:
@@ -30,6 +36,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |   owner:                           |                   |
       |     id: own-u                      |                   |
       |     name: after                    |                   |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 2       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
+      | 2       | test_nested_m2o_owner | 4      | 0      | 1      | 0      |
 
   Scenario: a nested M2O object naming an existing row alone leaves it unwritten
     When these requests get these responses:
@@ -55,6 +68,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |   fields:                          |         action: create |
       |     - activity.action              |       item: own-k      |
       |     - item                         |                        |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
+      | 2       | test_nested_m2o_owner | 2      | 0      | 0      | 0      |
 
   Scenario: a PATCH carrying a nested M2O object updates or creates its row
     When these requests get these responses:
@@ -95,6 +115,18 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |     - own-p                              |       name: after |
       |     - own-q                              |     - id: own-q   |
       |   sort: id                               |       name: fresh |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 3       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 3       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | test_nested_m2o_card  | 3      | 0      | 1      | 0      |
+      | 3       | test_nested_m2o_owner | 4      | 0      | 1      | 0      |
+      | 4       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 4       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 4       | directus_users        | 1      | 0      | 0      | 0      |
+      | 4       | test_nested_m2o_card  | 3      | 0      | 1      | 0      |
+      | 4       | test_nested_m2o_owner | 2      | 1      | 0      | 0      |
 
   Scenario: a PATCH of several keys files each revision under its own row
     When these requests get these responses:
@@ -159,6 +191,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |                                         |         title: renamed |
       |                                         |         owner: own-r   |
       |                                         |       parent: null     |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 3       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 3       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | test_nested_m2o_card  | 2      | 0      | 1      | 0      |
+      | 3       | test_nested_m2o_owner | 4      | 0      | 1      | 0      |
 
   Scenario: a batch create files a nested row's revision under its carrier
     When these requests get these responses:
@@ -201,6 +240,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |                                   |         name: made     |
       |                                   |       parent:          |
       |                                   |         item: bat-a    |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 2      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_m2o_owner | 1      | 1      | 0      | 0      |
 
   Scenario: a PATCH creating a user through an M2O passes the user checks
     When these requests get these responses:
@@ -218,6 +264,12 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | payload:                                 |                                   |
       |   assignee:                              |                                   |
       |     email: m2o-user@example.com          |                                   |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 2       | directus_activity    | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
+      | 2       | directus_users       | 3      | 1      | 0      | 0      |
+      | 2       | test_nested_m2o_task | 3      | 0      | 1      | 0      |
 
   Scenario: a nested A2O object without its collection field is refused
     When these requests get these responses:
@@ -282,6 +334,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |                                        |   data:                    |
       |                                        |     id: po-n               |
       |                                        |     title: fresh           |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 2      | 1      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
+      | 1       | test_nested_a2o_post | 1      | 1      | 0      | 0      |
 
   Scenario: a nested A2O object naming an existing row with fields updates it
     When these requests get these responses:
@@ -308,6 +367,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |                                        |   data:          |
       |                                        |     id: pg-u     |
       |                                        |     title: after |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 2       | directus_activity    | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
+      | 2       | test_nested_a2o_page | 3      | 0      | 1      | 0      |
 
   Scenario: a nested A2O object naming an existing row alone leaves it unwritten
     When these requests get these responses:
@@ -336,6 +402,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       |     - activity.action             |       data:            |
       |     - data                        |         id: pg-k       |
       |                                   |         title: kept    |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
+      | 2       | test_nested_a2o_page | 1      | 0      | 0      | 0      |
 
   Scenario: a PATCH carrying a nested A2O object needs its collection field too
     When these requests get these responses:
@@ -371,6 +444,13 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       Invalid payload. Can't update nested record "test_nested_a2o_link.item"
       without field "test_nested_a2o_link.target_collection" being set.
       """
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 2       | directus_activity    | 0      | 2      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_nested_a2o_link | 3      | 0      | 1      | 0      |
+      | 2       | test_nested_a2o_page | 1      | 1      | 0      | 0      |
 
   Scenario: a batch keyed by uuid reads back the rows it created
     When these requests get these responses:

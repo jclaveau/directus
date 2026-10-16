@@ -1,4 +1,3 @@
-import { getUrl } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
@@ -9,6 +8,10 @@ import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request from 'supertest';
 import { describe, expect } from 'vitest';
+import {
+	defineStatementCountsStep,
+	startAuditedInstance,
+} from './query-audit-steps';
 
 type RequestCell = {
 	method: 'GET' | 'POST' | 'PATCH';
@@ -22,9 +25,11 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 const feature = loadFeature('./tests/db/routes/items/nested-m2o-a2o.feature');
 
 describe.each(vendors)('%s', (vendor) => {
+	const instanceUrl = startAuditedInstance(vendor);
+
 	defineFeature(feature, (scenario) => {
 		for (const { title } of feature.scenarios) {
-			scenario(title, ({ when, then }) => {
+			scenario(title, ({ when, then, and }) => {
 				const responses: request.Response[] = [];
 
 				when(
@@ -36,9 +41,9 @@ describe.each(vendors)('%s', (vendor) => {
 							) as RequestCell;
 
 							const pendingRequest = {
-								GET: () => request(getUrl(vendor)).get(path),
-								POST: () => request(getUrl(vendor)).post(path),
-								PATCH: () => request(getUrl(vendor)).patch(path),
+								GET: () => request(instanceUrl()).get(path),
+								POST: () => request(instanceUrl()).post(path),
+								PATCH: () => request(instanceUrl()).patch(path),
 							}[method]()
 								.query(Object.fromEntries(
 									Object.entries(query).map(([parameter, value]) => {
@@ -68,6 +73,8 @@ describe.each(vendors)('%s', (vendor) => {
 						).toMatchObject([{ message: messageOfDocString(docString) }]);
 					},
 				);
+
+				defineStatementCountsStep(and, vendor, responses);
 			}, 60_000);
 		}
 	});
