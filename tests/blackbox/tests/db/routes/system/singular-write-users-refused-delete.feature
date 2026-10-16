@@ -44,7 +44,10 @@ Feature: A refused user delete leaves the user's references as they were
       | path: /users/<sender>         |   errors:                         |
       |                               |     - message: >-                 |
       |                               |         You don't have permission |
-      |                               |         to access this.           |
+      |                               |         to access collection      |
+      |                               |         "directus_users" or it    |
+      |                               |         does not exist. Queried   |
+      |                               |         in root.                  |
       | method: GET                   | code: 200                         |+
       | path: /notifications/<notice> | body:                             |
       | query:                        |   data:                           |

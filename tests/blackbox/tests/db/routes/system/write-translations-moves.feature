@@ -81,23 +81,23 @@ Feature: A translation moves to another key or language only onto a free one
 
   Scenario: two translations for one key and language created at once are refused
     Then these requests get these responses:
-      | request             | response                            |
-      | method: POST        | code: 400                           |+
-      | path: /translations | body:                               |
-      | payload:            |   errors:                           |
-      |   - key: tm-<run>   |     - message: >-                   |
-      |     language: en-US |         Value for field "key,       |
-      |     value: hello    |         language" in collection     |
-      |   - key: tm-<run>   |         "directus_translations" has |
-      |     language: en-US |         to be unique.               |
-      |     value: hi       |                                     |
-      | method: GET         | code: 200                           |+
-      | path: /translations | body:                               |
-      | query:              |   data: []                          |
-      |   fields: key       |                                     |
-      |   filter:           |                                     |
-      |     key:            |                                     |
-      |       _eq: tm-<run> |                                     |
+      | request             | response                           |
+      | method: POST        | code: 400                          |+
+      | path: /translations | body:                              |
+      | payload:            |   errors:                          |
+      |   - key: tm-<run>   |     - message: >-                  |
+      |     language: en-US |         Invalid payload. Duplicate |
+      |     value: hello    |         key and language           |
+      |   - key: tm-<run>   |         combination.               |
+      |     language: en-US |                                    |
+      |     value: hi       |                                    |
+      | method: GET         | code: 200                          |+
+      | path: /translations | body:                              |
+      | query:              |   data: []                         |
+      |   fields: key       |                                    |
+      |   filter:           |                                    |
+      |     key:            |                                    |
+      |       _eq: tm-<run> |                                    |
 
   Scenario: a translation moved by its language alone lands on a free one only
     Given these requests are sent:
