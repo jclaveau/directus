@@ -881,6 +881,25 @@ describe('Integration Tests', () => {
 			});
 		});
 
+		describe('prepareDelta', () => {
+			const schema = new SchemaBuilder()
+				.collection('ledger', (c) => {
+					c.field('id').id();
+					c.field('amount').bigInteger();
+				})
+				.build();
+
+			test('writes a BigInt a hook answered as its decimal string', async () => {
+				const service = new PayloadService('ledger', { knex: db, schema });
+
+				const deltaJson = await service.prepareDelta({
+					amount: 9007199254740993n,
+				});
+
+				expect(deltaJson).toEqual('{"amount":"9007199254740993"}');
+			});
+		});
+
 		describe('processO2M', () => {
 			const schema = new SchemaBuilder()
 				.collection('country', (c) => {

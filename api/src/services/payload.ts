@@ -956,6 +956,12 @@ export class PayloadService {
 
 		if (Object.keys(payload).length === 0) return null;
 
-		return JSON.stringify(payload);
+		// A filter hook may answer a BigInt, which JSON cannot hold as a number
+		// without losing digits.
+		return JSON.stringify(payload, (_key, fieldValue) => {
+			return typeof fieldValue === 'bigint'
+				? fieldValue.toString()
+				: fieldValue;
+		});
 	}
 }

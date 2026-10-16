@@ -8,6 +8,7 @@ import { expect, it } from 'vitest';
 
 export const collectionAnswerOwner = 'test_write_answer_owner';
 export const collectionAnswerRow = 'test_write_answer_row';
+export const collectionAnswerLedger = 'test_write_answer_ledger';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -18,13 +19,13 @@ export const seedDBStructure = () => {
 				for (const collection of [
 					collectionAnswerRow,
 					collectionAnswerOwner,
+					collectionAnswerLedger,
 				]) {
 					await DeleteCollection(vendor, { collection });
 				}
 
 				// Integer keys the scenarios choose, so a hook can add one by value.
-				// No revisions: their delta cannot serialize the BigInt a hook
-				// answers.
+				// Only the ledger keeps revisions, so its delta holds a hook's BigInt.
 				await CreateCollections(vendor, {
 					collections: [
 						{
@@ -40,6 +41,15 @@ export const seedDBStructure = () => {
 								{ field: 'name', type: 'string', meta: {} },
 								{ field: 'status', type: 'string', meta: {} },
 								{ field: 'amount', type: 'integer', meta: {} },
+							],
+						},
+						{
+							collection: collectionAnswerLedger,
+							primaryKeyType: 'integer',
+							meta: {},
+							fields: [
+								{ field: 'status', type: 'string', meta: {} },
+								{ field: 'amount', type: 'bigInteger', meta: {} },
 							],
 						},
 					],

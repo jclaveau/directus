@@ -10,6 +10,9 @@ Feature: A write checks what its filter hooks answer before writing it
   - The `write-answers-probe` hook answers the filters of `test_write_answer_row`:
     the create filter by a row's `name`, the update filter by a group's
     `status`, and the delete filter answers null when it deletes row 108.
+  - `test_write_answer_ledger` keeps revisions; its update filter writes amount
+    9007199254740993 as a BigInt for a group whose status is
+    `answer-big-number`.
 
   Scenario: a create filter answering null cancels a single create, which returns null
     When these requests get these responses:
@@ -238,6 +241,27 @@ Feature: A write checks what its filter hooks answer before writing it
       |   status: answer-big-number            |     id: 107                   |
       |                                        |     status: answer-big-number |
       |                                        |     amount: 7                 |
+
+  Scenario: an update filter writing a BigInt keeps it in the revision as a string
+    When these requests get these responses:
+      | request                                   | response                           |
+      | method: POST                              | code: 200                          |+
+      | path: /items/test_write_answer_ledger     |                                    |
+      | payload:                                  |                                    |
+      |   id: 201                                 |                                    |
+      |   status: start                           |                                    |
+      | method: PATCH                             | code: 200                          |+
+      | path: /items/test_write_answer_ledger/201 |                                    |
+      | payload:                                  |                                    |
+      |   status: answer-big-number               |                                    |
+      | method: GET                               | code: 200                          |+
+      | path: /revisions                          | body:                              |
+      | query:                                    |   data:                            |
+      |   filter[collection][_eq]: >-             |     - delta:                       |
+      |     test_write_answer_ledger              |         status: answer-big-number  |
+      |   filter[item][_eq]: 201                  |         amount: "9007199254740993" |
+      |   filter[activity][action][_eq]: update   |                                    |
+      |   fields: delta                           |                                    |
 
   Scenario: a delete filter cancelling a nested delete is refused, keeping the row
     When these requests get these responses:

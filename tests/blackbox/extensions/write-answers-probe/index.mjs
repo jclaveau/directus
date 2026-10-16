@@ -19,8 +19,12 @@
 //   'answer-add-row'    → adds row 109 to that group.
 //   'answer-big-number' → writes amount 7 as a BigInt.
 // The delete filter answers null when it deletes row 108.
+// The update filter of `test_write_answer_ledger`, which keeps revisions, writes
+// amount 9007199254740993 as a BigInt for a group whose status is
+// 'answer-big-number'.
 
 const COLLECTION = 'test_write_answer_row';
+const LEDGER_COLLECTION = 'test_write_answer_ledger';
 const HOOK_ADDED_KEY = 109;
 const UNDELETABLE_KEY = '108';
 
@@ -89,6 +93,16 @@ export default function registerHooks({ filter }) {
 	filter(`${COLLECTION}.items.update`, (groups) => {
 		return Array.isArray(groups)
 			? answerUpdate(groups)
+			: groups;
+	});
+
+	filter(`${LEDGER_COLLECTION}.items.update`, (groups) => {
+		return Array.isArray(groups)
+			? groups.map((group) => {
+				return group?.data?.status === 'answer-big-number'
+					? { ...group, data: { ...group.data, amount: 9007199254740993n } }
+					: group;
+			})
 			: groups;
 	});
 
