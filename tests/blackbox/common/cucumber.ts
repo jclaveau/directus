@@ -252,3 +252,28 @@ export function rememberedText(name: string, rememberedValue: unknown): string {
 
 	return String(rememberedValue);
 }
+
+/**
+ * A request or response cell, refused when it holds a key the step library
+ * reading it does not know: a misspelled `remember`, or a `cache` the library
+ * never checks, would otherwise be dropped and the row pass.
+ */
+export function cellOfKnownKeys<Cell>(
+	cellKind: 'request' | 'response',
+	cell: unknown,
+	knownKeys: readonly string[],
+	stepLibrary: string,
+): Cell {
+	const unknownKey = Object.keys(cell ?? {}).find((cellKey) => {
+		return !knownKeys.includes(cellKey);
+	});
+
+	if (unknownKey !== undefined) {
+		throw new Error(
+			`Unknown ${cellKind} cell "${unknownKey}" in ${stepLibrary} `
+			+ `(known: ${knownKeys.join(', ')})`,
+		);
+	}
+
+	return cell as Cell;
+}

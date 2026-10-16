@@ -1,5 +1,9 @@
 import { getUrl } from '@common/config';
-import { messageOfDocString, type StepFunctions } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	messageOfDocString,
+	type StepFunctions,
+} from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
@@ -14,6 +18,17 @@ type RequestCell = {
 	file?: unknown;
 	token?: string;
 };
+
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+	'file',
+	'token',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
 
 /**
  * The steps the write-coverage features share: a request|response table, and
@@ -34,7 +49,12 @@ export function defineWriteSteps(
 			payload,
 			file,
 			token = USER.ADMIN.TOKEN,
-		} = loadYaml(requestCell) as RequestCell;
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'write-steps.ts',
+		);
 
 		const pendingRequest = {
 			DELETE: () => request(getUrl(vendor)).delete(path),
@@ -78,7 +98,12 @@ export function defineWriteSteps(
 					body: receivedResponse.body,
 				};
 			})).toMatchObject(table.map(({ response }) => {
-				return loadYaml(response) ?? {};
+				return cellOfKnownKeys<object>(
+					'response',
+					loadYaml(response) ?? {},
+					RESPONSE_CELL_KEYS,
+					'write-steps.ts',
+				);
 			}));
 		},
 	);

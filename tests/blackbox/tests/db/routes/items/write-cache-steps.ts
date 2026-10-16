@@ -1,5 +1,9 @@
 import { getUrl, type Env } from '@common/config';
-import { messageOfDocString, type StepFunctions } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	messageOfDocString,
+	type StepFunctions,
+} from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
@@ -13,6 +17,16 @@ type RequestCell = {
 	payload?: unknown;
 	instance?: 'cached' | 'uncached';
 };
+
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+	'instance',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'cache', 'body'] as const;
 
 export const cacheStatusHeader = 'x-cache-status';
 
@@ -36,7 +50,12 @@ export function defineWriteCacheSteps(
 			query = {},
 			payload,
 			instance = 'cached',
-		} = loadYaml(requestCell) as RequestCell;
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'write-cache-steps.ts',
+		);
 
 		const instanceUrl = instance === 'cached'
 			? getUrl(vendor, cachedEnv)
@@ -71,7 +90,12 @@ export function defineWriteCacheSteps(
 					body: receivedResponse.body,
 				};
 			})).toMatchObject(table.map(({ response }) => {
-				return loadYaml(response) ?? {};
+				return cellOfKnownKeys<object>(
+					'response',
+					loadYaml(response) ?? {},
+					RESPONSE_CELL_KEYS,
+					'write-cache-steps.ts',
+				);
 			}));
 		},
 	);

@@ -1,5 +1,10 @@
 import config, { getUrl } from '@common/config';
-import { defineFeature, loadFeature, rememberedText } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	defineFeature,
+	loadFeature,
+	rememberedText,
+} from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { createHmac, randomUUID } from 'crypto';
@@ -21,6 +26,22 @@ type RequestCell = {
 	remember_session?: string;
 	eventually?: boolean;
 };
+
+const REQUEST_CELL_KEYS = [
+	'as',
+	'method',
+	'path',
+	'query',
+	'payload',
+	'form',
+	'file',
+	'headers',
+	'remember',
+	'remember_session',
+	'eventually',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body', 'text'] as const;
 
 type Row = { request: string; response: string };
 
@@ -250,15 +271,19 @@ async function sendRows(
 			await awaitFreshTotpStep();
 		}
 
-		const requestCell = loadYaml(
-			withKeys(requestText, scenarioKeys),
-			{ schema },
-		) as RequestCell;
+		const requestCell = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(withKeys(requestText, scenarioKeys), { schema }),
+			REQUEST_CELL_KEYS,
+			'singular-write-steps.ts',
+		);
 
-		const expectedResponse = loadYaml(
-			withKeys(responseText, scenarioKeys),
-			{ schema },
-		) ?? {};
+		const expectedResponse = cellOfKnownKeys<object>(
+			'response',
+			loadYaml(withKeys(responseText, scenarioKeys), { schema }) ?? {},
+			RESPONSE_CELL_KEYS,
+			'singular-write-steps.ts',
+		);
 
 		let response!: Response;
 

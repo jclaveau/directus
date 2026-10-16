@@ -2,7 +2,9 @@ import config, { paths } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
+import { randomUUID } from 'crypto';
 import getPort from 'get-port';
 import { cloneDeep } from 'lodash-es';
 import { afterAll, beforeAll, describe } from 'vitest';
@@ -22,8 +24,9 @@ describe.each(vendors)('%s', (vendor) => {
 	cacheEnv[vendor]['REDIS_HOST'] = 'localhost';
 	cacheEnv[vendor]['REDIS_PORT'] = '6108';
 
+	// A re-run inside the TTL would otherwise read the last run's entries.
 	cacheEnv[vendor]['CACHE_NAMESPACE']
-		= `directus-write-cache-hook-failures-${vendor}`;
+		= `directus-write-cache-hook-failures-${vendor}-${randomUUID()}`;
 
 	let cacheInstance: ChildProcess;
 
@@ -39,8 +42,8 @@ describe.each(vendors)('%s', (vendor) => {
 	}, 60_000);
 
 	afterAll(() => {
-		cacheInstance.kill();
-	});
+		return stopSpawnedInstance(cacheInstance);
+	}, 60_000);
 
 	defineFeature(feature, (scenario) => {
 		for (const { title } of feature.scenarios) {

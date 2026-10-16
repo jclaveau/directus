@@ -1,8 +1,13 @@
 import config, { getUrl, paths, type Env } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	defineFeature,
+	loadFeature,
+} from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { spawn, type ChildProcess } from 'child_process';
 import getPort from 'get-port';
 import { load as loadYaml } from 'js-yaml';
@@ -26,6 +31,21 @@ type RequestCell = {
 	query?: Record<string, string>;
 	payload?: unknown;
 };
+
+const LOGIN_CELL_KEYS = [
+	'login',
+	'profile',
+	'remember_session',
+] as const satisfies readonly (keyof LoginCell)[];
+
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
 
 type Row = { request: string; response: string };
 
@@ -97,14 +117,14 @@ export function defineSsoFeature(
 		}, 60_000);
 
 		afterAll(async () => {
-			instance?.kill();
+			await stopSpawnedInstance(instance);
 
 			for (const provider of Object.values(ssoInstance.providersByName)) {
 				await provider.stop();
 			}
 
 			await hooks.afterFeature?.(vendor);
-		});
+		}, 60_000);
 
 		defineFeature(feature, (scenario) => {
 			for (const { title } of feature.scenarios) {
@@ -193,12 +213,26 @@ async function sendRows(
 		const requestCell = loadYaml(withKeys(requestText, ssoInstance)) as
 			LoginCell | RequestCell;
 
+		cellOfKnownKeys(
+			'request',
+			requestCell,
+			'login' in requestCell
+? LOGIN_CELL_KEYS
+: REQUEST_CELL_KEYS,
+			'sso-steps.ts',
+		);
+
 		const response = 'login' in requestCell
 			? await logIn(vendor, ssoInstance, requestCell)
 			: await sendRequest(vendor, ssoInstance, requestCell);
 
 		expect({ code: response.statusCode, body: response.body })
-			.toMatchObject(loadYaml(responseText) ?? {});
+			.toMatchObject(cellOfKnownKeys<object>(
+				'response',
+				loadYaml(responseText) ?? {},
+				RESPONSE_CELL_KEYS,
+				'sso-steps.ts',
+			));
 
 		if ('login' in requestCell && requestCell.remember_session) {
 			ssoInstance.keysByName[requestCell.remember_session]

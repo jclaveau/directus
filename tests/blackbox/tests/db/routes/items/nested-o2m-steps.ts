@@ -1,4 +1,8 @@
-import { parseGherkinTable, type StepFunctions } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	parseGherkinTable,
+	type StepFunctions,
+} from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
@@ -12,6 +16,15 @@ type RequestCell = {
 	query?: Record<string, string>;
 	payload?: unknown;
 };
+
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -41,9 +54,12 @@ export function defineNestedWriteSteps(
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(requestCell: string) {
-		const { method, path, query = {}, payload } = loadYaml(
-			requestCell,
-		) as RequestCell;
+		const { method, path, query = {}, payload } = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'nested-o2m-steps.ts',
+		);
 
 		const pendingRequest = {
 			GET: () => request(instanceUrl()).get(path),
@@ -77,7 +93,12 @@ export function defineNestedWriteSteps(
 					body: receivedResponse.body,
 				};
 			})).toMatchObject(table.map(({ response }) => {
-				return loadYaml(response) ?? {};
+				return cellOfKnownKeys<object>(
+					'response',
+					loadYaml(response) ?? {},
+					RESPONSE_CELL_KEYS,
+					'nested-o2m-steps.ts',
+				);
 			}));
 		},
 	);

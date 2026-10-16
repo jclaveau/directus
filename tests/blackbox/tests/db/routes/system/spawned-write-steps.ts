@@ -1,8 +1,14 @@
 import config, { getUrl, paths } from '@common/config';
-import { defineFeature, loadFeature, rememberedText } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	defineFeature,
+	loadFeature,
+	rememberedText,
+} from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import getPort from 'get-port';
@@ -30,6 +36,26 @@ type ResponseCell = {
 	text?: string;
 	headers?: Record<string, string>;
 };
+
+const REQUEST_CELL_KEYS = [
+	'as',
+	'method',
+	'path',
+	'query',
+	'headers',
+	'upload_metadata',
+	'payload',
+	'body',
+	'remember',
+	'remember_headers',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = [
+	'code',
+	'body',
+	'text',
+	'headers',
+] as const satisfies readonly (keyof ResponseCell)[];
 
 type Row = { request: string; response: string };
 
@@ -78,9 +104,9 @@ export function defineSpawnedWriteFeature(
 		}, 60_000);
 
 		afterAll(async () => {
-			instance.kill();
+			await stopSpawnedInstance(instance);
 			await featureOptions.afterFeature?.(vendor);
-		});
+		}, 60_000);
 
 		defineFeature(feature, (scenario) => {
 			for (const { title } of feature.scenarios) {
@@ -205,13 +231,19 @@ async function sendRows(
 	table: Row[],
 ) {
 	for (const { request: requestText, response: responseText } of table) {
-		const requestCell = loadYaml(
-			withKeys(requestText, scenarioKeys),
-		) as RequestCell;
+		const requestCell = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(withKeys(requestText, scenarioKeys)),
+			REQUEST_CELL_KEYS,
+			'spawned-write-steps.ts',
+		);
 
-		const expectedResponse = (loadYaml(
-			withKeys(responseText, scenarioKeys),
-		) ?? {}) as ResponseCell;
+		const expectedResponse = cellOfKnownKeys<ResponseCell>(
+			'response',
+			loadYaml(withKeys(responseText, scenarioKeys)) ?? {},
+			RESPONSE_CELL_KEYS,
+			'spawned-write-steps.ts',
+		);
 
 		const response = await sendRequest(instanceUrl, requestCell);
 

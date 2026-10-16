@@ -1,5 +1,10 @@
 import { getUrl } from '@common/config';
-import { defineFeature, loadFeature, rememberedText } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	defineFeature,
+	loadFeature,
+	rememberedText,
+} from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { createWebSocketConn } from '@common/transport';
 import { USER } from '@common/variables';
@@ -25,6 +30,23 @@ type RequestCell = (HttpCell | WebSocketCell) & {
 	eventually?: boolean;
 	retry_stale_hash?: string;
 };
+
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+	'file',
+	'websocket',
+	'remember',
+	'eventually',
+	'retry_stale_hash',
+] as const satisfies readonly (
+	keyof HttpCell | keyof WebSocketCell | keyof RequestCell
+)[];
+
+// An HTTP answer, or the reply a `websocket:` message got.
+const RESPONSE_CELL_KEYS = ['code', 'body', 'reply'] as const;
 
 type Row = { request: string; response: string };
 
@@ -169,13 +191,19 @@ async function sendRows(
 	const rememberingRows: Record<string, RememberingRow> = {};
 
 	for (const { request: requestText, response: responseText } of table) {
-		const requestCell = loadYaml(
-			withKeys(requestText, scenarioKeys),
-		) as RequestCell;
+		const requestCell = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(withKeys(requestText, scenarioKeys)),
+			REQUEST_CELL_KEYS,
+			'write-path-steps.ts',
+		);
 
-		const expectedAnswer = loadYaml(
-			withKeys(responseText, scenarioKeys),
-		) ?? {};
+		const expectedAnswer = cellOfKnownKeys<object>(
+			'response',
+			loadYaml(withKeys(responseText, scenarioKeys)) ?? {},
+			RESPONSE_CELL_KEYS,
+			'write-path-steps.ts',
+		);
 
 		let answer: unknown;
 

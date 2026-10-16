@@ -1,4 +1,5 @@
 import {
+	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
 	messageOfDocString,
@@ -20,6 +21,15 @@ type RequestCell = {
 	payload?: unknown;
 };
 
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
 const feature = loadFeature('./tests/db/routes/items/nested-m2o-a2o.feature');
@@ -36,9 +46,17 @@ describe.each(vendors)('%s', (vendor) => {
 					'these requests get these responses:',
 					async (table: { request: string; response: string }[]) => {
 						for (const { request: requestCell } of table) {
-							const { method, path, query = {}, payload } = loadYaml(
-								requestCell,
-							) as RequestCell;
+							const {
+								method,
+								path,
+								query = {},
+								payload,
+							} = cellOfKnownKeys<RequestCell>(
+								'request',
+								loadYaml(requestCell),
+								REQUEST_CELL_KEYS,
+								'nested-m2o-a2o.test.ts',
+							);
 
 							const pendingRequest = {
 								GET: () => request(instanceUrl()).get(path),
@@ -60,7 +78,12 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(responses.map((response) => {
 							return { code: response.statusCode, body: response.body };
 						})).toMatchObject(table.map(({ response }) => {
-							return loadYaml(response) ?? {};
+							return cellOfKnownKeys<object>(
+								'response',
+								loadYaml(response) ?? {},
+								RESPONSE_CELL_KEYS,
+								'nested-m2o-a2o.test.ts',
+							);
 						}));
 					},
 				);

@@ -1,5 +1,6 @@
 import { getUrl } from '@common/config';
 import {
+	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
 } from '@common/cucumber';
@@ -16,6 +17,15 @@ type RequestCell = {
 	payload?: unknown;
 };
 
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
 const feature = loadFeature('./tests/db/routes/items/upsert-singleton.feature');
@@ -30,9 +40,17 @@ describe.each(vendors)('%s', (vendor) => {
 					'these requests get these responses:',
 					async (table: { request: string; response: string }[]) => {
 						for (const { request: requestCell } of table) {
-							const { method, path, query = {}, payload } = loadYaml(
-								requestCell,
-							) as RequestCell;
+							const {
+								method,
+								path,
+								query = {},
+								payload,
+							} = cellOfKnownKeys<RequestCell>(
+								'request',
+								loadYaml(requestCell),
+								REQUEST_CELL_KEYS,
+								'upsert-singleton.test.ts',
+							);
 
 							const pendingRequest = {
 								GET: () => request(getUrl(vendor)).get(path),
@@ -54,7 +72,12 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(responses.map((response) => {
 							return { code: response.statusCode, body: response.body };
 						})).toMatchObject(table.map(({ response }) => {
-							return loadYaml(response) ?? {};
+							return cellOfKnownKeys<object>(
+								'response',
+								loadYaml(response) ?? {},
+								RESPONSE_CELL_KEYS,
+								'upsert-singleton.test.ts',
+							);
 						}));
 					},
 				);

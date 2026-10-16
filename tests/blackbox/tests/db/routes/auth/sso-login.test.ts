@@ -64,14 +64,26 @@ defineSsoFeature(
 				})
 				.set('Authorization', AUTH);
 
-			await request(getUrl(vendor))
-				.delete('/users')
-				.send(ssoUsers.body.data.map((user: { id: string }) => user.id))
-				.set('Authorization', AUTH);
+			expect(ssoUsers.statusCode).toBe(200);
 
-			await request(getUrl(vendor))
+			const ssoUserIds = ssoUsers.body.data.map((user: { id: string }) => {
+				return user.id;
+			});
+
+			if (ssoUserIds.length > 0) {
+				const deletedUsers = await request(getUrl(vendor))
+					.delete('/users')
+					.send(ssoUserIds)
+					.set('Authorization', AUTH);
+
+				expect(deletedUsers.statusCode).toBe(204);
+			}
+
+			const deletedRole = await request(getUrl(vendor))
 				.delete(`/roles/${STAFF_ROLE_ID}`)
 				.set('Authorization', AUTH);
+
+			expect(deletedRole.statusCode).toBe(204);
 		},
 	},
 );

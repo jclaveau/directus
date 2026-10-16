@@ -6,6 +6,7 @@ import {
 import type { Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import { cloneDeep } from 'lodash-es';
@@ -52,8 +53,8 @@ export function startAuditedInstance(vendor: Vendor) {
 	}, 60_000);
 
 	afterAll(() => {
-		auditedInstance.kill();
-	});
+		return stopSpawnedInstance(auditedInstance);
+	}, 60_000);
 
 	return () => getUrl(vendor, env);
 }
