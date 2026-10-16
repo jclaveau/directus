@@ -27,6 +27,7 @@ import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
+import { transaction } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -394,23 +395,33 @@ export class UsersService extends ItemsService {
 			}
 		}
 
+		opts.mutationTracker ??= this.createMutationTracker();
+
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
-		// Outside the delete's transaction: a refused delete must keep them.
-		if (!opts.preMutationError) {
-			await this.knex('directus_comments')
-				.update({ user_updated: null })
-				.whereIn('user_updated', keys);
+		// In the delete's transaction: a delete refused there rolls it back.
+		await transaction(this.knex, async (trx) => {
+			if (!opts.preMutationError) {
+				await trx('directus_comments')
+					.update({ user_updated: null })
+					.whereIn('user_updated', keys);
 
-			await this.knex('directus_notifications')
-				.update({ sender: null })
-				.whereIn('sender', keys);
+				await trx('directus_notifications')
+					.update({ sender: null })
+					.whereIn('sender', keys);
 
-			await this.knex('directus_versions')
-				.update({ user_updated: null })
-				.whereIn('user_updated', keys);
-		}
+				await trx('directus_versions')
+					.update({ user_updated: null })
+					.whereIn('user_updated', keys);
+			}
 
-		await super.deleteMany(keys, opts);
+			await new ItemsService('directus_users', {
+				knex: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				nested: this.nested,
+			}).deleteMany(keys, opts);
+		}, opts.mutationTracker.snapshot());
+
 		await this.clearUserSessions(keys);
 
 		return keys;

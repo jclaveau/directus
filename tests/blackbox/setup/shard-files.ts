@@ -193,6 +193,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/system/singular-write-users-nested-delete.test.ts': 1_600,
 	'/tests/db/routes/system/singular-write-users-password-reset.test.ts': 1_600,
 	'/tests/db/routes/system/singular-write-users-registration.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-refused-delete.test.ts':
+		1_600,
 	'/tests/db/routes/system/singular-write-users-updates.test.ts': 1_600,
 	'/tests/db/routes/system/singular-write-webhooks.test.ts': 1_600,
 	'/tests/db/routes/system/write-path-apply-diff.test.ts': 1_600,
