@@ -85,6 +85,18 @@ Feature: A visitor registers and verifies the email address
       |     new-<run>@allowed.example.com        |                                    |
       | method: GET                              | code: 403                          |+
       | path: /users/register/verify-email       | body:                              |
+      |                                          |   errors:                          |
+      |                                          |     - message: Invalid token.      |
+      | method: GET                              | code: 403                          |+
+      | path: /users/register/verify-email       | body:                              |
+      | query:                                   |   errors:                          |
+      |   token: ''                              |     - message: Invalid token.      |
+      | method: GET                              | code: 403                          |+
+      | path: >-                                 | body:                              |
+      |   /users/register/verify-email?token[]=x |   errors:                          |
+      |                                          |     - message: Invalid token.      |
+      | method: GET                              | code: 403                          |+
+      | path: /users/register/verify-email       | body:                              |
       | query:                                   |   errors:                          |
       |   token: !jwt                            |     - message: >-                  |
       |     email: new-<run>@allowed.example.com |         Not a pending              |
