@@ -237,7 +237,7 @@ Feature: A file is uploaded, replaced and terminated through tus
       | request                                  | response                    |
       | method: POST                             | code: 500                   |+
       | path: /files/tus                         | text: "Something went wrong |
-      | headers:                                 |   with that request\n"      |
+      | headers:                                 |   with that request\\n"     |
       |   Tus-Resumable: 1.0.0                   |                             |
       |   Upload-Length: '4'                     |                             |
       | upload_metadata:                         |                             |

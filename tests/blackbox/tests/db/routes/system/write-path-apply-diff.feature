@@ -99,9 +99,14 @@ Feature: An applied schema diff updates and deletes a relation
       |             lhs:                            |                                   |
       |               collection: test_wp_diff_pets |                                   |
       |               field: owner_id               |                                   |
-      | method: GET                                 | code: 200                         |+
-      | path: /relations/test_wp_diff_pets          | body:                             |
-      |                                             |   data: []                        |
+      | method: GET                                 | code: 403                         |+
+      | path: /relations/test_wp_diff_pets/owner_id | body:                             |
+      |                                             |   errors:                         |
+      |                                             |     - message: "No result         |
+      |                                             |         found for relation        |
+      |                                             |         test_wp_diff_\\           |
+      |                                             |         pets.owner_id during      |
+      |                                             |         items.readOne()"          |
 
   Scenario: a diff whose first entry drops a meta key edits the relation
     Then these requests get these responses:
