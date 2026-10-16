@@ -1058,7 +1058,7 @@ describe('Integration Tests', () => {
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('invite-token' as any);
 				const mailError = new Error('SMTP down');
 
-				const send = vi.mocked(MailService.prototype.send)
+				const sendMail = vi.mocked(MailService.prototype.send)
 					.mockRejectedValueOnce(mailError);
 
 				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
@@ -1069,7 +1069,7 @@ describe('Integration Tests', () => {
 					'https://app.example.com/invite',
 				);
 
-				expect(send).toHaveBeenCalledWith({
+				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
 					subject: 'You\'ve been invited',
 					template: {
@@ -1097,11 +1097,11 @@ describe('Integration Tests', () => {
 					.mockResolvedValueOnce(undefined);
 
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('invite-token' as any);
-				const send = vi.mocked(MailService.prototype.send);
+				const sendMail = vi.mocked(MailService.prototype.send);
 
 				await service.inviteUser('ada@example.com', 'invite-role', null, 'Join');
 
-				expect(send).toHaveBeenCalledWith({
+				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
 					subject: 'Join',
 					template: {
@@ -1140,7 +1140,7 @@ describe('Integration Tests', () => {
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('verify-token' as any);
 				const mailError = new Error('SMTP down');
 
-				const send = vi.mocked(MailService.prototype.send)
+				const sendMail = vi.mocked(MailService.prototype.send)
 					.mockRejectedValueOnce(mailError);
 
 				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
@@ -1164,7 +1164,7 @@ describe('Integration Tests', () => {
 					{},
 				);
 
-				expect(send).toHaveBeenCalledWith({
+				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
 					subject: 'Verify your email address',
 					template: {
@@ -1197,7 +1197,7 @@ describe('Integration Tests', () => {
 					.mockResolvedValueOnce({ id: 'user-id-46', status: 'unverified' });
 
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('verify-token' as any);
-				const send = vi.mocked(MailService.prototype.send);
+				const sendMail = vi.mocked(MailService.prototype.send);
 
 				await service.registerUser({
 					email: 'ada@example.com',
@@ -1206,7 +1206,7 @@ describe('Integration Tests', () => {
 
 				expect(superCreateOneSpy).not.toHaveBeenCalled();
 
-				expect(send).toHaveBeenCalledWith({
+				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
 					subject: 'Verify your email address',
 					template: {
@@ -1234,7 +1234,7 @@ describe('Integration Tests', () => {
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('reset-token' as any);
 				const mailError = new Error('SMTP down');
 
-				const send = vi.mocked(MailService.prototype.send)
+				const sendMail = vi.mocked(MailService.prototype.send)
 					.mockRejectedValueOnce(mailError);
 
 				const logError = vi.spyOn(useLogger(), 'error').mockReturnValue();
@@ -1245,7 +1245,7 @@ describe('Integration Tests', () => {
 					'Reset it',
 				);
 
-				expect(send).toHaveBeenCalledWith({
+				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
 					subject: 'Reset it',
 					template: {
@@ -1275,11 +1275,11 @@ describe('Integration Tests', () => {
 					});
 
 				vi.spyOn(jwt, 'sign').mockReturnValueOnce('reset-token' as any);
-				const send = vi.mocked(MailService.prototype.send);
+				const sendMail = vi.mocked(MailService.prototype.send);
 
 				await service.requestPasswordReset('ada@example.com', null);
 
-				expect(send).toHaveBeenCalledWith({
+				expect(sendMail).toHaveBeenCalledWith({
 					to: 'ada@example.com',
 					subject: 'Password Reset Request',
 					template: {

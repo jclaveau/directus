@@ -159,7 +159,7 @@ describe('Services / Shares', () => {
 	});
 
 	describe('login', () => {
-		it('refuses a share that is missing, expired or used up', async () => {
+		it('refuses a share the lookup finds no row for', async () => {
 			tracker.on.select('directus_shares').response(undefined);
 
 			const service = new SharesService({ knex: db, schema });
@@ -177,13 +177,13 @@ describe('Services / Shares', () => {
 				share_password: '$argon2id$stored-hash',
 			});
 
-			const verify = vi.spyOn(argon2, 'verify').mockResolvedValue(false);
+			const verifyPassword = vi.spyOn(argon2, 'verify').mockResolvedValue(false);
 			const service = new SharesService({ knex: db, schema });
 
 			await expect(service.login({ share: 'share-id-6', password: 'wrong' }))
 				.rejects.toStrictEqual(new InvalidCredentialsError());
 
-			expect(verify).toHaveBeenCalledWith('$argon2id$stored-hash', 'wrong');
+			expect(verifyPassword).toHaveBeenCalledWith('$argon2id$stored-hash', 'wrong');
 			expect(tracker.history.update).toStrictEqual([]);
 		});
 
@@ -203,7 +203,7 @@ describe('Services / Shares', () => {
 			tracker.on.insert('directus_sessions').response([]);
 			tracker.on.delete('directus_sessions').response(0);
 
-			const sign = vi.spyOn(jwt, 'sign')
+			const signToken = vi.spyOn(jwt, 'sign')
 				.mockReturnValue('access-token-1' as any);
 
 			const service = new SharesService({ knex: db, schema });
@@ -215,7 +215,7 @@ describe('Services / Shares', () => {
 					expires: 900000,
 				});
 
-			expect(sign).toHaveBeenCalledWith(
+			expect(signToken).toHaveBeenCalledWith(
 				{
 					app_access: false,
 					admin_access: false,
@@ -248,7 +248,7 @@ describe('Services / Shares', () => {
 			tracker.on.delete('directus_sessions').response(0);
 			vi.spyOn(argon2, 'verify').mockResolvedValue(true);
 
-			const sign = vi.spyOn(jwt, 'sign')
+			const signToken = vi.spyOn(jwt, 'sign')
 				.mockReturnValue('access-token-2' as any);
 
 			const service = new SharesService({ knex: db, schema });
@@ -262,7 +262,7 @@ describe('Services / Shares', () => {
 				expires: 86400000,
 			});
 
-			expect(sign).toHaveBeenCalledWith(
+			expect(signToken).toHaveBeenCalledWith(
 				{
 					app_access: false,
 					admin_access: false,
