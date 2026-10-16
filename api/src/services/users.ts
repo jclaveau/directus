@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
+	ActionEventParams,
 	Item,
 	MutationOptions,
 	PrimaryKey,
@@ -19,6 +20,7 @@ import { performance } from 'node:perf_hooks';
 import { clearSystemCache } from '../cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
 import getDatabase from '../database/index.js';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
@@ -375,6 +377,10 @@ export class UsersService extends ItemsService {
 
 		opts.mutationTracker ??= this.createMutationTracker();
 
+		// Held until the delete commits: a hook fired inside it would read the users
+		// still there, or wait on the rows it locks.
+		const heldActionEvents: ActionEventParams[] = [];
+
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
 		// In the delete's transaction: a delete refused there rolls it back.
 		await transaction(this.knex, async (trx) => {
@@ -397,8 +403,25 @@ export class UsersService extends ItemsService {
 				schema: this.schema,
 				accountability: this.accountability,
 				nested: this.nested,
-			}).deleteMany(keys, opts);
+			}).deleteMany(keys, {
+				...opts,
+				bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+					heldActionEvents.push(actionEvent);
+				}),
+			});
 		}, opts.mutationTracker.snapshot());
+
+		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
+			return emitter.emitAction(
+				actionEvent.event,
+				actionEvent.meta,
+				actionEvent.context,
+			);
+		}));
+
+		if (opts.awaitActionHooks !== false) {
+			await emitting;
+		}
 
 		await this.clearUserSessions(keys);
 

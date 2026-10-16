@@ -72,6 +72,7 @@ const schema = new SchemaBuilder()
 
 // Taken before the Users tests replace it on the prototype.
 const itemsUpdateGroups = ItemsService.prototype.updateGroups;
+const itemsDeleteMany = ItemsService.prototype.deleteMany;
 const usersCheckUniqueEmails = (UsersService.prototype as any).checkUniqueEmails;
 const usersCheckPasswordPolicy = (UsersService.prototype as any).checkPasswordPolicy;
 const usersClearUserSessions = (UsersService.prototype as any).clearUserSessions;
@@ -661,7 +662,7 @@ describe('Integration Tests', () => {
 				});
 
 				const mockUser = {
-					id: 'user-id-17',
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000017',
 					status: 'invited',
 					role: 'existing-role',
 				};
@@ -1057,6 +1058,31 @@ describe('Integration Tests', () => {
 			});
 		});
 
+		describe('deleteMany action hooks', () => {
+			it('fires users.delete once the delete has committed', async () => {
+				vi.mocked(ItemsService.prototype.deleteMany)
+					.mockImplementationOnce(itemsDeleteMany);
+
+				const transactionStates: string[][] = [];
+
+				vi.spyOn(emitter, 'emitAction').mockImplementationOnce(async () => {
+					transactionStates.push(
+						tracker.history.transactions.map((trx) => trx.state),
+					);
+				});
+
+				tracker.on.update('directus_comments').response(0);
+				tracker.on.update('directus_notifications').response(0);
+				tracker.on.update('directus_versions').response(0);
+				tracker.on.select('directus_users').response([]);
+				tracker.on.delete('directus_users').response(1);
+
+				await service.deleteMany(['8e2b4c10-5d3a-4f6e-9a7b-000000000047']);
+
+				expect(transactionStates).toEqual([['committed']]);
+			});
+		});
+
 		describe('verifyRegistration by email', () => {
 			it('activates the unverified user the token names', async () => {
 				vi.mocked(verifyJWT).mockReturnValue({
@@ -1065,18 +1091,21 @@ describe('Integration Tests', () => {
 				} as any);
 
 				tracker.on.select('directus_users').response({
-					id: 'user-id-42',
+					id: '8e2b4c10-5d3a-4f6e-9a7b-000000000042',
 					status: 'unverified',
 				});
 
 				await expect(service.verifyRegistration('verify-token'))
-					.resolves.toBe('user-id-42');
+					.resolves.toBe('8e2b4c10-5d3a-4f6e-9a7b-000000000042');
 
 				expect(tracker.history.select[0]?.bindings)
 					.toStrictEqual(['ada@example.com', 1]);
 
 				expect(superUpdateGroupsSpy).toHaveBeenCalledWith(
-					[{ data: { status: 'active' }, keys: ['user-id-42'] }],
+					[{
+						data: { status: 'active' },
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000042'],
+					}],
 					expect.anything(),
 				);
 			});
@@ -1338,12 +1367,13 @@ describe('Integration Tests', () => {
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce({
-						id: 'user-id-49',
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000049',
 						status: 'active',
 						password: 'hashed',
 					});
 
-				tracker.on.select('directus_users').response({ id: 'user-id-49' });
+				tracker.on.select('directus_users')
+					.response({ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000049' });
 
 				await service.resetPassword('reset-token', 'new-password');
 
@@ -1368,12 +1398,13 @@ describe('Integration Tests', () => {
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce({
-						id: 'user-id-50',
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000050',
 						status: 'active',
 						password: 'hashed',
 					});
 
-				tracker.on.select('directus_users').response({ id: 'user-id-50' });
+				tracker.on.select('directus_users')
+					.response({ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000050' });
 
 				await new UsersService({
 					knex: db,
