@@ -2,6 +2,7 @@ import {
 	ForbiddenError,
 	InvalidForeignKeyError,
 	InvalidPayloadError,
+	RecordNotUniqueError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import {
@@ -21,7 +22,7 @@ import {
 	it,
 	vi,
 } from 'vitest';
-import { getDatabaseClient } from '../database/index.js';
+import getDatabase, { getDatabaseClient } from '../database/index.js';
 import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
@@ -3690,6 +3691,222 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
+	describe('branches no route reaches', () => {
+		it('names the primary key a mysql duplicate reports as PRIMARY', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('mysql');
+
+			tracker.on.insert('test').simulateError(Object.assign(
+				new Error('duplicate'),
+				{
+					code: 'ER_DUP_ENTRY',
+					sqlMessage: 'Duplicate entry \'1\' for key \'PRIMARY\'',
+				},
+			));
+
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			try {
+				const error = await service.createOne({ id: 1, name: 'a' })
+					.catch((createError) => createError);
+
+				expect(error).toBeInstanceOf(RecordNotUniqueError);
+				expect(error.message).toBe('Value has to be unique.');
+
+				expect(error.extensions).toEqual({
+					collection: null,
+					field: 'id',
+					value: null,
+				});
+			}
+			finally {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			}
+		});
+
+		it('keeps the field a mysql duplicate on a unique index names', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('mysql');
+
+			tracker.on.insert('test').simulateError(Object.assign(
+				new Error('duplicate'),
+				{
+					code: 'ER_DUP_ENTRY',
+					sqlMessage: 'Duplicate entry \'a\' for key \'test_name_unique\'',
+				},
+			));
+
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			try {
+				const error = await service.createOne({ name: 'a' })
+					.catch((createError) => createError);
+
+				expect(error).toBeInstanceOf(RecordNotUniqueError);
+
+				// `value` is left out: the create hands the translator its whole
+				// list of rows, so it reads the value off an array (reported).
+				expect(error.extensions).toMatchObject({
+					collection: 'test',
+					field: 'name',
+					primaryKey: false,
+				});
+			}
+			finally {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			}
+		});
+
+		it('refuses a read the database answers with no row list', async () => {
+			tracker.on.select('test').response(null);
+
+			await expect(new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			}).readByQuery({})).rejects.toThrow(
+				new ForbiddenError(),
+			);
+		});
+
+		it(oneLine`
+			hands the read action the default database when the service was built
+			without one
+		`, async () => {
+			vi.mocked(getDatabase).mockReturnValue(db);
+			tracker.on.select('test').response([{ id: 1, name: 'a' }]);
+
+			const readAction = vi.fn();
+
+			emitter.onAction('test.items.read', readAction);
+
+			try {
+				await new ItemsService('test', { schema: shapesSchema })
+					.readByQuery({});
+
+				expect(readAction).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({ database: db }),
+				);
+			}
+			finally {
+				emitter.offAction('test.items.read', readAction);
+				vi.mocked(getDatabase).mockReset();
+			}
+		});
+
+		it('gives readOne an empty meta when readByQuery returns none', async () => {
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			service.readByQuery = vi.fn(async () => [{ id: 1, name: 'a' }]) as any;
+
+			const record = await service.readOne(1);
+
+			expect(record).toEqual({ id: 1, name: 'a' });
+			expect(readMeta(record)).toEqual({ scopedCacheFingerprints: [] });
+		});
+
+		it(oneLine`
+			gives readSingleton's defaults an empty meta when readByQuery returns
+			none
+		`, async () => {
+			const service = new ItemsService('settings', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			service.readByQuery = vi.fn(async () => []) as any;
+
+			const record = await service.readSingleton({ fields: ['*'] });
+
+			expect(record).toEqual({ id: null, theme: 'auto' });
+			expect(readMeta(record)).toEqual({ scopedCacheFingerprints: [] });
+		});
+
+		it('refuses a group carrying no data before writing', async () => {
+			const error = await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			})
+				.updateGroups([{ keys: [1], data: null as any }])
+				.catch((updateError) => updateError);
+
+			// The class only: the message blames a filter hook, though none ran
+			// (reported).
+			expect(error).toBeInstanceOf(InvalidPayloadError);
+			expect(tracker.history.update).toEqual([]);
+		});
+
+		it(oneLine`
+			purges the collection whole when the re-read after an update fails
+		`, async () => {
+			tracker.on.update('test').response(1);
+
+			vi.spyOn(ItemScopedCacheService.prototype, 'snapshot')
+				.mockResolvedValueOnce({ canResolveSlicesFromRows: true, rows: [] })
+				.mockResolvedValueOnce({ canResolveSlicesFromRows: true, rows: [] })
+				.mockRejectedValueOnce(new Error('transaction aborted'));
+
+			const purgeSpy = vi.spyOn(ItemScopedCacheService.prototype, 'purge');
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1], { name: 'y' });
+
+			expect(purgeSpy).toHaveBeenCalledExactlyOnceWith(
+				null,
+				expect.anything(),
+				[],
+				{ includeBareFingerprint: true, rows: undefined },
+			);
+		});
+
+		it(oneLine`
+			files the object a read hook answered with under every revision
+		`, async () => {
+			const trackedSchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			trackedSchema.collections['tracked']!.accountability = 'all';
+
+			const answerAnObject = () => ({ id: 1, name: 'hooked' });
+
+			tracker.on.update('tracked').response(2);
+			tracker.on.select('tracked').response([{ id: 1, name: 'after' }]);
+			emitter.onFilter('tracked.items.read', answerAnObject);
+
+			try {
+				await new ItemsService('tracked', {
+					knex: db,
+					schema: trackedSchema,
+					accountability: {
+						user: 'u1',
+						role: 'r1',
+						admin: true,
+						app: true,
+					} as any,
+				}).updateMany([1, 2], { name: 'after' });
+
+				expect(revisionWrites[0]).toMatchObject([
+					{ item: 1, data: '{"id":1,"name":"hooked"}' },
+					{ item: 2, data: '{"id":1,"name":"hooked"}' },
+				]);
+			}
+			finally {
+				emitter.offFilter('tracked.items.read', answerAnObject);
+			}
+		});
+	});
+
 	describe('auto-derived scoped-cache paths', () => {
 		const pathSchema = new SchemaBuilder()
 			.collection('sub', (c) => {
@@ -4161,6 +4378,61 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 		}
 		finally {
 			emitter.offFilter('items.create', takeOverInertDeclaring);
+		}
+	});
+});
+
+describe('Services / Items / a failed upsert on its own transaction', () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+	});
+
+	afterEach(() => {
+		tracker.reset();
+	});
+
+	it('purges what its create hook declared before the insert failed', async () => {
+		const declarePurge = (
+			entries: unknown,
+			_meta: unknown,
+			context: any,
+		) => {
+			context.scopedCache.purgeBy({ collection: 'children' });
+
+			return entries;
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', declarePurge);
+
+		try {
+			await expect(new ItemsService('test', { knex: db, schema })
+				.upsertMany([{ name: 'new' }])).rejects.toThrow(new Error(
+				`insert into "test" ("name") values ('new') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				[],
+				expect.anything(),
+				{
+					declaredFingerprints: [{ collection: 'children' }],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', declarePurge);
 		}
 	});
 });
