@@ -1,4 +1,8 @@
-import { ForbiddenError, InvalidCredentialsError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidCredentialsError,
+	ItemNotFoundError,
+} from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
 import argon2 from 'argon2';
@@ -336,6 +340,172 @@ describe('Services / Shares', () => {
 			]);
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('updateGroups', () => {
+		it('refuses re-pointing to an item the caller may not share', async () => {
+			vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError({
+				reason: 'You don\'t have permission to perform "share" for collection'
+					+ ' "secret_docs" or it does not exist.',
+			}));
+
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([1]);
+
+			await expect(new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1' } as Accountability,
+			}).updateOne(1, { collection: 'secret_docs', item: '7' }))
+				.rejects.toStrictEqual(new ForbiddenError({
+					reason: 'You don\'t have permission to perform "share" for collection'
+						+ ' "secret_docs" or it does not exist.',
+				}));
+
+			expect(vi.mocked(validateAccess).mock.calls).toStrictEqual([
+				[
+					{
+						accountability: { user: 'user-1' },
+						action: 'share',
+						collection: 'secret_docs',
+						primaryKeys: ['7'],
+					},
+					{ schema, knex: db },
+				],
+			]);
+
+			expect(tracker.history.select).toStrictEqual([]);
+			expect(updateGroups).not.toHaveBeenCalled();
+		});
+
+		it('checks a changed item against the collection the share holds', async () => {
+			tracker.on.select('directus_shares').response([
+				{ id: 1, collection: 'articles', item: '3' },
+				{ id: 2, collection: 'pages', item: '4' },
+			]);
+
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([1, 2, 3]);
+
+			await expect(new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1' } as Accountability,
+			}).updateBatch([
+				{ id: 1, item: '7' },
+				{ id: 2, item: '8' },
+				{ id: 3, collection: 'articles', item: '9' },
+			])).resolves.toStrictEqual([1, 2, 3]);
+
+			expect(tracker.history.select).toHaveLength(1);
+
+			expect(tracker.history.select[0]?.sql).toBe(
+				'select "id", "collection", "item" from "directus_shares"'
+					+ ' where "id" in (?, ?)',
+			);
+
+			expect(tracker.history.select[0]?.bindings).toStrictEqual([1, 2]);
+
+			expect(vi.mocked(validateAccess).mock.calls).toStrictEqual([
+				[
+					{
+						accountability: { user: 'user-1' },
+						action: 'share',
+						collection: 'articles',
+						primaryKeys: ['7', '9'],
+					},
+					{ schema, knex: db },
+				],
+				[
+					{
+						accountability: { user: 'user-1' },
+						action: 'share',
+						collection: 'pages',
+						primaryKeys: ['8'],
+					},
+					{ schema, knex: db },
+				],
+			]);
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[
+					{ data: { item: '7' }, keys: [1] },
+					{ data: { item: '8' }, keys: [2] },
+					{ data: { collection: 'articles', item: '9' }, keys: [3] },
+				],
+				{},
+			);
+		});
+
+		it('refuses re-pointing a share no row holds', async () => {
+			tracker.on.select('directus_shares').response([]);
+
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([5]);
+
+			await expect(new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1' } as Accountability,
+			}).updateOne(5, { item: '7' }))
+				.rejects.toStrictEqual(new ForbiddenError({
+					reason: 'You don\'t have permission to perform "update" for collection'
+						+ ' "directus_shares" or it does not exist.',
+				}));
+
+			expect(validateAccess).not.toHaveBeenCalled();
+			expect(updateGroups).not.toHaveBeenCalled();
+		});
+
+		it('answers an admin re-pointing a share no row holds with a 404', async () => {
+			tracker.on.select('directus_shares').response([]);
+
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([5]);
+
+			await expect(new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1', admin: true } as Accountability,
+			}).updateBatch([{ id: 5, item: '7' }]))
+				.rejects.toStrictEqual(new ItemNotFoundError({
+					collection: 'directus_shares',
+					primaryKey: 5,
+				}));
+
+			expect(validateAccess).not.toHaveBeenCalled();
+			expect(updateGroups).not.toHaveBeenCalled();
+		});
+
+		it('runs no share check for a change leaving the target alone', async () => {
+			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue([1]);
+
+			await expect(new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1' } as Accountability,
+			}).updateMany([1], { name: 'renamed', max_uses: 3 }))
+				.resolves.toStrictEqual([1]);
+
+			expect(validateAccess).not.toHaveBeenCalled();
+			expect(tracker.history.select).toStrictEqual([]);
+
+			expect(updateGroups).toHaveBeenCalledWith(
+				[{ data: { name: 'renamed', max_uses: 3 }, keys: [1] }],
+				{},
+			);
+		});
+
+		it('re-points without a share check when no caller is set', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1]);
+
+			await expect(new SharesService({ knex: db, schema })
+				.updateOne(1, { item: '7' })).resolves.toBe(1);
+
+			expect(validateAccess).not.toHaveBeenCalled();
+			expect(tracker.history.select).toStrictEqual([]);
 		});
 	});
 

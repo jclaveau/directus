@@ -224,3 +224,87 @@ Feature: A single share is created only for an item its sender may share
       |     item: '<open>'                     |                                        |
       |   - collection: test_singular_shares   |                                        |
       |     item: '<open>'                     |                                        |
+
+  Scenario: a share is re-pointed only to an item its editor may share
+    Given these requests are sent:
+      | request                                | response  |
+      | method: POST                           | code: 200 |+
+      | path: /items/test_singular_shares      |           |
+      | payload:                               |           |
+      |   name: open-<run>                     |           |
+      | remember: open                         |           |
+      | method: POST                           | code: 200 |+
+      | path: /items/test_singular_shares      |           |
+      | payload:                               |           |
+      |   name: closed-<run>                   |           |
+      | remember: closed                       |           |
+      | method: POST                           | code: 200 |+
+      | path: /shares                          |           |
+      | payload:                               |           |
+      |   id: <share>                          |           |
+      |   name: created-<run>                  |           |
+      |   collection: test_singular_shares     |           |
+      |   item: '<open>'                       |           |
+      | method: POST                           | code: 200 |+
+      | path: /policies                        |           |
+      | payload:                               |           |
+      |   id: <editor-policy>                  |           |
+      |   name: editor-<run>                   |           |
+      |   app_access: false                    |           |
+      |   admin_access: false                  |           |
+      |   permissions:                         |           |
+      |     - collection: test_singular_shares |           |
+      |       action: share                    |           |
+      |       fields:                          |           |
+      |         - '*'                          |           |
+      |       permissions:                     |           |
+      |         name:                          |           |
+      |           _eq: open-<run>              |           |
+      |     - collection: directus_shares      |           |
+      |       action: update                   |           |
+      |       fields:                          |           |
+      |         - '*'                          |           |
+      |     - collection: directus_shares      |           |
+      |       action: read                     |           |
+      |       fields:                          |           |
+      |         - '*'                          |           |
+      | method: POST                           | code: 200 |+
+      | path: /users                           |           |
+      | payload:                               |           |
+      |   email: editor-<run>@example.com      |           |
+      |   token: <editor-token>                |           |
+      |   policies:                            |           |
+      |     - policy: <editor-policy>          |           |
+    Then these requests get these responses:
+      | request                              | response                               |
+      | as: <editor-token>                   | code: 403                              |+
+      | method: PATCH                        | body:                                  |
+      | path: /shares/<share>                |   errors:                              |
+      | payload:                             |     - message: >-                      |
+      |   collection: test_singular_shares   |         You don't have permission to   |
+      |   item: '<closed>'                   |         perform "share" for collection |
+      |                                      |         "test_singular_shares"         |
+      |                                      |         or it does not exist.          |
+      | as: <editor-token>                   | code: 403                              |+
+      | method: PATCH                        | body:                                  |
+      | path: /shares/<share>                |   errors:                              |
+      | payload:                             |     - message: >-                      |
+      |   item: '<closed>'                   |         You don't have permission to   |
+      |                                      |         perform "share" for collection |
+      |                                      |         "test_singular_shares"         |
+      |                                      |         or it does not exist.          |
+      | as: <editor-token>                   | code: 403                              |+
+      | method: PATCH                        | body:                                  |
+      | path: /shares                        |   errors:                              |
+      | payload:                             |     - message: >-                      |
+      |   - id: <share>                      |         You don't have permission to   |
+      |     item: '<closed>'                 |         perform "share" for collection |
+      |                                      |         "test_singular_shares"         |
+      |                                      |         or it does not exist.          |
+      | as: <editor-token>                   | code: 200                              |+
+      | method: PATCH                        | body:                                  |
+      | path: /shares/<share>                |   data:                                |
+      | query:                               |     name: renamed-<run>                |
+      |   fields: name,item                  |     item: '<open>'                     |
+      | payload:                             |                                        |
+      |   name: renamed-<run>                |                                        |
