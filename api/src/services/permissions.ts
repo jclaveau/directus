@@ -53,14 +53,6 @@ export class PermissionsService extends ItemsService {
 		);
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions) {
-		const res = await super.createOne(data, opts);
-
-		await this.clearCaches(opts);
-
-		return res;
-	}
-
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions) {
 		const res = await super.createMany(data, opts);
 

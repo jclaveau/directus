@@ -33,6 +33,42 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | eventually: true            |         You don't have permission to |
       |                             |         access this.                 |
 
+  Scenario: webhook flows created in one batch answer their triggers
+    Then these requests get these responses:
+      | request                            | response                |
+      | method: POST                       | code: 200               |+
+      | path: /flows                       |                         |
+      | payload:                           |                         |
+      |   - id: <first-flow>               |                         |
+      |     name: first-<run>              |                         |
+      |     trigger: webhook               |                         |
+      |     status: active                 |                         |
+      |     accountability: null           |                         |
+      |     options:                       |                         |
+      |       method: POST                 |                         |
+      |   - id: <second-flow>              |                         |
+      |     name: second-<run>             |                         |
+      |     trigger: webhook               |                         |
+      |     status: active                 |                         |
+      |     accountability: null           |                         |
+      |     options:                       |                         |
+      |       method: POST                 |                         |
+      | method: POST                       | code: 200               |+
+      | path: /flows/trigger/<first-flow>  | body:                   |
+      | payload:                           |   method: POST          |
+      |   probe: first-<run>               |   body:                 |
+      | eventually: true                   |     probe: first-<run>  |
+      | method: POST                       | code: 200               |+
+      | path: /flows/trigger/<second-flow> | body:                   |
+      | payload:                           |   method: POST          |
+      |   probe: second-<run>              |   body:                 |
+      | eventually: true                   |     probe: second-<run> |
+      | method: DELETE                     | code: 204               |+
+      | path: /flows                       |                         |
+      | payload:                           |                         |
+      |   - <first-flow>                   |                         |
+      |   - <second-flow>                  |                         |
+
   Scenario: a flow deleted with its chained operations takes them along
     Given these requests are sent:
       | request                | response  |

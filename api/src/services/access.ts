@@ -23,7 +23,10 @@ export class AccessService extends ItemsService {
 		}
 	}
 
-	override async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
+	override async createMany(
+		data: Partial<Item>[],
+		opts: MutationOptions = {},
+	): Promise<PrimaryKey[]> {
 		// Creating a new policy attachments affects the number of admin/app/api users.
 		// But it can only add app or admin users, so no need to check the remaining admin users.
 		opts.userIntegrityCheckFlags =
@@ -31,7 +34,7 @@ export class AccessService extends ItemsService {
 
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		const result = await super.createOne(data, opts);
+		const result = await super.createMany(data, opts);
 
 		// A new policy has been attached to a user or a role, clear the caches
 		await this.clearCaches();

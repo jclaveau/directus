@@ -34,31 +34,37 @@ afterEach(() => {
 });
 
 describe('Services / Access', () => {
-	describe('createOne', () => {
+	describe('createMany', () => {
 		it('adds the user limits check to the requested ones', async () => {
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('access-id-2');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['access-id-2', 'access-id-5']);
 
 			const onRequireUserIntegrityCheck = vi.fn();
 
 			await expect(new AccessService({
 				knex: knex.default({ client: MockClient }),
 				schema,
-			}).createOne(
-				{ policy: 'policy-id-2', user: 'user-id-1' },
+			}).createMany(
+				[
+					{ policy: 'policy-id-2', user: 'user-id-1' },
+					{ policy: 'policy-id-2', user: 'user-id-2' },
+				],
 				{
 					onRequireUserIntegrityCheck,
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.RemainingAdmins,
 				},
-			)).resolves.toBe('access-id-2');
+			)).resolves.toStrictEqual(['access-id-2', 'access-id-5']);
 
 			expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(
 				UserIntegrityCheckFlag.RemainingAdmins
 				| UserIntegrityCheckFlag.UserLimits,
 			);
 
-			expect(createOne).toHaveBeenCalledWith(
-				{ policy: 'policy-id-2', user: 'user-id-1' },
+			expect(createMany).toHaveBeenCalledWith(
+				[
+					{ policy: 'policy-id-2', user: 'user-id-1' },
+					{ policy: 'policy-id-2', user: 'user-id-2' },
+				],
 				{
 					onRequireUserIntegrityCheck,
 					userIntegrityCheckFlags: UserIntegrityCheckFlag.RemainingAdmins
@@ -70,18 +76,20 @@ describe('Services / Access', () => {
 		});
 
 		it('requests the user limits check when none was requested', async () => {
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('access-id-3');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['access-id-3']);
 
 			await new AccessService({
 				knex: knex.default({ client: MockClient }),
 				schema,
 			}).createOne({ policy: 'policy-id-3', role: 'role-id-1' });
 
-			expect(createOne).toHaveBeenCalledWith(
-				{ policy: 'policy-id-3', role: 'role-id-1' },
+			expect(createMany).toHaveBeenCalledWith(
+				[{ policy: 'policy-id-3', role: 'role-id-1' }],
 				{ userIntegrityCheckFlags: UserIntegrityCheckFlag.UserLimits },
 			);
+
+			expect(clearSystemCache).toHaveBeenCalledTimes(1);
 		});
 	});
 

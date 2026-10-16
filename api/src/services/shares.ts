@@ -33,23 +33,40 @@ export class SharesService extends ItemsService {
 		super('directus_shares', options);
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
+	override async createMany(
+		data: Partial<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		if (this.accountability) {
-			await validateAccess(
-				{
-					accountability: this.accountability,
-					action: 'share',
-					collection: data['collection'],
-					primaryKeys: [data['item']],
-				},
-				{
-					schema: this.schema,
-					knex: this.knex,
-				},
-			);
+			const sharedKeysByCollection = new Map<string, Map<string, PrimaryKey>>();
+
+			for (const shareRow of data) {
+				const sharedKeys = sharedKeysByCollection.get(shareRow['collection'])
+					?? new Map<string, PrimaryKey>();
+
+				// Keyed by its string form so two shares of one item read it once:
+				// validateAccess counts the rows it reads back against the keys.
+				sharedKeys.set(String(shareRow['item']), shareRow['item']);
+				sharedKeysByCollection.set(shareRow['collection'], sharedKeys);
+			}
+
+			for (const [collection, sharedKeys] of sharedKeysByCollection) {
+				await validateAccess(
+					{
+						accountability: this.accountability,
+						action: 'share',
+						collection,
+						primaryKeys: [...sharedKeys.values()],
+					},
+					{
+						schema: this.schema,
+						knex: this.knex,
+					},
+				);
+			}
 		}
 
-		return super.createOne(data, opts);
+		return super.createMany(data, opts);
 	}
 
 	override async updateGroups(

@@ -94,8 +94,8 @@ describe('Services / Versions', () => {
 					{ scopedCacheFingerprints: [] },
 				));
 
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('version-id-1');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['version-id-1']);
 
 			const service = new VersionsService({
 				knex: db,
@@ -121,14 +121,16 @@ describe('Services / Versions', () => {
 
 			expect(readOne).toHaveBeenCalledWith('1', undefined);
 
-			expect(createOne).toHaveBeenCalledWith(
-				{
-					key: 'draft',
-					collection: 'articles',
-					item: '1',
-					hash: 'ce8201426743c9507d62708c34f1afbb8bab637d',
-				},
-				undefined,
+			expect(createMany).toHaveBeenCalledWith(
+				[
+					{
+						key: 'draft',
+						collection: 'articles',
+						item: '1',
+						hash: 'ce8201426743c9507d62708c34f1afbb8bab637d',
+					},
+				],
+				{},
 			);
 		});
 
@@ -147,8 +149,8 @@ describe('Services / Versions', () => {
 					{ scopedCacheFingerprints: [] },
 				));
 
-			vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('version-id-2');
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['version-id-2']);
 
 			await expect(new VersionsService({ knex: db, schema }).createOne({
 				key: 'draft',
@@ -160,8 +162,8 @@ describe('Services / Versions', () => {
 		});
 
 		it('refuses a version missing its item', async () => {
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('version-id-3');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['version-id-3']);
 
 			await expect(new VersionsService({ knex: db, schema }).createOne({
 				key: 'draft',
@@ -170,7 +172,7 @@ describe('Services / Versions', () => {
 				reason: '"item" is required',
 			}));
 
-			expect(createOne).not.toHaveBeenCalled();
+			expect(createMany).not.toHaveBeenCalled();
 		});
 
 		it('refuses the reserved "main" key', async () => {
@@ -266,22 +268,78 @@ describe('Services / Versions', () => {
 			expect(createMany).not.toHaveBeenCalled();
 		});
 
-		it('creates versions of one item under different keys', async () => {
+		it('stamps each version with its main item hash', async () => {
+			readCollection.mockResolvedValue({ meta: { versioning: true } });
+
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(withMeta(
+					[{ count: 0 }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+			vi.spyOn(ItemsService.prototype, 'readOne')
+				.mockResolvedValueOnce(withMeta(
+					{ id: 1, title: 'Hello' },
+					{ scopedCacheFingerprints: [] },
+				))
+				.mockResolvedValueOnce(withMeta(
+					{ id: 2, title: 'World' },
+					{ scopedCacheFingerprints: [] },
+				));
+
 			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
 				.mockResolvedValue([1, 2]);
 
 			await expect(new VersionsService({ knex: db, schema }).createMany([
 				{ key: 'draft', collection: 'articles', item: '1' },
-				{ key: 'review', collection: 'articles', item: '1' },
+				{ key: 'draft', collection: 'articles', item: '2' },
 			])).resolves.toStrictEqual([1, 2]);
 
 			expect(createMany).toHaveBeenCalledWith(
 				[
-					{ key: 'draft', collection: 'articles', item: '1' },
-					{ key: 'review', collection: 'articles', item: '1' },
+					{
+						key: 'draft',
+						collection: 'articles',
+						item: '1',
+						hash: 'ce8201426743c9507d62708c34f1afbb8bab637d',
+					},
+					{
+						key: 'draft',
+						collection: 'articles',
+						item: '2',
+						hash: '00e31c5b4136a9882aa709dcee785754e5e1d09b',
+					},
 				],
 				undefined,
 			);
+		});
+
+		it('refuses a batch whose second version lacks its item', async () => {
+			readCollection.mockResolvedValue({ meta: { versioning: true } });
+
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(withMeta(
+					[{ count: 0 }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+			vi.spyOn(ItemsService.prototype, 'readOne')
+				.mockResolvedValue(withMeta(
+					{ id: 1, title: 'Hello' },
+					{ scopedCacheFingerprints: [] },
+				));
+
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue([1, 2]);
+
+			await expect(new VersionsService({ knex: db, schema }).createMany([
+				{ key: 'draft', collection: 'articles', item: '1' },
+				{ key: 'review', collection: 'articles' },
+			])).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: '"item" is required',
+			}));
+
+			expect(createMany).not.toHaveBeenCalled();
 		});
 	});
 
@@ -383,9 +441,9 @@ describe('Services / Versions', () => {
 					{ scopedCacheFingerprints: [] },
 				));
 
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValueOnce('activity-id-1')
-				.mockResolvedValueOnce('revision-id-1');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValueOnce(['activity-id-1'])
+				.mockResolvedValueOnce(['revision-id-1']);
 
 			vi.spyOn(PayloadService.prototype, 'prepareDelta')
 				.mockResolvedValue('{"body":"New"}');
@@ -409,7 +467,7 @@ describe('Services / Versions', () => {
 			await expect(service.save('version-id-4', { body: 'New' }))
 				.resolves.toStrictEqual({ title: 'Draft', body: 'New' });
 
-			expect(createOne).toHaveBeenNthCalledWith(1, {
+			expect(createMany).toHaveBeenNthCalledWith(1, [{
 				action: 'version_save',
 				user: 'user-1',
 				collection: 'articles',
@@ -417,18 +475,20 @@ describe('Services / Versions', () => {
 				user_agent: 'test-agent',
 				origin: 'https://app.example.com',
 				item: '1',
-			});
+			}], {});
 
-			expect(createOne).toHaveBeenNthCalledWith(
+			expect(createMany).toHaveBeenNthCalledWith(
 				2,
-				{
-					activity: 'activity-id-1',
-					version: 'version-id-4',
-					collection: 'articles',
-					item: '1',
-					data: '{"body":"New"}',
-					delta: '{"body":"New"}',
-				},
+				[
+					{
+						activity: 'activity-id-1',
+						version: 'version-id-4',
+						collection: 'articles',
+						item: '1',
+						data: '{"body":"New"}',
+						delta: '{"body":"New"}',
+					},
+				],
 				{ autoPurgeCache: false, bypassLimits: true },
 			);
 
@@ -446,9 +506,9 @@ describe('Services / Versions', () => {
 					{ scopedCacheFingerprints: [] },
 				));
 
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValueOnce('activity-id-2')
-				.mockResolvedValueOnce('revision-id-2');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValueOnce(['activity-id-2'])
+				.mockResolvedValueOnce(['revision-id-2']);
 
 			vi.spyOn(PayloadService.prototype, 'prepareDelta')
 				.mockResolvedValue(null);
@@ -462,7 +522,7 @@ describe('Services / Versions', () => {
 				.save('version-id-5', {}))
 				.resolves.toStrictEqual({});
 
-			expect(createOne).toHaveBeenNthCalledWith(1, {
+			expect(createMany).toHaveBeenNthCalledWith(1, [{
 				action: 'version_save',
 				user: null,
 				collection: 'articles',
@@ -470,7 +530,7 @@ describe('Services / Versions', () => {
 				user_agent: null,
 				origin: null,
 				item: '1',
-			});
+			}], {});
 
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		});

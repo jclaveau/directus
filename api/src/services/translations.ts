@@ -32,12 +32,34 @@ export class TranslationsService extends ItemsService {
 		return result.length > 0;
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		if (await this.translationKeyExists(data['key'], data['language'])) {
-			throw new InvalidPayloadError({ reason: 'Duplicate key and language combination' });
+	override async createMany(
+		data: Partial<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		const claimedCombos = new Set<string>();
+
+		for (const translationRow of data) {
+			const keyCombo = JSON.stringify([
+				translationRow['key'],
+				translationRow['language'],
+			]);
+
+			if (
+				claimedCombos.has(keyCombo)
+				|| await this.translationKeyExists(
+					translationRow['key'],
+					translationRow['language'],
+				)
+			) {
+				throw new InvalidPayloadError({
+					reason: 'Duplicate key and language combination',
+				});
+			}
+
+			claimedCombos.add(keyCombo);
 		}
 
-		return await super.createOne(data, opts);
+		return await super.createMany(data, opts);
 	}
 
 	override async updateGroups(

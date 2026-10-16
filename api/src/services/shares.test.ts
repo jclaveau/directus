@@ -82,10 +82,77 @@ afterEach(() => {
 });
 
 describe('Services / Shares', () => {
-	describe('createOne', () => {
-		it('checks the caller may share the item before creating', async () => {
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('share-id-1');
+	describe('createMany', () => {
+		it('checks the caller may share each item before creating', async () => {
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['share-id-5', 'share-id-6', 'share-id-7']);
+
+			const service = new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1' } as Accountability,
+			});
+
+			await expect(service.createMany([
+				{ collection: 'articles', item: '7' },
+				{ collection: 'pages', item: '3' },
+				{ collection: 'articles', item: '8' },
+				{ collection: 'articles', item: '7' },
+			])).resolves.toStrictEqual(['share-id-5', 'share-id-6', 'share-id-7']);
+
+			expect(vi.mocked(validateAccess).mock.calls).toStrictEqual([
+				[
+					{
+						accountability: { user: 'user-1' },
+						action: 'share',
+						collection: 'articles',
+						primaryKeys: ['7', '8'],
+					},
+					{ schema, knex: db },
+				],
+				[
+					{
+						accountability: { user: 'user-1' },
+						action: 'share',
+						collection: 'pages',
+						primaryKeys: ['3'],
+					},
+					{ schema, knex: db },
+				],
+			]);
+
+			expect(createMany).toHaveBeenCalledWith(
+				[
+					{ collection: 'articles', item: '7' },
+					{ collection: 'pages', item: '3' },
+					{ collection: 'articles', item: '8' },
+					{ collection: 'articles', item: '7' },
+				],
+				undefined,
+			);
+		});
+
+		it('refuses a batch holding a share the caller may not make', async () => {
+			vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError());
+
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['share-id-8', 'share-id-9']);
+
+			await expect(new SharesService({
+				knex: db,
+				schema,
+				accountability: { user: 'user-1' } as Accountability,
+			}).createMany([
+				{ collection: 'articles', item: '7' },
+				{ collection: 'articles', item: '9' },
+			])).rejects.toStrictEqual(new ForbiddenError());
+
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
+		it('checks a single share before creating it', async () => {
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['share-id-1']);
 
 			const service = new SharesService({
 				knex: db,
@@ -106,38 +173,20 @@ describe('Services / Shares', () => {
 				{ schema, knex: db },
 			);
 
-			expect(createOne).toHaveBeenCalledWith(
-				{ collection: 'articles', item: '7' },
-				undefined,
+			expect(createMany).toHaveBeenCalledWith(
+				[{ collection: 'articles', item: '7' }],
+				{},
 			);
 		});
 
-		it('refuses a share the caller may not make', async () => {
-			vi.mocked(validateAccess).mockRejectedValue(new ForbiddenError());
-
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('share-id-2');
-
-			const service = new SharesService({
-				knex: db,
-				schema,
-				accountability: { user: 'user-1' } as Accountability,
-			});
-
-			await expect(service.createOne({ collection: 'articles', item: '7' }))
-				.rejects.toStrictEqual(new ForbiddenError());
-
-			expect(createOne).not.toHaveBeenCalled();
-		});
-
 		it('creates without an access check when no caller is set', async () => {
-			vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('share-id-3');
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['share-id-3']);
 
 			const service = new SharesService({ knex: db, schema });
 
-			await expect(service.createOne({ collection: 'articles', item: '7' }))
-				.resolves.toBe('share-id-3');
+			await expect(service.createMany([{ collection: 'articles', item: '7' }]))
+				.resolves.toStrictEqual(['share-id-3']);
 
 			expect(validateAccess).not.toHaveBeenCalled();
 		});

@@ -34,6 +34,41 @@ Feature: A single translation is checked as it is created and deleted
       |   language: fr-FR            |     language: fr-FR           |
       |   value: second              |     value: second             |
 
+  Scenario: a batch repeating a key and language is refused like a single one
+    Given these requests are sent:
+      | request             | response  |
+      | method: POST        | code: 200 |+
+      | path: /translations |           |
+      | payload:            |           |
+      |   key: sw-<run>     |           |
+      |   language: en-US   |           |
+      |   value: first      |           |
+    Then these requests get these responses:
+      | request                      | response                      |
+      | method: POST                 | code: 400                     |+
+      | path: /translations          | body:                         |
+      | payload:                     |   errors:                     |
+      |   - key: sw-<run>            |     - message: >-             |
+      |     language: fr-FR          |         Invalid payload.      |
+      |     value: second            |         Duplicate key and     |
+      |   - key: sw-<run>            |         language combination. |
+      |     language: en-US          |                               |
+      |     value: second            |                               |
+      | method: POST                 | code: 400                     |+
+      | path: /translations          | body:                         |
+      | payload:                     |   errors:                     |
+      |   - key: sw-<run>            |     - message: >-             |
+      |     language: de-DE          |         Invalid payload.      |
+      |     value: third             |         Duplicate key and     |
+      |   - key: sw-<run>            |         language combination. |
+      |     language: de-DE          |                               |
+      |     value: fourth            |                               |
+      | method: GET                  | code: 200                     |+
+      | path: /translations          | body:                         |
+      | query:                       |   data:                       |
+      |   fields: language,value     |     - language: en-US         |
+      |   filter[key][_eq]: sw-<run> |       value: first            |
+
   Scenario: a translation deleted by its key is gone
     Given these requests are sent:
       | request             | response  |

@@ -26,46 +26,76 @@ afterEach(() => {
 });
 
 describe('Services / Translations', () => {
-	describe('createOne', () => {
+	describe('createMany', () => {
 		it('refuses a key already translated in that language', async () => {
 			const db = knex.default({ client: MockClient });
 			const tracker = createTracker(db);
 
+			tracker.on.select('directus_translations').responseOnce([]);
+
 			tracker.on.select('directus_translations')
-				.response([{ id: 'translation-id-6' }]);
+				.responseOnce([{ id: 'translation-id-6' }]);
 
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('translation-id-7');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['translation-id-7']);
 
-			await expect(new TranslationsService({ knex: db, schema }).createOne({
-				key: 'greeting',
-				language: 'en-US',
-			})).rejects.toStrictEqual(new InvalidPayloadError({
+			await expect(new TranslationsService({ knex: db, schema }).createMany([
+				{ key: 'greeting', language: 'fr-FR' },
+				{ key: 'greeting', language: 'en-US' },
+			])).rejects.toStrictEqual(new InvalidPayloadError({
 				reason: 'Duplicate key and language combination',
 			}));
 
-			expect(createOne).not.toHaveBeenCalled();
+			expect(tracker.history.select[1]?.bindings)
+				.toStrictEqual(['greeting', 'en-US', 1]);
+
+			expect(createMany).not.toHaveBeenCalled();
 		});
 
-		it('creates a key not yet translated in that language', async () => {
+		it('refuses one key and language given to two rows', async () => {
 			const db = knex.default({ client: MockClient });
 			const tracker = createTracker(db);
 
 			tracker.on.select('directus_translations').response([]);
 
-			const createOne = vi.spyOn(ItemsService.prototype, 'createOne')
-				.mockResolvedValue('translation-id-8');
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['translation-id-9', 'translation-id-10']);
 
-			await expect(new TranslationsService({ knex: db, schema }).createOne({
-				key: 'greeting',
-				language: 'fr-FR',
-			})).resolves.toBe('translation-id-8');
+			await expect(new TranslationsService({ knex: db, schema }).createMany([
+				{ key: 'greeting', language: 'de-DE' },
+				{ key: 'greeting', language: 'de-DE' },
+			])).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: 'Duplicate key and language combination',
+			}));
+
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
+		it('creates keys not yet translated in their language', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+
+			tracker.on.select('directus_translations').response([]);
+
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['translation-id-8', 'translation-id-11']);
+
+			await expect(new TranslationsService({ knex: db, schema }).createMany([
+				{ key: 'greeting', language: 'fr-FR' },
+				{ key: 'farewell', language: 'fr-FR' },
+			])).resolves.toStrictEqual(['translation-id-8', 'translation-id-11']);
 
 			expect(tracker.history.select[0]?.bindings)
 				.toStrictEqual(['greeting', 'fr-FR', 1]);
 
-			expect(createOne).toHaveBeenCalledWith(
-				{ key: 'greeting', language: 'fr-FR' },
+			expect(tracker.history.select[1]?.bindings)
+				.toStrictEqual(['farewell', 'fr-FR', 1]);
+
+			expect(createMany).toHaveBeenCalledWith(
+				[
+					{ key: 'greeting', language: 'fr-FR' },
+					{ key: 'farewell', language: 'fr-FR' },
+				],
 				undefined,
 			);
 		});

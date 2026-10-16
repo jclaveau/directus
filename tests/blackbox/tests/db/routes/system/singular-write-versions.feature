@@ -35,6 +35,42 @@ Feature: A single version is checked and stamped with its item as it is created
       |                                          |   data:                |
       |                                          |     outdated: true     |
 
+  Scenario: a batch of versions is checked and stamped like a single one
+    Given these requests are sent:
+      | request                       | response  |
+      | method: POST                  | code: 200 |+
+      | path: /items/test_draft_items |           |
+      | payload:                      |           |
+      |   title: batch-<run>          |           |
+      | remember: document            |           |
+    Then these requests get these responses:
+      | request                           | response                        |
+      | method: POST                      | code: 400                       |+
+      | path: /versions                   | body:                           |
+      | payload:                          |   errors:                       |
+      |   - key: review                   |     - message: >-               |
+      |     collection: test_draft_items  |         Invalid payload. "main" |
+      |     item: '<document>'            |         is a reserved version   |
+      |   - key: main                     |         key.                    |
+      |     collection: test_draft_items  |                                 |
+      |     item: '<document>'            |                                 |
+      | method: POST                      | code: 200                       |+
+      | path: /versions                   |                                 |
+      | payload:                          |                                 |
+      |   - key: draft                    |                                 |
+      |     collection: test_draft_items  |                                 |
+      |     item: '<document>'            |                                 |
+      |   - key: review                   |                                 |
+      |     collection: test_draft_items  |                                 |
+      |     item: '<document>'            |                                 |
+      | method: GET                       | code: 200                       |+
+      | path: /versions                   | body:                           |
+      | query:                            |   data:                         |
+      |   fields: key                     |     - key: draft                |
+      |   sort: key                       |     - key: review               |
+      |   filter[item][_eq]: '<document>' |                                 |
+      |   filter[hash][_nnull]: true      |                                 |
+
   Scenario: a second version of one key for one item is refused
     Given these requests are sent:
       | request                        | response  |
