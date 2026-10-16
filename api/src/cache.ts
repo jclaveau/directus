@@ -494,12 +494,14 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	if (targets.includes('system')) {
 		// forced so it runs even while a lock is held; its `schemaChanged` publish
 		// fans the system + schema + permissions clear out to every node.
-		const systemErrors = await storeErrorsDuring(
+		// The permission clear inside raises rather than emitting, so its refusal
+		// arrives as a throw, which would skip the targets below.
+		const systemRefused = await storeErrorsDuring(
 			[systemCache, lockCache],
 			() => clearSystemCache({ forced: true }),
-		);
+		).then((systemErrors) => systemErrors.length > 0, () => true);
 
-		if (systemErrors.length > 0) {
+		if (systemRefused) {
 			refusedTargets.push('system');
 		}
 	}

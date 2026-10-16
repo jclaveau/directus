@@ -134,6 +134,27 @@ describe('clearCacheTargets', () => {
 		expect(clearPermissionCache).toHaveBeenCalledOnce();
 	});
 
+	it(oneLine`
+		system: a refused permission clear fails the system clear,
+		after the other targets
+	`, async () => {
+		const { cache } = await seedAllTiers();
+		vi.mocked(clearPermissionCache).mockRejectedValueOnce(new Error('READONLY'));
+
+		await expect(clearCacheTargets(['system', 'response'])).rejects.toMatchObject({
+			message: oneLine`
+				Service "cache" is unavailable.
+				redis refused the system clear.
+			`,
+		});
+
+		expect(await cache.get('response-key')).toBeUndefined();
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheCleared', {
+			targets: ['system', 'response'],
+		});
+	});
+
 	it('broadcasts the exact targets for peers to drop the same subset', async () => {
 		await seedAllTiers();
 
