@@ -10,6 +10,9 @@ export const collectionZeroParent = 'test_write_zero_parent';
 export const collectionZeroListed = 'test_write_zero_listed';
 export const collectionZeroSorted = 'test_write_zero_sorted';
 export const collectionZeroPlain = 'test_write_zero_plain';
+export const collectionZeroCounted = 'test_write_zero_counted';
+export const collectionZeroHolder = 'test_write_zero_holder';
+export const collectionZeroMember = 'test_write_zero_member';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -22,6 +25,9 @@ export const seedDBStructure = () => {
 					collectionZeroSorted,
 					collectionZeroPlain,
 					collectionZeroParent,
+					collectionZeroCounted,
+					collectionZeroMember,
+					collectionZeroHolder,
 				]) {
 					await DeleteCollection(vendor, { collection });
 				}
@@ -36,6 +42,13 @@ export const seedDBStructure = () => {
 							fields: [{ field: 'position', type: 'integer', meta: {} }],
 						},
 						{ collection: collectionZeroPlain, primaryKeyType: 'string' },
+						{
+							collection: collectionZeroCounted,
+							primaryKeyType: 'integer',
+							fields: [{ field: 'name', type: 'string', meta: {} }],
+						},
+						{ collection: collectionZeroHolder, primaryKeyType: 'integer' },
+						{ collection: collectionZeroMember, primaryKeyType: 'integer' },
 					],
 				});
 
@@ -53,6 +66,14 @@ export const seedDBStructure = () => {
 						relationMeta,
 					});
 				}
+
+				await CreateFieldO2M(vendor, {
+					collection: collectionZeroHolder,
+					field: 'members',
+					primaryKeyType: 'integer',
+					otherCollection: collectionZeroMember,
+					otherField: 'holder',
+				});
 
 				expect(true).toBeTruthy();
 			}

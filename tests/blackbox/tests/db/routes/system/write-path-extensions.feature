@@ -6,12 +6,9 @@ Feature: Extension settings rows are rewritten, toggled and removed
     that name, while its package is named `extension-settings-probe-package`.
     It answers with its own settings row, plants a registry row for a folder
     no extension holds, and reads a planted row back, null once it is gone.
-  - Every extension update reloads the extensions in the background, so a
-    request marked `eventually` is sent again until its response matches, for
-    up to ten seconds.
-  - The load that takes a row back registers the extensions off the rows it
-    read before, so the folder's endpoint answers again only once the next
-    update has reloaded them.
+  - An extension update answers once the extensions are reloaded. A request
+    marked `eventually` is sent again until its response matches, for up to
+    ten seconds: the probe answers only once the extensions are loaded.
 
   Scenario: a settings row named after the package is taken back by the folder
     Given these requests are sent:
@@ -28,18 +25,12 @@ Feature: Extension settings rows are rewritten, toggled and removed
       |     folder: extension-settings-probe-package |     bundle: null  |
       |                                              |     schema: null  |
     Then these requests get these responses:
-      | request                         | response                               |
-      | method: PATCH                   | code: 200                              |+
-      | path: /extensions/<probe>       | body:                                  |
-      | payload:                        |   data:                                |
-      |   meta:                         |     meta:                              |
-      |     enabled: true               |       folder: extension-settings-probe |
-      | eventually: true                |                                        |
-      | method: GET                     | code: 200                              |+
-      | path: /extension-settings-probe | body:                                  |
-      | eventually: true                |   data:                                |
-      |                                 |     id: <probe>                        |
-      |                                 |     folder: extension-settings-probe   |
+      | request                         | response                             |
+      | method: GET                     | code: 200                            |+
+      | path: /extension-settings-probe | body:                                |
+      |                                 |   data:                              |
+      |                                 |     id: <probe>                      |
+      |                                 |     folder: extension-settings-probe |
 
   Scenario: a GraphQL update of an extension answers with its settings
     Given these requests are sent:
@@ -94,3 +85,34 @@ Feature: Extension settings rows are rewritten, toggled and removed
       | method: GET                                                  | code: 200    |+
       | path: /extension-settings-probe/registry-rows/<registry_row> | body:        |
       | eventually: true                                             |   data: null |
+
+  Scenario: an endpoint answers as its extension was just toggled
+    Given these requests are sent:
+      | request                         | response  |
+      | method: GET                     | code: 200 |+
+      | path: /extension-settings-probe | body:     |
+      | remember: probe                 |   data:   |
+      | eventually: true                |           |
+    Then these requests get these responses:
+      | request                         | response                          |
+      | method: PATCH                   | code: 200                         |+
+      | path: /extensions/<probe>       | body:                             |
+      | payload:                        |   data:                           |
+      |   meta:                         |     meta:                         |
+      |     enabled: false              |       enabled: false              |
+      | method: GET                     | code: 404                         |+
+      | path: /extension-settings-probe | body:                             |
+      |                                 |   errors:                         |
+      |                                 |     - message: >-                 |
+      |                                 |         Route                     |
+      |                                 |         /extension-settings-probe |
+      |                                 |         doesn't exist.            |
+      | method: PATCH                   | code: 200                         |+
+      | path: /extensions/<probe>       | body:                             |
+      | payload:                        |   data:                           |
+      |   meta:                         |     meta:                         |
+      |     enabled: true               |       enabled: true               |
+      | method: GET                     | code: 200                         |+
+      | path: /extension-settings-probe | body:                             |
+      |                                 |   data:                           |
+      |                                 |     id: <probe>                   |

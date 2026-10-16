@@ -210,3 +210,102 @@ Feature: A file is uploaded, replaced and terminated through tus
       |                                      |       kept-<run>.txt        |
       | method: GET                          | code: 200                   |+
       | path: /assets/<file>                 | text: kept                  |
+
+  Scenario: a replacement that cannot start leaves no row behind
+    Given these requests are sent:
+      | request                             | response  |
+      | method: POST                        | code: 201 |+
+      | path: /files/tus                    |           |
+      | headers:                            |           |
+      |   Tus-Resumable: 1.0.0              |           |
+      |   Upload-Length: '4'                |           |
+      | upload_metadata:                    |           |
+      |   filename_download: kept-<run>.txt |           |
+      |   type: text/plain                  |           |
+      | remember_headers:                   |           |
+      |   kept-upload: Location             |           |
+      |   file: Directus-File-Id            |           |
+      | method: PATCH                       | code: 204 |+
+      | path: /files/tus/<kept-upload>      |           |
+      | headers:                            |           |
+      |   Tus-Resumable: 1.0.0              |           |
+      |   Upload-Offset: '0'                |           |
+      |   Content-Type: >-                  |           |
+      |     application/offset+octet-stream |           |
+      | body: kept                          |           |
+    Then these requests get these responses:
+      | request                                  | response                    |
+      | method: POST                             | code: 500                   |+
+      | path: /files/tus                         | text: "Something went wrong |
+      | headers:                                 |   with that request\n"      |
+      |   Tus-Resumable: 1.0.0                   |                             |
+      |   Upload-Length: '4'                     |                             |
+      | upload_metadata:                         |                             |
+      |   id: <file>                             |                             |
+      |   filename_download: lost-<run>.txt      |                             |
+      |   filename_disk: <file>.txt/below-a-file |                             |
+      | method: GET                              | code: 200                   |+
+      | path: /files                             | body:                       |
+      | query:                                   |   data: []                  |
+      |   fields: id                             |                             |
+      |   filter[filename_download][_eq]: >-     |                             |
+      |     lost-<run>.txt                       |                             |
+      | method: GET                              | code: 200                   |+
+      | path: /assets/<file>                     | text: kept                  |
+
+  Scenario: an upload of an unknown type without extension is stored under its id
+    Then these requests get these responses:
+      | request                             | response                  |
+      | method: POST                        | code: 201                 |+
+      | path: /files/tus                    |                           |
+      | headers:                            |                           |
+      |   Tus-Resumable: 1.0.0              |                           |
+      |   Upload-Length: '4'                |                           |
+      | upload_metadata:                    |                           |
+      |   filename_download: noext-<run>    |                           |
+      |   type: application/x-unknown-thing |                           |
+      | remember_headers:                   |                           |
+      |   upload: Location                  |                           |
+      |   file: Directus-File-Id            |                           |
+      | method: PATCH                       | code: 204                 |+
+      | path: /files/tus/<upload>           |                           |
+      | headers:                            |                           |
+      |   Tus-Resumable: 1.0.0              |                           |
+      |   Upload-Offset: '0'                |                           |
+      |   Content-Type: >-                  |                           |
+      |     application/offset+octet-stream |                           |
+      | body: blob                          |                           |
+      | method: GET                         | code: 200                 |+
+      | path: /files/<file>                 | body:                     |
+      | query:                              |   data:                   |
+      |   fields: filename_disk             |     filename_disk: <file> |
+
+  Scenario: an upload naming an id no file holds reports the id it created
+    Then these requests get these responses:
+      | request                              | response         |
+      | method: POST                         | code: 201        |+
+      | path: /files/tus                     |                  |
+      | headers:                             |                  |
+      |   Tus-Resumable: 1.0.0               |                  |
+      |   Upload-Length: '5'                 |                  |
+      | upload_metadata:                     |                  |
+      |   id: <unheld-id>                    |                  |
+      |   filename_download: ghost-<run>.txt |                  |
+      |   type: text/plain                   |                  |
+      | remember_headers:                    |                  |
+      |   upload: Location                   |                  |
+      |   file: Directus-File-Id             |                  |
+      | method: PATCH                        | code: 204        |+
+      | path: /files/tus/<upload>            |                  |
+      | headers:                             |                  |
+      |   Tus-Resumable: 1.0.0               |                  |
+      |   Upload-Offset: '0'                 |                  |
+      |   Content-Type: >-                   |                  |
+      |     application/offset+octet-stream  |                  |
+      | body: ghost                          |                  |
+      | method: GET                          | code: 200        |+
+      | path: /files                         | body:            |
+      | query:                               |   data:          |
+      |   fields: id                         |     - id: <file> |
+      |   filter[filename_download][_eq]: >- |                  |
+      |     ghost-<run>.txt                  |                  |

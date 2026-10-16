@@ -133,3 +133,37 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   fields: id                       |                                         |
       |   filter[email][_eq]: >-           |                                         |
       |     refused-<run>@example.com      |                                         |
+
+  Scenario: a user invited again to a URL off the allow list is refused
+    Given these requests are sent:
+      | request                          | response  |
+      | method: POST                     | code: 200 |+
+      | path: /roles                     |           |
+      | payload:                         |           |
+      |   id: <again-role>               |           |
+      |   name: again-<run>              |           |
+      | method: POST                     | code: 204 |+
+      | path: /users/invite              |           |
+      | payload:                         |           |
+      |   email: again-<run>@example.com |           |
+      |   role: <again-role>             |           |
+      | method: POST                     | code: 200 |+
+      | path: /users                     |           |
+      | payload:                         |           |
+      |   email: known-<run>@example.com |           |
+    Then these requests get these responses:
+      | request                           | response                                |
+      | method: POST                      | code: 400                               |+
+      | path: /users/invite               | body:                                   |
+      | payload:                          |   errors:                               |
+      |   email: again-<run>@example.com  |     - message: >-                       |
+      |   role: <again-role>              |         Invalid payload. URL            |
+      |   invite_url: >-                  |         "https://elsewhere.test/accept" |
+      |     https://elsewhere.test/accept |         can't be used to invite users.  |
+      | method: POST                      | code: 400                               |+
+      | path: /users/invite               | body:                                   |
+      | payload:                          |   errors:                               |
+      |   email: known-<run>@example.com  |     - message: >-                       |
+      |   role: <again-role>              |         Invalid payload. URL            |
+      |   invite_url: >-                  |         "https://elsewhere.test/accept" |
+      |     https://elsewhere.test/accept |         can't be used to invite users.  |

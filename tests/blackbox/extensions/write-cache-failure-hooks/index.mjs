@@ -211,6 +211,21 @@ export default function registerHooks({ filter }, { database }) {
 	}
 
 	filter(
+		'test_wcf_nested_delete_child.items.delete',
+		async (keys, _meta, { scopedCache, database: hookDatabase }) => {
+			const declaringRows = await hookDatabase('test_wcf_nested_delete_child')
+				.whereIn('id', keys)
+				.where({ body: 'declare-foreign' });
+
+			if (declaringRows.length > 0) {
+				scopedCache.purgeBy({ collection: 'test_wcf_nested_delete_foreign' });
+			}
+
+			return keys;
+		},
+	);
+
+	filter(
 		'test_wcf_delete.items.delete',
 		async (keys, _meta, { scopedCache }) => {
 			const refusedRows = await database('test_wcf_delete')

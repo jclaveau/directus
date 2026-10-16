@@ -1,5 +1,6 @@
 import {
 	CreateCollections,
+	CreateFieldM2O,
 	CreateFieldO2M,
 	DeleteCollection,
 } from '@common/functions';
@@ -29,6 +30,10 @@ export const seedDBStructure = () => {
 					'test_wcf_nested_child',
 					'test_wcf_nested_parent',
 					'test_wcf_nested_foreign',
+					'test_wcf_nested_delete_holder',
+					'test_wcf_nested_delete_child',
+					'test_wcf_nested_delete_parent',
+					'test_wcf_nested_delete_foreign',
 					'test_wcf_delete',
 					'test_wcf_delete_foreign',
 					'test_wcf_upsert_takeover',
@@ -65,6 +70,25 @@ export const seedDBStructure = () => {
 						},
 						{
 							collection: 'test_wcf_nested_foreign',
+							meta: { accountability: null },
+							fields: [bodyField],
+						},
+						{
+							collection: 'test_wcf_nested_delete_parent',
+							meta: { accountability: null },
+							fields: [{ field: 'title', type: 'string', meta: {} }],
+						},
+						{
+							collection: 'test_wcf_nested_delete_child',
+							meta: { accountability: null },
+							fields: [bodyField],
+						},
+						{
+							collection: 'test_wcf_nested_delete_holder',
+							meta: { accountability: null },
+						},
+						{
+							collection: 'test_wcf_nested_delete_foreign',
 							meta: { accountability: null },
 							fields: [bodyField],
 						},
@@ -116,6 +140,21 @@ export const seedDBStructure = () => {
 					field: 'children',
 					otherCollection: 'test_wcf_nested_child',
 					otherField: 'parent',
+				});
+
+				await CreateFieldO2M(vendor, {
+					collection: 'test_wcf_nested_delete_parent',
+					field: 'children',
+					otherCollection: 'test_wcf_nested_delete_child',
+					otherField: 'parent',
+					relationMeta: { one_deselect_action: 'delete' },
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: 'test_wcf_nested_delete_holder',
+					field: 'child',
+					otherCollection: 'test_wcf_nested_delete_child',
+					relationSchema: { on_delete: 'NO ACTION' },
 				});
 
 				expect(true).toBeTruthy();

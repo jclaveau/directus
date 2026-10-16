@@ -38,6 +38,12 @@ export const seedDBStructure = () => {
 					otherCollection: collectionDiffOwners,
 				});
 
+				await CreateFieldM2O(vendor, {
+					collection: collectionDiffPets,
+					field: 'vet_id',
+					otherCollection: collectionDiffOwners,
+				});
+
 				expect(true).toBeTruthy();
 			}
 			catch (error) {

@@ -209,6 +209,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/files/tus-resumable-upload.test.ts': 12_000,
 	'/tests/db/routes/auth/sso-login.test.ts': 8_000,
 	'/tests/db/routes/items/write-payload-partials.test.ts': 1_600,
+	'/tests/db/routes/items/write-unique-value.test.ts': 1_600,
 	'/tests/db/routes/system/write-translations-moves.test.ts': 1_600,
 	'/tests/db/routes/system/write-versions-rename.test.ts': 1_600,
 	// Measured over the postgres run of 2026-10-01; no hint before it.

@@ -18,6 +18,10 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       and gives the rows sent the code "c".
     - "declare-foreign" on test_wcf_nested_child: declares
       test_wcf_nested_foreign through `purgeBy` and gives the rows the code "b".
+    - "declare-foreign" on test_wcf_nested_delete_child, a delete: declares
+      test_wcf_nested_delete_foreign through `purgeBy`. A holder still
+      referencing the child refuses its delete, which deselecting it from its
+      parent runs.
     - "refuse-deletion" on test_wcf_delete, a delete: declares
       test_wcf_delete_foreign through `purgeBy` and cancels.
     - "take-over-declared" on test_wcf_upsert_takeover, a create: writes the
@@ -211,6 +215,57 @@ Feature: A write failing after its hooks still purges what they wrote or declare
     Then response 8 is refused with the message:
       """
       Value "b" for field "code" in collection "test_wcf_nested_child" has to be unique.
+      """
+
+  Scenario: a refused nested delete purges what its hook declared
+    When these requests get these responses:
+      | request                                      | response             |
+      | method: POST                                 | code: 200            |+
+      | path: /items/test_wcf_nested_delete_parent   |                      |
+      | payload:                                     |                      |
+      |   id: 1                                      |                      |
+      |   title: parent                              |                      |
+      | method: POST                                 | code: 200            |+
+      | path: /items/test_wcf_nested_delete_child    |                      |
+      | payload:                                     |                      |
+      |   id: 1                                      |                      |
+      |   body: declare-foreign                      |                      |
+      |   parent: 1                                  |                      |
+      | method: POST                                 | code: 200            |+
+      | path: /items/test_wcf_nested_delete_holder   |                      |
+      | payload:                                     |                      |
+      |   id: 1                                      |                      |
+      |   child: 1                                   |                      |
+      | method: POST                                 | code: 200            |+
+      | path: /items/test_wcf_nested_delete_foreign  |                      |
+      | payload:                                     |                      |
+      |   id: 1                                      |                      |
+      |   body: original                             |                      |
+      | method: GET                                  | code: 200            |+
+      | path: /items/test_wcf_nested_delete_foreign  | cache: MISS          |
+      | query:                                       | body:                |
+      |   fields: body                               |   data:              |
+      |                                              |     - body: original |
+      | method: GET                                  | code: 200            |+
+      | path: /items/test_wcf_nested_delete_foreign  | cache: HIT           |
+      | query:                                       | body:                |
+      |   fields: body                               |   data:              |
+      |                                              |     - body: original |
+      | method: PATCH                                | code: 400            |+
+      | path: /items/test_wcf_nested_delete_parent/1 |                      |
+      | payload:                                     |                      |
+      |   children:                                  |                      |
+      |     delete:                                  |                      |
+      |       - 1                                    |                      |
+      | method: GET                                  | code: 200            |+
+      | path: /items/test_wcf_nested_delete_foreign  | cache: MISS          |
+      | query:                                       | body:                |
+      |   fields: body                               |   data:              |
+      |                                              |     - body: original |
+    Then response 7 is refused with the message:
+      """
+      Cannot delete "test_wcf_nested_delete_child:1": it is still referenced by
+      collection "test_wcf_nested_delete_holder".
       """
 
   Scenario: a delete its hook cancels is refused, purging what the hook declared
