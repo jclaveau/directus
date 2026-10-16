@@ -71,7 +71,18 @@ Feature: Imports write each row, exports notify whoever asked
       |                                           |         is ready                 |
       |                                           |       collection: directus_files |
 
-  Scenario: an export in a format no exporter knows notifies its failure
+  Scenario: an export in a format no exporter knows is refused before it runs
+    Then these requests get these responses:
+      | request                                   | response                         |
+      | method: POST                              | code: 400                        |+
+      | path: /utils/export/test_wp_porter_broken | body:                            |
+      | payload:                                  |   errors:                        |
+      |   query: {}                               |     - message: >-                |
+      |   format: pdf                             |         Invalid payload. Invalid |
+      |   file: {}                                |         format "pdf". Allowed:   |
+      |                                           |         csv, json, xml, yaml.    |
+
+  Scenario: an export whose query fails as it runs notifies its failure
     Given these requests are sent:
       | request                            | response  |
       | method: POST                       | code: 200 |+
@@ -85,8 +96,10 @@ Feature: Imports write each row, exports notify whoever asked
       | path: /utils/export/test_wp_porter_broken |                                    |
       | payload:                                  |                                    |
       |   query:                                  |                                    |
-      |     limit: 1                              |                                    |
-      |   format: html                            |                                    |
+      |     filter:                               |                                    |
+      |       no_such_field:                      |                                    |
+      |         _eq: broken-<run>                 |                                    |
+      |   format: json                            |                                    |
       | method: GET                               | code: 200                          |+
       | path: /notifications                      | body:                              |
       | query:                                    |   data:                            |
