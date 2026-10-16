@@ -111,3 +111,44 @@ Feature: A single permission reaches its policy's users from the next request on
       |   fields: policy,fields                 |     - policy: <queried-policy> |
       |   filter[policy][_eq]: <queried-policy> |       fields:                  |
       |                                         |         - name                 |
+
+  Scenario: a permission filter on id leaves out the app minimal permissions
+    Given these requests are sent:
+      | request                                 | response  |
+      | method: POST                            | code: 200 |+
+      | path: /policies                         |           |
+      | payload:                                |           |
+      |   id: <filtered-policy>                 |           |
+      |   name: filtered-<run>                  |           |
+      |   app_access: false                     |           |
+      |   admin_access: false                   |           |
+      | method: POST                            | code: 200 |+
+      | path: /permissions                      |           |
+      | payload:                                |           |
+      |   policy: <filtered-policy>             |           |
+      |   collection: test_singular_permissions |           |
+      |   action: read                          |           |
+      | remember: reading                       |           |
+      | method: POST                            | code: 200 |+
+      | path: /permissions                      |           |
+      | payload:                                |           |
+      |   policy: <filtered-policy>             |           |
+      |   collection: test_singular_permissions |           |
+      |   action: create                        |           |
+      | remember: creating                      |           |
+    Then these requests get these responses:
+      | request                                   | response                        |
+      | method: GET                               | code: 200                       |+
+      | path: /permissions                        | body:                           |
+      | query:                                    |   data:                         |
+      |   fields: action                          |     - action: create            |
+      |   sort: action                            |     - action: read              |
+      |   filter[id][_in]: '<reading>,<creating>' |                                 |
+      | method: GET                               | code: 404                       |+
+      | path: /permissions/2147483000             | body:                           |
+      |                                           |   errors:                       |
+      |                                           |     - message: >-               |
+      |                                           |         Item "2147483000"       |
+      |                                           |         doesn't exist in        |
+      |                                           |         collection              |
+      |                                           |         "directus_permissions". |
