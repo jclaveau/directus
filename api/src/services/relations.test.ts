@@ -162,7 +162,7 @@ describe('Services / Relations', () => {
 			await service.updateOne(
 				'test',
 				'related',
-				{ meta: { one_deselect_action: 'delete' } } as Partial<Relation>,
+				{ schema: { on_delete: 'SET NULL' } } as Partial<Relation>,
 				{ autoPurgeSystemCache: false },
 			);
 
@@ -170,9 +170,36 @@ describe('Services / Relations', () => {
 				{ sql: 'alter table "test" drop constraint "test_related_foreign"' },
 				{
 					sql: 'alter table "test" add constraint "test_related_foreign" '
-						+ 'foreign key ("related") references "related" ("id")',
+						+ 'foreign key ("related") references "related" ("id") '
+						+ 'on delete SET NULL',
 				},
 			]);
+		});
+
+		it('leaves the foreign key alone when handed the meta alone', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue(1);
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			pgTracker.on.any(/alter table/).response([]);
+
+			vi.mocked(transaction).mockImplementationOnce((_knex, runInTransaction) => {
+				return runInTransaction(pgDatabase as Knex.Transaction);
+			});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await service.updateOne(
+				'test',
+				'related',
+				{ meta: { one_deselect_action: 'delete' } } as Partial<Relation>,
+				{ autoPurgeSystemCache: false },
+			);
+
+			expect(pgTracker.history.all).toEqual([]);
 		});
 	});
 

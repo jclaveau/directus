@@ -29,7 +29,7 @@ Feature: A single relation is deleted by its collection and field
       | path: /relations/test_sw_pets           | body:                          |
       |                                         |   data: []                     |
 
-  Scenario: a relation updated with its meta alone keeps its foreign key
+  Scenario: a relation updated with its meta alone keeps its foreign key as it was
     Given these requests are sent:
       | request                              | response  |
       | method: POST                         | code: 200 |+
@@ -38,6 +38,8 @@ Feature: A single relation is deleted by its collection and field
       |   collection: test_sw_pets           |           |
       |   field: owner_ref                   |           |
       |   related_collection: test_sw_owners |           |
+      |   schema:                            |           |
+      |     on_delete: SET NULL              |           |
     Then these requests get these responses:
       | request                                 | response                          |
       | method: GET                             | code: 200                         |+
@@ -62,6 +64,7 @@ Feature: A single relation is deleted by its collection and field
       |                                         |       foreign_key_table: >-       |
       |                                         |         test_sw_owners            |
       |                                         |       foreign_key_column: id      |
+      |                                         |       on_delete: SET NULL         |
       |                                         |     meta:                         |
       |                                         |       many_collection: >-         |
       |                                         |         test_sw_pets              |

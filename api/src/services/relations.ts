@@ -375,7 +375,7 @@ export class RelationsService {
 			});
 		}
 
-		// The FK is re-created off these, so a meta-only payload keeps it.
+		// The FK is re-created off these and the payload's `schema`.
 		const relation: Partial<Relation> = {
 			...relationPayload,
 			collection,
@@ -390,7 +390,12 @@ export class RelationsService {
 
 		try {
 			await transaction(this.knex, async (trx) => {
-				if (existingRelation.related_collection) {
+				// A payload without `schema` leaves the FK as it is: re-creating it
+				// would drop its on_delete and on_update.
+				if (
+					existingRelation.related_collection
+					&& relationPayload.schema !== undefined
+				) {
 					// Synchronous: knex drops a rejected callback, so a throw would leave
 					// the queued drop running alone and the FK lost.
 					await trx.schema.alterTable(collection, (table) => {
