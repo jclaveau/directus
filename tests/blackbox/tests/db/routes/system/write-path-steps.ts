@@ -1,5 +1,5 @@
 import { getUrl } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import { defineFeature, loadFeature, rememberedText } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { createWebSocketConn } from '@common/transport';
 import { USER } from '@common/variables';
@@ -208,7 +208,8 @@ async function sendRows(
 		for (const [name, dottedPath] of Object.entries(
 			rememberedPaths(requestCell.remember),
 		)) {
-			scenarioKeys.keysByName[name] = String(
+			scenarioKeys.keysByName[name] = rememberedText(
+				name,
 				valueAtPath(answer, dottedPath),
 			);
 

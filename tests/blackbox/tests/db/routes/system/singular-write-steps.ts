@@ -1,5 +1,5 @@
 import config, { getUrl } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import { defineFeature, loadFeature, rememberedText } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { createHmac, randomUUID } from 'crypto';
@@ -260,28 +260,33 @@ async function sendRows(
 			{ schema },
 		) ?? {};
 
+		let response!: Response;
+
 		if (requestCell.eventually) {
 			await expect.poll(async () => {
-				return codeBodyAndText(await sendRequest(vendor, requestCell));
+				response = await sendRequest(vendor, requestCell);
+
+				return codeBodyAndText(response);
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
 				expectedResponse,
 			);
+		}
+		else {
+			response = await sendRequest(vendor, requestCell);
 
-			continue;
+			expect(codeBodyAndText(response)).toMatchObject(expectedResponse);
 		}
 
-		const response = await sendRequest(vendor, requestCell);
-
-		expect(codeBodyAndText(response)).toMatchObject(expectedResponse);
-
 		if (requestCell.remember !== undefined) {
-			scenarioKeys.keysByName[requestCell.remember] = String(
-				response.body.data.id,
+			scenarioKeys.keysByName[requestCell.remember] = rememberedText(
+				requestCell.remember,
+				response.body.data?.id,
 			);
 		}
 
 		if (requestCell.remember_session !== undefined) {
-			scenarioKeys.keysByName[requestCell.remember_session] = String(
+			scenarioKeys.keysByName[requestCell.remember_session] = rememberedText(
+				requestCell.remember_session,
 				sessionTokenOf(response),
 			);
 		}

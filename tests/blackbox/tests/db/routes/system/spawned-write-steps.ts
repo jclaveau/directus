@@ -1,5 +1,5 @@
 import config, { getUrl, paths } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import { defineFeature, loadFeature, rememberedText } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -220,15 +220,17 @@ async function sendRows(
 		);
 
 		if (requestCell.remember !== undefined) {
-			scenarioKeys.keysByName[requestCell.remember] = String(
-				response.body.data.id,
+			scenarioKeys.keysByName[requestCell.remember] = rememberedText(
+				requestCell.remember,
+				response.body.data?.id,
 			);
 		}
 
 		for (const [name, headerName] of Object.entries(
 			requestCell.remember_headers ?? {},
 		)) {
-			scenarioKeys.keysByName[name] = String(
+			scenarioKeys.keysByName[name] = rememberedText(
+				name,
 				response.headers[headerName.toLowerCase()],
 			)
 				.split('/')
