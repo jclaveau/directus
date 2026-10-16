@@ -9,7 +9,9 @@ import type {
 	PrimaryKey,
 	Query,
 	QueryOptions,
+	UpdateGroup,
 } from '@directus/types';
+import type { Driver } from '@directus/storage';
 import { toArray } from '@directus/utils';
 import type { AxiosResponse } from 'axios';
 import encodeURL from 'encodeurl';
@@ -25,7 +27,7 @@ import { useLogger } from '../logger/index.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { getAxios } from '../request/index.js';
 import { getStorage } from '../storage/index.js';
-import { clone, cloneDeep } from '../utils/lodash-es-used.js';
+import { clone, cloneDeep, escapeRegExp } from '../utils/lodash-es-used.js';
 import { extractMetadata } from './files/lib/extract-metadata.js';
 import { ItemsService } from './items.js';
 
@@ -65,6 +67,19 @@ export class FilesService extends ItemsService<File> {
 		const payload = { ...(existingFile ?? {}), ...clone(data) };
 
 		const disk = storage.location(payload.storage);
+
+		const requestedDiskName = data.filename_disk;
+
+		// Written before any row is, so a refused upload leaves nothing behind.
+		if (
+			requestedDiskName
+			&& requestedDiskName !== existingFile?.['filename_disk']
+			&& (await disk.exists(requestedDiskName))
+		) {
+			throw new InvalidPayloadError({
+				reason: diskNameTakenReason(requestedDiskName),
+			});
+		}
 
 		// If no folder is specified, we'll use the default folder from the settings if it exists
 		if ('folder' in payload === false) {
@@ -273,7 +288,87 @@ export class FilesService extends ItemsService<File> {
 			}
 		}
 
+		await this.refuseHeldDiskNames(
+			data.map((item) => ({ filenameDisk: item.filename_disk, ownerKey: null })),
+		);
+
 		return super.createMany(data, opts);
+	}
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		const diskNameClaims: DiskNameClaim[] = [];
+
+		for (const group of groups) {
+			const filenameDisk = group.data.filename_disk;
+
+			if (!filenameDisk) {
+				continue;
+			}
+
+			// Several rows holding one name would delete each other's file.
+			if (group.keys.length > 1) {
+				throw new InvalidPayloadError({ reason: diskNameTakenReason(filenameDisk) });
+			}
+
+			diskNameClaims.push({ filenameDisk, ownerKey: group.keys[0] ?? null });
+		}
+
+		await this.refuseHeldDiskNames(diskNameClaims);
+
+		return super.updateGroups(groups, opts);
+	}
+
+	/**
+	 * Refuse a `filename_disk` another row holds, or that two claims share.
+	 *
+	 * - Deleting either row would delete the other's file, and reading the asset
+	 *   would serve the other's content.
+	 * - A name only the disk holds is accepted: a row can be created for a file
+	 *   already in storage.
+	 */
+	private async refuseHeldDiskNames(
+		diskNameClaims: DiskNameClaim[],
+	): Promise<void> {
+		const claimedNames = diskNameClaims.flatMap((claim) => {
+			if (!claim.filenameDisk) {
+				return [];
+			}
+
+			return [claim.filenameDisk];
+		});
+
+		const sharedName = claimedNames.find((name, index) => {
+			return claimedNames.indexOf(name) !== index;
+		});
+
+		if (sharedName) {
+			throw new InvalidPayloadError({ reason: diskNameTakenReason(sharedName) });
+		}
+
+		if (claimedNames.length === 0) {
+			return;
+		}
+
+		const holderRows: { id: PrimaryKey; filename_disk: string }[] = await this.knex
+			.select('id', 'filename_disk')
+			.from('directus_files')
+			.whereIn('filename_disk', claimedNames);
+
+		for (const holderRow of holderRows) {
+			const isHeldElsewhere = diskNameClaims.some((claim) => {
+				return claim.filenameDisk === holderRow.filename_disk
+					&& String(claim.ownerKey) !== String(holderRow.id);
+			});
+
+			if (isHeldElsewhere) {
+				throw new InvalidPayloadError({
+					reason: diskNameTakenReason(holderRow.filename_disk),
+				});
+			}
+		}
 	}
 
 	/**
@@ -293,12 +388,8 @@ export class FilesService extends ItemsService<File> {
 
 		for (const file of files) {
 			const disk = storage.location(file['storage']);
-			const filePrefix = path.parse(file['filename_disk']).name;
 
-			// Delete file + thumbnails
-			for await (const filepath of disk.list(filePrefix)) {
-				await disk.delete(filepath);
-			}
+			await deleteFileAndThumbnails(disk, file['filename_disk']);
 		}
 
 		return keys;
@@ -322,6 +413,41 @@ export class FilesService extends ItemsService<File> {
 		}
 
 		return super.readByQuery(filteredQuery, opts);
+	}
+}
+
+type DiskNameClaim = {
+	filenameDisk: string | null | undefined;
+	ownerKey: PrimaryKey | null;
+};
+
+function diskNameTakenReason(filenameDisk: string) {
+	return `"filename_disk" "${filenameDisk}" is already used by another file`;
+}
+
+/**
+ * Delete a stored file and the thumbnails the assets service made from it.
+ *
+ * - A thumbnail is `<name>__<sha1 of the transforms>.<ext>` at the storage
+ *   root, whatever folder the file is in (`assets.ts`).
+ * - A driver's listing matches any longer name and, on a local disk, ignores
+ *   case, so each listed path is matched exactly before it is deleted.
+ */
+export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string) {
+	const { dir: folderPath, name: baseName } = path.posix.parse(filenameDisk);
+
+	const thumbnailPattern = new RegExp(
+		`^${escapeRegExp(baseName)}__[0-9a-f]{40}(\\.[^./]+)?$`,
+	);
+
+	const listedPrefixes = new Set([path.posix.join(folderPath, baseName), baseName]);
+
+	for (const listedPrefix of listedPrefixes) {
+		for await (const filepath of disk.list(listedPrefix)) {
+			if (filepath === filenameDisk || thumbnailPattern.test(filepath)) {
+				await disk.delete(filepath);
+			}
+		}
 	}
 }
 

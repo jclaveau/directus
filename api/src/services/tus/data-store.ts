@@ -104,6 +104,20 @@ export class TusDataStore extends DataStore {
 			}
 		}
 
+		// Starting the upload empties the file it names, so a name another file
+		// holds is refused before anything is written.
+		if (
+			requestedDiskName
+			&& requestedDiskName !== existingFile?.['filename_disk']
+			&& (await this.storageDriver.exists(requestedDiskName))
+		) {
+			throw {
+				status_code: 400,
+				body: `"filename_disk" "${requestedDiskName}" is already used`
+					+ ' by another file',
+			};
+		}
+
 		// Is this file a replacement? if the file data already exists and we have a primary key
 		const isReplacement = existingFile !== null && !!upload.metadata['id'];
 
