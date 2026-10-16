@@ -1297,6 +1297,31 @@ describe('Integration Tests', () => {
 			});
 
 			it.each([
+				{ batch: [{ id: 1, children: [7] }, { id: 2, children: [7] }] },
+				{
+					batch: [
+						{ id: 1, children: [{ id: 7 }] },
+						{ id: 2, children: { update: [{ id: 7 }] } },
+					],
+				},
+			])(oneLine`
+				refuses to give one existing child to two rows of a batch, writing
+				nothing: %j
+			`, async ({ batch }) => {
+				await expect(service.updateBatch(batch))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it.each([
 				{ children: [{}] },
 				{ children: { create: [{}], delete: [7] } },
 			])(oneLine`

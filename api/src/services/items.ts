@@ -1468,56 +1468,68 @@ implements AbstractService<Item> {
 	/**
 	 * Refuses a change that names an existing o2m child for several rows: each row
 	 * would take the child from the one before, leaving it on the last. A child
-	 * created inline is each row's own, and so is an m2m's junction row.
+	 * created inline is each row's own, and so is an m2m's junction row. Rows are
+	 * counted over every group, so two rows of a batch can't share a child either.
 	 */
-	private refuseChildJoiningSeveralRows(group: UpdateGroup<Item>): void {
-		if (group.keys.length < 2) {
-			return;
-		}
-
-		const groupData = group.data as Partial<AnyItem>;
-
+	private refuseChildJoiningSeveralRows(writingGroups: UpdateGroup<Item>[]): void {
 		for (const relation of this.schema.relations) {
 			const childrenField = relation.meta?.one_field;
 
 			if (
 				relation.related_collection !== this.collection
 				|| !childrenField
-				|| !(childrenField in groupData)
 				|| relation.meta?.junction_field
 			) {
 				continue;
 			}
 
-			const childrenValue = groupData[childrenField];
-
 			const childPrimaryKeyField = this.schema.collections[relation.collection]!
 				.primary;
 
-			let namedChildren: unknown[] = [childrenValue].flat();
+			const joiningRowCounts = new Map<string, number>();
 
-			// The `{ create, update, delete }` form moves only what `update` names.
-			if (!Array.isArray(childrenValue)) {
-				namedChildren = [childrenValue?.update].filter(Array.isArray).flat();
-			}
+			for (const group of writingGroups) {
+				const groupData = group.data as Partial<AnyItem>;
 
-			const joiningChildKey = namedChildren
-				.map((namedChild) => {
-					if (isPlainObject(namedChild)) {
-						return (namedChild as AnyItem)[childPrimaryKeyField];
+				if (!(childrenField in groupData)) {
+					continue;
+				}
+
+				const childrenValue = groupData[childrenField];
+
+				let namedChildren: unknown[] = [childrenValue].flat();
+
+				// The `{ create, update, delete }` form moves only what `update` names.
+				if (!Array.isArray(childrenValue)) {
+					namedChildren = [childrenValue?.update].filter(Array.isArray).flat();
+				}
+
+				const joiningChildKeys = new Set(namedChildren
+					.map((namedChild) => {
+						if (isPlainObject(namedChild)) {
+							return (namedChild as AnyItem)[childPrimaryKeyField];
+						}
+
+						return namedChild;
+					})
+					.filter((childKey) => !isMissingPrimaryKey(childKey))
+					.map(String));
+
+				for (const joiningChildKey of joiningChildKeys) {
+					const joiningRowCount = (joiningRowCounts.get(joiningChildKey) ?? 0)
+						+ group.keys.length;
+
+					if (joiningRowCount > 1) {
+						throw new InvalidPayloadError({
+							reason: oneLine`
+								"${joiningChildKey}" can't join more than one
+								"${this.collection}"
+							`,
+						});
 					}
 
-					return namedChild;
-				})
-				.find((childKey) => !isMissingPrimaryKey(childKey));
-
-			if (joiningChildKey !== undefined) {
-				throw new InvalidPayloadError({
-					reason: oneLine`
-						"${String(joiningChildKey)}" can't join more than one
-						"${this.collection}"
-					`,
-				});
+					joiningRowCounts.set(joiningChildKey, joiningRowCount);
+				}
 			}
 		}
 	}
@@ -2032,7 +2044,7 @@ implements AbstractService<Item> {
 					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
 					| this.requiredIntegrityChecks(writingGroups);
 
-				writingGroups.forEach((group) => this.refuseChildJoiningSeveralRows(group));
+				this.refuseChildJoiningSeveralRows(writingGroups);
 
 				// Every group before any is applied, so a row the caller may not update
 				// is refused whatever error a guard stored for another row.

@@ -275,6 +275,15 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       |     entries:                      |         code: INVALID_PAYLOAD    |
       |       - id: sk-x1                 |                                  |
       |         name: shared              |                                  |
+      | method: PATCH                     | code: 400                        |+
+      | path: /items/test_nested_o2m_list | body:                            |
+      | payload:                          |   errors:                        |
+      |   - id: sk-a                      |     - message: >-                |
+      |     entries:                      |         Invalid payload. "sk-x1" |
+      |       - sk-x1                     |         can't join more than one |
+      |   - id: sk-b                      |         "test_nested_o2m_list".  |
+      |     entries:                      |       extensions:                |
+      |       - sk-x1                     |         code: INVALID_PAYLOAD    |
     Then the rows of test_nested_o2m_list_entry whose key starts with "sk-" are:
       | id    | list | name |
       | sk-a1 | sk-a |      |
