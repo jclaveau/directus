@@ -216,3 +216,60 @@ Feature: A single access row grants its policy from the next request on
       |                                              |         "delete" for collection |
       |                                              |         "test_singular_access"  |
       |                                              |         or it does not exist.   |
+
+  Scenario: a key a batch delete misses is not found for the admin, forbidden to a user
+    Given these requests are sent:
+      | request                                | response  |
+      | method: POST                           | code: 200 |+
+      | path: /policies                        |           |
+      | payload:                               |           |
+      |   id: <deleter-policy>                 |           |
+      |   name: deleter-<run>                  |           |
+      |   app_access: false                    |           |
+      |   admin_access: false                  |           |
+      |   permissions:                         |           |
+      |     - collection: test_singular_access |           |
+      |       action: delete                   |           |
+      | method: POST                           | code: 200 |+
+      | path: /users                           |           |
+      | payload:                               |           |
+      |   email: deleter-<run>@example.com     |           |
+      |   token: <deleter-token>               |           |
+      |   policies:                            |           |
+      |     - policy: <deleter-policy>         |           |
+      | method: POST                           | code: 200 |+
+      | path: /items/test_singular_access      |           |
+      | payload:                               |           |
+      |   name: kept-<run>                     |           |
+      | remember: kept                         |           |
+    Then these requests get these responses:
+      | request                                  | response                        |
+      | method: DELETE                           | code: 404                       |+
+      | path: /items/test_singular_access        | body:                           |
+      | payload:                                 |   errors:                       |
+      |   - 2147483000                           |     - message: >-               |
+      |                                          |         Item "2147483000"       |
+      |                                          |         doesn't exist in        |
+      |                                          |         collection              |
+      |                                          |         "test_singular_access". |
+      | method: DELETE                           | code: 404                       |+
+      | path: /items/test_singular_access        | body:                           |
+      | payload:                                 |   errors:                       |
+      |   - <kept>                               |     - message: >-               |
+      |   - 2147483000                           |         Item "2147483000"       |
+      |                                          |         doesn't exist in        |
+      |                                          |         collection              |
+      |                                          |         "test_singular_access". |
+      | method: GET                              | code: 200                       |+
+      | path: /items/test_singular_access/<kept> | body:                           |
+      | query:                                   |   data:                         |
+      |   fields: name                           |     name: kept-<run>            |
+      | as: <deleter-token>                      | code: 403                       |+
+      | method: DELETE                           | body:                           |
+      | path: /items/test_singular_access        |   errors:                       |
+      | payload:                                 |     - message: >-               |
+      |   - 2147483000                           |         You don't have          |
+      |                                          |         permission to perform   |
+      |                                          |         "delete" for collection |
+      |                                          |         "test_singular_access"  |
+      |                                          |         or it does not exist.   |
