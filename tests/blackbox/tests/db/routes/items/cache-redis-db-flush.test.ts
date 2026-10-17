@@ -13,7 +13,7 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -142,7 +142,7 @@ describe.each(vendors)('%s', (vendor) => {
 		database: string,
 		instanceOverrides: Record<string, string> = {},
 	) {
-		const port = await getPort();
+		const port = await freePortOfWorker();
 		const instanceEnv = cloneDeep(env);
 		Object.assign(instanceEnv[vendor], instanceOverrides);
 

@@ -9,7 +9,7 @@ import {
 import { set } from 'lodash-es';
 import { expect, it } from 'vitest';
 import {
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 	CreateCollections,
 	CreateFieldM2M,
 	CreateItem,
@@ -160,11 +160,25 @@ export const seedDBStructure = () => {
 					const localJunctionIngredientsSuppliers = `${collectionIngredients}_suppliers_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localJunctionIngredientsSuppliers });
-					await DeleteCollection(vendor, { collection: localJunctionFoodsIngredients });
-					await DeleteCollection(vendor, { collection: localCollectionSuppliers });
-					await DeleteCollection(vendor, { collection: localCollectionIngredients });
-					await DeleteCollection(vendor, { collection: localCollectionFoods });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localJunctionIngredientsSuppliers,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localJunctionFoodsIngredients,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionSuppliers,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionIngredients,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionFoods,
+					});
 
 					// Foods, ingredients and suppliers share their whole structure at
 					// this point, so one POST /collections builds all three in a single

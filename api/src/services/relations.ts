@@ -273,7 +273,7 @@ export class RelationsService {
 
 			await transaction(this.knex, async (trx) => {
 				if (relation.related_collection) {
-					await trx.schema.alterTable(relation.collection!, async (table) => {
+					await trx.schema.alterTable(relation.collection!, (table) => {
 						this.alterType(table, relation, fieldSchema.nullable);
 
 						const constraintName: string = getDefaultIndexName('foreign', relation.collection!, relation.field!);
@@ -344,7 +344,7 @@ export class RelationsService {
 	async updateOne(
 		collection: string,
 		field: string,
-		relation: Partial<Relation>,
+		relationPayload: Partial<Relation>,
 		opts?: MutationOptions,
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
@@ -375,6 +375,14 @@ export class RelationsService {
 			});
 		}
 
+		// The FK is re-created off these and the payload's `schema`.
+		const relation: Partial<Relation> = {
+			...relationPayload,
+			collection,
+			field,
+			related_collection: existingRelation.related_collection,
+		};
+
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
 		this.helpers.schema.preRelationChange(relation);
 
@@ -382,8 +390,15 @@ export class RelationsService {
 
 		try {
 			await transaction(this.knex, async (trx) => {
-				if (existingRelation.related_collection) {
-					await trx.schema.alterTable(collection, async (table) => {
+				// A payload without `schema` leaves the FK as it is: re-creating it
+				// would drop its on_delete and on_update.
+				if (
+					existingRelation.related_collection
+					&& relationPayload.schema !== undefined
+				) {
+					// Synchronous: knex drops a rejected callback, so a throw would leave
+					// the queued drop running alone and the FK lost.
+					await trx.schema.alterTable(collection, (table) => {
 						let constraintName: string = getDefaultIndexName('foreign', collection, field);
 
 						// If the FK already exists in the DB, drop it first
@@ -392,7 +407,6 @@ export class RelationsService {
 							table.dropForeign(field, constraintName);
 
 							constraintName = this.helpers.schema.constraintName(constraintName);
-							existingRelation.schema.constraint_name = constraintName;
 						}
 
 						this.alterType(table, relation, fieldSchema.nullable);

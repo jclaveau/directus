@@ -3,7 +3,7 @@ import {
 	CreateField,
 	CreateFieldO2M,
 	CreateItem,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 	UpdateItem,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
@@ -35,8 +35,13 @@ export const seedDBStructure = () => {
 					const localCollectionSingletonO2M = `${collectionSingletonO2M}_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localCollectionSingletonO2M });
-					await DeleteCollection(vendor, { collection: localCollectionSingleton });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionSingletonO2M,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionSingleton,
+					});
 
 					// Create singleton collection
 					await CreateCollection(vendor, {

@@ -134,6 +134,7 @@ export const getExtensionsSettings = async ({
 		 */
 		if (settingsForName && !local.has(extension.name)) {
 			await service.extensionsItemService.updateOne(settingsForName.id, { folder });
+			settingsForName.folder = folder;
 			continue;
 		}
 

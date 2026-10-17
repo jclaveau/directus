@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
+	ActionEventParams,
 	Item,
 	MutationOptions,
 	PrimaryKey,
@@ -16,9 +17,9 @@ import Joi from 'joi';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { performance } from 'node:perf_hooks';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import getDatabase from '../database/index.js';
+import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
@@ -27,6 +28,7 @@ import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
+import { transaction } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
@@ -187,39 +189,17 @@ export class UsersService extends ItemsService {
 	}
 
 	/**
-	 * Create a new user
-	 */
-	override async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
-		try {
-			if ('email' in data && data['email'] !== undefined) {
-				this.validateEmail(data['email']);
-				await this.checkUniqueEmails([data['email']]);
-			}
-
-			if ('password' in data) {
-				await this.checkPasswordPolicy([data['password']]);
-			}
-		} catch (err: any) {
-			opts.preMutationError = err;
-		}
-
-		if (!('status' in data) || data['status'] === 'active') {
-			// Creating a user only requires checking user limits if the user is active, no need to care about the role
-			opts.userIntegrityCheckFlags =
-				(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-
-			opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
-		}
-
-		return await super.createOne(data, opts);
-	}
-
-	/**
 	 * Create multiple new users
 	 */
 	override async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
-		const emails = data.map((payload) => payload['email']).filter((email) => email);
-		const passwords = data.map((payload) => payload['password']).filter((password) => password);
+		const emails = data
+			.filter((payload) => payload['email'] !== undefined)
+			.map((payload) => payload['email']);
+
+		const passwords = data
+			.filter((payload) => 'password' in payload)
+			.map((payload) => payload['password']);
+
 		const someActive = data.some((payload) => !('status' in payload) || payload['status'] === 'active');
 
 		try {
@@ -394,12 +374,54 @@ export class UsersService extends ItemsService {
 			}
 		}
 
-		// Manual constraint, see https://github.com/directus/directus/pull/19912
-		await this.knex('directus_comments').update({ user_updated: null }).whereIn('user_updated', keys);
-		await this.knex('directus_notifications').update({ sender: null }).whereIn('sender', keys);
-		await this.knex('directus_versions').update({ user_updated: null }).whereIn('user_updated', keys);
+		opts.mutationTracker ??= this.createMutationTracker();
 
-		await super.deleteMany(keys, opts);
+		// Held until the delete commits: a hook fired inside it would read the users
+		// still there, or wait on the rows it locks.
+		const heldActionEvents: ActionEventParams[] = [];
+
+		// Manual constraint, see https://github.com/directus/directus/pull/19912
+		// In the delete's transaction: a delete refused there rolls it back.
+		await transaction(this.knex, async (trx) => {
+			if (!opts.preMutationError) {
+				await trx('directus_comments')
+					.update({ user_updated: null })
+					.whereIn('user_updated', keys);
+
+				await trx('directus_notifications')
+					.update({ sender: null })
+					.whereIn('sender', keys);
+
+				await trx('directus_versions')
+					.update({ user_updated: null })
+					.whereIn('user_updated', keys);
+			}
+
+			await new ItemsService('directus_users', {
+				knex: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				nested: this.nested,
+			}).deleteMany(keys, {
+				...opts,
+				bypassEmitAction: opts.bypassEmitAction ?? ((actionEvent) => {
+					heldActionEvents.push(actionEvent);
+				}),
+			});
+		}, opts.mutationTracker.snapshot());
+
+		const emitting = Promise.all(heldActionEvents.map((actionEvent) => {
+			return emitter.emitAction(
+				actionEvent.event,
+				actionEvent.meta,
+				actionEvent.context,
+			);
+		}));
+
+		if (opts.awaitActionHooks !== false) {
+			await emitting;
+		}
+
 		await this.clearUserSessions(keys);
 
 		return keys;
@@ -434,6 +456,9 @@ export class UsersService extends ItemsService {
 				// For known users update role if changed
 			} else if (user.status === 'invited' && user.role !== role) {
 				await this.updateOne(user.id, { role }, opts);
+			}
+			else if (opts.preMutationError) {
+				throw opts.preMutationError;
 			}
 
 			// Send invite for new and already invited users
@@ -711,10 +736,6 @@ export class UsersService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 }

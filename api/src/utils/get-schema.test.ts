@@ -37,12 +37,15 @@ const memoryCache: { schema: any; generation: number } = {
 	generation: 0,
 };
 
-vi.mock('../cache.js', () => {
+// Freezes in place, as the real cache does.
+vi.mock('../cache.js', async () => {
+	const { freezeSchema } = await import('./freeze-schema.js');
+
 	return {
 		getMemorySchemaCache: () => memoryCache.schema,
 		getSchemaCacheGeneration: () => memoryCache.generation,
 		setMemorySchemaCache: (schema: any) => {
-			memoryCache.schema = schema;
+			memoryCache.schema = freezeSchema(schema);
 		},
 	};
 });
@@ -382,6 +385,7 @@ describe('getSchema cached (non-bypass) path', () => {
 	afterEach(() => {
 		tracker.reset();
 		env['CACHE_SCHEMA'] = false;
+		env['CACHE_SCHEMA_FREEZE_ENABLED'] = false;
 	});
 
 	// A populated in-memory cache short-circuits the whole build (48-50).
@@ -407,7 +411,7 @@ describe('getSchema cached (non-bypass) path', () => {
 
 		expect(schema.collections['test']).toBeDefined();
 		// schema was written to the in-memory cache and the lock/bus were coordinated
-		expect(memoryCache.schema).toBe(schema);
+		expect(memoryCache.schema).toEqual(schema);
 		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema });
 		expect(lockDelete).toHaveBeenCalledWith('schemaCache--preparing');
 	});
@@ -417,7 +421,10 @@ describe('getSchema cached (non-bypass) path', () => {
 	it('waits for another process and resolves via the bus listener', async () => {
 		lockIncrement.mockResolvedValue(2);
 
-		const published = { collections: { fromBus: {} }, relations: [] };
+		const published = {
+			collections: { fromBus: { fields: {} } },
+			relations: [],
+		};
 
 		busSubscribe.mockImplementation(
 			async (_key: string, listener: (opts: { schema: any }) => void) => {
@@ -430,9 +437,69 @@ describe('getSchema cached (non-bypass) path', () => {
 
 		const schema = await getSchema({ database: db });
 
-		expect(schema).toBe(published);
+		expect(schema).toEqual(published);
 		expect(memoryCache.schema).toBe(published);
 		expect(overview).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		hands the request that built the schema a copy it can write to,
+		not the frozen one the cache keeps
+	`, async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockResolvedValue(overviewFor('test'));
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.isFrozen(memoryCache.schema)).toBe(true);
+		expect(Object.isFrozen(schema)).toBe(false);
+		expect(Object.isFrozen(schema.collections['test']!.fields['id'])).toBe(false);
+	});
+
+	it(oneLine`
+		hands a request waiting on the bus a copy it can write to,
+		not the frozen one the cache keeps
+	`, async () => {
+		lockIncrement.mockResolvedValue(2);
+
+		const published = {
+			collections: { fromBus: { fields: {} } },
+			relations: [],
+		};
+
+		busSubscribe.mockImplementation(
+			async (_key: string, listener: (opts: { schema: any }) => void) => {
+				listener({ schema: published });
+			},
+		);
+
+		busUnsubscribe.mockResolvedValue(undefined);
+
+		const schema = await getSchema({ database: db });
+
+		expect(Object.isFrozen(memoryCache.schema)).toBe(true);
+		expect(Object.isFrozen(schema)).toBe(false);
+		expect(Object.isFrozen(schema.collections['fromBus'])).toBe(false);
+	});
+
+	it(oneLine`
+		hands the request that built the schema the frozen cached one when
+		CACHE_SCHEMA_FREEZE_ENABLED is on, as a cache hit gets
+	`, async () => {
+		env['CACHE_SCHEMA_FREEZE_ENABLED'] = true;
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockResolvedValue(overviewFor('test'));
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema).toBe(memoryCache.schema);
+		expect(Object.isFrozen(schema)).toBe(true);
 	});
 
 	it('rebuilds when a schema write clears the cache mid-build', async () => {
@@ -451,7 +518,7 @@ describe('getSchema cached (non-bypass) path', () => {
 		const schema = await getSchema({ database: db });
 
 		expect(Object.keys(schema.collections)).toEqual(['fresh']);
-		expect(memoryCache.schema).toBe(schema);
+		expect(memoryCache.schema).toEqual(schema);
 		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema });
 	});
 

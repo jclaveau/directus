@@ -140,6 +140,9 @@ export class ExtensionManager {
 	 */
 	private reloadQueue: JobQueue = new JobQueue();
 
+	/** The reload waiting behind the running one, which later callers share. */
+	private queuedReload: Promise<unknown> | null = null;
+
 	/**
 	 * Optional file system watcher to auto-reload extensions when the local file system changes
 	 */
@@ -215,7 +218,7 @@ export class ExtensionManager {
 		this.messenger.subscribe(this.reloadChannel, (payload: Record<string, unknown>) => {
 			// Ignore requests for reloading that were published by the current process
 			if (isPlainObject(payload) && 'origin' in payload && payload['origin'] === this.processId) return;
-			this.reload();
+			this.reloadLoggingFailure('a request from another process');
 		});
 	}
 
@@ -326,9 +329,9 @@ export class ExtensionManager {
 	 * Reload all the extensions. Will unload if extensions have already been loaded
 	 */
 	public reload(options?: { forceSync: boolean }): Promise<unknown> {
-		if (this.reloadQueue.size > 0) {
-			// The pending job in the queue will already handle the additional changes
-			return Promise.resolve();
+		if (this.queuedReload !== null) {
+			// The queued job will already handle the additional changes
+			return this.queuedReload;
 		}
 
 		const logger = useLogger();
@@ -341,7 +344,7 @@ export class ExtensionManager {
 			reject = rej;
 		});
 
-		this.reloadQueue.enqueue(async () => {
+		const reloadExtensions = async () => {
 			if (this.isLoaded) {
 				const prevExtensions = clone(this.extensions);
 
@@ -381,6 +384,19 @@ export class ExtensionManager {
 			} else {
 				logger.warn('Extensions have to be loaded before they can be reloaded');
 				reject(new Error('Extensions have to be loaded before they can be reloaded'));
+			}
+		};
+
+		this.queuedReload = promise;
+
+		this.reloadQueue.enqueue(async () => {
+			this.queuedReload = null;
+
+			try {
+				await reloadExtensions();
+			}
+			catch (error) {
+				reject(error);
 			}
 		});
 
@@ -427,6 +443,13 @@ export class ExtensionManager {
 		};
 	}
 
+	/** For the callers nothing awaits, whose rejection would be unhandled. */
+	private reloadLoggingFailure(trigger: string): void {
+		this.reload().catch((error) => {
+			useLogger().error(error, `Failed to reload the extensions on ${trigger}`);
+		});
+	}
+
 	/**
 	 * Start the chokidar watcher for extensions on the local filesystem
 	 */
@@ -436,6 +459,7 @@ export class ExtensionManager {
 		logger.info('Watching extensions for changes...');
 
 		const extensionDirUrl = pathToRelativeUrl(getExtensionsPath());
+		const changeTrigger = 'a change in the extensions folder';
 
 		this.watcher = chokidar.watch(
 			[path.resolve('package.json'), path.posix.join(extensionDirUrl, '*', 'package.json')],
@@ -451,15 +475,15 @@ export class ExtensionManager {
 		this.watcher
 			.on(
 				'add',
-				debounce(() => this.reload(), 500),
+				debounce(() => this.reloadLoggingFailure(changeTrigger), 500),
 			)
 			.on(
 				'change',
-				debounce(() => this.reload(), 650),
+				debounce(() => this.reloadLoggingFailure(changeTrigger), 650),
 			)
 			.on(
 				'unlink',
-				debounce(() => this.reload(), 2000),
+				debounce(() => this.reloadLoggingFailure(changeTrigger), 2000),
 			);
 	}
 

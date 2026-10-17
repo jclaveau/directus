@@ -47,6 +47,13 @@ import { set } from '../utils/lodash-es-used.js';
 const env = useEnv();
 const logger = useLogger();
 
+export const exportMimeTypes: Record<ExportFormat, string> = {
+	csv: 'text/csv',
+	json: 'application/json',
+	xml: 'text/xml',
+	yaml: 'text/yaml',
+};
+
 export class ImportService {
 	knex: Knex;
 	accountability: Accountability | null;
@@ -296,13 +303,6 @@ export class ExportService {
 		try {
 			if (!tmpFile) throw new Error('Failed to create temporary file for export');
 
-			const mimeTypes = {
-				csv: 'text/csv',
-				json: 'application/json',
-				xml: 'text/xml',
-				yaml: 'text/yaml',
-			};
-
 			const database = getDatabase();
 
 			await transaction(database, async (trx) => {
@@ -403,7 +403,7 @@ export class ExportService {
 				title: options?.file?.title ?? title,
 				filename_download: options?.file?.filename_download ?? filename,
 				storage: options?.file?.storage ?? storage,
-				type: mimeTypes[format],
+				type: exportMimeTypes[format],
 			};
 
 			const savedFile = await filesService.uploadOne(createReadStream(tmpFile.path), fileWithDefaults);

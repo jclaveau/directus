@@ -1,4 +1,4 @@
-import { DeleteCollection } from './functions';
+import { DeleteCollectionIfPresent } from './functions';
 import vendors from './get-dbs-to-test';
 import { USER } from './variables';
 import fs from 'node:fs/promises';
@@ -16,9 +16,9 @@ export const seedDBStructure = async () => {
 	it.each(vendors)('%s', async (vendor) => {
 		try {
 			// Delete existing collections
-			await DeleteCollection(vendor, { collection: collectionNameO2M });
-			await DeleteCollection(vendor, { collection: collectionNameM2O });
-			await DeleteCollection(vendor, { collection: collectionName });
+			await DeleteCollectionIfPresent(vendor, { collection: collectionNameO2M });
+			await DeleteCollectionIfPresent(vendor, { collection: collectionNameM2O });
+			await DeleteCollectionIfPresent(vendor, { collection: collectionName });
 
 			// Update total count in tests flow
 			const response = await request(getUrl(vendor))

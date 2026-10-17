@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 
 // The manager reaches half the api to register an extension, so everything below
 // the import seam is stubbed. What is pinned here is one decision: which loads
@@ -22,7 +23,14 @@ const mocks = vi.hoisted(() => {
 		defaultEnv,
 		env: defaultEnv as Record<string, unknown>,
 		logger: { info: noop, warn: vi.fn(), error: vi.fn(), debug: noop, trace: noop },
-		bus: { subscribe: noop, publish: noop, unsubscribe: noop },
+		bus: {
+			subscribe: noop as (
+				channel: string,
+				handler: (payload: Record<string, unknown>) => void,
+			) => void,
+			publish: noop,
+			unsubscribe: noop,
+		},
 		flows: { addOperation: noop, removeOperation: noop },
 		installation: { install: noop, uninstall: noop },
 		importFileUrl: vi.fn(async () => ({ default: mocks.moduleDefault })),
@@ -34,7 +42,22 @@ const mocks = vi.hoisted(() => {
 		} as Record<string, Map<string, unknown>>,
 		settings: [] as unknown[],
 		sandboxedCode: '',
+		watcherHandlers: new Map<string, () => void>(),
 	};
+});
+
+vi.mock('chokidar', () => {
+	const watcher = {
+		on: (event: string, handler: () => void) => {
+			mocks.watcherHandlers.set(event, handler);
+			return watcher;
+		},
+		add: () => undefined,
+		unwatch: () => undefined,
+		close: async () => undefined,
+	};
+
+	return { default: { watch: () => watcher } };
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => mocks.env }));
@@ -92,6 +115,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.useRealTimers();
 });
 
 /** One of each api extension shape, so all four import sites are covered. */
@@ -125,6 +149,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.useRealTimers();
 });
 
 test.each(shapes)(
@@ -220,4 +245,115 @@ export default ({ filter }) => {
 	const filtered = emitter.emitFilter(SANDBOX_EVENT, { value: 1 }, {}, null);
 
 	await expect(filtered).resolves.toEqual({ value: 1, seen: true });
+});
+
+test('shares the queued reload with a reload asked behind it', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	let releaseFirstLoad: () => void = () => undefined;
+
+	vi.spyOn(manager as any, 'unload').mockResolvedValue(undefined);
+
+	const loadSpy = vi.spyOn(manager as any, 'load')
+		.mockImplementationOnce(() => {
+			return new Promise<void>((resolve) => {
+				releaseFirstLoad = resolve;
+			});
+		})
+		.mockResolvedValue(undefined);
+
+	const runningReload = manager.reload();
+	const queuedReload = manager.reload();
+	const lateReload = manager.reload();
+
+	await expect(Promise.race([lateReload, setImmediate('pending')]))
+		.resolves.toBe('pending');
+
+	releaseFirstLoad();
+
+	await expect(runningReload).resolves.toBeUndefined();
+	await expect(lateReload).resolves.toBeUndefined();
+	expect(loadSpy).toHaveBeenCalledTimes(2);
+	await expect(queuedReload).resolves.toBeUndefined();
+});
+
+test('runs the next reload after one whose load threw', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	vi.spyOn(manager as any, 'unload').mockResolvedValue(undefined);
+
+	const loadSpy = vi.spyOn(manager as any, 'load')
+		.mockRejectedValueOnce(new Error('load failed'))
+		.mockResolvedValue(undefined);
+
+	await expect(Promise.race([manager.reload(), setImmediate('pending')]))
+		.rejects.toThrow(new Error('load failed'));
+
+	await expect(Promise.race([manager.reload(), setImmediate('pending')]))
+		.resolves.toBeUndefined();
+
+	expect(loadSpy).toHaveBeenCalledTimes(2);
+});
+
+test('logs a reload asked by another process that fails', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const subscribeSpy = vi.spyOn(mocks.bus, 'subscribe');
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	const reloadFailure = new Error('load failed');
+	vi.spyOn(manager, 'reload').mockRejectedValue(reloadFailure);
+
+	const [, reloadRequestHandler] = subscribeSpy.mock.lastCall!;
+	reloadRequestHandler({ origin: 'another-process' });
+	await setImmediate();
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(
+		reloadFailure,
+		'Failed to reload the extensions on a request from another process',
+	);
+});
+
+test.each([
+	{ watchedEvent: 'add', debounceMs: 500 },
+	{ watchedEvent: 'change', debounceMs: 650 },
+	{ watchedEvent: 'unlink', debounceMs: 2000 },
+])('logs a failed reload on a watched $watchedEvent', async (watchedChange) => {
+	const { watchedEvent, debounceMs } = watchedChange;
+
+	mocks.env = { ...mocks.defaultEnv, EXTENSIONS_PATH: './extensions' };
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: true });
+
+	const reloadFailure = new Error('load failed');
+	vi.spyOn(manager, 'reload').mockRejectedValue(reloadFailure);
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+
+	mocks.watcherHandlers.get(watchedEvent)!();
+	vi.advanceTimersByTime(debounceMs);
+	vi.useRealTimers();
+
+	await setImmediate();
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(
+		reloadFailure,
+		'Failed to reload the extensions on a change in the extensions folder',
+	);
 });

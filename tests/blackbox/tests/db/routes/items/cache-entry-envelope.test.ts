@@ -11,7 +11,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { compress as tokenize } from '@directus/utils/values';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -56,7 +56,7 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 		}
 
 		async function boot(env: ReturnType<typeof instanceEnv>) {
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			const instance = spawn('node', [paths.cli, 'start'], {
@@ -120,7 +120,7 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 			let url: string;
 
 			beforeAll(async () => {
-				const proxyPort = await getPort();
+				const proxyPort = await freePortOfWorker();
 				proxy = createRedisProxy(6108, proxyPort);
 				await proxy.open();
 

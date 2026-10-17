@@ -5,7 +5,7 @@ import { requestGraphQL } from '@common/transport';
 import { TEST_USERS, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { EnumType } from 'json-to-graphql-query';
 import type { Knex } from 'knex';
 import knex from 'knex';
@@ -24,7 +24,7 @@ describe('Logger Redact Tests', () => {
 		for (const vendor of vendors) {
 			databases.set(vendor, knex(config.knexConfig[vendor]!));
 
-			const newServerPort = await getPort();
+			const newServerPort = await freePortOfWorker();
 
 			env[vendor]['LOG_STYLE'] = 'raw';
 			env[vendor]['LOG_LEVEL'] = 'info';

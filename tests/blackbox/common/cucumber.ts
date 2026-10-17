@@ -239,3 +239,41 @@ export function messageOfDocString(
 		},
 	);
 }
+
+/**
+ * The text a `remember` row keeps under `name`. A value the response does not
+ * hold fails the row: kept as the text `undefined`, it would stand in for a key
+ * in every later row and leave them checking nothing.
+ */
+export function rememberedText(name: string, rememberedValue: unknown): string {
+	if (rememberedValue === undefined) {
+		throw new Error(`"${name}" remembers nothing: the response holds no value`);
+	}
+
+	return String(rememberedValue);
+}
+
+/**
+ * A request or response cell, refused when it holds a key the step library
+ * reading it does not know: a misspelled `remember`, or a `cache` the library
+ * never checks, would otherwise be dropped and the row pass.
+ */
+export function cellOfKnownKeys<Cell>(
+	cellKind: 'request' | 'response',
+	cell: unknown,
+	knownKeys: readonly string[],
+	stepLibrary: string,
+): Cell {
+	const unknownKey = Object.keys(cell ?? {}).find((cellKey) => {
+		return !knownKeys.includes(cellKey);
+	});
+
+	if (unknownKey !== undefined) {
+		throw new Error(
+			`Unknown ${cellKind} cell "${unknownKey}" in ${stepLibrary} `
+			+ `(known: ${knownKeys.join(', ')})`,
+		);
+	}
+
+	return cell as Cell;
+}

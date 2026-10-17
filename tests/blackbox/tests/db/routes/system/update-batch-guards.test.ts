@@ -1,5 +1,6 @@
 import { getUrl } from '@common/config';
 import {
+	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
 	parseGherkinTable,
@@ -20,6 +21,16 @@ type RequestCell = {
 	payload?: unknown;
 };
 
+const REQUEST_CELL_KEYS = [
+	'as',
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+
 type Batch = {
 	run: string;
 	keysByName: Record<string, string>;
@@ -33,8 +44,7 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
-	// `<run>` and every `<name>` a Given created, `<name:upper>` upper-cased;
-	// anything else stays as written.
+	// `<run>` and every `<name>` a Given created, `<name:upper>` upper-cased.
 	function withKeys(cell: string, batch: Batch) {
 		return cell.replaceAll(
 			/<([\w-]+)(:upper)?>/g,
@@ -46,7 +56,7 @@ describe.each(vendors)('%s', (vendor) => {
 				const key = batch.keysByName[name];
 
 				if (key === undefined) {
-					return placeholder;
+					throw new Error(`No row or user is named ${placeholder}`);
 				}
 
 				if (upper === undefined) {
@@ -59,10 +69,29 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
+	function tokenOf(name: string, batch: Batch) {
+		const token = batch.tokensByName[name];
+
+		if (token === undefined) {
+			throw new Error(`No user is named "${name}"`);
+		}
+
+		return token;
+	}
+
 	function sendRequest(requestCell: string, batch: Batch) {
-		const { as: name, method, path, query = {}, payload } = loadYaml(
-			requestCell,
-		) as RequestCell;
+		const {
+			as: name,
+			method,
+			path,
+			query = {},
+			payload,
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'update-batch-guards.test.ts',
+		);
 
 		const pendingRequest = method === 'PATCH'
 			? request(getUrl(vendor)).patch(path)
@@ -72,7 +101,7 @@ describe.each(vendors)('%s', (vendor) => {
 			'Authorization',
 			name === undefined
 				? AUTH
-				: `Bearer ${batch.tokensByName[name]}`,
+				: `Bearer ${tokenOf(name, batch)}`,
 		);
 
 		return payload === undefined
@@ -85,6 +114,10 @@ describe.each(vendors)('%s', (vendor) => {
 		async function createRows(path: string, table: Record<string, string>[]) {
 			for (const row of table) {
 				const { as: name, ...cells } = row;
+
+				if (name === undefined) {
+					throw new Error(`A row of ${path} has no "as" cell`);
+				}
 
 				const [rowToCreate] = parseGherkinTable(
 					[Object.fromEntries(Object.entries(cells).map(([column, cell]) => {
@@ -100,7 +133,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				expect(response.statusCode).toEqual(200);
 
-				batch.keysByName[name!] = String(response.body.data.id);
+				batch.keysByName[name] = String(response.body.data.id);
 			}
 		}
 
@@ -166,7 +199,12 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(responses.map((response) => {
 					return { code: response.statusCode, body: response.body };
 				})).toMatchObject(table.map(({ response }) => {
-					return loadYaml(withKeys(response, batch)) ?? {};
+					return cellOfKnownKeys<object>(
+						'response',
+						loadYaml(withKeys(response, batch)) ?? {},
+						RESPONSE_CELL_KEYS,
+						'update-batch-guards.test.ts',
+					);
 				}));
 			},
 		);

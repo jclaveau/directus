@@ -2,6 +2,8 @@ import {
 	ForbiddenError,
 	InvalidForeignKeyError,
 	InvalidPayloadError,
+	ItemNotFoundError,
+	RecordNotUniqueError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import {
@@ -21,7 +23,7 @@ import {
 	it,
 	vi,
 } from 'vitest';
-import { getDatabaseClient } from '../database/index.js';
+import getDatabase, { getDatabaseClient } from '../database/index.js';
 import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
@@ -219,6 +221,105 @@ describe('Integration Tests', () => {
 				expect(error).toBeInstanceOf(ForbiddenError);
 
 				expect(error.message).toBe('No result found for key 999 in test during items.readOne()');
+			});
+
+			it('tells an admin the key no row holds is not found', async () => {
+				tracker.reset();
+				tracker.on.select('test').response(undefined);
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				adminService.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheFingerprints: [] });
+				});
+
+				await expect(adminService.readOne(999)).rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+			});
+
+			it('keeps a row its own filter hides forbidden to an admin', async () => {
+				tracker.reset();
+				tracker.on.select('test').response({ id: 999 });
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				adminService.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheFingerprints: [] });
+				});
+
+				await expect(adminService.readOne(999)).rejects.toStrictEqual(
+					new ForbiddenError({
+						reason: 'No result found for key 999 in test during items.readOne()',
+					}),
+				);
+			});
+		});
+
+		describe('updateOne and deleteOne of a key no row holds', () => {
+			it('refuse an admin with a not found before any write', async () => {
+				tracker.reset();
+				tracker.on.select('test').response(undefined);
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				adminService.updateMany = vi.fn();
+				adminService.deleteMany = vi.fn();
+
+				await expect(
+					adminService.updateOne(999, { name: 'patched' }),
+				).rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+
+				await expect(adminService.deleteOne(999)).rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+
+				expect(adminService.updateMany).not.toHaveBeenCalled();
+				expect(adminService.deleteMany).not.toHaveBeenCalled();
+			});
+
+			it('refuse an admin a key that is no integer before the lookup', async () => {
+				tracker.reset();
+
+				const adminService = new ItemsService('test', {
+					knex: db,
+					schema,
+					accountability: { admin: true } as any,
+				});
+
+				await expect(
+					adminService.updateOne('abc', { name: 'patched' }),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: 'Primary key of test must be an integer instead of "abc"',
+					}),
+				);
+
+				expect(tracker.history.all).toHaveLength(0);
+			});
+
+			it('leave anyone else to the permissions, without a lookup', async () => {
+				service.updateMany = vi.fn(async () => [999]);
+				service.deleteMany = vi.fn(async () => [999]);
+
+				expect(await service.updateOne(999, { name: 'patched' })).toBe(999);
+				expect(await service.deleteOne(999)).toBe(999);
+
+				expect(tracker.history.all).toEqual([]);
 			});
 		});
 
@@ -1172,6 +1273,77 @@ describe('Integration Tests', () => {
 				await service.updateMany([1], { children: { create: [], update: [], delete: [5] } });
 
 				expect(tracker.history.all.length).toBeGreaterThan(0);
+			});
+
+			it.each([
+				{ children: [7] },
+				{ children: [{ id: 7 }] },
+				{ children: { update: [{ id: 7 }] } },
+			])(oneLine`
+				refuses to give one existing child to several rows, writing nothing:
+				%j
+			`, async (payload) => {
+				await expect(service.updateMany([1, 2], payload))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it.each([
+				{ batch: [{ id: 1, children: [7] }, { id: 2, children: [7] }] },
+				{
+					batch: [
+						{ id: 1, children: [{ id: 7 }] },
+						{ id: 2, children: { update: [{ id: 7 }] } },
+					],
+				},
+			])(oneLine`
+				refuses to give one existing child to two rows of a batch, writing
+				nothing: %j
+			`, async ({ batch }) => {
+				await expect(service.updateBatch(batch))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it(oneLine`
+				lets a last-winning batch give its child twice to the one row
+			`, async () => {
+				await expect(service.updateBatch(
+					[
+						{ id: 1, children: { update: [{ id: 7, name: 'first' }] } },
+						{ id: 1, children: { update: [{ id: 7, name: 'second' }] } },
+					],
+					{ onRepeatedPk: 'lastWins' },
+				))
+					.resolves
+					.toEqual([1, 1]);
+			});
+
+			it.each([
+				{ children: [{}] },
+				{ children: { create: [{}], delete: [7] } },
+			])(oneLine`
+				gives each of several rows its own child created inline: %j
+			`, async (payload) => {
+				await expect(service.updateMany([1, 2], payload))
+					.resolves
+					.toEqual([1, 2]);
 			});
 
 			it('should NOT skip an object on a relational alias that is not alterations-shaped', async () => {
@@ -2588,6 +2760,96 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
+	describe('a create revision names a nested row by its key', () => {
+		const nestingSchema = new SchemaBuilder()
+			.collection('carrier', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('owner').m2o('owner');
+				c.field('collection').string();
+				c.field('item').a2o(['page']);
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('page', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		nestingSchema.collections['carrier']!.accountability = 'all';
+		nestingSchema.collections['owner']!.accountability = null;
+		nestingSchema.collections['page']!.accountability = null;
+
+		const carrierService = () => {
+			return new ItemsService('carrier', {
+				knex: db,
+				schema: nestingSchema,
+				accountability: {
+					user: 'u1',
+					role: 'r1',
+					admin: true,
+					app: true,
+				} as any,
+			});
+		};
+
+		it('stores an M2O row created inline as its key', async () => {
+			// Ahead of the owner's: the carrier's insert names an `owner` column.
+			tracker.on.insert('carrier').response([{ id: 1 }, { id: 2 }]);
+			tracker.on.select('owner').response(undefined);
+			tracker.on.insert('owner').response([{ id: 5 }]);
+			// A key given on a serial column resets its sequence after the insert.
+			tracker.on.any(/SETVAL/).response([]);
+
+			await carrierService().createMany([
+				{ id: 1, title: 'a', owner: { id: 5, name: 'made' } },
+				{ id: 2, title: 'b' },
+			]);
+
+			expect(revisionWrites).toEqual([[
+				{
+					activity: 1,
+					collection: 'carrier',
+					item: 1,
+					data: '{"id":1,"title":"a","owner":5}',
+					delta: '{"id":1,"title":"a","owner":5}',
+				},
+				{
+					activity: 2,
+					collection: 'carrier',
+					item: 2,
+					data: '{"id":2,"title":"b"}',
+					delta: '{"id":2,"title":"b"}',
+				},
+			]]);
+		});
+
+		it('stores an A2O row created inline as its key', async () => {
+			tracker.on.select('page').response(undefined);
+			tracker.on.insert('page').response([{ id: 7 }]);
+			// A key given on a serial column resets its sequence after the insert.
+			tracker.on.any(/SETVAL/).response([]);
+			tracker.on.insert('carrier').response([{ id: 1 }]);
+
+			await carrierService().createOne({
+				id: 1,
+				collection: 'page',
+				item: { id: 7, name: 'made' },
+			});
+
+			expect(revisionWrites).toEqual([[{
+				activity: 1,
+				collection: 'carrier',
+				item: 1,
+				data: '{"id":1,"collection":"page","item":7}',
+				delta: '{"id":1,"collection":"page","item":7}',
+			}]]);
+		});
+	});
+
 	describe('updateMany writes revisions when accountability tracks all', () => {
 		it('snapshots the read rows into revision data', async () => {
 			const accountabilitySchema = new SchemaBuilder()
@@ -2794,6 +3056,41 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			// The write still lands; only the announcing is suppressed.
 			expect(keys).toEqual([1]);
 			expect(tracker.history.update).toHaveLength(1);
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(actionSpy).not.toHaveBeenCalled();
+		});
+
+		it('emits neither create event when emitEvents is off', async () => {
+			tracker.on.insert('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.createMany(
+				[{ name: 'quiet' }],
+				{ emitEvents: false },
+			);
+
+			expect(keys).toEqual([1]);
+			expect(tracker.history.insert).toHaveLength(1);
+			expect(filterSpy).not.toHaveBeenCalled();
+			expect(actionSpy).not.toHaveBeenCalled();
+		});
+
+		it('emits neither delete event when emitEvents is off', async () => {
+			tracker.on.delete('test').response(1);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.deleteMany([1], { emitEvents: false });
+
+			expect(keys).toEqual([1]);
+			expect(tracker.history.delete).toHaveLength(1);
 			expect(filterSpy).not.toHaveBeenCalled();
 			expect(actionSpy).not.toHaveBeenCalled();
 		});
@@ -3516,6 +3813,21 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			});
 		});
 
+		it('refuses an update the caller may not make before judging it', async () => {
+			vi.spyOn(ItemsService.prototype as any, 'validateGroupsToUpdate')
+				.mockRejectedValueOnce(new InvalidPayloadError({ reason: 'judged' }));
+
+			vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+			await expect(new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).updateMany([1], { name: 'y' }))
+				.rejects
+				.toStrictEqual(new ForbiddenError());
+		});
+
 		it('checks a row sent twice with one change once', async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
 			tracker.on.update('test').response(1);
@@ -3687,6 +3999,307 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const result = await service.readByQuery({}, { stripNonRequested: false });
 
 			expect(result).toEqual([{ id: 1, name: 'a' }]);
+		});
+	});
+
+	describe('branches no route reaches', () => {
+		it('names the primary key a mysql duplicate reports as PRIMARY', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('mysql');
+
+			tracker.on.insert('test').simulateError(Object.assign(
+				new Error('duplicate'),
+				{
+					code: 'ER_DUP_ENTRY',
+					sqlMessage: 'Duplicate entry \'1\' for key \'PRIMARY\'',
+				},
+			));
+
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			try {
+				const error = await service.createOne({ id: 1, name: 'a' })
+					.catch((createError) => createError);
+
+				expect(error).toBeInstanceOf(RecordNotUniqueError);
+
+				// mysql names no field for PRIMARY, so the translator reads no value;
+				// the create names the field afterwards.
+				expect(error.extensions).toEqual({
+					collection: null,
+					field: 'id',
+					value: null,
+				});
+			}
+			finally {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			}
+		});
+
+		it('keeps the field a mysql duplicate on a unique index names', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('mysql');
+
+			tracker.on.insert('test').simulateError(Object.assign(
+				new Error('duplicate'),
+				{
+					code: 'ER_DUP_ENTRY',
+					sqlMessage: 'Duplicate entry \'a\' for key \'test_name_unique\'',
+				},
+			));
+
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			try {
+				const error = await service.createOne({ name: 'a' })
+					.catch((createError) => createError);
+
+				expect(error).toBeInstanceOf(RecordNotUniqueError);
+
+				expect(error.message).toBe(
+					'Value "a" for field "name" in collection "test" has to be unique.',
+				);
+
+				expect(error.extensions).toEqual({
+					collection: 'test',
+					field: 'name',
+					value: 'a',
+					primaryKey: false,
+				});
+			}
+			finally {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+			}
+		});
+
+		it('names the value a filter hook wrote in a duplicate refusal', async () => {
+			tracker.on.insert('test').simulateError(Object.assign(
+				new Error('duplicate'),
+				{
+					code: '23505',
+					table: 'test',
+					detail: 'Key (name)=(TAKEN) already exists.',
+				},
+			));
+
+			const upperCaseName = (entries: { data: { name: string } }[]) => {
+				return entries.map(({ data }) => {
+					return { data: { ...data, name: data.name.toUpperCase() } };
+				});
+			};
+
+			emitter.onFilter('items.create', upperCaseName);
+
+			try {
+				const error = await new ItemsService('test', {
+					knex: db,
+					schema: shapesSchema,
+				})
+					.createOne({ name: 'taken' })
+					.catch((createError) => createError);
+
+				expect(error.message).toBe(
+					'Value "TAKEN" for field "name" in collection "test" has to be unique.',
+				);
+			}
+			finally {
+				emitter.offFilter('items.create', upperCaseName);
+			}
+		});
+
+		it('refuses an empty string primary key before the insert', async () => {
+			await expect(new ItemsService('code_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).createOne({ code: '', name: 'a' })).rejects.toEqual(
+				new InvalidPayloadError({
+					reason: 'Primary key of code_coll can\'t be empty',
+				}),
+			);
+
+			expect(tracker.history.all).toEqual([]);
+		});
+
+		it('refuses a select resolving null, which no real driver answers', async () => {
+			tracker.on.select('test').response(null);
+
+			await expect(new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			}).readByQuery({})).rejects.toThrow(
+				new ForbiddenError(),
+			);
+		});
+
+		it(oneLine`
+			hands the read action the default database when the service was built
+			without one
+		`, async () => {
+			vi.mocked(getDatabase).mockReturnValue(db);
+			tracker.on.select('test').response([{ id: 1, name: 'a' }]);
+
+			const readAction = vi.fn();
+
+			emitter.onAction('test.items.read', readAction);
+
+			try {
+				await new ItemsService('test', { schema: shapesSchema })
+					.readByQuery({});
+
+				expect(readAction).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({ database: db }),
+				);
+			}
+			finally {
+				emitter.offAction('test.items.read', readAction);
+				vi.mocked(getDatabase).mockReset();
+			}
+		});
+
+		it('gives readOne an empty meta when readByQuery returns none', async () => {
+			const service = new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			service.readByQuery = vi.fn(async () => [{ id: 1, name: 'a' }]) as any;
+
+			const record = await service.readOne(1);
+
+			expect(record).toEqual({ id: 1, name: 'a' });
+			expect(readMeta(record)).toEqual({ scopedCacheFingerprints: [] });
+		});
+
+		it(oneLine`
+			gives readSingleton's defaults an empty meta when readByQuery returns
+			none
+		`, async () => {
+			const service = new ItemsService('settings', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			service.readByQuery = vi.fn(async () => []) as any;
+
+			const record = await service.readSingleton({ fields: ['*'] });
+
+			expect(record).toEqual({ id: null, theme: 'auto' });
+			expect(readMeta(record)).toEqual({ scopedCacheFingerprints: [] });
+		});
+
+		it('refuses a group carrying no data before writing', async () => {
+			const error = await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+			})
+				.updateGroups([{ keys: [1], data: null as any }])
+				.catch((updateError) => updateError);
+
+			expect(error).toBeInstanceOf(InvalidPayloadError);
+
+			expect(error.message).toEqual(
+				'Invalid payload. Each update group needs a "data" object.',
+			);
+
+			expect(tracker.history.update).toEqual([]);
+		});
+
+		it(oneLine`
+			purges the collection whole when the re-read after an update fails
+		`, async () => {
+			tracker.on.update('test').response(1);
+
+			vi.spyOn(ItemScopedCacheService.prototype, 'snapshot')
+				.mockResolvedValueOnce({ canResolveSlicesFromRows: true, rows: [] })
+				.mockResolvedValueOnce({ canResolveSlicesFromRows: true, rows: [] })
+				.mockRejectedValueOnce(new Error('transaction aborted'));
+
+			const purgeSpy = vi.spyOn(ItemScopedCacheService.prototype, 'purge');
+
+			await new ItemsService('test', { knex: db, schema: shapesSchema })
+				.updateMany([1], { name: 'y' });
+
+			expect(purgeSpy).toHaveBeenCalledExactlyOnceWith(
+				null,
+				expect.anything(),
+				[],
+				{ includeBareFingerprint: true, rows: undefined },
+			);
+		});
+
+		it(oneLine`
+			refuses the update whose read hook answers its snapshot with an
+			object, before any revision is filed
+		`, async () => {
+			const trackedSchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			trackedSchema.collections['tracked']!.accountability = 'all';
+
+			const answerAnObject = () => ({ id: 1, name: 'hooked' });
+
+			tracker.on.update('tracked').response(2);
+			tracker.on.select('tracked').response([{ id: 1, name: 'after' }]);
+			emitter.onFilter('tracked.items.read', answerAnObject);
+
+			try {
+				await expect(new ItemsService('tracked', {
+					knex: db,
+					schema: trackedSchema,
+					accountability: {
+						user: 'u1',
+						role: 'r1',
+						admin: true,
+						app: true,
+					} as any,
+				}).updateMany([1, 2], { name: 'after' })).rejects.toStrictEqual(
+					new Error(
+						'A read filter on "tracked" answered with object instead of'
+						+ ' the list of items it was given.',
+					),
+				);
+
+				expect(revisionWrites).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('tracked.items.read', answerAnObject);
+			}
+		});
+
+		it('refuses a read whose hook answers with null', async () => {
+			const trackedSchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			const answerNull = () => null;
+
+			tracker.on.select('tracked').response([{ id: 1, name: 'read' }]);
+			emitter.onFilter('tracked.items.read', answerNull);
+
+			try {
+				await expect(new ItemsService('tracked', {
+					knex: db,
+					schema: trackedSchema,
+				}).readByQuery({})).rejects.toStrictEqual(new Error(
+					'A read filter on "tracked" answered with null instead of the'
+					+ ' list of items it was given.',
+				));
+			}
+			finally {
+				emitter.offFilter('tracked.items.read', answerNull);
+			}
 		});
 	});
 
@@ -4162,5 +4775,139 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 		finally {
 			emitter.offFilter('items.create', takeOverInertDeclaring);
 		}
+	});
+});
+
+describe('Services / Items / a failed upsert on its own transaction', () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+	});
+
+	afterEach(() => {
+		tracker.reset();
+	});
+
+	it('purges what its create hook declared before the insert failed', async () => {
+		const declarePurge = (
+			entries: unknown,
+			_meta: unknown,
+			context: any,
+		) => {
+			context.scopedCache.purgeBy({ collection: 'children' });
+
+			return entries;
+		};
+
+		tracker.on.insert('test').simulateError('duplicate key');
+		emitter.onFilter('items.create', declarePurge);
+
+		try {
+			await expect(new ItemsService('test', { knex: db, schema })
+				.upsertMany([{ name: 'new' }])).rejects.toThrow(new Error(
+				`insert into "test" ("name") values ('new') - duplicate key`,
+			));
+
+			expect(purgeScopedCache).toHaveBeenCalledExactlyOnceWith(
+				{ clear: expect.any(Function), delete: expect.any(Function) },
+				'test',
+				[],
+				expect.anything(),
+				{
+					declaredFingerprints: [{ collection: 'children' }],
+					changedCollections: [],
+					includeBareFingerprint: false,
+				},
+			);
+		}
+		finally {
+			emitter.offFilter('items.create', declarePurge);
+		}
+	});
+});
+
+describe('Services / Items / a batch delete naming a key no row holds', () => {
+	let database: Knex;
+
+	beforeEach(async () => {
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('children', (table) => {
+			table.increments('id');
+			table.integer('parent_id');
+		});
+
+		await database('test').insert([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	afterEach(async () => {
+		await database.destroy();
+	});
+
+	it('refuses an admin with a not found, deleting none', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteMany([1, 999, 2])).rejects.toStrictEqual(
+			new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+		);
+
+		await expect(database('test').select('id')
+			.orderBy('id')).resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+
+	it('deletes for an admin every key a row holds, one spelled twice', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteMany([1, '1'])).resolves.toStrictEqual([
+			1,
+			'1',
+		]);
+
+		await expect(database('test').select('id'))
+			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+
+	it('keeps a non-admin delete of a key no row holds going', async () => {
+		const userService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: false, user: 'user-1' } as any,
+		});
+
+		await expect(userService.deleteMany([1, 999])).resolves.toStrictEqual([
+			1,
+			999,
+		]);
+
+		await expect(database('test').select('id'))
+			.resolves.toStrictEqual([{ id: 2 }]);
 	});
 });

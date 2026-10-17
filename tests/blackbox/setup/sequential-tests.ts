@@ -122,6 +122,32 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/graphql-ip-gated-read.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
+			// Reloading the flow manager unloads every flow for a moment: left in the
+			// parallel middle it would drop the handlers `event-flow-runs` waits on.
+			'/tests/db/routes/system/singular-write-flows.test.ts',
+			// Sets the password policy on the settings singleton, which every user
+			// creation of a sibling would then have to satisfy.
+			'/tests/db/routes/system/singular-write-users-password-policy.test.ts',
+			// Turn public registration on and off in the settings singleton, which a
+			// sibling registering or reading the settings would see mid-change.
+			'/tests/db/routes/system/singular-write-users-registration.test.ts',
+			// Adds a foreign key column to `directus_users` and drops it after, like
+			// `cache-nested-relation-tags`.
+			'/tests/db/routes/system/singular-write-users-nested-delete.test.ts',
+			// Writes users under fixed keys and emails a sibling could collide with.
+			'/tests/db/routes/items/write-user-integrity.test.ts',
+			// Saves operations, which reloads every flow, like `singular-write-flows`.
+			'/tests/db/routes/system/write-path-flow-operations.test.ts',
+			// Reloads the extensions, which unregisters every hook and endpoint for
+			// a moment.
+			'/tests/db/routes/system/write-path-extensions.test.ts',
+			// Applies a diff against a schema hash any sibling's schema write moves.
+			'/tests/db/routes/system/write-path-apply-diff.test.ts',
+			// Subscribes over a WebSocket, like the other WS suites.
+			'/tests/db/routes/system/write-path-websocket.test.ts',
+			// Turns public registration on and sets the URL allow lists in the
+			// settings singleton, like `singular-write-users-registration`.
+			'/tests/db/routes/users/write-url-allow-list.test.ts',
 			'/tests/db/app/cache.test.ts',
 			'/tests/db/app/processes.test.ts',
 			'/tests/db/app/pgbouncer.test.ts',

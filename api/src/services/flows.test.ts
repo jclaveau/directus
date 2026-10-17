@@ -31,6 +31,38 @@ afterEach(() => {
 });
 
 describe('Services / Flows', () => {
+	describe('createMany', () => {
+		it('reloads the flows once after the write', async () => {
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['id-3', 'id-4']);
+
+			await expect(new FlowsService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createMany([{ name: 'third' }, { name: 'fourth' }]))
+				.resolves.toStrictEqual(['id-3', 'id-4']);
+
+			expect(reload).toHaveBeenCalledTimes(1);
+
+			expect(createMany).toHaveBeenCalledWith(
+				[{ name: 'third' }, { name: 'fourth' }],
+				undefined,
+			);
+		});
+
+		it('reloads the flows after a single create', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['id-5']);
+
+			await expect(new FlowsService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).createOne({ name: 'fifth' })).resolves.toBe('id-5');
+
+			expect(reload).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe('updateBatch', () => {
 		it('reloads the flows once after the write', async () => {
 			vi.spyOn(ItemsService.prototype, 'updateGroups')

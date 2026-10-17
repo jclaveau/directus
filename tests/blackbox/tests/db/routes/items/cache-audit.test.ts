@@ -13,7 +13,7 @@ import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -195,7 +195,7 @@ describe('The cache audit replays live entries against the database', () => {
 
 			appUserId = appUser.id;
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -1415,7 +1415,7 @@ describe('The cache audit replays live entries against the database', () => {
 			const cutOffLog: string[] = [];
 
 			beforeAll(async () => {
-				const proxyPort = await getPort();
+				const proxyPort = await freePortOfWorker();
 				proxy = createRedisProxy(6108, proxyPort);
 				await proxy.open();
 
@@ -1433,7 +1433,7 @@ describe('The cache audit replays live entries against the database', () => {
 				cutOffEnv[vendor]['CACHE_SCHEMA'] = 'false';
 				cutOffEnv[vendor]['CACHE_AUDIT_IDENTITY_TOKEN'] = USER.ADMIN.TOKEN;
 
-				const cutOffPort = await getPort();
+				const cutOffPort = await freePortOfWorker();
 				cutOffEnv[vendor].PORT = String(cutOffPort);
 
 				cutOff = spawn('node', [paths.cli, 'start'], {

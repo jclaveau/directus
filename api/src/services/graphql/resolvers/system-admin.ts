@@ -24,15 +24,21 @@ export function resolveSystemAdmin(
 	const Field = getFieldType(schemaComposer, schema, 'write');
 	const Relation = getRelationType(schemaComposer, schema, 'write');
 
+	// The update mutation strips `collection` and `schema` from the shared
+	// input type, so the create mutation holds its own copy.
+	const CreateCollectionInput = toInputObjectType(Collection, {
+		postfix: '_input',
+	})
+		.addFields({
+			fields: [toInputObjectType(Field, { postfix: '_input' }).NonNull],
+		})
+		.clone('create_directus_collections_input');
+
 	schemaComposer.Mutation.addFields({
 		create_collections_item: {
 			type: Collection,
 			args: {
-				data: toInputObjectType(Collection, {
-					postfix: '_input',
-				}).addFields({
-					fields: [toInputObjectType(Field, { postfix: '_input' }).NonNull],
-				}).NonNull,
+				data: CreateCollectionInput.NonNull,
 			},
 			resolve: async (_, args) => {
 				const collectionsService = new CollectionsService({
@@ -177,7 +183,7 @@ export function resolveSystemAdmin(
 				});
 
 				await relationsService.updateOne(args['collection'], args['field'], args['data']);
-				return await relationsService.readOne(args['data'].collection, args['data'].field);
+				return await relationsService.readOne(args['collection'], args['field']);
 			},
 		},
 		delete_relations_item: {

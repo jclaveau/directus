@@ -3,7 +3,7 @@ import { flatAfterList, sequentialTestsList } from './sequential-tests';
 
 // The `maxWorkers` of the vitest config: how many middle files a shard runs at
 // once.
-export const MAX_WORKERS = 6;
+export const MAX_WORKERS = 5;
 
 // How many of those a 4-vCPU runner actually carries: the middle phases of the
 // postgres run of 2026-10-01 spent 3.2-4.9 times their wall clock in files.
@@ -160,6 +160,61 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/websocket/relation-update.test.ts': 500,
 	// Not measured yet: one table created, dropped and inspected.
 	'/tests/db/schema/inspector-concurrent-drop.test.ts': 300,
+	// Not measured yet: a few requests each, like nested-upsert.
+	'/tests/db/routes/items/upsert-singleton.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-access.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-flows.test.ts': 6_000,
+	'/tests/db/routes/system/singular-write-permissions.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-shares.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-translations.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-password-policy.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-versions.test.ts': 1_600,
+	'/tests/db/routes/items/write-hook-answers.test.ts': 1_600,
+	'/tests/db/routes/items/write-import-nested.test.ts': 1_600,
+	'/tests/db/routes/items/write-mutation-options.test.ts': 1_600,
+	'/tests/db/routes/items/write-payload-casts.test.ts': 1_600,
+	'/tests/db/routes/items/write-payload-geometry.test.ts': 1_600,
+	'/tests/db/routes/items/write-user-integrity.test.ts': 1_600,
+	'/tests/db/routes/items/write-zero-key.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-comments.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-dashboards.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-extensions.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-files.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-folders.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-notifications.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-presets.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-relations.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-roles.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-invite.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-nested-delete.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-password-reset.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-registration.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-users-refused-delete.test.ts':
+		1_600,
+	'/tests/db/routes/system/singular-write-users-updates.test.ts': 1_600,
+	'/tests/db/routes/system/singular-write-webhooks.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-apply-diff.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-extensions.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-flow-operations.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-import-export.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-schema-meta.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-versions.test.ts': 1_600,
+	'/tests/db/routes/system/write-path-websocket.test.ts': 1_600,
+	// Estimated, not measured: each boots its own instance.
+	'/tests/db/routes/items/nested-m2o-a2o.test.ts': 6_000,
+	'/tests/db/routes/items/nested-o2m-array.test.ts': 6_000,
+	'/tests/db/routes/items/nested-o2m-alterations.test.ts': 6_000,
+	'/tests/db/routes/items/write-cache-hook-failures.test.ts': 60_000,
+	'/tests/db/routes/items/write-cache-out-of-range-key.test.ts': 30_000,
+	'/tests/db/routes/users/write-url-allow-list.test.ts': 18_000,
+	'/tests/db/routes/files/tus-resumable-upload.test.ts': 12_000,
+	'/tests/db/routes/files/files-disk-name.test.ts': 10_000,
+	'/tests/db/routes/auth/sso-login.test.ts': 8_000,
+	'/tests/db/routes/items/write-payload-partials.test.ts': 1_600,
+	'/tests/db/routes/items/write-unique-value.test.ts': 1_600,
+	'/tests/db/routes/system/write-translations-moves.test.ts': 1_600,
+	'/tests/db/routes/system/write-versions-rename.test.ts': 1_600,
 	// Measured over the postgres run of 2026-10-01; no hint before it.
 	'/tests/db/routes/items/cache-index-marker.test.ts': 87_000,
 	'/tests/db/routes/items/cache-fill-pause-ceiling.test.ts': 85_000,

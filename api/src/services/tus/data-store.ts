@@ -2,9 +2,10 @@ import formatTitle from '@directus/format-title';
 import type { TusDriver } from '@directus/storage';
 import type { Accountability, ChunkedUploadContext, File, SchemaOverview } from '@directus/types';
 import { extension } from 'mime-types';
-import { extname } from 'node:path';
+import { extname, posix } from 'node:path';
 import stream from 'node:stream';
 import { DataStore, ERRORS, Upload } from '@tus/utils';
+import { unnormalisedDiskNameReason } from '../files/lib/disk-name.js';
 import { ItemsService } from '../items.js';
 import { useLogger } from '../../logger/index.js';
 import getDatabase from '../../database/index.js';
@@ -72,6 +73,28 @@ export class TusDataStore extends DataStore {
 			upload.metadata['title'] = formatTitle(upload.metadata['filename_download']);
 		}
 
+		const requestedDiskName = upload.metadata['filename_disk'];
+
+		// The storage driver resolves the name under its root, so `/`, `..` or a
+		// trailing separator would make it write over a directory.
+		if (
+			requestedDiskName
+			&& (posix.join('/', requestedDiskName) === '/'
+				|| requestedDiskName.endsWith('/'))
+		) {
+			throw {
+				status_code: 400,
+				body: '"filename_disk" must name a file, not a directory',
+			};
+		}
+
+		const unnormalisedReason = requestedDiskName
+			&& unnormalisedDiskNameReason(requestedDiskName);
+
+		if (unnormalisedReason) {
+			throw { status_code: 400, body: unnormalisedReason };
+		}
+
 		let existingFile: Record<string, any> | null = null;
 
 		// If the payload contains a primary key, we'll check if the file already exists
@@ -87,6 +110,26 @@ export class TusDataStore extends DataStore {
 			if (existingFile && existingFile['tus_id'] !== null) {
 				throw ERRORS.INVALID_METADATA;
 			}
+		}
+
+		// Starting the upload empties the file it names, so a name a file holds is
+		// refused before anything is written, the replaced file's own name too: tus
+		// writes straight to it, with no temp file. A row holding the name without
+		// its bytes yet would share them once they are written.
+		if (
+			requestedDiskName
+			&& ((await this.storageDriver.exists(requestedDiskName))
+				|| (await knex
+					.select('id')
+					.from('directus_files')
+					.where('filename_disk', requestedDiskName)
+					.first()))
+		) {
+			throw {
+				status_code: 400,
+				body: `"filename_disk" "${requestedDiskName}" is already used`
+					+ ' by another file',
+			};
 		}
 
 		// Is this file a replacement? if the file data already exists and we have a primary key
@@ -117,14 +160,17 @@ export class TusDataStore extends DataStore {
 		const primaryKey = await filesItemsService.createOne(fileData, { emitEvents: false });
 
 		// Set the file id, so it is available to be sent as a header on upload creation / resume
-		if (!upload.metadata['id']) {
+		if (!isReplacement) {
 			upload.metadata['id'] = primaryKey as string;
 		}
 
+		const typeExtension = extension(upload.metadata['type']);
+
 		const fileExtension =
-			extname(upload.metadata['filename_download']) ||
-			(upload.metadata['type'] && '.' + extension(upload.metadata['type'])) ||
-			'';
+			extname(upload.metadata['filename_download'])
+			|| (typeExtension
+				? `.${typeExtension}`
+				: '');
 
 		// The filename_disk is the FINAL filename on disk
 		fileData.filename_disk ||= primaryKey + (fileExtension || '');
@@ -142,10 +188,33 @@ export class TusDataStore extends DataStore {
 			logger.warn(`Couldn't create chunked upload for ${fileData.filename_disk}`);
 			logger.warn(err);
 
-			if (isReplacement) {
-				await filesItemsService.updateOne(primaryKey!, { tus_id: null, tus_data: null }, { emitEvents: false });
-			} else {
-				await filesItemsService.deleteOne(primaryKey!, { emitEvents: false });
+			// The caller may create a file without the right to delete it.
+			const sudoFilesItemsService = new ItemsService<File>('directus_files', {
+				schema: this.schema,
+				knex,
+			});
+
+			await sudoFilesItemsService.deleteOne(primaryKey!, { emitEvents: false });
+
+			// A local disk cannot hold a file below another file; an object store
+			// can, which is why this is told from the driver's error, not the name.
+			const errorCode = (err as NodeJS.ErrnoException | null)?.code;
+
+			if (errorCode === 'EEXIST' || errorCode === 'ENOTDIR') {
+				throw {
+					status_code: 400,
+					body: '"filename_disk" must not name a path below an existing file',
+				};
+			}
+
+			// The chunked upload may have created the file before failing, and a
+			// file left behind would hold its name against the next upload.
+			try {
+				await this.storageDriver.delete(fileData.filename_disk);
+			}
+			catch (deleteError) {
+				logger.warn(`Couldn't delete chunk file ${fileData.filename_disk}`);
+				logger.warn(deleteError);
 			}
 
 			throw ERRORS.UNKNOWN_ERROR;

@@ -1,6 +1,6 @@
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Accountability } from '@directus/types';
+import type { Accountability, Relation } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import type { Knex } from 'knex';
@@ -9,7 +9,10 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
+import { freezeSchema } from '../utils/freeze-schema.js';
+import { cloneDeep } from '../utils/lodash-es-used.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 import { RelationsService } from './relations.js';
 
@@ -124,6 +127,39 @@ describe('Services / Relations', () => {
 
 			expect(flushResponseCache).not.toHaveBeenCalled();
 		});
+
+		it(oneLine`
+			rejects when building the foreign key throws, rather than answering
+			while the key is never created
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue(1);
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			pgTracker.on.any(/alter table/).response([]);
+
+			vi.mocked(transaction).mockImplementationOnce((_knex, runInTransaction) => {
+				return runInTransaction(pgDatabase as Knex.Transaction);
+			});
+
+			const servicePrototype = RelationsService.prototype as unknown as {
+				alterType: () => void;
+			};
+
+			vi.spyOn(servicePrototype, 'alterType').mockImplementationOnce(() => {
+				throw new Error('column "owner" cannot be cast');
+			});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await expect(service.createOne(
+				{ collection: 'test', field: 'owner', related_collection: 'related' },
+				{ autoPurgeSystemCache: false },
+			)).rejects.toEqual(new Error('column "owner" cannot be cast'));
+		});
 	});
 
 	describe('updateOne', () => {
@@ -135,6 +171,68 @@ describe('Services / Relations', () => {
 			await expect(service.updateOne('test', 'related', {})).rejects.toThrowError(
 				`'test-user' is not allowed to update a relation`,
 			);
+		});
+
+		it(oneLine`
+			re-creates the foreign key it drops when handed a frozen schema, as the
+			request that builds the schema cache is
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue(1);
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			pgTracker.on.any(/alter table/).response([]);
+
+			vi.mocked(transaction).mockImplementationOnce((_knex, runInTransaction) => {
+				return runInTransaction(pgDatabase as Knex.Transaction);
+			});
+
+			const service = new RelationsService({
+				knex: db,
+				schema: freezeSchema(cloneDeep(schema)),
+				accountability: admin,
+			});
+
+			await service.updateOne(
+				'test',
+				'related',
+				{ schema: { on_delete: 'SET NULL' } } as Partial<Relation>,
+				{ autoPurgeSystemCache: false },
+			);
+
+			expect(pgTracker.history.all).toMatchObject([
+				{ sql: 'alter table "test" drop constraint "test_related_foreign"' },
+				{
+					sql: 'alter table "test" add constraint "test_related_foreign" '
+						+ 'foreign key ("related") references "related" ("id") '
+						+ 'on delete SET NULL',
+				},
+			]);
+		});
+
+		it('leaves the foreign key alone when handed the meta alone', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue(1);
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			pgTracker.on.any(/alter table/).response([]);
+
+			vi.mocked(transaction).mockImplementationOnce((_knex, runInTransaction) => {
+				return runInTransaction(pgDatabase as Knex.Transaction);
+			});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await service.updateOne(
+				'test',
+				'related',
+				{ meta: { one_deselect_action: 'delete' } } as Partial<Relation>,
+				{ autoPurgeSystemCache: false },
+			);
+
+			expect(pgTracker.history.all).toEqual([]);
 		});
 	});
 

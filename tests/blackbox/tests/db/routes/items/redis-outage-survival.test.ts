@@ -6,7 +6,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -89,7 +89,7 @@ describe('the API outlives an unreachable Redis', () => {
 
 			note = created.id;
 
-			const proxyPort = await getPort();
+			const proxyPort = await freePortOfWorker();
 			proxy = createRedisProxy(6108, proxyPort);
 			await proxy.open();
 
@@ -122,7 +122,7 @@ describe('the API outlives an unreachable Redis', () => {
 			env[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
 			env[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
@@ -463,7 +463,7 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 		let instance: ChildProcess;
 
 		beforeAll(async () => {
-			const proxyPort = await getPort();
+			const proxyPort = await freePortOfWorker();
 			proxy = createRedisProxy(6108, proxyPort);
 			await proxy.open();
 
@@ -484,7 +484,7 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			env[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
 			env[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			instance = spawn('node', [paths.cli, 'start'], {
