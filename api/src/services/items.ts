@@ -2971,6 +2971,70 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * Delete the rows `keys` name. An admin reaches every row, so a key no row
+	 * holds is a 404 for them, as it is for deleteOne. It is told off the
+	 * delete's count, so a delete reaching every key reads nothing more; the
+	 * delete runs under a savepoint so that, on a shortfall, the rows come back
+	 * to be read for the key none holds.
+	 */
+	private async deleteKeyRows(keys: PrimaryKey[], trx: Knex): Promise<void> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		if (this.accountability?.admin !== true) {
+			await trx(this.collection).whereIn(primaryKeyField, keys)
+				.delete();
+
+			return;
+		}
+
+		const keyNames = new Set(keys.map((key) => this.primaryKeyNameOf(key)));
+		const savepoint = await trx.transaction();
+		let deletedCount: number;
+
+		try {
+			deletedCount = await savepoint(this.collection)
+				.whereIn(primaryKeyField, keys)
+				.delete();
+		}
+		catch (error) {
+			await savepoint.rollback();
+			throw error;
+		}
+
+		if (deletedCount >= keyNames.size) {
+			await savepoint.commit();
+			return;
+		}
+
+		await savepoint.rollback();
+
+		const heldRows: Item[] = await trx
+			.select(primaryKeyField)
+			.from(this.collection)
+			.whereIn(primaryKeyField, keys);
+
+		const heldKeyNames = new Set(heldRows.map((heldRow) => {
+			return this.primaryKeyNameOf(heldRow[primaryKeyField]);
+		}));
+
+		const missingKey = keys.find((key) => {
+			return !heldKeyNames.has(this.primaryKeyNameOf(key));
+		});
+
+		if (missingKey === undefined) {
+			throw new Error(
+				`A delete of ${keyNames.size} ${this.collection} rows deleted`
+				+ ` ${deletedCount}, yet a row holds each of its keys`,
+			);
+		}
+
+		throw new ItemNotFoundError({
+			collection: this.collection,
+			primaryKey: missingKey,
+		});
+	}
+
+	/**
 	 * Delete multiple items by primary key.
 	 */
 	async deleteMany(
@@ -3089,10 +3153,13 @@ implements AbstractService<Item> {
 			}
 
 			try {
-				await trx(this.collection).whereIn(primaryKeyField, keys)
-					.delete();
+				await this.deleteKeyRows(keys, trx);
 			}
 			catch (err: any) {
+				if (isDirectusError(err, ErrorCode.ItemNotFound)) {
+					throw err;
+				}
+
 				// Parity with createOne/updateMany: a direct delete's FK/constraint
 				// violation must surface as a translated Directus error, not raw knex.
 				throw await translateDatabaseError(err, {}, this.knex, {

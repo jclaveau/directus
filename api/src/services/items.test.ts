@@ -4803,3 +4803,82 @@ describe('Services / Items / a failed upsert on its own transaction', () => {
 		}
 	});
 });
+
+describe('Services / Items / a batch delete naming a key no row holds', () => {
+	let database: Knex;
+
+	beforeEach(async () => {
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('children', (table) => {
+			table.increments('id');
+			table.integer('parent_id');
+		});
+
+		await database('test').insert([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	afterEach(async () => {
+		await database.destroy();
+	});
+
+	it('refuses an admin with a not found, deleting none', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteMany([1, 999, 2])).rejects.toStrictEqual(
+			new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+		);
+
+		await expect(database('test').select('id')
+			.orderBy('id')).resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+
+	it('deletes for an admin every key a row holds, one spelled twice', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteMany([1, '1'])).resolves.toStrictEqual([
+			1,
+			'1',
+		]);
+
+		await expect(database('test').select('id'))
+			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+
+	it('keeps a non-admin delete of a key no row holds going', async () => {
+		const userService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: false, user: 'user-1' } as any,
+		});
+
+		await expect(userService.deleteMany([1, 999])).resolves.toStrictEqual([
+			1,
+			999,
+		]);
+
+		await expect(database('test').select('id'))
+			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+});
