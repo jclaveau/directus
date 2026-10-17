@@ -99,6 +99,61 @@ describe('Services / Translations', () => {
 				undefined,
 			);
 		});
+
+		it('refuses a translation without a key before any query', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['translation-id-12']);
+
+			await expect(new TranslationsService({ knex: db, schema }).createOne({
+				value: 'Bonjour',
+			})).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: '"key" is required',
+			}));
+
+			expect(tracker.history.all).toStrictEqual([]);
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
+		it('refuses a translation without a language before any query', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['translation-id-13']);
+
+			await expect(new TranslationsService({ knex: db, schema }).createOne({
+				key: 'hello',
+				value: 'Bonjour',
+			})).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: '"language" is required',
+			}));
+
+			expect(tracker.history.all).toStrictEqual([]);
+			expect(createMany).not.toHaveBeenCalled();
+		});
+
+		it('refuses a batch whose second row has no language', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+
+			tracker.on.select('directus_translations').response([]);
+
+			const createMany = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['translation-id-14', 'translation-id-15']);
+
+			await expect(new TranslationsService({ knex: db, schema }).createMany([
+				{ key: 'greeting', language: 'fr-FR', value: 'Bonjour' },
+				{ key: 'hi', value: 'Salut' },
+			])).rejects.toStrictEqual(new InvalidPayloadError({
+				reason: '"language" is required',
+			}));
+
+			expect(tracker.history.all).toStrictEqual([]);
+			expect(createMany).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('updateBatch', () => {

@@ -36,6 +36,16 @@ export class TranslationsService extends ItemsService {
 		data: Partial<Item>[],
 		opts?: MutationOptions,
 	): Promise<PrimaryKey[]> {
+		for (const translationRow of data) {
+			for (const requiredField of ['key', 'language']) {
+				if (translationRow[requiredField] === undefined) {
+					throw new InvalidPayloadError({
+						reason: `"${requiredField}" is required`,
+					});
+				}
+			}
+		}
+
 		const claimedCombos = new Set<string>();
 
 		for (const translationRow of data) {
