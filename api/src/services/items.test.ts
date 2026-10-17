@@ -1321,6 +1321,20 @@ describe('Integration Tests', () => {
 				}]);
 			});
 
+			it(oneLine`
+				lets a last-winning batch give its child twice to the one row
+			`, async () => {
+				await expect(service.updateBatch(
+					[
+						{ id: 1, children: { update: [{ id: 7, name: 'first' }] } },
+						{ id: 1, children: { update: [{ id: 7, name: 'second' }] } },
+					],
+					{ onRepeatedPk: 'lastWins' },
+				))
+					.resolves
+					.toEqual([1, 1]);
+			});
+
 			it.each([
 				{ children: [{}] },
 				{ children: { create: [{}], delete: [7] } },

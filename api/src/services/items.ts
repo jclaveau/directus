@@ -1493,7 +1493,7 @@ implements AbstractService<Item> {
 			const childPrimaryKeyField = this.schema.collections[relation.collection]!
 				.primary;
 
-			const joiningRowCounts = new Map<string, number>();
+			const joiningRowNames = new Map<string, Set<string>>();
 
 			for (const group of writingGroups) {
 				const groupData = group.data as Partial<AnyItem>;
@@ -1523,10 +1523,13 @@ implements AbstractService<Item> {
 					.map(String));
 
 				for (const joiningChildKey of joiningChildKeys) {
-					const joiningRowCount = (joiningRowCounts.get(joiningChildKey) ?? 0)
-						+ group.keys.length;
+					// A row lastWins sends in two groups is still one row.
+					const rowNames = new Set([
+						...joiningRowNames.get(joiningChildKey) ?? [],
+						...group.keys.map((rowKey) => this.primaryKeyNameOf(rowKey)),
+					]);
 
-					if (joiningRowCount > 1) {
+					if (rowNames.size > 1) {
 						throw new InvalidPayloadError({
 							reason: oneLine`
 								"${joiningChildKey}" can't join more than one
@@ -1535,7 +1538,7 @@ implements AbstractService<Item> {
 						});
 					}
 
-					joiningRowCounts.set(joiningChildKey, joiningRowCount);
+					joiningRowNames.set(joiningChildKey, rowNames);
 				}
 			}
 		}
