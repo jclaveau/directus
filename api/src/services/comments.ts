@@ -1,5 +1,11 @@
 import { useEnv } from '@directus/env';
-import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidPayloadError,
+	isDirectusError,
+	ItemNotFoundError,
+} from '@directus/errors';
 import type { AbstractServiceOptions, Accountability, Comment, MutationOptions, PrimaryKey } from '@directus/types';
 import { useLogger } from '../logger/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
@@ -58,12 +64,25 @@ export class CommentsService extends ItemsService {
 			}
 		}
 
-		const keys = await super.createMany(data, opts);
-
 		const usersRegExp = new RegExp(/@[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}/gi);
 
-		for (const item of data) {
-			const mentions = uniq(item['comment']!.match(usersRegExp) ?? []);
+		const mentionsByItem = data.map((item) => {
+			return uniq(item['comment']!.match(usersRegExp) ?? []);
+		});
+
+		const mentionedIds = uniq(mentionsByItem.flat())
+			.map((mention) => mention.substring(1));
+
+		// Resolved before the insert: an admin's mention of a missing user
+		// refuses the comment instead of failing after it is written.
+		const authorReadableIds = mentionedIds.length === 0
+			? new Set<string>()
+			: await this.readableUserIds(mentionedIds);
+
+		const keys = await super.createMany(data, opts);
+
+		for (const [itemIndex, item] of data.entries()) {
+			const mentions = mentionsByItem[itemIndex]!;
 
 			if (mentions.length === 0) {
 				continue;
@@ -77,14 +96,10 @@ export class CommentsService extends ItemsService {
 				fields: ['id', 'first_name', 'last_name', 'email'],
 			});
 
-			const authorReadableIds = await this.readableUserIds(
-				mentions.map((mention) => mention.substring(1)),
-			);
-
 			for (const mention of mentions) {
 				const userID = mention.substring(1);
 
-				if (!authorReadableIds.has(userID)) {
+				if (!authorReadableIds.has(userID.toLowerCase())) {
 					logger.warn(
 						`Mention of user "${userID}" skipped:`
 						+ ' the author cannot read that user',
@@ -194,10 +209,6 @@ ${comment}
 	}
 
 	private async readableUserIds(userIds: string[]): Promise<Set<string>> {
-		if (!this.accountability || this.accountability.admin) {
-			return new Set(userIds);
-		}
-
 		const authorUsersService = new UsersService({
 			schema: this.schema,
 			knex: this.knex,
@@ -216,7 +227,24 @@ ${comment}
 			return [];
 		});
 
-		return new Set(readableUsers.map((readableUser) => readableUser['id']));
+		const readableIds = new Set<string>(readableUsers.map((readableUser) => {
+			return String(readableUser['id']).toLowerCase();
+		}));
+
+		// Only an admin may learn a user is missing: anyone else cannot tell it
+		// from a user they may not read, so that mention is skipped.
+		const missingId = this.accountability?.admin
+			? userIds.find((userId) => !readableIds.has(userId.toLowerCase()))
+			: undefined;
+
+		if (missingId !== undefined) {
+			throw new ItemNotFoundError({
+				collection: 'directus_users',
+				primaryKey: missingId,
+			});
+		}
+
+		return readableIds;
 	}
 
 	override updateOne(key: PrimaryKey, data: Partial<Comment>, opts?: MutationOptions): Promise<PrimaryKey> {

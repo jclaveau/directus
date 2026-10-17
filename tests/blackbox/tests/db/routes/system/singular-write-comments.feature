@@ -248,3 +248,32 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | query:                               |   data: [] |
       |   fields: id                         |            |
       |   filter[recipient][_eq]: <reader>   |            |
+
+  Scenario: an admin's comment mentioning a missing user is not written
+    Given these requests are sent:
+      | request                             | response  |
+      | method: POST                        | code: 200 |+
+      | path: /items/test_singular_comments |           |
+      | payload:                            |           |
+      |   name: missing-mention-<run>       |           |
+      | remember: entry                     |           |
+    Then these requests get these responses:
+      | request                              | response                    |
+      | method: POST                         | code: 404                   |+
+      | path: /comments                      | body:                       |
+      | payload:                             |   errors:                   |
+      |   collection: test_singular_comments |     - message: >-           |
+      |   item: '<entry>'                    |         Item "<ghost>"      |
+      |   comment: '@<ghost> please look'    |         doesn't exist in    |
+      |                                      |         collection          |
+      |                                      |         "directus_users".   |
+      | method: GET                          | code: 200                   |+
+      | path: /comments                      | body:                       |
+      | query:                               |   data: []                  |
+      |   fields: id                         |                             |
+      |   filter[item][_eq]: <entry>         |                             |
+      | method: GET                          | code: 200                   |+
+      | path: /notifications                 | body:                       |
+      | query:                               |   data: []                  |
+      |   fields: id                         |                             |
+      |   filter[recipient][_eq]: <ghost>    |                             |
