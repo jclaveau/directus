@@ -5,7 +5,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import { afterAll, beforeAll, describe } from 'vitest';
 import { cacheStatusHeader, defineWriteCacheSteps } from './write-cache-steps';
@@ -31,7 +31,7 @@ describe.each(vendors)('%s', (vendor) => {
 	let cacheInstance: ChildProcess;
 
 	beforeAll(async () => {
-		cacheEnv[vendor].PORT = String(await getPort());
+		cacheEnv[vendor].PORT = String(await freePortOfWorker());
 
 		cacheInstance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,

@@ -4,7 +4,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -52,8 +52,8 @@ describe('Cache settings', () => {
 
 			const peer = cloneDeep(writer);
 
-			const writerPort = await getPort();
-			const peerPort = await getPort();
+			const writerPort = await freePortOfWorker();
+			const peerPort = await freePortOfWorker();
 			writer[vendor].PORT = String(writerPort);
 			peer[vendor].PORT = String(peerPort);
 

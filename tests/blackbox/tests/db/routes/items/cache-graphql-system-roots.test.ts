@@ -10,7 +10,7 @@ import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -46,7 +46,7 @@ describe.each(vendors)('%s', (vendor) => {
 	let adminRoleId: string;
 
 	beforeAll(async () => {
-		const port = await getPort();
+		const port = await freePortOfWorker();
 		env[vendor].PORT = String(port);
 
 		instance = spawn('node', [paths.cli, 'start'], {

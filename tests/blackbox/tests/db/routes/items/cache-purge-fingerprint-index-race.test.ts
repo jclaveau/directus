@@ -11,7 +11,7 @@ import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -129,7 +129,7 @@ describe(oneLine`
 				item: [{ slot: HELD_SLOT, label: 'v1' }],
 			});
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			sweeperInstance = spawn('node', [paths.cli, 'start'], {
@@ -146,7 +146,7 @@ describe(oneLine`
 
 			rowId = seeded.body.data[0].id;
 
-			const readerPort = await getPort();
+			const readerPort = await freePortOfWorker();
 			readerEnv[vendor].PORT = String(readerPort);
 
 			readerInstance = spawn('node', [paths.cli, 'start'], {

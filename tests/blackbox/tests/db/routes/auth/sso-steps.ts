@@ -9,7 +9,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { spawn, type ChildProcess } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -100,7 +100,7 @@ export function defineSsoFeature(
 
 			const vendorEnv = ssoInstance.vendorEnv[vendor];
 
-			vendorEnv.PORT = String(await getPort());
+			vendorEnv.PORT = String(await freePortOfWorker());
 			vendorEnv['PUBLIC_URL'] = `http://127.0.0.1:${vendorEnv.PORT}`;
 
 			Object.assign(vendorEnv, authEnv({

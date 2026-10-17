@@ -1,4 +1,4 @@
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import {
 	createServer,
@@ -60,7 +60,7 @@ export class MockIdentityProvider {
 	}
 
 	async start() {
-		const freePort = await getPort();
+		const freePort = await freePortOfWorker();
 
 		await new Promise<void>((resolve) => {
 			this.httpServer.listen(freePort, '127.0.0.1', resolve);

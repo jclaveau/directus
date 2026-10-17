@@ -11,7 +11,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
@@ -89,7 +89,7 @@ export function defineSpawnedWriteFeature(
 		let instance: ChildProcess;
 
 		beforeAll(async () => {
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 			env[vendor]['PUBLIC_URL'] = getUrl(vendor, env);
 			Object.assign(env[vendor], featureOptions.envOverrides);
