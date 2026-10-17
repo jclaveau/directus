@@ -847,6 +847,51 @@ describe('Integration Tests', () => {
 				]);
 			});
 
+			it('deletes a file a rooted bucket lists with a leading slash', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'c'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* (listedPrefix: string) {
+						if (listedPrefix === 'photos/a') {
+							yield* ['/photos/a.jpg', '/photos/a1.jpg'];
+
+							return;
+						}
+
+						yield* ['/a.jpg', `/a__${thumbnailHash}.webp`, '/a1.jpg'];
+					}),
+					delete: vi.fn(),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[
+						{ id: 'root-id', storage: 's3', filename_disk: 'a.jpg' },
+						{ id: 'folder-id', storage: 's3', filename_disk: 'photos/a.jpg' },
+					],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await service.deleteMany(['root-id', 'folder-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					['/a.jpg'],
+					[`/a__${thumbnailHash}.webp`],
+					['/photos/a.jpg'],
+					[`/a__${thumbnailHash}.webp`],
+				]);
+			});
+
 			it('deletes the thumbnails of a file whose folder is gone', async () => {
 				const service = new FilesService({
 					knex: db,

@@ -530,6 +530,7 @@ function refuseUnnormalisedDiskName(filenameDisk: string): void {
  *   root, whatever folder the file is in (`assets.ts`).
  * - A driver's listing matches any longer name and, on a local disk, ignores
  *   case, so each listed path is matched exactly before it is deleted.
+ * - A bucket driver with a root lists `/<name>`: the key less the root.
  */
 export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string) {
 	const { dir: folderPath, name: baseName } = path.posix.parse(filenameDisk);
@@ -543,7 +544,9 @@ export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string
 	for (const listedPrefix of listedPrefixes) {
 		try {
 			for await (const filepath of disk.list(listedPrefix)) {
-				if (filepath === filenameDisk || thumbnailPattern.test(filepath)) {
+				const rootedPath = filepath.replace(/^\/+/, '');
+
+				if (rootedPath === filenameDisk || thumbnailPattern.test(rootedPath)) {
 					await disk.delete(filepath);
 				}
 			}
