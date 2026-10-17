@@ -13,8 +13,8 @@ import { expect, it } from 'vitest';
 export const collectionUserLink = 'test_write_user_link';
 
 // The literal keys write-user-integrity.feature writes, dropped before it runs
-// again. A batch delete passes over a key no row holds, so even a first run
-// answers 204.
+// again. A delete by filter names only the rows it finds, so even a first run
+// answers 204 (an admin's delete by keys answers 404 for a key no row holds).
 const systemRowsByPath = {
 	'/users': [
 		'5e1f0000-0000-4000-8000-000000000011',
@@ -40,7 +40,7 @@ export const seedDBStructure = () => {
 					const response = await request(getUrl(vendor))
 						.delete(path)
 						.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
-						.send(keys);
+						.send({ query: { filter: { id: { _in: keys } }, limit: -1 } });
 
 					if (response.statusCode !== 204) {
 						throw new Error(
