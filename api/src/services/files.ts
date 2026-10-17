@@ -1,5 +1,11 @@
 import { useEnv } from '@directus/env';
-import { ContentTooLargeError, InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
+import {
+	ContentTooLargeError,
+	ErrorCode,
+	InvalidPayloadError,
+	isDirectusError,
+	ServiceUnavailableError,
+} from '@directus/errors';
 import formatTitle from '@directus/format-title';
 import type {
 	AbstractServiceOptions,
@@ -31,7 +37,7 @@ import { getStorage } from '../storage/index.js';
 import { clone, cloneDeep, escapeRegExp } from '../utils/lodash-es-used.js';
 import { unnormalisedDiskNameReason } from './files/lib/disk-name.js';
 import { extractMetadata } from './files/lib/extract-metadata.js';
-import { ItemsService } from './items.js';
+import { ItemsService, type DeferredPurgeOptions } from './items.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -294,7 +300,34 @@ export class FilesService extends ItemsService<File> {
 			}
 		}
 
-		return super.createMany(data, opts);
+		try {
+			return await super.createMany(data, opts);
+		}
+		catch (error) {
+			throw diskNameTakenErrorFrom(error);
+		}
+	}
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts: DeferredPurgeOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts?: DeferredPurgeOptions,
+	): Promise<PrimaryKey[]>;
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts: DeferredPurgeOptions = {},
+	): Promise<(PrimaryKey | null)[]> {
+		try {
+			return await super.updateGroups(groups, opts);
+		}
+		catch (error) {
+			throw diskNameTakenErrorFrom(error);
+		}
 	}
 
 	protected override async validateRowsToCreate(
@@ -443,6 +476,31 @@ type DiskNameClaim = {
 
 function diskNameTakenReason(filenameDisk: string) {
 	return `"filename_disk" "${filenameDisk}" is already used by another file`;
+}
+
+/**
+ * The guard's 400 for a disk name the unique index refused: a row that took
+ * the name after the guard read the table. A batch insert cannot tell which
+ * row the database refused, so the reason may name no disk name.
+ */
+function diskNameTakenErrorFrom(error: unknown): unknown {
+	if (!isDirectusError(error, ErrorCode.RecordNotUnique)) {
+		return error;
+	}
+
+	if (error.extensions.field !== 'filename_disk') {
+		return error;
+	}
+
+	const takenName = error.extensions.value;
+
+	if (!takenName) {
+		return new InvalidPayloadError({
+			reason: '"filename_disk" is already used by another file',
+		});
+	}
+
+	return new InvalidPayloadError({ reason: diskNameTakenReason(takenName) });
 }
 
 function refuseUnnormalisedDiskName(filenameDisk: string): void {

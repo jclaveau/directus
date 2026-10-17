@@ -1,4 +1,4 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
 import type { File } from '@directus/types';
@@ -49,6 +49,89 @@ describe('Integration Tests', () => {
 	});
 
 	describe('Services / Files', () => {
+		describe('a disk name the unique index refuses', () => {
+			it('refuses a created row with the guard reason', async () => {
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockRejectedValue(new RecordNotUniqueError({
+						collection: 'directus_files',
+						field: 'filename_disk',
+						value: 'taken.txt',
+					}));
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.createMany([
+					{ type: 'text/plain', filename_disk: 'taken.txt' },
+				])).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: '"filename_disk" "taken.txt" is already used by another file',
+				}));
+			});
+
+			it('refuses a batch insert naming no disk name', async () => {
+				vi.spyOn(ItemsService.prototype, 'createMany')
+					.mockRejectedValue(new RecordNotUniqueError({
+						collection: 'directus_files',
+						field: 'filename_disk',
+						value: null,
+					}));
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.createMany([
+					{ type: 'text/plain', filename_disk: 'one.txt' },
+					{ type: 'text/plain', filename_disk: 'two.txt' },
+				])).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: '"filename_disk" is already used by another file',
+				}));
+			});
+
+			it('refuses an updated row with the guard reason', async () => {
+				vi.spyOn(ItemsService.prototype, 'updateGroups')
+					.mockRejectedValue(new RecordNotUniqueError({
+						collection: 'directus_files',
+						field: 'filename_disk',
+						value: 'taken.txt',
+					}));
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.updateGroups([
+					{ keys: ['file-1'], data: { filename_disk: 'taken.txt' } },
+				])).rejects.toStrictEqual(new InvalidPayloadError({
+					reason: '"filename_disk" "taken.txt" is already used by another file',
+				}));
+			});
+
+			it('keeps a unique error on another field', async () => {
+				const uniqueError = new RecordNotUniqueError({
+					collection: 'directus_files',
+					field: 'title',
+					value: 'Same title',
+				});
+
+				vi.spyOn(ItemsService.prototype, 'updateGroups')
+					.mockRejectedValue(uniqueError);
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.updateGroups([
+					{ keys: ['file-1'], data: { title: 'Same title' } },
+				])).rejects.toBe(uniqueError);
+			});
+		});
+
 		describe('createMany', () => {
 			let service: FilesService;
 			let superCreateMany: MockInstance;

@@ -85,7 +85,7 @@ const env = useEnv();
  * update sees the rows an `items.update` filter added, so it reports them, with
  * the slices they sat in before it wrote them.
  */
-type DeferredPurgeOptions = MutationOptions & {
+export type DeferredPurgeOptions = MutationOptions & {
 	onHookAddedRows?: (
 		hookAddedKeys: PrimaryKey[],
 		oldScopedCacheSnapshot: ScopedCacheSnapshot,
