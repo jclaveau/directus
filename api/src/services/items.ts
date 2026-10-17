@@ -733,7 +733,9 @@ implements AbstractService<Item> {
 			}
 
 			await this.validateRowsToCreate(
-				prepared.map((preparedRow) => preparedRow.payloadWithPresets),
+				prepared.map((preparedRow) => {
+					return preparedRow.payloadWithPresets as Partial<Item>;
+				}),
 				trx,
 			);
 
