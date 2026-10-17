@@ -732,6 +732,11 @@ implements AbstractService<Item> {
 				});
 			}
 
+			await this.validateRowsToCreate(
+				prepared.map((preparedRow) => preparedRow.payloadWithPresets),
+				trx,
+			);
+
 			// The rows that leave their key to the sequence draw it in the same
 			// statement as the rows that provide one, so the sequence has to clear
 			// the provided keys before the insert runs, not only after it.
@@ -1545,6 +1550,24 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * Refuses rows a create would insert. Handed them after the hooks and the
+	 * permission presets, inside the create's transaction.
+	 */
+	protected async validateRowsToCreate(
+		_rows: Partial<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
+	 * Refuses groups an update would write. Handed the groups the hooks left,
+	 * inside the update's transaction.
+	 */
+	protected async validateGroupsToUpdate(
+		_groups: UpdateGroup<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
 	 * What writing these groups sets off once they are written — a cache clear,
 	 * a logout. Handed the groups the hooks left.
 	 */
@@ -2045,6 +2068,7 @@ implements AbstractService<Item> {
 					| this.requiredIntegrityChecks(writingGroups);
 
 				this.refuseChildJoiningSeveralRows(writingGroups);
+				await this.validateGroupsToUpdate(writingGroups, trx);
 
 				// Every group before any is applied, so a row the caller may not update
 				// is refused whatever error a guard stored for another row.

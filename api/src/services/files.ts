@@ -14,6 +14,7 @@ import type {
 import type { Driver } from '@directus/storage';
 import { toArray } from '@directus/utils';
 import type { AxiosResponse } from 'axios';
+import type { Knex } from 'knex';
 import encodeURL from 'encodeurl';
 import { extension } from 'mime-types';
 import type { Readable } from 'node:stream';
@@ -288,37 +289,35 @@ export class FilesService extends ItemsService<File> {
 			}
 		}
 
-		await this.refuseHeldDiskNames(
-			data.map((item) => ({ filenameDisk: item.filename_disk, ownerKey: null })),
-		);
-
 		return super.createMany(data, opts);
 	}
 
-	override async updateGroups(
+	protected override async validateRowsToCreate(
+		rows: Partial<File>[],
+		trx: Knex,
+	): Promise<void> {
+		await this.refuseHeldDiskNames(
+			rows.map((row) => ({ filenameDisk: row.filename_disk, ownerKey: null })),
+			trx,
+		);
+	}
+
+	protected override async validateGroupsToUpdate(
 		groups: UpdateGroup<File>[],
-		opts?: MutationOptions,
-	): Promise<PrimaryKey[]> {
-		const diskNameClaims: DiskNameClaim[] = [];
+		trx: Knex,
+	): Promise<void> {
+		await this.refuseHeldDiskNames(
+			groups.flatMap((group) => {
+				if (!('filename_disk' in group.data)) {
+					return [];
+				}
 
-		for (const group of groups) {
-			const filenameDisk = group.data.filename_disk;
-
-			if (!filenameDisk) {
-				continue;
-			}
-
-			// Several rows holding one name would delete each other's file.
-			if (group.keys.length > 1) {
-				throw new InvalidPayloadError({ reason: diskNameTakenReason(filenameDisk) });
-			}
-
-			diskNameClaims.push({ filenameDisk, ownerKey: group.keys[0] ?? null });
-		}
-
-		await this.refuseHeldDiskNames(diskNameClaims);
-
-		return super.updateGroups(groups, opts);
+				return group.keys.map((ownerKey) => {
+					return { filenameDisk: group.data.filename_disk, ownerKey };
+				});
+			}),
+			trx,
+		);
 	}
 
 	/**
@@ -331,6 +330,7 @@ export class FilesService extends ItemsService<File> {
 	 */
 	private async refuseHeldDiskNames(
 		diskNameClaims: DiskNameClaim[],
+		trx: Knex,
 	): Promise<void> {
 		const claimedNames = diskNameClaims.flatMap((claim) => {
 			if (!claim.filenameDisk) {
@@ -352,7 +352,7 @@ export class FilesService extends ItemsService<File> {
 			return;
 		}
 
-		const holderRows: { id: PrimaryKey; filename_disk: string }[] = await this.knex
+		const holderRows: { id: PrimaryKey; filename_disk: string }[] = await trx
 			.select('id', 'filename_disk')
 			.from('directus_files')
 			.whereIn('filename_disk', claimedNames);

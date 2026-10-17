@@ -15,9 +15,17 @@ import {
 	vi,
 	type MockInstance,
 } from 'vitest';
+import emitter from '../emitter.js';
 import { getStorage } from '../storage/index.js';
 import { withMeta } from '../utils/read-meta.js';
 import { FilesService, ItemsService } from './index.js';
+
+vi.mock('../database/index.js', () => {
+	return {
+		default: vi.fn(),
+		getDatabaseClient: () => 'postgres',
+	};
+});
 
 vi.mock('../storage/index.js');
 vi.mock('@directus/storage');
@@ -34,6 +42,7 @@ describe('Integration Tests', () => {
 
 	afterEach(() => {
 		tracker.reset();
+		vi.restoreAllMocks();
 		vi.clearAllMocks();
 	});
 
@@ -295,20 +304,23 @@ describe('Integration Tests', () => {
 						.collection('directus_files', (collection) => {
 							collection.field('id').uuid()
 								.primary();
+
+							collection.field('type').string();
+							collection.field('title').string();
+							collection.field('filename_disk').string();
 						})
 						.build(),
 				});
-
-				vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['new-id']);
-
-				vi.spyOn(ItemsService.prototype, 'updateGroups')
-					.mockResolvedValue(['own-id']);
 			});
 
 			it('refuses a created row naming a disk name another row holds', async () => {
 				tracker.on
 					.select('select "id", "filename_disk" from "directus_files"')
-					.response([{ id: 'held-id', filename_disk: 'held.txt' }]);
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
 
 				await expect(
 					service.createMany([{ type: 'text/plain', filename_disk: 'held.txt' }]),
@@ -318,7 +330,35 @@ describe('Integration Tests', () => {
 					}),
 				);
 
-				expect(ItemsService.prototype.createMany).not.toHaveBeenCalled();
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('refuses a held disk name a create filter hook claims', async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+					{ data: { type: 'text/plain', filename_disk: 'held.txt' } },
+				]);
+
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				tracker.on.insert('directus_files').response([
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000001' },
+				]);
+
+				await expect(
+					service.createMany([{ type: 'text/plain' }]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.insert).toStrictEqual([]);
 			});
 
 			it('refuses two created rows sharing a disk name', async () => {
@@ -333,7 +373,7 @@ describe('Integration Tests', () => {
 					}),
 				);
 
-				expect(ItemsService.prototype.createMany).not.toHaveBeenCalled();
+				expect(tracker.history.insert).toStrictEqual([]);
 			});
 
 			it('creates a row for a file only the disk holds', async () => {
@@ -341,24 +381,37 @@ describe('Integration Tests', () => {
 					.select('select "id", "filename_disk" from "directus_files"')
 					.response([]);
 
-				await service.createMany([
-					{ type: 'text/plain', filename_disk: 'stored.txt' },
-				]);
+				tracker.on.insert('directus_files').response([
+					{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005',
+					}]);
 
-				expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
-					[{ type: 'text/plain', filename_disk: 'stored.txt' }],
-					{},
-				);
+				await expect(
+					service.createMany([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005',
+							type: 'text/plain',
+							filename_disk: 'stored.txt',
+						},
+					]),
+				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000005']);
 			});
 
 			it('refuses an update naming a disk name another row holds', async () => {
 				tracker.on
 					.select('select "id", "filename_disk" from "directus_files"')
-					.response([{ id: 'held-id', filename_disk: 'held.txt' }]);
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
 
 				await expect(
 					service.updateGroups([
-						{ keys: ['own-id'], data: { filename_disk: 'held.txt' } },
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: 'held.txt' },
+						},
 					]),
 				).rejects.toStrictEqual(
 					new InvalidPayloadError({
@@ -366,13 +419,53 @@ describe('Integration Tests', () => {
 					}),
 				);
 
-				expect(ItemsService.prototype.updateGroups).not.toHaveBeenCalled();
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses a held disk name an update filter hook claims', async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+					{
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+						data: { filename_disk: 'held.txt' },
+					},
+				]);
+
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { title: 'Own' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" "held.txt" is already used by another file',
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
 			});
 
 			it('refuses an update giving several rows one disk name', async () => {
 				await expect(
 					service.updateGroups([
-						{ keys: ['first-id', 'second-id'], data: { filename_disk: 'twin.txt' } },
+						{
+							keys: [
+								'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+								'8e2b4c10-5d3a-4f6e-9a7b-000000000004',
+							],
+							data: { filename_disk: 'twin.txt' },
+						},
 					]),
 				).rejects.toStrictEqual(
 					new InvalidPayloadError({
@@ -380,23 +473,30 @@ describe('Integration Tests', () => {
 					}),
 				);
 
-				expect(ItemsService.prototype.updateGroups).not.toHaveBeenCalled();
+				expect(tracker.history.update).toStrictEqual([]);
 			});
 
 			it('updates a row keeping its own disk name', async () => {
 				tracker.on
 					.select('select "id", "filename_disk" from "directus_files"')
-					.response([{ id: 'own-id', filename_disk: 'own.txt' }]);
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+							filename_disk: 'own.txt',
+						}]);
 
-				await service.updateGroups(
-					[{ keys: ['own-id'], data: { filename_disk: 'own.txt', title: 'Own' } }],
-					{},
-				);
+				tracker.on.update('directus_files').response(1);
 
-				expect(ItemsService.prototype.updateGroups).toHaveBeenCalledWith(
-					[{ keys: ['own-id'], data: { filename_disk: 'own.txt', title: 'Own' } }],
-					{},
-				);
+				await expect(
+					service.updateGroups(
+						[
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+								data: { filename_disk: 'own.txt', title: 'Own' },
+							},
+						],
+					),
+				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000001']);
 			});
 
 			it('updates a row keeping its disk name under an uppercase key', async () => {
@@ -407,22 +507,16 @@ describe('Integration Tests', () => {
 						filename_disk: 'own.txt',
 					}]);
 
-				await service.updateGroups(
-					[{
-						keys: ['8E2B4C10-5D3A-4F6E-9A7B-00000000000A'],
-						data: { filename_disk: 'own.txt' },
-					}],
-					{},
-				);
+				tracker.on.update('directus_files').response(1);
 
-				expect(ItemsService.prototype.updateGroups).toHaveBeenCalledWith(
-					[{
+				await expect(
+					service.updateGroups([{
 						keys: ['8E2B4C10-5D3A-4F6E-9A7B-00000000000A'],
 						data: { filename_disk: 'own.txt' },
-					}],
-					{},
-				);
+					}]),
+				).resolves.toStrictEqual(['8E2B4C10-5D3A-4F6E-9A7B-00000000000A']);
 			});
+
 		});
 
 		describe('deleteMany', () => {
