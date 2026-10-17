@@ -182,7 +182,13 @@ export class TusDataStore extends DataStore {
 			logger.warn(`Couldn't create chunked upload for ${fileData.filename_disk}`);
 			logger.warn(err);
 
-			await filesItemsService.deleteOne(primaryKey!, { emitEvents: false });
+			// The caller may create a file without the right to delete it.
+			const sudoFilesItemsService = new ItemsService<File>('directus_files', {
+				schema: this.schema,
+				knex,
+			});
+
+			await sudoFilesItemsService.deleteOne(primaryKey!, { emitEvents: false });
 
 			// A local disk cannot hold a file below another file; an object store
 			// can, which is why this is told from the driver's error, not the name.
@@ -193,6 +199,16 @@ export class TusDataStore extends DataStore {
 					status_code: 400,
 					body: '"filename_disk" must not name a path below an existing file',
 				};
+			}
+
+			// The chunked upload may have created the file before failing, and a
+			// file left behind would hold its name against the next upload.
+			try {
+				await this.storageDriver.delete(fileData.filename_disk);
+			}
+			catch (deleteError) {
+				logger.warn(`Couldn't delete chunk file ${fileData.filename_disk}`);
+				logger.warn(deleteError);
 			}
 
 			throw ERRORS.UNKNOWN_ERROR;

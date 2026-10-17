@@ -776,6 +776,99 @@ describe('TusDataStore.create', () => {
 		);
 
 		expect(mockedDeps.logger.warn).toHaveBeenCalledWith(new Error('disk full'));
+		expect(mockedDeps.storageDriver.delete).toHaveBeenCalledWith('file-1.jpg');
+	});
+
+	test('rolls back as sudo an upload its caller may not delete', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: { user: 'creator-1', admin: false } as any,
+		});
+
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
+
+		mockedDeps.storageDriver.createChunkedUpload.mockResolvedValueOnce({
+			id: 'tus-1',
+		});
+
+		mockedDeps.filesService.updateOne.mockRejectedValueOnce(new Error('forbidden'));
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: { filename_download: 'notes.txt', filename_disk: 'notes.txt' },
+		}))).rejects.toBe(ERRORS.UNKNOWN_ERROR);
+
+		expect(vi.mocked(ItemsService).mock.calls).toStrictEqual([
+			[
+				'directus_files',
+				{
+					accountability: { user: 'creator-1', admin: false },
+					schema: { collections: {}, relations: [] },
+					knex: mockedKnex,
+				},
+			],
+			[
+				'directus_files',
+				{ schema: { collections: {}, relations: [] }, knex: mockedKnex },
+			],
+		]);
+
+		expect(mockedDeps.filesService.deleteOne).toHaveBeenCalledWith(
+			'file-1',
+			{ emitEvents: false },
+		);
+
+		expect(mockedDeps.storageDriver.delete).toHaveBeenCalledWith('notes.txt');
+	});
+
+	test('logs a chunk file the rollback cannot delete', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		knexTracker.on.select('directus_settings').response(undefined);
+		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
+
+		mockedDeps.storageDriver.createChunkedUpload.mockRejectedValueOnce(
+			new Error('disk full'),
+		);
+
+		mockedDeps.storageDriver.delete.mockRejectedValueOnce(new Error('no such file'));
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: { filename_download: 'notes.txt', filename_disk: 'notes.txt' },
+		}))).rejects.toBe(ERRORS.UNKNOWN_ERROR);
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledWith(
+			'Couldn\'t delete chunk file notes.txt',
+		);
+
+		expect(mockedDeps.logger.warn).toHaveBeenCalledWith(new Error('no such file'));
 	});
 
 	test('refuses a replacement whose chunked upload cannot start', async () => {
