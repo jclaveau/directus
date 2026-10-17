@@ -3,6 +3,7 @@ import {
 	ForbiddenError,
 	InvalidPayloadError,
 	LimitExceededError,
+	ServiceUnavailableError,
 	UnprocessableContentError,
 } from '@directus/errors';
 import { describe as describeExtension } from '@directus/extensions-registry';
@@ -12,6 +13,7 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getExtensionManager } from '../extensions/index.js';
+import { useLogger } from '../logger/index.js';
 import { transaction } from '../utils/transaction.js';
 import { ExtensionReadError, ExtensionsService } from './extensions.js';
 import { ItemsService } from './items.js';
@@ -31,6 +33,11 @@ vi.mock('@directus/env', async (importOriginal) => {
 
 vi.mock('@directus/extensions-registry', () => ({ describe: vi.fn() }));
 vi.mock('../extensions/index.js', () => ({ getExtensionManager: vi.fn() }));
+
+vi.mock('../logger/index.js', () => {
+	const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+	return { useLogger: () => logger };
+});
 
 vi.mock('../utils/transaction.js', () => {
 	return {
@@ -588,6 +595,51 @@ describe('Services / Extensions / updateOne', () => {
 		await service.updateOne('extension-id', { meta: { options: null } } as any);
 
 		expect(reloadSteps).toEqual(['reloaded', 'broadcast']);
+	});
+
+	it('answers a 503 naming the saved settings on a failed reload', async () => {
+		const reloadFailure = new Error('load failed');
+		const broadcastReloadNotification = vi.fn().mockResolvedValue(undefined);
+
+		vi.mocked(getExtensionManager).mockReturnValue({
+			reload: vi.fn().mockRejectedValue(reloadFailure),
+			broadcastReloadNotification,
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('extension-id');
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'extension-id',
+			bundle: null,
+			schema: null,
+			meta: { options: null },
+		} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		const update = service.updateOne('extension-id', {
+			meta: { options: null },
+		} as any);
+
+		await expect(update).rejects.toBeInstanceOf(ServiceUnavailableError);
+
+		await expect(update).rejects.toHaveProperty(
+			'message',
+			oneLine`
+				Service "extensions" is unavailable. The extension settings were saved,
+				but reloading the extensions failed.
+			`,
+		);
+
+		expect(broadcastReloadNotification).toHaveBeenCalledOnce();
+
+		expect(useLogger().error).toHaveBeenCalledWith(
+			reloadFailure,
+			'Failed to reload the extensions after an extension update',
+		);
 	});
 
 	it('wraps a failed read-back in ExtensionReadError', async () => {

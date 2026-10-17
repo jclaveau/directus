@@ -1,12 +1,19 @@
 import { useEnv } from '@directus/env';
-import { ForbiddenError, InvalidPayloadError, LimitExceededError, UnprocessableContentError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	LimitExceededError,
+	ServiceUnavailableError,
+	UnprocessableContentError,
+} from '@directus/errors';
 import type { ApiOutput, BundleExtension, ExtensionSettings, ExtensionManager } from '@directus/types';
 import { describe, type DescribeOptions } from '@directus/extensions-registry';
 import type { AbstractServiceOptions, Accountability, DeepPartial, SchemaOverview } from '@directus/types';
-import { isObject } from '@directus/utils';
+import { isObject, oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
 import { getExtensionManager } from '../extensions/index.js';
+import { useLogger } from '../logger/index.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 
@@ -224,8 +231,27 @@ export class ExtensionsService {
 			return extension;
 		});
 
-		await this.extensionsManager.reload();
+		const reloadOutcome = await this.extensionsManager.reload().then(
+			() => ({ hasFailed: false, failure: undefined }),
+			(failure: unknown) => ({ hasFailed: true, failure }),
+		);
+
 		await this.extensionsManager.broadcastReloadNotification();
+
+		if (reloadOutcome.hasFailed) {
+			useLogger().error(
+				reloadOutcome.failure,
+				'Failed to reload the extensions after an extension update',
+			);
+
+			throw new ServiceUnavailableError({
+				service: 'extensions',
+				reason: oneLine`
+					The extension settings were saved,
+					but reloading the extensions failed
+				`,
+			});
+		}
 
 		return result;
 	}

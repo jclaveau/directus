@@ -35,7 +35,22 @@ const mocks = vi.hoisted(() => {
 		} as Record<string, Map<string, unknown>>,
 		settings: [] as unknown[],
 		sandboxedCode: '',
+		watcherHandlers: new Map<string, () => void>(),
 	};
+});
+
+vi.mock('chokidar', () => {
+	const watcher = {
+		on: (event: string, handler: () => void) => {
+			mocks.watcherHandlers.set(event, handler);
+			return watcher;
+		},
+		add: () => undefined,
+		unwatch: () => undefined,
+		close: async () => undefined,
+	};
+
+	return { default: { watch: () => watcher } };
 });
 
 vi.mock('@directus/env', () => ({ useEnv: () => mocks.env }));
@@ -93,6 +108,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.useRealTimers();
 });
 
 /** One of each api extension shape, so all four import sites are covered. */
@@ -126,6 +142,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.useRealTimers();
 });
 
 test.each(shapes)(
@@ -279,4 +296,57 @@ test('runs the next reload after one whose load threw', async () => {
 		.resolves.toBeUndefined();
 
 	expect(loadSpy).toHaveBeenCalledTimes(2);
+});
+
+test('logs a reload asked by another process that fails', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const subscribeSpy = vi.spyOn(mocks.bus, 'subscribe');
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	const reloadFailure = new Error('load failed');
+	vi.spyOn(manager, 'reload').mockRejectedValue(reloadFailure);
+
+	const [, reloadRequestHandler] = subscribeSpy.mock.lastCall!;
+	reloadRequestHandler({ origin: 'another-process' });
+	await setImmediate();
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(
+		reloadFailure,
+		'Failed to reload the extensions on a request from another process',
+	);
+});
+
+test.each([
+	{ watchedEvent: 'add', debounceMs: 500 },
+	{ watchedEvent: 'change', debounceMs: 650 },
+	{ watchedEvent: 'unlink', debounceMs: 2000 },
+])('logs a failed reload on a watched $watchedEvent', async (watchedChange) => {
+	const { watchedEvent, debounceMs } = watchedChange;
+
+	mocks.env = { ...mocks.defaultEnv, EXTENSIONS_PATH: './extensions' };
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: true });
+
+	const reloadFailure = new Error('load failed');
+	vi.spyOn(manager, 'reload').mockRejectedValue(reloadFailure);
+	vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+
+	mocks.watcherHandlers.get(watchedEvent)!();
+	vi.advanceTimersByTime(debounceMs);
+	vi.useRealTimers();
+
+	await setImmediate();
+
+	expect(mocks.logger.error).toHaveBeenCalledWith(
+		reloadFailure,
+		'Failed to reload the extensions on a change in the extensions folder',
+	);
 });
