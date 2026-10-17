@@ -344,12 +344,24 @@ export class FilesService extends ItemsService<File> {
 		groups: UpdateGroup<File>[],
 		trx: Knex,
 	): Promise<void> {
-		// Under lastWins a row is in several groups: the last one names its disk.
 		const claimsByKeyName = new Map<string, DiskNameClaim>();
 
 		for (const group of groups) {
 			if (!('filename_disk' in group.data)) {
 				continue;
+			}
+
+			const groupKeyNames = new Set(group.keys.map((ownerKey) => {
+				return this.primaryKeyNameOf(ownerKey);
+			}));
+
+			// Even under lastWins, a row is given one disk name, never a sequence.
+			for (const keyName of groupKeyNames) {
+				if (claimsByKeyName.has(keyName)) {
+					throw new InvalidPayloadError({
+						reason: `Row ${keyName} is sent more than once; send each row once`,
+					});
+				}
 			}
 
 			for (const ownerKey of group.keys) {

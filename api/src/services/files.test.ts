@@ -719,13 +719,7 @@ describe('Integration Tests', () => {
 				]);
 			});
 
-			it('judges the disk name a last-winning group leaves a row', async () => {
-				tracker.on
-					.select('select "id", "filename_disk" from "directus_files"')
-					.response([]);
-
-				tracker.on.update('directus_files').response(1);
-
+			it('refuses two last-winning groups naming one row a disk name', async () => {
 				await expect(
 					service.updateGroups(
 						[
@@ -737,9 +731,39 @@ describe('Integration Tests', () => {
 								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
 								data: { filename_disk: 'kept.txt' },
 							},
+						],
+						{ onRepeatedPk: 'lastWins' },
+					),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							Row 8e2b4c10-5d3a-4f6e-9a7b-000000000003 is sent more than
+							once; send each row once
+						`,
+					}),
+				);
+			});
+
+			it('lets last-winning groups name a row one disk name', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups(
+						[
 							{
-								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000004'],
+								keys: [
+									'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+									'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+								],
 								data: { filename_disk: 'moved.txt' },
+							},
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
+								data: { title: 'Moved' },
 							},
 						],
 						{ onRepeatedPk: 'lastWins' },
@@ -747,7 +771,7 @@ describe('Integration Tests', () => {
 				).resolves.toStrictEqual([
 					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
 					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
-					'8e2b4c10-5d3a-4f6e-9a7b-000000000004',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
 				]);
 			});
 
