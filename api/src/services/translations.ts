@@ -120,7 +120,8 @@ export class TranslationsService extends ItemsService {
 
 				for (const key of keys) {
 					const item = items.find((readItem) => {
-						return String(readItem['id']) === String(key);
+						return this.primaryKeyNameOf(readItem['id'])
+						=== this.primaryKeyNameOf(key);
 					});
 
 					if (item === undefined) {

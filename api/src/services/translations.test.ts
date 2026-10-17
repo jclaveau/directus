@@ -183,6 +183,31 @@ describe('Services / Translations', () => {
 			])).resolves.toStrictEqual(['translation-id-1']);
 		});
 
+		it('moves a row named by its upper-case uuid', async () => {
+			vi.spyOn(ItemsService.prototype, 'readMany')
+				.mockResolvedValueOnce(withMeta(
+					[{
+						id: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+						key: 'hello',
+						language: 'de-DE',
+					}],
+					{ scopedCacheFingerprints: [] },
+				));
+
+			vi.spyOn(TranslationsService.prototype as any, 'translationKeyExists')
+				.mockResolvedValue(false);
+
+			vi.spyOn(ItemsService.prototype, 'updateGroups')
+				.mockResolvedValue(['9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D']);
+
+			await expect(new TranslationsService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).updateBatch([
+				{ id: '9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D', key: 'greeting' },
+			])).resolves.toStrictEqual(['9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D']);
+		});
+
 		it('refuses one key and language given to several rows', async () => {
 			const updateGroups = vi.spyOn(ItemsService.prototype, 'updateGroups')
 				.mockResolvedValue(['translation-id-1', 'translation-id-9']);
