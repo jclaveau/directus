@@ -1,5 +1,9 @@
 import config, { getUrl, paths } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	defineFeature,
+	loadFeature,
+} from '@common/cucumber';
 import { CreateCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -119,15 +123,32 @@ describe.each(vendors)('%s', (vendor) => {
 		headers?: Record<string, string>;
 	};
 
+	const REQUEST_CELL_KEYS = [
+		'method',
+		'path',
+		'payload',
+		'headers',
+	] as const satisfies readonly (keyof RequestCell)[];
+
+	const RESPONSE_CELL_KEYS = ['code', 'body', 'headers'] as const;
+
 	type QueryAudit = Record<string, unknown> & {
 		statements: Record<string, unknown>[];
 	};
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(instanceUrl: string, requestCell: string) {
-		const { method, path, payload, headers = {} } = loadYaml(
-			requestCell,
-		) as RequestCell;
+		const {
+			method,
+			path,
+			payload,
+			headers = {},
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'query-audit-header.test.ts',
+		);
 
 		const pendingRequest = method === 'POST'
 			? request(instanceUrl).post(path)
@@ -174,7 +195,14 @@ describe.each(vendors)('%s', (vendor) => {
 					[queryAuditHeader]: auditOf(response),
 				},
 			};
-		})).toMatchObject(table.map(({ response }) => loadYaml(response)));
+		})).toMatchObject(table.map(({ response }) => {
+			return cellOfKnownKeys<object>(
+				'response',
+				loadYaml(response),
+				RESPONSE_CELL_KEYS,
+				'query-audit-header.test.ts',
+			);
+		}));
 
 		return responses;
 	}
