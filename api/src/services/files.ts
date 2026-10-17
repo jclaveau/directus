@@ -29,6 +29,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { getAxios } from '../request/index.js';
 import { getStorage } from '../storage/index.js';
 import { clone, cloneDeep, escapeRegExp } from '../utils/lodash-es-used.js';
+import { unnormalisedDiskNameReason } from './files/lib/disk-name.js';
 import { extractMetadata } from './files/lib/extract-metadata.js';
 import { ItemsService } from './items.js';
 
@@ -70,6 +71,10 @@ export class FilesService extends ItemsService<File> {
 		const disk = storage.location(payload.storage);
 
 		const requestedDiskName = data.filename_disk;
+
+		if (requestedDiskName) {
+			refuseUnnormalisedDiskName(requestedDiskName);
+		}
 
 		// Written before any row is, so a refused upload leaves nothing behind.
 		if (
@@ -296,7 +301,7 @@ export class FilesService extends ItemsService<File> {
 		rows: Partial<File>[],
 		trx: Knex,
 	): Promise<void> {
-		await this.refuseHeldDiskNames(
+		await this.refuseUnusableDiskNames(
 			rows.map((row) => ({ filenameDisk: row.filename_disk, ownerKey: null })),
 			trx,
 		);
@@ -322,18 +327,19 @@ export class FilesService extends ItemsService<File> {
 			}
 		}
 
-		await this.refuseHeldDiskNames([...claimsByKeyName.values()], trx);
+		await this.refuseUnusableDiskNames([...claimsByKeyName.values()], trx);
 	}
 
 	/**
-	 * Refuse a `filename_disk` another row holds, or that two claims share.
+	 * Refuse a `filename_disk` that is not a normalised relative path, that
+	 * another row holds, or that two claims share.
 	 *
 	 * - Deleting either row would delete the other's file, and reading the asset
 	 *   would serve the other's content.
 	 * - A name only the disk holds is accepted: a row can be created for a file
 	 *   already in storage.
 	 */
-	private async refuseHeldDiskNames(
+	private async refuseUnusableDiskNames(
 		diskNameClaims: DiskNameClaim[],
 		trx: Knex,
 	): Promise<void> {
@@ -344,6 +350,10 @@ export class FilesService extends ItemsService<File> {
 
 			return [claim.filenameDisk];
 		});
+
+		for (const claimedName of claimedNames) {
+			refuseUnnormalisedDiskName(claimedName);
+		}
 
 		const sharedName = claimedNames.find((name, index) => {
 			return claimedNames.indexOf(name) !== index;
@@ -433,6 +443,14 @@ type DiskNameClaim = {
 
 function diskNameTakenReason(filenameDisk: string) {
 	return `"filename_disk" "${filenameDisk}" is already used by another file`;
+}
+
+function refuseUnnormalisedDiskName(filenameDisk: string): void {
+	const unnormalisedReason = unnormalisedDiskNameReason(filenameDisk);
+
+	if (unnormalisedReason) {
+		throw new InvalidPayloadError({ reason: unnormalisedReason });
+	}
 }
 
 /**

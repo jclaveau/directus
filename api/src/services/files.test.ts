@@ -2,6 +2,7 @@ import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
 import type { File } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
@@ -270,6 +271,31 @@ describe('Integration Tests', () => {
 				expect(mockDriver.write).not.toHaveBeenCalled();
 			});
 
+			it('refuses a filename_disk that is not a normalised path', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						filename_disk: 'up/../notes.txt',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "up/../notes.txt" must be a relative path
+							without empty, "." or ".." segments
+						`,
+					}),
+				);
+
+				expect(mockDriver.exists).not.toHaveBeenCalled();
+				expect(superCreateOne).not.toHaveBeenCalled();
+			});
+
 			it('lets a replacement keep its own disk name', async () => {
 				tracker.on
 					.select('from "directus_files" where "id" = ?')
@@ -360,6 +386,64 @@ describe('Integration Tests', () => {
 				);
 
 				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('refuses a created row whose disk name is rooted', async () => {
+				await expect(
+					service.createMany([
+						{ type: 'text/plain', filename_disk: '/rooted.txt' },
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "/rooted.txt" must be a relative path
+							without empty, "." or ".." segments
+						`,
+					}),
+				);
+
+				expect(tracker.history.select).toStrictEqual([]);
+				expect(tracker.history.insert).toStrictEqual([]);
+			});
+
+			it('refuses an update to a disk name with a dot segment', async () => {
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: 'folder/./dotted.txt' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "folder/./dotted.txt" must be a relative path
+							without empty, "." or ".." segments
+						`,
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('creates a row whose disk name sits in a folder', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.insert('directus_files').response([
+					{ id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005' },
+				]);
+
+				await expect(
+					service.createMany([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000005',
+							type: 'text/plain',
+							filename_disk: 'folder/stored.txt',
+						},
+					]),
+				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000005']);
 			});
 
 			it('refuses two created rows sharing a disk name', async () => {

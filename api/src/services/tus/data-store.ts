@@ -5,6 +5,7 @@ import { extension } from 'mime-types';
 import { extname, posix } from 'node:path';
 import stream from 'node:stream';
 import { DataStore, ERRORS, Upload } from '@tus/utils';
+import { unnormalisedDiskNameReason } from '../files/lib/disk-name.js';
 import { ItemsService } from '../items.js';
 import { useLogger } from '../../logger/index.js';
 import getDatabase from '../../database/index.js';
@@ -85,6 +86,13 @@ export class TusDataStore extends DataStore {
 				status_code: 400,
 				body: '"filename_disk" must name a file, not a directory',
 			};
+		}
+
+		const unnormalisedReason = requestedDiskName
+			&& unnormalisedDiskNameReason(requestedDiskName);
+
+		if (unnormalisedReason) {
+			throw { status_code: 400, body: unnormalisedReason };
 		}
 
 		let existingFile: Record<string, any> | null = null;

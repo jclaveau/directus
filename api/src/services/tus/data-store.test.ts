@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { ERRORS, Upload } from '@tus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
@@ -444,6 +445,41 @@ describe('TusDataStore.create', () => {
 			body: '"filename_disk" must name a file, not a directory',
 		});
 
+		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
+	});
+
+	test('refuses a filename_disk that is not a normalised path', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				filename_download: 'notes.txt',
+				filename_disk: 'up/../notes.txt',
+			},
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: oneLine`
+				"filename_disk" "up/../notes.txt" must be a relative path without
+				empty, "." or ".." segments
+			`,
+		});
+
+		expect(mockedDeps.storageDriver.exists).not.toHaveBeenCalled();
 		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
 	});
 
