@@ -127,6 +127,39 @@ describe('Services / Relations', () => {
 
 			expect(flushResponseCache).not.toHaveBeenCalled();
 		});
+
+		it(oneLine`
+			rejects when building the foreign key throws, rather than answering
+			while the key is never created
+		`, async () => {
+			vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue(1);
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			pgTracker.on.any(/alter table/).response([]);
+
+			vi.mocked(transaction).mockImplementationOnce((_knex, runInTransaction) => {
+				return runInTransaction(pgDatabase as Knex.Transaction);
+			});
+
+			const servicePrototype = RelationsService.prototype as unknown as {
+				alterType: () => void;
+			};
+
+			vi.spyOn(servicePrototype, 'alterType').mockImplementationOnce(() => {
+				throw new Error('column "owner" cannot be cast');
+			});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await expect(service.createOne(
+				{ collection: 'test', field: 'owner', related_collection: 'related' },
+				{ autoPurgeSystemCache: false },
+			)).rejects.toEqual(new Error('column "owner" cannot be cast'));
+		});
 	});
 
 	describe('updateOne', () => {
