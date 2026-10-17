@@ -70,8 +70,9 @@ export class CommentsService extends ItemsService {
 			return uniq(item['comment']!.match(usersRegExp) ?? []);
 		});
 
-		const mentionedIds = uniq(mentionsByItem.flat())
-			.map((mention) => mention.substring(1));
+		// A uuid is case-insensitive (RFC 9562), and Directus stores it lowercase.
+		const mentionedIds = uniq(mentionsByItem.flat()
+			.map((mention) => mention.substring(1).toLowerCase()));
 
 		// Resolved before the insert: an admin's mention of a missing user
 		// refuses the comment instead of failing after it is written.
@@ -97,9 +98,9 @@ export class CommentsService extends ItemsService {
 			});
 
 			for (const mention of mentions) {
-				const userID = mention.substring(1);
+				const userID = mention.substring(1).toLowerCase();
 
-				if (!authorReadableIds.has(userID.toLowerCase())) {
+				if (!authorReadableIds.has(userID)) {
 					logger.warn(
 						`Mention of user "${userID}" skipped:`
 						+ ' the author cannot read that user',
@@ -144,7 +145,13 @@ export class CommentsService extends ItemsService {
 
 					const templateData = await usersService.readByQuery({
 						fields: ['id', 'first_name', 'last_name', 'email'],
-						filter: { id: { _in: mentions.map((mention) => mention.substring(1)) } },
+						filter: {
+							id: {
+								_in: mentions.map((mention) => {
+									return mention.substring(1).toLowerCase();
+								}),
+							},
+						},
 					}).catch((error: unknown) => {
 						// The recipient is notified all the same: a user they may not
 						// read is previewed as "@Unknown User".
@@ -166,7 +173,7 @@ export class CommentsService extends ItemsService {
 					let comment = item['comment']!;
 
 					for (const mention of mentions) {
-						const uuid = mention.substring(1);
+						const uuid = mention.substring(1).toLowerCase();
 						// We only match on UUIDs in the first place. This is just an extra sanity check.
 						if (isValidUuid(uuid) === false) continue;
 						// Literal replace (not a user-built RegExp) avoids regex injection; mention is a literal @<uuid>.

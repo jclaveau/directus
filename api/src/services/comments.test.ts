@@ -291,7 +291,7 @@ Sam Sender has mentioned you in a comment:
 
 		vi.mocked(UsersService.prototype.readByQuery)
 			.mockResolvedValue(withMeta([
-				{ id: mentionUuid },
+				{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe' },
 			], { scopedCacheFingerprints: [] }));
 
 		const result = await service.createMany([
@@ -304,8 +304,43 @@ Sam Sender has mentioned you in a comment:
 
 		expect(result).toEqual(['comment-pk-8']);
 
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			[senderUuid, { fields: ['id', 'first_name', 'last_name', 'email'] }],
+			[
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				{ fields: ['id', 'first_name', 'last_name', 'email', 'role.id'] },
+			],
+		]);
+
+		expect(vi.mocked(UsersService.prototype.readByQuery).mock.calls).toEqual([
+			[{
+				fields: ['id'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+				limit: -1,
+			}],
+			[{
+				fields: ['id', 'first_name', 'last_name', 'email'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+			}],
+		]);
+
 		expect(NotificationsService.prototype.createOne)
-			.toHaveBeenCalledOnce();
+			.toHaveBeenCalledExactlyOnceWith({
+				recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+				subject: 'You were mentioned in articles',
+				message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey <em>Jane Doe</em>
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+				collection: 'articles',
+				item: '42',
+			});
 	});
 
 	describe('as an author who is not an admin', () => {
