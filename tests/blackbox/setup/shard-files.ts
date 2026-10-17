@@ -3,7 +3,7 @@ import { flatAfterList, sequentialTestsList } from './sequential-tests';
 
 // The `maxWorkers` of the vitest config: how many middle files a shard runs at
 // once.
-export const MAX_WORKERS = 6;
+export const MAX_WORKERS = 5;
 
 // How many of those a 4-vCPU runner actually carries: the middle phases of the
 // postgres run of 2026-10-01 spent 3.2-4.9 times their wall clock in files.

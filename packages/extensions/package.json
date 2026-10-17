@@ -32,8 +32,8 @@
 		"//build-unbundle": "The shared entry ships to extension bundlers. Emitting one module per source file is what lets them drop the zod-backed schemas when only the define* helpers are imported; a single bundled file keeps the two inseparable.",
 		"build:shared": "tsdown src/index.ts --tsconfig src/tsconfig.json --out-dir dist --dts --no-clean --unbundle",
 		"dev": "pnpm run '/^build:.*/' --watch",
-		"test": "vitest run",
-		"test:coverage": "vitest run --coverage"
+		"test": "VITEST_MAX_WORKERS=5 vitest run",
+		"test:coverage": "VITEST_MAX_WORKERS=5 vitest run --coverage"
 	},
 	"dependencies": {
 		"@directus/constants": "workspace:*",

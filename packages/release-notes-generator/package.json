@@ -22,8 +22,8 @@
 	"scripts": {
 		"build": "tsc --project tsconfig.prod.json",
 		"dev": "tsc --watch",
-		"test": "vitest run",
-		"test:coverage": "vitest run --coverage"
+		"test": "VITEST_MAX_WORKERS=5 vitest run",
+		"test:coverage": "VITEST_MAX_WORKERS=5 vitest run --coverage"
 	},
 	"dependencies": {
 		"@changesets/get-github-info": "catalog:",

@@ -75,6 +75,7 @@ export default defineConfig({
 		},
 	}),
 	test: {
+		maxWorkers: 5,
 		environment: 'happy-dom',
 		deps: {
 			optimizer: {

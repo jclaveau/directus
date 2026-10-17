@@ -24,8 +24,8 @@
 		"create-directus-project": "./lib/index.js"
 	},
 	"scripts": {
-		"test": "vitest run",
-		"test:coverage": "vitest run --coverage"
+		"test": "VITEST_MAX_WORKERS=5 vitest run",
+		"test:coverage": "VITEST_MAX_WORKERS=5 vitest run --coverage"
 	},
 	"dependencies": {
 		"chalk": "catalog:",
