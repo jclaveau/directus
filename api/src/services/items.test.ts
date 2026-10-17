@@ -3813,6 +3813,21 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			});
 		});
 
+		it('refuses an update the caller may not make before judging it', async () => {
+			vi.spyOn(ItemsService.prototype as any, 'validateGroupsToUpdate')
+				.mockRejectedValueOnce(new InvalidPayloadError({ reason: 'judged' }));
+
+			vi.mocked(validateAccess).mockRejectedValueOnce(new ForbiddenError());
+
+			await expect(new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).updateMany([1], { name: 'y' }))
+				.rejects
+				.toStrictEqual(new ForbiddenError());
+		});
+
 		it('checks a row sent twice with one change once', async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
 			tracker.on.update('test').response(1);

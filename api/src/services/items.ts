@@ -2072,11 +2072,9 @@ implements AbstractService<Item> {
 					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None)
 					| this.requiredIntegrityChecks(writingGroups);
 
-				this.refuseChildJoiningSeveralRows(writingGroups);
-				await this.validateGroupsToUpdate(writingGroups, trx);
-
 				// Every group before any is applied, so a row the caller may not update
-				// is refused whatever error a guard stored for another row.
+				// is refused whatever error a guard stored for another row, and before
+				// any payload refusal tells a caller with no access about the rows.
 				if (this.accountability) {
 					for (const group of writingGroups) {
 						await validateAccess(
@@ -2094,6 +2092,9 @@ implements AbstractService<Item> {
 						);
 					}
 				}
+
+				this.refuseChildJoiningSeveralRows(writingGroups);
+				await this.validateGroupsToUpdate(writingGroups, trx);
 
 				for (const group of writingGroups) {
 					const result = await service.applyUpdateGroup(
