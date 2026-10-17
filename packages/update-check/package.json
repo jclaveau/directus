@@ -23,8 +23,8 @@
 	"scripts": {
 		"build": "pnpm run '/^bundle|typecheck$/'",
 		"bundle": "tsdown src/index.ts --dts",
-		"test": "VITEST_MAX_WORKERS=5 vitest run",
-		"test:coverage": "VITEST_MAX_WORKERS=5 vitest run --coverage",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

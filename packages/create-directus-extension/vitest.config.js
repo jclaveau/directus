@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { VITEST_MAX_WORKERS } from '../../vitest.max-workers';
 
 export default defineConfig({
 	test: {
-		maxWorkers: 5,
+		maxWorkers: VITEST_MAX_WORKERS,
 		environment: 'node',
 		globals: true,
 	},

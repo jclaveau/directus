@@ -31,8 +31,8 @@
 		"build:shared": "tsdown shared/index.ts --tsconfig shared/tsconfig.json --out-dir dist/shared --dts",
 		"build:values": "tsdown shared/values/index.ts --tsconfig shared/tsconfig.json --out-dir dist/values --dts",
 		"dev": "pnpm run '/^build:.*/' --watch",
-		"test": "VITEST_MAX_WORKERS=5 vitest run",
-		"test:coverage": "VITEST_MAX_WORKERS=5 vitest run --coverage"
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
 		"@directus/constants": "workspace:*",

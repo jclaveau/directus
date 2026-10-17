@@ -24,7 +24,7 @@
 	"scripts": {
 		"build": "vite build",
 		"dev": "vite build --watch",
-		"test": "VITEST_MAX_WORKERS=5 vitest run",
+		"test": "vitest run",
 		"test:watch": "vitest"
 	},
 	"dependencies": {

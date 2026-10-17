@@ -23,8 +23,8 @@
 	"scripts": {
 		"build": "tsdown src/index.ts --dts",
 		"dev": "tsdown src/index.ts --dts --watch",
-		"test": "VITEST_MAX_WORKERS=5 vitest run",
-		"test:coverage": "VITEST_MAX_WORKERS=5 vitest run --coverage"
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
 		"@directus/storage": "workspace:*",
