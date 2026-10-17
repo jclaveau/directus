@@ -23,7 +23,14 @@ const mocks = vi.hoisted(() => {
 		defaultEnv,
 		env: defaultEnv as Record<string, unknown>,
 		logger: { info: noop, warn: vi.fn(), error: vi.fn(), debug: noop, trace: noop },
-		bus: { subscribe: noop, publish: noop, unsubscribe: noop },
+		bus: {
+			subscribe: noop as (
+				channel: string,
+				handler: (payload: Record<string, unknown>) => void,
+			) => void,
+			publish: noop,
+			unsubscribe: noop,
+		},
 		flows: { addOperation: noop, removeOperation: noop },
 		installation: { install: noop, uninstall: noop },
 		importFileUrl: vi.fn(async () => ({ default: mocks.moduleDefault })),
