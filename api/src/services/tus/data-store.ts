@@ -114,10 +114,16 @@ export class TusDataStore extends DataStore {
 
 		// Starting the upload empties the file it names, so a name a file holds is
 		// refused before anything is written, the replaced file's own name too: tus
-		// writes straight to it, with no temp file.
+		// writes straight to it, with no temp file. A row holding the name without
+		// its bytes yet would share them once they are written.
 		if (
 			requestedDiskName
-			&& (await this.storageDriver.exists(requestedDiskName))
+			&& ((await this.storageDriver.exists(requestedDiskName))
+				|| (await knex
+					.select('id')
+					.from('directus_files')
+					.where('filename_disk', requestedDiskName)
+					.first()))
 		) {
 			throw {
 				status_code: 400,

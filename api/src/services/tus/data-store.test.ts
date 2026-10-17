@@ -498,6 +498,10 @@ describe('TusDataStore.create', () => {
 			accountability: undefined,
 		});
 
+		knexTracker.on
+			.select('select "id" from "directus_files" where "filename_disk" = ?')
+			.response(undefined);
+
 		knexTracker.on.select('directus_settings').response(undefined);
 		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
 
@@ -558,6 +562,44 @@ describe('TusDataStore.create', () => {
 		});
 
 		expect(mockedDeps.storageDriver.exists).toHaveBeenCalledWith('file-9.jpg');
+		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
+		expect(mockedDeps.storageDriver.createChunkedUpload).not.toHaveBeenCalled();
+	});
+
+	test('refuses a filename_disk a row holds without its bytes', async () => {
+		const tusStore = new TusDataStore({
+			constants: {
+				ENABLED: true,
+				CHUNK_SIZE: null,
+				MAX_SIZE: null,
+				EXPIRATION_TIME: 600000,
+				SCHEDULE: '*/5 * * * *',
+			},
+			location: 'local',
+			driver: mockedDeps.storageDriver as any,
+			schema: { collections: {}, relations: [] },
+			accountability: undefined,
+		});
+
+		mockedDeps.storageDriver.exists.mockResolvedValueOnce(false);
+
+		knexTracker.on
+			.select('select "id" from "directus_files" where "filename_disk" = ?')
+			.response({ id: 'file-9' });
+
+		await expect(tusStore.create(new Upload({
+			id: 'tus-1',
+			offset: 0,
+			size: 1024,
+			metadata: {
+				filename_download: 'notes.txt',
+				filename_disk: 'file-9.jpg',
+			},
+		}))).rejects.toStrictEqual({
+			status_code: 400,
+			body: '"filename_disk" "file-9.jpg" is already used by another file',
+		});
+
 		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
 		expect(mockedDeps.storageDriver.createChunkedUpload).not.toHaveBeenCalled();
 	});
@@ -794,6 +836,10 @@ describe('TusDataStore.create', () => {
 			accountability: { user: 'creator-1', admin: false } as any,
 		});
 
+		knexTracker.on
+			.select('select "id" from "directus_files" where "filename_disk" = ?')
+			.response(undefined);
+
 		knexTracker.on.select('directus_settings').response(undefined);
 		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
 
@@ -847,6 +893,10 @@ describe('TusDataStore.create', () => {
 			schema: { collections: {}, relations: [] },
 			accountability: undefined,
 		});
+
+		knexTracker.on
+			.select('select "id" from "directus_files" where "filename_disk" = ?')
+			.response(undefined);
 
 		knexTracker.on.select('directus_settings').response(undefined);
 		mockedDeps.filesService.createOne.mockResolvedValueOnce('file-1');
