@@ -8,7 +8,7 @@ import path from 'node:path';
 import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
 import vueDevtools from 'vite-plugin-vue-devtools';
-import { VITEST_MAX_WORKERS } from '../vitest.max-workers';
+import { VITEST_MAX_WORKERS } from '../vitest.max-workers.ts';
 
 const API_PATH = path.join('..', 'api');
 
