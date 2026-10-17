@@ -2,7 +2,7 @@ import {
 	CreateCollections,
 	CreateFieldM2A,
 	CreateItem,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { SeedFunctions } from '@common/seed-functions';
@@ -160,10 +160,21 @@ export const seedDBStructure = () => {
 					const localJunctionShapesChildren = `${collectionShapes}_children_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localJunctionShapesChildren });
-					await DeleteCollection(vendor, { collection: localCollectionSquares });
-					await DeleteCollection(vendor, { collection: localCollectionCircles });
-					await DeleteCollection(vendor, { collection: localCollectionShapes });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localJunctionShapesChildren,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionSquares,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionCircles,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionShapes,
+					});
 
 					// Shapes, circles and squares differ by one column each, so one POST
 					// /collections builds all three in a single transaction. The M2A

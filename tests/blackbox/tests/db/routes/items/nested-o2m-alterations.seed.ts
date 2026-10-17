@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -27,7 +27,7 @@ export const seedDBStructure = () => {
 					collectionBoxEntry,
 					collectionBox,
 				]) {
-					await DeleteCollection(vendor, { collection });
+					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
 				// String keys, so a scenario names every row it writes and reads.

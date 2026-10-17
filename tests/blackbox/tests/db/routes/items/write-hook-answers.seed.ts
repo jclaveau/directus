@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -21,7 +21,7 @@ export const seedDBStructure = () => {
 					collectionAnswerOwner,
 					collectionAnswerLedger,
 				]) {
-					await DeleteCollection(vendor, { collection });
+					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
 				// Integer keys the scenarios choose, so a hook can add one by value.

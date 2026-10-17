@@ -3,7 +3,7 @@ import {
 	CreateCollections,
 	CreateFieldO2M,
 	CreateRelation,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -30,7 +30,7 @@ export const seedDBStructure = () => {
 					collectionPartialParent,
 					collectionPartialGenerated,
 				]) {
-					await DeleteCollection(vendor, { collection });
+					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
 				await CreateCollections(vendor, {

@@ -4,8 +4,8 @@ import {
 	CreateFieldM2M,
 	CreateFieldM2O,
 	CreateFieldO2M,
-	DeleteCollection,
-	DeleteField,
+	DeleteCollectionIfPresent,
+	DeleteFieldIfPresent,
 } from '@common/functions';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import type { PrimaryKeyType } from '@common/types';
@@ -66,23 +66,31 @@ export const deleteAllCollections = async (vendor: Vendor, pkType: PrimaryKeyTyp
 	const localJunctionSelfM2M = `${junctionSelfM2M}_${pkType}${suffix}`;
 
 	// Delete existing collections
-	await DeleteField(vendor, { collection: localCollectionSelf, field: 'self_id' });
-	await DeleteField(vendor, { collection: localCollectionSelf, field: 'self_id' });
-	await DeleteCollection(vendor, { collection: localJunctionSelfM2M });
-	await DeleteCollection(vendor, { collection: localCollectionSelf });
-	await DeleteCollection(vendor, { collection: localCollectionO2M2 });
-	await DeleteCollection(vendor, { collection: localCollectionO2M });
-	await DeleteCollection(vendor, { collection: localJunctionM2MM2M2 });
-	await DeleteCollection(vendor, { collection: localJunctionAllM2M });
-	await DeleteCollection(vendor, { collection: localCollectionM2M2 });
-	await DeleteCollection(vendor, { collection: localCollectionM2M });
-	await DeleteCollection(vendor, { collection: localJunctionM2AM2A2 });
-	await DeleteCollection(vendor, { collection: localJunctionAllM2A });
-	await DeleteCollection(vendor, { collection: localCollectionM2A2 });
-	await DeleteCollection(vendor, { collection: localCollectionM2A });
-	await DeleteCollection(vendor, { collection: localCollectionAll });
-	await DeleteCollection(vendor, { collection: localCollectionM2O });
-	await DeleteCollection(vendor, { collection: localCollectionM2O2 });
+	await DeleteFieldIfPresent(vendor, {
+		collection: localCollectionSelf,
+		field: 'self_id',
+	});
+
+	await DeleteFieldIfPresent(vendor, {
+		collection: localCollectionSelf,
+		field: 'self_id',
+	});
+
+	await DeleteCollectionIfPresent(vendor, { collection: localJunctionSelfM2M });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionSelf });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionO2M2 });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionO2M });
+	await DeleteCollectionIfPresent(vendor, { collection: localJunctionM2MM2M2 });
+	await DeleteCollectionIfPresent(vendor, { collection: localJunctionAllM2M });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionM2M2 });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionM2M });
+	await DeleteCollectionIfPresent(vendor, { collection: localJunctionM2AM2A2 });
+	await DeleteCollectionIfPresent(vendor, { collection: localJunctionAllM2A });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionM2A2 });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionM2A });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionAll });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionM2O });
+	await DeleteCollectionIfPresent(vendor, { collection: localCollectionM2O2 });
 };
 
 export const seedDBStructure = () => {
@@ -114,7 +122,9 @@ export const seedDBStructure = () => {
 						await deleteAllCollections(vendor, pkType, setDefaultValues);
 
 						// Delete the temp collection created in previous test run
-						await DeleteCollection(vendor, { collection: tempTestCollection });
+						await DeleteCollectionIfPresent(vendor, {
+							collection: tempTestCollection,
+						});
 
 						// Only `all` and `self` carry fields of their own; the rest exist
 						// to be pointed at.

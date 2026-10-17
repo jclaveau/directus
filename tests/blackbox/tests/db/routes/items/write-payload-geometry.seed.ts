@@ -1,4 +1,4 @@
-import { CreateCollections, DeleteCollection } from '@common/functions';
+import { CreateCollections, DeleteCollectionIfPresent } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
 
@@ -9,7 +9,7 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				await DeleteCollection(vendor, { collection: collectionGeoSpot });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionGeoSpot });
 
 				// Its own seed: a vendor with no spatial support fails here alone.
 				await CreateCollections(vendor, {

@@ -3,7 +3,7 @@ import {
 	CreateField,
 	CreateFieldO2M,
 	CreateRelation,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -25,7 +25,7 @@ export const seedDBStructure = () => {
 					collectionImportParent,
 					collectionImportPage,
 				]) {
-					await DeleteCollection(vendor, { collection });
+					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
 				await CreateCollections(vendor, {

@@ -1,4 +1,4 @@
-import { CreateCollections, DeleteCollection } from '@common/functions';
+import { CreateCollections, DeleteCollectionIfPresent } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
 
@@ -10,8 +10,13 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				await DeleteCollection(vendor, { collection: collectionSocketNotes });
-				await DeleteCollection(vendor, { collection: collectionSocketBanner });
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionSocketNotes,
+				});
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionSocketBanner,
+				});
 
 				await CreateCollections(vendor, {
 					collections: [

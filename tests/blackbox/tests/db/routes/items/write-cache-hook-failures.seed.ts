@@ -2,7 +2,7 @@ import {
 	CreateCollections,
 	CreateFieldM2O,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -43,7 +43,7 @@ export const seedDBStructure = () => {
 					'test_wcf_upsert_uncached',
 					'test_wcf_upsert_added',
 				]) {
-					await DeleteCollection(vendor, { collection });
+					await DeleteCollectionIfPresent(vendor, { collection });
 				}
 
 				await CreateCollections(vendor, {

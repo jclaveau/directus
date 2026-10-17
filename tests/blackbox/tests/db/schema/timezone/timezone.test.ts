@@ -3,7 +3,7 @@ import {
 	ClearCaches,
 	CreateCollection,
 	CreateField,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 	DisableTestCachingSetup,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
@@ -64,7 +64,7 @@ describe('schema', () => {
 				'%s',
 				async (vendor) => {
 					// Delete the table in case it already exists
-					await DeleteCollection(vendor, { collection: collectionName });
+					await DeleteCollectionIfPresent(vendor, { collection: collectionName });
 
 					const tableOptions = {
 						collection: collectionName,

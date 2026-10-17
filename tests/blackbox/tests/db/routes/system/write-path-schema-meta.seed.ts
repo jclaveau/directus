@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldM2O,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -17,11 +17,15 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				await DeleteCollection(vendor, { collection: collectionMetaPets });
-				await DeleteCollection(vendor, { collection: collectionMetaLinks });
-				await DeleteCollection(vendor, { collection: collectionMetaOwners });
-				await DeleteCollection(vendor, { collection: collectionMetaBare });
-				await DeleteCollection(vendor, { collection: collectionMetaGql });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionMetaPets });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionMetaLinks });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionMetaOwners,
+				});
+
+				await DeleteCollectionIfPresent(vendor, { collection: collectionMetaBare });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionMetaGql });
 
 				await CreateCollections(vendor, {
 					collections: [

@@ -3,7 +3,7 @@ import {
 	CreateCollections,
 	CreateField,
 	CreateRelation,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -50,7 +50,7 @@ export const seedDBStructure = () => {
 					}
 				}
 
-				await DeleteCollection(vendor, { collection: collectionUserLink });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionUserLink });
 
 				await CreateCollections(vendor, {
 					collections: [
