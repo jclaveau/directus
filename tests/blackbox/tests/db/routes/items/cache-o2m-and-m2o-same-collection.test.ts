@@ -5,6 +5,7 @@ import {
 	CreateFieldO2M,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -115,8 +116,14 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
-			await DeleteCollection(vendor, { collection: ARTICLE });
+			// Article and comment reference each other, so one FK goes first.
+			await DeleteField(vendor, {
+				collection: ARTICLE,
+				field: 'featured_comment',
+			});
+
 			await DeleteCollection(vendor, { collection: COMMENT });
+			await DeleteCollection(vendor, { collection: ARTICLE });
 		});
 
 		function readArticle() {

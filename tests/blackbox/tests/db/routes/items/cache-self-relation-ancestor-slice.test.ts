@@ -4,6 +4,7 @@ import {
 	CreateFieldM2O,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -148,6 +149,8 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
+			// Directus drops the table before the self-FK, then fails on it.
+			await DeleteField(vendor, { collection: NODE, field: 'parent' });
 			await DeleteCollection(vendor, { collection: NODE });
 			await DeleteCollection(vendor, { collection: OWNER });
 			await DeleteCollection(vendor, { collection: ORG });

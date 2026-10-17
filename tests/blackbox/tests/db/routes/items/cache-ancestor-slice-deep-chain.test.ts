@@ -148,8 +148,9 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			// The slot holds the o2m's reverse fk, so it goes before the range.
 			for (const collection of [
-				CONFIG, RANGE, SLOT, PART, COURSE, UNIT, DISCIPLINE, STUDENT, OWNER,
+				CONFIG, SLOT, RANGE, PART, COURSE, UNIT, DISCIPLINE, STUDENT, OWNER,
 			]) {
 				await DeleteCollection(vendor, { collection });
 			}

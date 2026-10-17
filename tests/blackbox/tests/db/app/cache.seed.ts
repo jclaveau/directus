@@ -8,6 +8,7 @@ import {
 	CreateFieldO2M,
 	CreateItem,
 	DeleteCollectionIfPresent,
+	DeleteFieldIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { randomUUID } from 'node:crypto';
@@ -97,6 +98,12 @@ export const seedDBStructure = () => {
 
 				await DeleteCollectionIfPresent(vendor, {
 					collection: collectionScopedMulti,
+				});
+
+				// Directus drops the table before the self-FK, then fails on it.
+				await DeleteFieldIfPresent(vendor, {
+					collection: collectionScoped,
+					field: 'parent',
 				});
 
 				await DeleteCollectionIfPresent(vendor, { collection: collectionScoped });

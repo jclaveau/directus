@@ -434,6 +434,8 @@ describe(oneLine`
 			// The two cascade into each other, so neither can go while the other's
 			// foreign key still names it.
 			await DeleteField(vendor, { collection: CYCLE_A, field: 'peer' });
+			// Directus drops the table before the self-FK, then fails on it.
+			await DeleteField(vendor, { collection: SELF, field: 'parent' });
 
 			// Depth first: every FK must go before the collection it points at.
 			await DeleteCollection(vendor, { collection: GRANDCHILD });
