@@ -130,6 +130,26 @@ describe('Integration Tests', () => {
 					{ keys: ['file-1'], data: { title: 'Same title' } },
 				])).rejects.toBe(uniqueError);
 			});
+
+			it('keeps a unique error on another collection\'s filename_disk', async () => {
+				const uniqueError = new RecordNotUniqueError({
+					collection: 'scans',
+					field: 'filename_disk',
+					value: 'scan.txt',
+				});
+
+				vi.spyOn(ItemsService.prototype, 'updateGroups')
+					.mockRejectedValue(uniqueError);
+
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				await expect(service.updateGroups([
+					{ keys: ['file-1'], data: { title: 'Scanned' } },
+				])).rejects.toBe(uniqueError);
+			});
 		});
 
 		describe('createMany', () => {

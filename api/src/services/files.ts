@@ -500,7 +500,11 @@ function diskNameTakenErrorFrom(error: unknown): unknown {
 		return error;
 	}
 
-	if (error.extensions.field !== 'filename_disk') {
+	// A nested write can reach a collection with its own filename_disk.
+	if (
+		error.extensions.collection !== 'directus_files'
+		|| error.extensions.field !== 'filename_disk'
+	) {
 		return error;
 	}
 
