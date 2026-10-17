@@ -1,6 +1,7 @@
 import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { Driver, StorageManager } from '@directus/storage';
+import type { File } from '@directus/types';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
@@ -515,6 +516,88 @@ describe('Integration Tests', () => {
 						data: { filename_disk: 'own.txt' },
 					}]),
 				).resolves.toStrictEqual(['8E2B4C10-5D3A-4F6E-9A7B-00000000000A']);
+			});
+
+			it('refuses an update group holding no data object', async () => {
+				await expect(
+					service.updateGroups([{
+						keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+						data: null as unknown as Partial<File>,
+					}]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: 'Each update group needs a "data" object',
+					}),
+				);
+			});
+
+			it('writes a disk name to a row one group names twice', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([{
+						keys: [
+							'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+							'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+						],
+						data: { filename_disk: 'renamed.txt' },
+					}]),
+				).resolves.toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+				]);
+			});
+
+			it('judges the disk name a last-winning group leaves a row', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups(
+						[
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
+								data: { filename_disk: 'moved.txt' },
+							},
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000003'],
+								data: { filename_disk: 'kept.txt' },
+							},
+							{
+								keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000004'],
+								data: { filename_disk: 'moved.txt' },
+							},
+						],
+						{ onRepeatedPk: 'lastWins' },
+					),
+				).resolves.toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000003',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000004',
+				]);
+			});
+
+			it('judges no disk name for an update naming no row', async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([
+						{
+							id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+							filename_disk: 'held.txt',
+						}]);
+
+				await expect(
+					service.updateGroups([
+						{ keys: [], data: { filename_disk: 'held.txt' } },
+					]),
+				).resolves.toStrictEqual([]);
 			});
 
 		});

@@ -306,18 +306,23 @@ export class FilesService extends ItemsService<File> {
 		groups: UpdateGroup<File>[],
 		trx: Knex,
 	): Promise<void> {
-		await this.refuseHeldDiskNames(
-			groups.flatMap((group) => {
-				if (!('filename_disk' in group.data)) {
-					return [];
-				}
+		// Under lastWins a row is in several groups: the last one names its disk.
+		const claimsByKeyName = new Map<string, DiskNameClaim>();
 
-				return group.keys.map((ownerKey) => {
-					return { filenameDisk: group.data.filename_disk, ownerKey };
+		for (const group of groups) {
+			if (!('filename_disk' in group.data)) {
+				continue;
+			}
+
+			for (const ownerKey of group.keys) {
+				claimsByKeyName.set(this.primaryKeyNameOf(ownerKey), {
+					filenameDisk: group.data.filename_disk,
+					ownerKey,
 				});
-			}),
-			trx,
-		);
+			}
+		}
+
+		await this.refuseHeldDiskNames([...claimsByKeyName.values()], trx);
 	}
 
 	/**
