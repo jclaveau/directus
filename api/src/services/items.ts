@@ -3025,11 +3025,14 @@ implements AbstractService<Item> {
 			return !heldKeyNames.has(this.primaryKeyNameOf(key));
 		});
 
+		// Every key is held, so the database itself kept rows: a DO INSTEAD rule,
+		// or a trigger skipping the delete.
 		if (missingKey === undefined) {
-			throw new Error(
-				`A delete of ${keyNames.size} ${this.collection} rows deleted`
-				+ ` ${deletedCount}, yet a row holds each of its keys`,
-			);
+			throw new InvalidPayloadError({
+				reason: `"${this.collection}" deleted ${deletedCount} of the`
+					+ ` ${keyNames.size} rows named: a rule or trigger on the table`
+					+ ' kept the others',
+			});
 		}
 
 		throw new ItemNotFoundError({

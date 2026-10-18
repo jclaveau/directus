@@ -4895,6 +4895,29 @@ describe('Services / Items / a batch delete naming a key no row holds', () => {
 			.resolves.toStrictEqual([{ id: 2 }]);
 	});
 
+	it('refuses an admin delete a trigger keeps a row of', async () => {
+		await database.raw(`
+			CREATE TRIGGER keep_two BEFORE DELETE ON test WHEN old.id = 2
+			BEGIN SELECT RAISE(IGNORE); END
+		`);
+
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteMany([1, 2])).rejects.toStrictEqual(
+			new InvalidPayloadError({
+				reason: '"test" deleted 1 of the 2 rows named:'
+					+ ' a rule or trigger on the table kept the others',
+			}),
+		);
+
+		await expect(database('test').select('id')
+			.orderBy('id')).resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+
 	it('keeps a non-admin delete of a key no row holds going', async () => {
 		const userService = new ItemsService('test', {
 			knex: database,
