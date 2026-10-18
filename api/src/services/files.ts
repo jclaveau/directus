@@ -383,6 +383,9 @@ export class FilesService extends ItemsService<File> {
 	 *   would serve the other's content.
 	 * - A name only the disk holds is accepted: a row can be created for a file
 	 *   already in storage.
+	 * - A name the batch moves its holder off is free, as in translations. The
+	 *   unique index still judges each write in order, so the batch must move
+	 *   the holder before the row taking its name; a swap is refused.
 	 */
 	private async refuseUnusableDiskNames(
 		diskNameClaims: DiskNameClaim[],
@@ -418,6 +421,18 @@ export class FilesService extends ItemsService<File> {
 			.whereIn('filename_disk', claimedNames);
 
 		for (const holderRow of holderRows) {
+			// The batch moves the holder off its name, which frees the name.
+			const isMovedOff = diskNameClaims.some((claim) => {
+				return claim.ownerKey !== null
+					&& claim.filenameDisk !== holderRow.filename_disk
+					&& this.primaryKeyNameOf(claim.ownerKey)
+						=== this.primaryKeyNameOf(holderRow.id);
+			});
+
+			if (isMovedOff) {
+				continue;
+			}
+
 			const isHeldElsewhere = diskNameClaims.some((claim) => {
 				if (claim.filenameDisk !== holderRow.filename_disk) {
 					return false;

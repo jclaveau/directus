@@ -687,6 +687,35 @@ describe('Integration Tests', () => {
 				).resolves.toStrictEqual(['8e2b4c10-5d3a-4f6e-9a7b-000000000001']);
 			});
 
+			it(oneLine`
+				gives a row the disk name the same batch moves another row off
+			`, async () => {
+				tracker.on
+					.select('select "id", "filename_disk" from "directus_files"')
+					.response([{
+						id: '8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+						filename_disk: 'held.txt',
+					}]);
+
+				tracker.on.update('directus_files').response(1);
+
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000002'],
+							data: { filename_disk: 'moved.txt' },
+						},
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: 'held.txt' },
+						},
+					]),
+				).resolves.toStrictEqual([
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000002',
+					'8e2b4c10-5d3a-4f6e-9a7b-000000000001',
+				]);
+			});
+
 			it('updates a row keeping its disk name under an uppercase key', async () => {
 				tracker.on
 					.select('select "id", "filename_disk" from "directus_files"')
