@@ -399,6 +399,41 @@ describe('Integration Tests', () => {
 				expect(superCreateOne).not.toHaveBeenCalled();
 			});
 
+			it('derives the disk name of an upload sending an empty one', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response(null);
+
+				// uploadOne goes on to fill the payload it created the row with.
+				const createdPayloads: unknown[] = [];
+
+				superCreateOne.mockImplementationOnce(async (createdPayload: object) => {
+					createdPayloads.push({ ...createdPayload });
+					return sample.id;
+				});
+
+				await service.uploadOne(new PassThrough(), {
+					storage: 'local',
+					type: 'text/plain',
+					filename_download: 'notes.txt',
+					filename_disk: '',
+				});
+
+				expect(createdPayloads).toStrictEqual([
+					{
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+					},
+				]);
+
+				expect(mockDriver.write).toHaveBeenCalledWith(
+					'test-file-id-123.txt',
+					expect.anything(),
+					'text/plain',
+				);
+			});
+
 			it('lets a replacement keep its own disk name', async () => {
 				tracker.on
 					.select('from "directus_files" where "id" = ?')
@@ -527,6 +562,35 @@ describe('Integration Tests', () => {
 				);
 
 				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses an update to an empty disk name', async () => {
+				await expect(
+					service.updateGroups([
+						{
+							keys: ['8e2b4c10-5d3a-4f6e-9a7b-000000000001'],
+							data: { filename_disk: '' },
+						},
+					]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" can\'t be empty',
+					}),
+				);
+
+				expect(tracker.history.update).toStrictEqual([]);
+			});
+
+			it('refuses a created row with an empty disk name', async () => {
+				await expect(
+					service.createMany([{ type: 'text/plain', filename_disk: '' }]),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: '"filename_disk" can\'t be empty',
+					}),
+				);
+
+				expect(tracker.history.insert).toStrictEqual([]);
 			});
 
 			it('creates a row whose disk name sits in a folder', async () => {

@@ -4,6 +4,10 @@
  * would reach a file the row doesn't name.
  */
 export function unnormalisedDiskNameReason(filenameDisk: string): string | null {
+	if (filenameDisk === '') {
+		return '"filename_disk" can\'t be empty';
+	}
+
 	const isNormalised = filenameDisk.split('/').every((pathSegment) => {
 		return !['', '.', '..'].includes(pathSegment);
 	});

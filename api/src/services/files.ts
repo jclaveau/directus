@@ -74,6 +74,11 @@ export class FilesService extends ItemsService<File> {
 		// Merge the existing file's folder and filename_download with the new payload
 		const payload = { ...(existingFile ?? {}), ...clone(data) };
 
+		// An upload derives an empty disk name below, which a row write refuses.
+		if (payload.filename_disk === '') {
+			delete payload.filename_disk;
+		}
+
 		const disk = storage.location(payload.storage);
 
 		const requestedDiskName = data.filename_disk;
@@ -392,7 +397,7 @@ export class FilesService extends ItemsService<File> {
 		trx: Knex,
 	): Promise<void> {
 		const claimedNames = diskNameClaims.flatMap((claim) => {
-			if (!claim.filenameDisk) {
+			if (claim.filenameDisk === null || claim.filenameDisk === undefined) {
 				return [];
 			}
 
