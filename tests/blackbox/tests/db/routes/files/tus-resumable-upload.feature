@@ -350,3 +350,71 @@ Feature: A file is uploaded, replaced and terminated through tus
       |   fields: id                         |     - id: <file> |
       |   filter[filename_download][_eq]: >- |                  |
       |     ghost-<run>.txt                  |                  |
+
+  Scenario: a replacement keeps a file whose disk name starts with the replaced id
+    Given these requests are sent:
+      | request                                | response  |
+      | method: POST                           | code: 201 |+
+      | path: /files/tus                       |           |
+      | headers:                               |           |
+      |   Tus-Resumable: 1.0.0                 |           |
+      |   Upload-Length: '4'                   |           |
+      | upload_metadata:                       |           |
+      |   filename_download: first-<run>.txt   |           |
+      |   type: text/plain                     |           |
+      | remember_headers:                      |           |
+      |   first-upload: Location               |           |
+      |   file: Directus-File-Id               |           |
+      | method: PATCH                          | code: 204 |+
+      | path: /files/tus/<first-upload>        |           |
+      | headers:                               |           |
+      |   Tus-Resumable: 1.0.0                 |           |
+      |   Upload-Offset: '0'                   |           |
+      |   Content-Type: >-                     |           |
+      |     application/offset+octet-stream    |           |
+      | body: orig                             |           |
+      | method: POST                           | code: 201 |+
+      | path: /files/tus                       |           |
+      | headers:                               |           |
+      |   Tus-Resumable: 1.0.0                 |           |
+      |   Upload-Length: '4'                   |           |
+      | upload_metadata:                       |           |
+      |   filename_download: copy-<run>.txt    |           |
+      |   filename_disk: <file>-copy.txt       |           |
+      |   type: text/plain                     |           |
+      | remember_headers:                      |           |
+      |   copy-upload: Location                |           |
+      |   copy: Directus-File-Id               |           |
+      | method: PATCH                          | code: 204 |+
+      | path: /files/tus/<copy-upload>         |           |
+      | headers:                               |           |
+      |   Tus-Resumable: 1.0.0                 |           |
+      |   Upload-Offset: '0'                   |           |
+      |   Content-Type: >-                     |           |
+      |     application/offset+octet-stream    |           |
+      | body: copy                             |           |
+    Then these requests get these responses:
+      | request                                | response          |
+      | method: POST                           | code: 201         |+
+      | path: /files/tus                       |                   |
+      | headers:                               |                   |
+      |   Tus-Resumable: 1.0.0                 |                   |
+      |   Upload-Length: '3'                   |                   |
+      | upload_metadata:                       |                   |
+      |   id: <file>                           |                   |
+      |   filename_download: second-<run>.txt  |                   |
+      |   type: text/plain                     |                   |
+      | remember_headers:                      |                   |
+      |   second-upload: Location              |                   |
+      | method: PATCH                          | code: 204         |+
+      | path: /files/tus/<second-upload>       |                   |
+      | headers:                               |                   |
+      |   Tus-Resumable: 1.0.0                 |                   |
+      |   Upload-Offset: '0'                   |                   |
+      |   Content-Type: >-                     |                   |
+      |     application/offset+octet-stream    |                   |
+      | body: new                              |                   |
+      | method: GET                            | code: 200         |+
+      | path: /assets/<file>                   | text: new         |
+      | method: GET                            | code: 200         |+
+      | path: /assets/<copy>                   | text: copy        |

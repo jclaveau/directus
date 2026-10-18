@@ -457,6 +457,39 @@ describe('Integration Tests', () => {
 					'test-file-id-123.txt',
 				);
 			});
+
+			it('replaces a file without deleting one its id prefixes', async () => {
+				tracker.on
+					.select('from "directus_files" where "id" = ?')
+					.response({ filename_disk: 'test-file-id-123.jpg' });
+
+				const thumbnailHash = 'b'.repeat(40);
+
+				mockDriver.list = vi.fn(async function* () {
+					yield* [
+						'test-file-id-123.jpg',
+						`test-file-id-123__${thumbnailHash}.webp`,
+						'test-file-id-123-copy.jpg',
+					];
+				});
+
+				mockDriver.delete = vi.fn();
+
+				await service.uploadOne(
+					new PassThrough(),
+					{
+						storage: 'local',
+						type: 'image/jpeg',
+						filename_download: 'photo.jpg',
+					},
+					sample.id,
+				);
+
+				expect(vi.mocked(mockDriver.delete).mock.calls).toStrictEqual([
+					['test-file-id-123.jpg'],
+					[`test-file-id-123__${thumbnailHash}.webp`],
+				]);
+			});
 		});
 
 		describe('disk names held by rows', () => {

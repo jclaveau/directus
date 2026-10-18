@@ -1237,7 +1237,7 @@ describe('TusDataStore.write', () => {
 		expect(mockedDeps.storageDriver.move).not.toHaveBeenCalled();
 	});
 
-	test('moves a finished replacement over the replaced file', async () => {
+	test('moves a replacement, keeping a file its id prefixes', async () => {
 		const tusStore = new TusDataStore({
 			constants: {
 				ENABLED: true,
@@ -1274,7 +1274,8 @@ describe('TusDataStore.write', () => {
 		mockedDeps.storageDriver.list.mockReturnValueOnce(
 			(async function* () {
 				yield 'file-9.jpg';
-				yield 'file-9__thumbnail.webp';
+				yield 'file-9__ffffffffffffffffffffffffffffffffffffffff.webp';
+				yield 'file-9-copy.jpg';
 			})(),
 		);
 
@@ -1289,7 +1290,7 @@ describe('TusDataStore.write', () => {
 
 		expect(mockedDeps.storageDriver.delete.mock.calls).toEqual([
 			['file-9.jpg'],
-			['file-9__thumbnail.webp'],
+			['file-9__ffffffffffffffffffffffffffffffffffffffff.webp'],
 		]);
 
 		expect(mockedDeps.storageDriver.move).toHaveBeenCalledWith(
