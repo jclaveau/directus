@@ -156,6 +156,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/batch-update.test.ts': 500,
 	'/tests/db/routes/permissions/policy-user-integrity.test.ts': 400,
 	'/tests/db/routes/items/read-hook-null.test.ts': 200,
+	'/tests/db/harness/remembered-text.test.ts': 100,
 	// Not measured yet: one PATCH and one message, like websocket/batch-update.
 	'/tests/db/websocket/relation-update.test.ts': 500,
 	// Not measured yet: one table created, dropped and inspected.

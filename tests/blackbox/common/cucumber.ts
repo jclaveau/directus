@@ -242,11 +242,13 @@ export function messageOfDocString(
 
 /**
  * The text a `remember` row keeps under `name`. A value the response does not
- * hold fails the row: kept as the text `undefined`, it would stand in for a key
- * in every later row and leave them checking nothing.
+ * hold, or holds as `null`, fails the row: kept as the text `undefined` or
+ * `null`, it would stand in for a key in every later row and leave them
+ * checking nothing — `/items/<collection>/null` answers the 403 of a missing
+ * item.
  */
 export function rememberedText(name: string, rememberedValue: unknown): string {
-	if (rememberedValue === undefined) {
+	if (rememberedValue === undefined || rememberedValue === null) {
 		throw new Error(`"${name}" remembers nothing: the response holds no value`);
 	}
 
