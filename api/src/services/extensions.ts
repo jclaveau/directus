@@ -236,13 +236,26 @@ export class ExtensionsService {
 			(failure: unknown) => ({ hasFailed: true, failure }),
 		);
 
-		await this.extensionsManager.broadcastReloadNotification();
-
 		if (reloadOutcome.hasFailed) {
 			useLogger().error(
 				reloadOutcome.failure,
 				'Failed to reload the extensions after an extension update',
 			);
+		}
+
+		// The settings are saved either way: a bus that fails is logged, not
+		// answered in place of the reload's outcome.
+		try {
+			await this.extensionsManager.broadcastReloadNotification();
+		}
+		catch (broadcastFailure) {
+			useLogger().error(
+				broadcastFailure,
+				'Failed to tell the other processes to reload the extensions',
+			);
+		}
+
+		if (reloadOutcome.hasFailed) {
 
 			throw new ServiceUnavailableError({
 				service: 'extensions',

@@ -642,6 +642,86 @@ describe('Services / Extensions / updateOne', () => {
 		);
 	});
 
+	it('answers the failed reload whatever the broadcast does', async () => {
+		const reloadFailure = new Error('load failed');
+		const broadcastFailure = new Error('bus down');
+
+		vi.mocked(getExtensionManager).mockReturnValue({
+			reload: vi.fn().mockRejectedValue(reloadFailure),
+			broadcastReloadNotification: vi.fn().mockRejectedValue(broadcastFailure),
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('extension-id');
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'extension-id',
+			bundle: null,
+			schema: null,
+			meta: { options: null },
+		} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		const update = service.updateOne('extension-id', {
+			meta: { options: null },
+		} as any);
+
+		await expect(update).rejects.toBeInstanceOf(ServiceUnavailableError);
+
+		expect(vi.mocked(useLogger().error).mock.calls).toEqual([
+			[
+				reloadFailure,
+				'Failed to reload the extensions after an extension update',
+			],
+			[
+				broadcastFailure,
+				'Failed to tell the other processes to reload the extensions',
+			],
+		]);
+	});
+
+	it('answers the saved extension when only the broadcast fails', async () => {
+		const broadcastFailure = new Error('bus down');
+
+		vi.mocked(getExtensionManager).mockReturnValue({
+			reload: vi.fn().mockResolvedValue(undefined),
+			broadcastReloadNotification: vi.fn().mockRejectedValue(broadcastFailure),
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('extension-id');
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'extension-id',
+			bundle: null,
+			schema: null,
+			meta: { options: null },
+		} as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		const update = service.updateOne('extension-id', {
+			meta: { options: null },
+		} as any);
+
+		await expect(update).resolves.toEqual({
+			id: 'extension-id',
+			bundle: null,
+			schema: null,
+			meta: { options: null },
+		});
+
+		expect(useLogger().error).toHaveBeenCalledWith(
+			broadcastFailure,
+			'Failed to tell the other processes to reload the extensions',
+		);
+	});
+
 	it('wraps a failed read-back in ExtensionReadError', async () => {
 		vi.mocked(getExtensionManager).mockReturnValue({} as any);
 		vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('extension-id');
