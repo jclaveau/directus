@@ -11,6 +11,7 @@ export const collectionMetaPets = 'test_wp_meta_pets';
 export const collectionMetaLinks = 'test_wp_meta_links';
 export const collectionMetaBare = 'test_wp_meta_bare';
 export const collectionMetaGql = 'test_wp_meta_gql';
+export const collectionMetaGqlField = 'test_wp_meta_gql_field';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -26,6 +27,10 @@ export const seedDBStructure = () => {
 
 				await DeleteCollectionIfPresent(vendor, { collection: collectionMetaBare });
 				await DeleteCollectionIfPresent(vendor, { collection: collectionMetaGql });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionMetaGqlField,
+				});
 
 				await CreateCollections(vendor, {
 					collections: [

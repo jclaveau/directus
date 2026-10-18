@@ -291,6 +291,39 @@ describe('resolveSystemAdmin', () => {
 		expect(readOneSpy).toHaveBeenCalledWith('articles', 'title');
 	});
 
+	test(oneLine`
+		update_fields_item reads back the field named by its arguments
+	`, async () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+		resolveSystemAdmin(gql, emptySchema, schemaComposer);
+
+		vi.spyOn(FieldsService.prototype, 'updateField').mockResolvedValue('title');
+
+		const readOneSpy = vi
+			.spyOn(FieldsService.prototype, 'readOne')
+			.mockResolvedValue({ collection: 'articles', field: 'title' } as any);
+
+		await schemaComposer.Mutation.getFieldConfig('update_fields_item').resolve!(
+			undefined,
+			{
+				collection: 'articles',
+				field: 'title',
+				data: { meta: { note: 'Headline' } },
+			},
+			{},
+			{} as any,
+		);
+
+		expect(readOneSpy).toHaveBeenCalledWith('articles', 'title');
+	});
+
 	test('delete_fields_item deletes and echoes the field', async () => {
 		const gql = new GraphQLService({
 			knex: knex({ client: MockClient }),
