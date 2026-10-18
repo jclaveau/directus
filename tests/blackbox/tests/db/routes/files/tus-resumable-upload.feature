@@ -239,7 +239,7 @@ Feature: A file is uploaded, replaced and terminated through tus
       | path: /files/tus                     | text: >-                  |
       | headers:                             |   "filename_disk"         |
       |   Tus-Resumable: 1.0.0               |   "<file>.txt" is already |
-      |   Upload-Length: '4'                 |   used by another file    |
+      |   Upload-Length: '4'                 |   used                    |
       | upload_metadata:                     |                           |
       |   filename_download: lost-<run>.txt  |                           |
       |   filename_disk: <file>.txt          |                           |

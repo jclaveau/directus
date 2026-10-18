@@ -170,7 +170,7 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | method: POST                        | code: 400                          |+
       | path: /files/tus                    | text: >-                           |
       | headers:                            |   "filename_disk" "held-<run>.txt" |
-      |   Tus-Resumable: 1.0.0              |   is already used by another file  |
+      |   Tus-Resumable: 1.0.0              |   is already used                  |
       |   Upload-Length: '4'                |                                    |
       | upload_metadata:                    |                                    |
       |   filename_download: lost-<run>.txt |                                    |

@@ -127,8 +127,7 @@ export class TusDataStore extends DataStore {
 		) {
 			throw {
 				status_code: 400,
-				body: `"filename_disk" "${requestedDiskName}" is already used`
-					+ ' by another file',
+				body: `"filename_disk" "${requestedDiskName}" is already used`,
 			};
 		}
 

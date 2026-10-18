@@ -558,7 +558,7 @@ describe('TusDataStore.create', () => {
 			},
 		}))).rejects.toStrictEqual({
 			status_code: 400,
-			body: '"filename_disk" "file-9.jpg" is already used by another file',
+			body: '"filename_disk" "file-9.jpg" is already used',
 		});
 
 		expect(mockedDeps.storageDriver.exists).toHaveBeenCalledWith('file-9.jpg');
@@ -597,7 +597,7 @@ describe('TusDataStore.create', () => {
 			},
 		}))).rejects.toStrictEqual({
 			status_code: 400,
-			body: '"filename_disk" "file-9.jpg" is already used by another file',
+			body: '"filename_disk" "file-9.jpg" is already used',
 		});
 
 		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
@@ -643,7 +643,7 @@ describe('TusDataStore.create', () => {
 			},
 		}))).rejects.toEqual({
 			status_code: 400,
-			body: '"filename_disk" "file-9.jpg" is already used by another file',
+			body: '"filename_disk" "file-9.jpg" is already used',
 		});
 
 		expect(mockedDeps.filesService.createOne).not.toHaveBeenCalled();
