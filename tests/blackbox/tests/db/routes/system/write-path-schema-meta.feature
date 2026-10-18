@@ -145,3 +145,17 @@ Feature: Schema rows without meta get their meta on the first update
       |     ) { field meta { note } } }             |                             |
       | method: DELETE                              | code: 204                   |+
       | path: /collections/test_wp_meta_gql_field   |                             |
+
+  Scenario: GraphQL refuses a fields list on a collection update
+    Then these requests get these responses:
+      | request                                | response                               |
+      | method: POST                           | code: 400                              |+
+      | path: /graphql/system                  | body:                                  |
+      | payload:                               |   errors:                              |
+      |   query: >-                            |     - extensions:                      |
+      |     mutation {                         |         code: GRAPHQL_VALIDATION       |
+      |     update_collections_item(           |         errors:                        |
+      |     collection: "test_wp_meta_owners", |           - message: "Field \"fields\" |
+      |     data: { fields: [] }               |               is not defined by type   |
+      |     ) { collection } }                 |               \"write_directus_\       |
+      |                                        |               collections_input\"."    |
