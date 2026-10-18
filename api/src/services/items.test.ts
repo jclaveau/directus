@@ -25,6 +25,9 @@ import {
 } from 'vitest';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
+import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
 import {
@@ -3811,6 +3814,31 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				knex: expect.objectContaining({ isTransaction: true }),
 				schema: shapesSchema,
 			});
+		});
+
+		it('judges an update with the value its preset sets', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
+			tracker.on.update('test').response(1);
+
+			vi.mocked(processPayload).mockResolvedValueOnce({ name: 'preset' });
+
+			const judgedGroups = vi.spyOn(
+				ItemsService.prototype as any,
+				'validateGroupsToUpdate',
+			);
+
+			await new ItemsService('test', {
+				knex: db,
+				schema: shapesSchema,
+				accountability,
+			}).updateMany([1], { name: 'y' });
+
+			expect(judgedGroups).toHaveBeenCalledWith(
+				[{ keys: [1], data: { name: 'preset' } }],
+				expect.anything(),
+			);
+
+			expect(processPayload).toHaveBeenCalledOnce();
 		});
 
 		it('refuses an update the caller may not make before judging it', async () => {

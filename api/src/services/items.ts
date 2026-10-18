@@ -1568,7 +1568,7 @@ implements AbstractService<Item> {
 
 	/**
 	 * Refuses groups an update would write. Handed the groups the hooks left,
-	 * inside the update's transaction.
+	 * with the permission presets, inside the update's transaction.
 	 */
 	protected async validateGroupsToUpdate(
 		_groups: UpdateGroup<Item>[],
@@ -2096,10 +2096,35 @@ implements AbstractService<Item> {
 					}
 				}
 
-				this.refuseChildJoiningSeveralRows(writingGroups);
-				await this.validateGroupsToUpdate(writingGroups, trx);
+				// The presets before the guards, so a value a preset sets is judged
+				// like one the caller sent.
+				const presetGroups: UpdateGroup<Item>[] = [];
 
 				for (const group of writingGroups) {
+					presetGroups.push({
+						...group,
+						data: this.accountability
+							? await processPayload(
+								{
+									accountability: this.accountability,
+									action: 'update',
+									collection: this.collection,
+									payload: group.data,
+									nested: this.nested,
+								},
+								{
+									knex: trx,
+									schema: this.schema,
+								},
+							)
+							: group.data,
+					});
+				}
+
+				this.refuseChildJoiningSeveralRows(presetGroups);
+				await this.validateGroupsToUpdate(presetGroups, trx);
+
+				for (const group of presetGroups) {
 					const result = await service.applyUpdateGroup(
 						group,
 						aliasFields,
@@ -2502,7 +2527,8 @@ implements AbstractService<Item> {
 	 * `updateGroups` around the loop, never here. Returns what was written: the
 	 * payload after presets, and the keys it reached. A group that changes nothing
 	 * never gets here — `updateGroups` filters those out before the transaction —
-	 * and `updateGroups` has checked the caller may update every group's rows.
+	 * and `updateGroups` has checked the caller may update every group's rows
+	 * and applied the presets to `group.data`.
 	 */
 	private async applyUpdateGroup(
 		group: UpdateGroup<Item>,
@@ -2516,26 +2542,10 @@ implements AbstractService<Item> {
 		// Sorted for the work below only. `group.keys` stays in the caller's row order,
 		// which is what `updateGroups` returns and what the per-row action events walk.
 		const keys = [...group.keys].sort();
-		const payloadAfterHooks = group.data as Partial<AnyItem>;
+		const payloadWithPresets = group.data as Partial<AnyItem>;
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
-
-		const payloadWithPresets = this.accountability
-			? await processPayload(
-				{
-					accountability: this.accountability,
-					action: 'update',
-					collection: this.collection,
-					payload: payloadAfterHooks,
-					nested: this.nested,
-				},
-				{
-					knex: this.knex,
-					schema: this.schema,
-				},
-			)
-			: payloadAfterHooks;
 
 		const preMutationError = opts.preMutationError ?? group.keys
 			.map((key) => opts.preMutationErrorsByKey?.get(String(key)))
@@ -2576,7 +2586,7 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, payloadAfterHooks, this.knex, {
+					throw await translateDatabaseError(err, payloadWithPresets, this.knex, {
 						collection: this.collection,
 						operation: 'update',
 					});
