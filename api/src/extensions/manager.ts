@@ -143,6 +143,9 @@ export class ExtensionManager {
 	/** The reload waiting behind the running one, which later callers share. */
 	private queuedReload: Promise<unknown> | null = null;
 
+	/** What the queued reload loads with, forced if any caller sharing it asked. */
+	private queuedReloadOptions: { forceSync: boolean } | undefined = undefined;
+
 	/**
 	 * Optional file system watcher to auto-reload extensions when the local file system changes
 	 */
@@ -331,6 +334,10 @@ export class ExtensionManager {
 	public reload(options?: { forceSync: boolean }): Promise<unknown> {
 		if (this.queuedReload !== null) {
 			// The queued job will already handle the additional changes
+			if (options?.forceSync) {
+				this.queuedReloadOptions = options;
+			}
+
 			return this.queuedReload;
 		}
 
@@ -344,12 +351,12 @@ export class ExtensionManager {
 			reject = rej;
 		});
 
-		const reloadExtensions = async () => {
+		const reloadExtensions = async (reloadOptions?: { forceSync: boolean }) => {
 			if (this.isLoaded) {
 				const prevExtensions = clone(this.extensions);
 
 				await this.unload();
-				await this.load(options);
+				await this.load(reloadOptions);
 
 				logger.info('Extensions reloaded');
 
@@ -388,12 +395,16 @@ export class ExtensionManager {
 		};
 
 		this.queuedReload = promise;
+		this.queuedReloadOptions = options;
 
 		this.reloadQueue.enqueue(async () => {
+			const reloadOptions = this.queuedReloadOptions;
+
 			this.queuedReload = null;
+			this.queuedReloadOptions = undefined;
 
 			try {
-				await reloadExtensions();
+				await reloadExtensions(reloadOptions);
 			}
 			catch (error) {
 				reject(error);
