@@ -234,6 +234,39 @@ describe('Services / Relations', () => {
 
 			expect(pgTracker.history.all).toEqual([]);
 		});
+
+		it('keeps the foreign key action a partial schema leaves out', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue(1);
+			const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+			const pgTracker = createTracker(pgDatabase);
+			pgTracker.on.any(/alter table/).response([]);
+
+			vi.mocked(transaction).mockImplementationOnce((_knex, runInTransaction) => {
+				return runInTransaction(pgDatabase as Knex.Transaction);
+			});
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			await service.updateOne(
+				'test',
+				'related',
+				{ schema: { on_update: 'CASCADE' } } as Partial<Relation>,
+				{ autoPurgeSystemCache: false },
+			);
+
+			expect(pgTracker.history.all).toMatchObject([
+				{ sql: 'alter table "test" drop constraint "test_related_foreign"' },
+				{
+					sql: 'alter table "test" add constraint "test_related_foreign" '
+						+ 'foreign key ("related") references "related" ("id") '
+						+ 'on update CASCADE on delete SET NULL',
+				},
+			]);
+		});
 	});
 
 	describe('deleteOne', () => {

@@ -74,3 +74,33 @@ Feature: A single relation is deleted by its collection and field
       |                                         |       one_deselect_action: delete |
       | method: DELETE                          | code: 204                         |+
       | path: /relations/test_sw_pets/owner_ref |                                   |
+
+  Scenario: a relation updated with one foreign key action keeps the other
+    Given these requests are sent:
+      | request                              | response  |
+      | method: POST                         | code: 200 |+
+      | path: /relations                     |           |
+      | payload:                             |           |
+      |   collection: test_sw_pets           |           |
+      |   field: owner_ref                   |           |
+      |   related_collection: test_sw_owners |           |
+      |   schema:                            |           |
+      |     on_delete: SET NULL              |           |
+      |     on_update: CASCADE               |           |
+    Then these requests get these responses:
+      | request                                 | response                    |
+      | method: PATCH                           | code: 200                   |+
+      | path: /relations/test_sw_pets/owner_ref |                             |
+      | payload:                                |                             |
+      |   schema:                               |                             |
+      |     on_delete: CASCADE                  |                             |
+      | method: GET                             | code: 200                   |+
+      | path: /relations/test_sw_pets/owner_ref | body:                       |
+      |                                         |   data:                     |
+      |                                         |     schema:                 |
+      |                                         |       table: test_sw_pets   |
+      |                                         |       column: owner_ref     |
+      |                                         |       on_delete: CASCADE    |
+      |                                         |       on_update: CASCADE    |
+      | method: DELETE                          | code: 204                   |+
+      | path: /relations/test_sw_pets/owner_ref |                             |
