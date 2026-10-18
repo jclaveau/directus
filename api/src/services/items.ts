@@ -1375,7 +1375,10 @@ implements AbstractService<Item> {
 
 	/**
 	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
-	 * or a bigInteger whatever zeros lead it.
+	 * or a bigInteger whatever zeros lead it. A string key is taken as spelled:
+	 * on a column comparing without case (citext) or padding (char), two
+	 * spellings of one row read as two rows, and a row named by the spelling
+	 * the read does not return is told missing.
 	 */
 	protected primaryKeyNameOf(key: PrimaryKey): string {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
