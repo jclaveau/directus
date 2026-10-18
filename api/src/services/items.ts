@@ -744,6 +744,7 @@ implements AbstractService<Item> {
 			// the provided keys before the insert runs, not only after it.
 			if (autoIncrementSequenceNeedsToBeReset) {
 				const providedPrimaryKeys = prepared
+					.filter((p) => !isMissingPrimaryKey(p.primaryKey))
 					.map((p) => Number(p.primaryKey))
 					.filter((key) => Number.isFinite(key));
 
