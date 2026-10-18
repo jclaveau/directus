@@ -2930,7 +2930,7 @@ implements AbstractService<Item> {
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
 		return keys.length
-			? await this.deleteMany(keys, opts)
+			? await this.deleteMany(keys, { ...opts, keysFromQuery: true })
 			: [];
 	}
 
@@ -2979,9 +2979,14 @@ implements AbstractService<Item> {
 	 * holds is a 404 for them, as it is for deleteOne. It is told off the
 	 * delete's count, so a delete reaching every key reads nothing more; the
 	 * delete runs under a savepoint so that, on a shortfall, the rows come back
-	 * to be read for the key none holds.
+	 * to be read for the key none holds. Keys a query resolved were not named
+	 * by the caller, so one another delete took meanwhile is skipped.
 	 */
-	private async deleteKeyRows(keys: PrimaryKey[], trx: Knex): Promise<void> {
+	private async deleteKeyRows(
+		keys: PrimaryKey[],
+		trx: Knex,
+		keysFromQuery: boolean,
+	): Promise<void> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
 		if (this.accountability?.admin !== true) {
@@ -3006,6 +3011,17 @@ implements AbstractService<Item> {
 		}
 
 		if (deletedCount >= keyNames.size) {
+			await savepoint.commit();
+			return;
+		}
+
+		const keptRows: Item[] = await savepoint
+			.select(primaryKeyField)
+			.from(this.collection)
+			.whereIn(primaryKeyField, keys);
+
+		// No row is left, so the shortfall is only keys no row held.
+		if (keysFromQuery && keptRows.length === 0) {
 			await savepoint.commit();
 			return;
 		}
@@ -3160,7 +3176,7 @@ implements AbstractService<Item> {
 			}
 
 			try {
-				await this.deleteKeyRows(keys, trx);
+				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);
 			}
 			catch (err: any) {
 				if (isDirectusError(err, ErrorCode.ItemNotFound)) {

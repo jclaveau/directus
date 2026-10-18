@@ -160,6 +160,12 @@ export type MutationOptions = {
 	preMutationErrorsByKey?: Map<string, DirectusError> | undefined;
 
 	/**
+	 * The keys a delete takes were resolved from a query, not named by the
+	 * caller: a key another delete took meanwhile is skipped, not a 404.
+	 */
+	keysFromQuery?: boolean | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */

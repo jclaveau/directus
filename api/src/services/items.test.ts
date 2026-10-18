@@ -4918,6 +4918,26 @@ describe('Services / Items / a batch delete naming a key no row holds', () => {
 			.orderBy('id')).resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
 	});
 
+	it(oneLine`
+		skips for an admin a key its query found and another delete took
+	`, async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		vi.spyOn(adminService, 'getKeysByQuery').mockResolvedValue([1, 999]);
+
+		await expect(adminService.deleteByQuery({})).resolves.toStrictEqual([
+			1,
+			999,
+		]);
+
+		await expect(database('test').select('id'))
+			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+
 	it('keeps a non-admin delete of a key no row holds going', async () => {
 		const userService = new ItemsService('test', {
 			knex: database,
