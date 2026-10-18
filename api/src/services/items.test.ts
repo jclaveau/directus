@@ -604,6 +604,35 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 			});
 
+			it(oneLine`
+				raises the sequence before a batch whose other row has a null key
+			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const raiseSpy = vi
+					.spyOn(AutoIncrementHelperPostgres.prototype, 'raiseAutoIncrementSequence')
+					.mockResolvedValue(undefined);
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 11 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+				const raw = vi.fn();
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) =>
+						callback({ ...db, batchInsert, raw } as any));
+
+				await batchService().createMany([
+					{ id: 10, name: 'a' },
+					{ id: null, name: 'b' },
+				]);
+
+				expect(raiseSpy).toHaveBeenCalledWith('test', 'id', 10);
+
+				raiseSpy.mockRestore();
+				transactionSpy.mockRestore();
+			});
+
 			it('falls back to a per-row insert loop when the dialect does not preserve RETURNING order', async () => {
 				// mysql has no order-preserving RETURNING -> each row is inserted individually
 				vi.mocked(getDatabaseClient).mockReturnValue('mysql');
