@@ -2706,7 +2706,7 @@ implements AbstractService<Item> {
 			}
 		}, opts.mutationTracker.snapshot());
 
-		return { data: payloadWithPresets, keys: group.keys };
+		return { data: group.data, keys: group.keys };
 	}
 
 	/**
