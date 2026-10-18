@@ -24,15 +24,16 @@ export function resolveSystemAdmin(
 	const Field = getFieldType(schemaComposer, schema, 'write');
 	const Relation = getRelationType(schemaComposer, schema, 'write');
 
-	// The update mutation strips `collection` and `schema` from the shared
-	// input type, so the create mutation holds its own copy.
+	// toInputObjectType hands both mutations one shared input type: the create
+	// adds `fields` and the update strips `collection` and `schema`, so the
+	// create works on its own copy.
 	const CreateCollectionInput = toInputObjectType(Collection, {
 		postfix: '_input',
 	})
+		.clone('create_directus_collections_input')
 		.addFields({
 			fields: [toInputObjectType(Field, { postfix: '_input' }).NonNull],
-		})
-		.clone('create_directus_collections_input');
+		});
 
 	schemaComposer.Mutation.addFields({
 		create_collections_item: {
