@@ -282,6 +282,43 @@ test('shares the queued reload with a reload asked behind it', async () => {
 	await expect(queuedReload).resolves.toBeUndefined();
 });
 
+test('force-syncs the queued reload when a reload joining it asks to', async () => {
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	let releaseFirstLoad: () => void = () => undefined;
+
+	vi.spyOn(manager as any, 'unload').mockResolvedValue(undefined);
+
+	const loadSpy = vi.spyOn(manager as any, 'load')
+		.mockImplementationOnce(() => {
+			return new Promise<void>((resolve) => {
+				releaseFirstLoad = resolve;
+			});
+		})
+		.mockResolvedValue(undefined);
+
+	const runningReload = manager.reload();
+	const queuedReload = manager.reload();
+	const forcedReload = manager.reload({ forceSync: true });
+
+	await expect(Promise.race([forcedReload, setImmediate('pending')]))
+		.resolves.toBe('pending');
+
+	releaseFirstLoad();
+
+	await Promise.all([runningReload, queuedReload, forcedReload]);
+
+	expect(loadSpy.mock.calls).toEqual([
+		[undefined],
+		[{ forceSync: true }],
+	]);
+});
+
 test('runs the next reload after one whose load threw', async () => {
 	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
 	mocks.settings = [];
