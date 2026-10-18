@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
 import {
 	queueAfterCommit,
+	queueAfterCommitOrRollback,
 	queueMergedAfterCommit,
 	transaction,
 } from './transaction.js';
@@ -207,6 +208,95 @@ describe('queueAfterCommit', () => {
 
 		expect(secondTask).toHaveBeenCalledOnce();
 		expect(handler).toHaveBeenCalledOnce();
+	});
+});
+
+describe('queueAfterCommitOrRollback', () => {
+	it('runs a task queued on the trx once that trx rolled back', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const trxCompletedWhenRun = vi.fn();
+
+		await expect(transaction(db, async (trx) => {
+			queueAfterCommitOrRollback(trx, async (database) => {
+				trxCompletedWhenRun(
+					database,
+					(trx as knex.Knex.Transaction).isCompleted(),
+				);
+			});
+
+			throw new Error('write refused');
+		})).rejects.toThrow('write refused');
+
+		expect(trxCompletedWhenRun).toHaveBeenCalledWith(db, true);
+	});
+
+	it('runs a task queued on the trx once that trx committed', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await transaction(db, async (trx) => {
+			queueAfterCommitOrRollback(trx, queuedTask);
+		});
+
+		expect(queuedTask).toHaveBeenCalledExactlyOnceWith(db);
+	});
+
+	it('runs the task of an aborted attempt, and of the one retried', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		const handler = vi.fn()
+			.mockImplementationOnce(async (trx: knex.Knex) => {
+				queueAfterCommitOrRollback(trx, queuedTask);
+
+				throw Object.assign(new Error('busy'), { code: 'SQLITE_BUSY' });
+			})
+			.mockImplementationOnce(async (trx: knex.Knex) => {
+				queueAfterCommitOrRollback(trx, queuedTask);
+			});
+
+		await transaction(db, handler);
+
+		expect(queuedTask).toHaveBeenCalledTimes(2);
+	});
+
+	it(oneLine`
+		answers the rolled-back write's error when its task fails, logging the
+		failure
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const taskFailure = new Error('clear failed');
+
+		await expect(transaction(db, async (trx) => {
+			queueAfterCommitOrRollback(trx, async () => {
+				throw taskFailure;
+			});
+
+			throw new Error('write refused');
+		})).rejects.toThrow('write refused');
+
+		expect(useLogger().error).toHaveBeenCalledWith(
+			taskFailure,
+			'[transaction] a task queued after rollback failed: Error: clear failed',
+		);
+	});
+
+	it('leaves a task queued outside a transaction() trx to the caller', () => {
+		const db = knex.default({ client: MockClient });
+
+		expect(queueAfterCommitOrRollback(db, async () => {})).toBe(false);
 	});
 });
 

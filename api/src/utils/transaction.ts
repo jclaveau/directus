@@ -17,6 +17,9 @@ type AfterCommitTask = (database: Knex) => Promise<void>;
  */
 const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
 
+/** The work each open transaction runs if it rolls back, keyed the same way. */
+const afterRollbackTasks = new WeakMap<Knex, AfterCommitTask[]>();
+
 /**
  * Hold `task` until the transaction `knex` belongs to commits, when `transaction()`
  * opened it. Returns false when nothing will run it later: `knex` is no
@@ -24,6 +27,7 @@ const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
  *
  * A rolled-back transaction drops its tasks: nothing it wrote landed, so nothing
  * needs them. A retried one drops the aborted attempt's tasks with that attempt.
+ * `queueAfterCommitOrRollback` holds a task both ends need.
  */
 export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
 	const queuedTasks = afterCommitTasks.get(knex);
@@ -33,6 +37,26 @@ export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
 	}
 
 	queuedTasks.push(task);
+
+	return true;
+}
+
+/**
+ * `queueAfterCommit` for a task the transaction needs whichever way it settles:
+ * run once it commits, or once it rolls back, aborted attempts of a retry
+ * included. Returns false when nothing will run it, as `queueAfterCommit` does.
+ */
+export function queueAfterCommitOrRollback(
+	knex: Knex,
+	task: AfterCommitTask,
+): boolean {
+	const rollbackTasks = afterRollbackTasks.get(knex);
+
+	if (rollbackTasks === undefined || !queueAfterCommit(knex, task)) {
+		return false;
+	}
+
+	rollbackTasks.push(task);
 
 	return true;
 }
@@ -123,7 +147,7 @@ export const transaction = async <T = unknown>(
 
 	const { result, queuedTasks } = await commitWithRetries(knex, handler, onRetry);
 
-	await drainAfterCommit(knex, queuedTasks);
+	await drainAfterSettle(knex, queuedTasks, 'commit');
 
 	return result;
 };
@@ -139,23 +163,31 @@ async function commitAttempt<T>(
 	handler: (knex: Knex) => Promise<T>,
 ): Promise<CommittedAttempt<T>> {
 	const queuedTasks: AfterCommitTask[] = [];
+	const rollbackTasks: AfterCommitTask[] = [];
 	const openedTrxs: Knex[] = [];
 
 	try {
 		const result = await knex.transaction((trx) => {
 			openedTrxs.push(trx);
 			afterCommitTasks.set(trx, queuedTasks);
+			afterRollbackTasks.set(trx, rollbackTasks);
 
 			return handler(trx);
 		});
 
 		return { result, queuedTasks };
 	}
+	catch (error) {
+		await drainAfterSettle(knex, rollbackTasks, 'rollback');
+
+		throw error;
+	}
 	finally {
 		// Once settled, a straggler queueing on the trx gets false and runs its task
 		// itself: pushed onto a list already drained, it would never run.
 		for (const openedTrx of openedTrxs) {
 			afterCommitTasks.delete(openedTrx);
+			afterRollbackTasks.delete(openedTrx);
 		}
 	}
 }
@@ -219,7 +251,8 @@ async function commitWithRetries<T>(
 }
 
 /**
- * Run what the committed transaction queued. Outside the retry loop: a task
+ * Run what the settled transaction queued. A committed one drains outside the
+ * retry loop: a task
  * failing with a retryable code must not re-run a write that already landed.
  * Awaited, not left floating: a task lost on process death leaves what it was for
  * undone with nothing coming to redo it.
@@ -232,11 +265,13 @@ async function commitWithRetries<T>(
  *
  * A failure is logged, not thrown: the write is durable by now, and a 500 for it
  * invites a client retry that duplicates a non-idempotent write. Same rule as the
- * purge's own `purgeOrRecord`.
+ * purge's own `purgeOrRecord`. After a rollback, it would stand in for the error
+ * that rolled the write back.
  */
-async function drainAfterCommit(
+async function drainAfterSettle(
 	knex: Knex,
 	queuedTasks: AfterCommitTask[],
+	settlement: 'commit' | 'rollback',
 ): Promise<void> {
 	// One after another, as they ran inside the trx: purges of different collections
 	// can share index sets, and each shrinks what the next one scans. A hook's
@@ -249,7 +284,7 @@ async function drainAfterCommit(
 		catch (error) {
 			useLogger().error(
 				error,
-				`[transaction] a task queued after commit failed: ${error}`,
+				`[transaction] a task queued after ${settlement} failed: ${error}`,
 			);
 		}
 	}

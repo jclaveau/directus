@@ -50,18 +50,22 @@ describe('clearCachesAfterCommit', () => {
 		expect(flushResponseCache).not.toHaveBeenCalled();
 	});
 
-	it('clears nothing when the transaction rolls back', async () => {
+	it('clears both caches once the transaction rolls back', async () => {
 		const database = knex.default({ client: MockClient });
+		const responseCache = {} as Keyv;
 
 		createTracker(database);
 
 		await expect(transaction(database, async (trx) => {
-			await clearCachesAfterCommit(trx, {} as Keyv);
+			await clearCachesAfterCommit(trx, responseCache);
 
 			throw new Error('write refused');
 		})).rejects.toThrow('write refused');
 
-		expect(clearSystemCache).not.toHaveBeenCalled();
-		expect(flushResponseCache).not.toHaveBeenCalled();
+		expect(clearSystemCache).toHaveBeenCalledExactlyOnceWith({
+			autoPurgeCache: undefined,
+		});
+
+		expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith(responseCache);
 	});
 });
