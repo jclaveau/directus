@@ -192,8 +192,8 @@ export class FilesService extends ItemsService<File> {
 				await this.updateOne(primaryKey, payload, { emitEvents: false });
 
 				// delete the previously saved file and thumbnails to ensure they're generated fresh
-				for await (const filepath of disk.list(String(primaryKey))) {
-					await disk.delete(filepath);
+				if (existingFile?.['filename_disk']) {
+					await deleteFileAndThumbnails(disk, existingFile['filename_disk']);
 				}
 
 				// Upgrade the temp file to the final filename

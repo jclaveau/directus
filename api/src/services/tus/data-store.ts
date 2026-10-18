@@ -6,6 +6,7 @@ import { extname, posix } from 'node:path';
 import stream from 'node:stream';
 import { DataStore, ERRORS, Upload } from '@tus/utils';
 import { unnormalisedDiskNameReason } from '../files/lib/disk-name.js';
+import { deleteFileAndThumbnails } from '../files.js';
 import { ItemsService } from '../items.js';
 import { useLogger } from '../../logger/index.js';
 import getDatabase from '../../database/index.js';
@@ -260,9 +261,10 @@ export class TusDataStore extends DataStore {
 					const replaceData = await sudoFilesItemsService.readOne(replaceId, { fields: ['filename_disk'] });
 
 					// delete the previously saved file and thumbnails to ensure they're generated fresh
-					for await (const partPath of this.storageDriver.list(replaceId)) {
-						await this.storageDriver.delete(partPath);
-					}
+					await deleteFileAndThumbnails(
+						this.storageDriver,
+						replaceData.filename_disk,
+					);
 
 					// Upgrade the temp file to the final filename
 					await this.storageDriver.move(filePath, replaceData.filename_disk);
