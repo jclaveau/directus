@@ -143,12 +143,30 @@ describe('resolveSystemAdmin', () => {
 				.getFieldArgITC('create_collections_item', 'data')
 				.getFieldNames(),
 		).toEqual(['collection', 'meta', 'schema', 'fields']);
+	});
+
+	test(oneLine`
+		update_collections_item takes no fields list it would ignore
+	`, () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+
+		resolveSystemAdmin(gql, {
+			...emptySchema,
+			read: { collections: { directus_collections: { fields: {} } } },
+		}, schemaComposer);
 
 		expect(
 			schemaComposer.Mutation
 				.getFieldArgITC('update_collections_item', 'data')
 				.getFieldNames(),
-		).toEqual(['meta', 'fields']);
+		).toEqual(['meta']);
 	});
 
 	test('update_collections_item updates, then reads the collection', async () => {
