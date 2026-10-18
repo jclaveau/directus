@@ -204,7 +204,7 @@ describe('Services / Relations', () => {
 				{
 					sql: 'alter table "test" add constraint "test_related_foreign" '
 						+ 'foreign key ("related") references "related" ("id") '
-						+ 'on delete SET NULL',
+						+ 'on update NO ACTION on delete SET NULL',
 				},
 			]);
 		});
