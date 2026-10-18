@@ -343,6 +343,79 @@ Sam Sender has mentioned you in a comment:
 			});
 	});
 
+	it('notifies a user once whatever case spells the mention', async () => {
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-9']);
+
+		const service = new CommentsService({ knex: db, schema, accountability });
+
+		vi.mocked(UsersService.prototype.readOne)
+			.mockResolvedValueOnce(withMeta({
+				id: senderUuid,
+				first_name: 'Sam',
+				last_name: 'Sender',
+				email: 'sam@x.com',
+			}, { scopedCacheFingerprints: [] }))
+			.mockResolvedValue(withMeta({
+				id: mentionUuid,
+				first_name: 'Jane',
+				last_name: 'Doe',
+				email: 'jane@x.com',
+				role: { id: null },
+			}, { scopedCacheFingerprints: [] }));
+
+		vi.mocked(fetchGlobalAccess)
+			.mockResolvedValue({
+				admin: false,
+				app: true,
+				grantedDbConnections: [],
+			});
+
+		vi.mocked(UsersService.prototype.readByQuery)
+			.mockResolvedValue(withMeta([
+				{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe' },
+			], { scopedCacheFingerprints: [] }));
+
+		await service.createMany([
+			{
+				comment: 'hey @aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+					+ ' and @AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+				collection: 'articles',
+				item: '42',
+			},
+		]);
+
+		expect(NotificationsService.prototype.createOne)
+			.toHaveBeenCalledExactlyOnceWith({
+				recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+				subject: 'You were mentioned in articles',
+				message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey <em>Jane Doe</em> and <em>Jane Doe</em>
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+				collection: 'articles',
+				item: '42',
+			});
+
+		expect(vi.mocked(UsersService.prototype.readByQuery).mock.calls).toEqual([
+			[{
+				fields: ['id'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+				limit: -1,
+			}],
+			[{
+				fields: ['id', 'first_name', 'last_name', 'email'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+			}],
+		]);
+	});
+
 	describe('as an author who is not an admin', () => {
 		const authorAccountability: Accountability = {
 			user: senderUuid,
