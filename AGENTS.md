@@ -5,10 +5,11 @@ Guidance for AI coding assistants working in this repository.
 ## Project memory
 
 Everything this repo has already learned — ports, harness gotchas, settled
-decisions, conventions — is indexed here, one line per entry. Read the linked
-file before re-deriving anything it covers, and add to it rather than to this
-file: a fact belongs in `.agents/auto-memory/`, and only the non-discoverable
-conventions below belong here.
+decisions, conventions — is routed from here by category, each category's full
+list living in `.agents/auto-memory/index/<category>.md`. Read the category's
+index and the linked file before re-deriving anything it covers, and add to it
+rather than to this file: a fact belongs in `.agents/auto-memory/`, and only the
+non-discoverable conventions below belong here.
 
 @.agents/auto-memory/MEMORY.md
 
