@@ -1,5 +1,5 @@
 ---
-name: feedback-directus-blackbox-gherkin-standard
+name: feedback_directus_blackbox_gherkin_standard
 description: Every NEW blackbox test file on this fork is Gherkin — a `.feature` next to the `.test.ts` (loadFeature/defineFeature), never a plain describe/it file
 metadata:
   type: feedback

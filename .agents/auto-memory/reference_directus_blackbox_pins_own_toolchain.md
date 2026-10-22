@@ -1,6 +1,6 @@
 ---
 name: reference_directus_blackbox_pins_own_toolchain
-description: tests/blackbox pins its own toolchain (vitest 1.6.1), not the api's catalog vitest 3 — assuming the newer API costs a full 8-shard CI run
+description: tests/blackbox pins its own toolchain (CI resolved vitest 4.1.11 on 2026-10-01; the file once said 1.6.1), not the api's catalog vitest — assuming the newer API costs a full 8-shard CI run
 metadata:
   type: reference
 ---

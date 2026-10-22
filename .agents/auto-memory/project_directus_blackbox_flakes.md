@@ -1,6 +1,6 @@
 ---
 name: project_directus_blackbox_flakes
-description: known intermittent blackbox flakes in jclaveau/directus CI (m2o.test.ts WebSocket-OPEN timeout) + how to rerun a failed shard — don't chase these as real bugs
+description: known intermittent blackbox flakes in jclaveau/directus CI (m2o.test.ts WebSocket-OPEN timeout) + how to rerun a failed shard — rerun, then root-cause it in a dedicated PR merged first (feedback_directus_flakes_get_dedicated_pr)
 metadata:
   author: Jean Claveau
   type: project
@@ -166,7 +166,7 @@ expected (limiter sampled at 1000ms, timing-decided precondition), filed as **#5
 `graphql-ip-gated-read` got `Cannot query field "ip_gated"` (a validation error, not
 the expected permission refusal), 1 occurrence, not filed.
 
-**2026-10-09: `graphql-ip-gated-read` root-caused, fixed on PR #602 (green, unmerged).** A sibling file's write (any collection/field/relation/user/role/policy/permission/access write → `clearSystemCache` → `schemaChanged`) empties the per-user GraphQL schema cache between the given-step read (cached under `scope_type_role_user`, no IP in key) and the outside-range read, which then builds a schema without `ip_gated`. Over websocket graphql-ws 6.2 throws the validation error from `iterate().next()`, so a result-checking retry never sees it (why #590's retry missed it). Fix = file moved to the serial `after` list in `tests/blackbox/setup/sequential-tests.ts`, retry removed; CodeRabbit's "restore the retry" declined in-thread. Proof is only the green CI run (never reproduced). Open product question for jean: schema content depends on request IP (`fetchAllowedFieldMap` honours `ip_access`) but the cache key has none.
+**2026-10-09: `graphql-ip-gated-read` root-caused, fixed on PR #602 (merged 2026-10-09 as 68832078de).** A sibling file's write (any collection/field/relation/user/role/policy/permission/access write → `clearSystemCache` → `schemaChanged`) empties the per-user GraphQL schema cache between the given-step read (cached under `scope_type_role_user`, no IP in key) and the outside-range read, which then builds a schema without `ip_gated`. Over websocket graphql-ws 6.2 throws the validation error from `iterate().next()`, so a result-checking retry never sees it (why #590's retry missed it). Fix = file moved to the serial `after` list in `tests/blackbox/setup/sequential-tests.ts`, retry removed; CodeRabbit's "restore the retry" declined in-thread. Proof is only the green CI run (never reproduced). Open product question for jean: schema content depends on request IP (`fetchAllowedFieldMap` honours `ip_access`) but the cache key has none.
 Also in #602: app `autoscale-panel.vue.test.ts` countdown flake = test read `ceil((until-Date.now())/1000)` on the real clock; fixed with `vi.useFakeTimers({toFake:['Date']})` (flushPromises needs real timers). The `s%` in `.text()` is the two v-input suffixes, not a component bug. See [[feedback_directus_flakes_get_dedicated_pr]].
 
 ## #602 review findings + MONITOR-noise flake (2026-10-09)

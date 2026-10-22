@@ -83,7 +83,7 @@ the convoy (2.9% co-occurrence against a 3.3% base rate) — all four refuted, c
 open, suspects are `getSchema()` and the permission aggregate. Planner #772.
 See also [[project_directus_alias_collision_500s]].
 
-Related: [[project_directus_migrations_transaction_and_health]],
+Related: [[project_directus_migration_transaction_design]],
 [[project_directus_pgbouncer_admin_console]], [[project_directus_cache_entries_query_perf]].
 
 ## Applied 2026-09-15

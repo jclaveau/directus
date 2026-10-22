@@ -1,5 +1,5 @@
 ---
-name: directus_pr447_pm2_supervisor_cpu
+name: project_directus_pr447_pm2_supervisor_cpu
 description: PR #447 pm2 supervisor/CPU fix + processes admin page charts — root cause, design decisions, settled exceptions
 metadata:
   author: Jean Claveau

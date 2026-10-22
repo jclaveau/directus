@@ -1,5 +1,5 @@
 ---
-name: directus_pr444_extension_bundle_cost
+name: project_directus_pr444_extension_bundle_cost
 description: PR #444 extension-sdk bundle cost — P1-P4 measured levers on the planner's real extensions, settled verdicts, don't re-raise
 metadata:
   author: Jean Claveau

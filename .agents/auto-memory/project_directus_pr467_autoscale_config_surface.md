@@ -33,7 +33,7 @@ A whole-object write would pin all 13 fields and kill the env chain — don't.
 [1,maxWorkers], `releaseCpuThreshold`→[0,scaleCpuThreshold-1]),
 `assertUsableConfig` refuses by it, and the panel's inputs offer it.
 
-**The override key is fleet-wide** (`<CACHE_NAMESPACE>:autoscale:config`): one
+**The override key is fleet-wide** (`<CACHE_NAMESPACE>:config:processes:autoscale`): one
 write moves every node in the namespace.
 
 `GET|PATCH|DELETE /utils/autoscale`, admin-only, mounted only under
@@ -293,9 +293,9 @@ numbers from a bundled build drift" note) — no coverage-shaped filler added.
 (no env var exists to back it — `wait_ready` is hardcoded `true` in
 `ecosystem.config.cjs`, offered twice, still no answer); an MCP tool for the
 supervisor write (MCP only reports it); no blackbox scenario for "release
-under falling load" or the other rollback levers (queued since #456,
-[[project_directus_pr456_open_items]]); no unit regression test for the
-`unhandledRejection` guard; the 4 blackbox files touched by the key rename
+under falling load" or the other rollback levers, and no unit regression test
+for the `unhandledRejection` guard (all three since DONE on #456,
+[[project_directus_pr456_open_items]]); the 4 blackbox files touched by the key rename
 were never re-run under `Run Blackbox` (offered, no answer yet, PR merged
 gates were unit/lint/style only at handoff).
 

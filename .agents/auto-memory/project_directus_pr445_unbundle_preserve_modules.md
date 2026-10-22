@@ -1,5 +1,5 @@
 ---
-name: directus_pr445_unbundle_preserve_modules
+name: project_directus_pr445_unbundle_preserve_modules
 description: PR #445 unbundle command + --preserve-modules inspection flag — measured verdicts, settled exceptions, don't re-raise
 metadata:
   author: Jean Claveau

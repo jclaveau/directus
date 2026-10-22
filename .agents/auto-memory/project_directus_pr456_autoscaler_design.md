@@ -8,7 +8,7 @@ metadata:
 
 Supersedes the design-stage rationale in [[project_directus_issue455_fork_autoscale]] —
 this is what actually landed on `v11.10.1-feat/autoscaler` (PR #456,
-`/home/jean/dev/Hippocast/dev/deps/.wt-autoscaler`).
+`.wt-autoscaler`).
 
 **pm2 app, not pm2 module — measured, not assumed.** User asked to evaluate a
 module-as-symlink form. Verdict: no.
@@ -28,7 +28,7 @@ module-as-symlink form. Verdict: no.
   second delivery route.
 
 **Three-layer instant rollback**, none needing a redeploy or a shell, all one Redis
-write to `${CACHE_NAMESPACE}:autoscale:config`:
+write to `${CACHE_NAMESPACE}:config:processes:autoscale`:
 1. `{"enabled": false}` — freezes the pool, covers a defect anywhere including sampling.
 2. `{"minWorkers": N, "maxWorkers": N}` — pins the pool at a known-good size.
 3. `{"strategy": "legacy"}` — reverts the decision rule to what pm2-autoscale did.

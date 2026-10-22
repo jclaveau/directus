@@ -46,7 +46,7 @@ line appended below.
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
 - [Blackbox flakes](project_directus_blackbox_flakes.md) — known intermittents; `gh run rerun --failed` only after the run completes (needs its own ask)
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
-- [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — not the api's vitest; no `expect.poll`
+- [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
 ## ci (19) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`

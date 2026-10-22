@@ -15,7 +15,7 @@ would have closed itself. Everything below is closed. See
 exercised live on the preview the hour before the merge.
 
 Still open and deliberately out of scope: #455 items 1-2 (decision
-observability, memory-derived ceiling), #457 (proportional release), #463
+observability, memory-derived ceiling), #457 (proportional release, since merged via #494), #463
 (the shared client's offline queue), #483 (RSS victim ranking).
 
 **1. PR #456's body — FIXED 2026-09-09** (PATCHed, admin-preview footer spliced from

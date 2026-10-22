@@ -1,5 +1,5 @@
 ---
-name: directus_system_mcp_wiring
+name: reference_directus_system_mcp_wiring
 description: How to wire the fork's system-mcp onto a live Railway service and register it as an MCP server in a Claude Code session
 metadata:
   author: Jean Claveau

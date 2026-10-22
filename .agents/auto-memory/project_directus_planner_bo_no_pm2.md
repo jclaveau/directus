@@ -1,5 +1,5 @@
 ---
-name: directus_planner_bo_no_pm2
+name: project_directus_planner_bo_no_pm2
 description: Planner's bo/Backend service runs bare node with NO pm2 at all; only Api uses pm2 — don't apply pm2/autoscale reasoning to bo; base .env sets PM2_INSTANCES=2 for all services, api override to 1 is deliberate
 metadata:
   author: Jean Claveau

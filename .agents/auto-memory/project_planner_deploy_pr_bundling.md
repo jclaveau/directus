@@ -1,5 +1,5 @@
 ---
-name: planner_deploy_pr_bundling
+name: project_planner_deploy_pr_bundling
 description: Planner's deploy PR (develop→main) ships every fork PR merged since the last deploy, not just the one you meant to ship
 metadata:
   author: Jean Claveau

@@ -1,5 +1,5 @@
 ---
-name: directus_tests_admin_dev_provisioning
+name: reference_directus_tests_admin_dev_provisioning
 description: How to add tests-admin@hiphiphip.fr to planner's dev DB safely — targeted user restore only, never the PR-seed pipeline
 metadata:
   author: Jean Claveau

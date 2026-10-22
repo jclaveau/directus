@@ -21,7 +21,7 @@ shared postgres), so it has a side effect on his environment that CI does not.
 **How to apply:**
 - Write the test and prove the red/green claim at the **unit** level where the fix has a
   unit seam — but prove it on CI, not locally: [[feedback_directus_ci_only_test_runs]].
-- For the blackbox layer: commit, push, open the PR, add the `Run Blackbox` label, and read
+- For the blackbox layer: commit, push, open the PR (no label: bb runs on every code PR, and adding `Run Blackbox` after the push cancels the run), and read
   results from the run — mechanics in [[project_directus_blackbox_run_and_logs]].
 - "Ensure red then make it green" over blackbox = two CI runs on the branch (one with the
   fix reverted, one with it applied), not two local runs. Use `ScheduleWakeup` / a monitor

@@ -1,5 +1,5 @@
 ---
-name: directus_pr448_details_narrowing_bug
+name: project_directus_pr448_details_narrowing_bug
 description: PR #448 processes `details` narrowing param — the false-unavailable bug it reintroduced and the general lesson
 metadata:
   author: Jean Claveau
