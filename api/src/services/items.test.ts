@@ -36,6 +36,7 @@ import {
 import emitter from '../emitter.js';
 import {
 	ItemScopedCacheService,
+	flushResponseCache,
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
@@ -82,6 +83,7 @@ vi.mock('../cache.js', () => {
 		getCache: () => {
 			return { cache: { clear: vi.fn(), delete: vi.fn() } };
 		},
+		clearSystemCache: vi.fn(),
 	};
 });
 
@@ -91,6 +93,7 @@ vi.mock('../scoped-cache/purge.js', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('../scoped-cache/purge.js')>()),
 		purgeScopedCache: vi.fn(),
+		flushResponseCache: vi.fn(),
 	};
 });
 
@@ -3251,6 +3254,86 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			);
 
 			expect(result).toEqual(['0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', null]);
+		});
+	});
+
+	describe('a users upsert moving users to another role', () => {
+		beforeEach(() => {
+			vi.mocked(flushResponseCache).mockClear();
+		});
+
+		it('flushes the response cache once the upsert commits', async () => {
+			tracker.on.select('directus_users').response([
+				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
+			]);
+
+			tracker.on.update('directus_users').response(1);
+
+			const transactionStates: string[][] = [];
+
+			vi.mocked(flushResponseCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await new UsersService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('role').uuid();
+					})
+					.build(),
+			}).upsertMany([
+				{
+					id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+				},
+				{
+					id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22',
+					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+				},
+			]);
+
+			expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith({
+				clear: expect.any(Function),
+				delete: expect.any(Function),
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
+		});
+
+		it('leaves the response cache to a caller that opted out', async () => {
+			tracker.on.select('directus_users').response([
+				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
+			]);
+
+			tracker.on.update('directus_users').response(1);
+
+			await new UsersService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('role').uuid();
+					})
+					.build(),
+			}).upsertMany(
+				[
+					{
+						id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+						role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+					},
+				],
+				{ autoPurgeCache: false },
+			);
+
+			expect(flushResponseCache).not.toHaveBeenCalled();
 		});
 	});
 
