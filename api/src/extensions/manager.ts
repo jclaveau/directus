@@ -86,6 +86,12 @@ export class ExtensionManager {
 	 */
 	private hasLoadedBefore = false;
 
+	/**
+	 * The extensions the last successful load registered, which a failed reload
+	 * leaves in place for the retry to compare against.
+	 */
+	private lastLoadedExtensions: Extension[] = [];
+
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
 
@@ -301,6 +307,7 @@ export class ExtensionManager {
 		}
 
 		this.isLoaded = true;
+		this.lastLoadedExtensions = clone(this.extensions);
 
 		emitter.emitAction('extensions.load', {
 			extensions: this.extensions,
@@ -352,8 +359,10 @@ export class ExtensionManager {
 		});
 
 		const reloadExtensions = async (reloadOptions?: { forceSync: boolean }) => {
-			if (this.isLoaded) {
-				const prevExtensions = clone(this.extensions);
+			// A failed load leaves isLoaded false; keeping the last loaded set
+			// instead of retrying it is tracked in #627.
+			if (this.hasLoadedBefore) {
+				const prevExtensions = this.lastLoadedExtensions;
 
 				await this.unload();
 				await this.load(reloadOptions);
