@@ -131,9 +131,10 @@ or `actions/checkout` over SSH like the overlay edits do (line above). Same root
 
 ## Fork CI quirks
 
-- **blackbox + e2e are label-gated**: `blackbox-pr.yml` runs Blackbox only with the `Run Blackbox` label, E2E only with
-  `Run E2E`, on `synchronize`/`labeled`. A PR runs NEITHER by default — only Check/Changeset/CLA/agent-scan. Add the
-  label via REST (`gh api -X POST .../issues/<N>/labels`), not `gh pr edit` ([[gh-issue-view-quirk]]).
+- **blackbox runs on every code PR since 2026-08-05** (`Decide` job in `blackbox-pr.yml`, see
+  [[project_directus_blackbox_run_and_logs]]); `Run Blackbox` only forces it (docs-only diff) and added after a push
+  cancels the run in flight. E2E stays label-gated on `Run E2E`. Labels via REST (`gh api -X POST
+  .../issues/<N>/labels`), not `gh pr edit` ([[gh-issue-view-quirk]]).
 - **`blackbox-pr.yml` is `name: Check`** — so in `gh run list` the Blackbox run shows as **"Check"**, not "Blackbox". A
   push spawns TWO "Check" runs: the real one (Lint/Unit/Format/Stylelint jobs) AND this one (`Blackbox Tests / <db>`
   jobs, via `uses: ./.github/workflows/blackbox.yml`). Identify by listing each run's jobs, not by name.

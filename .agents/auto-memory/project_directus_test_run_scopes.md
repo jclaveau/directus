@@ -1,6 +1,6 @@
 ---
 name: project_directus_test_run_scopes
-description: how to run the Scalabus suites locally — root `pnpm test` skips api and app, the app run OOM-crashes (shard it), `--changed origin/v11.10.1-hhh-dev` is the fast loop, and which failures are pre-existing rather than yours
+description: how to run the Scalabus suites — targeted runs locally and CI owns everything wider, root `pnpm test` skips api and app, the app run OOM-crashes (shard it), and which failures are pre-existing rather than yours
 metadata:
   author: Jean Claveau
   type: project
@@ -19,11 +19,16 @@ Running the Scalabus suites locally, before claiming "all tests pass":
   is memory (box had ~1GB available), not a pool setting. **Fix: shard it** —
   `for i in 1 2 3 4; do pnpm vitest run --shard=$i/4; done` (34 files each, fresh
   process per shard).
-- **The fast loop is `cd api && pnpm vitest run --changed origin/v11.10.1-hhh-dev`**
-  — 13s against 181s for the full package, and it selects dependent tests through
-  the module graph, which a file-scoped run misses. Use it after every edit; keep
-  one full `vitest run 2>&1 | tee <log>` before pushing. See
-  [[feedback_test_run_ladder]].
+- **The local ladder stops at the targeted rung on this repo** (decided 2026-09-14,
+  which [[feedback_test_run_ladder]] leaves as a per-repo call). CI runs Unit Tests
+  (api), (app) and (rest) on **every push**, so a local `--changed` or full run only
+  re-derives what the push is about to answer anyway. Keep locally: the file-scoped
+  run, because the mutation loop needs it — pinning N guards means N+1 suite passes,
+  seconds each locally against a CI round trip apiece. Everything wider is CI's,
+  and the verdict is read from the job rather than reproduced.
+- `--changed origin/v11.10.1-hhh-dev` is still the right shape when CI is not the
+  answer (offline, or a question about the module graph itself): 13s against 181s,
+  and it selects dependent tests a file-scoped run misses.
 - **api timeouts under load are usually flakes, but check for a real one first.**
   A loaded full run failed `items.test.ts`, `stall.test.ts` and
   `get-database-for-accountability.test.ts` with `Test timed out in 5000ms`; those
@@ -41,6 +46,7 @@ Running the Scalabus suites locally, before claiming "all tests pass":
 **Why:** I reported "full suite green" off the root script while api/app had not
 run at all, then read a crashed app run as a failure. Both are silent.
 
-**How to apply:** api + app explicitly, app sharded; any 5s-timeout failure gets
+**How to apply:** targeted runs locally, CI for the rest; when a wide local run is
+unavoidable, api + app explicitly and app sharded. Any 5s-timeout failure gets
 re-run isolated before it goes in a report. See [[project_directus_blackbox_sharding]]
 for the CI-side equivalent.

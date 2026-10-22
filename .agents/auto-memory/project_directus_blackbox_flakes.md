@@ -116,3 +116,92 @@ PATCH in `beforeAll` whose status nothing checked, so a seed write that did not 
 as a cache bug 100 lines away. Cleared on rerun; the seed now carries `.expect(200)`. A raw
 `request(...)` in a seed needs `.expect(200)` — the `Create*` helpers already throw on
 non-2xx ([[project_directus_blackbox_silent_write_failures]]).
+**Sixth signature — two suites claiming the same migration version on the shared
+vendor DB (2026-09-08, PR #456).** `migration-transaction.test.ts` applies
+`20990101A` and only removes it in its own `afterAll`; `health-outstanding-migrations
+.test.ts` staged a file with that exact same version and expected it outstanding. A
+shard that packs them side by side boots the health instance against a DB that already
+recorded the migration it was meant to be missing — all three assertions failed, not
+partially, because the watch reads clean and health never even holds. Latent until a
+`shard-files.ts` repack happened to place them together. Fix: pick a version number
+nobody else claims (`20991231A`) and leave a comment on the file naming the collision,
+so the next person picking a number reads it first. General lesson: a fabricated
+migration version string is effectively global state on the shared vendor DB, same
+class as a collection name — check for existing users before picking one.
+
+**Eighth signature — twice-red is not a flake (2026-09-15, PR #494's shard 7).**
+`autoscale-mcp-levers.test.ts` failed identically on a run AND its `--failed`
+rerun (0/2) — the tell that ended the "flake, rerun it" reflex and started a
+root-cause hunt instead. Real bug: an ioredis subscribe-during-connect race
+silently and permanently drops a bus subscription; PR #492 reordered boot-time
+imports just enough to land a subscribe inside the ~1-2ms losing window. Full
+mechanism, probe, and fix in
+[[project_directus_bus_subscribe_race_pr497]]. General rule this confirms:
+**2+ identical reruns red on the SAME arms ⇒ stop rerunning, diagnose** — a
+single red-then-green is the load-flake shape documented above, a red-then-red
+on the same test is not.
+
+**Seventh signature — `autoscale-config-source` hold arm, still unretired (PR #456).**
+3 failures in 5 runs (`:76`, `:115`, `:121`), shape always `[1, 2]` (pool grew when the
+arm expected it to hold). Two theories tested and refuted: boot-CPU-is-cumulative
+(raised warm-up 2→8, failed again) and runner-CPU-contention (saturated all 8 local
+cores, didn't reproduce either way). Stopped guessing a third time and instrumented the
+assertion with `{sizes, decisions, restarts}` instead — passed twice after that, so no
+data was captured, and it is NOT to be called retired on green streaks alone. See
+[[project_directus_pr456_open_items]] for what each shape of a future recurrence would
+mean.
+
+**Ninth signature — a spawned instance on its own namespace misses schema changes
+(2026-09-29, PR #572).** `cache-content-version` got `POST /users 500` with PG `42P01
+relation "users_me_nested_student" does not exist`. `users/cache-nested-relation-tags`
+adds an o2m alias to `directus_users` and drops it in `afterAll`; since #503 the bus
+follows `CACHE_NAMESPACE`, so an instance on another namespace never hears
+`schemaChanged` and keeps the dead alias. Fix: the file that mutates a SYSTEM
+collection goes in the serial `after` list. Any spawned instance is exposed, so
+suspect this whenever a 500 names a table another file owns. The spawned instance's
+log is only visible because content-version now saves it under `TEST_SAVE_LOGS`.
+
+**Same day, still open:** `cache-audit-under-pressure` got 200 where a 503 was
+expected (limiter sampled at 1000ms, timing-decided precondition), filed as **#580**;
+`graphql-ip-gated-read` got `Cannot query field "ip_gated"` (a validation error, not
+the expected permission refusal), 1 occurrence, not filed.
+
+**2026-10-09: `graphql-ip-gated-read` root-caused, fixed on PR #602 (green, unmerged).** A sibling file's write (any collection/field/relation/user/role/policy/permission/access write → `clearSystemCache` → `schemaChanged`) empties the per-user GraphQL schema cache between the given-step read (cached under `scope_type_role_user`, no IP in key) and the outside-range read, which then builds a schema without `ip_gated`. Over websocket graphql-ws 6.2 throws the validation error from `iterate().next()`, so a result-checking retry never sees it (why #590's retry missed it). Fix = file moved to the serial `after` list in `tests/blackbox/setup/sequential-tests.ts`, retry removed; CodeRabbit's "restore the retry" declined in-thread. Proof is only the green CI run (never reproduced). Open product question for jean: schema content depends on request IP (`fetchAllowedFieldMap` honours `ip_access`) but the cache key has none.
+Also in #602: app `autoscale-panel.vue.test.ts` countdown flake = test read `ceil((until-Date.now())/1000)` on the real clock; fixed with `vi.useFakeTimers({toFake:['Date']})` (flushPromises needs real timers). The `s%` in `.text()` is the two v-input suffixes, not a component bug. See [[feedback_directus_flakes_get_dedicated_pr]].
+
+## #602 review findings + MONITOR-noise flake (2026-10-09)
+
+- A bb file moved into the serial `after` list needs a `DURATION_HINTS_MS` entry in `tests/blackbox/setup/shard-files.ts`; without one the planner reads source bytes as ms (8197 B → 8.2 s vs 2.9 s real) and inflates that shard's serial floor.
+- `vi.useFakeTimers({ toFake: ['Date'] })` freezes `Date` only: a component interval that disarms on `Date.now() >= deadline` then NEVER disarms (leaks until worker exit). Unmount the panel in `afterEach` (CodeRabbit caught it; fixed 815a7e5fbd).
+- `cache-purge-redis-commands.test.ts` "same commands whatever other values are cached": expected 15 got 18. Extra is always `get`×4, `set`×4, `publish`×4, no key, un-namespaced (4 occurrences across runs) = periodic burst from another client seen by the MONITOR capture. Suspect: metrics redis check (`metrics-<id>`) or process reporting. jean ruled: fix it inside #602 (the flakes-gathering PR).
+
+## #602 flake survey + root causes (2026-10-09, 1249 Check runs since 09-18)
+
+Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 (pool released 2→1; hyp: crash→restart gap > `WARMUP_SECONDS` 5), cache-audit-under-pressure 19 (`expected 200 to be 503`, limiter sampling window; #580), cache-audit cron-run-missing 16 (last 09-30), fingerprint-index-race 16, cache-purge-redis-commands 8 (fixed #602), 42703 seed race 10 (last 10-01, #590), websocket "Hook timed out" 9, setnull-delete 6, retry-timer 6, db-connection-priority 4. Exclude from any survey: `ci-dialect-*` (deterministic maria/sqlite red), `v11.10.1-scratch/*` revert-proof branches (their red is intended), branch-local diff reds.
+
+- **`cache-purge-fingerprint-index-race` = TEST bug, not stale cache.** Decoys sat in the same Redis set as the held reads; the purge SSCANs it and a member added mid-pass survives only if the cursor already passed its hash slot (random per Redis process) → ~5% of tests had 0 survivors → "aim missed" guard. The `HIT×5` failures all came from scratch revert-proof branches. Fix: plant decoys in the BARE collection set (`scopedCacheRowIndexKeys` reads bare + slot sets in parallel; the held set is empty and read whole on page 1). Commit `be95ff8418`.
+- **`cache-declared-pin` Background `reading 'filter'` = PRODUCT bug in `@directus/schema` postgres.ts.** `columnInfo()` (no table) constraints query calls `pg_get_serial_sequence(att.attrelid::regclass::text, …)`: rows come from the statement snapshot, the regclass lookup from the CURRENT catalog, so a sibling's `DROP TABLE` mid-statement yields `relation "<oid>" does not exist` (42P01) → `/fields` 500 → unchecked `.data.filter`. Only the first (cold) `/fields` per instance is exposed (CACHE_SCHEMA). Fix: replace with an `EXISTS` over `pg_depend`/`pg_class relkind 'S'`; stress 166/602 reads failed → 0/510. Not caused by #602 (admin path never reads the permissions cache).
+- **Test-only fixes need a red proof, and bb runs only on PR events**: push a scratch commit to the PR that re-breaks the product, watch it go red, then force-push it away. A deterministic proof (REPEATABLE READ snapshot + drop from a second connection) beats timing.
+- **Unchecked status hides the real error**: bb helpers reading `.body.data` must assert `statusCode` with the body as message (`expect(res.statusCode, JSON.stringify(res.body)).toBe(200)`).
+
+## #602 flakes B + E, red-proof results (2026-10-09, later)
+
+- **`cache-audit-under-pressure` `expected 200 to be 503` = TEST bug (not the sampling clock).** `packages/pressure/src/monitor.ts` compares the mean of a 10ms event-loop-delay histogram against `MAX_EVENT_LOOP_DELAY=100`. A 300ms stall = one sample ~300, each free 10ms = one sample ~10. Serial priming (`for … await read`) leaves a full round trip between stalls; simulated mean: gap 30ms → 110-123 (sheds), 40ms → 92 (no shed), identical at every sampling offset. So idle gap > ~35ms on a loaded runner defeats the precondition. Fix: send the 8 primes with `Promise.all` so stalls queue back to back. Deterministic red: the stall hook awaits `setTimeout(60)` before `Atomics.wait` (extension `tests/blackbox/extensions/cache-audit-stall/index.mjs`). Supersedes the "#580 sampling window" theory.
+- **Same file, `scanned 8 / fresh 8` mismatch** = unfiltered `POST /utils/cache/audit` from another `CACHE_NAMESPACE` retiring the shared descriptor rows (`retireCacheAuditQueue`, `api/src/cache-events.ts`); already fixed by `dead96ffa7`. Check `git merge-base --is-ancestor` of the failing job sha before diagnosing. Design weakness left for jean: DB-wide queue retired by a per-namespace view (needs a namespace column on descriptors).
+- **`autoscale-churn` (A)**: `sizesOver` is fooled by pm2 listing a crashed worker as `stopped` until `restart_delay` fires; assert on `decisionAfter` (every release logs `N -> M workers:` first) plus an `autoscaler running;` liveness guard. `autoscale-config-source` still uses `sizesOver` (:134, :218), possibly same dip.
+- **Cache-audit schedule (E)**: test read the run's results before the scheduled run finished; wait for its own finished row, always clear the rule in cleanup.
+- **Red-proof result (run 37902165057)**: all five targets went red for the predicted reason (A real `2 -> 1`, B 200≠503, C under scratch `del`, D without the schema fix, E both schedule tests). Scratch commit's collateral reds (unit api cache) come from the mutation itself. Backup branch kept as `flakes-scratch-bk`.
+- **Still open**: B's fix timed out at 60s in one shard on the fix head (66a1aa544c); pool-deadlock guess weak (reads don't run in a transaction). Method chosen: scratch instrumentation commit capturing the spawned instance's output + per-phase timestamps, not more guessing. Unexplained B jobs: 109140970115 (`scanned 0` ×30 with dead96ffa7 present), 111185358859 (`MISS`≠`HIT` :150), 112815617871 (60s).
+- Tooling: zsh does not word-split a `$C` alias var (use a function or spell it out).
+
+## #603 flakes round 2 (2026-10-09)
+
+- **"Hook timed out in 600000ms" on the `after` files = gate deadlock, PROVEN.** Completion to `tests_flow_completed` was posted from `setup/sequential-gate.ts` `afterAll`; vitest 4.1.11 runs NO hook (setup-file hooks included) for a fully-skipped file or a file that fails to load → that file never reports → every `after` file waits 600 s. Causes seen: db-connection-priority fully skipped on sqlite3/maria (22 jobs), collect failure on a branch (12, the wall of timeouts hides the real error), one 605 s middle file. Red test `tests/common/harness/sequential-gate-completion.feature` (spawns vitest on 3 fixtures vs a fake completion server), job 113763133609. Fix `abf46f5f73`: `setup/completion-reporter.ts` `onTestModuleEnd` (main process, every module) posts it; `afterAll` gone. When a timeout wall appears now, look for the file that skipped/failed to collect.
+- **`cache-purge-retry-timer` `expected [ { id } ] to deeply equal []` = test race.** Drain (`api/src/scoped-cache/purge.ts` ~1326) purges then deletes the pending record in a separate statement, so a read sees the MISS first. Deterministic red: second connection `FOR UPDATE` on the record rows, commit 3 s after the MISS (job 113766478523). Fix `084f862f53`: poll the record.
+- **`setnull-delete`**: fixed by `ab479b4ffc` before #603, no longer open.
+- **db-connection-priority (4 jobs, old branches)**: A `expected 200 to be 429` probably cold-connect (pre-warm pool + poll `numUsed()` instead of `setTimeout 400` in `extensions/db-connection-probe/index.mjs`), INFERRED; B `expected 500 to be 429` = "Connection terminated unexpectedly" has no code → not matched by `getPoolExhaustedError` (`api/src/database/errors/dialects/postgres.ts`), product gap, mechanism a GUESS (needs pgbouncer verbose logging).
+- `cache-audit-under-pressure` `expected 200 to be 503` recurred AFTER #602's Promise.all fix (job 113766478459, 4164 ms) → investigated in #603.
+- **under-pressure `200≠503` root cause (red job 113779593760, fix `1de283cf4a`, 8 shards green)**: `packages/pressure/src/monitor.ts` reads `histogram.mean` once per tick, sample-count weighted. 8 concurrent `await setTimeout(60)` + `Atomics.wait(300)` stalls run in ONE timers phase → one ~2400 ms sample, diluted by idle samples to <100 → ping 200. Fix: chain each stall on its own `setTimeout(0)` turn (drop `IDLE_GAP_MS`); red = barrier releases the 8 together after a 1100 ms phase-pinning stall + 600 ms idle; hook gets the read count via the flag (`together:N`), no copied const. Upstream side finding, unfixed: `eventLoopUtilization()` called without arg = cumulative, ceiling never trips. Proved in a standalone sim of the monitor BEFORE pushing the red.
+- **`api/src/utils/stall.test.ts` flake (`0≠1`, then `2≠1`)**: `vi.useFakeTimers()` with no `toFake` also fakes `performance` (vitest 4.1.11) → `vi.spyOn(performance,'now')` mocks the fake while `stall()` reads real `node:perf_hooks`; outcome depends on worker uptime R (<100 ms = CI pattern, ≥1100 ms = other failure). NOT a cross-file leak (pool forks, isolate). Red `28481d36d1` busy-waits `beforeAll` past 1100 ms; fix `e96dda8ab6` `toFake: ['setTimeout','clearTimeout']`.
+- **#603 deep-review findings (fixed in the loop)**: completion-reporter retry can double-post after a 10 s axios timeout on a POST the server saved (gate counts rows, `test_file_path` not unique) → look the row up before retrying; `FOR UPDATE` hold in retry-timer stalls other instances' retries (pending-purge list not namespaced) → hold 3 s→500 ms; `finally{commit()}` must not mask the assertion error; restore the `performance.now` spy.
+- Method that worked: read-only subagents mine logs, then I re-verify the claimed mechanism (sim / grep vitest dist) before building the red.

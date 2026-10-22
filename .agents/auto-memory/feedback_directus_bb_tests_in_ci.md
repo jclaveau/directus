@@ -6,8 +6,10 @@ metadata:
   type: feedback
 ---
 
-**Do not run `pnpm test:blackbox` locally.** Run the blackbox suite in CI and loop on the
-run until green. Told twice — the second time after I had already been asked to stop.
+**Do not run `pnpm test:blackbox` locally, and do not try to hand-verify a blackbox spec
+locally either.** Run the blackbox suite in CI and loop on the run until green. Told
+**three times** — the third after I typechecked a bb spec locally (`tsc -p tests/blackbox`,
+eslint) instead of just pushing it, which proves nothing about a suite only CI can run.
 
 **Why:** locally it is *slower* than CI, not faster. Every local run pays a full
 `rimraf dist` + `pnpm --filter directus deploy --prod dist` before vitest even starts,

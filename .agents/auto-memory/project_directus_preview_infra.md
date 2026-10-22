@@ -39,10 +39,50 @@ resolves its workflow from the default, i.e. hhh-dev now.
   life (GH caches comment history). Accepted by jean (throwaway instance, random pw, no real data). Safer fallback if
   ever needed: pw in the members-only Summary, only the link in the comment.
 
+**Autoscaler in the preview (added for PR #467, `4fccccc6d2`):** by default the
+preview only started the `directus` pm2 app, so any page reading autoscale state
+(Settings → Processes) showed nothing — no process on the bus reported
+`autoscale`. Fixed by starting a second pm2 app, `directus autoscale`, scaling the
+first, with preview-only pacing baked into the job env (`SAMPLE_WINDOW=3`, min 2 /
+max 6 workers, add-cooldown 10s / release-cooldown 30s, warmup 15s) so a lever
+pulled in the GUI has a visible effect inside the preview's short life. Verify via
+`GET /utils/processes`: a `pm 3 autoscale=YES` entry alongside the `directus`
+workers, `config.appName: 'directus'`.
+
 **Preview Deployment** (`preview-webhook.yml`) — Northflank-hosted, PERSISTENT. **DROPPED on pr-controle this session.**
 - Was a `pull_request_target: [labeled, synchronize]` job that fire-and-forget POSTed to
   `webhooks.northflank.com/previews/${PREVIEW_TOKEN}` with `pullRequestId`/`repoUrl`/`branch`; Northflank built a hosted
   env. URL lived in the **Northflank dashboard** — never returned to GitHub (no deployment/comment).
+
+**Two CI traps in `preview-admin.yml`, diagnosed and fixed 2026-09-10 (fix
+written, uncommitted, sitting in `.wt-autoscaler` — belongs on its own branch
+off `v11.10.1-hhh-dev`, not inside a feature PR, because `pull_request_target`
+resolves the workflow from the base branch so the fix is inert anywhere else):**
+
+1. **A PR-body `edited` event kills the live preview even though its own `if:`
+   gate would skip it.** GitHub cancels a concurrency group's in-progress run
+   the moment the new run is *queued* — before any job-level `if` runs. So an
+   `edited` run that will do nothing still kills the `synchronize` preview
+   sharing its group (`preview-admin-<pr-number>`). Fix: give an `edited`
+   event the job won't act on its own group suffix (`-inert`), computed from
+   the same condition the job's `if:` already checks (Preview label present +
+   the re-run checkbox ticked) — a *ticked* re-run still shares the main
+   group and replaces the live preview, as intended. Related finding: a PATCH
+   made with `GITHUB_TOKEN` (the bot's own body edits) does **not** spawn an
+   `edited` run — only a human/`gh`-token edit does — so the workflow's own
+   URL-publish write was never the problem; once this lands, the surrounding
+   "re-fetch the body in the same command that PATCHes it" workaround stops
+   being load-bearing.
+2. **A `workflow_dispatch` preview publishes its URL nowhere reachable.** The
+   "Publish preview to the PR description" step is gated on
+   `github.event.pull_request.number || inputs.pr`; a dispatch with `pr`
+   blank leaves the URL only in the run Summary, written by the streaming
+   step when the job *ends* — by which point the tunnel is already dead. Fix:
+   a new `Resolve the PR to publish into` step right after the tunnel starts,
+   resolving `gh pr list --head <dispatched ref> --state open` when `pr` is
+   blank, so a manual run on a PR's head branch still publishes into that
+   PR's description (and gets a real SHA in the header instead of a branch
+   name).
 
 **Propagation — CORRECTED empirically (2026-07-10).** The old caveat here claimed `pull_request_target` resolves the
 wf from the PR's BASE (hhh-dev), so pr-controle edits wouldn't reach hhh-dev-based PRs. **This is WRONG for

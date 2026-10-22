@@ -34,9 +34,8 @@ override. Only `FilesService` (passthrough, ok) + `PermissionsService` (rebuilds
 `withAppMinimalPermissions` → must re-attach the rider) override it. Found via
 `grep "override async read*"` + `extends ItemsService`. Whole api typechecks 0 errors after.
 
-**Blackbox is label-gated:** add `Run Blackbox` (pg+sqlite smoke) or `Run Blackbox Full` (all
-vendors) label via REST (`gh api … /issues/N/labels`); `blackbox-pr.yml` runs `if contains(labels,
-'Run Blackbox')`. Scoped-cache logic is redis (vendor-independent) → smoke suffices. New blackbox env
+**Blackbox runs on its own for any code PR** (since 2026-08-05, [[project_directus_blackbox_run_and_logs]]);
+`Run Blackbox Full` (all vendors) via REST (`gh api … /issues/N/labels`) when a vendor matrix is wanted. Scoped-cache logic is redis (vendor-independent) → smoke suffices. New blackbox env
 `envRedisScopedPurge` asserts cross-collection isolation.
 
 Parked follow-ups: [[project_directus_sql_query_cache_parked]] (partition tags, owner-tagging,

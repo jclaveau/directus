@@ -1,17 +1,26 @@
 ---
 name: project_directus_blackbox_run_and_logs
-description: How to trigger the label-gated blackbox suite on a branch HEAD (compare-PR + Run Blackbox label) and why its REST job logs are unreadable (containerized vitest output) — read the streamed section before ELIFECYCLE instead.
+description: Blackbox runs on every PR touching a non-doc file since 66e5e32501 (2026-08-05) — the Run Blackbox label only forces it and, added after the push, fires a second Check run that cancels the first; how to read its logs (REST job logs lack the containerized vitest output, use the run-logs ZIP).
 metadata:
   author: Jean Claveau
   type: project
 ---
 
-The blackbox suite (`tests/blackbox`, 7 jobs: common + 6 DBs) is **label-gated** on PRs: `blackbox-pr.yml`
-("Check") runs only when the PR carries the `Run Blackbox` label. It also runs on push to `main` only —
-**not** the v11.10.1 line until #187 added `v11.10.1-prepare` to `blackbox.yml`'s push triggers.
+**The `Run Blackbox` label is NOT required on a PR** (since `66e5e32501`, 2026-08-05).
+`blackbox-pr.yml` ("Check") has a `Decide` job: runs for a `ci-dialect-*` head, skips on
+`Skip Blackbox`, forces on `Run Blackbox` / `Run Blackbox Full` (full = the vendor
+matrix), and otherwise runs **whenever a changed file is outside `.agents/`, `docs/`,
+`.github/` (except `blackbox*` workflows) or `*.md`** — i.e. any code PR runs it on
+`opened`/`synchronize`. Adding the label after the push fires a `labeled` event → a
+second `Check` run on the same head whose concurrency **cancels the in-flight one**
+(cost ~6 min, seen on PR #497); removing it fires `unlabeled` and does it again. So:
+never add the label to a code PR; read the `Decide` step summary when unsure. The
+label is only for a docs/memory-only PR that should still exercise the suite.
 
-**Run it on an arbitrary branch's HEAD without merging:** open a PR with that branch as **head** + add the
-`Run Blackbox` label (`gh api -X POST repos/jclaveau/directus/issues/<n>/labels -f "labels[]=Run Blackbox"` —
+Trunk pushes run **no** blackbox at all ([[project_directus_trunk_full_vendor_matrix]]).
+
+**Run it on an arbitrary branch's HEAD without merging:** open a PR with that branch as **head** (the
+label is only needed if the diff is docs-only) (`gh api -X POST repos/jclaveau/directus/issues/<n>/labels -f "labels[]=Run Blackbox"` —
 `gh pr edit --add-label` 500s on this classic-Projects repo, [[gh-issue-view-quirk]]). `blackbox-pr.yml`
 (the label gate) loads from the **base**, but the reusable `blackbox.yml` it calls via `uses: ./` loads from
 the **PR head/merge ref** — so the head's suite runs regardless of base. Used a PR of `v11.10.1-prepare` vs
@@ -25,7 +34,7 @@ server-startup throw / vitest summary sits just before `ERR_PNPM_RECURSIVE_RUN_F
 that window (`sed -n` around the ELIFECYCLE line) after stripping ANSI. The full run-log zip needs the run id,
 which `gh run list --branch <b> --workflow Blackbox` often returns empty for. See [[feedback_gh_job_logs_via_curl]].
 
-**How to apply:** to verify a fix-forward against blackbox, push to the branch + ensure `Run Blackbox` label →
+**How to apply:** to verify a fix-forward against blackbox, push to the branch (no label) →
 read results per-job via `gh pr view <n> --json statusCheckRollup`; for the failure detail, read the streamed
 log around ELIFECYCLE, not the REST job-log body. The redis cache-purge + SAML tests are the high-signal ones.
 

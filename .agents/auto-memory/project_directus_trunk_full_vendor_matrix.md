@@ -8,7 +8,7 @@ metadata:
 
 `blackbox.yml` picks the vendor matrix by event:
 
-- **PR** with `Run Blackbox` → `["postgres"]`.
+- **PR** (any code diff; `Run Blackbox` no longer needed) → `["postgres"]`.
 - **`Run Blackbox Full`** → `["sqlite3","postgres","maria"]`.
 - A **push to `v11.10.1-hhh-dev` does not run blackbox at all** — measured: that branch's
   last `blackbox-pr.yml` runs are `pull_request` events from June, all skipped. Trunk CI

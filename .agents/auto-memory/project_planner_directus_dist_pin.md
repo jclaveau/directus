@@ -37,3 +37,5 @@ diff is only the SHA, commit, then deploy. `develop` is the integration branch
 
 Related: [[feedback_bump_not_patch_consumer_dep]], [[feedback_verify_moving_tag_payload]],
 [[project_scalabus_derived_branches]], [[project_directus_cache_stats_prod_incident]].
+
+**Bump gotcha (2026-10-14, #605 bump):** swapping the SHA in `pnpm-lock.yaml` alone leaves ~60 stale `integrity:` hashes on the fork tarballs; the earlier bump (a48b8a82) went through `pnpm run update-directus-fork` (--latest), then check `@types/node` churn. A planner session's classifier may deny the lockfile edit → jean approves in that session. #605 planner work: 14 `.one` registrations in 10 hook files → mapUpdateRows/mapCreateRows; 5 `purgeBy` takeover sites without `forKey` (stay coarse, narrowing = follow-up); no `onRepeatedPk` use. Dist tip after #605: `b9719fc4b3`.
