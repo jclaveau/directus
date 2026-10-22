@@ -25,8 +25,8 @@ A consumer's prod DB stays SELECT-only from any session, this one included; the 
 is in the consumer repo.
 
 **Why:** jean, 2026-10-22, on the #624 review: consumer-specific data must not sit in the
-fork's memories, for security. The fork is public; the planner is private. 21 memories
-moved to the planner repo (the-HipHipHip/Planner#822) and the rest were redacted.
+fork's memories, for security. The fork is public; the consumer is private. 21 memories
+moved to the consumer's private repo and the rest were redacted.
 
 **How to apply:** before writing or editing a memory in this repo, strip consumer
 specifics or write it in the consumer's repo instead. A review of a PR that touches
