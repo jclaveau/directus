@@ -374,6 +374,59 @@ describe('Integration Tests', () => {
 				expect(mockDriver.write).not.toHaveBeenCalled();
 			});
 
+			it('refuses a new id whose disk name only the disk holds', async () => {
+				tracker.on
+					.select('select "id" from "directus_files" where "filename_disk" = ?')
+					.response(undefined);
+
+				vi.mocked(mockDriver.exists!).mockResolvedValue(true);
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						id: 'test-file-id-123',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "test-file-id-123.txt" is already used by
+							another file
+						`,
+					}),
+				);
+
+				expect(mockDriver.exists).toHaveBeenCalledWith('test-file-id-123.txt');
+				expect(superCreateOne).not.toHaveBeenCalled();
+				expect(mockDriver.write).not.toHaveBeenCalled();
+			});
+
+			it('refuses a new id whose disk name another row holds', async () => {
+				tracker.on
+					.select('select "id" from "directus_files" where "filename_disk" = ?')
+					.response({ id: 'other-file-id' });
+
+				await expect(
+					service.uploadOne(new PassThrough(), {
+						storage: 'local',
+						type: 'text/plain',
+						filename_download: 'notes.txt',
+						id: 'test-file-id-123',
+					}),
+				).rejects.toStrictEqual(
+					new InvalidPayloadError({
+						reason: oneLine`
+							"filename_disk" "test-file-id-123.txt" is already used by
+							another file
+						`,
+					}),
+				);
+
+				expect(superCreateOne).not.toHaveBeenCalled();
+				expect(mockDriver.write).not.toHaveBeenCalled();
+			});
+
 			it('refuses a filename_disk that is not a normalised path', async () => {
 				tracker.on
 					.select('from "directus_files" where "id" = ?')

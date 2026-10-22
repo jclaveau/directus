@@ -158,3 +158,60 @@ Feature: A file's record is written one at a time or in batches, its data replac
       | path: /files/<short> |            |
       | method: GET          | code: 200  |+
       | path: /assets/<kept> | text: kept |
+
+  Scenario: a new file sending its id is refused when its disk name is taken
+    Given these requests are sent:
+      | request                                  | response  |
+      | method: POST                             | code: 200 |+
+      | path: /files                             |           |
+      | form:                                    |           |
+      |   title: holder-<run>                    |           |
+      |   filename_disk: <held-id>.txt           |           |
+      | file:                                    |           |
+      |   name: holder-<run>.txt                 |           |
+      |   content: holder                        |           |
+      | remember: holder                         |           |
+      | method: POST                             | code: 200 |+
+      | path: /files                             |           |
+      | form:                                    |           |
+      |   title: orphaned-<run>                  |           |
+      |   filename_disk: <orphan-id>.txt         |           |
+      | file:                                    |           |
+      |   name: orphaned-<run>.txt               |           |
+      |   content: orphaned                      |           |
+      | remember: orphaned                       |           |
+      | method: PATCH                            | code: 200 |+
+      | path: /files/<orphaned>                  |           |
+      | payload:                                 |           |
+      |   filename_disk: moved-<run>.txt         |           |
+    Then these requests get these responses:
+      | request                           | response                             |
+      | method: POST                      | code: 400                            |+
+      | path: /files                      | body:                                |
+      | form:                             |   errors:                            |
+      |   id: <held-id>                   |     - message: >-                    |
+      |   title: taker-<run>              |         Invalid payload.             |
+      | file:                             |         "filename_disk"              |
+      |   name: taker-<run>.txt           |         "<held-id>.txt" is already   |
+      |   content: taker                  |         used by another file.        |
+      | method: POST                      | code: 400                            |+
+      | path: /files                      | body:                                |
+      | form:                             |   errors:                            |
+      |   id: <orphan-id>                 |     - message: >-                    |
+      |   title: taker-<run>              |         Invalid payload.             |
+      | file:                             |         "filename_disk"              |
+      |   name: taker-<run>.txt           |         "<orphan-id>.txt" is already |
+      |   content: taker                  |         used by another file.        |
+      | method: GET                       | code: 200                            |+
+      | path: /files                      | body:                                |
+      | query:                            |   data: []                           |
+      |   fields: id                      |                                      |
+      |   filter[title][_eq]: taker-<run> |                                      |
+      | method: GET                       | code: 200                            |+
+      | path: /assets/<holder>            | text: holder                         |
+      | method: PATCH                     | code: 200                            |+
+      | path: /files/<orphaned>           |                                      |
+      | payload:                          |                                      |
+      |   filename_disk: <orphan-id>.txt  |                                      |
+      | method: GET                       | code: 200                            |+
+      | path: /assets/<orphaned>          | text: orphaned                       |
