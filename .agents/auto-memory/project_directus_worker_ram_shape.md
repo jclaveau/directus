@@ -6,7 +6,7 @@ metadata:
   type: project
 ---
 
-Measured 2026-09-08 on the fork's `api/dist`, planner-shaped schema (37 collections,
+Measured 2026-09-08 on the fork's `api/dist`, a consumer-shaped schema (37 collections,
 327 fields, 95 relations, 115 permissions), postgres, redis, no extensions,
 `SERVE_APP=false`. Numbers are post-`global.gc()`.
 
@@ -30,5 +30,5 @@ measured and refuted. The two things that actually move a worker are *which modu
 got imported* and *how V8 is configured*, not the size of the project.
 
 **How to apply:** multiply any per-worker saving by `PM2_AUTOSCALE_MAX_WORKERS`
-(32 on the planner's Api). See [[project_directus_ram_node_flags]],
+(32 on a prod consumer's API). See [[project_directus_ram_node_flags]],
 [[project_directus_eager_module_imports]], [[reference_directus_ram_probe_harness]].

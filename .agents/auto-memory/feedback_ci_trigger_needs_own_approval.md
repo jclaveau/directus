@@ -9,7 +9,7 @@ Adding a label, dispatching a workflow, or forcing a rerun spends CI money/time
 and is a distinct action from whatever goal it serves — it needs its own ask,
 never inferred from an adjacent instruction.
 
-**Why:** told "merge once green" on planner PR #749, inferred that meant "make
+**Why:** told "merge once green" on a consumer PR, inferred that meant "make
 the gate go green" and added the `all-tests` label myself — 9 browser shards +
 smoke + extra builds, broader than the `front-tests` label already offered and
 left unanswered earlier in the session. User had not asked for the label; the

@@ -16,7 +16,7 @@ error "invalid foreign key"). Fix:
   `relatedCollection`, `reason` (`invalid_reference`|`still_referenced`), `operation`
   (`create`|`update`|`delete`). `code` stays `INVALID_FOREIGN_KEY` (no client-contract break).
 - `messageConstructor` branches on reason + operation: a blocked delete reads
-  `Cannot delete "enrollment:5": it is still referenced by collection "student_enrollment".`
+  `Cannot delete "<parent>:5": it is still referenced by collection "<child>".`
   (`collection:pk` names the exact row when the driver gives its key; **compact form chosen by
   jean**). Falls back to collection-only when the pk is composite (comma in field) or absent, and
   to `Record ... is still referenced ...` on the read path (no operation/collection).

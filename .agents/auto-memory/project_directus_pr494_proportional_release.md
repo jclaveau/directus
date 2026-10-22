@@ -53,7 +53,7 @@ several chances to hit the supervisor's 15s bound.
 the figure #457 names), 2026-09-16, jean's explicit call after prod showed
 release actually happening 60-90s after an add. Only reader is
 `resolve-config.ts`'s env fallback; no test/doc pinned 300. Prod/dev don't
-hit this default anyway — the planner's own env sets `RELEASE_WORKER=60`.
+hit this default anyway — the consumer's own env sets `RELEASE_WORKER=60`.
 Pushed as its own commit onto #494 (5 commits total), PR body Scope updated
 in the same command that re-fetched it.
 

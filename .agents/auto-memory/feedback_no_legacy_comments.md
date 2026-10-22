@@ -10,7 +10,7 @@ code should go straight to the point."
 
 **Why:** a comment justified by history rots the moment the history stops mattering, and
 reads as a monument to a deletion rather than information about the code that's there.
-Example caught in [[project_pr753_pre_node_env_wrapper]]/#753: a comment explaining
+Example caught in a consumer PR: a comment explaining
 *"--experimental-require-module is deliberately NOT here…"* and another contrasting a
 new cooldown value against *"the base env file's 10 is what dev used to inherit"* — both
 past-tense justifications for an absence, not statements about what's present.

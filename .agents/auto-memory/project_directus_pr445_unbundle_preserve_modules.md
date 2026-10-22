@@ -15,7 +15,7 @@ extensions?"):
   reps: bundled cold/warm/redeploy = 37/20/32ms; spread-out = 457/392/454ms (~10× slower
   at every point, including the "redeploy, 1 module changed" case that looked strongest
   on paper). Per-module link cost (~0.4ms) swamps every compile the cache saves. Worse:
-  the planner's real domain extension (13.6MB, the module you'd actually want to patch in
+  a consumer's real domain extension (13.6MB, the module you'd actually want to patch in
   a container) **throws at load** when spread out — `require_lib is not a function` (a
   joi CJS require-cycle whose init order needs everything in one scope) with sqlite3's
   native binding lookup failing right behind it. Vendor is 89% of those bytes, so this is
@@ -28,7 +28,7 @@ extensions?"):
   a tree anyway; not fixed, not worth blocking on.
 - **`directus-extension unbundle <bundle|map> <dir>`** — recovers a deployed extension's
   original source tree from its sourcemap's `sources[]`/`sourcesContent[]`. Motivated by
-  `-dist` dropping sources: the planner's domain `api.js.map` carries 2086/2107 sources
+  `-dist` dropping sources: a consumer's domain extension `api.js.map` carries 2086/2107 sources
   with content, recoverable in 3.5s with zero runtime cost, works on what's already
   deployed. Settled design points from two review rounds, all fixed + regression-tested:
   path-traversal segments (`..`, absolute, Windows drive letters) are dropped not
@@ -48,5 +48,5 @@ served cheaper by `unbundle` than by any bundling-strategy change — no runtime
 works on what's already shipped.
 
 **How to apply:** don't re-litigate `--preserve-modules`'s cache case — it's measured
-refuted, twice, on both a synthetic and the planner's real extension. See
+refuted, twice, on both a synthetic and a consumer's real extension. See
 [[reference_directus_extension_unbundle]] for when to reach for the command itself.

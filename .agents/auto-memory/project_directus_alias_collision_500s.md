@@ -18,14 +18,12 @@ runs — the caller gets a 500, not a slow response.
 
 Cause is Directus's random 5-character join alias. A deep read builds one alias per
 relational hop; a permission-CASE read on a nested collection chains 6-7 joins
-(`student_course_note` → `student_course` → `student_teaching_unit` →
-`student_discipline` → `student_enrollment` → `student` → `directus_users`), and two hops
+(six nested collections down to `directus_users`), and two hops
 in the same statement eventually draw the same string. Birthday collision, so it scales
 with joins per query and with traffic, not with any one endpoint.
 
-Find them with
-`railway logs -s Postgres-HipHipHip-test -e production -S 14d --filter "specified more than once"`
-([[project_directus_prod_db_access]]). The log gives the colliding alias but not the
+Find them by filtering the PG log for `specified more than once` (how-to in the
+consumer repo's memories). The log gives the colliding alias but not the
 statement — `log_min_error_statement=error` prints a `STATEMENT:` line, correlate on
 `[pid]` + second.
 
@@ -35,4 +33,4 @@ the random string, which only moves the rate.
 
 Filed as fork issue **#485**.
 
-Related: [[project_directus_prod_query_timeouts]], [[project_directus_filter_normalization_layers]].
+Related: [[project_directus_filter_normalization_layers]].

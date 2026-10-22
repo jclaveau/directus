@@ -93,7 +93,7 @@ does not decode as `[line, hits]`, so trust `totals` and not a hand-rolled miss 
 **Three bb scenarios queued next, ranked by the user's "all three", highest-value
 first:**
 1. **Losing the pm2 daemon mid-run** — `connectToSupervisor()` runs once at boot, the
-   loop never reconnects; a `pm2 kill`/restart (God daemon death, OOM, the planner's
+   loop never reconnects; a `pm2 kill`/restart (God daemon death, OOM, a consumer's
    nightly `cron_restart`) makes every `readPool` throw, swallowed by the per-tick
    catch, forever, silently. Same failure class as the Redis freeze (alive but not
    working). **This WAS a defect, and the "self-recovers" reading recorded here on

@@ -9,9 +9,9 @@ A memory filename is a label, not the rule. Renamed or stale slugs can say the
 opposite of the current body — always read the body before acting on what a
 memory "says."
 
-**Why:** refused to start the planner locally for tests, citing a memory named
+**Why:** refused to start a consumer app locally for tests, citing a memory named
 `feedback_defer_dev_stack_start_to_user.md`. The user had already granted
-"you are allowed to start the planner locally to run the tests" on 2026-09-07,
+permission to start it locally to run the tests on 2026-09-07,
 and the memory's own body recorded that grant — only the filename still said
 defer-to-user. Read the name, stopped there, acted on the opposite of what was
 written. Cost the user a repeated "i already told you."

@@ -1,15 +1,15 @@
 ---
 name: project_directus_prewarm_deploy_failure
-description: PM2_AUTOSCALE_PREWARM=15 failed every planner production deploy — the 15s supervisor bound, the terminal prewarmed latch, and the health target nothing reconciles (fork #490)
+description: PM2_AUTOSCALE_PREWARM=15 failed every deploy of a prod consumer — the 15s supervisor bound, the terminal prewarmed latch, and the health target nothing reconciles (fork #490)
 metadata:
   author: Jean Claveau
   type: project
 ---
 
-**2026-09-15, planner production.** The first deploy that actually ran the fork's
-autoscaler in prod (planner #773) failed twice with `PM2_AUTOSCALE_PREWARM=15`.
+**2026-09-15, a prod consumer.** The first deploy that actually ran the fork's
+autoscaler in prod failed twice with `PM2_AUTOSCALE_PREWARM=15`.
 Filed as fork **#490**. Prod only came up once `PM2_AUTOSCALE_PREWARM=0` was set
-as a Railway Api service variable by hand.
+as a service variable by hand.
 
 **It is size-dependent, which is why nothing caught it.** The same commit
 deployed clean to dev with `PREWARM=3` — `prewarming api from 1 to 3 workers`,
@@ -35,7 +35,7 @@ The chain, each link independently fixable:
 4. `decide()` then released the still-filling pool 9→8→7→6→5→4, one per 60s, each
    release re-arming `lastScaleDownAt`.
 
-`directus-api.railway.json` sets no `healthcheckTimeout`, so the window is
+The consumer's Railway config sets no `healthcheckTimeout`, so the window is
 Railway's 300s default.
 
 Beside it, and eating 2.8 min of that same window:
@@ -48,8 +48,8 @@ folds `resolveCoreBuildId()` to a literal in the shipped dist, so
 half moves only when the dist pin moves; a redeploy of the same commit did not
 flush.
 
-See [[project_directus_pm2_autoscale_ramp_measured]] and
-[[project_directus_planner_deploy_shape]] for the surrounding numbers.
+See [[project_directus_pm2_autoscale_ramp_measured]] (and the consumer repo's
+memories) for the surrounding numbers.
 
 **Fixed in PR #491** (`v11.10.1-fix/prewarm-deploy-failure`, CI + blackbox
 green): the prewarm walks the pool up `PREWARM_STEP_WORKERS = 2` a tick and
@@ -58,9 +58,7 @@ been sent; the flush lock is refreshed for as long as the flush runs and the
 boot waits only `CACHE_FLUSH_TIMEOUT` for it. Why a big scale cannot be answered
 at all is [[reference_directus_pm2_scale_cost]]. Blackbox arm:
 `tests/db/app/autoscale-prewarm-health.test.ts`, third arm, eight workers three
-seconds apart. `apps/directus/env/.env.prod.cd.railway.api` still ships
-`PM2_AUTOSCALE_PREWARM=15` while the Railway service var says 0 — reconcile once
-#491 ships.
+seconds apart.
 
 **Deep review of #491 (`805a2a4979`→`2547d17d47`, CI green both times, mutation-
 checked): no correctness defect**, but `PREWARM_STEP_WORKERS = 2` sits ON the
@@ -116,7 +114,7 @@ a trunk push, so it LANDED as a blackbox arm (runs on every PR):
 `tests/blackbox/tests/db/app/autoscale-prewarm-load.test.ts` on commit
 `752ea560c3`, green, **34-41 s on the runner** (shard hint 50_000). Real
 Directus as the pm2 pool via the rig's new `startPool({ directusEnv })`
-(cluster, `wait_ready`, `listen_timeout` 60 s, planner `kill_timeout` 20 s);
+(cluster, `wait_ready`, `listen_timeout` 60 s, `kill_timeout` 25 s);
 four request loops on `/server/ping` + `/users/me` from before the autoscaler
 starts; the pool is read every 250 ms for the whole run and the sizes HELD
 (≥1 s, first size kept by definition) are asserted as a curve
@@ -151,7 +149,7 @@ per added worker (3 s default in prod → 45 s for 15), so an ask unanswered pas
 that is one whose daemon is gone. `requestScale` is client-internal again. The
 client also fails its unbounded in-flight calls on a reconnect (`outstanding`
 set). Restart gate `carriesRestarts === false || prewarmBegun`. Boot's flush
-wait got its own `CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT` (30s) because the planner
+wait got its own `CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT` (30s) because a consumer
 sets `CACHE_FLUSH_TIMEOUT=120s` for the CLI. Health arm file now ~223 s (hint
 260_000); load arm 41.7 s, curve `1 2 3 4 5 6 3 2 1` reproduced.
 
@@ -170,15 +168,7 @@ growth seen. Unit `pool(count, listenTimeout)` fixture; arm 4 derives its
 bound from rig exports `WORKER_LISTEN_TIMEOUT_MS`/`SUPERVISOR_TIMEOUT_MS`.
 
 **Merged 2026-09-16 as `9cdfbde9e2`** (`#490` auto-closed). Fork `-dist` rebuilt to
-`df934ae588`; planner `develop` bumped (`1f0d45f8` SHA-substitution only, 269-line
-lockfile diff, nothing else moved) and the `.env.prod.cd.railway.api` comment block
-above `PM2_AUTOSCALE_PREWARM=15` rewritten to describe the new mechanics (was the old
-concurrent-batch story). Deploy PR
-[the-HipHipHip/Planner#775](https://github.com/the-HipHipHip/Planner/pull/775) opened,
-explicit that **this deploy does not exercise the prewarm** — the Railway Api service
-var `PM2_AUTOSCALE_PREWARM=0` (the 2026-09-15 hand-fix) stays until jean deletes it
-post-deploy; see [[feedback_planner_env_files_over_railway_vars]] and
-[[feedback_no_railway_env_var_changes_without_explicit_ask]] for why the var is never
-touched by the agent. One review thread on #775 (a stale comment block) replied and
-fixed via `/pr-comments`.
+`df934ae588`. The consumer-side bump and deploy are in the consumer repo's
+memories; that deploy did not exercise the prewarm (the 2026-09-15 hand-set
+`PM2_AUTOSCALE_PREWARM=0` stays until jean deletes it post-deploy).
 

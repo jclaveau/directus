@@ -1,6 +1,6 @@
 ---
 name: project_directus_cache_redis_db_559
-description: CACHE_REDIS_DB (PRs #572/#577, issue #559) — response cache in its own Redis DB flushed by FLUSHDB; settled design B, guards, MULTI epoch reseed, COUNT 1000, Valkey CI, one-namespace-per-DB, planner prod facts; do not re-raise
+description: CACHE_REDIS_DB (PRs #572/#577, issue #559) — response cache in its own Redis DB flushed by FLUSHDB; settled design B, guards, MULTI epoch reseed, COUNT 1000, Valkey CI, one-namespace-per-DB, consumer prod facts; do not re-raise
 metadata:
   author: Jean Claveau
   type: project
@@ -27,7 +27,7 @@ healthcheck). MERGED: #577 (flush bench, `72784ad2e8`), #572 (`1225982ed1`), clo
   `flushed-queued-command-failed` (OOM → bump once more; a one-round-trip window remains,
   documented). No blackbox witness: `dropScopedCacheIndex`'s later bump would mask it.
 - **One `CACHE_NAMESPACE` per cache DB** (a FLUSHDB empties other namespaces' counters
-  too). Planner prod is safe: each Railway env has its own Redis service, Api+Backend share
+  too). A prod consumer is safe: each env has its own Redis service, its services share
   the default namespace, URL has no path (shared DB 0), FLUSHDB not renamed. Option (b)
   claim-key enforcement REJECTED as out of scope.
 - `KvRedis.clear()` (`@directus/memory`) now scans `count: 1000`; ioredis `scanStream`
@@ -43,7 +43,6 @@ healthcheck). MERGED: #577 (flush bench, `72784ad2e8`), #572 (`1225982ed1`), clo
   floor shared ≥ 9; ms reported not gated; grows the cache with synthetic Keyv-shaped keys
   in whichever DB the build actually uses (detected from real filled entries).
 
-**How to apply:** planner side (`CACHE_REDIS_DB=1` in `.env` files, never a Railway var;
-collapse `init.sh`'s 4 flushes) was handed to session cache-fingerprints-72 / planner PR
-#795. Follow-up bugs: [[project_directus_cache_flush_offline_tiers_581]]. Bench context:
+**How to apply:** the consumer side (set `CACHE_REDIS_DB=1`, collapse its 4 boot
+flushes) was handed to the consumer repo. Follow-up bugs: [[project_directus_cache_flush_offline_tiers_581]]. Bench context:
 [[project_directus_cache_bench_gates_560]].

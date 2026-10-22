@@ -9,7 +9,7 @@ metadata:
 Scratch harness used for the 2026-09-08 RAM study (files under the session scratchpad;
 recreate, they are not in the repo).
 
-1. **Database.** Replica per [[project_directus_planner_schema_replica]] restored as a
+1. **Database.** A consumer schema replica (see the consumer repo's memories) restored as a
    throwaway `ram_probe` on `blackbox-postgres-1` (port 6100), then `dist/cli/run.js
    bootstrap`. Users must be created with a real TLD — `@example.com`, not `.local`,
    which `UsersService.validateEmail` rejects.

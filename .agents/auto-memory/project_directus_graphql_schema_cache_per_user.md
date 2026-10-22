@@ -11,7 +11,7 @@ metadata:
 `LRUMap` of `GRAPHQL_SCHEMA_CACHE_CAPACITY ?? 100` entries
 (`api/src/services/graphql/schema-cache.ts`).
 
-Measured on the planner-shaped schema: one admin schema costs 7.9 MB, and **eight
+Measured on a consumer-shaped schema: one admin schema costs 7.9 MB, and **eight
 users sharing one identical role added 29.0 MB — 3.6 MB per user** of byte-identical
 schema. Re-keying on `admin` + the role list instead took the same eight users to
 **+5.5 MB**. At the default capacity the worst case is ~370 MB per worker.
@@ -22,8 +22,8 @@ those users. `fetchPolicies` is already `withCache`d, so resolving it before the
 is cheap. Permission *filters* may contain `$CURRENT_USER`, but those affect values,
 not the schema's shape, so they do not belong in this key.
 
-**Not currently a production cost for the planner** — it does not use GraphQL
-(`grep -rl graphql planner_2/apps/domain/src` is empty), so this is a latent fork-wide
-bug rather than a live win. Fix it for the fork, do not sell it as planner RAM.
+**Not currently a production cost for the prod consumer** — it does not use GraphQL,
+so this is a latent fork-wide bug rather than a live win. Fix it for the fork, do not
+sell it as consumer RAM.
 
 See [[project_directus_worker_ram_shape]].

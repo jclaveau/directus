@@ -11,7 +11,7 @@ Since #456 the autoscaler is a process of its own (`directus autoscale`,
 in the God daemon and costing no second process. jean flagged the ~230 MB
 steady-state RSS as the one real regression. Filed as fork **#489**.
 
-**Measured** (node 22.22, planner's installed `@directus/api`, RSS after one
+**Measured** (node 22.22, a consumer's installed `@directus/api`, RSS after one
 dynamic import into an otherwise empty process):
 
 | | RSS |
@@ -37,8 +37,8 @@ The same command graph is carried by every api worker, which only ever runs
 `start` — so this is the "every CLI command" term of
 [[project_directus_eager_module_imports]], multiplied by the pool.
 
-Third, free lever: the `autoscaler` app in the planner's
-`directus.ecosystem.config.js` declares **no `node_args`**, so it runs on V8
+Third, free lever: the `autoscaler` app in the consumer's
+ecosystem config declares **no `node_args`**, so it runs on V8
 defaults while the api app gets `--max-semi-space-size=2`
 ([[project_directus_ram_node_flags]]).
 

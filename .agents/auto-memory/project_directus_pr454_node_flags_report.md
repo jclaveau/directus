@@ -18,8 +18,8 @@ test to `report-processes.test.ts`, kept both).
 `node_args` (which becomes real `argv` flags at fork) lands there. The PR's own type doc,
 test comments and body originally claimed `NODE_OPTIONS` was covered — reworded to "what
 pm2's `node_args` hands Node"; `NODE_OPTIONS` still reaches the report through the
-existing env half. Prod is unaffected either way: the planner sets its flag
-(`--max-semi-space-size=2`) via `node_args` in `directus.ecosystem.config.js`, not
+existing env half. Prod is unaffected either way: a prod consumer sets its flag
+(`--max-semi-space-size=2`) via `node_args` in its ecosystem config, not
 `NODE_OPTIONS`.
 
 **Had no bb witness for the pm2 route at all** — added one arm to
@@ -29,7 +29,7 @@ to `nodeVersion`; a plain `processes` start asserts `[]`.
 
 **Deep review found one P2:** the admin page reads `node.runtime.execArgv.length`
 unguarded (`processes.vue:741`). Replicas are gathered by service name over shared Redis,
-so during a planner deploy (bo and Api switch over minutes apart) the page can list an
+so during a consumer deploy (its services switch over minutes apart) the page can list an
 OLD build's report that predates the `execArgv` field entirely → `undefined.length` →
 render error → the whole processes page blanks for that window, for every future field
 this report grows the same way (every earlier addition — `autoscale`, `nodeId`, `env` —
@@ -37,7 +37,7 @@ was tolerated absent). Fixed at the collector: `runtimeOf()` in `collect-process
 fills `execArgv: []` when a report carries none (both the listed and unlisted branch),
 keeping the type required rather than optional on the page. Witness in
 `collect-processes.test.ts`, mutant (fill dropped) killed. Also `.runtime { flex-wrap:
-wrap }` (a long `node_args` list — the planner's profiling flags run three at once —
+wrap }` (a long `node_args` list — a consumer's profiling flags run three at once —
 would squeeze or overflow the row; no jsdom witness, layout only).
 
 **Settled, not changed:** Node flags carry no credentials (worst case is a path like
@@ -46,6 +46,6 @@ left unredacted, the PR body's open "say so and I will wire it" line on redactio
 dropped as answered.
 
 Merged `d38af828d5`; `-dist` rebuilt to `0bf3a4b096` (pinned manifests identical, SHA
-substitution only); planner `develop` bumped (`d0b5377c`). One shard-1 bb failure on the
+substitution only); the consumer's pin bumped. One shard-1 bb failure on the
 rebased head (`cache-cascade-delete.test.ts` seed relation-create race) did not recur on
 the next push — flake, not #454's diff, same shape as issue #308's seed-retry class.

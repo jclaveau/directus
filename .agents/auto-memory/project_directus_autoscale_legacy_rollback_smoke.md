@@ -7,7 +7,7 @@ metadata:
 
 `PM2_AUTOSCALE_STRATEGY=legacy` is the first thing to reach for if the
 autoscaler misbehaves in production, so the lever itself was exercised on
-`Planner-pr-770` (preview Api) on 2026-09-15.
+a consumer's PR preview on 2026-09-15.
 
 **The lever is a single authenticated write, applied live.**
 
@@ -24,11 +24,10 @@ each `autoscaler` process carries `autoscale.config`, `autoscale.sources` and
 `autoscale.withoutSharedSettings`, so what is effective and where it came from
 are both readable without guessing.
 
-The preview has no admin static token, but `TESTS_ADMIN_EMAIL` /
-`TESTS_ADMIN_PASSWORD` are Railway variables on its Api service, and a session
+The preview has no admin static token, but a session
 token from `POST /auth/login` is enough for these routes (only system-mcp needs
-a *static* token). Run the login through `railway run -s Api -- bash -c '…'` so
-the password stays inside Railway's process env — reading it into the agent's own
+a *static* token). Run the login inside the platform's process env so
+the password stays there — reading it into the agent's own
 shell trips the sandbox classifier, correctly.
 
 **What legacy decided under the pass-2 load shape** (200 s ramp at 32 burners,
@@ -58,7 +57,7 @@ Both known asymmetries reproduced in 22 seconds:
   hour old, and the next waited a full 302 s.
 
 **It costs no errors at this request size.** 16993 probes, **0 non-200**, worst
-latency 1.78 s across the whole churn — `kill_timeout: 20000` covers every
+latency 1.78 s across the whole churn — `kill_timeout: 25000` covers every
 request that finishes inside it, exactly as in
 [[project_directus_autoscale_release_load_test]]. So the lever is safe to pull
 under production-shaped traffic; what it buys back is pm2-autoscale's decisions,
@@ -67,7 +66,7 @@ churn included.
 Instrument trap: `/utils/processes` CPU is pm2's delta since the last lister, so
 a 15 s poller **perturbs and misses** — my sampler never saw the 3-worker moment
 and read numbers the autoscaler never saw. Judge the decisions from the
-autoscaler's own log lines (`railway logs -s Api --filter autoscale`), never from
+autoscaler's own log lines (filter the service log on `autoscale`), never from
 a sampler's CPU column ([[project_directus_pm2_cpu_delta_window]]).
 
 Related: [[project_directus_pm2_autoscale_threshold_ratchet]],
@@ -76,28 +75,24 @@ Related: [[project_directus_pm2_autoscale_threshold_ratchet]],
 
 ## pm2-autoscale is gone, verified 2026-09-15
 
-The module is removed on planner #770 in three places: `apps/package.json`'s
-`"prepare": "pnpm pm2 install pm2-autoscale"`, and both
-`RUN pnpm --filter @hiphiphip/shared-dependencies run prepare` lines in
-`Dockerfile.directus-bo` — the api Dockerfile is *generated* from the bo one by
-`prepare-dockerfile.sh`, which is why `b89e1037`'s stat shows only the bo file and
-`4b537d8f` carries the regenerated api one.
+The consumer's deploy PR removes the module from its install step and its
+Dockerfiles.
 
-**Verified live rather than inferred.** The 770 preview's `/utils/processes` lists
+**Verified live rather than inferred.** The consumer's preview `/utils/processes` lists
 exactly `api` (pmId 0) and `autoscaler` (pmId 1). That list *would* show a module:
 `listSupervisedApps()` is a bare `pm2.list()` → `getMonitorData` with no filter, and
 pm2 hides modules only at display time (`lib/API/UX/pm2-ls.js:23` filters
-`pm2_env.pmx_module != true`). No volume is declared in the Railway config either,
+`pm2_env.pmx_module != true`). No volume is declared in the platform config either,
 so `PM2_HOME=/directus/.pm2` is ephemeral and a module baked into an older image
 dies with its container.
 
 **There is no window where both supervisors run.** The scalabus dist bump put the
-autoscaler *code* on develop, but the `autoscaler` process declaration in
-`directus.ecosystem.config.js` is on #770 — so prod today runs the module and not
-the fork's loop, and the #770 deploy swaps them in one step. `strategy: legacy` is a
+autoscaler *code* on the consumer's main branch, but the `autoscaler` process
+declaration in the consumer's ecosystem config is on that deploy PR — so prod today
+runs the module and not the fork's loop, and that deploy swaps them in one step. `strategy: legacy` is a
 branch inside the fork's own `decide()`, never the module, so the rollback can never
 resurrect it.
 
 Corollary for the day before that deploy: **the `PATCH /utils/autoscale` levers do
-not exist on prod yet.** Until #770 ships, prod is pm2-autoscale 1.4.0 and its only
+not exist on prod yet.** Until that deploy ships, prod is pm2-autoscale 1.4.0 and its only
 rollback is the `PM2_AUTOSCALE_*` thresholds plus a redeploy.

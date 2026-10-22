@@ -42,7 +42,7 @@ reproduces pm2-autoscale 1.4.0 exactly.
 `rmProcs` walks `procs[i++]` from `i = 0` (`pm2/lib/API.js:1807`), ascending
 `pm_id`, so it always deletes the **oldest** worker — which under keep-alive is
 the one holding the most in-flight work. That is what produced the 502: the
-victim held a 27 s `POST /items/student_course`.
+victim held a 27 s `POST /items/<collection>`.
 
 - **#482 — landed** as `lib/choose-victims.ts` on the #456 branch, with a
   blackbox arm (`e171705a54`) and confirmed live on the preview by the
@@ -68,4 +68,4 @@ victim held a 27 s `POST /items/student_course`.
   **would not have prevented the 502**. It belongs strictly below idleness.
 
 The drain budget that turned the dropped request into a 502 is a third, separate
-thing: planner issue the-HipHipHip/Planner#771.
+thing, tracked in the consumer repo.

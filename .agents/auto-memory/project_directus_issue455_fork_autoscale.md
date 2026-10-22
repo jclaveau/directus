@@ -49,7 +49,7 @@ keeps the door open to extracting it if it ever proves generally useful.
   plateau) as policy on every future deploy.
 - Prewarm gating on Directus's own `ready` event is more robust than a blind
   `min_seconds_to_add_worker` wait: `api/src/server.ts:211` calls `process.send('ready')`
-  inside the `listen` callback, and the ecosystem config already sets `wait_ready: true`,
+  inside the `listen` callback, and the consumer's ecosystem config already sets `wait_ready: true`,
   so pm2 already knows exactly when a worker is accepting connections — confirmed from
   source. Caveat: **ready is not warm** — a just-started worker has a cold schema cache
   and unJITted hot path, so its CPU stays elevated right after. Pacing on ready alone
@@ -71,10 +71,10 @@ keeps the door open to extracting it if it ever proves generally useful.
   (fork already paid for this lesson once, [[project_directus_redis_outage_kills_process]]).
 
 **Ship the current module pinned, independent of the rewrite:** `pm2 install
-pm2-autoscale` runs on the planner's `prepare` lifecycle script (`apps/package.json:12`)
+pm2-autoscale` runs on the consumer's `prepare` lifecycle script
 — fires on *every* `pnpm install`, not just image builds, fetches from npm unpinned with
-**no lockfile entry**. It is the single component that took prod down. Baked into three
-Dockerfiles (bo's twice). Shipping the fork's own package as a `directus autoscale`
+**no lockfile entry**. It is the single component that took prod down. Baked into three of the
+consumer's Dockerfiles. Shipping the fork's own package as a `directus autoscale`
 subcommand removes the network layer, the unpinned-version risk, and the module-store
 plumbing (`pm2 set`, `PM2_HOME` module store) in one move — planned to land before the
 full rewrite as an isolated pin-first step.

@@ -1,13 +1,13 @@
 ---
 name: reference_directus_system_mcp_wiring
-description: How to wire the fork's system-mcp onto a live Railway service and register it as an MCP server in a Claude Code session
+description: How to wire the fork's system-mcp onto a live service and register it as an MCP server in a Claude Code session
 metadata:
   author: Jean Claveau
   type: reference
 ---
 
 Two independent halves, both required before `list_processes`/`list_cache_entries`/etc.
-are callable — done once against dev's Backend service:
+are callable — done once against a consumer's dev API service:
 
 **Server side:**
 1. `SYSTEM_MCP_ENABLED=true` on the target service (the router only mounts behind this
@@ -45,7 +45,7 @@ measured **98 KB**, blowing the tool-result size limit and needing a file+jq wor
 exposes to everyone else — prefer that over setting `PROCESSES_REPORT_DETAILS=stats`
 service-wide, which would permanently take the env comparison away from every caller.
 
-**Why:** confirmed end-to-end on `bo.dev.hiphiphip.app` — `mcp__scalabus-dev__list_processes`
+**Why:** confirmed end-to-end on a consumer's dev host — `mcp__scalabus-dev__list_processes`
 returned dev's real (pre-#447-dist) process tree only after both halves were done and the
 session restarted.
 

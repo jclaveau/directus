@@ -5,16 +5,16 @@ metadata:
   type: project
 ---
 
-**Never cap `--max-old-space-size` on the planner's Api workers.** Prod ran
-`node_args: --max-semi-space-size=2 --max-old-space-size=1024` (merged `b9eafb6c`,
-deployed `ae6f55464` 2026-09-08 03:02 UTC). Under morning traffic:
+**Never cap `--max-old-space-size` on a prod consumer's API workers.** Prod ran
+`node_args: --max-semi-space-size=2 --max-old-space-size=1024` (deployed
+2026-09-08 03:02 UTC). Under morning traffic:
 
 ```
 FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
 App [api:68] exited with code [0] via signal [SIGABRT]   → restart, continuously
 ```
 
-The planner's deep relational reads (`fields=` trees 20+ paths deep, `limit=-1`) pass
+The consumer's deep relational reads (`fields=` trees 20+ paths deep, `limit=-1`) pass
 1 GB in a single worker.
 
 **The amplifier is the part worth remembering.** Every abort pays a full boot, which is
@@ -33,11 +33,11 @@ space, not the heap — keep it, drop the old-space cap.
 **How to apply:**
 - `PM2_MAX_MEMORY_RESTART=2G` is the right backstop for a worker that grows: it recycles
   gracefully rather than aborting mid-request.
-- **A Railway `NODE_OPTIONS` cannot lift a `node_args` cap** — pm2 passes node_args on the
+- **A service-level `NODE_OPTIONS` cannot lift a `node_args` cap** — pm2 passes node_args on the
   command line and the command line beats NODE_OPTIONS for conflicting flags. Only a
   deploy fixes it.
-- Diagnose with `railway logs -e production -s Api -n 5000 --filter "FATAL ERROR"` and
-  `--filter SIGABRT`; rising `App [api:N]` ids are the restart counter, not live workers.
-- Fixed on develop by `aa31aee0`. Any change that reintroduces an old-space cap by
-  another route (env chain, NODE_OPTIONS) reintroduces this outage — PR #753 moves these
-  flags into the env chain and must not carry the cap.
+- Diagnose by filtering the service logs for `FATAL ERROR` and `SIGABRT`;
+  rising `App [api:N]` ids are the restart counter, not live workers.
+- Fixed in the consumer's ecosystem config. Any change that reintroduces an old-space
+  cap by another route (env chain, NODE_OPTIONS) reintroduces this outage — a change
+  that moves these flags into the env chain must not carry the cap.

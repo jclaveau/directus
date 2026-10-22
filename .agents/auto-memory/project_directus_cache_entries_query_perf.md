@@ -17,8 +17,8 @@ Measured on prod 2026-08-21 (`statement_timeout=60s`, `work_mem=32MB`, 1.83M eve
 
 - **It has never timed out.** `log_min_error_statement=error`, so a cancelled statement
   logs its own SQL; grepping the whole retention for `d.cache_key` finds nothing but my
-  own probes. The 8 real timeouts in 18 days are all `student_time_slot` permission-CASE
-  selects and `student_teaching_unit` updates.
+  own probes. The 8 real timeouts in 18 days are all permission-CASE selects on one
+  consumer collection and updates on another.
 - **The wide grouping key is not the spill driver** — 131 MB vs 130 MB, 1%. It is ~1.8M
   event rows at ~70 B against 32 MB `work_mem`. Restructuring buys ~10% and no spill.
 - **The window is the only real lever — but the page never takes the default.**
@@ -28,11 +28,11 @@ Measured on prod 2026-08-21 (`statement_timeout=60s`, `work_mem=32MB`, 1.83M eve
   page stays at 24h → 4.6s → 125 MB spill regardless of #377.
   (Had the page taken 1h it WOULD be a big content change: 168/200 keys swap, top row
   3826→168 hits, bottom 58→6; and 1h respills at ~7x current traffic.)
-- The empty cache page on 2026-08-20 was a Railway partial deploy (Api deployed,
-  Backend not), never a slow query. I reasoned row-counts→timeout instead of grepping
+- The empty cache page on 2026-08-20 was a partial deploy (the API service deployed,
+  the backend not), never a slow query. I reasoned row-counts→timeout instead of grepping
   for one; PR #377's body now carries the correction above the fold.
 
 **How to apply:** before touching a cache-stats query for speed, grep the PG log for the
 statement first ([[reference_railway_log_forensics]], read-only recipe in
-[[reference_pn_db_query_local]]); `temporary file: ... size N` lines are the spill
+the consumer repo's memories); `temporary file: ... size N` lines are the spill
 evidence and they attribute it per-pid.

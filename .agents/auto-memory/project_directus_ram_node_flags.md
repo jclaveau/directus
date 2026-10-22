@@ -8,7 +8,7 @@ metadata:
 
 **`--max-old-space-size=1024` caused a real prod outage 2026-09-08** — see
 [[project_directus_worker_heap_cap_incident]]. Steady-state RSS/throughput measurement
-below is real but does not prove a cap is safe: the planner's deep relational reads
+below is real but does not prove a cap is safe: a prod consumer's deep relational reads
 (`limit=-1`, 20+-path `fields=`) pass 1 GB in a single worker under real traffic, V8
 aborts (SIGABRT), pm2 restarts, and the restart CPU feeds the autoscaler into a runaway.
 **Only `--max-semi-space-size=2` shipped in the end; the old-space cap was reverted and
@@ -37,5 +37,5 @@ is **371 → 243 MB (‑34%)** per worker — ~4 GB across 32 workers.
   read "no measurable throughput cost", not "free". A real load test is still owed.
 
 **How to apply:** only ship `--max-semi-space-size=2`. Never set `--max-old-space-size`
-on Api workers without a **measured peak** under real (not synthetic) planner traffic —
+on Api workers without a **measured peak** under real (not synthetic) consumer traffic —
 steady-state RSS/throughput numbers like the ones above do not substitute for one.

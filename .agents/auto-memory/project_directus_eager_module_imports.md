@@ -8,14 +8,14 @@ metadata:
 
 Traced with `module.registerHooks` + a `Module.prototype._compile` patch (see
 [[reference_directus_ram_probe_harness]]), then each fix measured by patching `dist`.
-Idle heapUsed, cumulative, planner-shaped schema:
+Idle heapUsed, cumulative, consumer-shaped schema:
 
 | change | idle heapUsed | Δ |
 | --- | --- | --- |
 | baseline | 85.5 MB | — |
 | auth drivers imported lazily | 74.6 MB | ‑10.9 |
 | `rollup`/`rolldown`/plugins imported inside `generateExtensionBundle` | 72.5 MB | ‑2.1 |
-| + `SERVE_APP=false` (already set on the planner's Api) | 68.6 MB | ‑3.9 |
+| + `SERVE_APP=false` (already set on a prod consumer's API service) | 68.6 MB | ‑3.9 |
 | CLI command modules imported inside their `.action()` | 64.2 MB | ‑4.5 |
 
 Total **‑21.3 MB heap / ‑39 MB RSS per worker**, source loaded 22.5 → 14.3 MB,
@@ -29,7 +29,7 @@ Total **‑21.3 MB heap / ‑39 MB RSS per worker**, source loaded 22.5 → 14.3
   `getProviderInstance` can `await import()` per configured driver; the controller's
   module-level loop needs top-level await.
 - **`extensions/manager.ts` imports `rollup` AND `rolldown`** at module scope for a
-  function that only runs under `SERVE_APP`. The planner's Api sets `SERVE_APP=false`
+  function that only runs under `SERVE_APP`. A prod consumer's API service sets `SERVE_APP=false`
   and still pays for both.
 - **`cli/index.ts` imports every command module** to register them, so `start` pays for
   `inquirer`, `rxjs`, `joi`, `execa` and `liquidjs` (the `init` command).

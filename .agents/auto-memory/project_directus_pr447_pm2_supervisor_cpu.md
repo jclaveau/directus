@@ -10,17 +10,17 @@ MERGED (`3aa5b885e8` on hhh-dev). Root cause found while chasing why dev's PM2
 autoscaler never showed CPU: `report-processes.ts`'s `shouldReportSupervisor()` was
 `supervisorAvailable() && instanceNumber() === 0` — **only pm2 instance 0 ever attaches
 the container-wide `pm2 list`.** That's fine for a fresh pool, but `NODE_APP_INSTANCE`
-keeps incrementing as `pm2-autoscale` releases/adds workers (and a 3am `cron_restart`
+keeps incrementing as `pm2-autoscale` releases/adds workers (and a nightly `cron_restart`
 recycles them), so a pool that has scaled even once can permanently lose instance 0 —
 exactly the steady state on an autoscaled service, i.e. the report drops its CPU view
-precisely on the services the page exists to watch. Confirmed live on dev Api: stable at
+precisely on the services the page exists to watch. Confirmed live on a consumer's dev API service: stable at
 instances 2 and 3 across 6 polls, no 0, `supervisor: unavailable` and every `cpuPercent`
 null forever. Fix: every supervised process attaches its own `pm2 list()`; the collector
 already took the first non-null one per replica, so no new coordination was needed —
 just removing the `instanceNumber() === 0` gate. Second fix in the same root cause:
-`supervisorAvailable()` tested only `'PM2_HOME' in process.env`, and the bo/Backend
-Dockerfile sets `PM2_HOME` unconditionally even though Backend runs bare `directus
-start` with **no pm2 at all** (see [[project_directus_planner_bo_no_pm2]]) — so it
+`supervisorAvailable()` tested only `'PM2_HOME' in process.env`, and a consumer's
+back-office Dockerfile sets `PM2_HOME` unconditionally even though that service runs
+bare `directus start` with **no pm2 at all** — so it
 reported `supervisor: unavailable` (implying broken) instead of `none` (implying
 absent). Fixed by also requiring `pm_id`.
 
@@ -47,8 +47,8 @@ surfaced while iterating previews on it. `create-metrics.ts` keeps its own separ
 `isPM2 = 'PM2_HOME' in process.env` with the same false-positive shape — feeds metrics
 aggregation, not this report, deliberately left for its own PR.
 
-**Why:** planner's PM2 autoscaler couldn't be observed at all — this closes that gap for
-Api; Backend never runs pm2 so it's out of scope by definition, not an oversight.
+**Why:** a consumer's PM2 autoscaler couldn't be observed at all — this closes that gap
+for its API service; its back-office service never runs pm2 so it's out of scope by definition, not an oversight.
 
 **How to apply:** any future "why is CPU null on the processes page" report on an
 autoscaled service — check instance numbering first, not credentials or the bus timeout.

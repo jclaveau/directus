@@ -1,22 +1,23 @@
 ---
 name: project_directus_migration_deploy_data_loss_window
-description: A rename/drop migration guarantees a data-loss window sized to Bo's migrate time — health-hold gates HTTP traffic but not Api's own background writers; option (a) shipped as #451/#452, and the answer to "why did it get traffic" is that it never did
+description: A rename/drop migration guarantees a data-loss window sized to the migrating service's migrate time — health-hold gates HTTP traffic but not the API service's own background writers; option (a) shipped as #451/#452, and the answer to "why did it get traffic" is that it never did
 metadata:
   author: Jean Claveau
   type: project
 ---
 
-Measured on the `71df324c` prod deploy (2026-09-07 22:27, migration
-`20260826A-name-the-cache-stats-tables`, a rename): Api and Bo are independent Railway
-services deploying the same commit in parallel. Bo runs `directus:init` (migrate then
-start); **Api never migrates** ([[project_directus_planner_deploy_shape]]). Api came up
-at 22:27:53 already running post-migration code (new table names); Bo didn't apply the
+Measured on a prod consumer's deploy (2026-09-07 22:27, migration
+`20260826A-name-the-cache-stats-tables`, a rename): its API service and its migrating
+service are independent services deploying the same commit in parallel. The migrating
+service runs `directus:init` (migrate then start); **the API service never migrates**.
+The API service came up at 22:27:53 already running post-migration code (new table
+names); the migrating service didn't apply the
 rename until 22:30:24 — a 2m40s gap.
 
 `/server/health` 503s for that whole gap
 ([[project_directus_health_holds_on_outstanding_migrations]]), which protects HTTP
 traffic — Railway won't switch traffic to a 503'ing container, so the previous
-deployment kept serving reads/writes. **It does NOT protect Api's own background
+deployment kept serving reads/writes. **It does NOT protect the API service's own background
 telemetry writer**, which starts on boot regardless of health state and isn't wired to
 the same outstanding-migrations watch. Every cache-stats insert during the gap hit
 `42P01 relation does not exist` and was dropped: 451/490/200/77/387/500/50/255/310
@@ -25,26 +26,26 @@ events per 10s tick, **~2,700 events lost**, same shape as
 ordering, not the autokill/escaping bugs).
 
 **So any rename/drop migration has a guaranteed data-loss window** equal to however
-long Bo takes to migrate after Api boots, for any background writer that targets the
+long the migrating service takes to migrate after the API service boots, for any background writer that targets the
 renamed/dropped object immediately.
 
 Fix options discussed: (a) gate the schedules on the same outstanding-migrations watch
 that gates health; (b) make the drain tolerate `42P01` by holding its buffer instead of
-dropping; (c) have Api wait for migrations to be *applied* before starting background
+dropping; (c) have the API service wait for migrations to be *applied* before starting background
 schedules at all. **(a) shipped** — issue #451, PR #452
 (`v11.10.1-fix/hold-schedules-for-migrations`): `migrationsAreOutstanding()` in
 `api/src/outstanding-migrations.ts`, read by `scheduleSynchronizedJob` **before**
 `clock.set()`. (b) remains available as a belt to those braces.
 
-**Answered: Api never got traffic.** The prod log for the whole 22:27:59→22:30:33 window
+**Answered: the API service never got traffic.** The prod log for the whole 22:27:59→22:30:33 window
 contains nothing but its own `GET /server/health 503` probes, so the health gate worked
 exactly as designed and Railway never switched over. The work was **outbound, not
 inbound**: `drainCacheEvents()` (`api/src/cache-events.ts:769` → `drainCacheEventStream()`
 at `:784`) reads the **shared Redis stream** that the old, still-serving containers kept
 filling. `api/src/app.ts:104-110` only `logger.warn`s about outstanding migrations and
 gates nothing, so `createApp()` runs on to start every schedule at `app.ts:401-405`.
-So the cross-service question does not arise: nothing needs to wait on Bo, because Api's
-*own* reading of the shared migrations table was already correct — it just was not wired
+So the cross-service question does not arise: nothing needs to wait on the migrating service, because the API
+service's *own* reading of the shared migrations table was already correct — it just was not wired
 to anything but health.
 
 **The amplifier, and why the gate sits before the claim:** `scheduleSynchronizedJob`

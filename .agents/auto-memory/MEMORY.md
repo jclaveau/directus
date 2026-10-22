@@ -12,6 +12,7 @@ line appended below.
 
 - [Run every test in CI, loop on the run](feedback_directus_ci_only_test_runs.md) — unit, typecheck, blackbox all in CI; no local vitest/tsc gate
 - [Never run blackbox locally](feedback_directus_bb_tests_in_ci.md) — slower than CI's shards and re-seeds jean's docker stack
+- [No consumer data in fork memories](feedback_directus_no_consumer_data_in_fork_memories.md) — public repo: consumer specifics go to its private repo; a consumer prod DB is SELECT-only
 - [Non-PG review points go to #610](feedback_directus_non_pg_review_points_to_610.md) — sqlite/cockroach/maria finding → point in #610 + `TODO(#610):`, never fixed in the PR
 - [Postgres only in the main workflow](feedback_directus_pg_only_dialect_focus.md) — no MariaDB/SQLite investment; never report their absence as a gap
 - [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch/rerun is its own ask
@@ -25,7 +26,7 @@ line appended below.
 - [PR #605 row-helpers](project_directus_pr605_row_helpers.md) — mapUpdateRows/mapCreateRows replace `.one` events
 - [PR #600 query-audit header](project_directus_pr600_query_audit.md) — counts in knex `_query`; ONE map header
 
-## scoped-cache (19) — tag derivation, pins, purges, value slices
+## scoped-cache (18) — tag derivation, pins, purges, value slices
 `.agents/auto-memory/index/scoped-cache.md`
 
 - [Scoped cache tag derivation](project_directus_scoped_cache_tag_derivation.md) — what a read gets tagged with; only stale vector = enrichment outside the AST
@@ -33,7 +34,7 @@ line appended below.
 - [scopedCache hook API](reference_directus_scopedcache_api.md) — scopeTo/dependOn on reads, purgeBy on mutations
 - [Query-filter $NOW is NOT a cache poison](reference_directus_query_now_not_cache_poison.md) — mis-analysed ≥2×; keys differ per request
 
-## cache (30) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
+## cache (29) — tiers, namespaces, keys, telemetry, audit, admin page, Redis
 `.agents/auto-memory/index/cache.md`
 
 - [Cache key identities](project_directus_cache_key_identities.md) — cacheKey digest vs redisKey; a wrong one fails SILENTLY as a cold cache
@@ -61,25 +62,18 @@ line appended below.
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (31) — Directus core internals, env, errors, migrations, DB
+## api (32) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
 - [A bad env var fails the boot](feedback_directus_bad_env_var_fails_boot.md) — exit before listen naming the var; never fall back
 - [Env TYPE_MAP coverage](project_directus_env_type_map.md) — register every env var you touch
 - [Directus ForbiddenError conventions](project_directus_forbidden_error_conventions.md) — 403 for missing items, pre-access validation 400
 
-## processes (29) — pm2, autoscaler, boot cost, worker RAM
+## processes (28) — pm2, autoscaler, boot cost, worker RAM
 `.agents/auto-memory/index/processes.md`
 
 - [processes/autoscale consolidation](project_directus_processes_autoscale_consolidation.md) — one bounded `processes/supervisor/` gateway; routes/env frozen
 - [RAM: the node flags that work](project_directus_ram_node_flags.md) — never cap old space without a measured peak
-
-## planner (18) — the planner app, its prod deploy, prod DB, Railway
-`.agents/auto-memory/index/planner.md`
-
-- [Inspect planner DB](reference_pn_db_query_local.md) — **HARD RULE: prod is SELECT-only**, mutations only in the local sandbox
-- [Planner config lives in the .env.xxx files](feedback_planner_env_files_over_railway_vars.md) — a Railway var is an emergency override to delete
-- [Planner deploy PR bundles everything since last prod pin](project_planner_deploy_pr_bundling.md) — the deploy PR ships every fork PR since the pin moved
 
 ## fork (18) — branches, PR naming, licensing, derived branches, worktrees
 `.agents/auto-memory/index/fork.md`

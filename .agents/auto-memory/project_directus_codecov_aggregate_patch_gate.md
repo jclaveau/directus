@@ -66,8 +66,9 @@ already near 100%, and read the per-file split with the compare API
 `totals.patch`) rather than guessing which file dragged it down.
 
 Also: the flagged `codecov/patch/api` and the unflagged `codecov/patch` can report the
-**same percentage** and disagree on pass/fail — the flag's target is 80%, the gate's is
-95%. A green `patch/api` says nothing about the blocking check.
+**same percentage** and still read differently — the flag's status is 80% but
+`informational: true`, so always SUCCESS; the gate's target is 95% and blocks. A green
+`patch/api` says nothing about the blocking check.
 
 **A lazy `await import()` inside an action body is an uncovered line until something
 runs the action (PR #492, 2026-09-15).** Making every CLI command lazy turned 16

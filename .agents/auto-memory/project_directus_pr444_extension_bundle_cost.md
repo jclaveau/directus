@@ -1,6 +1,6 @@
 ---
 name: project_directus_pr444_extension_bundle_cost
-description: PR #444 extension-sdk bundle cost — P1-P4 measured levers on the planner's real extensions, settled verdicts, don't re-raise
+description: PR #444 extension-sdk bundle cost — P1-P4 measured levers on a consumer's real extensions, settled verdicts, don't re-raise
 metadata:
   author: Jean Claveau
   type: project
@@ -9,7 +9,7 @@ metadata:
 `packages/extensions-sdk` build (`build.ts`) inlines everything into an api-extension
 bundle except `directus`/`directus:api` (no `external` escape hatch existed). PR #444
 (`v11.10.1-perf/extension-bundle-cost` → hhh-dev) ships P1+P2+P4, P3 opt-in only. All
-numbers measured on the planner's real 8 extensions, one process, arms interleaved.
+numbers measured on a consumer's real 8 extensions, one process, arms interleaved.
 
 - **P1** — `fresh: true` only on reload, not initial load (`api/src/extensions/manager.ts`):
   789→496 ms/worker (−293ms, ~9.4s at 32 workers). Root cause: `import-file-url.ts`'s
@@ -17,7 +17,7 @@ numbers measured on the planner's real 8 extensions, one process, arms interleav
   WORSE than no cache at all (623ms) — enabled, missed, rewritten every time.
 - **P2** — `@directus/extensions`: `tsdown --unbundle` + `sideEffects: false`. Isolated
   hook probe 125,629→304B; both changes required, neither alone moves a byte. On the
-  planner: only −7.4KB (domain's `extensions-exports.ts` re-exports composables/themes
+  consumer: only −7.4KB (its domain extension's exports barrel re-exports composables/themes
   as VALUES on purpose → blocks treeshake; the other 7 extensions never imported the SDK
   barrel). `sideEffects:false` on `@directus/types` first measured as 0-benefit — false,
   the A/B never varied (a stash mishap left both arms identical); re-measured properly:
@@ -29,8 +29,8 @@ numbers measured on the planner's real 8 extensions, one process, arms interleav
   time anyway (api dist bundles its own knex; external one loads a second copy). Early
   runs looked "identical" because the build was silently failing to apply `external` —
   re-measure the artifact size/content, not just the timing, before trusting a null
-  result. Precisely located the planner's real waste for #442: one file imports `Knex`
-  as a value not `import type` (5.36MB for a type), and `extensions-exports.ts`
+  result. Precisely located the consumer's real waste for #442: one file imports `Knex`
+  as a value not `import type` (5.36MB for a type), and its exports barrel
   re-exports app composables from the API entry (3.22MB that belongs in `app.js`).
 - **P4** — build-time report: size + module count always; warns only when an API entry
   pulls app-only packages (vue/vue-i18n/pinia/themes/composables). Caught all 5 on the
@@ -46,7 +46,7 @@ the stock build-test measures the registry, not this branch — point it at the 
 
 **Why:** #2 lever (after #440's boot-cost work) toward faster PM2 autoscale reactivity.
 
-**How to apply:** remaining planner-side fixes (import type Knex, move composables
+**How to apply:** remaining consumer-side fixes (import type Knex, move composables
 re-export to app.js) belong to issue #442, not this repo. `tmp/sdk-probe/` is the P1-P4
 harness — worth promoting to a bundle-size regression test in `packages/extensions-sdk`
 so P2 can't silently regress.

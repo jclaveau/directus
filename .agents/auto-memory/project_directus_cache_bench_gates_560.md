@@ -30,7 +30,7 @@ metadata:
 **Measured (ratios vs `off`, units always):** old prod pin `d38af828d5` scoped fan fill
 2.19–2.27x, hit 6 cmds; current prod `514d416386` 1.32–1.73x, hit 1 cmd; #534 head
 `db23e8c2a8` 1.40–1.53x, fill 13→9 cmds. Cache path got CHEAPER between the pins, so the
-prod Api CPU doubling (planner deploy #786) is NOT in what this bench exercises; the per-row
+prod Api CPU doubling (a consumer deploy) is NOT in what this bench exercises; the per-row
 fan-fill cost (~814 cmds) predates #438. Lead (1 run each, unconfirmed): `off` fan-fill CPU
 3.8 ms → 5.9–6.1 ms between the pins.
 

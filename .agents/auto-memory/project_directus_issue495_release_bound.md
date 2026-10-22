@@ -1,6 +1,6 @@
 ---
 name: project_directus_issue495_release_bound
-description: Issue #495 (filed, not fixed) — the autoscaler's 15s supervisor bound is shorter than the planner's 20-25s drain window, so a release of several workers is a release of several chances to time out
+description: Issue #495 (filed, not fixed) — the autoscaler's 15s supervisor bound is shorter than a consumer's 20-25s drain window, so a release of several workers is a release of several chances to time out
 metadata:
   author: Jean Claveau
   type: project
@@ -9,7 +9,7 @@ metadata:
 `releaseWorker(pmId)` = `pm2.delete(pmId)` wrapped in `answeredInTime(…, 15_000)`
 (`SUPERVISOR_TIMEOUT_MS`, `api/src/processes/supervisor/lib/client.ts:33`). pm2
 only answers a delete once the worker has actually exited: SIGINT → terminus
-keeps sockets open for in-flight requests up to the planner's
+keeps sockets open for in-flight requests up to a consumer's
 `SERVER_SHUTDOWN_TIMEOUT=20000` → `database.destroy()` → exit, SIGKILL at
 `kill_timeout: 25000` if it hasn't. A worker mid-drain on a 16s request exits
 (and pm2 answers) at ~16s — after the autoscaler already gave up at 15s.

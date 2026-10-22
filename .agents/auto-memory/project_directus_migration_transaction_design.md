@@ -62,7 +62,7 @@ plain `batch`):
 - **How long is the lock held?** This is the real cost of `batch`: an `ACCESS EXCLUSIVE`
   taken by a rename is held until the END OF THE WHOLE RUN, not the end of that migration.
   The API writes cache-stats telemetry to those very tables and does not itself migrate
-  ([[project_directus_planner_deploy_shape]]), so live writes queue behind it. `'own'`
+  (in a prod consumer's deploy shape), so live writes queue behind it. `'own'`
   shrinks the window to the migration while keeping it atomic.
 
 **Unmeasured, reasoned only:** renaming a *TimescaleDB hypertable* inside a transaction.

@@ -91,5 +91,4 @@ only the config-and-panel plumbing.
 Related: [[project_directus_pr456_autoscaler_design]],
 [[project_directus_pr467_autoscale_config_surface]],
 [[project_directus_pm2_autoscale_ramp_measured]],
-[[project_directus_planner_deploy_shape]],
 [[project_directus_worker_ram_shape]].

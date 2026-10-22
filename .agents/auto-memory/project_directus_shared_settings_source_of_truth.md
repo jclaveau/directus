@@ -25,7 +25,7 @@ store you design outage handling for is a cache. And the four `NOTE_FIELDS`
 (`setBy`/`setAt`/`setFrom`/`note`, `shared-config.ts:34`) are hand-rolled audit
 that exists **only because Redis has none**; `directus_revisions` already does it.
 
-Not verified: this deployment's Redis persistence config (`railway` unlinked from
+Not verified: this deployment's Redis persistence config (not reachable from
 the checkout). Doesn't change the conclusion — persisted Redis still has no
 migrations, no owned backups, no revisions.
 
@@ -68,8 +68,8 @@ internally inconsistent about this.
    all** today (verified) — give it the lazy best-effort
    `import('./database/index.js')` that `cache-config.ts:44` already uses to keep
    the dialect graph off the hot path, not a bus query (that would make config
-   depend on a live worker). Boot-order hazard: the planner's API container never
-   migrates ([[project_directus_planner_deploy_shape]]) so the column may be
+   depend on a live worker). Boot-order hazard: a consumer's API container may never
+   migrate (see the consumer repo's memories) so the column may be
    absent — best-effort read + env fallback, like `initCacheConfig`.
    3 blackbox files write the key directly and would move to the route.
 2. **The poll retires as a consequence, it is not a separate project.** Once the
@@ -82,8 +82,8 @@ internally inconsistent about this.
 **Timing: cheapest BEFORE the first deploy that ships #456** (which since
 2026-09-10 carries #467 and #472 too). Nothing has stored
 a config in production yet, so PG-from-the-start needs no data migration; after,
-it needs read-old-key → write-PG → delete. Window closes at the next planner
-deploy PR bundling #467. The precedent costs one migration + one `settings.yaml`
+it needs read-old-key → write-PG → delete. Window closes at the next consumer
+deploy bundling #467. The precedent costs one migration + one `settings.yaml`
 entry (`20260724A-add-settings-cache-ttl.ts`).
 
 ## Testing this model (added to #473 2026-09-10)
@@ -353,8 +353,8 @@ Three more commits on the same PR, each CI-green:
 check.yml + Style + CodeQL + CLA all green on `61a93591b2`. Base is still
 `v11.10.1-feat/autoscaler` and **#456 is still open**, so #475 merges into
 the stack, not into `hhh-dev`. Unverified caveat: the boot check reads
-Railway variables too, and only the planner's `.env` files were checked
-(`true`/`false`, all fine) — a Railway variable holding `True`/`yes`/`on`
+service variables too, and only a consumer's `.env` files were checked
+(`true`/`false`, all fine) — a service variable holding `True`/`yes`/`on`
 would refuse the boot on the deploy that ships this.
 
 ## Issue #477 filed — the wide `toBoolean` fix, deliberately out of scope
@@ -383,5 +383,5 @@ the CLI and extensions SDK) vs refuse **at boot** (one `validateBooleanEnv`
 call derived from the type-map — contained to the API, misses the untyped
 call sites). Left the call to whoever picks it up; noted it wants measuring
 first — which of the 41 keys are actually set, and with what spelling, in
-both the planner `.env` files *and* the Railway variables (which beat the
-files, [[reference_planner_readenv_precedence]]).
+both a consumer's `.env` files *and* its service variables (which may beat
+the files; see the consumer repo's memories).

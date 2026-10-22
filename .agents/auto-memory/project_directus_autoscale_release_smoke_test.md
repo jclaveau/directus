@@ -5,8 +5,8 @@ metadata:
   type: project
 ---
 
-`planner_2/apps/domain/tests/smoke/pm2-autoscale-release.smoke.spec.ts`
-(untracked, not committed), sibling of `pm2-autoscale-load.smoke.spec.ts`. The
+A vitest smoke spec in the consumer repo
+(untracked, not committed), sibling of its autoscale load smoke spec. The
 test owns every autoscale/supervisor knob it needs rather than relying on
 production defaults: `beforeAll` snapshots `GET /utils/autoscale`, then `PATCH
 /utils/autoscale` (scale/release thresholds, pacing, pool bounds) and `PATCH
@@ -27,8 +27,8 @@ load test ([[project_directus_autoscale_release_load_test]]) but not here; a
 different environment (dev vs. a pinned PR-preview dist) got a different
 proxy load-balancing behavior.
 
-**Rework:** probe swapped to admin `GET
-/items/student_course?aggregate[count]=*` (~300 ms PG-bound, always a cache
+**Rework:** probe swapped to an admin `GET
+/items/<collection>?aggregate[count]=*` (~300 ms PG-bound, always a cache
 MISS, ~3% CPU/loop measured). `killTimeout` raised 300→1000 ms — above the
 probe's p50 but far under prod's 20 s — with `p50 < killTimeout` kept as its own
 control assertion (proves the drain window the release fix depends on was
@@ -40,12 +40,6 @@ last-sample per-worker CPU for a human to read, just not as a pass/fail gate.
 (737 hashes, 12 s), release 2→1 on "cpu 15% across the 1 worker(s) a release
 leaves < 40%" 6 s into the fall phase, 162 probes served, 0 failed, p50 372 /
 p90 569 / p99 776 / max 855 ms.
-
-Also confirms [[reference_directus_tests_admin_dev_provisioning]]'s trap from
-the test-writer's side: the local `.env.test.secrets` admin login works fine
-against dev, but the CI-provisioned Railway `TESTS_ADMIN_PASSWORD` secret 401s
-there — so this spec cannot run unattended in CI against dev until that secret
-is aligned.
 
 Related: [[project_directus_autoscale_release_load_test]],
 [[project_directus_autoscale_in_flight_signal]],

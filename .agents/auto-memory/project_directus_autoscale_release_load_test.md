@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Two load tests on `Planner-pr-770` (preview Api) on 2026-09-14 exercised the
+Two load tests on a consumer's PR preview on 2026-09-14 exercised the
 autoscaler's grow and release paths against `/server/specs/oas`.
 
 Pass 1 (23:38–23:43) and pass 2 (23:49–23:58) both fired both paths:
@@ -32,10 +32,10 @@ log: pm2's own `rmProcs` walks from the lowest `pm_id`, and the release stopped
 `id:2`, the worker just grown, not the older one holding the keep-alive sockets.
 
 What the run does **not** prove is the drain budget underneath it.
-`directus.ecosystem.config.js` sets `kill_timeout: 20000` and every request here
+The consumer's ecosystem config sets `kill_timeout: 25000` and every request here
 finished inside 6 s, so a graceful drain would have covered these requests even
 had the victim been chosen badly. The 2026-09-13 502 needed a request that
-outlived the kill timeout — it held a 27 s `POST /items/student_course`. Both
+outlived the kill timeout — it held a 27 s `POST /items/<collection>`. Both
 halves have to fail together, so exposing a regression in either needs a request
 longer than 20 s, not more concurrency.
 

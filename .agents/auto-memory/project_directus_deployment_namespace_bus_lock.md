@@ -30,7 +30,7 @@ ioredis `monitor()` client on the shared 6108, drops a node's schema with
 `POST /utils/cache/clear?targets=system`, polls `GET /collections` and matches the
 whole `PUBLISH` channel / `INCRBY` key — other suites' traffic can only add lines.
 
-**Rollover risks (first planner deploy carrying it):** old workers on `directus:bus`
+**Rollover risks (first consumer deploy carrying it):** old workers on `directus:bus`
 miss a migration's `schemaChanged` (`flushCaches` in `migrations/run.ts`) and keep
 their pre-migration in-memory schema until replaced — ship in a deploy without a
 schema migration or accept the window. Later deploys have both sides on `scalabus:bus`.

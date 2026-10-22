@@ -11,7 +11,7 @@ metadata:
 then refuses the first commands with "The client is offline"; Keyv turns that into an
 `error` EVENT and resolves, so `failures=[]` and the CLI exits 0. The FLUSHDB "worked"
 because it runs on ioredis, which queues offline. Introduced by 9997d1d7fe, not #572.
-Found on planner PR #795's preview deploy; the log also said "dropped 0 scoped-cache
+Found on a consumer PR's preview deploy; the log also said "dropped 0 scoped-cache
 index keys" after a FLUSHDB (the FLUSHDB already took the index).
 
 **Fix (cache.ts):** `awaitStoresReady` (≤5 s, waits `once('ready')` on tiers with
