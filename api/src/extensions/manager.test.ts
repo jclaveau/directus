@@ -342,6 +342,63 @@ test('runs the next reload after one whose load threw', async () => {
 	expect(loadSpy).toHaveBeenCalledTimes(2);
 });
 
+test('retries the load a failed reload left undone', async () => {
+	mocks.moduleDefault = () => undefined;
+	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.settings = [];
+
+	const manager = new ExtensionManager();
+
+	await manager.initialize({ schedule: false, watch: false });
+
+	mocks.extensions = {
+		local: new Map([
+			[
+				'test-retried-hook',
+				{
+					type: 'hook',
+					name: 'test-retried-hook',
+					path: '/extensions/test-retried-hook',
+					entrypoint: 'index.js',
+					local: true,
+				},
+			],
+		]),
+		registry: new Map(),
+		module: new Map(),
+	};
+
+	mocks.settings = [
+		{ id: '1', source: 'local', folder: 'test-retried-hook', enabled: true },
+	];
+
+	vi.spyOn(manager as any, 'registerApiExtensions')
+		.mockRejectedValueOnce(new Error('registration failed'));
+
+	const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+
+	await expect(manager.reload())
+		.rejects.toThrow(new Error('registration failed'));
+
+	await expect(manager.reload()).resolves.toBeUndefined();
+
+	expect(mocks.importFileUrl).toHaveBeenCalledTimes(1);
+
+	expect(emitActionSpy).toHaveBeenLastCalledWith('extensions.reload', {
+		extensions: [
+			{
+				type: 'hook',
+				name: 'test-retried-hook',
+				path: '/extensions/test-retried-hook',
+				entrypoint: 'index.js',
+				local: true,
+			},
+		],
+		added: ['test-retried-hook'],
+		removed: [],
+	});
+});
+
 test('logs a reload asked by another process that fails', async () => {
 	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
 	mocks.settings = [];
