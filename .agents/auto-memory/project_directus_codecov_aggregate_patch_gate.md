@@ -54,3 +54,27 @@ different store needs `vi.resetModules()` + a dynamic re-import.
 
 **`tests/blackbox`'s `tsc --noEmit` passes vacuously** — it aborts on two tsconfig
 option errors before checking anything ([[reference_gate_can_pass_vacuously]]).
+
+**A `git mv` re-charges every line the file never covered.** codecov scores the *diff*,
+and a moved or extracted file arrives as added lines — including the ones no test ever
+reached at the old path, which cost nothing while they sat in an untouched file. PR #472
+(pure refactor, zero behaviour change) landed at 79.36% against the 95% target: 26 misses,
+all pre-existing dead spots in `pool.ts` and the pm2 calls lifted into
+`supervisor/lib/client.ts`. Budget a coverage pass into any move of code that isn't
+already near 100%, and read the per-file split with the compare API
+(`api.codecov.io/api/v2/github/<owner>/repos/<repo>/compare/?pullid=<n>`, each file's
+`totals.patch`) rather than guessing which file dragged it down.
+
+Also: the flagged `codecov/patch/api` and the unflagged `codecov/patch` can report the
+**same percentage** and still read differently — the flag's status is 80% but
+`informational: true`, so always SUCCESS; the gate's target is 95% and blocks. A green
+`patch/api` says nothing about the blocking check.
+
+**A lazy `await import()` inside an action body is an uncovered line until something
+runs the action (PR #492, 2026-09-15).** Making every CLI command lazy turned 16
+one-line `.action(...)` bodies into misses and failed the gate. What cleared it: an
+`it.each` wiring table in `api/src/cli/index.test.ts` — `vi.mock` every command
+module, `createCli(argv)` + `program.exitOverride()` + `parseAsync(argv, { from:
+'user' })`, then `toHaveBeenCalledExactlyOnceWith(...args)` with the args commander
+really parses (`{ yes: false, format: 'yaml' }`, not a hand-written shape). Mutation
+check: swap one `migrate('up')` for `'latest'` → exactly one row fails.

@@ -34,9 +34,8 @@ override. Only `FilesService` (passthrough, ok) + `PermissionsService` (rebuilds
 `withAppMinimalPermissions` → must re-attach the rider) override it. Found via
 `grep "override async read*"` + `extends ItemsService`. Whole api typechecks 0 errors after.
 
-**Blackbox is label-gated:** add `Run Blackbox` (pg+sqlite smoke) or `Run Blackbox Full` (all
-vendors) label via REST (`gh api … /issues/N/labels`); `blackbox-pr.yml` runs `if contains(labels,
-'Run Blackbox')`. Scoped-cache logic is redis (vendor-independent) → smoke suffices. New blackbox env
+**Blackbox runs on its own for any code PR** (since 2026-08-05, [[project_directus_blackbox_run_and_logs]]);
+`Run Blackbox Full` (all vendors) via REST (`gh api … /issues/N/labels`) when a vendor matrix is wanted. Scoped-cache logic is redis (vendor-independent) → smoke suffices. New blackbox env
 `envRedisScopedPurge` asserts cross-collection isolation.
 
 Parked follow-ups: [[project_directus_sql_query_cache_parked]] (partition tags, owner-tagging,
@@ -54,20 +53,20 @@ Extends #203's collection-level invalidation to **per-value** slices. Branch
   `CollectionOverview.scopedCacheFields` via [[project_directus_get_schema_raw_knex_json]].
 - **Tag type:** `ScopedCacheTag {collection, field?, value?}` in `@directus/types`; the rider's
   `ReadMeta.scopedCacheTags` went `Set<string>` → `ScopedCacheTag[]`.
-- **Invariant:** a scoped read tags ONLY its value slices (`tag:slots:student=A`); the **bare
+- **Invariant:** a scoped read tags ONLY its value slices (`tag:slots:owner=A`); the **bare
   collection tag holds only global reads** that couldn't scope. A write purges bare (global readers)
   **+ resolved value slices**, sparing every other slice. Writes resolve precisely: create from
   payload, update/delete from `snapshotScopedCacheTags` (pre-mutation SELECT) **∪ new** payload value
   (a row moved A→B drops both); `upsertMany` full-flushes (mixed insert/update, TODO).
 - **READ-SIDE CORRECTNESS FIX (post-review, commit `cea4bea59b`):** the original #205 tagged a read
   by the scope values **present in its result rows** — a *latent staleness bug*. A multi-owner read
-  (admin "all students" list) tagged only the slices it returned (A,B,C), no bare tag → an INSERT of
+  (admin "all owners" list) tagged only the slices it returned (A,B,C), no bare tag → an INSERT of
   a **new** value D purged `bare + D`, leaving that broad read stale (missing D). Regression vs #203's
   collection-level baseline (which purged the whole collection tag on every write).
   - Fix: scope the root off the **query filter**, not result rows — `pinnedScopeTagsFromFilter`
     (exported from `items.ts`). A read may carry a value slice **only when an `_eq`/`_in` on a scope
     field BOUNDS it** to that value (reached via root or `_and`; `_or` doesn't bound → skip; non-eq
-    ops like `_gt` don't bound). Pinned → value slices (the planner's `?filter[student]=A` win);
+    ops like `_gt` don't bound). Pinned → value slices (a consumer's `?filter[owner]=A` win);
     unbounded → bare collection tag → every write invalidates. **Principle: value-scoped cache tags
     must come from the query's bounding predicate, never the result set** — result rows are a snapshot
     that can't prove a future insert is excluded.
@@ -75,7 +74,7 @@ Extends #203's collection-level invalidation to **per-value** slices. Branch
     with no rows yet). The **purge side still uses rows** (`scopedCacheTagsFromRows`) — that's correct
     (it enumerates the values a write actually touched).
   - `normalizeFilter` (apply-query) was considered and rejected: it canonicalizes *relational sibling*
-    nesting for `getFilterPath`, orthogonal to scalar scope-field pinning; no-op for the flat planner case.
+    nesting for `getFilterPath`, orthogonal to scalar scope-field pinning; no-op for the flat consumer case.
   - Also: `purgeCache` guards `redis.del()` against an empty tag set (a `cache.purge` filter could
     empty it → "ERR wrong number of arguments"); tag-key serializer's `String(value)` type-collapse
     documented as safe (a scope column has one stable type, tag+purge read the same column).

@@ -1,5 +1,5 @@
 ---
-name: directus-stacked-rebuild-gotchas
+name: project_directus_stacked_rebuild_gotchas
 description:
   Gotchas building the hhh-main copy stack via cherry-pick — branches are independent (fix low → rebuild above),
   divergent stacked history isn't a mechanical rebase, merge-tree forced-base lies, and the test-file two-block merge.
@@ -8,7 +8,7 @@ metadata:
   type: project
 ---
 
-Hard-won while building the conflict-resolved copy stack ([[directus-compose-copy-stack]]).
+Hard-won while building the conflict-resolved copy stack ([[project_directus_compose_copy_stack]]).
 
 - **Cherry-pick branches are independent — they do NOT inherit a parent's fix.** Each `hhh-main-stacked-*` is its own
   commits; fixing a low PR (e.g. #48's dialect-test merge) does NOT propagate to the branches above it. A fix near the

@@ -7,7 +7,7 @@ metadata:
 ---
 
 **UPDATED 2026-07-27: the default branch flipped to `v11.10.1-hhh-dev`** (pr-controle retired,
-[[directus-fork-integration-branches]]). GitHub auto-closes a `Closes #N` / `Fixes #N` issue only
+[[project_directus_fork_integration_branches]]). GitHub auto-closes a `Closes #N` / `Fixes #N` issue only
 when the linking PR merges into the **default branch** — so now that hhh-dev IS the default,
 `Closes #N` **fires normally** on hhh-dev merges. No more manual close needed for new PRs.
 

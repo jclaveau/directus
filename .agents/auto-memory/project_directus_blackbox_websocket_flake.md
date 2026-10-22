@@ -37,3 +37,5 @@ writes `server-log-<vendor>.txt` when set, and only on server exit) plus a
 drops the big test step.
 
 Related: [[project_directus_blackbox_sharding]], [[feedback_instrument_before_theorising]].
+
+**Update 2026-10-01: the 42703 race was an api bug, not placement.** `getSchema` reads collections, fields and relations in separate queries. A schema write committing + clearing between them left the build half-old, and the build then CACHED it: an o2m alias created before the build, with its relation created during it, read back as a plain column → every `*` read 500s with 42703 until the next schema change. Fixed on #590 (`8524a7636a`): `cache.ts` bumps a `schemaCacheGeneration` on every clear (local and peer `schemaChanged`); a build that saw it move rebuilds (max 3) and never caches/publishes a stale one. Serialising suites only hid it.

@@ -14,7 +14,7 @@ The blackbox harness is hard to run locally (dep drift), but a scoped-cache HIT/
 4. **Smoking gun**: `redis-cli -p 6399 keys 'dbg:tag:*'` — empty tag sets = the read never tagged ⇒ scoped purge has nothing to drop ⇒ stale HIT. Cache value lives at `dbg::dbg:<hash>` (Keyv double-namespace); tag-set members are the raw response key.
 
 Gotchas (all bit me):
-- **Port 8055 = jean's planner directus** ("HipHipHip"). Verify `curl /server/info` / `ss -ltnp | grep :PORT` before any POST — use a spare port (8077).
+- **Port 8055 = a local consumer's directus**. Verify `curl /server/info` / `ss -ltnp | grep :PORT` before any POST — use a spare port (8077).
 - **`pkill -f "dbg-directus.db"` does NOT match** — DB_FILENAME is in env, not cmdline. Kill by port: `ss -ltnp | grep :8077 → kill <pid>`.
 - **api/dist staleness** — `grep -c scopedCachePurgeEnabled api/dist/...` to confirm the build has your change before trusting a run.
 - See [[project_directus_blackbox_seed_mechanics]] for the harness, [[reference_local_build_env_version_mismatch]] for PR-branch dep drift.
