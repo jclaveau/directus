@@ -6,6 +6,14 @@ import { flushResponseCache } from '../scoped-cache/index.js';
 import { queueAfterCommitOrRollback } from './transaction.js';
 
 /**
+ * Set by a batch that runs its rows with `autoPurgeCache` off: a row asking for
+ * a response-cache flush reports it here, and the batch flushes once for all.
+ */
+export type ResponseCacheFlushDeferral = {
+	onResponseCacheFlushDeferred?: () => void;
+};
+
+/**
  * Clear the system cache, and the response cache unless the write opted out,
  * once the transaction `knex` belongs to commits. Cleared before, a read landing
  * in between caches the permissions the transaction is replacing again.
@@ -17,8 +25,12 @@ import { queueAfterCommitOrRollback } from './transaction.js';
 export async function clearCachesAfterCommit(
 	knex: Knex,
 	responseCache: Keyv | null,
-	opts?: MutationOptions,
+	opts?: MutationOptions & ResponseCacheFlushDeferral,
 ): Promise<void> {
+	if (responseCache && opts?.autoPurgeCache === false) {
+		opts.onResponseCacheFlushDeferred?.();
+	}
+
 	const clearCaches = async () => {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
@@ -29,5 +41,34 @@ export async function clearCachesAfterCommit(
 
 	if (!queueAfterCommitOrRollback(knex, clearCaches)) {
 		await clearCaches();
+	}
+}
+
+/**
+ * Flush the response cache once the transaction `knex` belongs to commits or
+ * rolls back, as `clearCachesAfterCommit` does; a write that opted out hands
+ * the flush on to its own batch, if any.
+ */
+export async function flushResponseCacheAfterCommit(
+	knex: Knex,
+	responseCache: Keyv | null,
+	opts?: MutationOptions & ResponseCacheFlushDeferral,
+): Promise<void> {
+	if (!responseCache) {
+		return;
+	}
+
+	if (opts?.autoPurgeCache === false) {
+		opts.onResponseCacheFlushDeferred?.();
+
+		return;
+	}
+
+	const flushCache = () => {
+		return flushResponseCache(responseCache);
+	};
+
+	if (!queueAfterCommitOrRollback(knex, flushCache)) {
+		await flushCache();
 	}
 }
