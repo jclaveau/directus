@@ -7,7 +7,7 @@ metadata:
 ---
 
 Two preview mechanisms on the fork, both keyed off the **`Preview`** GitHub label. **Default branch = `v11.10.1-hhh-dev`
-since 2026-07-27** (was `pr-controle`, now retired — [[directus-fork-integration-branches]]); `pull_request_target`
+since 2026-07-27** (was `pr-controle`, now retired — [[project_directus_fork_integration_branches]]); `pull_request_target`
 resolves its workflow from the default, i.e. hhh-dev now.
 
 **Preview Admin** (`.github/workflows/preview-admin.yml`) — runner-hosted, EPHEMERAL.

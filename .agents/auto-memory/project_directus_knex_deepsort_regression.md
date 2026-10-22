@@ -1,5 +1,5 @@
 ---
-name: directus-knex-deepsort-regression
+name: project_directus_knex_deepsort_regression
 description:
   Directus is incompatible with knex >= 3.2.10 (PR #6392) — it double-escapes the rowNumber window alias
   and 500s every deep o2m/m2m/m2a sort on all dialects; the fork pins knex 3.1.0
@@ -31,4 +31,4 @@ on every nested o2m/m2m/m2a sort, all dialects**.
   `ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??` (pg/cockroach/mssql 2016+), sqlite overrides with `DROP INDEX IF EXISTS`
   (uniques are indexes), mysql/oracle keep catalog checks.
 
-Related: [[directus-fork-integration-branches]], [[directus-db-clients-and-returning-support]], [[knex-drop-if-exists]].
+Related: [[project_directus_fork_integration_branches]], [[project_directus_db_clients]], [[knex-drop-if-exists]].

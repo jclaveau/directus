@@ -41,7 +41,7 @@ line appended below.
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (25) — seeds, sharding, flakes, spawned instances
+## blackbox (24) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
@@ -56,7 +56,7 @@ line appended below.
 - [The blocking codecov check is the unflagged patch at 95%](project_directus_codecov_aggregate_patch_gate.md) — only unit tests clear the bar
 - [Bench measures the trunk, not your PR](project_directus_bench_measures_trunk.md) — a red `Bench / cache` on a PR is the trunk tip
 
-## unit-tests (9) — vitest mocks, typecheck, local test env
+## unit-tests (8) — vitest mocks, typecheck, local test env
 `.agents/auto-memory/index/unit-tests.md`
 
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first

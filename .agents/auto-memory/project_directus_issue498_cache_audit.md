@@ -1,5 +1,5 @@
 ---
-name: directus_issue498_cache_audit
+name: project_directus_issue498_cache_audit
 description: Issue #498 cache audit (replay every live entry against the database) — settled design points, history tables + live schedule + MCP group + cache-page panel (PR #499), the traps each surface hit, the two defects only a hand-run smoke caught
 metadata:
   author: Jean Claveau

@@ -1,5 +1,5 @@
 ---
-name: directus-v12-license-dual-compose
+name: project_directus_v12_license_dual_compose
 description:
   Directus v12+ requires a license key (relicensing); v11.9.2 = last license-free release a consumer runs, so the fork
   keeps two live integration lines and compose must eventually target both. Current infra targets main only.
@@ -15,7 +15,7 @@ which is what a consumer deploys.
 
 - **last-v11 line** (`v11.9.2-hhh-dev` + `-dist`) — the license-free **deployment** line a consumer actually runs.
 - **`main` line** (v12, upstream-tracking) — where the `upstream-draft:` proposals soak (see
-  [[directus-fork-integration-branches]]).
+  [[project_directus_fork_integration_branches]]).
 
 **Compose roadmap = dual-target.** The compose / `upstream-diff:` infra (PRs #64 = compose-hhh-main denylist +
 release-fork dispatch + `.gitattributes`; #65 = `.agents/` tracking; both opened 2026-06-16) currently targets **`main`

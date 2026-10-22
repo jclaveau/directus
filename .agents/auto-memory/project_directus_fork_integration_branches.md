@@ -1,5 +1,5 @@
 ---
-name: directus-fork-integration-branches
+name: project_directus_fork_integration_branches
 description:
   jclaveau/directus branch model — pr-controle = default/trunk (fork CI), main = clean upstream base, hhh-main = derived
   integration auto-composed from the hhh-main-* copy stack; plus blackbox/e2e label-gating + mssql fork-runner
@@ -44,7 +44,7 @@ the re-derive/compose roster. See [[directus-linear-chain-leaf-pr]] (hhh-dev = p
 ## CURRENT topology (2026-06-16) — supersedes the "Branch model" block below
 
 The original "main = upstream + overlay" model was replaced by a **dedicated default branch** once the overlay outgrew
-one file (denylist, release-fork, .gitattributes, codecov, copy-stack hack). See [[directus-compose-copy-stack]] for the
+one file (denylist, release-fork, .gitattributes, codecov, copy-stack hack). See [[project_directus_compose_copy_stack]] for the
 full compose architecture.
 
 ```
@@ -147,4 +147,4 @@ or `actions/checkout` over SSH like the overlay edits do (line above). Same root
   Dropped mssql from `blackbox.yml`'s matrix. **pg + sqlite are the healthy batch-insert signal** (both green, ~1s;
   mssql inconclusive, not a logic bug).
 
-Related: [[directus-db-clients-and-returning-support]].
+Related: [[project_directus_db_clients]].

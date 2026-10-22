@@ -1,5 +1,5 @@
 ---
-name: directus-compose-copy-stack
+name: project_directus_compose_copy_stack
 description:
   How hhh-main is composed conflict-free — isolated upstream-draft PRs stay clean for upstream; a parallel
   hhh-main-root/stacked copy tree resolves overlaps once; compose consumes the copies. SSH deploy key + CLA inject.
@@ -19,7 +19,7 @@ maintain a parallel **copy tree** that compose consumes.
   upstream churn). Every member of a conflict-connected component is stacked; only truly-isolated PRs are roots.
 - Built by **cherry-picking each PR's own commit range** onto the advancing tip (NOT merging heads — a stacked
   upstream-draft head contains its parent, which would double-apply). Order = the mergeability rubric
-  [[directus-compose-stack-order-rubric]].
+  [[project_directus_compose_stack_order_rubric]].
 - Always open. Each PR description records: copy-of #, parent, exact resolution, and a **re-rebase recipe** so a refresh
   after a `main` sync is mechanical.
 
@@ -39,4 +39,4 @@ stale vs main → re-rebase** (not raw inter-PR conflict). Verified green end-to
   `main`).
 
 Excluded from the stack: **#46** (refused upstream → `superseded`), **#52** (divergent history — see
-[[directus-stacked-rebuild-gotchas]]). #67 = the upstream-compare view of hhh-main.
+[[project_directus_stacked_rebuild_gotchas]]). #67 = the upstream-compare view of hhh-main.

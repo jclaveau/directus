@@ -25,4 +25,4 @@ fixed it with no change to the existing cases.
   to someone else's file — check the sibling tests' `fields` before extending a fixture.
 - Teardown order: drop the junction/child before the collections it points at.
 
-Related: [[feedback_regression_test_avoid_fragile_shared_state]], [[project_directus_blackbox_single_file_locally]].
+Related: [[feedback_regression_test_avoid_fragile_shared_state]].

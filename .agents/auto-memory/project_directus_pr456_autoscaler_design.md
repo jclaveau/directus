@@ -1,6 +1,6 @@
 ---
 name: project_directus_pr456_autoscaler_design
-description: PR #456 (issue #455) landed autoscaler design — app-not-module verdict, three-layer instant rollback, legacy strategy reproducing pm2-autoscale exactly, windowed CPU smoothing, resolve-config outage semantics, two Redis-outage bugs found and fixed
+description: PR #456 (issue #455) landed autoscaler design — app-not-module verdict, three-layer instant rollback, legacy strategy reproducing pm2-autoscale exactly, windowed CPU smoothing, resolve-config outage semantics, Redis-outage handling
 metadata:
   author: Jean Claveau
   type: project
@@ -64,33 +64,12 @@ ceiling to survive a spike would have it dropped by a blip, with no cooldown on 
 ceiling correction, so the pool sheds workers immediately and retakes them on
 reconnect. Env chain is only reached when nothing was ever successfully read.
 
-**Two independent Redis-outage bugs found and fixed while building the coverage the
-user asked for** ("do we have some test simulating loosing the redis connection"):
-1. **Freeze (`c19168832b`).** The shared ioredis client has its offline queue enabled
-   (only the Keyv cache clients get `disableOfflineQueue: true`), so a command issued
-   while reconnecting queues with no deadline — measured a `get` still pending after 5s
-   against a dead port. The tick's first statement is `await resolveConfig()`, so an
-   outage didn't fall back to anything, it stopped the loop dead: no decisions, no
-   logs, pool frozen. Fix: the read is skipped outright while the client reports
-   `reconnecting`/`close`/`end`, else raced against a 1000ms deadline (the sample
-   interval, so a read is never why a tick is late); the losing promise gets its own
-   `.catch` or the flushed-queue rejection would kill the process.
-2. **Death (`ea2c951a4a`).** `directus autoscale` **dies** during a Redis outage —
-   unhandled rejections from the bus/ioredis are fatal by default, and this long-running
-   CLI command never registered the `unhandledRejection` guard `startServer` registers
-   for the API. Measured driving the rig directly: 7 rejections per queue flush,
-   process exits code 1 ~40s in (later corrected to 10.5s: 20 retries of `50ms ×
-   attempt` capped at 2000ms). In prod pm2 just restarts it back into the same outage —
-   pool unmanaged, frozen wherever the failure caught it. **General lesson for this
-   fork: any long-running non-HTTP process needs the same unhandledRejection guard as
-   `startServer` — being a server isn't what earns it, outliving a background
-   dependency is.**
-3. **Boot-path variant of the same issue (`6e68f31c30`), found when re-auditing
-   [issue #463](https://github.com/jclaveau/directus/issues/463) for autoscale
-   instances.** `runAutoscaler` `await`ed `initProcessReports()` (subscribes over the
-   shared client) before entering its loop — a boot into an outage burned the whole
-   retry budget before the first decision. Made fire-and-forget with the same catch:
-   first scale moved from 21s to 9s after boot (8s warm-up + one tick).
+**Redis outage, as the autoscaler handles it today:** the config read is skipped while
+the client is reconnecting, else raced against a 1000ms deadline (`c19168832b`); the
+process carries the `unhandledRejection` guard (`ea2c951a4a`, see
+[[project_directus_entry_guard_unhandled_rejection]]); `initProcessReports()` is
+fire-and-forget at boot (`6e68f31c30`). Lesson: any long-running non-HTTP process needs
+the guard — outliving a background dependency is what earns it, not being a server.
 
 **Issue #463 (shared ioredis offline queue) — deliberately split by intent, not
 folded into #456.** The two autoscale-specific instances are fixed narrowly (both call
