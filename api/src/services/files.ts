@@ -98,6 +98,32 @@ export class FilesService extends ItemsService<File> {
 			});
 		}
 
+		const fileExtension = path.extname(payload.filename_download!)
+			|| (payload.type && `.${extension(payload.type)}`)
+			|| '';
+
+		// A new file sending its id and no disk name is stored under that id.
+		if (existingFile === null && payload.id && !payload.filename_disk) {
+			const derivedDiskName = `${payload.id}${fileExtension}`;
+
+			const holderRow = await this.knex
+				.select('id')
+				.from('directus_files')
+				.where({ filename_disk: derivedDiskName })
+				.first();
+
+			// The row the id names is left to the insert, which refuses its id.
+			const isDerivedNameTaken = holderRow
+				? String(holderRow.id) !== String(payload.id)
+				: await disk.exists(derivedDiskName);
+
+			if (isDerivedNameTaken) {
+				throw new InvalidPayloadError({
+					reason: diskNameTakenReason(derivedDiskName),
+				});
+			}
+		}
+
 		// If no folder is specified, we'll use the default folder from the settings if it exists
 		if ('folder' in payload === false) {
 			const settings = await this.knex.select('storage_default_folder').from('directus_settings').first();
@@ -114,9 +140,6 @@ export class FilesService extends ItemsService<File> {
 		if (isReplacement === false || primaryKey === undefined) {
 			primaryKey = await this.createOne(payload, { emitEvents: false });
 		}
-
-		const fileExtension =
-			path.extname(payload.filename_download!) || (payload.type && '.' + extension(payload.type)) || '';
 
 		const filenameDisk = primaryKey + (fileExtension || '');
 
