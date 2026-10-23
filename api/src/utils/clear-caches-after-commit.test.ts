@@ -4,7 +4,10 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
-import { clearCachesAfterCommit } from './clear-caches-after-commit.js';
+import {
+	clearCachesAfterCommit,
+	flushResponseCacheAfterCommit,
+} from './clear-caches-after-commit.js';
 import { transaction } from './transaction.js';
 
 vi.mock('../database/index.js', () => {
@@ -67,5 +70,20 @@ describe('clearCachesAfterCommit', () => {
 		});
 
 		expect(flushResponseCache).toHaveBeenCalledExactlyOnceWith(responseCache);
+	});
+});
+
+describe('flushResponseCacheAfterCommit', () => {
+	it('flushes nothing without a response cache', async () => {
+		const onResponseCacheFlushDeferred = vi.fn();
+
+		await flushResponseCacheAfterCommit(
+			knex.default({ client: MockClient }),
+			null,
+			{ autoPurgeCache: false, onResponseCacheFlushDeferred },
+		);
+
+		expect(flushResponseCache).not.toHaveBeenCalled();
+		expect(onResponseCacheFlushDeferred).not.toHaveBeenCalled();
 	});
 });
