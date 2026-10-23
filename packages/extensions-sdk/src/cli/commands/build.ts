@@ -8,7 +8,7 @@ import {
 } from '@directus/extensions';
 import type { AppExtensionType, ApiExtensionType } from '@directus/types';
 import { APP_EXTENSION_TYPES, EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants';
-import { isIn, isTypeIn } from '@directus/utils';
+import { isIn, isTypeIn } from '@directus/utils/array-helpers';
 import terserDefault from '@rollup/plugin-terser';
 import virtualDefault from '@rollup/plugin-virtual';
 import vue from '@vitejs/plugin-vue';
