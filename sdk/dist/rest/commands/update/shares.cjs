@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/shares`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/shares`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/shares/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updateShare=r,exports.updateShares=t,exports.updateSharesBatch=n;
+//# sourceMappingURL=shares.cjs.map

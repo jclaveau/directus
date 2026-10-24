@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n)=>()=>(e(t,`Collection cannot be empty`),e(n,`Field cannot be empty`),{path:`/fields/${t}/${n}`,method:`DELETE`});export{t as deleteField};
+//# sourceMappingURL=fields.js.map

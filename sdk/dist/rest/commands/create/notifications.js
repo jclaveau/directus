@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/notifications`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/notifications`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createNotification,e as createNotifications};
+//# sourceMappingURL=notifications.js.map

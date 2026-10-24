@@ -1,0 +1,2 @@
+const e=(e,t=1e3)=>new Promise((n,r)=>{let i=e=>{try{let t=JSON.parse(e.data);typeof t==`object`&&!Array.isArray(t)&&t!==null?(o(),n(t)):(o(),a())}catch{o(),n(e)}},a=()=>r(),o=()=>{clearTimeout(s),e.removeEventListener(`message`,i),e.removeEventListener(`error`,a),e.removeEventListener(`close`,a)};e.addEventListener(`message`,i),e.addEventListener(`error`,a),e.addEventListener(`close`,a);let s=setTimeout(()=>{o(),n(void 0)},t)});exports.messageCallback=e;
+//# sourceMappingURL=message-callback.cjs.map

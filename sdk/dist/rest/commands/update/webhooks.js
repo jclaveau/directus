@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(e(t,`Keys cannot be empty`),{path:`/webhooks`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(t,n,r)=>()=>(e(String(t),`Key cannot be empty`),{path:`/webhooks/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});export{n as updateWebhook,t as updateWebhooks};
+//# sourceMappingURL=webhooks.js.map

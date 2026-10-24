@@ -1,0 +1,2 @@
+const e=e=>()=>({method:`POST`,path:`/utils/hash/generate`,body:JSON.stringify({string:e})}),t=(e,t)=>()=>({method:`POST`,path:`/utils/hash/verify`,body:JSON.stringify({string:e,hash:t})});exports.generateHash=e,exports.verifyHash=t;
+//# sourceMappingURL=hash.cjs.map
