@@ -4164,3 +4164,137 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 		}
 	});
 });
+
+describe('updateBatch on postgres', () => {
+	const postsSchema = new SchemaBuilder()
+		.collection('posts', (c) => {
+			c.field('id').id();
+			c.field('title').string();
+			c.field('status').string();
+			c.field('published').timestamp();
+		})
+		.build();
+
+	let pgDatabase: Knex;
+	let pgTracker: Tracker;
+
+	beforeAll(() => {
+		pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+		pgTracker = createTracker(pgDatabase);
+	});
+
+	afterEach(() => {
+		pgTracker.reset();
+		vi.unstubAllEnvs();
+	});
+
+	it('writes rows setting the same columns in one statement', async () => {
+		pgTracker.on.any('posts').response({});
+
+		const keys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+			{ id: 3, title: 'third' },
+		]);
+
+		expect(keys).toEqual([1, 2, 3]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: oneLine`
+					update "posts" set "title" = "v"."title"
+					from jsonb_populate_recordset(null::"posts", $1) as "v"
+					where "posts"."id" = "v"."id"
+				`,
+				bindings: [
+					'[{"title":"first","id":1},{"title":"second","id":2},'
+					+ '{"title":"third","id":3}]',
+				],
+			}),
+		]);
+	});
+
+	it('writes each run of side-by-side groups in its own statement', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+			{ id: 3, status: 'draft' },
+			{ id: 1, title: 'again' },
+		], { onRepeatedPk: 'lastWins' });
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "status" = $1 where "id" in ($2)',
+				bindings: ['draft', 3],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['again', 1],
+			}),
+		]);
+	});
+
+	it('writes a timestamp as the local time node-pg would bind', async () => {
+		vi.stubEnv('TZ', 'Europe/Paris');
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, published: '2026-10-24T10:00:00.000Z' },
+			{ id: 2, published: '2026-10-24T11:00:00.000Z' },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: [
+					'[{"published":"2026-10-24T12:00:00.000+02:00","id":1},'
+					+ '{"published":"2026-10-24T13:00:00.000+02:00","id":2}]',
+				],
+			}),
+		]);
+	});
+
+	it('writes the groups one by one when the batch fails', async () => {
+		pgTracker.on.any(/jsonb_populate_recordset/)
+			.simulateError('duplicate key value violates unique constraint');
+
+		pgTracker.on.any('posts').response({});
+
+		const keys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		]);
+
+		expect(keys).toEqual([1, 2]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['first', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['second', 2],
+			}),
+		]);
+	});
+});
