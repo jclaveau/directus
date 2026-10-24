@@ -1,5 +1,5 @@
 import { getUrl } from '@common/config';
-import { DeleteCollection } from '@common/functions';
+import { DeleteCollectionIfPresent } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import request from 'supertest';
@@ -17,7 +17,7 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				await DeleteCollection(vendor, { collection });
+				await DeleteCollectionIfPresent(vendor, { collection });
 
 				const collectionResponse = await request(getUrl(vendor))
 					.post(`/collections`)

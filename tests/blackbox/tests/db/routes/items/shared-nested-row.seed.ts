@@ -4,7 +4,7 @@ import {
 	CreateFieldM2A,
 	CreateFieldM2O,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
@@ -27,10 +27,21 @@ export const seedDBStructure = () => {
 
 					const localJunctionContents = `${junctionUnitContents}_${pkType}`;
 
-					await DeleteCollection(vendor, { collection: localJunctionContents });
-					await DeleteCollection(vendor, { collection: localCollectionUnits });
-					await DeleteCollection(vendor, { collection: localCollectionSegments });
-					await DeleteCollection(vendor, { collection: localCollectionDisciplines });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localJunctionContents,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionUnits,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionSegments,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionDisciplines,
+					});
 
 					await CreateCollection(vendor, {
 						collection: localCollectionDisciplines,

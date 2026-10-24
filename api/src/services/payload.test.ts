@@ -6,8 +6,8 @@ import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import { PayloadService } from './index.js';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Item, Accountability } from '@directus/types';
-import { ForbiddenError } from '@directus/errors';
+import type { Item, Accountability, FieldOverview } from '@directus/types';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 
 vi.mock('../../src/database/index', () => ({
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
@@ -25,6 +25,7 @@ describe('Integration Tests', () => {
 
 	afterEach(() => {
 		tracker.reset();
+		vi.restoreAllMocks();
 	});
 
 	describe('Services / PayloadService', () => {
@@ -119,6 +120,346 @@ describe('Integration Tests', () => {
 
 					expect(result).toBe('test,directus');
 				});
+			});
+
+			describe('cast-json', () => {
+				test('parses a JSON string on read', async () => {
+					const result = await service.transformers['cast-json']!({
+						value: '{"tags":["a","b"]}',
+						action: 'read',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual({ tags: ['a', 'b'] });
+				});
+
+				test('returns an unparsable string as is on read', async () => {
+					const result = await service.transformers['cast-json']!({
+						value: 'not json',
+						action: 'read',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('not json');
+				});
+
+				test('returns an already parsed value as is on read', async () => {
+					const result = await service.transformers['cast-json']!({
+						value: { tags: ['a'] },
+						action: 'read',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual({ tags: ['a'] });
+				});
+
+				test('leaves a JSON string untouched on update', async () => {
+					const result = await service.transformers['cast-json']!({
+						value: '{"tags":["a"]}',
+						action: 'update',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('{"tags":["a"]}');
+				});
+			});
+
+			describe('user and role stamps', () => {
+				test('user-created stamps the user on create', async () => {
+					const result = await service.transformers['user-created']!({
+						value: 'someone-else',
+						action: 'create',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('user-a');
+				});
+
+				test('user-created stamps null without a user on create', async () => {
+					const result = await service.transformers['user-created']!({
+						value: 'someone-else',
+						action: 'create',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe(null);
+				});
+
+				test('user-created keeps the value on update', async () => {
+					const result = await service.transformers['user-created']!({
+						value: 'someone-else',
+						action: 'update',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('someone-else');
+				});
+
+				test('user-updated stamps the user on update', async () => {
+					const result = await service.transformers['user-updated']!({
+						value: 'someone-else',
+						action: 'update',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('user-a');
+				});
+
+				test('user-updated stamps null without a user on update', async () => {
+					const result = await service.transformers['user-updated']!({
+						value: 'someone-else',
+						action: 'update',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe(null);
+				});
+
+				test('user-updated keeps the value on create', async () => {
+					const result = await service.transformers['user-updated']!({
+						value: 'someone-else',
+						action: 'create',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('someone-else');
+				});
+
+				test('role-created stamps the role on create', async () => {
+					const result = await service.transformers['role-created']!({
+						value: 'other-role',
+						action: 'create',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('role-a');
+				});
+
+				test('role-created stamps null without a role on create', async () => {
+					const result = await service.transformers['role-created']!({
+						value: 'other-role',
+						action: 'create',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe(null);
+				});
+
+				test('role-created keeps the value on update', async () => {
+					const result = await service.transformers['role-created']!({
+						value: 'other-role',
+						action: 'update',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('other-role');
+				});
+
+				test('role-updated stamps the role on update', async () => {
+					const result = await service.transformers['role-updated']!({
+						value: 'other-role',
+						action: 'update',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('role-a');
+				});
+
+				test('role-updated stamps null without a role on update', async () => {
+					const result = await service.transformers['role-updated']!({
+						value: 'other-role',
+						action: 'update',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe(null);
+				});
+
+				test('role-updated keeps the value on create', async () => {
+					const result = await service.transformers['role-updated']!({
+						value: 'other-role',
+						action: 'create',
+						payload: {},
+						accountability: { role: 'role-a', user: 'user-a' } as Accountability,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('other-role');
+				});
+			});
+
+			describe('date stamps', () => {
+				beforeEach(() => {
+					vi.useFakeTimers({ now: new Date('2026-01-02T03:04:05.000Z') });
+				});
+
+				afterEach(() => {
+					vi.useRealTimers();
+				});
+
+				test('date-created stamps the current time on create', async () => {
+					const result = await service.transformers['date-created']!({
+						value: '1999-01-01T00:00:00.000Z',
+						action: 'create',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual(new Date('2026-01-02T03:04:05.000Z'));
+				});
+
+				test('date-created keeps the value on update', async () => {
+					const result = await service.transformers['date-created']!({
+						value: '1999-01-01T00:00:00.000Z',
+						action: 'update',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('1999-01-01T00:00:00.000Z');
+				});
+
+				test('date-updated stamps the current time on update', async () => {
+					const result = await service.transformers['date-updated']!({
+						value: '1999-01-01T00:00:00.000Z',
+						action: 'update',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toEqual(new Date('2026-01-02T03:04:05.000Z'));
+				});
+
+				test('date-updated keeps the value on create', async () => {
+					const result = await service.transformers['date-updated']!({
+						value: '1999-01-01T00:00:00.000Z',
+						action: 'create',
+						payload: {},
+						accountability: null,
+						specials: [],
+						helpers,
+					});
+
+					expect(result).toBe('1999-01-01T00:00:00.000Z');
+				});
+			});
+		});
+
+		describe('processField', () => {
+			test('returns the raw value of a field without specials', async () => {
+				const result = await new PayloadService('test', {
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				}).processField(
+					{ field: 'title', special: null } as unknown as FieldOverview,
+					{ title: 'Hello' },
+					'create',
+					null,
+				);
+
+				expect(result).toBe('Hello');
+			});
+		});
+
+		describe('processGeometries', () => {
+			test('parses a GeoJSON string before converting it on write', () => {
+				const service = new PayloadService('test', {
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const fromGeoJsonSpy = vi
+					.spyOn(service.helpers.st, 'fromGeoJSON')
+					.mockReturnValue('converted-point' as never);
+
+				const result = service.processGeometries(
+					[['location', { type: 'geometry.Point' } as FieldOverview]],
+					[{ location: '{"type":"Point","coordinates":[1,2]}' }],
+					'create',
+				);
+
+				expect(fromGeoJsonSpy).toHaveBeenCalledWith({
+					type: 'Point',
+					coordinates: [1, 2],
+				});
+
+				expect(result).toEqual([{ location: 'converted-point' }]);
+			});
+
+			test('converts a GeoJSON object as is on write', () => {
+				const service = new PayloadService('test', {
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const fromGeoJsonSpy = vi
+					.spyOn(service.helpers.st, 'fromGeoJSON')
+					.mockReturnValue('converted-point' as never);
+
+				const result = service.processGeometries(
+					[['location', { type: 'geometry.Point' } as FieldOverview]],
+					[{ location: { type: 'Point', coordinates: [1, 2] } }],
+					'update',
+				);
+
+				expect(fromGeoJsonSpy).toHaveBeenCalledWith({
+					type: 'Point',
+					coordinates: [1, 2],
+				});
+
+				expect(result).toEqual([{ location: 'converted-point' }]);
 			});
 		});
 
@@ -326,6 +667,85 @@ describe('Integration Tests', () => {
 					]);
 				});
 			});
+
+			describe('parses dates on write', () => {
+				test('turns a valid date string into a Date', () => {
+					const result = service.processDates(
+						fieldEntries,
+						[{ date_field: '2022-01-10' }],
+						'create',
+					);
+
+					expect(result).toEqual([{ date_field: new Date(2022, 0, 10) }]);
+				});
+
+				test('refuses an invalid date string', () => {
+					expect(() => {
+						service.processDates(
+							fieldEntries,
+							[{ date_field: 'not-a-date' }],
+							'update',
+						);
+					}).toThrowError(InvalidPayloadError);
+
+					expect(() => {
+						service.processDates(
+							fieldEntries,
+							[{ date_field: 'not-a-date' }],
+							'update',
+						);
+					}).toThrowError(new InvalidPayloadError({
+						reason: 'Invalid Date format in field "date_field"',
+					}));
+				});
+			});
+		});
+
+		describe('processDates on time columns', () => {
+			const schema = new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('time_field').time();
+				})
+				.build();
+
+			let service: PayloadService;
+
+			beforeEach(() => {
+				service = new PayloadService('test', { knex: db, schema });
+			});
+
+			test('formats a Date as a time of day on read', () => {
+				const result = service.processDates(
+					[['time_field', schema.collections['test']!.fields['time_field']!]],
+					[{ time_field: new Date(2020, 0, 1, 13, 14, 15) }],
+					'read',
+				);
+
+				expect(result).toEqual([{ time_field: '13:14:15' }]);
+			});
+
+			test('keeps a time string as is on read', () => {
+				const result = service.processDates(
+					[['time_field', schema.collections['test']!.fields['time_field']!]],
+					[{ time_field: '13:14:15' }],
+					'read',
+				);
+
+				expect(result).toEqual([{ time_field: '13:14:15' }]);
+			});
+
+			test('keeps a Date as is on write', () => {
+				const result = service.processDates(
+					[['time_field', schema.collections['test']!.fields['time_field']!]],
+					[{ time_field: new Date(2020, 0, 1, 13, 14, 15) }],
+					'create',
+				);
+
+				expect(result).toEqual([
+					{ time_field: new Date(2020, 0, 1, 13, 14, 15) },
+				]);
+			});
 		});
 
 		describe('processAggregates', () => {
@@ -458,6 +878,25 @@ describe('Integration Tests', () => {
 				);
 
 				expect(result).toMatchObject({ other_string: 'not-redacted', other_hidden: REDACT_STR });
+			});
+		});
+
+		describe('prepareDelta', () => {
+			const schema = new SchemaBuilder()
+				.collection('ledger', (c) => {
+					c.field('id').id();
+					c.field('amount').bigInteger();
+				})
+				.build();
+
+			test('writes a BigInt a hook answered as its decimal string', async () => {
+				const service = new PayloadService('ledger', { knex: db, schema });
+
+				const deltaJson = await service.prepareDelta({
+					amount: 9007199254740993n,
+				});
+
+				expect(deltaJson).toEqual('{"amount":"9007199254740993"}');
 			});
 		});
 

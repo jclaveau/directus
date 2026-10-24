@@ -3,7 +3,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -45,8 +45,8 @@ describe('Rate limiter charge', () => {
 			const chargeEveryRequest = cloneDeep(chargeDefault);
 			chargeEveryRequest[vendor]['RATE_LIMITER_CHARGE'] = 'every-request';
 
-			const chargeDefaultPort = await getPort();
-			const chargeEveryRequestPort = await getPort();
+			const chargeDefaultPort = await freePortOfWorker();
+			const chargeEveryRequestPort = await freePortOfWorker();
 			chargeDefault[vendor].PORT = String(chargeDefaultPort);
 			chargeEveryRequest[vendor].PORT = String(chargeEveryRequestPort);
 

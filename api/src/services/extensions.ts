@@ -1,12 +1,19 @@
 import { useEnv } from '@directus/env';
-import { ForbiddenError, InvalidPayloadError, LimitExceededError, UnprocessableContentError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	LimitExceededError,
+	ServiceUnavailableError,
+	UnprocessableContentError,
+} from '@directus/errors';
 import type { ApiOutput, BundleExtension, ExtensionSettings, ExtensionManager } from '@directus/types';
 import { describe, type DescribeOptions } from '@directus/extensions-registry';
 import type { AbstractServiceOptions, Accountability, DeepPartial, SchemaOverview } from '@directus/types';
-import { isObject } from '@directus/utils';
+import { isObject, oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import getDatabase from '../database/index.js';
 import { getExtensionManager } from '../extensions/index.js';
+import { useLogger } from '../logger/index.js';
 import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 
@@ -194,18 +201,20 @@ export class ExtensionsService {
 	}
 
 	async updateOne(id: string, data: DeepPartial<ApiOutput>) {
-		const result = await transaction(this.knex, async (trx) => {
-			if (!isObject(data.meta)) {
-				throw new InvalidPayloadError({ reason: `"meta" is required` });
-			}
+		if (!isObject(data.meta)) {
+			throw new InvalidPayloadError({ reason: `"meta" is required` });
+		}
 
+		const updatedMeta = data.meta;
+
+		const result = await transaction(this.knex, async (trx) => {
 			const service = new ExtensionsService({
 				knex: trx,
 				accountability: this.accountability,
 				schema: this.schema,
 			});
 
-			await service.extensionsItemService.updateOne(id, data.meta);
+			await service.extensionsItemService.updateOne(id, updatedMeta);
 
 			let extension;
 
@@ -215,16 +224,47 @@ export class ExtensionsService {
 				throw new ExtensionReadError(error);
 			}
 
-			if ('enabled' in data.meta) {
+			if ('enabled' in updatedMeta) {
 				await service.checkBundleAndSyncStatus(trx, id, extension);
 			}
 
 			return extension;
 		});
 
-		this.extensionsManager.reload().then(() => {
-			this.extensionsManager.broadcastReloadNotification();
-		});
+		const reloadOutcome = await this.extensionsManager.reload().then(
+			() => ({ hasFailed: false, failure: undefined }),
+			(failure: unknown) => ({ hasFailed: true, failure }),
+		);
+
+		if (reloadOutcome.hasFailed) {
+			useLogger().error(
+				reloadOutcome.failure,
+				'Failed to reload the extensions after an extension update',
+			);
+		}
+
+		// The settings are saved either way: a bus that fails is logged, not
+		// answered in place of the reload's outcome.
+		try {
+			await this.extensionsManager.broadcastReloadNotification();
+		}
+		catch (broadcastFailure) {
+			useLogger().error(
+				broadcastFailure,
+				'Failed to tell the other processes to reload the extensions',
+			);
+		}
+
+		if (reloadOutcome.hasFailed) {
+
+			throw new ServiceUnavailableError({
+				service: 'extensions',
+				reason: oneLine`
+					The extension settings were saved,
+					but reloading the extensions failed
+				`,
+			});
+		}
 
 		return result;
 	}

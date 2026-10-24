@@ -6,7 +6,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'events';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -56,7 +56,7 @@ describe.each(vendors)('%s', (vendor) => {
 	// build before goes on running through a rolling deploy. Its output is not
 	// read, so it is not piped: a full pipe would stall it.
 	async function startSecondInstance() {
-		const port = await getPort();
+		const port = await freePortOfWorker();
 
 		secondInstance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,
@@ -79,7 +79,7 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	async function startInstance() {
-		env[vendor].PORT = String(await getPort());
+		env[vendor].PORT = String(await freePortOfWorker());
 		instanceLog = [];
 
 		const spawned = spawn('node', [paths.cli, 'start'], {

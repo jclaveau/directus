@@ -12,7 +12,7 @@ import { oneLine } from '@directus/utils';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -76,11 +76,11 @@ describe.each(vendors)('%s', (vendor) => {
 			}],
 		});
 
-		const proxyPort = await getPort();
+		const proxyPort = await freePortOfWorker();
 		proxy = createRedisProxy(6108, proxyPort);
 		await proxy.open();
 		env[vendor]['REDIS_PORT'] = String(proxyPort);
-		env[vendor].PORT = String(await getPort());
+		env[vendor].PORT = String(await freePortOfWorker());
 
 		instance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,

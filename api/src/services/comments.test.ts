@@ -1,8 +1,16 @@
 import type { Accountability } from '@directus/types';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
+import { ForbiddenError } from '@directus/errors';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
+import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import {
+	fetchGlobalAccess,
+} from '../permissions/modules/fetch-global-access/fetch-global-access.js';
+import {
+	validateAccess,
+} from '../permissions/modules/validate-access/validate-access.js';
 import { withMeta } from '../utils/read-meta.js';
 import { CommentsService } from './comments.js';
 import { ItemsService } from './items.js';
@@ -23,8 +31,10 @@ vi.mock('@directus/env', () => ({
 	useEnv: vi.fn(() => ({ PUBLIC_URL: 'http://example.com' })),
 }));
 
+const { loggerWarn } = vi.hoisted(() => ({ loggerWarn: vi.fn() }));
+
 vi.mock('../logger/index.js', () => ({
-	useLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),
+	useLogger: vi.fn(() => ({ warn: loggerWarn, info: vi.fn(), error: vi.fn() })),
 }));
 
 vi.mock('../permissions/lib/fetch-roles-tree.js', () => ({
@@ -156,5 +166,431 @@ describe('Services / Comments', () => {
 		expect(superCreateManySpy).toHaveBeenCalledTimes(1);
 		expect(UsersService.prototype.readOne).not.toHaveBeenCalled();
 		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+	});
+
+	it('notifies a mentioned user who cannot read users', async () => {
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-3']);
+
+		const service = new CommentsService({ knex: db, schema, accountability });
+
+		vi.mocked(UsersService.prototype.readOne)
+			.mockResolvedValueOnce(withMeta({
+				id: senderUuid,
+				first_name: 'Sam',
+				last_name: 'Sender',
+				email: 'sam@x.com',
+			}, { scopedCacheFingerprints: [] }))
+			.mockResolvedValueOnce(withMeta({
+				id: mentionUuid,
+				first_name: 'Jane',
+				last_name: 'Doe',
+				email: 'jane@x.com',
+				role: { id: null },
+			}, { scopedCacheFingerprints: [] }));
+
+		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+		vi.mocked(validateAccess).mockResolvedValue(undefined);
+
+		vi.mocked(fetchGlobalAccess)
+			.mockResolvedValue({
+				admin: false,
+				app: false,
+				grantedDbConnections: [],
+			});
+
+		vi.mocked(UsersService.prototype.readByQuery)
+			.mockResolvedValueOnce(withMeta([
+				{ id: mentionUuid },
+			], { scopedCacheFingerprints: [] }))
+			.mockRejectedValueOnce(new ForbiddenError());
+
+		const result = await service.createMany([
+			{
+				comment: `hey @${mentionUuid} please review`,
+				collection: 'articles',
+				item: '42',
+			},
+		]);
+
+		expect(result).toEqual(['comment-pk-3']);
+
+		expect(NotificationsService.prototype.createOne)
+			.toHaveBeenCalledExactlyOnceWith({
+				recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+				subject: 'You were mentioned in articles',
+				message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey @Unknown User please review
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+				collection: 'articles',
+				item: '42',
+			});
+
+		expect(loggerWarn).not.toHaveBeenCalled();
+	});
+
+	it('refuses a mention of a user no row holds, before the insert', async () => {
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-7']);
+
+		const service = new CommentsService({ knex: db, schema, accountability });
+
+		vi.mocked(UsersService.prototype.readByQuery)
+			.mockResolvedValueOnce(withMeta([], { scopedCacheFingerprints: [] }));
+
+		await expect(service.createMany([
+			{
+				comment: `hey @${mentionUuid} please review`,
+				collection: 'articles',
+				item: '42',
+			},
+		])).rejects.toMatchObject({
+			status: 404,
+			message: 'Item "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" doesn\'t exist'
+				+ ' in collection "directus_users".',
+		});
+
+		expect(superCreateManySpy).not.toHaveBeenCalled();
+		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+	});
+
+	it('resolves a mention written in upper case', async () => {
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-8']);
+
+		const service = new CommentsService({ knex: db, schema, accountability });
+
+		vi.mocked(UsersService.prototype.readOne)
+			.mockResolvedValueOnce(withMeta({
+				id: senderUuid,
+				first_name: 'Sam',
+				last_name: 'Sender',
+				email: 'sam@x.com',
+			}, { scopedCacheFingerprints: [] }))
+			.mockResolvedValueOnce(withMeta({
+				id: mentionUuid,
+				first_name: 'Jane',
+				last_name: 'Doe',
+				email: 'jane@x.com',
+				role: { id: null },
+			}, { scopedCacheFingerprints: [] }));
+
+		vi.mocked(fetchGlobalAccess)
+			.mockResolvedValue({
+				admin: false,
+				app: true,
+				grantedDbConnections: [],
+			});
+
+		vi.mocked(UsersService.prototype.readByQuery)
+			.mockResolvedValue(withMeta([
+				{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe' },
+			], { scopedCacheFingerprints: [] }));
+
+		const result = await service.createMany([
+			{
+				comment: 'hey @AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+				collection: 'articles',
+				item: '42',
+			},
+		]);
+
+		expect(result).toEqual(['comment-pk-8']);
+
+		expect(vi.mocked(UsersService.prototype.readOne).mock.calls).toEqual([
+			[senderUuid, { fields: ['id', 'first_name', 'last_name', 'email'] }],
+			[
+				'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				{ fields: ['id', 'first_name', 'last_name', 'email', 'role.id'] },
+			],
+		]);
+
+		expect(vi.mocked(UsersService.prototype.readByQuery).mock.calls).toEqual([
+			[{
+				fields: ['id'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+				limit: -1,
+			}],
+			[{
+				fields: ['id', 'first_name', 'last_name', 'email'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+			}],
+		]);
+
+		expect(NotificationsService.prototype.createOne)
+			.toHaveBeenCalledExactlyOnceWith({
+				recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+				subject: 'You were mentioned in articles',
+				message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey <em>Jane Doe</em>
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+				collection: 'articles',
+				item: '42',
+			});
+	});
+
+	it('notifies a user once whatever case spells the mention', async () => {
+		vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-9']);
+
+		const service = new CommentsService({ knex: db, schema, accountability });
+
+		vi.mocked(UsersService.prototype.readOne)
+			.mockResolvedValueOnce(withMeta({
+				id: senderUuid,
+				first_name: 'Sam',
+				last_name: 'Sender',
+				email: 'sam@x.com',
+			}, { scopedCacheFingerprints: [] }))
+			.mockResolvedValue(withMeta({
+				id: mentionUuid,
+				first_name: 'Jane',
+				last_name: 'Doe',
+				email: 'jane@x.com',
+				role: { id: null },
+			}, { scopedCacheFingerprints: [] }));
+
+		vi.mocked(fetchGlobalAccess)
+			.mockResolvedValue({
+				admin: false,
+				app: true,
+				grantedDbConnections: [],
+			});
+
+		vi.mocked(UsersService.prototype.readByQuery)
+			.mockResolvedValue(withMeta([
+				{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe' },
+			], { scopedCacheFingerprints: [] }));
+
+		await service.createMany([
+			{
+				comment: 'hey @aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+					+ ' and @AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+				collection: 'articles',
+				item: '42',
+			},
+		]);
+
+		expect(NotificationsService.prototype.createOne)
+			.toHaveBeenCalledExactlyOnceWith({
+				recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+				sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+				subject: 'You were mentioned in articles',
+				message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey <em>Jane Doe</em> and <em>Jane Doe</em>
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+				collection: 'articles',
+				item: '42',
+			});
+
+		expect(vi.mocked(UsersService.prototype.readByQuery).mock.calls).toEqual([
+			[{
+				fields: ['id'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+				limit: -1,
+			}],
+			[{
+				fields: ['id', 'first_name', 'last_name', 'email'],
+				filter: { id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] } },
+			}],
+		]);
+	});
+
+	describe('as an author who is not an admin', () => {
+		const authorAccountability: Accountability = {
+			user: senderUuid,
+			role: null,
+			admin: false,
+			app: true,
+			roles: [],
+			ip: null,
+		};
+
+		it('skips a mention when the author cannot read users', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['comment-pk-4']);
+
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: authorAccountability,
+			});
+
+			vi.mocked(UsersService.prototype.readOne)
+				.mockResolvedValueOnce(withMeta({
+					id: senderUuid,
+					first_name: 'Sam',
+					last_name: 'Sender',
+					email: 'sam@x.com',
+				}, { scopedCacheFingerprints: [] }));
+
+			vi.mocked(UsersService.prototype.readByQuery)
+				.mockRejectedValue(new ForbiddenError());
+
+			const result = await service.createMany([
+				{
+					comment: `hey @${mentionUuid} please review`,
+					collection: 'articles',
+					item: '42',
+				},
+			]);
+
+			expect(result).toEqual(['comment-pk-4']);
+			expect(UsersService.prototype.readOne).toHaveBeenCalledOnce();
+			expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+
+			expect(loggerWarn).toHaveBeenCalledExactlyOnceWith(
+				'Mention of user "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" skipped:'
+				+ ' the author cannot read that user',
+			);
+		});
+
+		it('skips a mention of a user the author cannot read', async () => {
+			const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['comment-pk-5']);
+
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: authorAccountability,
+			});
+
+			vi.mocked(UsersService.prototype.readOne)
+				.mockResolvedValueOnce(withMeta({
+					id: senderUuid,
+					first_name: 'Sam',
+					last_name: 'Sender',
+					email: 'sam@x.com',
+				}, { scopedCacheFingerprints: [] }));
+
+			vi.mocked(UsersService.prototype.readByQuery)
+				.mockResolvedValueOnce(withMeta([], { scopedCacheFingerprints: [] }));
+
+			const result = await service.createMany([
+				{
+					comment: `hey @${mentionUuid} please review`,
+					collection: 'articles',
+					item: '42',
+				},
+			]);
+
+			expect(result).toEqual(['comment-pk-5']);
+			expect(superCreateManySpy).toHaveBeenCalledOnce();
+
+			expect(UsersService.prototype.readByQuery)
+				.toHaveBeenCalledExactlyOnceWith({
+					fields: ['id'],
+					filter: {
+						id: { _in: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'] },
+					},
+					limit: -1,
+				});
+
+			expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
+
+			expect(loggerWarn).toHaveBeenCalledExactlyOnceWith(
+				'Mention of user "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" skipped:'
+				+ ' the author cannot read that user',
+			);
+		});
+
+		it('notifies a mentioned user the author can read', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['comment-pk-6']);
+
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: authorAccountability,
+			});
+
+			vi.mocked(UsersService.prototype.readOne)
+				.mockResolvedValueOnce(withMeta({
+					id: senderUuid,
+					first_name: 'Sam',
+					last_name: 'Sender',
+					email: 'sam@x.com',
+				}, { scopedCacheFingerprints: [] }))
+				.mockResolvedValueOnce(withMeta({
+					id: mentionUuid,
+					first_name: 'Jane',
+					last_name: 'Doe',
+					email: 'jane@x.com',
+					role: { id: null },
+				}, { scopedCacheFingerprints: [] }));
+
+			vi.mocked(fetchRolesTree).mockResolvedValue([]);
+			vi.mocked(validateAccess).mockResolvedValue(undefined);
+
+			vi.mocked(fetchGlobalAccess)
+				.mockResolvedValue({
+					admin: false,
+					app: true,
+					grantedDbConnections: [],
+				});
+
+			vi.mocked(UsersService.prototype.readByQuery)
+				.mockResolvedValueOnce(withMeta([
+					{ id: mentionUuid },
+				], { scopedCacheFingerprints: [] }))
+				.mockResolvedValueOnce(withMeta([
+					{
+						id: mentionUuid,
+						first_name: 'Jane',
+						last_name: 'Doe',
+						email: 'jane@x.com',
+					},
+				], { scopedCacheFingerprints: [] }));
+
+			const result = await service.createMany([
+				{
+					comment: `hey @${mentionUuid} please review`,
+					collection: 'articles',
+					item: '42',
+				},
+			]);
+
+			expect(result).toEqual(['comment-pk-6']);
+
+			expect(NotificationsService.prototype.createOne)
+				.toHaveBeenCalledExactlyOnceWith({
+					recipient: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+					sender: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+					subject: 'You were mentioned in articles',
+					message: `
+Hello Jane Doe,
+
+Sam Sender has mentioned you in a comment:
+
+> hey <em>Jane Doe</em> please review
+
+<a href="http://example.com/admin/content/articles/42">Click here to view.</a>
+`,
+					collection: 'articles',
+					item: '42',
+				});
+
+			expect(loggerWarn).not.toHaveBeenCalled();
+		});
 	});
 });

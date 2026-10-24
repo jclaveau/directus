@@ -13,7 +13,7 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep, omit } from 'lodash-es';
 import request from 'supertest';
@@ -77,7 +77,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 		expect(scoped.statusCode).toBe(200);
 
-		env[vendor].PORT = String(await getPort());
+		env[vendor].PORT = String(await freePortOfWorker());
 
 		instance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,

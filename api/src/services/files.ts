@@ -1,5 +1,11 @@
 import { useEnv } from '@directus/env';
-import { ContentTooLargeError, InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
+import {
+	ContentTooLargeError,
+	ErrorCode,
+	InvalidPayloadError,
+	isDirectusError,
+	ServiceUnavailableError,
+} from '@directus/errors';
 import formatTitle from '@directus/format-title';
 import type {
 	AbstractServiceOptions,
@@ -9,9 +15,12 @@ import type {
 	PrimaryKey,
 	Query,
 	QueryOptions,
+	UpdateGroup,
 } from '@directus/types';
+import type { Driver } from '@directus/storage';
 import { toArray } from '@directus/utils';
 import type { AxiosResponse } from 'axios';
+import type { Knex } from 'knex';
 import encodeURL from 'encodeurl';
 import { extension } from 'mime-types';
 import type { Readable } from 'node:stream';
@@ -25,9 +34,10 @@ import { useLogger } from '../logger/index.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { getAxios } from '../request/index.js';
 import { getStorage } from '../storage/index.js';
-import { clone, cloneDeep } from '../utils/lodash-es-used.js';
+import { clone, cloneDeep, escapeRegExp } from '../utils/lodash-es-used.js';
+import { unnormalisedDiskNameReason } from './files/lib/disk-name.js';
 import { extractMetadata } from './files/lib/extract-metadata.js';
-import { ItemsService } from './items.js';
+import { ItemsService, type DeferredPurgeOptions } from './items.js';
 
 const env = useEnv();
 const logger = useLogger();
@@ -64,7 +74,55 @@ export class FilesService extends ItemsService<File> {
 		// Merge the existing file's folder and filename_download with the new payload
 		const payload = { ...(existingFile ?? {}), ...clone(data) };
 
+		// An upload derives an empty disk name below, which a row write refuses.
+		if (payload.filename_disk === '') {
+			delete payload.filename_disk;
+		}
+
 		const disk = storage.location(payload.storage);
+
+		const requestedDiskName = data.filename_disk;
+
+		if (requestedDiskName) {
+			refuseUnnormalisedDiskName(requestedDiskName);
+		}
+
+		// Written before any row is, so a refused upload leaves nothing behind.
+		if (
+			requestedDiskName
+			&& requestedDiskName !== existingFile?.['filename_disk']
+			&& (await disk.exists(requestedDiskName))
+		) {
+			throw new InvalidPayloadError({
+				reason: diskNameTakenReason(requestedDiskName),
+			});
+		}
+
+		const fileExtension = path.extname(payload.filename_download!)
+			|| (payload.type && `.${extension(payload.type)}`)
+			|| '';
+
+		// A new file sending its id and no disk name is stored under that id.
+		if (existingFile === null && payload.id && !payload.filename_disk) {
+			const derivedDiskName = `${payload.id}${fileExtension}`;
+
+			const holderRow = await this.knex
+				.select('id')
+				.from('directus_files')
+				.where({ filename_disk: derivedDiskName })
+				.first();
+
+			// The row the id names is left to the insert, which refuses its id.
+			const isDerivedNameTaken = holderRow
+				? String(holderRow.id) !== String(payload.id)
+				: await disk.exists(derivedDiskName);
+
+			if (isDerivedNameTaken) {
+				throw new InvalidPayloadError({
+					reason: diskNameTakenReason(derivedDiskName),
+				});
+			}
+		}
 
 		// If no folder is specified, we'll use the default folder from the settings if it exists
 		if ('folder' in payload === false) {
@@ -82,9 +140,6 @@ export class FilesService extends ItemsService<File> {
 		if (isReplacement === false || primaryKey === undefined) {
 			primaryKey = await this.createOne(payload, { emitEvents: false });
 		}
-
-		const fileExtension =
-			path.extname(payload.filename_download!) || (payload.type && '.' + extension(payload.type)) || '';
 
 		const filenameDisk = primaryKey + (fileExtension || '');
 
@@ -160,8 +215,8 @@ export class FilesService extends ItemsService<File> {
 				await this.updateOne(primaryKey, payload, { emitEvents: false });
 
 				// delete the previously saved file and thumbnails to ensure they're generated fresh
-				for await (const filepath of disk.list(String(primaryKey))) {
-					await disk.delete(filepath);
+				if (existingFile?.['filename_disk']) {
+					await deleteFileAndThumbnails(disk, existingFile['filename_disk']);
 				}
 
 				// Upgrade the temp file to the final filename
@@ -273,7 +328,155 @@ export class FilesService extends ItemsService<File> {
 			}
 		}
 
-		return super.createMany(data, opts);
+		try {
+			return await super.createMany(data, opts);
+		}
+		catch (error) {
+			throw diskNameTakenErrorFrom(error);
+		}
+	}
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts: DeferredPurgeOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts?: DeferredPurgeOptions,
+	): Promise<PrimaryKey[]>;
+
+	override async updateGroups(
+		groups: UpdateGroup<File>[],
+		opts: DeferredPurgeOptions = {},
+	): Promise<(PrimaryKey | null)[]> {
+		try {
+			return await super.updateGroups(groups, opts);
+		}
+		catch (error) {
+			throw diskNameTakenErrorFrom(error);
+		}
+	}
+
+	protected override async validateRowsToCreate(
+		rows: Partial<File>[],
+		trx: Knex,
+	): Promise<void> {
+		await this.refuseUnusableDiskNames(
+			rows.map((row) => ({ filenameDisk: row.filename_disk, ownerKey: null })),
+			trx,
+		);
+	}
+
+	protected override async validateGroupsToUpdate(
+		groups: UpdateGroup<File>[],
+		trx: Knex,
+	): Promise<void> {
+		const claimsByKeyName = new Map<string, DiskNameClaim>();
+
+		for (const group of groups) {
+			if (!('filename_disk' in group.data)) {
+				continue;
+			}
+
+			const groupKeyNames = new Set(group.keys.map((ownerKey) => {
+				return this.primaryKeyNameOf(ownerKey);
+			}));
+
+			// Even under lastWins, a row is given one disk name, never a sequence.
+			for (const keyName of groupKeyNames) {
+				if (claimsByKeyName.has(keyName)) {
+					throw new InvalidPayloadError({
+						reason: `Row ${keyName} is sent more than once; send each row once`,
+					});
+				}
+			}
+
+			for (const ownerKey of group.keys) {
+				claimsByKeyName.set(this.primaryKeyNameOf(ownerKey), {
+					filenameDisk: group.data.filename_disk,
+					ownerKey,
+				});
+			}
+		}
+
+		await this.refuseUnusableDiskNames([...claimsByKeyName.values()], trx);
+	}
+
+	/**
+	 * Refuse a `filename_disk` that is not a normalised relative path, that
+	 * another row holds, or that two claims share.
+	 *
+	 * - Deleting either row would delete the other's file, and reading the asset
+	 *   would serve the other's content.
+	 * - A name only the disk holds is accepted: a row can be created for a file
+	 *   already in storage.
+	 * - A name the batch moves its holder off is free, as in translations. The
+	 *   unique index still judges each write in order, so the batch must move
+	 *   the holder before the row taking its name; a swap is refused.
+	 */
+	private async refuseUnusableDiskNames(
+		diskNameClaims: DiskNameClaim[],
+		trx: Knex,
+	): Promise<void> {
+		const claimedNames = diskNameClaims.flatMap((claim) => {
+			if (claim.filenameDisk === null || claim.filenameDisk === undefined) {
+				return [];
+			}
+
+			return [claim.filenameDisk];
+		});
+
+		for (const claimedName of claimedNames) {
+			refuseUnnormalisedDiskName(claimedName);
+		}
+
+		const sharedName = claimedNames.find((name, index) => {
+			return claimedNames.indexOf(name) !== index;
+		});
+
+		if (sharedName) {
+			throw new InvalidPayloadError({ reason: diskNameTakenReason(sharedName) });
+		}
+
+		if (claimedNames.length === 0) {
+			return;
+		}
+
+		const holderRows: { id: PrimaryKey; filename_disk: string }[] = await trx
+			.select('id', 'filename_disk')
+			.from('directus_files')
+			.whereIn('filename_disk', claimedNames);
+
+		for (const holderRow of holderRows) {
+			// The batch moves the holder off its name, which frees the name.
+			const isMovedOff = diskNameClaims.some((claim) => {
+				return claim.ownerKey !== null
+					&& claim.filenameDisk !== holderRow.filename_disk
+					&& this.primaryKeyNameOf(claim.ownerKey)
+						=== this.primaryKeyNameOf(holderRow.id);
+			});
+
+			if (isMovedOff) {
+				continue;
+			}
+
+			const isHeldElsewhere = diskNameClaims.some((claim) => {
+				if (claim.filenameDisk !== holderRow.filename_disk) {
+					return false;
+				}
+
+				return claim.ownerKey === null
+					|| this.primaryKeyNameOf(claim.ownerKey)
+						!== this.primaryKeyNameOf(holderRow.id);
+			});
+
+			if (isHeldElsewhere) {
+				throw new InvalidPayloadError({
+					reason: diskNameTakenReason(holderRow.filename_disk),
+				});
+			}
+		}
 	}
 
 	/**
@@ -293,12 +496,8 @@ export class FilesService extends ItemsService<File> {
 
 		for (const file of files) {
 			const disk = storage.location(file['storage']);
-			const filePrefix = path.parse(file['filename_disk']).name;
 
-			// Delete file + thumbnails
-			for await (const filepath of disk.list(filePrefix)) {
-				await disk.delete(filepath);
-			}
+			await deleteFileAndThumbnails(disk, file['filename_disk']);
 		}
 
 		return keys;
@@ -322,6 +521,100 @@ export class FilesService extends ItemsService<File> {
 		}
 
 		return super.readByQuery(filteredQuery, opts);
+	}
+}
+
+type DiskNameClaim = {
+	filenameDisk: string | null | undefined;
+	ownerKey: PrimaryKey | null;
+};
+
+function diskNameTakenReason(filenameDisk: string) {
+	return `"filename_disk" "${filenameDisk}" is already used by another file`;
+}
+
+/**
+ * The guard's 400 for a disk name the unique index refused: a row that took
+ * the name after the guard read the table. A batch insert cannot tell which
+ * row the database refused, so the reason may name no disk name.
+ */
+function diskNameTakenErrorFrom(error: unknown): unknown {
+	if (!isDirectusError(error, ErrorCode.RecordNotUnique)) {
+		return error;
+	}
+
+	// A nested write can reach a collection with its own filename_disk.
+	if (
+		error.extensions.collection !== 'directus_files'
+		|| error.extensions.field !== 'filename_disk'
+	) {
+		return error;
+	}
+
+	const takenName = error.extensions.value;
+
+	if (!takenName) {
+		return new InvalidPayloadError({
+			reason: '"filename_disk" is already used by another file',
+		});
+	}
+
+	return new InvalidPayloadError({ reason: diskNameTakenReason(takenName) });
+}
+
+function refuseUnnormalisedDiskName(filenameDisk: string): void {
+	const unnormalisedReason = unnormalisedDiskNameReason(filenameDisk);
+
+	if (unnormalisedReason) {
+		throw new InvalidPayloadError({ reason: unnormalisedReason });
+	}
+}
+
+/**
+ * Delete a stored file and the thumbnails the assets service made from it.
+ *
+ * - A thumbnail is `<name>__<sha1 of the transforms>.<ext>` at the storage
+ *   root, whatever folder the file is in (`assets.ts`).
+ * - A driver's listing matches any longer name and, on a local disk, ignores
+ *   case, so each listed path is matched exactly before it is deleted.
+ * - A bucket driver with a root lists `/<name>`: the key less the root.
+ */
+export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string) {
+	const { dir: folderPath, name: baseName } = path.posix.parse(filenameDisk);
+
+	const thumbnailPattern = new RegExp(
+		`^${escapeRegExp(baseName)}__[0-9a-f]{40}(\\.[^./]+)?$`,
+	);
+
+	const listedPrefixes = new Set([path.posix.join(folderPath, baseName), baseName]);
+
+	for (const listedPrefix of listedPrefixes) {
+		try {
+			for await (const filepath of disk.list(listedPrefix)) {
+				const rootedPath = filepath.replace(/^\/+/, '');
+
+				if (rootedPath === filenameDisk || thumbnailPattern.test(rootedPath)) {
+					// A file deleted since the listing named it is already gone.
+					try {
+						await disk.delete(filepath);
+					}
+					catch (error) {
+						ignoreMissingFile(error);
+					}
+				}
+			}
+		}
+		// A local disk lists a folder by opening it, and a folder that is gone
+		// holds nothing to delete.
+		catch (error) {
+			ignoreMissingFile(error);
+		}
+	}
+}
+
+function ignoreMissingFile(error: unknown) {
+	if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+		throw error;
 	}
 }
 

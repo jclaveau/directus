@@ -4,7 +4,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'node:events';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -64,7 +64,7 @@ describe('A pool the supervisor cannot keep whole reaches /server/health', () =>
 	beforeAll(async () => {
 		for (const vendor of vendors) {
 			const env = cloneDeep(config.envs)[vendor]!;
-			const port = await getPort();
+			const port = await freePortOfWorker();
 
 			env['PORT'] = String(port);
 			env['REDIS_HOST'] = 'localhost';
@@ -187,7 +187,7 @@ describe('A pool the supervisor cannot keep whole reaches /server/health', () =>
 		'answers a Directus that boots after it was sent: %s',
 		async (vendor) => {
 			const since = Date.now();
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			const env = { ...envs[vendor]!, PORT: String(port) };
 
 			lateInstances[vendor] = spawn('node', [paths.cli, 'start'], {

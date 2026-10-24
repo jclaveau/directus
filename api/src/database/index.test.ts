@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockEnv, state } = vi.hoisted(() => {
+const { mockEnv, state, trackTransactionsOf } = vi.hoisted(() => {
 	return {
 		mockEnv: {} as Record<string, any>,
+		trackTransactionsOf: vi.fn(),
 		state: {
 			coreFiles: [] as string[],
 			customFiles: [] as string[],
@@ -42,6 +43,10 @@ vi.mock('knex', () => {
 			},
 		},
 	};
+});
+
+vi.mock('../utils/transaction.js', () => {
+	return { trackTransactionsOf };
 });
 
 vi.mock('../logger/index.js', () => {
@@ -98,6 +103,21 @@ function resetState() {
 	state.readdirFails = false;
 	state.selectFails = false;
 }
+
+describe('getDatabase', () => {
+	beforeEach(() => {
+		resetState();
+		trackTransactionsOf.mockClear();
+	});
+
+	it('tracks the transactions of the instance it builds', async () => {
+		const { getDatabase } = await loadDatabase();
+
+		const database = getDatabase();
+
+		expect(trackTransactionsOf.mock.calls).toEqual([[database]]);
+	});
+});
 
 describe('outstandingMigrations', () => {
 	beforeEach(resetState);

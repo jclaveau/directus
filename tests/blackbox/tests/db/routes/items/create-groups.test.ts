@@ -1,5 +1,6 @@
 import { getUrl } from '@common/config';
 import {
+	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
 	type StepFunctions,
@@ -19,6 +20,15 @@ type RequestCell = {
 	payload?: unknown;
 };
 
+const REQUEST_CELL_KEYS = [
+	'method',
+	'path',
+	'query',
+	'payload',
+] as const satisfies readonly (keyof RequestCell)[];
+
+const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
+
 type Exchanges = { responses: Response[] };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -28,9 +38,17 @@ const feature = loadFeature('./tests/db/routes/items/create-groups.feature');
 describe.each(vendors)('%s', (vendor) => {
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(requestCell: string) {
-		const { method, path, query = {}, payload } = loadYaml(
-			requestCell,
-		) as RequestCell;
+		const {
+			method,
+			path,
+			query = {},
+			payload,
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'create-groups.test.ts',
+		);
 
 		const pendingRequest = method === 'POST'
 			? request(getUrl(vendor)).post(path)
@@ -106,7 +124,12 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(exchanges.responses.map((response) => {
 					return { code: response.statusCode, body: response.body };
 				})).toMatchObject(table.map(({ response }) => {
-					return loadYaml(response) ?? {};
+					return cellOfKnownKeys<object>(
+						'response',
+						loadYaml(response) ?? {},
+						RESPONSE_CELL_KEYS,
+						'create-groups.test.ts',
+					);
 				}));
 			},
 		);

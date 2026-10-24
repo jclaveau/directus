@@ -112,7 +112,7 @@ jobs:
               pnpm --filter @directus/app test:coverage --passWithNoTests
               ;;
             rest)
-              pnpm --recursive --filter '!tests-blackbox' --filter '!@directus/api' --filter '!@directus/app' test:coverage --passWithNoTests
+              pnpm --recursive --workspace-concurrency=1 --filter '!tests-blackbox' --filter '!@directus/api' --filter '!@directus/app' test:coverage --passWithNoTests
               ;;
           esac
 

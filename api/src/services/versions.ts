@@ -137,16 +137,6 @@ export class VersionsService extends ItemsService {
 		return null;
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		await this.validateCreateData(data);
-
-		const mainItem = await this.getMainItem(data['collection'], data['item']);
-
-		data['hash'] = objectHash(mainItem);
-
-		return super.createOne(data, opts);
-	}
-
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		if (!Array.isArray(data)) {
 			throw new InvalidPayloadError({ reason: 'Input should be an array of items' });
@@ -168,6 +158,17 @@ export class VersionsService extends ItemsService {
 			}
 
 			keyCombos.add(keyCombo);
+		}
+
+		for (const versionRow of data) {
+			await this.validateCreateData(versionRow);
+
+			const mainItem = await this.getMainItem(
+				versionRow['collection'],
+				versionRow['item'],
+			);
+
+			versionRow['hash'] = objectHash(mainItem);
 		}
 
 		return super.createMany(data, opts);

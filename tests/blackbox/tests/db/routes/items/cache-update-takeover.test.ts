@@ -14,7 +14,7 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { oneLine } from '@directus/utils';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -275,7 +275,7 @@ describe.each(vendors)('%s', (vendor) => {
 			item: { body: 'original' },
 		});
 
-		cacheEnv[vendor].PORT = String(await getPort());
+		cacheEnv[vendor].PORT = String(await freePortOfWorker());
 
 		cacheInstance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,

@@ -1,4 +1,10 @@
-import { CreateCollection, CreateField, CreateItem, DeleteCollection, UpdateItem } from '@common/functions';
+import {
+	CreateCollection,
+	CreateField,
+	CreateItem,
+	DeleteCollectionIfPresent,
+	UpdateItem,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
 
@@ -13,7 +19,7 @@ export const seedDBStructure = () => {
 		async (vendor) => {
 			try {
 				// Delete existing collection
-				await DeleteCollection(vendor, { collection });
+				await DeleteCollectionIfPresent(vendor, { collection });
 
 				// Create collection
 				await CreateCollection(vendor, {
@@ -28,7 +34,7 @@ export const seedDBStructure = () => {
 				});
 
 				// Delete existing singleton
-				await DeleteCollection(vendor, { collection: singleton });
+				await DeleteCollectionIfPresent(vendor, { collection: singleton });
 
 				// Create singleton collection
 				await CreateCollection(vendor, {

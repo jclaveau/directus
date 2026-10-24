@@ -1,7 +1,12 @@
 import { useEnv } from '@directus/env';
-import { ForbiddenError, InvalidCredentialsError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidCredentialsError,
+	ItemNotFoundError,
+} from '@directus/errors';
 import type {
 	AbstractServiceOptions,
+	Accountability,
 	Item,
 	LoginResult,
 	MutationOptions,
@@ -21,9 +26,12 @@ import { getSecret } from '../utils/get-secret.js';
 import { md } from '../utils/md.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
+import { validateKeys } from '../utils/validate-keys.js';
 import { ItemsService } from './items.js';
 import { MailService } from './mail/index.js';
 import { UsersService } from './users.js';
+
+type ShareTarget = { collection: string; item: PrimaryKey };
 
 const env = useEnv();
 const logger = useLogger();
@@ -33,23 +41,15 @@ export class SharesService extends ItemsService {
 		super('directus_shares', options);
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
+	override async createMany(
+		data: Partial<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		if (this.accountability) {
-			await validateAccess(
-				{
-					accountability: this.accountability,
-					action: 'share',
-					collection: data['collection'],
-					primaryKeys: [data['item']],
-				},
-				{
-					schema: this.schema,
-					knex: this.knex,
-				},
-			);
+			await this.validateShareAccess(this.accountability, data as ShareTarget[]);
 		}
 
-		return super.createOne(data, opts);
+		return super.createMany(data, opts);
 	}
 
 	override async updateGroups(
@@ -58,7 +58,111 @@ export class SharesService extends ItemsService {
 	): Promise<PrimaryKey[]> {
 		await clearPermissionsCache();
 
+		if (this.accountability) {
+			await this.validateShareAccess(
+				this.accountability,
+				await this.readUpdatedShareTargets(groups),
+			);
+		}
+
 		return super.updateGroups(groups, opts);
+	}
+
+	/**
+	 * Where each row of the update points once written. A change setting neither
+	 * `collection` nor `item` keeps its target, so it reads nothing and is not
+	 * checked; one setting a single half takes the other from the stored row.
+	 */
+	private async readUpdatedShareTargets(
+		groups: UpdateGroup<Item>[],
+	): Promise<ShareTarget[]> {
+		const repointingGroups = groups.filter((group) => {
+			return group.data['collection'] !== undefined
+				|| group.data['item'] !== undefined;
+		});
+
+		const halfSetKeys = repointingGroups
+			.filter((group) => {
+				return group.data['collection'] === undefined
+					|| group.data['item'] === undefined;
+			})
+			.flatMap((group) => group.keys);
+
+		const storedTargets = new Map<string, ShareTarget>();
+
+		if (halfSetKeys.length > 0) {
+			validateKeys(this.schema, this.collection, 'id', halfSetKeys);
+
+			const storedRows = await this.knex
+				.select('id', 'collection', 'item')
+				.from('directus_shares')
+				.whereIn('id', halfSetKeys);
+
+			for (const storedRow of storedRows) {
+				storedTargets.set(this.primaryKeyNameOf(storedRow.id), storedRow);
+			}
+		}
+
+		return repointingGroups.flatMap((group) => {
+			return group.keys.map((key) => {
+				const storedTarget = storedTargets.get(this.primaryKeyNameOf(key));
+				const collection = group.data['collection'] ?? storedTarget?.collection;
+				const item = group.data['item'] ?? storedTarget?.item;
+
+				// No row holds the key: a 404 for an admin, as forbidden as a hidden
+				// share for anyone else, like ItemsService.refuseMissingKeyForAdmin.
+				if (collection === undefined || item === undefined) {
+					if (this.accountability?.admin === true) {
+						throw new ItemNotFoundError({
+							collection: this.collection,
+							primaryKey: key,
+						});
+					}
+
+					throw new ForbiddenError({
+						reason: `You don't have permission to perform "update" for`
+							+ ` collection "${this.collection}" or it does not exist.`,
+					});
+				}
+
+				return { collection, item };
+			});
+		});
+	}
+
+	/**
+	 * Refuses unless the caller may share every target, one read per collection.
+	 */
+	private async validateShareAccess(
+		accountability: Accountability,
+		shareTargets: ShareTarget[],
+	): Promise<void> {
+		const sharedKeysByCollection = new Map<string, Map<string, PrimaryKey>>();
+
+		for (const shareTarget of shareTargets) {
+			const sharedKeys = sharedKeysByCollection.get(shareTarget.collection)
+				?? new Map<string, PrimaryKey>();
+
+			// Keyed by its string form so two shares of one item read it once:
+			// validateAccess counts the rows it reads back against the keys.
+			sharedKeys.set(String(shareTarget.item), shareTarget.item);
+			sharedKeysByCollection.set(shareTarget.collection, sharedKeys);
+		}
+
+		for (const [collection, sharedKeys] of sharedKeysByCollection) {
+			await validateAccess(
+				{
+					accountability,
+					action: 'share',
+					collection,
+					primaryKeys: [...sharedKeys.values()],
+				},
+				{
+					schema: this.schema,
+					knex: this.knex,
+				},
+			);
+		}
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts?: MutationOptions): Promise<PrimaryKey[]> {

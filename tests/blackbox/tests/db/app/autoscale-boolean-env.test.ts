@@ -2,7 +2,7 @@ import config, { getUrl, paths } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import { createRequire } from 'module';
 import { mkdtempSync } from 'node:fs';
@@ -84,7 +84,7 @@ function runToEnd(
 describe.each(vendors)('%s', (vendor) => {
 	describe('The boot refuses a boolean variable that is not one', () => {
 		it.each(BOOLEAN_KEYS)('the server, on %s', async (key) => {
-			const port = await getPort();
+			const port = await freePortOfWorker();
 
 			const run = await runToEnd(vendor, ['start'], {
 				PORT: String(port),
@@ -122,7 +122,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	it('a spelling the cast can read boots', async () => {
 		const env = cloneDeep(config.envs);
-		const port = await getPort();
+		const port = await freePortOfWorker();
 
 		env[vendor]['PORT'] = String(port);
 		env[vendor]['PM2_AUTOSCALE_ENABLED'] = 'false';

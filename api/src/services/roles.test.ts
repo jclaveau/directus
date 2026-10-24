@@ -4,13 +4,22 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearSystemCache } from '../cache.js';
 import emitter from '../emitter.js';
+import { transaction } from '../utils/transaction.js';
 import { AccessService, ItemsService, PresetsService, RolesService, UsersService } from './index.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
+
+vi.mock('../cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../cache.js')>(),
+		clearSystemCache: vi.fn(),
+	};
+});
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -229,6 +238,24 @@ describe('Integration Tests', () => {
 				);
 
 				expect(itemsDeleteManySpy).toHaveBeenCalledWith(keys, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+			});
+
+			it('clears the caches once the parent transaction has committed', async () => {
+				const database = knex.default({ client: MockClient });
+				const databaseTracker = createTracker(database);
+				const transactionStates: string[][] = [];
+
+				vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+					transactionStates.push(
+						databaseTracker.history.transactions.map((trx) => trx.state),
+					);
+				});
+
+				await transaction(database, async (trx) => {
+					await new RolesService({ knex: trx, schema }).deleteMany(['role-id-9']);
+				});
+
+				expect(transactionStates).toEqual([['committed']]);
 			});
 
 			it('should clear caches', async () => {
