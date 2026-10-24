@@ -90,6 +90,10 @@ export type ScopedCacheReadInputs = {
  */
 const PATH_ALIAS = '#path';
 
+// The read-back binds one parameter per key and nothing else, so this keeps each
+// statement well under Postgres' 65535 bind parameters.
+const SNAPSHOT_KEYS_PER_QUERY = 10_000;
+
 /** A purge held back until its transaction commits. */
 type ScopedCachePurgeRequest = {
 	scopedCacheFingerprints: ScopedCacheFingerprint[] | null;
@@ -545,7 +549,7 @@ export class ItemScopedCacheService {
 			});
 		}
 
-		const scopedRows = await query
+		const selectQuery = query
 			.select([
 				// Deduped: a project that also lists its primary key in
 				// `scoped_cache_fields` would otherwise project the column twice.
@@ -559,8 +563,24 @@ export class ItemScopedCacheService {
 				...terminalRefByPath.map(({ terminalRef }, index) => {
 					return this.knex.ref(terminalRef).as(`${PATH_ALIAS}${index}`);
 				}),
-			])
-			.whereIn(`root.${primaryKeyField}`, keys);
+			]);
+
+		const scopedRows: Item[] = [];
+
+		for (
+			let chunkStart = 0;
+			chunkStart < keys.length;
+			chunkStart += SNAPSHOT_KEYS_PER_QUERY
+		) {
+			const chunkRows = await selectQuery
+				.clone()
+				.whereIn(
+					`root.${primaryKeyField}`,
+					keys.slice(chunkStart, chunkStart + SNAPSHOT_KEYS_PER_QUERY),
+				);
+
+			scopedRows.push(...chunkRows);
+		}
 
 		return scopedRows.map((row: Item) => {
 			const namedRow: Item = {};

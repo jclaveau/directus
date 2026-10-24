@@ -299,6 +299,42 @@ describe('snapshot', () => {
 		});
 	});
 
+	it('reads a few keys back in one query binding each key once', async () => {
+		tracker.on.select('item').response([]);
+
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		await scopedCache.snapshot([1, 2, 3]);
+
+		expect(tracker.history.select).toHaveLength(1);
+		expect(tracker.history.select[0]!.bindings).toEqual([1, 2, 3]);
+	});
+
+	// Past 65535 bind parameters Postgres refuses the statement, and the caller
+	// falls back to purging the whole collection.
+	it(oneLine`
+		reads 70000 keys back in chunks under Postgres' 65535 bind parameters,
+		returning every row
+	`, async () => {
+		tracker.on.select('item').response((rawQuery) => {
+			return rawQuery.bindings.map((key) => {
+				return { id: key, owner: 'alpha', method: 'spaced', parent: 9 };
+			});
+		});
+
+		const scopedCache =
+			new ItemScopedCacheService('item', schema, db, null, null);
+
+		const mutatedKeys = Array.from({ length: 70_000 }, (_, index) => index + 1);
+		const { rows } = await scopedCache.snapshot(mutatedKeys);
+
+		expect(tracker.history.select.map(({ bindings }) => bindings.length))
+			.toEqual([10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000]);
+
+		expect(rows.map(({ key }) => key)).toEqual(mutatedKeys);
+	});
+
 	it('snapshots nothing for a collection absent from the schema', async () => {
 		const scopedCache =
 			new ItemScopedCacheService('unknown', schema, db, null, null);
