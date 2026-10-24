@@ -242,27 +242,24 @@ export abstract class SchemaHelper extends DatabaseHelper {
 		return 64;
 	}
 
-	// Emit the DB-native DROP CONSTRAINT IF EXISTS directly, the same way
-	// dropIndexIfExists below does. This predates the knex bump that brought
-	// a native table.dropUniqueIfExists.
-	//
-	// Coverage: postgres / cockroachdb (and mssql 2016+) accept DROP CONSTRAINT IF EXISTS; sqlite
-	// backs uniques with an index and overrides; mysql + oracle lack the syntax and override with a
-	// catalog existence check.
+	// knex emits the DB-native IF EXISTS: DROP CONSTRAINT on postgres, DROP INDEX
+	// on sqlite / cockroachdb / mssql. mysql + oracle lack the syntax and
+	// override with a catalog existence check; redshift falls back to the plain
+	// drops.
 	async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
 		const constraintName = this.generateIndexName('unique', collection, field);
 
-		await knex.raw('ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??', [collection, constraintName]);
+		await knex.schema.alterTable(collection, (table) => {
+			table.dropUniqueIfExists([field], constraintName);
+		});
 	}
 
-	// Emit the DB-native IF EXISTS directly (postgres / sqlite / cockroachdb).
-	// mssql needs ON <table>; mysql + oracle lack the syntax and override with
-	// an existence check. This predates the jclaveau/knex fork, which ships a
-	// native table.dropIndexIfExists (https://github.com/knex/knex/issues/6467).
 	async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
 		const indexName = this.generateIndexName('index', collection, field);
 
-		await knex.raw('DROP INDEX IF EXISTS ??', [indexName]);
+		await knex.schema.alterTable(collection, (table) => {
+			table.dropIndexIfExists([field], indexName);
+		});
 	}
 
 	async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> {
