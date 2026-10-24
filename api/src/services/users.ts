@@ -376,8 +376,9 @@ export class UsersService extends ItemsService {
 
 		opts.mutationTracker ??= this.createMutationTracker();
 
-		// Held until the delete commits: a hook fired inside it would read the users
-		// still there, or wait on the rows it locks.
+		// Held until the delete's transaction ends, a savepoint inside a caller's: a
+		// hook fired inside it would read the users still there, or wait on the rows
+		// it locks.
 		const heldActionEvents: ActionEventParams[] = [];
 
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
