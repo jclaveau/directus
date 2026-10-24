@@ -242,16 +242,9 @@ export abstract class SchemaHelper extends DatabaseHelper {
 		return 64;
 	}
 
-	// Emit the DB-native DROP CONSTRAINT IF EXISTS directly rather than knex's native
-	// table.dropUniqueIfExists. The native method only exists on knex >= 3.2, and bumping to it
-	// is not worth the regression it brings:
-	//
-	// - knex 3.2.10 (PR #6392, "Properly Escape Aliases in Analytic Functions") now wraps a
-	//   window-function alias through formatter.wrap. Directus pre-wraps its `directus_row_number`
-	//   alias via knex.ref(...).toQuery() in run-ast/get-db-query.ts, so 3.2.x double-escapes it
-	//   (e.g. `as ""directus_row_number""`) and every deep o2m/m2m sort 500s on all dialects.
-	// - So we stay on knex 3.1.x and hand-roll the conditional drop, the same way dropIndexIfExists
-	//   below already does.
+	// Emit the DB-native DROP CONSTRAINT IF EXISTS directly, the same way
+	// dropIndexIfExists below does. This predates the knex bump that brought
+	// a native table.dropUniqueIfExists.
 	//
 	// Coverage: postgres / cockroachdb (and mssql 2016+) accept DROP CONSTRAINT IF EXISTS; sqlite
 	// backs uniques with an index and overrides; mysql + oracle lack the syntax and override with a

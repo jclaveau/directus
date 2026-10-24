@@ -36,5 +36,5 @@ test('a multi-relational sort aliases the row number once', () => {
 	).toSQL().sql;
 
 	// The full SQL carries random join and sort aliases, the window alias does not
-	expect(sql).toContain(') as directus_row_number from');
+	expect(sql).toContain(') as "directus_row_number" from');
 });

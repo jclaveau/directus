@@ -33,7 +33,7 @@
 		"jest-cucumber": "github:jclaveau/jest-cucumber#main-dist",
 		"js-yaml": "4.3.0",
 		"json-to-graphql-query": "2.3.0",
-		"knex": "3.1.0",
+		"knex": "catalog:",
 		"listr2": "10.1.2",
 		"lodash-es": "catalog:",
 		"pm2": "catalog:",
