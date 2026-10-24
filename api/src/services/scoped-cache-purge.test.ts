@@ -176,6 +176,9 @@ describe(oneLine`
 	afterEach(() => {
 		tracker.reset();
 		purgeScopedCache.mockClear();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	const service = (withSchema = schema) => {
@@ -576,6 +579,7 @@ describe(oneLine`
 		updateBatch keeps its own autoPurgeCache:false when the caller passes true, so
 		the batch purges once after the commit, not once per forked child
 	`, async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -685,6 +689,9 @@ describe(oneLine`
 		a failed updateBatch on the caller's transaction purges old ∪ new of every
 		row, since the groups written before the failure commit with it
 	`, async () => {
+		// The groups are written one by one only off postgres.
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
 			{ id: 2, student: 'B' },
@@ -693,14 +700,19 @@ describe(oneLine`
 		tracker.on.update((query) => query.bindings.includes('second'))
 			.simulateError('boom');
 
-		await db.transaction(async (trx) => {
-			const callerService = new ItemsService('test', { knex: trx, schema });
+		try {
+			await db.transaction(async (trx) => {
+				const callerService = new ItemsService('test', { knex: trx, schema });
 
-			await expect(callerService.updateBatch([
-				{ id: 1, name: 'first' },
-				{ id: 2, name: 'second' },
-			])).rejects.toThrow('boom');
-		});
+				await expect(callerService.updateBatch([
+					{ id: 1, name: 'first' },
+					{ id: 2, name: 'second' },
+				])).rejects.toThrow('boom');
+			});
+		}
+		finally {
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		}
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),

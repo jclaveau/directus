@@ -2,6 +2,7 @@ import {
 	ForbiddenError,
 	InvalidForeignKeyError,
 	InvalidPayloadError,
+	NotNullViolationError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import {
@@ -34,6 +35,9 @@ import {
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -192,6 +196,9 @@ describe('Integration Tests', () => {
 	afterEach(() => {
 		tracker.reset();
 		vi.restoreAllMocks();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('Services / Items', () => {
@@ -680,6 +687,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('returns the keys in the order the caller sent the rows', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				const keys = await service.updateBatch([
 					{ id: 5, name: 'same' },
 					{ id: 4, name: 'other' },
@@ -714,6 +723,8 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				writes rows apart carrying the same change in the order sent
 			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				// Row 1 may free a value row 2 takes, or row 2 one row 3 takes, so
 				// writing rows 1 and 3 together would reorder the batch.
 				const keys = await service.updateBatch([
@@ -2257,6 +2268,9 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		revisionIds.issued = 0;
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('system collection event scope', () => {
@@ -2481,6 +2495,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('keeps two keys apart past the safe integers', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('big_coll').response(1);
 
 			const updatedKeys = await new ItemsService('big_coll', {
@@ -2529,6 +2545,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('writes two keys apart that differ in case only', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('code_coll').response(1);
 
 			const updatedKeys = await new ItemsService('code_coll', {
@@ -3021,6 +3039,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('splits off the row it rewrote and answers in the caller order', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
@@ -4162,5 +4182,269 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 		finally {
 			emitter.offFilter('items.create', takeOverInertDeclaring);
 		}
+	});
+});
+
+describe('updateBatch on postgres', () => {
+	const postsSchema = new SchemaBuilder()
+		.collection('posts', (c) => {
+			c.field('id').id();
+			c.field('title').string();
+			c.field('status').string();
+			c.field('published').timestamp();
+			c.field('meta').json();
+		})
+		.build();
+
+	let pgDatabase: Knex;
+	let pgTracker: Tracker;
+
+	beforeAll(() => {
+		pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+
+		// `dialect` makes a pg client instance the prototype of MockClient, so
+		// every transaction client inherits its `_events` and a savepoint
+		// re-emits 'query' to itself forever.
+		delete Object.getPrototypeOf(MockClient.prototype)._events;
+
+		pgTracker = createTracker(pgDatabase);
+	});
+
+	beforeEach(() => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+	});
+
+	afterEach(() => {
+		pgTracker.reset();
+		vi.unstubAllEnvs();
+	});
+
+	it('writes rows setting the same columns in one statement', async () => {
+		pgTracker.on.any('posts').response({});
+
+		const keys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+			{ id: 3, title: 'third' },
+		]);
+
+		expect(keys).toEqual([1, 2, 3]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: oneLine`
+					update "posts" set "title" = "v"."title"
+					from jsonb_populate_recordset(null::"posts", $1) as "v"
+					where "posts"."id" = "v"."id"
+				`,
+				bindings: [
+					'[{"title":"first","id":1},{"title":"second","id":2},'
+					+ '{"title":"third","id":3}]',
+				],
+			}),
+		]);
+	});
+
+	it('writes each run of side-by-side groups in its own statement', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+			{ id: 3, status: 'draft' },
+			{ id: 1, title: 'again' },
+		], { onRepeatedPk: 'lastWins' });
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "status" = $1 where "id" in ($2)',
+				bindings: ['draft', 3],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['again', 1],
+			}),
+		]);
+	});
+
+	it('writes a timestamp as the local time node-pg would bind', async () => {
+		vi.stubEnv('TZ', 'Europe/Paris');
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, published: '2026-10-24T10:00:00.000Z' },
+			{ id: 2, published: '2026-10-24T11:00:00.000Z' },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: [
+					'[{"published":"2026-10-24T12:00:00.000+02:00","id":1},'
+					+ '{"published":"2026-10-24T13:00:00.000+02:00","id":2}]',
+				],
+			}),
+		]);
+	});
+
+	it('writes a number into a string field as node-pg would bind it', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 1e-7 },
+			{ id: 2, title: 1e21 },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"1e-7","id":1},{"title":"1e+21","id":2}]'],
+			}),
+		]);
+	});
+
+	it('leaves a field the rows set to undefined as it is', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first', status: undefined },
+			{ id: 2, title: 'second', status: undefined },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: oneLine`
+					update "posts" set "title" = "v"."title"
+					from jsonb_populate_recordset(null::"posts", $1) as "v"
+					where "posts"."id" = "v"."id"
+				`,
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+		]);
+	});
+
+	it(oneLine`
+		writes the groups one by one when a permission preset sets a json field
+	`, async () => {
+		vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+			return { ...payload, meta: { origin: 'preset' } };
+		});
+
+		pgTracker.on.select('posts').response([]);
+		pgTracker.on.any('posts').response({});
+
+		try {
+			await new ItemsService('posts', {
+				knex: pgDatabase,
+				schema: postsSchema,
+				accountability: { user: 'u1', role: 'r1', admin: false, app: true } as any,
+			}).updateBatch([
+				{ id: 1, title: 'first' },
+				{ id: 2, title: 'second' },
+			]);
+		}
+		finally {
+			vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+				return payload;
+			});
+		}
+
+		expect(pgTracker.history.all).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1, "meta" = $2 where "id" in ($3)',
+				bindings: ['first', '{"origin":"preset"}', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1, "meta" = $2 where "id" in ($3)',
+				bindings: ['second', '{"origin":"preset"}', 2],
+			}),
+		]));
+	});
+
+	it(oneLine`
+		writes the groups one by one when the batch breaks a unique constraint
+	`, async () => {
+		const uniqueError: any = new Error(
+			'duplicate key value violates unique constraint "posts_title_unique"',
+		);
+
+		uniqueError.code = '23505';
+
+		pgTracker.on.any(/jsonb_populate_recordset/).simulateError(uniqueError);
+
+		pgTracker.on.any('posts').response({});
+
+		const keys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		]);
+
+		expect(keys).toEqual([1, 2]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['first', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['second', 2],
+			}),
+		]);
+	});
+
+	it(oneLine`
+		raises any other batch error without writing the groups one by one
+	`, async () => {
+		const notNullError: any = new Error(oneLine`
+			null value in column "title" of relation "posts" violates not-null
+			constraint
+		`);
+
+		notNullError.code = '23502';
+		notNullError.table = 'posts';
+		notNullError.column = 'title';
+
+		pgTracker.on.any(/jsonb_populate_recordset/).simulateError(notNullError);
+		pgTracker.on.any('posts').response({});
+
+		await expect(new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		])).rejects.toThrow(new NotNullViolationError({
+			collection: 'posts',
+			field: 'title',
+		}));
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+		]);
 	});
 });

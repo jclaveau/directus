@@ -9,7 +9,8 @@ Feature: An update reaches its hooks as one grouped event
   key alone. The log is emptied before each scenario.
   `test_update_groups_owner` holds rows too, and no update hook listens to it.
   `test_update_groups_slot` lets a holder hold each slot once (a unique
-  `(holder, slot)`), and no update hook listens to it either.
+  `(holder, slot)`), and no update hook listens to it either. Its `label`
+  starts "unlabelled", and its `owner` points at `test_update_groups_owner`.
   `test_update_groups_badge` is keyed by uuid, and no update hook listens to
   it.
 
@@ -155,6 +156,76 @@ Feature: An update reaches its hooks as one grouped event
       | hand-a | first  | open   |
       | hand-b | second | closed |
       | hand-c | second | open   |
+
+  Scenario: a batch hands a slot over to a row stored before the one freeing it
+    Given the rows, in the collection holding each slot once per holder:
+      | name   | holder   | slot |
+      | take-d | holder-d |      |
+      | free-d | holder-d | open |
+    When the batch sends the slots:
+      | name   | slot   |
+      | free-d | closed |
+      | take-d | open   |
+    Then the update succeeds
+    And the slots hold:
+      | name   | holder   | slot   |
+      | take-d | holder-d | open   |
+      | free-d | holder-d | closed |
+
+  Scenario: a batch taking a slot its holder still holds is refused, writing nothing
+    Given the rows, in the collection holding each slot once per holder:
+      | name    | holder         | slot |
+      | keep-e  | holder-e       | open |
+      | move-e  | holder-e       |      |
+      | other-e | holder-e-other |      |
+    When the batch sends the slots:
+      | name    | slot   |
+      | other-e | closed |
+      | move-e  | open   |
+    Then the update is refused with the message:
+      """
+      Value for field "holder, slot" in collection "test_update_groups_slot" has
+      to be unique.
+      """
+    And the slots hold:
+      | name    | holder         | slot |
+      | keep-e  | holder-e       | open |
+      | move-e  | holder-e       |      |
+      | other-e | holder-e-other |      |
+
+  Scenario: a batch naming an owner that does not exist is refused
+    Given the rows, in the collection holding each slot once per holder:
+      | name    | holder   | slot |
+      | owner-f | holder-f |      |
+      | ghost-f | holder-f | open |
+    When the batch sends the owners, a blank one as null:
+      | name    | owner  |
+      | owner-f |        |
+      | ghost-f | 999999 |
+    Then the update is refused with the message:
+      """
+      Invalid foreign key "999999" for field "owner" in collection
+      "test_update_groups_slot" (references "test_update_groups_owner").
+      """
+
+  Scenario: rows side by side changing different fields are each written
+    Given the rows, in the collection holding each slot once per holder:
+      | name  | holder   | slot |
+      | mix-g | holder-g |      |
+      | mix-h | holder-h |      |
+    When the batch sends the slots and labels:
+      | name  | slot | label  |
+      | mix-g | open |        |
+      | mix-h |      | tagged |
+    Then the update succeeds
+    And the slots hold:
+      | name  | holder   | slot |
+      | mix-g | holder-g | open |
+      | mix-h | holder-h |      |
+    And the labels hold:
+      | name  | label      |
+      | mix-g | unlabelled |
+      | mix-h | tagged     |
 
   Scenario: a row a batch changes back and forth keeps the last change it was sent
     Given the rows:
