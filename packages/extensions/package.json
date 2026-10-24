@@ -59,7 +59,7 @@
 		"vue-router": "catalog:"
 	},
 	"peerDependencies": {
-		"knex": "catalog:",
+		"knex": "^3.1.0",
 		"pino": "catalog:",
 		"vue": "catalog:",
 		"vue-router": "catalog:"
