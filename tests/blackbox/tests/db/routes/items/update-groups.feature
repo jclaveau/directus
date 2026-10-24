@@ -10,7 +10,7 @@ Feature: An update reaches its hooks as one grouped event
   `test_update_groups_owner` holds rows too, and no update hook listens to it.
   `test_update_groups_slot` lets a holder hold each slot once (a unique
   `(holder, slot)`), and no update hook listens to it either. Its `label`
-  refuses null and starts "unlabelled".
+  starts "unlabelled", and its `owner` points at `test_update_groups_owner`.
   `test_update_groups_badge` is keyed by uuid, and no update hook listens to
   it.
 
@@ -159,25 +159,25 @@ Feature: An update reaches its hooks as one grouped event
 
   Scenario: a batch hands a slot over to a row stored before the one freeing it
     Given the rows, in the collection holding each slot once per holder:
-      | name   | holder | slot |
-      | take-d | second |      |
-      | free-d | second | open |
+      | name   | holder   | slot |
+      | take-d | holder-d |      |
+      | free-d | holder-d | open |
     When the batch sends the slots:
       | name   | slot   |
       | free-d | closed |
       | take-d | open   |
     Then the update succeeds
     And the slots hold:
-      | name   | holder | slot   |
-      | take-d | second | open   |
-      | free-d | second | closed |
+      | name   | holder   | slot   |
+      | take-d | holder-d | open   |
+      | free-d | holder-d | closed |
 
   Scenario: a batch taking a slot its holder still holds is refused, writing nothing
     Given the rows, in the collection holding each slot once per holder:
-      | name    | holder | slot |
-      | keep-e  | second | open |
-      | move-e  | second |      |
-      | other-e | first  |      |
+      | name    | holder         | slot |
+      | keep-e  | holder-e       | open |
+      | move-e  | holder-e       |      |
+      | other-e | holder-e-other |      |
     When the batch sends the slots:
       | name    | slot   |
       | other-e | closed |
@@ -188,44 +188,40 @@ Feature: An update reaches its hooks as one grouped event
       to be unique.
       """
     And the slots hold:
-      | name    | holder | slot |
-      | keep-e  | second | open |
-      | move-e  | second |      |
-      | other-e | first  |      |
+      | name    | holder         | slot |
+      | keep-e  | holder-e       | open |
+      | move-e  | holder-e       |      |
+      | other-e | holder-e-other |      |
 
-  Scenario: a batch writing null into a field refusing it is refused, writing nothing
+  Scenario: a batch naming an owner that does not exist is refused
     Given the rows, in the collection holding each slot once per holder:
-      | name    | holder | slot |
-      | label-f | first  |      |
-      | blank-f | second |      |
-    When the batch sends the labels, a blank one as null:
-      | name    | label  |
-      | label-f | tagged |
-      | blank-f |        |
+      | name    | holder   | slot |
+      | owner-f | holder-f |      |
+      | ghost-f | holder-f | open |
+    When the batch sends the owners, a blank one as null:
+      | name    | owner  |
+      | owner-f |        |
+      | ghost-f | 999999 |
     Then the update is refused with the message:
       """
-      Value for field "label" in collection "test_update_groups_slot" can't be
-      null.
+      Invalid foreign key "999999" for field "owner" in collection
+      "test_update_groups_slot" (references "test_update_groups_owner").
       """
-    And the labels hold:
-      | name    | label      |
-      | label-f | unlabelled |
-      | blank-f | unlabelled |
 
   Scenario: rows side by side changing different fields are each written
     Given the rows, in the collection holding each slot once per holder:
-      | name  | holder | slot |
-      | mix-g | first  |      |
-      | mix-h | second |      |
+      | name  | holder   | slot |
+      | mix-g | holder-g |      |
+      | mix-h | holder-h |      |
     When the batch sends the slots and labels:
       | name  | slot | label  |
       | mix-g | open |        |
       | mix-h |      | tagged |
     Then the update succeeds
     And the slots hold:
-      | name  | holder | slot |
-      | mix-g | first  | open |
-      | mix-h | second |      |
+      | name  | holder   | slot |
+      | mix-g | holder-g | open |
+      | mix-h | holder-h |      |
     And the labels hold:
       | name  | label      |
       | mix-g | unlabelled |

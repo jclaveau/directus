@@ -340,15 +340,15 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
-			'the batch sends the labels, a blank one as null:',
+			'the batch sends the owners, a blank one as null:',
 			async (table: Record<string, string>[]) => {
 				update.response = await request(getUrl(vendor))
 					.patch(`/items/${update.collection}`)
-					.send(parseGherkinTable<{ name: string; label: string | null }>(table)
+					.send(parseGherkinTable<{ name: string; owner: number | null }>(table)
 						.map((change) => {
 							return {
 								id: update.rows.find((row) => row.name === change.name)!.id,
-								label: change.label,
+								owner: change.owner,
 							};
 						}))
 					.set('Authorization', update.authorization);
@@ -722,10 +722,7 @@ describe.each(vendors)('%s', (vendor) => {
 				a batch taking a slot its holder still holds is refused, writing
 				nothing
 			`,
-			oneLine`
-				a batch writing null into a field refusing it is refused, writing
-				nothing
-			`,
+			'a batch naming an owner that does not exist is refused',
 			'rows side by side changing different fields are each written',
 			oneLine`
 				a row a batch changes back and forth keeps the last change it was

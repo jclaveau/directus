@@ -2,6 +2,7 @@ import {
 	ForbiddenError,
 	InvalidForeignKeyError,
 	InvalidPayloadError,
+	NotNullViolationError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import {
@@ -4332,9 +4333,10 @@ describe('updateBatch on postgres', () => {
 		}).updateBatch([
 			{ id: 1, title: 'first' },
 			{ id: 2, title: 'second' },
-		])).rejects.toThrow(new Error(
-			`Value for field "title" in collection "posts" can't be null.`,
-		));
+		])).rejects.toThrow(new NotNullViolationError({
+			collection: 'posts',
+			field: 'title',
+		}));
 
 		expect(pgTracker.history.all).toEqual([
 			expect.objectContaining({

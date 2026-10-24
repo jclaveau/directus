@@ -21,8 +21,8 @@ export const seedDBStructure = () => {
 			try {
 				await DeleteCollection(vendor, { collection: collectionGrouped });
 				await DeleteCollection(vendor, { collection: collectionGroupedLog });
-				await DeleteCollection(vendor, { collection: collectionGroupedOwner });
 				await DeleteCollection(vendor, { collection: collectionGroupedSlot });
+				await DeleteCollection(vendor, { collection: collectionGroupedOwner });
 				await DeleteCollection(vendor, { collection: collectionGroupedBadge });
 
 				await CreateCollections(vendor, {
@@ -65,7 +65,7 @@ export const seedDBStructure = () => {
 									field: 'label',
 									type: 'string',
 									meta: {},
-									schema: { is_nullable: false, default_value: 'unlabelled' },
+									schema: { default_value: 'unlabelled' },
 								},
 							],
 						},
@@ -95,6 +95,12 @@ export const seedDBStructure = () => {
 
 				await CreateFieldM2O(vendor, {
 					collection: collectionGrouped,
+					field: 'owner',
+					otherCollection: collectionGroupedOwner,
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionGroupedSlot,
 					field: 'owner',
 					otherCollection: collectionGroupedOwner,
 				});
