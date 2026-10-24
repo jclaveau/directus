@@ -2749,7 +2749,10 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.upsertOne` under the hood.
 	 */
-	async upsertMany(payloads: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	async upsertMany(
+		payloads: Partial<Item>[],
+		opts: MutationOptions & ResponseCacheFlushDeferral = {},
+	): Promise<PrimaryKey[]> {
 		if (!opts.mutationTracker) {
 			opts.mutationTracker = this.createMutationTracker();
 		}
