@@ -35,6 +35,7 @@ import {
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
+import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -193,6 +194,9 @@ describe('Integration Tests', () => {
 	afterEach(() => {
 		tracker.reset();
 		vi.restoreAllMocks();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('Services / Items', () => {
@@ -681,6 +685,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('returns the keys in the order the caller sent the rows', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				const keys = await service.updateBatch([
 					{ id: 5, name: 'same' },
 					{ id: 4, name: 'other' },
@@ -715,6 +721,8 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				writes rows apart carrying the same change in the order sent
 			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				// Row 1 may free a value row 2 takes, or row 2 one row 3 takes, so
 				// writing rows 1 and 3 together would reorder the batch.
 				const keys = await service.updateBatch([
@@ -2258,6 +2266,9 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		revisionIds.issued = 0;
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('system collection event scope', () => {
@@ -2482,6 +2493,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('keeps two keys apart past the safe integers', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('big_coll').response(1);
 
 			const updatedKeys = await new ItemsService('big_coll', {
@@ -2530,6 +2543,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('writes two keys apart that differ in case only', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('code_coll').response(1);
 
 			const updatedKeys = await new ItemsService('code_coll', {
@@ -3022,6 +3037,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('splits off the row it rewrote and answers in the caller order', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
@@ -4173,6 +4190,7 @@ describe('updateBatch on postgres', () => {
 			c.field('title').string();
 			c.field('status').string();
 			c.field('published').timestamp();
+			c.field('meta').json();
 		})
 		.build();
 
@@ -4188,6 +4206,10 @@ describe('updateBatch on postgres', () => {
 		delete Object.getPrototypeOf(MockClient.prototype)._events;
 
 		pgTracker = createTracker(pgDatabase);
+	});
+
+	beforeEach(() => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	afterEach(() => {
@@ -4272,6 +4294,85 @@ describe('updateBatch on postgres', () => {
 				],
 			}),
 		]);
+	});
+
+	it('writes a number into a string field as node-pg would bind it', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 1e-7 },
+			{ id: 2, title: 1e21 },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"1e-7","id":1},{"title":"1e+21","id":2}]'],
+			}),
+		]);
+	});
+
+	it('leaves a field the rows set to undefined as it is', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first', status: undefined },
+			{ id: 2, title: 'second', status: undefined },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: oneLine`
+					update "posts" set "title" = "v"."title"
+					from jsonb_populate_recordset(null::"posts", $1) as "v"
+					where "posts"."id" = "v"."id"
+				`,
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+		]);
+	});
+
+	it(oneLine`
+		writes the groups one by one when a permission preset sets a json field
+	`, async () => {
+		vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+			return { ...payload, meta: { origin: 'preset' } };
+		});
+
+		pgTracker.on.select('posts').response([]);
+		pgTracker.on.any('posts').response({});
+
+		try {
+			await new ItemsService('posts', {
+				knex: pgDatabase,
+				schema: postsSchema,
+				accountability: { user: 'u1', role: 'r1', admin: false, app: true } as any,
+			}).updateBatch([
+				{ id: 1, title: 'first' },
+				{ id: 2, title: 'second' },
+			]);
+		}
+		finally {
+			vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+				return payload;
+			});
+		}
+
+		expect(pgTracker.history.all).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1, "meta" = $2 where "id" in ($3)',
+				bindings: ['first', '{"origin":"preset"}', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1, "meta" = $2 where "id" in ($3)',
+				bindings: ['second', '{"origin":"preset"}', 2],
+			}),
+		]));
 	});
 
 	it(oneLine`
