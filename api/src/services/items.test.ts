@@ -4273,9 +4273,16 @@ describe('updateBatch on postgres', () => {
 		]);
 	});
 
-	it('writes the groups one by one when the batch fails', async () => {
-		pgTracker.on.any(/jsonb_populate_recordset/)
-			.simulateError('duplicate key value violates unique constraint');
+	it(oneLine`
+		writes the groups one by one when the batch breaks a unique constraint
+	`, async () => {
+		const uniqueError: any = new Error(
+			'duplicate key value violates unique constraint "posts_title_unique"',
+		);
+
+		uniqueError.code = '23505';
+
+		pgTracker.on.any(/jsonb_populate_recordset/).simulateError(uniqueError);
 
 		pgTracker.on.any('posts').response({});
 
@@ -4300,6 +4307,38 @@ describe('updateBatch on postgres', () => {
 			expect.objectContaining({
 				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
 				bindings: ['second', 2],
+			}),
+		]);
+	});
+
+	it(oneLine`
+		raises any other batch error without writing the groups one by one
+	`, async () => {
+		const notNullError: any = new Error(oneLine`
+			null value in column "title" of relation "posts" violates not-null
+			constraint
+		`);
+
+		notNullError.code = '23502';
+		notNullError.table = 'posts';
+		notNullError.column = 'title';
+
+		pgTracker.on.any(/jsonb_populate_recordset/).simulateError(notNullError);
+		pgTracker.on.any('posts').response({});
+
+		await expect(new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		])).rejects.toThrow(new Error(
+			`Value for field "title" in collection "posts" can't be null.`,
+		));
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
 			}),
 		]);
 	});

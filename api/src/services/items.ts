@@ -263,6 +263,9 @@ const BATCH_FIELD_TYPES = new Set<Type>([
 	'uuid',
 ]);
 
+// Postgres' SQLSTATE for unique_violation.
+const UNIQUE_VIOLATION_CODE = '23505';
+
 /**
  * A value as the batch's JSON must carry it to store what node-pg binds: a Date
  * in local time with its offset, whose wall clock a `timestamp` column keeps; a
@@ -2687,13 +2690,23 @@ implements AbstractService<Item> {
 				});
 			});
 
-		// A failed batch rolls back to its savepoint and leaves the run to
-		// `applyUpdateGroup`, which raises the failing group's error, translated, or
-		// writes the rows in the caller's order where only the statement's own row
-		// order broke a unique constraint.
+		// The statement updates the rows in its own order, so it can break a unique
+		// constraint the caller's order would not: that batch rolls back to its
+		// savepoint and leaves the run to `applyUpdateGroup`. Any other error would
+		// fail the same group by group, so it is raised, with no group's payload
+		// since the failing row is unknown.
 		const wroteBatch = isBatchable && await this.knex
 			.batchUpdate(this.collection, batchRows, primaryKeyField, { mode: 'json' })
-			.then(() => true, () => false);
+			.then(() => true, async (error) => {
+				if (error?.code === UNIQUE_VIOLATION_CODE) {
+					return false;
+				}
+
+				throw await translateDatabaseError(error, {}, this.knex, {
+					collection: this.collection,
+					operation: 'update',
+				});
+			});
 
 		if (!wroteBatch) {
 			const appliedGroups: UpdateGroup<Item>[] = [];
