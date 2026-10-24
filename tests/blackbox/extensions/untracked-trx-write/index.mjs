@@ -1,5 +1,5 @@
-// Writes a user's role inside a transaction the extension opens itself, which
-// `transaction()` never tracked, then reads as another user before it commits
+// Writes a user's role inside a transaction the extension opens itself with
+// `database.transaction()`, then reads as another user before it commits
 // (cache-untracked-transaction-flush.feature).
 //
 //   POST /untracked-trx-write/move-user

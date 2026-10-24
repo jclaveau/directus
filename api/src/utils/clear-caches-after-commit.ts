@@ -69,9 +69,9 @@ export async function flushResponseCacheAfterCommit(
 /**
  * Run `cacheTask` once the transaction `knex` belongs to commits or rolls back,
  * or at once outside a transaction. A savepoint waits for the transaction it
- * nests in. A transaction `transaction()` did not open, such as an extension's
- * own `database.transaction()`, holds no queue, so the task follows its
- * `executionPromise` instead, and an error it raises is logged.
+ * nests in. A transaction opened on a knex instance `trackTransactionsOf` never
+ * saw, such as one an extension builds itself, holds no queue, so the task
+ * follows its `executionPromise` instead, and an error it raises is logged.
  */
 async function runOnceSettled(
 	knex: Knex,

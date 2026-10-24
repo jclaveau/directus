@@ -14,6 +14,7 @@ import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import { isArray, merge, toArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
+import { trackTransactionsOf } from '../utils/transaction.js';
 import { validateEnv } from '../utils/validate-env.js';
 import {
 	assertConnectionNamesAreUnique,
@@ -179,6 +180,7 @@ export function constructDatabase(
 	}
 
 	const dbInstance = knex.default(knexConfig);
+	trackTransactionsOf(dbInstance);
 	validateDatabaseCharset(dbInstance);
 
 	if (queryAuditEnabled()) {

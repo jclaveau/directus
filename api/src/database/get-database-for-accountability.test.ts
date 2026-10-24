@@ -24,6 +24,10 @@ const { mockEnv, knexInstances, mockKnexFactory } = vi.hoisted(() => {
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv }));
 vi.mock('knex', () => ({ default: { default: mockKnexFactory } }));
 
+vi.mock('../utils/transaction.js', () => {
+	return { trackTransactionsOf: vi.fn() };
+});
+
 vi.mock('../logger/index.js', () => {
 	return {
 		useLogger: () => {
