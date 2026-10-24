@@ -12,6 +12,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
+import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -429,7 +430,7 @@ describe(oneLine`
 		}, 60_000);
 
 		afterAll(async () => {
-			instance.kill();
+			await stopSpawnedInstance(instance);
 
 			// The two cascade into each other, so neither can go while the other's
 			// foreign key still names it.
