@@ -2,6 +2,7 @@ import type { MutationOptions } from '@directus/types';
 import type { Knex } from 'knex';
 import type { Keyv } from 'keyv';
 import { clearSystemCache } from '../cache.js';
+import { useLogger } from '../logger/index.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
 import { queueAfterCommitOrRollback } from './transaction.js';
 
@@ -39,9 +40,7 @@ export async function clearCachesAfterCommit(
 		}
 	};
 
-	if (!queueAfterCommitOrRollback(knex, clearCaches)) {
-		await clearCaches();
-	}
+	await runOnceSettled(knex, clearCaches);
 }
 
 /**
@@ -64,11 +63,47 @@ export async function flushResponseCacheAfterCommit(
 		return;
 	}
 
-	const flushCache = () => {
-		return flushResponseCache(responseCache);
+	await runOnceSettled(knex, () => flushResponseCache(responseCache));
+}
+
+/**
+ * Run `cacheTask` once the transaction `knex` belongs to commits or rolls back,
+ * or at once outside a transaction. A savepoint waits for the transaction it
+ * nests in. A transaction `transaction()` did not open, such as an extension's
+ * own `database.transaction()`, holds no queue, so the task follows its
+ * `executionPromise` instead, and an error it raises is logged.
+ */
+async function runOnceSettled(
+	knex: Knex,
+	cacheTask: () => Promise<void>,
+): Promise<void> {
+	if (!knex.isTransaction) {
+		await cacheTask();
+
+		return;
+	}
+
+	let outermostTrx = knex as Knex.Transaction;
+
+	while (outermostTrx.parentTransaction) {
+		outermostTrx = outermostTrx.parentTransaction;
+	}
+
+	if (queueAfterCommitOrRollback(outermostTrx, cacheTask)) {
+		return;
+	}
+
+	const runLoggingFailure = async () => {
+		try {
+			await cacheTask();
+		}
+		catch (error) {
+			useLogger().error(
+				error,
+				`[cache] a flush held until a transaction settled failed: ${error}`,
+			);
+		}
 	};
 
-	if (!queueAfterCommitOrRollback(knex, flushCache)) {
-		await flushCache();
-	}
+	void outermostTrx.executionPromise.then(runLoggingFailure, runLoggingFailure);
 }
