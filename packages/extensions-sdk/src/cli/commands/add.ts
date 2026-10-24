@@ -6,7 +6,7 @@ import type {
 import type { NestedExtensionType } from '@directus/types';
 import { EXTENSION_LANGUAGES, EXTENSION_PKG_KEY, ExtensionManifest } from '@directus/extensions';
 import { EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants';
-import { isIn, isTypeIn } from '@directus/utils';
+import { isIn, isTypeIn } from '@directus/utils/array-helpers';
 import { pathToRelativeUrl } from '@directus/utils/node';
 import chalk from 'chalk';
 import { execa } from 'execa';
