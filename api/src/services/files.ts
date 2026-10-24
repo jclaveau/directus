@@ -594,17 +594,27 @@ export async function deleteFileAndThumbnails(disk: Driver, filenameDisk: string
 				const rootedPath = filepath.replace(/^\/+/, '');
 
 				if (rootedPath === filenameDisk || thumbnailPattern.test(rootedPath)) {
-					await disk.delete(filepath);
+					// A file deleted since the listing named it is already gone.
+					try {
+						await disk.delete(filepath);
+					}
+					catch (error) {
+						ignoreMissingFile(error);
+					}
 				}
 			}
 		}
+		// A local disk lists a folder by opening it, and a folder that is gone
+		// holds nothing to delete.
 		catch (error) {
-			// A local disk lists a folder by opening it, and a folder that is gone
-			// holds nothing to delete.
-			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-				throw error;
-			}
+			ignoreMissingFile(error);
 		}
+	}
+}
+
+function ignoreMissingFile(error: unknown) {
+	if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+		throw error;
 	}
 }
 

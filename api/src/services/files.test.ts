@@ -1178,6 +1178,47 @@ describe('Integration Tests', () => {
 					[`x__${thumbnailHash}.webp`],
 				]);
 			});
+
+			it('deletes past a thumbnail gone since the listing', async () => {
+				const service = new FilesService({
+					knex: db,
+					schema: { collections: {}, relations: [] },
+				});
+
+				const thumbnailHash = 'd'.repeat(40);
+
+				const mockDriver: Partial<Driver> = {
+					list: vi.fn(async function* () {
+						yield* [`a__${thumbnailHash}.webp`, 'a.jpg'];
+					}),
+					delete: vi.fn(async (filepath: string) => {
+						if (filepath === `a__${thumbnailHash}.webp`) {
+							throw Object.assign(
+								new Error('ENOENT: no such file or directory, unlink'),
+								{ code: 'ENOENT' },
+							);
+						}
+					}),
+				};
+
+				vi.mocked(getStorage).mockResolvedValue({
+					location: vi.fn(() => mockDriver as Driver),
+				} as Partial<StorageManager> as StorageManager);
+
+				vi.spyOn(ItemsService.prototype, 'readMany').mockResolvedValue(withMeta(
+					[{ id: 'root-id', storage: 'local', filename_disk: 'a.jpg' }],
+					{ scopedCacheFingerprints: [] },
+				));
+
+				vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue([]);
+
+				await service.deleteMany(['root-id']);
+
+				expect(vi.mocked(mockDriver.delete!).mock.calls).toStrictEqual([
+					[`a__${thumbnailHash}.webp`],
+					['a.jpg'],
+				]);
+			});
 		});
 	});
 });
