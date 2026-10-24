@@ -7,6 +7,7 @@ import {
 	queueAfterCommit,
 	queueAfterCommitOrRollback,
 	queueMergedAfterCommit,
+	trackTransactionsOf,
 	transaction,
 } from './transaction.js';
 
@@ -425,5 +426,179 @@ describe('queueMergedAfterCommit', () => {
 			}));
 
 		expect(runRequest.mock.calls).toEqual([[db, ['committed row']]]);
+	});
+});
+
+describe('trackTransactionsOf', () => {
+	it(oneLine`
+		holds a task queued on a trx database.transaction(handler) opened until it
+		commits
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const trxCompletedWhenRun = vi.fn();
+
+		await db.transaction(async (trx) => {
+			queueAfterCommit(trx, async () => {
+				trxCompletedWhenRun(trx.isCompleted());
+			});
+		});
+
+		expect(trxCompletedWhenRun.mock.calls).toEqual([[true]]);
+	});
+
+	it('runs a task held for a rollback once the handler threw', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await expect(db.transaction(async (trx) => {
+			queueAfterCommitOrRollback(trx, queuedTask);
+
+			throw new Error('write failed');
+		})).rejects.toThrow(new Error('write failed'));
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
+	it('runs the handler once, a retry code included', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const busyError = Object.assign(new Error('busy'), { code: 'SQLITE_BUSY' });
+
+		const handler = vi.fn(async () => {
+			throw busyError;
+		});
+
+		await expect(db.transaction(handler)).rejects.toBe(busyError);
+
+		expect(handler).toHaveBeenCalledOnce();
+	});
+
+	it('resolves to what the handler returned', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		await expect(db.transaction(async () => 'committed'))
+			.resolves.toBe('committed');
+	});
+
+	it(oneLine`
+		holds a task queued on a trx database.transaction() opened until its
+		commit() resolves
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+
+		queueAfterCommit(trx, queuedTask);
+
+		expect(queuedTask).not.toHaveBeenCalled();
+
+		await trx.commit();
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		runs only the tasks held for a rollback once rollback() resolves
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const committedTask = vi.fn(async () => {});
+		const settledTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+
+		queueAfterCommit(trx, committedTask);
+		queueAfterCommitOrRollback(trx, settledTask);
+
+		await trx.rollback();
+
+		expect(committedTask).not.toHaveBeenCalled();
+		expect(settledTask).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		holds a task queued on a trx database.transaction(config) opened
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transaction({ isolationLevel: 'serializable' });
+
+		queueAfterCommit(trx, queuedTask);
+		await trx.commit();
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
+	it('holds a task queued on a trx transactionProvider() opened', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transactionProvider()();
+
+		queueAfterCommit(trx, queuedTask);
+		await trx.commit();
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
+	it('runs a task queued in transaction() on a tracked database once', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await transaction(db, async (trx) => {
+			queueAfterCommit(trx, queuedTask);
+		});
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
+		still retries the handler transaction() runs on a tracked database
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const handler = vi.fn()
+			.mockRejectedValueOnce(
+				Object.assign(new Error('busy'), { code: 'SQLITE_BUSY' }),
+			)
+			.mockResolvedValueOnce('committed');
+
+		await expect(transaction(db, handler)).resolves.toBe('committed');
+
+		expect(handler).toHaveBeenCalledTimes(2);
 	});
 });
