@@ -34,6 +34,7 @@ import {
 	AutoIncrementHelperPostgres,
 } from '../database/helpers/sequence/dialects/postgres.js';
 import emitter from '../emitter.js';
+import { useLogger } from '../logger/index.js';
 import {
 	ItemScopedCacheService,
 	flushResponseCache,
@@ -77,6 +78,12 @@ vi.mock('../../src/database/index', () => ({
 }));
 
 vi.mock('../utils/validate-user-count-integrity.js');
+
+vi.mock('../logger/index.js', () => {
+	const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn(), trace: vi.fn() };
+
+	return { useLogger: () => logger };
+});
 
 vi.mock('../cache.js', () => {
 	return {
@@ -3337,6 +3344,43 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(flushResponseCache).not.toHaveBeenCalled();
 			expect(onResponseCacheFlushDeferred).toHaveBeenCalledOnce();
+		});
+
+		it('logs a flush that fails once the upsert committed', async () => {
+			tracker.on.select('directus_users').response([
+				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
+			]);
+
+			tracker.on.update('directus_users').response(1);
+
+			const flushFailure = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+
+			vi.mocked(flushResponseCache).mockRejectedValueOnce(flushFailure);
+
+			const upsertedKeys = await new UsersService({
+				knex: db,
+				schema: new SchemaBuilder()
+					.collection('directus_users', (c) => {
+						c.field('id').uuid()
+							.primary();
+
+						c.field('role').uuid();
+					})
+					.build(),
+			}).upsertMany([
+				{
+					id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0',
+					role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
+				},
+			]);
+
+			expect(upsertedKeys).toEqual(['0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0']);
+
+			expect(useLogger().error).toHaveBeenCalledWith(
+				flushFailure,
+				oneLine`[cache] the response-cache flush a batch held until its
+					transaction settled failed: Error: connect ECONNREFUSED 127.0.0.1:6379`,
+			);
 		});
 	});
 

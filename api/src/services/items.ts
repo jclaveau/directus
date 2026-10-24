@@ -54,6 +54,7 @@ import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
+import { useLogger } from '../logger/index.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -2823,9 +2824,22 @@ implements AbstractService<Item> {
 		// permission) leaves it to this batch, which flushes once for every row.
 		let responseCacheFlushDeferred = false;
 
+		// Logged, not thrown, like a flush a transaction drains: the rows have
+		// committed, and the scoped purge below must still run.
 		const flushDeferredResponseCache = async () => {
-			if (responseCacheFlushDeferred) {
+			if (!responseCacheFlushDeferred) {
+				return;
+			}
+
+			try {
 				await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+			}
+			catch (error) {
+				useLogger().error(
+					error,
+					oneLine`[cache] the response-cache flush a batch held until its
+						transaction settled failed: ${error}`,
+				);
 			}
 		};
 
