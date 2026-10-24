@@ -61,6 +61,12 @@ export const seedDBStructure = () => {
 								{ field: 'name', type: 'string', meta: {} },
 								{ field: 'holder', type: 'string', meta: {} },
 								{ field: 'slot', type: 'string', meta: {} },
+								{
+									field: 'label',
+									type: 'string',
+									meta: {},
+									schema: { is_nullable: false, default_value: 'unlabelled' },
+								},
 							],
 						},
 						{

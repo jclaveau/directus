@@ -9,7 +9,8 @@ Feature: An update reaches its hooks as one grouped event
   key alone. The log is emptied before each scenario.
   `test_update_groups_owner` holds rows too, and no update hook listens to it.
   `test_update_groups_slot` lets a holder hold each slot once (a unique
-  `(holder, slot)`), and no update hook listens to it either.
+  `(holder, slot)`), and no update hook listens to it either. Its `label`
+  refuses null and starts "unlabelled".
   `test_update_groups_badge` is keyed by uuid, and no update hook listens to
   it.
 
@@ -155,6 +156,80 @@ Feature: An update reaches its hooks as one grouped event
       | hand-a | first  | open   |
       | hand-b | second | closed |
       | hand-c | second | open   |
+
+  Scenario: a batch hands a slot over to a row stored before the one freeing it
+    Given the rows, in the collection holding each slot once per holder:
+      | name   | holder | slot |
+      | take-d | second |      |
+      | free-d | second | open |
+    When the batch sends the slots:
+      | name   | slot   |
+      | free-d | closed |
+      | take-d | open   |
+    Then the update succeeds
+    And the slots hold:
+      | name   | holder | slot   |
+      | take-d | second | open   |
+      | free-d | second | closed |
+
+  Scenario: a batch taking a slot its holder still holds is refused, writing nothing
+    Given the rows, in the collection holding each slot once per holder:
+      | name    | holder | slot |
+      | keep-e  | second | open |
+      | move-e  | second |      |
+      | other-e | first  |      |
+    When the batch sends the slots:
+      | name    | slot   |
+      | other-e | closed |
+      | move-e  | open   |
+    Then the update is refused with the message:
+      """
+      Value for field "holder, slot" in collection "test_update_groups_slot" has
+      to be unique.
+      """
+    And the slots hold:
+      | name    | holder | slot |
+      | keep-e  | second | open |
+      | move-e  | second |      |
+      | other-e | first  |      |
+
+  Scenario: a batch writing null into a field refusing it is refused, writing nothing
+    Given the rows, in the collection holding each slot once per holder:
+      | name    | holder | slot |
+      | label-f | first  |      |
+      | blank-f | second |      |
+    When the batch sends the labels, a blank one as null:
+      | name    | label  |
+      | label-f | tagged |
+      | blank-f |        |
+    Then the update is refused with the message:
+      """
+      Value for field "label" in collection "test_update_groups_slot" can't be
+      null.
+      """
+    And the labels hold:
+      | name    | label      |
+      | label-f | unlabelled |
+      | blank-f | unlabelled |
+
+  Scenario: rows side by side changing different fields are each written
+    Given the rows, in the collection holding each slot once per holder:
+      | name  | holder | slot |
+      | mix-g | first  |      |
+      | mix-h | second |      |
+    When the batch sends the slots and labels:
+      | name  | slot | label  |
+      | mix-g | open |        |
+      | mix-h |      | tagged |
+    Then the update succeeds
+    And the slots hold:
+      | name  | holder | slot |
+      | mix-g | first  | open |
+      | mix-h | second |      |
+    And the labels hold:
+      | name  | label      |
+      | mix-g | unlabelled |
+      | mix-h | tagged     |
 
   Scenario: a row a batch changes back and forth keeps the last change it was sent
     Given the rows:
