@@ -18,7 +18,9 @@ import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { nanoid } from 'nanoid';
 import { useLogger } from '../logger/index.js';
-import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
+import {
+	clearPermissionsCacheAfterCommit,
+} from '../utils/clear-caches-after-commit.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import type { DirectusTokenPayload, ShareData } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -56,8 +58,6 @@ export class SharesService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		opts?: MutationOptions,
 	): Promise<PrimaryKey[]> {
-		await clearPermissionsCache();
-
 		if (this.accountability) {
 			await this.validateShareAccess(
 				this.accountability,
@@ -65,7 +65,11 @@ export class SharesService extends ItemsService {
 			);
 		}
 
-		return super.updateGroups(groups, opts);
+		const updatedKeys = await super.updateGroups(groups, opts);
+
+		await clearPermissionsCacheAfterCommit(this.knex);
+
+		return updatedKeys;
 	}
 
 	/**
@@ -166,9 +170,11 @@ export class SharesService extends ItemsService {
 	}
 
 	override async deleteMany(keys: PrimaryKey[], opts?: MutationOptions): Promise<PrimaryKey[]> {
-		await clearPermissionsCache();
+		const deletedKeys = await super.deleteMany(keys, opts);
 
-		return super.deleteMany(keys, opts);
+		await clearPermissionsCacheAfterCommit(this.knex);
+
+		return deletedKeys;
 	}
 
 	async login(

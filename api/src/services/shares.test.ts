@@ -16,6 +16,7 @@ import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
 import { withMeta } from '../utils/read-meta.js';
+import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 import type { EmailOptions } from './mail/index.js';
 import { SharesService } from './shares.js';
@@ -209,6 +210,26 @@ describe('Services / Shares', () => {
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
 			expect(deleteMany).toHaveBeenCalledWith(['share-id-4'], undefined);
 		});
+
+		it('clears the permissions cache once the transaction commits', async () => {
+			vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['share-id-4']);
+
+			const transactionStates: string[][] = [];
+
+			vi.mocked(clearPermissionsCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await transaction(db, async (trx) => {
+				await new SharesService({ knex: trx, schema })
+					.deleteMany(['share-id-4']);
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
+		});
 	});
 
 	describe('login', () => {
@@ -340,6 +361,25 @@ describe('Services / Shares', () => {
 			]);
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+		});
+
+		it('clears the permissions cache once the transaction commits', async () => {
+			vi.spyOn(ItemsService.prototype, 'updateGroups').mockResolvedValue([1]);
+
+			const transactionStates: string[][] = [];
+
+			vi.mocked(clearPermissionsCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await transaction(db, async (trx) => {
+				await new SharesService({ knex: trx, schema })
+					.updateBatch([{ id: 1, max_uses: 3 }]);
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
 		});
 	});
 

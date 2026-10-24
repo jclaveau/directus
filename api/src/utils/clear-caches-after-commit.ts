@@ -3,6 +3,7 @@ import type { Knex } from 'knex';
 import type { Keyv } from 'keyv';
 import { clearSystemCache } from '../cache.js';
 import { useLogger } from '../logger/index.js';
+import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { flushResponseCache } from '../scoped-cache/index.js';
 import { queueAfterCommitOrRollback } from './transaction.js';
 
@@ -64,6 +65,14 @@ export async function flushResponseCacheAfterCommit(
 	}
 
 	await runOnceSettled(knex, () => flushResponseCache(responseCache));
+}
+
+/**
+ * Clear the permissions cache once the transaction `knex` belongs to commits or
+ * rolls back, as `clearCachesAfterCommit` does.
+ */
+export async function clearPermissionsCacheAfterCommit(knex: Knex): Promise<void> {
+	await runOnceSettled(knex, () => clearPermissionsCache());
 }
 
 /**
