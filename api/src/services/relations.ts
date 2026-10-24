@@ -419,12 +419,17 @@ export class RelationsService {
 								}`,
 							);
 
-						if (relation.schema?.on_delete) {
-							builder.onDelete(relation.schema.on_delete);
+						// The payload's `schema` may name one action: the other keeps the
+						// key's stored one rather than the dialect default.
+						const keptSchema = relation.schema
+							&& { ...existingRelation.schema, ...relation.schema };
+
+						if (keptSchema?.on_delete) {
+							builder.onDelete(keptSchema.on_delete);
 						}
 
-						if (relation.schema?.on_update) {
-							builder.onUpdate(relation.schema.on_update);
+						if (keptSchema?.on_update) {
+							builder.onUpdate(keptSchema.on_update);
 						}
 					});
 				}

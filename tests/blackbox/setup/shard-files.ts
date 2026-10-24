@@ -269,6 +269,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/cache-or-root-filter-reverse-chain.test.ts': 10_000,
 	'/tests/db/routes/items/cache-read-inflight-system-flush.test.ts': 10_000,
 	'/tests/db/routes/items/cache-scoped-field-filter-pin.test.ts': 10_000,
+	// Estimated from its spawned instance's boot, not yet measured.
+	'/tests/db/routes/users/cache-role-move-flush.test.ts': 8_000,
+	'/tests/db/routes/users/cache-untracked-transaction-flush.test.ts': 8_000,
 };
 
 export function fileWeight(file: string): number {

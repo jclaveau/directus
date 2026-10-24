@@ -58,6 +58,10 @@ import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import {
+	flushResponseCacheAfterCommit,
+	type ResponseCacheFlushDeferral,
+} from '../utils/clear-caches-after-commit.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import {
@@ -85,7 +89,7 @@ const env = useEnv();
  * update sees the rows an `items.update` filter added, so it reports them, with
  * the slices they sat in before it wrote them.
  */
-export type DeferredPurgeOptions = MutationOptions & {
+export type DeferredPurgeOptions = MutationOptions & ResponseCacheFlushDeferral & {
 	onHookAddedRows?: (
 		hookAddedKeys: PrimaryKey[],
 		oldScopedCacheSnapshot: ScopedCacheSnapshot,
@@ -744,6 +748,7 @@ implements AbstractService<Item> {
 			// the provided keys before the insert runs, not only after it.
 			if (autoIncrementSequenceNeedsToBeReset) {
 				const providedPrimaryKeys = prepared
+					.filter((p) => !isMissingPrimaryKey(p.primaryKey))
 					.map((p) => Number(p.primaryKey))
 					.filter((key) => Number.isFinite(key));
 
@@ -2744,7 +2749,10 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.upsertOne` under the hood.
 	 */
-	async upsertMany(payloads: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	async upsertMany(
+		payloads: Partial<Item>[],
+		opts: MutationOptions & ResponseCacheFlushDeferral = {},
+	): Promise<PrimaryKey[]> {
 		if (!opts.mutationTracker) {
 			opts.mutationTracker = this.createMutationTracker();
 		}
@@ -2811,6 +2819,16 @@ implements AbstractService<Item> {
 			});
 		};
 
+		// A row whose side effect flushes the response cache (a user's role, a
+		// permission) leaves it to this batch, which flushes once for every row.
+		let responseCacheFlushDeferred = false;
+
+		const flushDeferredResponseCache = async () => {
+			if (responseCacheFlushDeferred) {
+				await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+			}
+		};
+
 		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
 		// retryable error.
 		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
@@ -2833,6 +2851,9 @@ implements AbstractService<Item> {
 
 						hookAddedSnapshots.push(addedSnapshot);
 					},
+					onResponseCacheFlushDeferred: () => {
+						responseCacheFlushDeferred = true;
+					},
 				};
 
 				for (const payload of payloads) {
@@ -2843,6 +2864,8 @@ implements AbstractService<Item> {
 			},
 			opts.mutationTracker.snapshot(),
 		).catch(async (error) => {
+			await flushDeferredResponseCache();
+
 			if (!shouldClearCache(this.cache, opts, this.collection)) {
 				throw error;
 			}
@@ -2875,6 +2898,8 @@ implements AbstractService<Item> {
 
 			throw error;
 		});
+
+		await flushDeferredResponseCache();
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const takenOverKeys = changedTakenOverKeys();

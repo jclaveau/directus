@@ -108,16 +108,22 @@ export function defineSingularWriteFeature(
 
 // `<run>` is unique to the scenario; a `<name>` met for the first time stands
 // for a fresh uuid, or for the key a `remember: name` row stored before.
+// `<name:upper>` spells that same value in upper case.
 function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
-	return cell.replaceAll(/<([\w-]+)>/g, (_placeholder, name: string) => {
-		if (name === 'run') {
-			return scenarioKeys.run;
-		}
+	return cell.replaceAll(
+		/<([\w-]+)(:upper)?>/g,
+		(_placeholder, name: string, upperSuffix?: string) => {
+			const keyValue = name === 'run'
+				? scenarioKeys.run
+				: (scenarioKeys.keysByName[name] ??= randomUUID());
 
-		scenarioKeys.keysByName[name] ??= randomUUID();
+			if (upperSuffix) {
+				return keyValue.toUpperCase();
+			}
 
-		return scenarioKeys.keysByName[name];
-	});
+			return keyValue;
+		},
+	);
 }
 
 // The token Directus itself would sign: `!jwt` maps the claims it signs.

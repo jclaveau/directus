@@ -556,7 +556,10 @@ export class FieldsService {
 				if (!isEqual(columnToCompare, hookAdjustedField.schema)) {
 					try {
 						await transaction(this.knex, async (trx) => {
-							await trx.schema.alterTable(collection, async (table) => {
+							// Synchronous: knex never awaits the callback, so an async one
+							// turns a refused column into an unhandled rejection and a
+							// reported success.
+							await trx.schema.alterTable(collection, (table) => {
 								if (!hookAdjustedField.schema) return;
 								this.addColumnToTable(table, collection, field, existingColumn);
 							});

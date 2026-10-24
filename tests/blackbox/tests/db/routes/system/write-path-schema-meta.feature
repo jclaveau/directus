@@ -5,8 +5,8 @@ Feature: Schema rows without meta get their meta on the first update
   - `test_wp_meta_pets.owner_id` is a many-to-one to `test_wp_meta_owners`
     with a meta row; `spare_id` beside it is a plain integer. In
     `test_wp_meta_links`, `link_id` is a plain integer no relation uses yet.
-  - `test_wp_meta_bare` and `test_wp_meta_gql` do not exist before their
-    scenario creates them.
+  - `test_wp_meta_bare`, `test_wp_meta_gql` and `test_wp_meta_gql_field` do
+    not exist before their scenario creates them.
 
   Scenario: a collection and a field created without meta get it on update
     Then these requests get these responses:
@@ -122,3 +122,40 @@ Feature: Schema rows without meta get their meta on the first update
       | method: GET                           | code: 200                            |+
       | path: /relations/test_wp_meta_links   | body:                                |
       |                                       |   data: []                           |
+
+  Scenario: GraphQL updates a field its payload does not name
+    Then these requests get these responses:
+      | request                                     | response                    |
+      | method: POST                                | code: 200                   |+
+      | path: /collections                          |                             |
+      | payload:                                    |                             |
+      |   collection: test_wp_meta_gql_field        |                             |
+      |   schema: {}                                |                             |
+      |   fields:                                   |                             |
+      |     - field: headline                       |                             |
+      |       type: string                          |                             |
+      | method: POST                                | code: 200                   |+
+      | path: /graphql/system                       | body:                       |
+      | payload:                                    |   data:                     |
+      |   query: >-                                 |     update_fields_item:     |
+      |     mutation { update_fields_item(          |       field: headline       |
+      |     collection: "test_wp_meta_gql_field",   |       meta:                 |
+      |     field: "headline",                      |         note: field-<run>   |
+      |     data: { meta: { note: "field-<run>" } } |                             |
+      |     ) { field meta { note } } }             |                             |
+      | method: DELETE                              | code: 204                   |+
+      | path: /collections/test_wp_meta_gql_field   |                             |
+
+  Scenario: GraphQL refuses a fields list on a collection update
+    Then these requests get these responses:
+      | request                                | response                               |
+      | method: POST                           | code: 400                              |+
+      | path: /graphql/system                  | body:                                  |
+      | payload:                               |   errors:                              |
+      |   query: >-                            |     - extensions:                      |
+      |     mutation {                         |         code: GRAPHQL_VALIDATION       |
+      |     update_collections_item(           |         errors:                        |
+      |     collection: "test_wp_meta_owners", |           - message: "Field \"fields\" |
+      |     data: { fields: [] }               |               is not defined by type   |
+      |     ) { collection } }                 |               \"write_directus_\       |
+      |                                        |               collections_input\"."    |

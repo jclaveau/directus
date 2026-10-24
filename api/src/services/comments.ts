@@ -97,9 +97,13 @@ export class CommentsService extends ItemsService {
 				fields: ['id', 'first_name', 'last_name', 'email'],
 			});
 
-			for (const mention of mentions) {
-				const userID = mention.substring(1).toLowerCase();
+			// Two spellings of one uuid mention one user, who is notified once;
+			// the preview below still replaces every spelling the comment holds.
+			const mentionedUserIds = uniq(mentions.map((mention) => {
+				return mention.substring(1).toLowerCase();
+			}));
 
+			for (const userID of mentionedUserIds) {
 				if (!authorReadableIds.has(userID)) {
 					logger.warn(
 						`Mention of user "${userID}" skipped:`
@@ -147,9 +151,7 @@ export class CommentsService extends ItemsService {
 						fields: ['id', 'first_name', 'last_name', 'email'],
 						filter: {
 							id: {
-								_in: mentions.map((mention) => {
-									return mention.substring(1).toLowerCase();
-								}),
+								_in: mentionedUserIds,
 							},
 						},
 					}).catch((error: unknown) => {

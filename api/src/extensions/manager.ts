@@ -86,6 +86,12 @@ export class ExtensionManager {
 	 */
 	private hasLoadedBefore = false;
 
+	/**
+	 * The extensions the last successful load registered, which a failed reload
+	 * leaves in place for the retry to compare against.
+	 */
+	private lastLoadedExtensions: Extension[] = [];
+
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
 
@@ -142,6 +148,9 @@ export class ExtensionManager {
 
 	/** The reload waiting behind the running one, which later callers share. */
 	private queuedReload: Promise<unknown> | null = null;
+
+	/** What the queued reload loads with, forced if any caller sharing it asked. */
+	private queuedReloadOptions: { forceSync: boolean } | undefined = undefined;
 
 	/**
 	 * Optional file system watcher to auto-reload extensions when the local file system changes
@@ -298,6 +307,7 @@ export class ExtensionManager {
 		}
 
 		this.isLoaded = true;
+		this.lastLoadedExtensions = clone(this.extensions);
 
 		emitter.emitAction('extensions.load', {
 			extensions: this.extensions,
@@ -331,6 +341,10 @@ export class ExtensionManager {
 	public reload(options?: { forceSync: boolean }): Promise<unknown> {
 		if (this.queuedReload !== null) {
 			// The queued job will already handle the additional changes
+			if (options?.forceSync) {
+				this.queuedReloadOptions = options;
+			}
+
 			return this.queuedReload;
 		}
 
@@ -344,12 +358,14 @@ export class ExtensionManager {
 			reject = rej;
 		});
 
-		const reloadExtensions = async () => {
-			if (this.isLoaded) {
-				const prevExtensions = clone(this.extensions);
+		const reloadExtensions = async (reloadOptions?: { forceSync: boolean }) => {
+			// A failed load leaves isLoaded false; keeping the last loaded set
+			// instead of retrying it is tracked in #627.
+			if (this.hasLoadedBefore) {
+				const prevExtensions = this.lastLoadedExtensions;
 
 				await this.unload();
-				await this.load(options);
+				await this.load(reloadOptions);
 
 				logger.info('Extensions reloaded');
 
@@ -388,12 +404,16 @@ export class ExtensionManager {
 		};
 
 		this.queuedReload = promise;
+		this.queuedReloadOptions = options;
 
 		this.reloadQueue.enqueue(async () => {
+			const reloadOptions = this.queuedReloadOptions;
+
 			this.queuedReload = null;
+			this.queuedReloadOptions = undefined;
 
 			try {
-				await reloadExtensions();
+				await reloadExtensions(reloadOptions);
 			}
 			catch (error) {
 				reject(error);

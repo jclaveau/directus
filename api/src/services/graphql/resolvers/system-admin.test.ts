@@ -143,12 +143,30 @@ describe('resolveSystemAdmin', () => {
 				.getFieldArgITC('create_collections_item', 'data')
 				.getFieldNames(),
 		).toEqual(['collection', 'meta', 'schema', 'fields']);
+	});
+
+	test(oneLine`
+		update_collections_item takes no fields list it would ignore
+	`, () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+
+		resolveSystemAdmin(gql, {
+			...emptySchema,
+			read: { collections: { directus_collections: { fields: {} } } },
+		}, schemaComposer);
 
 		expect(
 			schemaComposer.Mutation
 				.getFieldArgITC('update_collections_item', 'data')
 				.getFieldNames(),
-		).toEqual(['meta', 'fields']);
+		).toEqual(['meta']);
 	});
 
 	test('update_collections_item updates, then reads the collection', async () => {
@@ -287,6 +305,39 @@ describe('resolveSystemAdmin', () => {
 			field: 'title',
 			meta: { note: 'Headline' },
 		});
+
+		expect(readOneSpy).toHaveBeenCalledWith('articles', 'title');
+	});
+
+	test(oneLine`
+		update_fields_item reads back the field named by its arguments
+	`, async () => {
+		const gql = new GraphQLService({
+			knex: knex({ client: MockClient }),
+			schema: { collections: {} } as any,
+			accountability: { user: 'admin-1', role: null, roles: [], admin: true } as any,
+			scope: 'system',
+		});
+
+		const schemaComposer = new SchemaComposer();
+		resolveSystemAdmin(gql, emptySchema, schemaComposer);
+
+		vi.spyOn(FieldsService.prototype, 'updateField').mockResolvedValue('title');
+
+		const readOneSpy = vi
+			.spyOn(FieldsService.prototype, 'readOne')
+			.mockResolvedValue({ collection: 'articles', field: 'title' } as any);
+
+		await schemaComposer.Mutation.getFieldConfig('update_fields_item').resolve!(
+			undefined,
+			{
+				collection: 'articles',
+				field: 'title',
+				data: { meta: { note: 'Headline' } },
+			},
+			{},
+			{} as any,
+		);
 
 		expect(readOneSpy).toHaveBeenCalledWith('articles', 'title');
 	});
