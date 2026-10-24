@@ -3306,12 +3306,14 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(transactionStates).toEqual([['committed']]);
 		});
 
-		it('leaves the response cache to a caller that opted out', async () => {
+		it('hands the flush to a caller that opted out', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
 			]);
 
 			tracker.on.update('directus_users').response(1);
+
+			const onResponseCacheFlushDeferred = vi.fn();
 
 			await new UsersService({
 				knex: db,
@@ -3330,10 +3332,11 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 						role: '4ccdb196-14b3-4ed1-b9da-c1978be07ca2',
 					},
 				],
-				{ autoPurgeCache: false },
+				{ autoPurgeCache: false, onResponseCacheFlushDeferred },
 			);
 
 			expect(flushResponseCache).not.toHaveBeenCalled();
+			expect(onResponseCacheFlushDeferred).toHaveBeenCalledOnce();
 		});
 	});
 
