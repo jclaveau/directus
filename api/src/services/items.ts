@@ -267,28 +267,6 @@ const BATCH_FIELD_TYPES = new Set<Type>([
 const UNIQUE_VIOLATION_CODE = '23505';
 
 /**
- * A value as the batch's JSON must carry it to store what node-pg binds: a Date
- * in local time with its offset, whose wall clock a `timestamp` column keeps; a
- * bigint or a non-finite number, which JSON cannot carry, as text. An invalid
- * Date stays a Date, which `applyUpdateBatch` leaves to `applyUpdateGroup`.
- */
-function toBatchValue(value: unknown): unknown {
-	if (value instanceof Date) {
-		return Number.isNaN(value.getTime())
-			? value
-			: format(value, "yyyy-MM-dd'T'HH:mm:ss.SSSxxx");
-	}
-
-	const isNonFiniteNumber = typeof value === 'number' && !Number.isFinite(value);
-
-	if (typeof value === 'bigint' || isNonFiniteNumber) {
-		return String(value);
-	}
-
-	return value;
-}
-
-/**
  * Merge each group into the one before it when both carry the same change, so one
  * statement writes rows sent side by side. Rows apart are never merged: a row in
  * between may take a value the earlier row frees, or free one the later row takes,
@@ -2556,11 +2534,11 @@ implements AbstractService<Item> {
 			const batchColumns = this.batchColumnsOf(group, aliases, opts);
 			const keyNames = group.keys.map((key) => this.primaryKeyNameOf(key));
 
-			const joinsLastRun = batchColumns !== null
-				&& batchColumns === runColumns
-				&& keyNames.every((keyName) => !runKeyNames.has(keyName));
-
-			if (!joinsLastRun) {
+			if (
+				batchColumns === null
+				|| batchColumns !== runColumns
+				|| keyNames.some((keyName) => runKeyNames.has(keyName))
+			) {
 				groupRuns.push([]);
 				runColumns = batchColumns;
 				runKeyNames = new Set();
@@ -2602,18 +2580,19 @@ implements AbstractService<Item> {
 			return field !== collectionSchema.primary;
 		});
 
-		const isBatchable = fieldNames.length > 0
-			&& fieldNames.every((field) => {
-				const fieldType = collectionSchema.fields[field]?.type;
-				const value: unknown = group.data[field];
+		if (fieldNames.length === 0) {
+			return null;
+		}
 
-				return !aliases.includes(field)
-					&& fieldType !== undefined
-					&& BATCH_FIELD_TYPES.has(fieldType)
-					&& (typeof value !== 'object' || value === null || value instanceof Date);
-			});
+		return fieldNames.every((field) => {
+			const fieldType = collectionSchema.fields[field]?.type;
+			const value: unknown = group.data[field];
 
-		return isBatchable
+			return !aliases.includes(field)
+				&& fieldType !== undefined
+				&& BATCH_FIELD_TYPES.has(fieldType)
+				&& (typeof value !== 'object' || value === null || value instanceof Date);
+		})
 			? JSON.stringify(fieldNames.sort())
 			: null;
 	}
@@ -2666,47 +2645,79 @@ implements AbstractService<Item> {
 			}
 		}
 
-		const batchRows = preparedGroups.flatMap(({ group, payloadWithTypeCasting }) => {
-			const batchValues = Object.fromEntries(
-				Object.entries(payloadWithTypeCasting).map(([field, value]) => {
-					return [field, toBatchValue(value)];
-				}),
-			);
+		// A field set to undefined is left out, as knex's update leaves it, where
+		// the JSON would drop it and the statement write NULL.
+		const groupBatchValues = preparedGroups.map(({ payloadWithTypeCasting }) => {
+			return Object.fromEntries(
+				Object.entries(payloadWithTypeCasting)
+					.filter(([, value]) => value !== undefined)
+					.map(([field, value]) => {
+						// The JSON must carry what node-pg binds: a Date in local time with
+						// its offset, whose wall clock a `timestamp` column keeps; a number
+						// or a bigint as text, since jsonb renders `1e-7` as `0.0000001`
+						// in a text column and JSON carries neither a bigint nor `NaN`. An
+						// invalid Date stays a Date, which leaves the run to
+						// `applyUpdateGroup`.
+						if (value instanceof Date && !Number.isNaN(value.getTime())) {
+							return [field, format(value, "yyyy-MM-dd'T'HH:mm:ss.SSSxxx")];
+						}
 
-			return group.keys.map((key) => ({ ...batchValues, [primaryKeyField]: key }));
+						if (typeof value === 'number' || typeof value === 'bigint') {
+							return [field, String(value)];
+						}
+
+						return [field, value];
+					}),
+			);
 		});
 
-		const columnSets = new Set(preparedGroups.map(({ payloadWithTypeCasting }) => {
-			return JSON.stringify(Object.keys(payloadWithTypeCasting).sort());
+		const batchRows = preparedGroups.flatMap(({ group }, index) => {
+			return group.keys.map((key) => {
+				return { ...groupBatchValues[index], [primaryKeyField]: key };
+			});
+		});
+
+		const columnSets = new Set(groupBatchValues.map((batchValues) => {
+			return JSON.stringify(Object.keys(batchValues).sort());
 		}));
 
-		// Presets or special fields can make two groups set different columns, and
-		// a geometry or invalid date stays an object, which JSON would mangle.
-		const isBatchable = columnSets.size === 1
+		let wroteBatch = false;
+
+		// A preset can set a field no batch carries, presets or special fields can
+		// make two groups set different columns, and a geometry or invalid date
+		// stays an object, which JSON would mangle.
+		if (
+			columnSets.size === 1
 			&& !columnSets.has('[]')
+			&& preparedGroups.every(({ group, payloadWithPresets }) => {
+				const presetGroup = { ...group, data: payloadWithPresets as Partial<Item> };
+
+				return this.batchColumnsOf(presetGroup, aliases, opts) !== null;
+			})
 			&& batchRows.every((batchRow) => {
 				return Object.values(batchRow).every((value) => {
 					return typeof value !== 'object' || value === null;
 				});
-			});
+			})
+		) {
+			// The statement updates the rows in its own order, so it can break a
+			// unique constraint the caller's order would not: that batch rolls back
+			// to its savepoint and leaves the run to `applyUpdateGroup`. Any other
+			// error would fail the same group by group, so it is raised, with no
+			// group's payload since the failing row is unknown.
+			wroteBatch = await this.knex
+				.batchUpdate(this.collection, batchRows, primaryKeyField, { mode: 'json' })
+				.then(() => true, async (error) => {
+					if (error?.code === UNIQUE_VIOLATION_CODE) {
+						return false;
+					}
 
-		// The statement updates the rows in its own order, so it can break a unique
-		// constraint the caller's order would not: that batch rolls back to its
-		// savepoint and leaves the run to `applyUpdateGroup`. Any other error would
-		// fail the same group by group, so it is raised, with no group's payload
-		// since the failing row is unknown.
-		const wroteBatch = isBatchable && await this.knex
-			.batchUpdate(this.collection, batchRows, primaryKeyField, { mode: 'json' })
-			.then(() => true, async (error) => {
-				if (error?.code === UNIQUE_VIOLATION_CODE) {
-					return false;
-				}
-
-				throw await translateDatabaseError(error, {}, this.knex, {
-					collection: this.collection,
-					operation: 'update',
+					throw await translateDatabaseError(error, {}, this.knex, {
+						collection: this.collection,
+						operation: 'update',
+					});
 				});
-			});
+		}
 
 		if (!wroteBatch) {
 			const appliedGroups: UpdateGroup<Item>[] = [];
@@ -2793,12 +2804,10 @@ implements AbstractService<Item> {
 		// If this is an authenticated action, and accountability tracking is
 		// enabled, save activity row
 		if (this.accountability && collectionAccountability !== null) {
-			const activityService = new ActivityService({
+			const activity = await new ActivityService({
 				knex: trx,
 				schema: this.schema,
-			});
-
-			const activity = await activityService.createMany(
+			}).createMany(
 				updatedRows.map(({ key }) => {
 					return {
 						action: Action.UPDATE,
@@ -2814,12 +2823,10 @@ implements AbstractService<Item> {
 			);
 
 			if (collectionAccountability === 'all') {
-				const itemsService = new ItemsService(this.collection, {
+				const snapshots = await new ItemsService(this.collection, {
 					knex: trx,
 					schema: this.schema,
-				});
-
-				const snapshots = await itemsService.readMany(
+				}).readMany(
 					updatedRows.map(({ key }) => key),
 				);
 

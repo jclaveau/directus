@@ -35,7 +35,9 @@ import {
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
-import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';

@@ -176,6 +176,9 @@ describe(oneLine`
 	afterEach(() => {
 		tracker.reset();
 		purgeScopedCache.mockClear();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	const service = (withSchema = schema) => {
@@ -576,6 +579,7 @@ describe(oneLine`
 		updateBatch keeps its own autoPurgeCache:false when the caller passes true, so
 		the batch purges once after the commit, not once per forked child
 	`, async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
