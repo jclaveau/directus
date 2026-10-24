@@ -4180,6 +4180,12 @@ describe('updateBatch on postgres', () => {
 
 	beforeAll(() => {
 		pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+
+		// `dialect` makes a pg client instance the prototype of MockClient, so
+		// every transaction client inherits its `_events` and a savepoint
+		// re-emits 'query' to itself forever.
+		delete Object.getPrototypeOf(MockClient.prototype)._events;
+
 		pgTracker = createTracker(pgDatabase);
 	});
 
