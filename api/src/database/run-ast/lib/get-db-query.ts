@@ -177,7 +177,9 @@ export function getDBQuery(
 
 			if (hasMultiRelationalSort) {
 				dbQuery.rowNumber(
-					knex.ref('directus_row_number').toQuery(),
+					// Bare: knex >= 3.2.10 wraps the window alias itself,
+					// so a pre-wrapped one gets quoted twice
+					'directus_row_number',
 					knex.raw(`partition by ?? order by ${orderByString}`, [`${table}.${primaryKey}`, ...orderByFields]),
 				);
 
