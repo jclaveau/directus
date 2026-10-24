@@ -2405,7 +2405,7 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
-		const payloadWithPresets = await this.presetUpdatePayload(payloadAfterHooks);
+		const payloadWithPresets = await this.presetUpdatePayload(group.data);
 
 		const preMutationError = opts.preMutationError ?? group.keys
 			.map((key) => opts.preMutationErrorsByKey?.get(String(key)))
@@ -2602,7 +2602,7 @@ implements AbstractService<Item> {
 		const isBatchable = fieldNames.length > 0
 			&& fieldNames.every((field) => {
 				const fieldType = collectionSchema.fields[field]?.type;
-				const value = group.data[field];
+				const value: unknown = group.data[field];
 
 				return !aliases.includes(field)
 					&& fieldType !== undefined
@@ -2737,8 +2737,8 @@ implements AbstractService<Item> {
 	 * The payload a group writes once the caller's permission presets fill it.
 	 */
 	private async presetUpdatePayload(
-		payload: Partial<AnyItem>,
-	): Promise<Partial<AnyItem>> {
+		payload: Partial<Item>,
+	): Promise<Partial<Item>> {
 		if (!this.accountability) {
 			return payload;
 		}
