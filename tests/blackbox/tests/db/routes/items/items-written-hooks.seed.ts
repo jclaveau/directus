@@ -11,8 +11,10 @@ export const scenarioCollectionPrefixes = [
 	'test_items_written_nested',
 	'test_items_written_create_refused',
 	'test_items_written_create_answered',
+	'test_items_written_create_echoed',
 	'test_items_written_update',
 	'test_items_written_update_refused',
+	'test_items_written_update_echoed',
 ];
 
 export const seedDBStructure = () => {

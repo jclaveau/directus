@@ -357,14 +357,28 @@ test('register.filter types an updated event by the groups it applied', () => {
 	});
 });
 
-test('register.filter refuses a written handler answering a row', () => {
+test('register.filter refuses a written handler answering anything', () => {
 	const register = {} as RegisterFunctions;
 
-	// @ts-expect-error -- a created hook answers nothing or the rows it received
+	// @ts-expect-error -- the rows are written: a created hook answers nothing
 	register.filter('article.items.created', () => ({ a: 1 }));
 
-	// @ts-expect-error -- an updated hook answers nothing or the groups it received
+	// @ts-expect-error -- the rows are written: an updated hook answers nothing
 	register.filter('users.updated', () => ({ a: 1 }));
+
+	// @ts-expect-error -- the rows are written: a created hook answers nothing
+	register.filter('article.items.created', (rows) => rows);
+
+	// @ts-expect-error -- the rows are written: an updated hook answers nothing
+	register.filter('items.updated', async (groups) => groups);
+});
+
+test('register.filter takes a written handler answering nothing', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('article.items.created', () => {});
+
+	register.filter('items.updated', async () => {});
 });
 
 test('register.filter hands a written handler no skipPurgeFor', () => {

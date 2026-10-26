@@ -25,8 +25,10 @@ describe.each(vendors)('%s', (vendor) => {
 			'a create hands the created hook its nested children already written',
 			'a created hook that throws takes the create back',
 			'a created hook answering other rows is refused',
+			'a created hook answering the rows it was handed is refused',
 			'an update hands the updated hook the row it wrote',
 			'an updated hook that throws takes the update back',
+			'an updated hook answering the groups it was handed is refused',
 		]) {
 			scenario(scenarioTitle, ({ given, when, then, and }) => {
 				const mutation: Mutation = {

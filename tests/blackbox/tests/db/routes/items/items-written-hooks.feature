@@ -6,8 +6,9 @@ Feature: A created or updated hook runs once the rows are written, before the co
   a hook that throws takes the mutation back. The items-written-hooks hook
   reads each row it is handed back and notes `<event>:<status>:<children>` in
   the witness collection, the count of child rows pointing at it, then throws on
-  the status "refuse" and answers other rows on the status "answer", so a
-  refused mutation must take that note back with it. Every
+  the status "refuse", answers other rows on the status "answer" and the rows
+  it was handed on the status "echo", so a refused mutation must take that note
+  back with it. Every
   scenario owns its item collection, `<name>_item`, with the children of its
   `children` field in `<name>_child`, and its `<name>_witness` collection.
 
@@ -38,8 +39,19 @@ Feature: A created or updated hook runs once the rows are written, before the co
     When the item 1 is created with the status "answer"
     Then the mutation is refused with the status 400 and the message:
       """
-      Invalid payload. A "items.created" filter hook must return nothing or the
-      rows it received: they are already written.
+      Invalid payload. A "items.created" filter hook must return nothing: the
+      rows are already written.
+      """
+    And the item 1 does not exist
+    And the witness of the item 1 holds no note
+
+  Scenario: a created hook answering the rows it was handed is refused
+    Given the collections of test_items_written_create_echoed
+    When the item 1 is created with the status "echo"
+    Then the mutation is refused with the status 400 and the message:
+      """
+      Invalid payload. A "items.created" filter hook must return nothing: the
+      rows are already written.
       """
     And the item 1 does not exist
     And the witness of the item 1 holds no note
@@ -58,6 +70,18 @@ Feature: A created or updated hook runs once the rows are written, before the co
     Then the mutation is refused with the status 500 and the message:
       """
       The updated hook refused the row 1
+      """
+    And the item 1 holds the status "draft"
+    And the witness of the item 1 holds the notes "created:draft:0"
+
+  Scenario: an updated hook answering the groups it was handed is refused
+    Given the collections of test_items_written_update_echoed
+    And the item 1 with the status "draft"
+    When the item 1 is updated to the status "echo"
+    Then the mutation is refused with the status 400 and the message:
+      """
+      Invalid payload. A "items.updated" filter hook must return nothing: the
+      rows are already written.
       """
     And the item 1 holds the status "draft"
     And the witness of the item 1 holds the notes "created:draft:0"

@@ -319,12 +319,34 @@ describe('Integration Tests', () => {
 					await expect(service.createOne({ name: 'Test' }))
 						.rejects
 						.toThrow(new InvalidPayloadError({
-							reason: 'A "items.created" filter hook must return nothing or '
-								+ 'the rows it received: they are already written',
+							reason: 'A "items.created" filter hook must return nothing: '
+								+ 'the rows are already written',
 						}));
 				}
 				finally {
 					emitter.offFilter('items.created', answerOtherRows);
+				}
+			});
+
+			it('refuses a created filter answering the rows it was handed', async () => {
+				const answerHandedRows = (rows: unknown) => rows;
+
+				emitter.onFilter('test.items.created', answerHandedRows);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "test.items.created" filter hook must return '
+								+ 'nothing: the rows are already written',
+						}));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('test.items.created', answerHandedRows);
 				}
 			});
 
@@ -1459,6 +1481,30 @@ describe('Integration Tests', () => {
 				}
 				finally {
 					emitter.offFilter('items.updated', refuseUpdated);
+				}
+			});
+
+			it(oneLine`
+				refuses an updated filter answering the groups it was handed
+			`, async () => {
+				const answerHandedGroups = (groups: unknown) => groups;
+
+				emitter.onFilter('items.updated', answerHandedGroups);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "items.updated" filter hook must return nothing: '
+								+ 'the rows are already written',
+						}));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.updated', answerHandedGroups);
 				}
 			});
 
