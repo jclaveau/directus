@@ -5,8 +5,9 @@
 // untouched. For each row they are handed they read the row back through
 // `context.transaction`, so the note proves the write is visible to them, and
 // insert into the `_witness` sibling the note `<event>:<status>:<children>`,
-// the count of `_child` rows pointing at it. A row whose status is 'refuse'
-// makes them throw; one whose status is 'answer' makes them answer other rows.
+// the count of `_child` rows pointing at it. Then a row whose status is
+// 'refuse' makes them throw, and one whose status is 'answer' makes them answer
+// other rows: either way the note was written first, so it proves the rollback.
 
 const ITEM_COLLECTION = /^test_items_written_\w+_item$/;
 
@@ -24,14 +25,14 @@ async function noteWrittenRows(writtenEvent, keys, collection, transaction) {
 			.where('item', key)
 			.count('* as childCount');
 
-		if (writtenRow.status === 'refuse') {
-			throw new Error(`The ${writtenEvent} hook refused the row ${key}`);
-		}
-
 		await transaction(siblingOf(collection, '_witness')).insert({
 			item: key,
 			note: `${writtenEvent}:${writtenRow.status}:${Number(childCount)}`,
 		});
+
+		if (writtenRow.status === 'refuse') {
+			throw new Error(`The ${writtenEvent} hook refused the row ${key}`);
+		}
 	}
 }
 

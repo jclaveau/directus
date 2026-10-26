@@ -5,8 +5,9 @@ Feature: A created or updated hook runs once the rows are written, before the co
   `context.transaction`, a write it makes there commits with the mutation, and
   a hook that throws takes the mutation back. The items-written-hooks hook
   reads each row it is handed back and notes `<event>:<status>:<children>` in
-  the witness collection, the count of child rows pointing at it; it throws on
-  the status "refuse" and answers other rows on the status "answer". Every
+  the witness collection, the count of child rows pointing at it, then throws on
+  the status "refuse" and answers other rows on the status "answer", so a
+  refused mutation must take that note back with it. Every
   scenario owns its item collection, `<name>_item`, with the children of its
   `children` field in `<name>_child`, and its `<name>_witness` collection.
 
@@ -41,6 +42,7 @@ Feature: A created or updated hook runs once the rows are written, before the co
       rows it received: they are already written.
       """
     And the item 1 does not exist
+    And the witness of the item 1 holds no note
 
   Scenario: an update hands the updated hook the row it wrote
     Given the collections of test_items_written_update

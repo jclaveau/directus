@@ -359,3 +359,12 @@ test('register.filter refuses a written handler answering a row', () => {
 	// @ts-expect-error -- an updated hook answers nothing or the groups it received
 	register.filter('users.updated', () => ({ a: 1 }));
 });
+
+test('register.filter hands a written handler no skipPurgeFor', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter('items.updated', (_groups, _meta, context) => {
+		// @ts-expect-error -- the rows are written: no take-over to declare inert
+		context.scopedCache.skipPurgeFor(1);
+	});
+});

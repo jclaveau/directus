@@ -260,6 +260,8 @@ describe('Integration Tests', () => {
 				hands the created filter the written rows inside the mutation
 				transaction
 			`, async () => {
+				tracker.on.insert('test').response([{ id: 7 }]);
+
 				const createdFilter = vi.fn();
 
 				emitter.onFilter('items.created', createdFilter);
@@ -267,13 +269,14 @@ describe('Integration Tests', () => {
 				try {
 					await service.createOne({ name: 'Test' });
 
+					// The key 7 comes back from the insert: the filter runs after it.
 					expect(createdFilter).toHaveBeenCalledWith(
-						[{ id: undefined, name: 'Test' }],
+						[{ id: 7, name: 'Test' }],
 						{
 							collection: 'test',
 							event: 'items.created',
-							keys: [undefined],
-							originalPayload: [{ id: undefined, name: 'Test' }],
+							keys: [7],
+							originalPayload: [{ id: 7, name: 'Test' }],
 						},
 						expect.objectContaining({
 							transaction: expect.objectContaining({ isTransaction: true }),
@@ -1390,6 +1393,47 @@ describe('Integration Tests', () => {
 				}
 				finally {
 					emitter.offFilter('test.items.updated', updatedFilter);
+				}
+			});
+
+			it(oneLine`
+				hands an updated filter a purge handle that declares no take-over
+				inert
+			`, async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					// A skipPurgeFor here would spare a row an update hook took over and
+					// moved, leaving its old slice cached.
+					expect(updatedFilter).toHaveBeenCalledWith(
+						expect.anything(),
+						expect.anything(),
+						expect.objectContaining({
+							scopedCache: { purgeBy: expect.any(Function) },
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.updated', updatedFilter);
+				}
+			});
+
+			it('emits no updated event when emitEvents is false', async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' }, { emitEvents: false });
+
+					expect(updatedFilter).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.updated', updatedFilter);
 				}
 			});
 
