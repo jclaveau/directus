@@ -313,13 +313,19 @@ test('register.filter leaves the handle optional on a bare or runtime event', ()
 
 	register.filter('auth.create', (_payload, _meta, context) => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<
-			ScopedCacheScopeHandle | ScopedCachePurgeHandle | undefined
+			| ScopedCacheScopeHandle
+			| ScopedCachePurgeHandle
+			| Pick<ScopedCachePurgeHandle, 'purgeBy'>
+			| undefined
 		>();
 	});
 
 	register.filter(event, (_payload, _meta, context) => {
 		expectTypeOf(context.scopedCache).toEqualTypeOf<
-			ScopedCacheScopeHandle | ScopedCachePurgeHandle | undefined
+			| ScopedCacheScopeHandle
+			| ScopedCachePurgeHandle
+			| Pick<ScopedCachePurgeHandle, 'purgeBy'>
+			| undefined
 		>();
 	});
 });
