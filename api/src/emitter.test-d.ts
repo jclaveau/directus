@@ -322,3 +322,40 @@ test('register.filter leaves the handle optional on a bare or runtime event', ()
 		>();
 	});
 });
+
+test('register.filter types a created event by the rows it wrote', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('article.items.created', (rows, _meta, context) => {
+		expectTypeOf(rows).toEqualTypeOf<Item[]>();
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter('users.created', (rows, _meta, context) => {
+		expectTypeOf(rows).toEqualTypeOf<Record<string, any>[]>();
+		expectTypeOf(context.transaction).toEqualTypeOf<Knex>();
+	});
+});
+
+test('register.filter types an updated event by the groups it applied', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('items.updated', (groups, _meta, context) => {
+		expectTypeOf(groups).toEqualTypeOf<UpdateGroup<Item>[]>();
+		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+	});
+
+	register.filter('users.updated', (groups) => {
+		expectTypeOf(groups).toEqualTypeOf<UpdateGroup<Record<string, any>>[]>();
+	});
+});
+
+test('register.filter refuses a written handler answering a row', () => {
+	const register = {} as RegisterFunctions;
+
+	// @ts-expect-error -- a created hook answers nothing or the rows it received
+	register.filter('article.items.created', () => ({ a: 1 }));
+
+	// @ts-expect-error -- an updated hook answers nothing or the groups it received
+	register.filter('users.updated', () => ({ a: 1 }));
+});

@@ -256,6 +256,90 @@ describe('Integration Tests', () => {
 				}
 			});
 
+			it(oneLine`
+				hands the created filter the written rows inside the mutation
+				transaction
+			`, async () => {
+				const createdFilter = vi.fn();
+
+				emitter.onFilter('items.created', createdFilter);
+
+				try {
+					await service.createOne({ name: 'Test' });
+
+					expect(createdFilter).toHaveBeenCalledWith(
+						[{ id: undefined, name: 'Test' }],
+						{
+							collection: 'test',
+							event: 'items.created',
+							keys: [undefined],
+							originalPayload: [{ id: undefined, name: 'Test' }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.created', createdFilter);
+				}
+			});
+
+			it('rolls the create back when a created filter throws', async () => {
+				const refuseCreated = () => {
+					throw new Error('refused by the created hook');
+				};
+
+				emitter.onFilter('items.created', refuseCreated);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new Error('refused by the created hook'));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.created', refuseCreated);
+				}
+			});
+
+			it('refuses a created filter answering other rows', async () => {
+				const answerOtherRows = () => [{ name: 'other' }];
+
+				emitter.onFilter('items.created', answerOtherRows);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "items.created" filter hook must return nothing or '
+								+ 'the rows it received: they are already written',
+						}));
+				}
+				finally {
+					emitter.offFilter('items.created', answerOtherRows);
+				}
+			});
+
+			it('emits no created event when emitEvents is false', async () => {
+				const createdFilter = vi.fn();
+
+				emitter.onFilter('items.created', createdFilter);
+
+				try {
+					await service.createOne({ name: 'Test' }, { emitEvents: false });
+
+					expect(createdFilter).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.created', createdFilter);
+				}
+			});
+
 			it('should validate user count if requested', async () => {
 				await service.createOne({}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
@@ -1276,6 +1360,61 @@ describe('Integration Tests', () => {
 				}
 				finally {
 					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				hands the updated filter the applied groups inside the mutation
+				transaction
+			`, async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('test.items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					expect(updatedFilter).toHaveBeenCalledWith(
+						[{ data: { name: 'Test' }, keys: [1] }],
+						{
+							collection: 'test',
+							event: 'test.items.updated',
+							keys: [1],
+							originalPayload: [{ data: { name: 'Test' }, keys: [1] }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('test.items.updated', updatedFilter);
+				}
+			});
+
+			it('rolls the update back when an updated filter throws', async () => {
+				const refuseUpdated = () => {
+					throw new Error('refused by the updated hook');
+				};
+
+				emitter.onFilter('items.updated', refuseUpdated);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' }))
+						.rejects
+						.toThrow(new Error('refused by the updated hook'));
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'rolled back',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ? where "id" in (?)',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.updated', refuseUpdated);
 				}
 			});
 
