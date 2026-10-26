@@ -1,11 +1,13 @@
 import type { FieldOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { CapabilitiesHelperCockroachDb } from './dialects/cockroachdb.js';
 import { CapabilitiesHelperDefault } from './dialects/default.js';
 import { CapabilitiesHelperMSSQL } from './dialects/mssql.js';
 import { CapabilitiesHelperMySQL } from './dialects/mysql.js';
 import { CapabilitiesHelperOracle } from './dialects/oracle.js';
 import { CapabilitiesHelperPostgres } from './dialects/postgres.js';
+import { CapabilitiesHelperRedshift } from './dialects/redshift.js';
 import { CapabilitiesHelperSqlite } from './dialects/sqlite.js';
 
 // vitest hoists vi.hoisted + vi.mock above the imports above, so @directus/env is
@@ -45,6 +47,11 @@ describe('CapabilitiesHelper (default)', () => {
 	test('insertReturningOptions is undefined', () => {
 		expect(helper.insertReturningOptions()).toBeUndefined();
 	});
+
+	test('does not support a json batch update', () => {
+		expect(helper.supportsJsonBatchUpdate()).toBe(false);
+		expect(helper.jsonBatchUpdateTypes()).toEqual(new Set());
+	});
 });
 
 describe('CapabilitiesHelperPostgres', () => {
@@ -60,6 +67,45 @@ describe('CapabilitiesHelperPostgres', () => {
 
 	test('preserves insert order in RETURNING', async () => {
 		await expect(helper.preservesInsertOrderInReturning()).resolves.toBe(true);
+	});
+
+	test('supports a json batch update of the scalar field types', () => {
+		expect(helper.supportsJsonBatchUpdate()).toBe(true);
+
+		expect(helper.jsonBatchUpdateTypes()).toEqual(new Set([
+			'bigInteger',
+			'boolean',
+			'csv',
+			'date',
+			'dateTime',
+			'decimal',
+			'float',
+			'hash',
+			'integer',
+			'string',
+			'text',
+			'time',
+			'timestamp',
+			'uuid',
+		]));
+	});
+});
+
+describe('CapabilitiesHelperCockroachDb', () => {
+	const helper = new CapabilitiesHelperCockroachDb(noKnex);
+
+	test('does not support a json batch update', () => {
+		expect(helper.supportsJsonBatchUpdate()).toBe(false);
+		expect(helper.jsonBatchUpdateTypes()).toEqual(new Set());
+	});
+});
+
+describe('CapabilitiesHelperRedshift', () => {
+	const helper = new CapabilitiesHelperRedshift(noKnex);
+
+	test('does not support a json batch update', () => {
+		expect(helper.supportsJsonBatchUpdate()).toBe(false);
+		expect(helper.jsonBatchUpdateTypes()).toEqual(new Set());
 	});
 });
 
