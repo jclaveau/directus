@@ -67,7 +67,7 @@ export type WrittenFilterHandler<TIn> = (
 	payload: TIn,
 	meta: Record<string, any>,
 	context: WrittenEventContext,
-) => undefined | Promise<void>;
+) => void | Promise<void>;
 export type ActionHandler = (meta: Record<string, any>, context: EventContext) => void;
 export type InitHandler = (meta: Record<string, any>) => void;
 export type ScheduleHandler = PromiseCallback;
