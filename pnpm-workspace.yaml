@@ -203,7 +203,7 @@ catalog:
   jsonlint-mod: 1.7.6
   jsonwebtoken: 9.0.3
   keyv: 5.6.0
-  knex: git+https://github.com/jclaveau/knex.git#4851c53a6a8e53350c0ff4ff1717de6d59c7b492
+  knex: git+https://github.com/jclaveau/knex.git#046fea9017795fdabf1a793ca84df3fa10062b1b
   knex-mock-client: 3.0.2
   ky: 1.14.3
   ldapjs: 3.0.7
