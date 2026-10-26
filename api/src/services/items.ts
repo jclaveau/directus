@@ -948,6 +948,16 @@ implements AbstractService<Item> {
 				results[index] = results[sameRowAs]!;
 			}
 
+			if (opts.emitEvents !== false && postPrepared.length > 0) {
+				await this.emitWrittenEvent(
+					'created',
+					postPrepared.map((p) => p.actionHookPayload),
+					postPrepared.map((p) => p.primaryKey),
+					trx,
+					scopedCacheHookDeclarations,
+				);
+			}
+
 			return {
 				nestedActionEvents,
 				actionPayloads: postPrepared.map(
@@ -1449,6 +1459,53 @@ implements AbstractService<Item> {
 		_groups: UpdateGroup<Item>[],
 		_opts: MutationOptions,
 	): Promise<void> {}
+
+	/**
+	 * Hand the rows a mutation wrote to its `.created` or `.updated` filters,
+	 * inside the transaction before it commits: a hook that throws rolls the
+	 * mutation back, and a hook writing through `context.transaction` commits with
+	 * it. The rows are already written, so a hook answering anything but what it
+	 * was handed is refused.
+	 *
+	 * A row is the payload as written, presets applied and its key set, not the
+	 * row read back: no database default, relations as the caller sent them. A
+	 * nested create or update emits its own event, from its own service.
+	 *
+	 * Bounds: on a transaction the caller opened, a throw rolls back only when
+	 * the caller does; a retried transaction runs the hooks again; a hook writing
+	 * the same collection through `ItemsService` emits again.
+	 */
+	private async emitWrittenEvent(
+		writtenAction: 'created' | 'updated',
+		writtenRows: AnyItem[] | UpdateGroup<Item>[],
+		keys: PrimaryKey[],
+		trx: Knex,
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): Promise<void> {
+		const answeredRows = await emitter.emitFilter(
+			this.eventScope === 'items'
+				? [`items.${writtenAction}`, `${this.collection}.items.${writtenAction}`]
+				: `${this.eventScope}.${writtenAction}`,
+			writtenRows,
+			{ keys, collection: this.collection },
+			{
+				transaction: trx,
+				database: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				scopedCache: declarations.purgeHandleFor(this.collection),
+			},
+		);
+
+		if (answeredRows !== writtenRows) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					A "${this.eventScope}.${writtenAction}" filter hook must return
+					nothing or the rows it received: they are already written
+				`,
+			});
+		}
+	}
 
 	async updateGroups(
 		groups: UpdateGroup<Item>[],
@@ -1979,6 +2036,16 @@ implements AbstractService<Item> {
 							knex: trx,
 						});
 					}
+				}
+
+				if (opts.emitEvents !== false) {
+					await this.emitWrittenEvent(
+						'updated',
+						applied,
+						directusWrittenKeys,
+						trx,
+						scopedCacheHookDeclarations,
+					);
 				}
 
 				return answeredUpdate;

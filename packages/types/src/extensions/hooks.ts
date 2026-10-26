@@ -13,6 +13,7 @@ import type {
 	DeleteKeys,
 	Item as AnyItem,
 	UpdateEntries,
+	UpdateGroup,
 } from '../items.js';
 import type { PermissionsAction } from '../permissions.js';
 import type { ApiExtensionContext } from './api-extension-context.js';
@@ -36,16 +37,25 @@ export type SystemScope = SystemCollection extends `directus_${infer Scope}`
  * collection, `<name>.<op>`. A create and an update are emitted grouped, once per
  * mutation.
  */
-type ItemsServiceEvent<Action extends PermissionsAction> =
+type ItemsServiceEvent<Action extends PermissionsAction | WrittenAction> =
 	| `items.${Action}`
 	| `${string}.items.${Action}`
 	| `${SystemScope}.${Action}`;
+
+/**
+ * The events an `ItemsService` emits once its rows are written, inside the
+ * transaction and before it commits.
+ */
+type WrittenAction = 'created' | 'updated';
 
 export type ItemsReadEvent = ItemsServiceEvent<'read'>;
 export type ItemsCreateEvent = ItemsServiceEvent<'create'>;
 export type ItemsUpdateEvent = ItemsServiceEvent<'update'>;
 export type ItemsDeleteEvent = ItemsServiceEvent<'delete'>;
 export type ItemsMutationEvent = ItemsServiceEvent<MutationAction>;
+export type ItemsCreatedEvent = ItemsServiceEvent<'created'>;
+export type ItemsUpdatedEvent = ItemsServiceEvent<'updated'>;
+export type ItemsWrittenEvent = ItemsServiceEvent<WrittenAction>;
 
 /**
  * A system scope whose events a service other than `ItemsService` emits by hand: its
@@ -107,8 +117,20 @@ export type RegisterFilter = {
 			MutationEventContext
 		>,
 	): void;
+	<CreatedItem = AnyItem>(
+		event: ItemsCreatedEvent,
+		handler: FilterHandler<CreatedItem[], void, MutationEventContext>,
+	): void;
+	<UpdatedItem = AnyItem>(
+		event: ItemsUpdatedEvent,
+		handler: FilterHandler<
+			UpdateGroup<UpdatedItem>[],
+			void,
+			MutationEventContext
+		>,
+	): void;
 	<TIn = unknown, TOut = TIn, EventName extends string = string>(
-		event: EventName extends ItemsReadEvent | ItemsMutationEvent
+		event: EventName extends ItemsReadEvent | ItemsMutationEvent | ItemsWrittenEvent
 			? never
 			: EventName,
 		handler: FilterHandler<TIn, TOut>,

@@ -23,7 +23,10 @@ export type ReadEventContext = Omit<EventContext, 'scopedCache'> & {
 	scopedCache: ScopedCacheScopeHandle;
 };
 
-/** What an `ItemsService` create/update/delete filter receives. */
+/**
+ * What an `ItemsService` create/update/delete filter receives, and a
+ * created/updated one, which runs once the rows are written.
+ */
 export type MutationEventContext = Omit<EventContext, 'database' | 'scopedCache'> & {
 	/**
 	 * The transaction the filter hooks and the write share: a hook writing through

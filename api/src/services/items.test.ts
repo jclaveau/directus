@@ -893,7 +893,7 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				keeps a row a hook answers with its integer key with a leading zero
 			`, async () => {
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 					data: { name: 'after' },
 					keys: ['01'],
 				}]);
@@ -960,7 +960,7 @@ describe('Integration Tests', () => {
 			`, async () => {
 				tracker.on.update('test').response(1);
 
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([
 					{ data: { name: 'after' }, keys: [1, 3] },
 				]);
 
@@ -2558,7 +2558,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps a row a hook answers with its uuid in capitals', async () => {
 			tracker.on.update('uuid_coll').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 				data: { name: 'after' },
 				keys: ['AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
 			}]);
@@ -2620,7 +2620,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps a row a hook answers with its key with a leading zero', async () => {
 			tracker.on.update('big_coll').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 				data: { name: 'after' },
 				keys: ['05'],
 			}]);
@@ -3018,6 +3018,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					{ collection: 'test' },
 					expect.anything(),
 				],
+				[
+					['items.updated', 'test.items.updated'],
+					[{ data: { name: 'after' }, keys: [1, 2, 3] }],
+					{ keys: [1, 2, 3], collection: 'test' },
+					expect.anything(),
+				],
 			]);
 
 			expect(actionSpy.mock.calls).toEqual([
@@ -3115,7 +3121,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3137,7 +3143,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('answers a null per row when every row is cancelled', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, () => null);
 				},
@@ -3155,7 +3161,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('refuses a row cancel the caller did not opt into', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3183,7 +3189,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 2
@@ -3211,7 +3217,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 2 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3235,7 +3241,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('writes nothing when it takes every row over', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
 				},
@@ -3254,7 +3260,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('emits no update action when it takes every row over', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
 				},
@@ -3373,6 +3379,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					['items.create', 'test.items.create'],
 					[{ data: { id: 1, name: 'a' } }, { data: { id: 2, name: 'b' } }],
 					{ collection: 'test' },
+					expect.anything(),
+				],
+				[
+					['items.created', 'test.items.created'],
+					[{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+					{ keys: [1, 2], collection: 'test' },
 					expect.anything(),
 				],
 			]);
