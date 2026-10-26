@@ -4211,8 +4211,10 @@ describe('updateBatch on postgres', () => {
 		pgTracker = createTracker(pgDatabase);
 
 		// knex's pg json mode binds a Date or a bigint through node-pg's
-		// prepareValue, read off the driver MockClient replaces.
-		pgDatabase.client.driver.utils = pg.utils;
+		// prepareValue, read off the driver MockClient replaces. @types/pg
+		// leaves `utils` out.
+		pgDatabase.client.driver.utils = (pg as typeof pg & { utils: object })
+			.utils;
 	});
 
 	beforeEach(() => {
