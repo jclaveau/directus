@@ -48,9 +48,11 @@ export class Emitter {
 		meta: Record<string, any>,
 		context: EventContext | MutationEventContext | null = null,
 	): Promise<TIn | TOut> {
+		const eventListeners = this.filterListenersOf<TIn, TOut>(event);
+
 		let updatedPayload: TIn | TOut = payload;
 
-		for (const { event, listeners } of this.filterListenersOf<TIn, TOut>(event)) {
+		for (const { event, listeners } of eventListeners) {
 			for (const listener of listeners) {
 				const result = await listener(
 					updatedPayload as TIn,
