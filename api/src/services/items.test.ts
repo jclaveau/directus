@@ -4192,6 +4192,7 @@ describe('updateBatch on postgres', () => {
 			c.field('title').string();
 			c.field('status').string();
 			c.field('published').timestamp();
+			c.field('views').integer();
 			c.field('meta').json();
 		})
 		.build();
@@ -4312,6 +4313,48 @@ describe('updateBatch on postgres', () => {
 		expect(pgTracker.history.all).toEqual([
 			expect.objectContaining({
 				bindings: ['[{"title":"1e-7","id":1},{"title":"1e+21","id":2}]'],
+			}),
+		]);
+	});
+
+	it('writes a number into an integer field as a JSON number', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, views: 10 },
+			{ id: 2, views: 20 },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"views":10,"id":1},{"views":20,"id":2}]'],
+			}),
+		]);
+	});
+
+	it('writes the groups one by one on a dialect without a json batch', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('cockroachdb');
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['first', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['second', 2],
 			}),
 		]);
 	});

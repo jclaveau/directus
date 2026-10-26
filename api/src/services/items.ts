@@ -43,13 +43,11 @@ import {
 	takenOverScopedCacheKey,
 	withScopedCacheOwnershipInjections,
 } from '../scoped-cache/index.js';
+import { isUniqueViolation } from '../database/errors/dialects/postgres.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
-import getDatabase, {
-	getDatabaseClient,
-	getDatabaseForAccountability,
-} from '../database/index.js';
+import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
@@ -59,7 +57,6 @@ import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { isPrimaryKey } from '../utils/is-primary-key.js';
-import { format } from '../utils/date-fns-used.js';
 import {
 	assign,
 	clone,
@@ -243,28 +240,16 @@ function isTakenOverRow<Item extends AnyItem>(
 		&& isPrimaryKey((entry as { key: PrimaryKey }).key);
 }
 
-// The field types a `jsonb_populate_recordset` row stores as a bound update
-// value would: a json field arrives stringified and would land as a JSON
-// string, a geometry as a raw call, and an unknown type as anything.
-const BATCH_FIELD_TYPES = new Set<Type>([
-	'bigInteger',
-	'boolean',
+// The field types a number is sent to as text, as the per-group update binds
+// it: knex keeps a finite number a JSON number, which jsonb renders `1e-7` as
+// `0.0000001`.
+const BATCH_TEXT_FIELD_TYPES = new Set<Type>([
 	'csv',
-	'date',
-	'dateTime',
-	'decimal',
-	'float',
 	'hash',
-	'integer',
 	'string',
 	'text',
-	'time',
-	'timestamp',
 	'uuid',
 ]);
-
-// Postgres' SQLSTATE for unique_violation.
-const UNIQUE_VIOLATION_CODE = '23505';
 
 /**
  * Merge each group into the one before it when both carry the same change, so one
@@ -2556,9 +2541,9 @@ implements AbstractService<Item> {
 
 	/**
 	 * The columns a group sets, serialized for `splitBatchRuns` to compare, or
-	 * null where no batch can carry the group: off postgres, behind a stored
-	 * refusal, or setting an alias, a nested item, an object value or a field
-	 * whose type is not in `BATCH_FIELD_TYPES`.
+	 * null where no batch can carry the group: on a dialect without a json batch,
+	 * behind a stored refusal, or setting an alias, a nested item, an object value
+	 * or a field whose type is not in `jsonBatchUpdateTypes`.
 	 */
 	private batchColumnsOf(
 		group: UpdateGroup<Item>,
@@ -2572,7 +2557,9 @@ implements AbstractService<Item> {
 				return opts.preMutationErrorsByKey?.get(String(key)) !== undefined;
 			});
 
-		if (getDatabaseClient(this.knex) !== 'postgres' || isRefused) {
+		const { capabilities } = getHelpers(this.knex);
+
+		if (!capabilities.supportsJsonBatchUpdate() || isRefused) {
 			return null;
 		}
 
@@ -2590,7 +2577,7 @@ implements AbstractService<Item> {
 
 			return !aliases.includes(field)
 				&& fieldType !== undefined
-				&& BATCH_FIELD_TYPES.has(fieldType)
+				&& capabilities.jsonBatchUpdateTypes().has(fieldType)
 				&& (typeof value !== 'object' || value === null || value instanceof Date);
 		})
 			? JSON.stringify(fieldNames.sort())
@@ -2645,28 +2632,23 @@ implements AbstractService<Item> {
 			}
 		}
 
-		// A field set to undefined is left out, as knex's update leaves it, where
-		// the JSON would drop it and the statement write NULL.
+		const fieldSchemas = this.schema.collections[this.collection]!.fields;
+
+		// A field set to undefined is left out, as knex's update leaves it: one
+		// group may set to undefined a field another leaves out, and knex refuses
+		// rows of different columns.
 		const groupBatchValues = preparedGroups.map(({ payloadWithTypeCasting }) => {
 			return Object.fromEntries(
 				Object.entries(payloadWithTypeCasting)
 					.filter(([, value]) => value !== undefined)
 					.map(([field, value]) => {
-						// The JSON must carry what node-pg binds: a Date in local time with
-						// its offset, whose wall clock a `timestamp` column keeps; a number
-						// or a bigint as text, since jsonb renders `1e-7` as `0.0000001`
-						// in a text column and JSON carries neither a bigint nor `NaN`. An
-						// invalid Date stays a Date, which leaves the run to
-						// `applyUpdateGroup`.
-						if (value instanceof Date && !Number.isNaN(value.getTime())) {
-							return [field, format(value, "yyyy-MM-dd'T'HH:mm:ss.SSSxxx")];
-						}
+						const fieldType = fieldSchemas[field]?.type;
 
-						if (typeof value === 'number' || typeof value === 'bigint') {
-							return [field, String(value)];
-						}
-
-						return [field, value];
+						return typeof value === 'number'
+							&& fieldType !== undefined
+							&& BATCH_TEXT_FIELD_TYPES.has(fieldType)
+							? [field, String(value)]
+							: [field, value];
 					}),
 			);
 		});
@@ -2685,7 +2667,8 @@ implements AbstractService<Item> {
 
 		// A preset can set a field no batch carries, presets or special fields can
 		// make two groups set different columns, and a geometry or invalid date
-		// stays an object, which JSON would mangle.
+		// stays an object, which JSON would mangle. knex binds a valid Date as
+		// node-pg would.
 		if (
 			columnSets.size === 1
 			&& !columnSets.has('[]')
@@ -2696,7 +2679,9 @@ implements AbstractService<Item> {
 			})
 			&& batchRows.every((batchRow) => {
 				return Object.values(batchRow).every((value) => {
-					return typeof value !== 'object' || value === null;
+					return typeof value !== 'object'
+						|| value === null
+						|| (value instanceof Date && !Number.isNaN(value.getTime()));
 				});
 			})
 		) {
@@ -2708,7 +2693,7 @@ implements AbstractService<Item> {
 			wroteBatch = await this.knex
 				.batchUpdate(this.collection, batchRows, primaryKeyField, { mode: 'json' })
 				.then(() => true, async (error) => {
-					if (error?.code === UNIQUE_VIOLATION_CODE) {
+					if (isUniqueViolation(error)) {
 						return false;
 					}
 
