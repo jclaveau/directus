@@ -1464,8 +1464,8 @@ implements AbstractService<Item> {
 	 * Hand the rows a mutation wrote to its `.created` or `.updated` filters,
 	 * inside the transaction before it commits: a hook that throws rolls the
 	 * mutation back, and a hook writing through `context.transaction` commits with
-	 * it. The rows are already written, so a hook answering anything but what it
-	 * was handed is refused.
+	 * it. The rows are already written, so a hook answering anything is refused,
+	 * and one changing them in place changes only what the action is handed.
 	 *
 	 * A row is the payload as written, presets applied and its key set, not the
 	 * row read back: no database default, relations as the caller sent them. A
@@ -1482,7 +1482,7 @@ implements AbstractService<Item> {
 		trx: Knex,
 		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
 	): Promise<void> {
-		const answeredRows = await emitter.emitFilter(
+		await emitter.emitWrittenFilter(
 			this.eventScope === 'items'
 				? [`items.${writtenAction}`, `${this.collection}.items.${writtenAction}`]
 				: `${this.eventScope}.${writtenAction}`,
@@ -1498,15 +1498,6 @@ implements AbstractService<Item> {
 				},
 			},
 		);
-
-		if (answeredRows !== writtenRows) {
-			throw new InvalidPayloadError({
-				reason: oneLine`
-					A "${this.eventScope}.${writtenAction}" filter hook must return
-					nothing or the rows it received: they are already written
-				`,
-			});
-		}
 	}
 
 	async updateGroups(

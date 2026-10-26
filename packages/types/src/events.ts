@@ -59,6 +59,15 @@ export type FilterHandler<
 	meta: Record<string, any>,
 	context: TContext,
 ) => TIn | TOut | Promise<TIn | TOut>;
+/**
+ * What an `ItemsService` created/updated filter is: the rows are already
+ * written, so it answers nothing.
+ */
+export type WrittenFilterHandler<TIn> = (
+	payload: TIn,
+	meta: Record<string, any>,
+	context: WrittenEventContext,
+) => undefined | Promise<void>;
 export type ActionHandler = (meta: Record<string, any>, context: EventContext) => void;
 export type InitHandler = (meta: Record<string, any>) => void;
 export type ScheduleHandler = PromiseCallback;

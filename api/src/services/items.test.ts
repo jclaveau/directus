@@ -3108,12 +3108,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					{ collection: 'test' },
 					expect.anything(),
 				],
-				[
-					['items.updated', 'test.items.updated'],
-					[{ data: { name: 'after' }, keys: [1, 2, 3] }],
-					{ keys: [1, 2, 3], collection: 'test' },
-					expect.anything(),
-				],
 			]);
 
 			expect(actionSpy.mock.calls).toEqual([
@@ -3469,12 +3463,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 					['items.create', 'test.items.create'],
 					[{ data: { id: 1, name: 'a' } }, { data: { id: 2, name: 'b' } }],
 					{ collection: 'test' },
-					expect.anything(),
-				],
-				[
-					['items.created', 'test.items.created'],
-					[{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
-					{ keys: [1, 2], collection: 'test' },
 					expect.anything(),
 				],
 			]);

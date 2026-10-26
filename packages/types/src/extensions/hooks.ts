@@ -7,7 +7,7 @@ import type {
 	MutationEventContext,
 	ReadEventContext,
 	ScheduleHandler,
-	WrittenEventContext,
+	WrittenFilterHandler,
 } from '../events.js';
 import type {
 	CreateEntries,
@@ -77,7 +77,8 @@ export type BareFilterEvent =
  * non-literal event name lands.
  *
  * An item handler may return nothing: `emitFilter` keeps the payload when a
- * handler answers `undefined`.
+ * handler answers `undefined`. A created or updated one must: its rows are
+ * already written.
  *
  * The last overload refuses an item event whose name it can infer, so a handler
  * that does not fit its item overload is an error rather than a silent fall
@@ -121,15 +122,11 @@ export type RegisterFilter = {
 	): void;
 	<CreatedItem = AnyItem>(
 		event: ItemsCreatedEvent,
-		handler: FilterHandler<CreatedItem[], void, WrittenEventContext>,
+		handler: WrittenFilterHandler<CreatedItem[]>,
 	): void;
 	<UpdatedItem = AnyItem>(
 		event: ItemsUpdatedEvent,
-		handler: FilterHandler<
-			UpdateGroup<UpdatedItem>[],
-			void,
-			WrittenEventContext
-		>,
+		handler: WrittenFilterHandler<UpdateGroup<UpdatedItem>[]>,
 	): void;
 	<TIn = unknown, TOut = TIn, EventName extends string = string>(
 		event: EventName extends ItemsReadEvent | ItemsMutationEvent | ItemsWrittenEvent
