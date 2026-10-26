@@ -13,6 +13,7 @@ import {
 import { mapCreateRows, mapUpdateRows, oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
+import pg from 'pg';
 import {
 	afterEach,
 	beforeAll,
@@ -4208,6 +4209,10 @@ describe('updateBatch on postgres', () => {
 		delete Object.getPrototypeOf(MockClient.prototype)._events;
 
 		pgTracker = createTracker(pgDatabase);
+
+		// knex's pg json mode binds a Date or a bigint through node-pg's
+		// prepareValue, read off the driver MockClient replaces.
+		pgDatabase.client.driver.utils = pg.utils;
 	});
 
 	beforeEach(() => {
