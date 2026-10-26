@@ -11,11 +11,15 @@ export type EventContext = {
 	/**
 	 * Scoped-cache fingerprint channel, carrying ONLY the methods for this event:
 	 * `scopeTo` and `dependOn` on `items.read`, `purgeBy` on
-	 * `items.create`/`update`/`delete`. Absent on every other event. A hook does not
-	 * see this union: `register.filter` hands a read handler `ReadEventContext` and a
-	 * mutation handler `MutationEventContext`, resolved from the event name.
+	 * `items.create`/`update`/`delete` and `items.created`/`updated`. Absent on every
+	 * other event. A hook does not see this union: `register.filter` hands a read
+	 * handler `ReadEventContext`, a mutation handler `MutationEventContext` and a
+	 * written one `WrittenEventContext`, resolved from the event name.
 	 */
-	scopedCache?: ScopedCacheScopeHandle | ScopedCachePurgeHandle;
+	scopedCache?:
+		| ScopedCacheScopeHandle
+		| ScopedCachePurgeHandle
+		| Pick<ScopedCachePurgeHandle, 'purgeBy'>;
 };
 
 /** What an `ItemsService` read filter receives: the read handle is always there. */
@@ -23,10 +27,7 @@ export type ReadEventContext = Omit<EventContext, 'scopedCache'> & {
 	scopedCache: ScopedCacheScopeHandle;
 };
 
-/**
- * What an `ItemsService` create/update/delete filter receives, and a
- * created/updated one, which runs once the rows are written.
- */
+/** What an `ItemsService` create/update/delete filter receives. */
 export type MutationEventContext = Omit<EventContext, 'database' | 'scopedCache'> & {
 	/**
 	 * The transaction the filter hooks and the write share: a hook writing through
@@ -38,6 +39,15 @@ export type MutationEventContext = Omit<EventContext, 'database' | 'scopedCache'
 	/** @deprecated Use `transaction`, the same object. */
 	database: Knex;
 	scopedCache: ScopedCachePurgeHandle;
+};
+
+/**
+ * What an `ItemsService` created/updated filter receives, once the rows are
+ * written: it may purge, but no row is left to take over, so it has no
+ * `skipPurgeFor` to spare one an update hook took over and moved.
+ */
+export type WrittenEventContext = Omit<MutationEventContext, 'scopedCache'> & {
+	scopedCache: Pick<ScopedCachePurgeHandle, 'purgeBy'>;
 };
 
 export type FilterHandler<

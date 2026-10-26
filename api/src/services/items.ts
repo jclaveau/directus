@@ -1493,7 +1493,9 @@ implements AbstractService<Item> {
 				database: trx,
 				schema: this.schema,
 				accountability: this.accountability,
-				scopedCache: declarations.purgeHandleFor(this.collection),
+				scopedCache: {
+					purgeBy: declarations.purgeHandleFor(this.collection).purgeBy,
+				},
 			},
 		);
 

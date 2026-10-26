@@ -14,6 +14,7 @@ import type {
 	UpdateEntries,
 	UpdateEntry,
 	UpdateGroup,
+	WrittenEventContext,
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { expectTypeOf, test } from 'vitest';
@@ -328,7 +329,7 @@ test('register.filter types a created event by the rows it wrote', () => {
 
 	register.filter<Item>('article.items.created', (rows, _meta, context) => {
 		expectTypeOf(rows).toEqualTypeOf<Item[]>();
-		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+		expectTypeOf(context).toEqualTypeOf<WrittenEventContext>();
 	});
 
 	register.filter('users.created', (rows, _meta, context) => {
@@ -342,7 +343,7 @@ test('register.filter types an updated event by the groups it applied', () => {
 
 	register.filter<Item>('items.updated', (groups, _meta, context) => {
 		expectTypeOf(groups).toEqualTypeOf<UpdateGroup<Item>[]>();
-		expectTypeOf(context).toEqualTypeOf<MutationEventContext>();
+		expectTypeOf(context).toEqualTypeOf<WrittenEventContext>();
 	});
 
 	register.filter('users.updated', (groups) => {

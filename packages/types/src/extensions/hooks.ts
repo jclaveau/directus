@@ -7,6 +7,7 @@ import type {
 	MutationEventContext,
 	ReadEventContext,
 	ScheduleHandler,
+	WrittenEventContext,
 } from '../events.js';
 import type {
 	CreateEntries,
@@ -71,8 +72,9 @@ export type BareFilterEvent =
  * `fields.create` does not read as a mutation; then the item shapes, a grouped
  * create or update taking the item type and wrapping it in the list it carries,
  * a delete taking the item type too, so `filter<Row>` does not type its keys as
- * a row, and handing them as `DeleteKeys`; then any other string, which is also
- * where a non-literal event name lands.
+ * a row, and handing them as `DeleteKeys`; then a created or updated one, typed
+ * by the rows or groups it wrote; then any other string, which is also where a
+ * non-literal event name lands.
  *
  * An item handler may return nothing: `emitFilter` keeps the payload when a
  * handler answers `undefined`.
@@ -119,14 +121,14 @@ export type RegisterFilter = {
 	): void;
 	<CreatedItem = AnyItem>(
 		event: ItemsCreatedEvent,
-		handler: FilterHandler<CreatedItem[], void, MutationEventContext>,
+		handler: FilterHandler<CreatedItem[], void, WrittenEventContext>,
 	): void;
 	<UpdatedItem = AnyItem>(
 		event: ItemsUpdatedEvent,
 		handler: FilterHandler<
 			UpdateGroup<UpdatedItem>[],
 			void,
-			MutationEventContext
+			WrittenEventContext
 		>,
 	): void;
 	<TIn = unknown, TOut = TIn, EventName extends string = string>(

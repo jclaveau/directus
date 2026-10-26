@@ -4,6 +4,7 @@ import type {
 	FilterHandler,
 	InitHandler,
 	MutationEventContext,
+	WrittenEventContext,
 } from '@directus/types';
 import EventEmitter2 from 'eventemitter2';
 import getDatabase from './database/index.js';
@@ -43,7 +44,11 @@ export class Emitter {
 		event: string | string[],
 		payload: TIn,
 		meta: Record<string, any>,
-		context: EventContext | MutationEventContext | null = null,
+		context:
+			| EventContext
+			| MutationEventContext
+			| WrittenEventContext
+			| null = null,
 	): Promise<TIn | TOut> {
 		const events = Array.isArray(event) ? event : [event];
 
