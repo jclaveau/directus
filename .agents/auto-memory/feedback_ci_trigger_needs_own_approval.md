@@ -23,3 +23,6 @@ a standing yes to raise later. When multiple label scopes exist, propose the
 narrowest one that would satisfy the ask, not the catch-all. See
 [[feedback_ask_before_branch_switch_and_pr]] for the sibling rule on branch/PR
 actions.
+
+**Exception (2026-10-26, cross-repo):** a rerun of a failure that may be flaky
+needs no ask. See `~/.agents/feedback_rerun_likely_flaky_without_asking.md`.

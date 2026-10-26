@@ -13,13 +13,13 @@ line appended below.
 - [Run every test in CI, loop on the run](feedback_directus_ci_only_test_runs.md) — unit, typecheck, blackbox all in CI; no local vitest/tsc gate
 - [Never run blackbox locally](feedback_directus_bb_tests_in_ci.md) — slower than CI's shards and re-seeds jean's docker stack
 - [No consumer data in fork memories](feedback_directus_no_consumer_data_in_fork_memories.md) — public repo: consumer specifics go to its private repo; a consumer prod DB is SELECT-only
-- [Non-PG review points go to #610](feedback_directus_non_pg_review_points_to_610.md) — sqlite/cockroach/maria finding → point in #610 + `TODO(#610):`, never fixed in the PR
+- [Non-PG review points go to #610](feedback_directus_non_pg_review_points_to_610.md) — sqlite/cockroach/maria finding → point in #610 + `TODO(#610):`, never fixed in the PR; a closed PR leaving a sqlite/maria gap → link in #330/#331, no ask
 - [Postgres only in the main workflow](feedback_directus_pg_only_dialect_focus.md) — no MariaDB/SQLite investment; never report their absence as a gap
 - [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch/rerun is its own ask
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 
-## settled (29) — per-PR accepted exceptions; read before reviewing that PR
+## settled (31) — per-PR accepted exceptions; read before reviewing that PR
 `.agents/auto-memory/index/settled.md`
 
 - [PR #607 accepted exceptions](project_directus_pr607_accepted_exceptions.md) — context.transaction on mutation filters; non-PG → #610
@@ -56,7 +56,7 @@ line appended below.
 - [The blocking codecov check is the unflagged patch at 95%](project_directus_codecov_aggregate_patch_gate.md) — only unit tests clear the bar
 - [Bench measures the trunk, not your PR](project_directus_bench_measures_trunk.md) — a red `Bench / cache` on a PR is the trunk tip
 
-## unit-tests (8) — vitest mocks, typecheck, local test env
+## unit-tests (9) — vitest mocks, typecheck, local test env
 `.agents/auto-memory/index/unit-tests.md`
 
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
@@ -75,7 +75,7 @@ line appended below.
 - [processes/autoscale consolidation](project_directus_processes_autoscale_consolidation.md) — one bounded `processes/supervisor/` gateway; routes/env frozen
 - [RAM: the node flags that work](project_directus_ram_node_flags.md) — never cap old space without a measured peak
 
-## fork (18) — branches, PR naming, licensing, derived branches, worktrees
+## fork (21) — branches, PR naming, licensing, derived branches, worktrees
 `.agents/auto-memory/index/fork.md`
 
 - [New feats base on v11.10.1-hhh-dev](feedback_directus_new_feat_base_hhh_dev.md) — fetch + sync hhh-dev first
