@@ -4414,6 +4414,126 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 	});
 });
 
+describe(oneLine`
+	Services / Items / a write a written hook makes on its transaction
+`, () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+		tracker.on.select('test').response([{ id: 1, name: 'Before' }]);
+		tracker.on.insert('test').response([{ id: 1 }]);
+		tracker.on.update('test').response(1);
+		tracker.on.insert('children').response([{ id: 9 }]);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+	});
+
+	it(oneLine`
+		purges the child a created hook writes on its transaction once the create
+		commits
+	`, async () => {
+		// On `test` alone: the child's own create emits `items.created` too.
+		const writeChild = async (_rows: unknown, _meta: unknown, context: any) => {
+			await new ItemsService('children', { knex: context.transaction, schema })
+				.createOne({ parent_id: 1 });
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		};
+
+		emitter.onFilter('test.items.created', writeChild);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.createOne({ name: 'Test' });
+
+			expect(purgeScopedCache).toHaveBeenNthCalledWith(
+				1,
+				expect.anything(),
+				'children',
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.created', writeChild);
+		}
+	});
+
+	it(oneLine`
+		purges the child an updated hook writes on its transaction once the update
+		commits
+	`, async () => {
+		const writeChild = async (_groups: unknown, _meta: unknown, context: any) => {
+			await new ItemsService('children', { knex: context.transaction, schema })
+				.createOne({ parent_id: 1 });
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		};
+
+		emitter.onFilter('test.items.updated', writeChild);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.updateOne(1, { name: 'Test' });
+
+			expect(purgeScopedCache).toHaveBeenNthCalledWith(
+				1,
+				expect.anything(),
+				'children',
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.updated', writeChild);
+		}
+	});
+
+	it(oneLine`
+		purges the child a created hook writes in a savepoint of its transaction
+		once the create commits
+	`, async () => {
+		const writeChild = async (_rows: unknown, _meta: unknown, context: any) => {
+			await context.transaction.transaction(async (savepointTrx: Knex) => {
+				await new ItemsService('children', { knex: savepointTrx, schema })
+					.createOne({ parent_id: 1 });
+			});
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		};
+
+		emitter.onFilter('test.items.created', writeChild);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.createOne({ name: 'Test' });
+
+			expect(purgeScopedCache).toHaveBeenNthCalledWith(
+				1,
+				expect.anything(),
+				'children',
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.created', writeChild);
+		}
+	});
+});
+
 describe('updateBatch on postgres', () => {
 	const postsSchema = new SchemaBuilder()
 		.collection('posts', (c) => {
