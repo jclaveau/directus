@@ -4418,13 +4418,10 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 	let db: Knex;
 	let tracker: Tracker;
 
-	// The nested write reaches `get-service.js`, loaded lazily: pay its load here, as
-	// the integration tests do, not inside a test's 5s budget.
-	beforeAll(async () => {
+	beforeAll(() => {
 		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
-		await import('../utils/get-service.js');
-	}, 120_000);
+	});
 
 	beforeEach(() => {
 		vi.mocked(purgeScopedCache).mockClear();
@@ -4442,6 +4439,7 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 		purges the child a created hook writes on its transaction once the create
 		commits
 	`, async () => {
+		// On `test` alone: the child's own create emits `items.created` too.
 		const writeChild = async (_rows: unknown, _meta: unknown, context: any) => {
 			await new ItemsService('children', { knex: context.transaction, schema })
 				.createOne({ parent_id: 1 });
@@ -4449,7 +4447,7 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		};
 
-		emitter.onFilter('items.created', writeChild);
+		emitter.onFilter('test.items.created', writeChild);
 
 		try {
 			await new ItemsService('test', { knex: db, schema })
@@ -4465,7 +4463,7 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 			);
 		}
 		finally {
-			emitter.offFilter('items.created', writeChild);
+			emitter.offFilter('test.items.created', writeChild);
 		}
 	});
 
@@ -4480,7 +4478,7 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 			expect(purgeScopedCache).not.toHaveBeenCalled();
 		};
 
-		emitter.onFilter('items.updated', writeChild);
+		emitter.onFilter('test.items.updated', writeChild);
 
 		try {
 			await new ItemsService('test', { knex: db, schema })
@@ -4496,7 +4494,7 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 			);
 		}
 		finally {
-			emitter.offFilter('items.updated', writeChild);
+			emitter.offFilter('test.items.updated', writeChild);
 		}
 	});
 });
