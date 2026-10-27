@@ -178,7 +178,7 @@ describe('queueAfterCommit', () => {
 		const queuedTask = vi.fn(async () => {});
 
 		await expect(db.transaction(async (trx) => {
-			queueAfterCommit(trx, queuedTask);
+			expect(queueAfterCommit(trx, queuedTask)).toBe(true);
 
 			throw new Error('write failed');
 		})).rejects.toThrow('write failed');
@@ -198,7 +198,7 @@ describe('queueAfterCommit', () => {
 		const queuedTask = vi.fn(async () => {});
 		const trx = await db.transaction();
 
-		queueAfterCommit(trx, queuedTask);
+		expect(queueAfterCommit(trx, queuedTask)).toBe(true);
 
 		await trx.rollback();
 		await new Promise((resolve) => setTimeout(resolve, 10));
@@ -220,6 +220,50 @@ describe('queueAfterCommit', () => {
 		await trx.commit();
 
 		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledWith(db));
+	});
+
+	// A purge missed leaves the old row cached until TTL; one too many only
+	// re-reads it.
+	it(oneLine`
+		runs a task queued on a raw trx committed through a commit taken before
+		the task was queued
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+		const { commit } = trx;
+
+		expect(queueAfterCommit(trx, queuedTask)).toBe(true);
+
+		await commit();
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledWith(db));
+	});
+
+	it(oneLine`
+		runs a task queued on a released savepoint of a raw trx once the raw trx
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await db.transaction(async (trx) => {
+			const savepointTrx = await trx.transaction();
+
+			await savepointTrx.commit();
+
+			expect(queueAfterCommit(savepointTrx, queuedTask)).toBe(true);
+		});
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledOnce());
 	});
 
 	it('queues nothing on a raw trx that already committed', async () => {

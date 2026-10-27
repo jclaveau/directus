@@ -44,14 +44,15 @@ function findQueuedTasks(knex: Knex): AfterCommitTask[] | undefined {
  * purge would otherwise run before that trx commits (#641). Undefined when
  * `knex` is no open trx.
  *
- * Its tasks run once its COMMIT went through, on the database `getDatabase()`
- * returns, the trx carrying no link to the knex it was opened on. They run after
- * the opener's await resumes, not before it: nothing makes the opener wait.
+ * Its tasks run once it settled without a rollback, on the database
+ * `getDatabase()` returns, the trx carrying no link to the knex it was opened on.
+ * The opener's await does not wait for them: the first one starts before it
+ * resumes, and they end after.
  */
 function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 	let outermostTrx = knex as Knex.Transaction;
 
-	if (!outermostTrx.isTransaction || outermostTrx.isCompleted()) {
+	if (!outermostTrx.isTransaction) {
 		return undefined;
 	}
 
@@ -59,16 +60,25 @@ function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 		outermostTrx = outermostTrx.parentTransaction;
 	}
 
+	// Checked on the outermost trx: a savepoint released inside it still commits
+	// with it.
+	if (outermostTrx.isCompleted()) {
+		return undefined;
+	}
+
 	const queuedTasks: AfterCommitTask[] = [];
-	const { commit } = outermostTrx;
-	let commitRequested = false;
+	const { rollback } = outermostTrx;
+	let rollbackRequested = false;
 
 	// A trx opened without a handler and rolled back resolves as a committed one
-	// does: only a call to its commit tells them apart.
-	outermostTrx.commit = (value) => {
-		commitRequested = true;
+	// does: only a call to its rollback tells them apart. Watched rather than its
+	// commit: an opener that took the method before this ran goes unseen, and a
+	// rollback unseen costs a purge of rows left unchanged, a commit unseen a
+	// stale row.
+	outermostTrx.rollback = (error) => {
+		rollbackRequested = true;
 
-		return commit.call(outermostTrx, value);
+		return rollback.call(outermostTrx, error);
 	};
 
 	afterCommitTasks.set(outermostTrx, queuedTasks);
@@ -77,7 +87,7 @@ function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
 		async () => {
 			afterCommitTasks.delete(outermostTrx);
 
-			if (commitRequested) {
+			if (!rollbackRequested) {
 				await drainAfterCommit(getDatabase(), queuedTasks);
 			}
 		},

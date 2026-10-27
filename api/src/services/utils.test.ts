@@ -1202,18 +1202,22 @@ describe('Services / Utils', () => {
 		`, async () => {
 			vi.mocked(readSharedSettings).mockResolvedValue(null);
 
-			const transactionStatesWhenRun: unknown[] = [];
+			const taskSteps: string[] = [];
 
+			// The state is copied when the task starts: the tracker rewrites it in
+			// place. The task outlasts a tick, so an answer that does not wait for
+			// it comes before 'task ended'.
 			vi.mocked(writeSharedSettings).mockImplementationOnce(async (...args) => {
 				queueAfterCommit(args[2].knex!, async () => {
-					transactionStatesWhenRun.push(tracker.history.transactions);
+					taskSteps.push(tracker.history.transactions[0]!.state);
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					taskSteps.push('task ended');
 				});
 			});
 
 			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
 
-			expect(transactionStatesWhenRun)
-				.toMatchObject([[{ state: 'committed' }]]);
+			expect(taskSteps).toEqual(['committed', 'task ended']);
 		});
 
 		// A clear held inside the transaction keeps the row locked for as long
