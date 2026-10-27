@@ -126,6 +126,7 @@ import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { transaction } from '../utils/transaction.js';
 
 /**
  * A whole number inside the range the field accepts, or the answer saying it
@@ -767,7 +768,9 @@ export class UtilsService {
 			{ accountability: this.accountability },
 		);
 
-		const sharedSettings = await this.knex.transaction(async (settingsTrx) => {
+		// Through `transaction()`: the purge the write queues runs once the row
+		// committed, and before this answers.
+		const sharedSettings = await transaction(this.knex, async (settingsTrx) => {
 			// Skipped ahead because the row said on, the check runs again under the
 			// lock: a write switching it off in between is now in the row.
 			if (clearedAhead) {

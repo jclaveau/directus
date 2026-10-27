@@ -1,6 +1,6 @@
 import { isObject } from '@directus/utils';
 import { type Knex } from 'knex';
-import { getDatabaseClient } from '../database/index.js';
+import getDatabase, { getDatabaseClient } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import type { DatabaseClient } from '@directus/types';
 
@@ -11,9 +11,9 @@ import type { DatabaseClient } from '@directus/types';
 type AfterCommitTask = (database: Knex) => Promise<void>;
 
 /**
- * The work each open transaction holds back, keyed by the trx `transaction()`
- * opened. A savepoint of it queues on its list; any other trx has none, so work
- * queued on it runs at once.
+ * The work each open transaction holds back, keyed by the outermost trx: the one
+ * `transaction()` opened, or a raw one, given its list when work is first queued
+ * on it. A savepoint queues on the list of the trx it was opened in.
  */
 const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
 
@@ -39,10 +39,60 @@ function findQueuedTasks(knex: Knex): AfterCommitTask[] | undefined {
 }
 
 /**
- * Hold `task` until the transaction `knex` belongs to commits, when `transaction()`
- * opened it or a savepoint of it. Returns false when nothing will run it later:
- * `knex` is no transaction, or one opened elsewhere, and the caller runs the task
- * itself.
+ * The list for a trx `transaction()` did not open: a raw `database.transaction()`
+ * an extension or a service opened itself, handing its trx to a service whose
+ * purge would otherwise run before that trx commits (#641). Undefined when
+ * `knex` is no open trx.
+ *
+ * Its tasks run once its COMMIT went through, on the database `getDatabase()`
+ * returns, the trx carrying no link to the knex it was opened on. They run after
+ * the opener's await resumes, not before it: nothing makes the opener wait.
+ */
+function queueOnRawTransaction(knex: Knex): AfterCommitTask[] | undefined {
+	let outermostTrx = knex as Knex.Transaction;
+
+	if (!outermostTrx.isTransaction || outermostTrx.isCompleted()) {
+		return undefined;
+	}
+
+	while (outermostTrx.parentTransaction !== undefined) {
+		outermostTrx = outermostTrx.parentTransaction;
+	}
+
+	const queuedTasks: AfterCommitTask[] = [];
+	const { commit } = outermostTrx;
+	let commitRequested = false;
+
+	// A trx opened without a handler and rolled back resolves as a committed one
+	// does: only a call to its commit tells them apart.
+	outermostTrx.commit = (value) => {
+		commitRequested = true;
+
+		return commit.call(outermostTrx, value);
+	};
+
+	afterCommitTasks.set(outermostTrx, queuedTasks);
+
+	outermostTrx.executionPromise.then(
+		async () => {
+			afterCommitTasks.delete(outermostTrx);
+
+			if (commitRequested) {
+				await drainAfterCommit(getDatabase(), queuedTasks);
+			}
+		},
+		() => {
+			afterCommitTasks.delete(outermostTrx);
+		},
+	);
+
+	return queuedTasks;
+}
+
+/**
+ * Hold `task` until the transaction `knex` belongs to commits. Returns false when
+ * nothing will run it later: `knex` is no transaction, or one already settled,
+ * and the caller runs the task itself.
  *
  * A rolled-back transaction drops its tasks: nothing it wrote landed, so nothing
  * needs them. A retried one drops the aborted attempt's tasks with that attempt.
@@ -50,7 +100,7 @@ function findQueuedTasks(knex: Knex): AfterCommitTask[] | undefined {
  * of rows left unchanged.
  */
 export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
-	const queuedTasks = findQueuedTasks(knex);
+	const queuedTasks = findQueuedTasks(knex) ?? queueOnRawTransaction(knex);
 
 	if (queuedTasks === undefined) {
 		return false;
@@ -96,7 +146,7 @@ export function queueMergedAfterCommit<Request>(
 		runRequest: (database: Knex, request: Request) => Promise<void>;
 	},
 ): boolean {
-	const queuedTasks = findQueuedTasks(knex);
+	const queuedTasks = findQueuedTasks(knex) ?? queueOnRawTransaction(knex);
 
 	if (queuedTasks === undefined) {
 		return false;
