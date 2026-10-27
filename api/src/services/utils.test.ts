@@ -73,6 +73,7 @@ import {
 } from '../schedules/cache-audit.js';
 import { countScopedCachePinMembers } from '../scoped-cache/index.js';
 import { compress } from '../utils/compress.js';
+import { queueAfterCommit } from '../utils/transaction.js';
 import { SettingsService } from './settings.js';
 import { UtilsService } from './utils.js';
 
@@ -1192,6 +1193,27 @@ describe('Services / Utils', () => {
 			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
 
 			expect(announceSharedSettings).toHaveBeenCalledWith('cache_settings');
+		});
+
+		// The settings row is served from the cache: a purge run before the
+		// commit lets a read in between cache the row this write replaces.
+		it(oneLine`
+			runs what the write queues once it committed, before answering
+		`, async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			const transactionStatesWhenRun: unknown[] = [];
+
+			vi.mocked(writeSharedSettings).mockImplementationOnce(async (...args) => {
+				queueAfterCommit(args[2].knex!, async () => {
+					transactionStatesWhenRun.push(tracker.history.transactions);
+				});
+			});
+
+			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
+
+			expect(transactionStatesWhenRun)
+				.toMatchObject([[{ state: 'committed' }]]);
 		});
 
 		// A clear held inside the transaction keeps the row locked for as long
