@@ -12,8 +12,8 @@ type AfterCommitTask = (database: Knex) => Promise<void>;
 
 /**
  * The work each open transaction holds back, keyed by the trx `transaction()`
- * opened. A trx it did not open has no entry, so work queued on it runs at once,
- * as before.
+ * opened. A savepoint of it queues on its list; any other trx has none, so work
+ * queued on it runs at once.
  */
 const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
 
