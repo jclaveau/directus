@@ -18,15 +18,39 @@ type AfterCommitTask = (database: Knex) => Promise<void>;
 const afterCommitTasks = new WeakMap<Knex, AfterCommitTask[]>();
 
 /**
+ * The tasks held back for the transaction `knex` belongs to: its own, or, for a
+ * savepoint `trx.transaction()` opened, the ones of the transaction it was opened
+ * in, which its writes commit with.
+ */
+function findQueuedTasks(knex: Knex): AfterCommitTask[] | undefined {
+	let openTrx: Knex.Transaction | undefined = knex as Knex.Transaction;
+
+	while (openTrx !== undefined) {
+		const queuedTasks = afterCommitTasks.get(openTrx);
+
+		if (queuedTasks !== undefined) {
+			return queuedTasks;
+		}
+
+		openTrx = openTrx.parentTransaction;
+	}
+
+	return undefined;
+}
+
+/**
  * Hold `task` until the transaction `knex` belongs to commits, when `transaction()`
- * opened it. Returns false when nothing will run it later: `knex` is no
- * transaction, or one opened elsewhere, and the caller runs the task itself.
+ * opened it or a savepoint of it. Returns false when nothing will run it later:
+ * `knex` is no transaction, or one opened elsewhere, and the caller runs the task
+ * itself.
  *
  * A rolled-back transaction drops its tasks: nothing it wrote landed, so nothing
  * needs them. A retried one drops the aborted attempt's tasks with that attempt.
+ * A rolled-back savepoint keeps them: they run once the outer one commits, a purge
+ * of rows left unchanged.
  */
 export function queueAfterCommit(knex: Knex, task: AfterCommitTask): boolean {
-	const queuedTasks = afterCommitTasks.get(knex);
+	const queuedTasks = findQueuedTasks(knex);
 
 	if (queuedTasks === undefined) {
 		return false;
@@ -72,7 +96,7 @@ export function queueMergedAfterCommit<Request>(
 		runRequest: (database: Knex, request: Request) => Promise<void>;
 	},
 ): boolean {
-	const queuedTasks = afterCommitTasks.get(knex);
+	const queuedTasks = findQueuedTasks(knex);
 
 	if (queuedTasks === undefined) {
 		return false;
