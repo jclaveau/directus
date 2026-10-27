@@ -770,6 +770,9 @@ export class UtilsService {
 
 		// Through `transaction()`: the purge the write queues runs once the row
 		// committed, and before this answers.
+		// TODO(#610): off postgres, a busy or serialization error re-runs this
+		// handler and, once the retries ran out, answers "Transaction failed after
+		// 4 attempts" rather than the database's own error.
 		const sharedSettings = await transaction(this.knex, async (settingsTrx) => {
 			// Skipped ahead because the row said on, the check runs again under the
 			// lock: a write switching it off in between is now in the row.
