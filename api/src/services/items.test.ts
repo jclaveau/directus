@@ -22,7 +22,7 @@ import {
 	it,
 	vi,
 } from 'vitest';
-import { getDatabaseClient } from '../database/index.js';
+import getDatabase, { getDatabaseClient } from '../database/index.js';
 import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
@@ -4197,10 +4197,13 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 
 	beforeEach(() => {
 		vi.mocked(purgeScopedCache).mockClear();
+		// A failed write purges on the database `getDatabase()` returns.
+		vi.mocked(getDatabase).mockReturnValue(db);
 		tracker.on.select('test').response([]);
 	});
 
 	afterEach(() => {
+		vi.mocked(getDatabase).mockReset();
 		tracker.reset();
 	});
 

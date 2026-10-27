@@ -63,7 +63,9 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
-const { getDatabaseClient } = await import('../database/index.js');
+
+const { default: getDatabase, getDatabaseClient } =
+	await import('../database/index.js');
 
 const { createScopedCacheHookDeclarations, scopedCachePinKeys } =
 	await import('../scoped-cache/index.js');
@@ -176,6 +178,7 @@ describe(oneLine`
 	afterEach(() => {
 		tracker.reset();
 		purgeScopedCache.mockClear();
+		vi.mocked(getDatabase).mockReset();
 		// A test writing its groups one by one runs off postgres, since this
 		// MockClient has no dialect to compile their batch with.
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
@@ -691,6 +694,9 @@ describe(oneLine`
 	`, async () => {
 		// The groups are written one by one only off postgres.
 		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+		// The purge runs once the trx committed, on the database `getDatabase()`
+		// returns.
+		vi.mocked(getDatabase).mockReturnValue(db);
 
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
@@ -714,30 +720,33 @@ describe(oneLine`
 			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 		}
 
-		expect(purgeScopedCache).toHaveBeenCalledWith(
-			expect.anything(),
-			'test',
-			[
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-				},
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-				},
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['1'], 'student': ['a'] },
-				},
-				{
-					collection: 'test',
-					pinnedScope: { 'id': ['2'], 'student': ['b'] },
-				},
-			],
-			expect.anything(),
-			expect.anything(),
-		);
+		// The opener's await does not wait for the tasks queued on its trx.
+		await vi.waitFor(() => {
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['1'], 'student': ['a'] },
+					},
+					{
+						collection: 'test',
+						pinnedScope: { 'id': ['2'], 'student': ['b'] },
+					},
+				],
+				expect.anything(),
+				expect.anything(),
+			);
+		});
 	});
 
 	// Purge pins come from the value actually stored, not the raw input: a
