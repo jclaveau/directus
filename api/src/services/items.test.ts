@@ -256,6 +256,115 @@ describe('Integration Tests', () => {
 				}
 			});
 
+			it(oneLine`
+				hands the created filter the written rows inside the mutation
+				transaction
+			`, async () => {
+				tracker.on.insert('test').response([{ id: 7 }]);
+
+				const createdFilter = vi.fn();
+
+				emitter.onFilter('items.created', createdFilter);
+
+				try {
+					await service.createOne({ name: 'Test' });
+
+					// The key 7 comes back from the insert: the filter runs after it.
+					expect(createdFilter).toHaveBeenCalledWith(
+						[{ id: 7, name: 'Test' }],
+						{
+							collection: 'test',
+							event: 'items.created',
+							keys: [7],
+							originalPayload: [{ id: 7, name: 'Test' }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.created', createdFilter);
+				}
+			});
+
+			it('rolls the create back when a created filter throws', async () => {
+				const refuseCreated = () => {
+					throw new Error('refused by the created hook');
+				};
+
+				emitter.onFilter('items.created', refuseCreated);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new Error('refused by the created hook'));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.created', refuseCreated);
+				}
+			});
+
+			it('refuses a created filter answering other rows', async () => {
+				const answerOtherRows = () => [{ name: 'other' }];
+
+				emitter.onFilter('items.created', answerOtherRows);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "items.created" filter hook must return nothing: '
+								+ 'the rows are already written',
+						}));
+				}
+				finally {
+					emitter.offFilter('items.created', answerOtherRows);
+				}
+			});
+
+			it('refuses a created filter answering the rows it was handed', async () => {
+				const answerHandedRows = (rows: unknown) => rows;
+
+				emitter.onFilter('test.items.created', answerHandedRows);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "test.items.created" filter hook must return '
+								+ 'nothing: the rows are already written',
+						}));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('test.items.created', answerHandedRows);
+				}
+			});
+
+			it('emits no created event when emitEvents is false', async () => {
+				const createdFilter = vi.fn();
+
+				emitter.onFilter('items.created', createdFilter);
+
+				try {
+					await service.createOne({ name: 'Test' }, { emitEvents: false });
+
+					expect(createdFilter).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.created', createdFilter);
+				}
+			});
+
 			it('should validate user count if requested', async () => {
 				await service.createOne({}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
@@ -809,7 +918,7 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				keeps a row a hook answers with its integer key with a leading zero
 			`, async () => {
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 					data: { name: 'after' },
 					keys: ['01'],
 				}]);
@@ -876,7 +985,7 @@ describe('Integration Tests', () => {
 			`, async () => {
 				tracker.on.update('test').response(1);
 
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([
 					{ data: { name: 'after' }, keys: [1, 3] },
 				]);
 
@@ -1276,6 +1385,126 @@ describe('Integration Tests', () => {
 				}
 				finally {
 					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				hands the updated filter the applied groups inside the mutation
+				transaction
+			`, async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('test.items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					expect(updatedFilter).toHaveBeenCalledWith(
+						[{ data: { name: 'Test' }, keys: [1] }],
+						{
+							collection: 'test',
+							event: 'test.items.updated',
+							keys: [1],
+							originalPayload: [{ data: { name: 'Test' }, keys: [1] }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('test.items.updated', updatedFilter);
+				}
+			});
+
+			it(oneLine`
+				hands an updated filter a purge handle that declares no take-over
+				inert
+			`, async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					// A skipPurgeFor here would spare a row an update hook took over and
+					// moved, leaving its old slice cached.
+					expect(updatedFilter).toHaveBeenCalledWith(
+						expect.anything(),
+						expect.anything(),
+						expect.objectContaining({
+							scopedCache: { purgeBy: expect.any(Function) },
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.updated', updatedFilter);
+				}
+			});
+
+			it('emits no updated event when emitEvents is false', async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' }, { emitEvents: false });
+
+					expect(updatedFilter).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.updated', updatedFilter);
+				}
+			});
+
+			it('rolls the update back when an updated filter throws', async () => {
+				const refuseUpdated = () => {
+					throw new Error('refused by the updated hook');
+				};
+
+				emitter.onFilter('items.updated', refuseUpdated);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' }))
+						.rejects
+						.toThrow(new Error('refused by the updated hook'));
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'rolled back',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ? where "id" in (?)',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.updated', refuseUpdated);
+				}
+			});
+
+			it(oneLine`
+				refuses an updated filter answering the groups it was handed
+			`, async () => {
+				const answerHandedGroups = (groups: unknown) => groups;
+
+				emitter.onFilter('items.updated', answerHandedGroups);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "items.updated" filter hook must return nothing: '
+								+ 'the rows are already written',
+						}));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.updated', answerHandedGroups);
 				}
 			});
 
@@ -2419,7 +2648,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps a row a hook answers with its uuid in capitals', async () => {
 			tracker.on.update('uuid_coll').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 				data: { name: 'after' },
 				keys: ['AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
 			}]);
@@ -2481,7 +2710,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps a row a hook answers with its key with a leading zero', async () => {
 			tracker.on.update('big_coll').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 				data: { name: 'after' },
 				keys: ['05'],
 			}]);
@@ -2976,7 +3205,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -2998,7 +3227,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('answers a null per row when every row is cancelled', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, () => null);
 				},
@@ -3016,7 +3245,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('refuses a row cancel the caller did not opt into', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3044,7 +3273,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 2
@@ -3072,7 +3301,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 2 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3096,7 +3325,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('writes nothing when it takes every row over', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
 				},
@@ -3115,7 +3344,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('emits no update action when it takes every row over', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
 				},
