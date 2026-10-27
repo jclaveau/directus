@@ -4418,10 +4418,13 @@ describe('Services / Items / a write a written hook makes on its transaction', (
 	let db: Knex;
 	let tracker: Tracker;
 
-	beforeAll(() => {
+	// The nested write reaches `get-service.js`, loaded lazily: pay its load here, as
+	// the integration tests do, not inside a test's 5s budget.
+	beforeAll(async () => {
 		db = knex.default({ client: MockClient });
 		tracker = createTracker(db);
-	});
+		await import('../utils/get-service.js');
+	}, 120_000);
 
 	beforeEach(() => {
 		vi.mocked(purgeScopedCache).mockClear();
