@@ -75,6 +75,48 @@ describe('queueAfterCommit', () => {
 		expect(queuedTask).toHaveBeenCalledOnce();
 	});
 
+	it(oneLine`
+		runs a task queued on a savepoint of the trx once the outer transaction
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await transaction(db, async (trx) => {
+			await trx.transaction(async (savepointTrx) => {
+				expect(queueAfterCommit(savepointTrx, queuedTask)).toBe(true);
+			});
+
+			expect(queuedTask).not.toHaveBeenCalled();
+		});
+
+		expect(queuedTask).toHaveBeenCalledWith(db);
+	});
+
+	it(oneLine`
+		runs a task queued on a rolled-back savepoint once the outer transaction
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await transaction(db, async (trx) => {
+			await expect(trx.transaction(async (savepointTrx) => {
+				queueAfterCommit(savepointTrx, queuedTask);
+
+				throw new Error('savepoint rolled back');
+			})).rejects.toThrow('savepoint rolled back');
+		});
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
 	it('queues nothing on a knex that transaction() did not open', () => {
 		const db = knex.default({ client: MockClient });
 
@@ -292,6 +334,34 @@ describe('queueMergedAfterCommit', () => {
 		});
 
 		expect(runRequest.mock.calls).toEqual([[db, 'row 1'], [db, 'row 2']]);
+	});
+
+	it(oneLine`
+		merges a request queued on a savepoint into the one its outer transaction
+		holds
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const runRequest = vi.fn(async () => {});
+
+		const rowsMerger = {
+			mergeRequests: (queued: string[], incoming: string[]) => {
+				return [...queued, ...incoming];
+			},
+			runRequest,
+		};
+
+		await transaction(db, async (trx) => {
+			queueMergedAfterCommit(trx, 'rows', ['row 1'], rowsMerger);
+
+			await trx.transaction(async (savepointTrx) => {
+				queueMergedAfterCommit(savepointTrx, 'rows', ['row 2'], rowsMerger);
+			});
+		});
+
+		expect(runRequest.mock.calls).toEqual([[db, ['row 1', 'row 2']]]);
 	});
 
 	it('queues nothing on a knex that transaction() did not open', () => {
