@@ -5,7 +5,16 @@ import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => {
-	return { scoped: true, purgeForMutatedRows: vi.fn() };
+	return {
+		scoped: true,
+		purgeForMutatedRows: vi.fn(),
+		provider: {
+			getUserID: async () => 'u-1',
+			login: async () => {
+				throw new Error('wrong password');
+			},
+		},
+	};
 });
 
 vi.mock('../database/index.js', () => {
@@ -16,11 +25,38 @@ vi.mock('../database/index.js', () => {
 });
 
 vi.mock('../auth.js', () => {
-	return { getAuthProvider: vi.fn() };
+	return { getAuthProvider: () => state.provider };
 });
 
 vi.mock('../rate-limiter.js', () => {
-	return { createRateLimiter: () => ({ set: vi.fn() }), RateLimiterRes: class {} };
+	// A spent budget: the consume that suspends the user.
+	class RateLimiterRes {
+		remainingPoints = 0;
+	}
+
+	return {
+		createRateLimiter: () => {
+			return {
+				set: vi.fn(),
+				consume: async () => {
+					throw new RateLimiterRes();
+				},
+			};
+		},
+		RateLimiterRes,
+	};
+});
+
+vi.mock('./settings.js', () => {
+	return {
+		SettingsService: vi.fn(function () {
+			return { readSingleton: async () => ({ auth_login_attempts: 1 }) };
+		}),
+	};
+});
+
+vi.mock('../utils/stall.js', () => {
+	return { stall: async () => {} };
 });
 
 vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
@@ -85,5 +121,52 @@ describe('a login or a refresh touching last_access', () => {
 
 		expect(tracker.history.update).toHaveLength(1);
 		expect(state.purgeForMutatedRows).not.toHaveBeenCalled();
+	});
+});
+
+describe('a login spending the last attempt', () => {
+	const db = knex.default({ client: MockClient });
+	let tracker: Tracker;
+
+	beforeEach(() => {
+		tracker = createTracker(db);
+
+		tracker.on.select('directus_users').response([
+			{ id: 'u-1', status: 'active', provider: 'default', tfa_secret: null },
+		]);
+
+		tracker.on.update('directus_users').response(1);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		vi.clearAllMocks();
+	});
+
+	it(oneLine`
+		suspends the user raw and purges the user's slices, since no hook heard the
+		write
+	`, async () => {
+		state.scoped = true;
+		const service = new AuthenticationService({ knex: db, schema });
+
+		await expect(service.login('default', { password: 'nope' }))
+			.rejects.toEqual(new Error('wrong password'));
+
+		expect(tracker.history.update[0]!.bindings).toEqual(['suspended', 'u-1']);
+
+		expect(state.purgeForMutatedRows)
+			.toHaveBeenCalledWith('directus_users', [{ id: 'u-1' }]);
+	});
+
+	it('purges in full mode too, unlike the last_access stamp', async () => {
+		state.scoped = false;
+		const service = new AuthenticationService({ knex: db, schema });
+
+		await expect(service.login('default', { password: 'nope' }))
+			.rejects.toEqual(new Error('wrong password'));
+
+		expect(state.purgeForMutatedRows)
+			.toHaveBeenCalledWith('directus_users', [{ id: 'u-1' }]);
 	});
 });

@@ -2,6 +2,7 @@ import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@dire
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import { FailedValidationError } from '@directus/validation';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
@@ -44,6 +45,16 @@ vi.mock('../utils/jwt.js', () => ({
 vi.mock('../utils/stall.js', () => ({
 	stall: vi.fn().mockResolvedValue(undefined),
 }));
+
+const { purgeForMutatedRows } = vi.hoisted(() => {
+	return { purgeForMutatedRows: vi.fn() };
+});
+
+vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
+	return {
+		createScopedCacheExtensionHandle: () => ({ purgeForMutatedRows }),
+	};
+});
 
 const testRoleId = '4ccdb196-14b3-4ed1-b9da-c1978be07ca2';
 
@@ -570,6 +581,9 @@ describe('Integration Tests', () => {
 				tracker.on.update('directus_versions').response({});
 				// mock comments update query in deleteOne/deleteMany/deleteByQuery methods
 				tracker.on.update('directus_comments').response({});
+				tracker.on.select('directus_notifications').response([]);
+				tracker.on.select('directus_versions').response([]);
+				tracker.on.select('directus_comments').response([]);
 
 				const service = new UsersService({
 					knex: db,
@@ -581,6 +595,25 @@ describe('Integration Tests', () => {
 
 				expect(validateRemainingAdminUsers).toHaveBeenCalled();
 				expect(clearUserSessionsSpy).toBeCalled();
+			});
+
+			it(oneLine`
+				purges the comments, notifications and versions it unlinks raw, since no
+				hook heard those writes
+			`, async () => {
+				tracker.on.select('directus_comments').response([{ id: 'c-1' }]);
+				tracker.on.select('directus_notifications').response([{ id: 7 }]);
+				tracker.on.select('directus_versions').response([]);
+				tracker.on.update('directus_comments').response(1);
+				tracker.on.update('directus_notifications').response(1);
+				tracker.on.update('directus_versions').response(0);
+
+				await service.deleteMany(['user-id-16']);
+
+				expect(purgeForMutatedRows.mock.calls).toEqual([
+					['directus_comments', [{ id: 'c-1' }]],
+					['directus_notifications', [{ id: 7 }]],
+				]);
 			});
 		});
 

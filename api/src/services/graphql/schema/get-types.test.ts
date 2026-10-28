@@ -72,6 +72,11 @@ describe('getTypes', () => {
 							primary: 'id',
 							fields: { id: { field: 'id', type: 'integer', special: [] } },
 						},
+						directus_scoped_cache_pending_purges: {
+							collection: 'directus_scoped_cache_pending_purges',
+							primary: 'id',
+							fields: { id: { field: 'id', type: 'integer', special: [] } },
+						},
 						directus_users: {
 							collection: 'directus_users',
 							primary: 'id',

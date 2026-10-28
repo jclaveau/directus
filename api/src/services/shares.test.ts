@@ -1,9 +1,10 @@
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
@@ -24,6 +25,25 @@ vi.mock('../permissions/cache.js', async (importOriginal) => {
 
 const { send } = vi.hoisted(() => {
 	return { send: vi.fn(async (_options: EmailOptions): Promise<null> => null) };
+});
+
+const scopedCache = vi.hoisted(() => {
+	// Off by default, as on the memory store the other tests run against.
+	return { scoped: false, purgeForMutatedRows: vi.fn() };
+});
+
+vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
+	return {
+		createScopedCacheExtensionHandle: () => {
+			return { purgeForMutatedRows: scopedCache.purgeForMutatedRows };
+		},
+	};
+});
+
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../scoped-cache/index.js')>();
+
+	return { ...actual, scopedCachePurgeEnabled: () => scopedCache.scoped };
 });
 
 vi.mock('./mail/index.js', () => {
@@ -67,6 +87,47 @@ describe('Services / Shares', () => {
 			]);
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('login', () => {
+		beforeEach(() => {
+			scopedCache.purgeForMutatedRows.mockClear();
+
+			tracker.on.select('directus_shares').response([
+				{ share_id: 's-1', share_times_used: 2, share_password: null },
+			]);
+
+			tracker.on.update('directus_shares').response(1);
+			tracker.on.insert('directus_sessions').response([]);
+			tracker.on.delete('directus_sessions').response(0);
+		});
+
+		afterEach(() => {
+			scopedCache.scoped = false;
+		});
+
+		it(oneLine`
+			counts the use raw and purges the share's slices, since no hook heard the
+			write
+		`, async () => {
+			scopedCache.scoped = true;
+
+			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
+
+			expect(tracker.history.update[0]!.bindings).toEqual([3, 's-1']);
+
+			expect(scopedCache.purgeForMutatedRows)
+				.toHaveBeenCalledWith('directus_shares', [{ id: 's-1' }]);
+		});
+
+		it('leaves the cache alone in full mode, as upstream does', async () => {
+			scopedCache.scoped = false;
+
+			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
+
+			expect(tracker.history.update).toHaveLength(1);
+			expect(scopedCache.purgeForMutatedRows).not.toHaveBeenCalled();
 		});
 	});
 
