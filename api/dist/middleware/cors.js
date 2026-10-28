@@ -1,0 +1,18 @@
+import { useEnv } from "@directus/env";
+import cors from "cors";
+
+//#region src/middleware/cors.ts
+let corsMiddleware = (_req, _res, next) => next();
+const env = useEnv();
+if (env["CORS_ENABLED"] === true) corsMiddleware = cors({
+	origin: env["CORS_ORIGIN"],
+	methods: env["CORS_METHODS"],
+	allowedHeaders: env["CORS_ALLOWED_HEADERS"],
+	exposedHeaders: env["CORS_EXPOSED_HEADERS"],
+	credentials: env["CORS_CREDENTIALS"],
+	maxAge: env["CORS_MAX_AGE"]
+});
+var cors_default = corsMiddleware;
+
+//#endregion
+export { cors_default as default };
