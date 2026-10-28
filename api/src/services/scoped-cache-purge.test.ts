@@ -473,6 +473,47 @@ describe(oneLine`
 		);
 	});
 
+	// https://github.com/jclaveau/directus/issues/645
+	it(oneLine`
+		a delete whose survivor re-read fails after the commit still answers, purges
+		the collection and emits the action
+	`, async () => {
+		tracker.on.select('test').responseOnce([{ id: 2 }]);
+
+		tracker.on.select('test').responseOnce([
+			{ id: 1, student: 'A' },
+			{ id: 2, student: 'B' },
+		]);
+
+		tracker.on.delete('test').response(1);
+		tracker.on.select('test').simulateErrorOnce('read failed');
+		const bypassEmitAction = vi.fn();
+
+		await expect(service(selfRefSchema).deleteMany([1], { bypassEmitAction }))
+			.resolves
+			.toEqual([1]);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+			expect.anything(),
+		);
+
+		expect(bypassEmitAction).toHaveBeenCalledWith({
+			event: ['items.delete', 'test.items.delete'],
+			meta: { payload: [1], keys: [1], collection: 'test' },
+			context: {
+				database: undefined,
+				schema: selfRefSchema,
+				accountability: null,
+			},
+		});
+	});
+
 	it(oneLine`
 		a delete on a collection with no self-relation looks for no survivor
 	`, async () => {
