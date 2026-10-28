@@ -15,10 +15,12 @@ import { nanoid } from 'nanoid';
 import { useLogger } from '../logger/index.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import type { DirectusTokenPayload, ShareData } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { md } from '../utils/md.js';
+import { purgeRawWrite } from '../utils/purge-raw-write.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { ItemsService } from './items.js';
@@ -106,6 +108,14 @@ export class SharesService extends ItemsService {
 		await this.knex('directus_shares')
 			.update({ times_used: record.share_times_used + 1 })
 			.where('id', record.share_id);
+
+		// A counter bumped on every share login: full mode keeps upstream's silence,
+		// as for a user's last_access.
+		if (scopedCachePurgeEnabled()) {
+			await purgeRawWrite(this.knex, this.schema, 'directus_shares', [
+				{ id: record.share_id },
+			]);
+		}
 
 		const tokenPayload: DirectusTokenPayload = {
 			app_access: false,

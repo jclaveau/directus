@@ -26,6 +26,7 @@ import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { isEmpty } from '../utils/lodash-es-used.js';
+import { purgeRawWrite } from '../utils/purge-raw-write.js';
 import { stall } from '../utils/stall.js';
 import { Url } from '../utils/url.js';
 import { ItemsService } from './items.js';
@@ -395,9 +396,26 @@ export class UsersService extends ItemsService {
 		}
 
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
-		await this.knex('directus_comments').update({ user_updated: null }).whereIn('user_updated', keys);
-		await this.knex('directus_notifications').update({ sender: null }).whereIn('sender', keys);
-		await this.knex('directus_versions').update({ user_updated: null }).whereIn('user_updated', keys);
+		const userReferences = [
+			['directus_comments', 'user_updated'],
+			['directus_notifications', 'sender'],
+			['directus_versions', 'user_updated'],
+		] as const;
+
+		for (const [collection, userField] of userReferences) {
+			const unlinkedRows = await this.knex
+				.select('id')
+				.from(collection)
+				.whereIn(userField, keys);
+
+			await this.knex(collection)
+				.update({ [userField]: null })
+				.whereIn(userField, keys);
+
+			if (unlinkedRows.length > 0) {
+				await purgeRawWrite(this.knex, this.schema, collection, unlinkedRows);
+			}
+		}
 
 		await super.deleteMany(keys, opts);
 		await this.clearUserSessions(keys);

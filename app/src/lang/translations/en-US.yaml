@@ -1302,6 +1302,7 @@ directus_collection:
   directus_cache_stats_scoped_purge_pins: Pins each purge named, for attribution (telemetry)
   directus_cache_audits: Cache audit runs, one row per replay of the live cache against the database
   directus_cache_audit_findings: The entries a cache audit found stale, drifted or unreplayable
+  directus_scoped_cache_pending_purges: Scoped-cache purges a Redis outage held back, replayed once it is reachable again
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

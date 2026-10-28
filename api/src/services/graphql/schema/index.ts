@@ -55,6 +55,7 @@ export const SYSTEM_DENY_LIST = [
 	'directus_cache_stats_scoped_purge_pins',
 	'directus_cache_audits',
 	'directus_cache_audit_findings',
+	'directus_scoped_cache_pending_purges',
 ];
 
 export const READ_ONLY = ['directus_activity', 'directus_revisions'];

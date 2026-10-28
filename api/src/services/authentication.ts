@@ -26,6 +26,7 @@ import type { DirectusTokenPayload, Session, User } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
+import { purgeRawWrite } from '../utils/purge-raw-write.js';
 import { stall } from '../utils/stall.js';
 import { ActivityService } from './activity.js';
 import { SettingsService } from './settings.js';
@@ -163,6 +164,14 @@ export class AuthenticationService {
 				// back to a limiter that refuses nothing. See `rate-limiter.ts`.
 				if (error instanceof RateLimiterRes && error.remainingPoints === 0) {
 					await this.knex('directus_users').update({ status: 'suspended' }).where({ id: user.id });
+
+					await purgeRawWrite(
+						this.knex,
+						this.schema,
+						'directus_users',
+						[{ id: user.id }],
+					);
+
 					user.status = 'suspended';
 
 					// This means that new attempts after the user has been re-activated will be accepted
