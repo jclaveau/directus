@@ -74,6 +74,7 @@ vi.mock('../scoped-cache/index.js', async (importOriginal) => {
 });
 
 const { AuthenticationService } = await import('./authentication.js');
+const { ItemsService } = await import('./items.js');
 
 const schema = new SchemaBuilder()
 	.collection('directus_users', (c) => {
@@ -134,39 +135,50 @@ describe('a login spending the last attempt', () => {
 		tracker.on.select('directus_users').response([
 			{ id: 'u-1', status: 'active', provider: 'default', tfa_secret: null },
 		]);
-
-		tracker.on.update('directus_users').response(1);
 	});
 
 	afterEach(() => {
 		tracker.reset();
-		vi.clearAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	it(oneLine`
-		suspends the user raw and purges the user's slices, since no hook heard the
-		write
+		suspends the user through ItemsService, so the purge sees the row before and
+		after the write, with no hook as upstream's raw write had none
 	`, async () => {
-		state.scoped = true;
+		const suspendCalls: unknown[] = [];
+
+		vi.spyOn(ItemsService.prototype, 'updateOne')
+			.mockImplementation(async function (
+				this: InstanceType<typeof ItemsService>,
+				key,
+				data,
+				opts,
+			) {
+				suspendCalls.push([
+					this.collection,
+					this.accountability,
+					key,
+					data,
+					opts,
+				]);
+
+				return key;
+			});
+
 		const service = new AuthenticationService({ knex: db, schema });
 
 		await expect(service.login('default', { password: 'nope' }))
 			.rejects.toEqual(new Error('wrong password'));
 
-		expect(tracker.history.update[0]!.bindings).toEqual(['suspended', 'u-1']);
-
-		expect(state.purgeForMutatedRows)
-			.toHaveBeenCalledWith('directus_users', [{ id: 'u-1' }]);
-	});
-
-	it('purges in full mode too, unlike the last_access stamp', async () => {
-		state.scoped = false;
-		const service = new AuthenticationService({ knex: db, schema });
-
-		await expect(service.login('default', { password: 'nope' }))
-			.rejects.toEqual(new Error('wrong password'));
-
-		expect(state.purgeForMutatedRows)
-			.toHaveBeenCalledWith('directus_users', [{ id: 'u-1' }]);
+		expect(suspendCalls).toEqual([
+			[
+				'directus_users',
+				null,
+				'u-1',
+				{ status: 'suspended' },
+				{ emitEvents: false },
+			],
+		]);
 	});
 });

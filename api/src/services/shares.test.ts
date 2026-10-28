@@ -92,42 +92,71 @@ describe('Services / Shares', () => {
 
 	describe('login', () => {
 		beforeEach(() => {
-			scopedCache.purgeForMutatedRows.mockClear();
-
 			tracker.on.select('directus_shares').response([
 				{ share_id: 's-1', share_times_used: 2, share_password: null },
 			]);
 
-			tracker.on.update('directus_shares').response(1);
 			tracker.on.insert('directus_sessions').response([]);
 			tracker.on.delete('directus_sessions').response(0);
 		});
 
 		afterEach(() => {
 			scopedCache.scoped = false;
+			vi.restoreAllMocks();
 		});
 
 		it(oneLine`
-			counts the use raw and purges the share's slices, since no hook heard the
-			write
+			counts the use through ItemsService, so the purge sees the row before and
+			after the write, with no hook as upstream's raw write had none
 		`, async () => {
 			scopedCache.scoped = true;
+			const countCalls: unknown[] = [];
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementation(async function (this: ItemsService, key, data, opts) {
+					countCalls.push([this.collection, this.accountability, key, data, opts]);
+
+					return key;
+				});
 
 			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
 
-			expect(tracker.history.update[0]!.bindings).toEqual([3, 's-1']);
-
-			expect(scopedCache.purgeForMutatedRows)
-				.toHaveBeenCalledWith('directus_shares', [{ id: 's-1' }]);
+			expect(countCalls).toEqual([
+				[
+					'directus_shares',
+					null,
+					's-1',
+					{ times_used: 3 },
+					{ emitEvents: false, autoPurgeCache: true },
+				],
+			]);
 		});
 
-		it('leaves the cache alone in full mode, as upstream does', async () => {
+		it(oneLine`
+			leaves the cache alone in full mode, as upstream does: a full purge on every
+			share login would flush the whole cache
+		`, async () => {
 			scopedCache.scoped = false;
+			const countCalls: unknown[] = [];
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementation(async function (this: ItemsService, key, data, opts) {
+					countCalls.push([this.collection, this.accountability, key, data, opts]);
+
+					return key;
+				});
 
 			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
 
-			expect(tracker.history.update).toHaveLength(1);
-			expect(scopedCache.purgeForMutatedRows).not.toHaveBeenCalled();
+			expect(countCalls).toEqual([
+				[
+					'directus_shares',
+					null,
+					's-1',
+					{ times_used: 3 },
+					{ emitEvents: false, autoPurgeCache: false },
+				],
+			]);
 		});
 	});
 
