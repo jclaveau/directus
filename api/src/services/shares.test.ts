@@ -1,9 +1,10 @@
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
@@ -24,6 +25,17 @@ vi.mock('../permissions/cache.js', async (importOriginal) => {
 
 const { send } = vi.hoisted(() => {
 	return { send: vi.fn(async (_options: EmailOptions): Promise<null> => null) };
+});
+
+const scopedCache = vi.hoisted(() => {
+	// Off by default, as on the memory store the other tests run against.
+	return { scoped: false };
+});
+
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../scoped-cache/index.js')>();
+
+	return { ...actual, scopedCachePurgeEnabled: () => scopedCache.scoped };
 });
 
 vi.mock('./mail/index.js', () => {
@@ -67,6 +79,76 @@ describe('Services / Shares', () => {
 			]);
 
 			expect(clearPermissionsCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('login', () => {
+		beforeEach(() => {
+			tracker.on.select('directus_shares').response([
+				{ share_id: 's-1', share_times_used: 2, share_password: null },
+			]);
+
+			tracker.on.insert('directus_sessions').response([]);
+			tracker.on.delete('directus_sessions').response(0);
+		});
+
+		afterEach(() => {
+			scopedCache.scoped = false;
+			vi.restoreAllMocks();
+		});
+
+		it(oneLine`
+			counts the use through ItemsService, so the purge sees the row before and
+			after the write, with no hook as upstream's raw write had none
+		`, async () => {
+			scopedCache.scoped = true;
+			const countCalls: unknown[] = [];
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementation(async function (this: ItemsService, key, data, opts) {
+					countCalls.push([this.collection, this.accountability, key, data, opts]);
+
+					return key;
+				});
+
+			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
+
+			expect(countCalls).toEqual([
+				[
+					'directus_shares',
+					null,
+					's-1',
+					{ times_used: 3 },
+					{ emitEvents: false, autoPurgeCache: true },
+				],
+			]);
+		});
+
+		it(oneLine`
+			leaves the cache alone in full mode, as upstream does: a full purge on every
+			share login would flush the whole cache
+		`, async () => {
+			scopedCache.scoped = false;
+			const countCalls: unknown[] = [];
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementation(async function (this: ItemsService, key, data, opts) {
+					countCalls.push([this.collection, this.accountability, key, data, opts]);
+
+					return key;
+				});
+
+			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
+
+			expect(countCalls).toEqual([
+				[
+					'directus_shares',
+					null,
+					's-1',
+					{ times_used: 3 },
+					{ emitEvents: false, autoPurgeCache: false },
+				],
+			]);
 		});
 	});
 

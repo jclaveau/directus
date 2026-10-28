@@ -35,4 +35,5 @@ export const SYSTEM_COLLECTION_NAMES = [
 	'directus_cache_stats_scoped_purge_pins',
 	'directus_cache_audits',
 	'directus_cache_audit_findings',
+	'directus_scoped_cache_pending_purges',
 ] as const;

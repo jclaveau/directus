@@ -2,10 +2,11 @@ import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@dire
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import { FailedValidationError } from '@directus/validation';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import emitter from '../emitter.js';
 import { verifyJWT } from '../utils/jwt.js';
@@ -564,12 +565,13 @@ describe('Integration Tests', () => {
 			vi.spyOn(ItemsService.prototype, 'deleteMany').mockResolvedValue(['user-id-15']);
 
 			it('should validate remaining admin users', async () => {
-				// mock notifications update query in deleteOne/deleteMany/deleteByQuery methods
-				tracker.on.update('directus_notifications').response({});
-				// mock versions update query in deleteOne/deleteMany/deleteByQuery methods
-				tracker.on.update('directus_versions').response({});
-				// mock comments update query in deleteOne/deleteMany/deleteByQuery methods
-				tracker.on.update('directus_comments').response({});
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockResolvedValue([]);
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+				});
 
 				const service = new UsersService({
 					knex: db,
@@ -581,6 +583,120 @@ describe('Integration Tests', () => {
 
 				expect(validateRemainingAdminUsers).toHaveBeenCalled();
 				expect(clearUserSessionsSpy).toBeCalled();
+			});
+
+			it(oneLine`
+				unlinks the user from the comments and notifications through
+				ItemsService, so the purge sees each row before and after the write, and
+				skips the versions with none
+			`, async () => {
+				const unlinkCalls: unknown[] = [];
+
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockImplementation(async function (this: ItemsService, query) {
+						unlinkCalls.push(['getKeysByQuery', this.collection, query]);
+
+						return {
+							directus_comments: ['c-1'],
+							directus_notifications: [7],
+							directus_versions: [],
+						}[this.collection]!;
+					});
+
+				const updateManySpy = vi
+					.spyOn(ItemsService.prototype, 'updateMany')
+					.mockImplementation(async function (
+						this: ItemsService,
+						keys,
+						data,
+						opts,
+					) {
+						unlinkCalls.push([
+							'updateMany',
+							this.collection,
+							this.accountability,
+							keys,
+							data,
+							opts,
+						]);
+
+						return keys;
+					});
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+					updateManySpy.mockRestore();
+				});
+
+				await service.deleteMany(['user-id-16']);
+
+				expect(unlinkCalls).toEqual([
+					[
+						'getKeysByQuery',
+						'directus_comments',
+						{ filter: { user_updated: { _in: ['user-id-16'] } }, limit: -1 },
+					],
+					[
+						'updateMany',
+						'directus_comments',
+						null,
+						['c-1'],
+						{ user_updated: null },
+						{ emitEvents: false },
+					],
+					[
+						'getKeysByQuery',
+						'directus_notifications',
+						{ filter: { sender: { _in: ['user-id-16'] } }, limit: -1 },
+					],
+					[
+						'updateMany',
+						'directus_notifications',
+						null,
+						[7],
+						{ sender: null },
+						{ emitEvents: false },
+					],
+					[
+						'getKeysByQuery',
+						'directus_versions',
+						{ filter: { user_updated: { _in: ['user-id-16'] } }, limit: -1 },
+					],
+				]);
+			});
+
+			it(oneLine`
+				unlinks 10 000 rows per update, since one statement past 65 535 keys would
+				overflow Postgres's bind parameters
+			`, async () => {
+				const getKeysByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'getKeysByQuery')
+					.mockImplementation(async function (this: ItemsService) {
+						return this.collection === 'directus_comments'
+							? Array.from({ length: 10_001 }, (_, index) => index)
+							: [];
+					});
+
+				const updateManySpy = vi
+					.spyOn(ItemsService.prototype, 'updateMany')
+					.mockImplementation(async (keys) => keys);
+
+				onTestFinished(() => {
+					getKeysByQuerySpy.mockRestore();
+					updateManySpy.mockRestore();
+				});
+
+				await service.deleteMany(['user-id-16']);
+
+				expect(updateManySpy.mock.calls).toEqual([
+					[
+						Array.from({ length: 10_000 }, (_, index) => index),
+						{ user_updated: null },
+						{ emitEvents: false },
+					],
+					[[10_000], { user_updated: null }, { emitEvents: false }],
+				]);
 			});
 		});
 

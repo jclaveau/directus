@@ -175,6 +175,7 @@ const {
 	purgeScopedCache,
 	scopedCacheFingerprintOf,
 	scopedCachePurgeEnabled,
+	warnFullPurgeDeprecated,
 } = await import('./scoped-cache/index.js');
 
 function setEnv(values: Record<string, unknown>) {
@@ -348,6 +349,57 @@ describe('scoped cache purging', () => {
 			redis.isCluster = true;
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 			expect(() => assertScopedCacheStoreSupported()).not.toThrow();
+		});
+	});
+
+	describe('warnFullPurgeDeprecated', () => {
+		test('warns at startup when the auto purge runs in full mode', () => {
+			Object.assign(env, {
+				CACHE_ENABLED: true,
+				CACHE_AUTO_PURGE: true,
+				CACHE_AUTO_PURGE_MODE: 'full',
+			});
+
+			warnFullPurgeDeprecated();
+
+			expect(logger.warn.mock.calls).toEqual([[oneLine`
+				[scoped-cache] The full cache purge is deprecated and will be removed
+				once the scoped purge covers every write (#644): CACHE_AUTO_PURGE flushes
+				the whole response cache on every mutation here. Set
+				CACHE_AUTO_PURGE_MODE=scoped with CACHE_STORE=redis.
+			`]]);
+		});
+
+		test('warns when scoped mode falls back to full off Redis', () => {
+			Object.assign(env, {
+				CACHE_ENABLED: true,
+				CACHE_AUTO_PURGE: true,
+				CACHE_STORE: 'memory',
+			});
+
+			warnFullPurgeDeprecated();
+
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+		});
+
+		test('silent in scoped mode', () => {
+			Object.assign(env, { CACHE_ENABLED: true, CACHE_AUTO_PURGE: true });
+
+			warnFullPurgeDeprecated();
+
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		test('silent when nothing auto purges', () => {
+			Object.assign(env, {
+				CACHE_ENABLED: true,
+				CACHE_AUTO_PURGE: false,
+				CACHE_AUTO_PURGE_MODE: 'full',
+			});
+
+			warnFullPurgeDeprecated();
+
+			expect(logger.warn).not.toHaveBeenCalled();
 		});
 	});
 

@@ -3415,8 +3415,11 @@ implements AbstractService<Item> {
 		const { selfRelationSurvivorKeys, oldScopedCacheSnapshot } = deletion;
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const survivorScopedCacheSnapshot =
-				await this.scopedCache.snapshot(selfRelationSurvivorKeys);
+			// After the commit: a failed read must not fail a delete that went through.
+			// Null widens the purge to the collection, as in updateMany.
+			const survivorScopedCacheSnapshot = await this.scopedCache
+				.snapshot(selfRelationSurvivorKeys)
+				.catch(() => null);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheMutatedFingerprints(
