@@ -44,6 +44,17 @@ export const SYSTEM_DENY_LIST = [
 	'directus_migrations',
 	'directus_sessions',
 	'directus_extensions',
+	// Written through raw knex, never purged: a cached read would go stale.
+	// Read through the /utils cache routes instead.
+	'directus_cache_stats_descriptors',
+	'directus_cache_stats_events',
+	'directus_cache_stats_anomalies',
+	'directus_cache_stats_config_events',
+	'directus_cache_stats_purges',
+	'directus_cache_stats_scoped_entry_pins',
+	'directus_cache_stats_scoped_purge_pins',
+	'directus_cache_audits',
+	'directus_cache_audit_findings',
 ];
 
 export const READ_ONLY = ['directus_activity', 'directus_revisions'];
