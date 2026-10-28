@@ -20,7 +20,6 @@ import type { DirectusTokenPayload, ShareData } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { md } from '../utils/md.js';
-import { purgeRawWrite } from '../utils/purge-raw-write.js';
 import { Url } from '../utils/url.js';
 import { userName } from '../utils/user-name.js';
 import { ItemsService } from './items.js';
@@ -105,17 +104,16 @@ export class SharesService extends ItemsService {
 			throw new InvalidCredentialsError();
 		}
 
-		await this.knex('directus_shares')
-			.update({ times_used: record.share_times_used + 1 })
-			.where('id', record.share_id);
-
 		// A counter bumped on every share login: full mode keeps upstream's silence,
 		// as for a user's last_access.
-		if (scopedCachePurgeEnabled()) {
-			await purgeRawWrite(this.knex, this.schema, 'directus_shares', [
-				{ id: record.share_id },
-			]);
-		}
+		await new ItemsService('directus_shares', {
+			knex: this.knex,
+			schema: this.schema,
+		}).updateOne(
+			record.share_id,
+			{ times_used: record.share_times_used + 1 },
+			{ emitEvents: false, autoPurgeCache: scopedCachePurgeEnabled() },
+		);
 
 		const tokenPayload: DirectusTokenPayload = {
 			app_access: false,

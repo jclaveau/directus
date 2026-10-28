@@ -46,16 +46,6 @@ vi.mock('../utils/stall.js', () => ({
 	stall: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { purgeForMutatedRows } = vi.hoisted(() => {
-	return { purgeForMutatedRows: vi.fn() };
-});
-
-vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
-	return {
-		createScopedCacheExtensionHandle: () => ({ purgeForMutatedRows }),
-	};
-});
-
 const testRoleId = '4ccdb196-14b3-4ed1-b9da-c1978be07ca2';
 
 const schema = new SchemaBuilder()

@@ -29,15 +29,7 @@ const { send } = vi.hoisted(() => {
 
 const scopedCache = vi.hoisted(() => {
 	// Off by default, as on the memory store the other tests run against.
-	return { scoped: false, purgeForMutatedRows: vi.fn() };
-});
-
-vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
-	return {
-		createScopedCacheExtensionHandle: () => {
-			return { purgeForMutatedRows: scopedCache.purgeForMutatedRows };
-		},
-	};
+	return { scoped: false };
 });
 
 vi.mock('../scoped-cache/index.js', async (importOriginal) => {

@@ -109,6 +109,7 @@ import tusSchedule from './schedules/tus.js';
 import {
 	assertScopedCacheStoreSupported,
 	startScopedCachePurgeRecovery,
+	warnFullPurgeDeprecated,
 } from './scoped-cache/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
@@ -161,6 +162,7 @@ export default async function createApp(): Promise<express.Application> {
 	await validateStorage();
 
 	assertScopedCacheStoreSupported();
+	warnFullPurgeDeprecated();
 
 	await registerAuthProviders();
 
