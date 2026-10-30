@@ -9,7 +9,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -76,8 +76,8 @@ describe(oneLine`
 				item: [{ slot: 'a', label: 'v1' }],
 			});
 
-			shortEnv[vendor].PORT = String(await getPort());
-			longEnv[vendor].PORT = String(await getPort());
+			shortEnv[vendor].PORT = String(await freePortOfWorker());
+			longEnv[vendor].PORT = String(await freePortOfWorker());
 
 			shortInstance = spawn('node', [paths.cli, 'start'], {
 				cwd: paths.cwd,

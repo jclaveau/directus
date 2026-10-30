@@ -3,6 +3,7 @@ import {
 	ForbiddenError,
 	InvalidCredentialsError,
 	InvalidPayloadError,
+	InvalidTokenError,
 	isDirectusError,
 } from '@directus/errors';
 import type { PrimaryKey, RegisterUserInput } from '@directus/types';
@@ -477,7 +478,7 @@ router.get(
 		const { error, value } = verifyRegistrationSchema.validate(req.query['token']);
 
 		if (error) {
-			return res.redirect('/admin/login');
+			throw new InvalidTokenError();
 		}
 
 		const service = new UsersService({ accountability: null, schema: req.schema });

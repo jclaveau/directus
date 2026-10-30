@@ -1,6 +1,12 @@
 import { Action, ALTERATIONS_KEYS } from '@directus/constants';
 import { useEnv } from '@directus/env';
-import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidPayloadError,
+	isDirectusError,
+	ItemNotFoundError,
+} from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
 import type {
 	AbstractService,
@@ -50,13 +56,21 @@ import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
+import { useLogger } from '../logger/index.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
+import {
+	flushResponseCacheAfterCommit,
+	type ResponseCacheFlushDeferral,
+} from '../utils/clear-caches-after-commit.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
-import { isPrimaryKey } from '../utils/is-primary-key.js';
+import {
+	isMissingPrimaryKey,
+	isPrimaryKey,
+} from '../utils/is-primary-key.js';
 import {
 	assign,
 	clone,
@@ -78,7 +92,7 @@ const env = useEnv();
  * update sees the rows an `items.update` filter added, so it reports them, with
  * the slices they sat in before it wrote them.
  */
-type DeferredPurgeOptions = MutationOptions & {
+export type DeferredPurgeOptions = MutationOptions & ResponseCacheFlushDeferral & {
 	onHookAddedRows?: (
 		hookAddedKeys: PrimaryKey[],
 		oldScopedCacheSnapshot: ScopedCacheSnapshot,
@@ -403,7 +417,10 @@ implements AbstractService<Item> {
 		};
 	}
 
-	async getKeysByQuery(query: Query): Promise<PrimaryKey[]> {
+	async getKeysByQuery(
+		query: Query,
+		opts?: Pick<QueryOptions, 'emitEvents'>,
+	): Promise<PrimaryKey[]> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const readQuery = cloneDeep(query);
 		readQuery.fields = [primaryKeyField];
@@ -422,6 +439,7 @@ implements AbstractService<Item> {
 		// them: a missed snapshot costs staleness, and only a call site owning the whole
 		// round trip can know its rows never reach the cache.
 		const items = await itemsService.readByQuery(readQuery, {
+			...opts,
 			skipScopedCacheEpochs: true,
 		});
 
@@ -521,6 +539,7 @@ implements AbstractService<Item> {
 				payloadAfterHooks: AnyItem;
 				payloadWithPresets: AnyItem;
 				payloadWithoutAliases: Record<string, unknown>;
+				revisionPayload: AnyItem;
 				primaryKey: PrimaryKey | undefined;
 				revisionsM2O: Awaited<ReturnType<PayloadService['processM2O']>>['revisions'];
 				revisionsA2O: Awaited<ReturnType<PayloadService['processA2O']>>['revisions'];
@@ -685,12 +704,29 @@ implements AbstractService<Item> {
 				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
 				const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
 
+				const nestedRowFields = this.schema.relations
+					.filter((relation) => relation.collection === this.collection)
+					.map((relation) => relation.field)
+					.filter((field) => field in payloadAfterHooks);
+
+				const revisionPayload = {
+					...payloadAfterHooks,
+					...pick(payloadWithA2O, nestedRowFields),
+				};
+
 				// The primary key can already exist in the payload.
 				// In case of manual string / UUID primary keys it's always provided at this point.
 				// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
 				const primaryKey: PrimaryKey | undefined = payloadWithTypeCasting[primaryKeyField];
 
-				if (primaryKey) {
+				// Stored as is, an empty key reads back as another row's: off max(id).
+				if (primaryKey === '') {
+					throw new InvalidPayloadError({
+						reason: `Primary key of ${this.collection} can't be empty`,
+					});
+				}
+
+				if (!isMissingPrimaryKey(primaryKey)) {
 					validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 				}
 
@@ -706,6 +742,7 @@ implements AbstractService<Item> {
 					payloadAfterHooks,
 					payloadWithPresets,
 					payloadWithoutAliases,
+					revisionPayload,
 					primaryKey,
 					revisionsM2O,
 					revisionsA2O,
@@ -717,11 +754,19 @@ implements AbstractService<Item> {
 				});
 			}
 
+			await this.validateRowsToCreate(
+				prepared.map((preparedRow) => {
+					return preparedRow.payloadWithPresets as Partial<Item>;
+				}),
+				trx,
+			);
+
 			// The rows that leave their key to the sequence draw it in the same
 			// statement as the rows that provide one, so the sequence has to clear
 			// the provided keys before the insert runs, not only after it.
 			if (autoIncrementSequenceNeedsToBeReset) {
 				const providedPrimaryKeys = prepared
+					.filter((p) => !isMissingPrimaryKey(p.primaryKey))
 					.map((p) => Number(p.primaryKey))
 					.filter((key) => Number.isFinite(key));
 
@@ -736,6 +781,10 @@ implements AbstractService<Item> {
 
 			const useBatchInsert =
 				prepared.length > 1 && (await getHelpers(trx).capabilities.preservesInsertOrderInReturning());
+
+			// The row the translator reads the duplicate's value off; a batch insert
+			// cannot tell which of its rows the database refused.
+			let insertingRowInput: Partial<Item> = {};
 
 			try {
 				if (useBatchInsert) {
@@ -780,6 +829,8 @@ implements AbstractService<Item> {
 					const returningOptions = getHelpers(trx).capabilities.insertReturningOptions();
 
 					for (const p of prepared) {
+						insertingRowInput = p.payloadWithoutAliases as Partial<Item>;
+
 						const result = await trx
 							.insert(p.payloadWithoutAliases)
 							.into(this.collection)
@@ -801,7 +852,7 @@ implements AbstractService<Item> {
 						// Most database support returning, those who don't tend to return the PK anyways
 						// (MySQL/SQLite). In case the primary key isn't know yet, we'll do a best-attempt at
 						// fetching it based on the last inserted row
-						if (!p.primaryKey) {
+						if (isMissingPrimaryKey(p.primaryKey)) {
 							// Fetching it with max should be safe, as we're in the context of the current transaction
 							const maxResult = await trx.max(primaryKeyField, { as: 'id' })
 								.from(this.collection)
@@ -819,7 +870,7 @@ implements AbstractService<Item> {
 			catch (err: any) {
 				const dbError = await translateDatabaseError(
 					err,
-					data,
+					insertingRowInput,
 					this.knex,
 					{ collection: this.collection, operation: 'create' },
 				);
@@ -902,7 +953,8 @@ implements AbstractService<Item> {
 
 					const revisionInputs = await Promise.all(
 						postPrepared.map(async (p, index) => {
-							const revisionPayload = await p.payloadService.prepareDelta(p.payloadAfterHooks);
+							const revisionPayload = await p.payloadService
+								.prepareDelta(p.revisionPayload);
 
 							return {
 								activity: activityIds[index]!,
@@ -1117,7 +1169,7 @@ implements AbstractService<Item> {
 			onRowsWithTemporaryFields: (rows) => scopedCachePlan.pinFromRows(rows),
 		});
 
-		// TODO when would this happen?
+		// Unreachable on a real driver: a select resolves a list, empty or not.
 		if (records === null) {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
@@ -1146,6 +1198,19 @@ implements AbstractService<Item> {
 					},
 				)
 				: records;
+
+		// emitFilter hands back whatever a listener returned; anything but a list
+		// would be cast to one below and filed under every key that asked for it.
+		if (!Array.isArray(filteredRecords)) {
+			const answerType = filteredRecords === null
+				? 'null'
+				: typeof filteredRecords;
+
+			throw new Error(
+				`A read filter on "${this.collection}" answered with ${answerType}`
+				+ ` instead of the list of items it was given.`,
+			);
+		}
 
 		// Scope this read for cache purging (see
 		// ItemScopedCacheService.readFingerprints); bounded to this read — it rides
@@ -1185,13 +1250,6 @@ implements AbstractService<Item> {
 			ownershipInjections,
 		);
 
-		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
-		// listener's return verbatim, and the cast above asserts rather than checks)
-		// makes this throw `Object.defineProperty called on non-object`. That is a
-		// 500 raised inside whatever transaction was reading — a write snapshotting
-		// its rows for revisions takes the whole update down with it. The write path
-		// validates its own filter returns (`payloadAfterHooks === null`); this one
-		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheFingerprints,
 			scopedCacheUnautopurgeableFingerprints,
@@ -1223,8 +1281,10 @@ implements AbstractService<Item> {
 		const results = await this.readByQuery(queryWithKey, opts);
 
 		if (results.length === 0) {
+			// A row the query's own filter excludes still exists, and stays a 403.
+			await this.refuseMissingKeyForAdmin(key);
+
 			throw new ForbiddenError({
-				// 404 / InvalidPayload?
 				reason: `No result found for key ${key} in ${this.collection} during items.readOne()`,
 			});
 		}
@@ -1281,6 +1341,10 @@ implements AbstractService<Item> {
 	 * Uses `this.updateMany` under the hood.
 	 */
 	async updateOne(key: PrimaryKey, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		validateKeys(this.schema, this.collection, primaryKeyField, key);
+
+		await this.refuseMissingKeyForAdmin(key);
 		await this.updateMany([key], data, opts);
 		return key;
 	}
@@ -1305,7 +1369,7 @@ implements AbstractService<Item> {
 			data.map((item): UpdateGroup<Item> => {
 				const primaryKey = item[primaryKeyField];
 
-				if (!primaryKey) {
+				if (isMissingPrimaryKey(primaryKey)) {
 					throw new InvalidPayloadError({
 						reason: `Item in update misses primary key`,
 					});
@@ -1344,9 +1408,12 @@ implements AbstractService<Item> {
 
 	/**
 	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
-	 * or a bigInteger whatever zeros lead it.
+	 * or a bigInteger whatever zeros lead it. A string key is taken as spelled:
+	 * on a column comparing without case (citext) or padding (char), two
+	 * spellings of one row read as two rows, and a row named by the spelling
+	 * the read does not return is told missing.
 	 */
-	private primaryKeyNameOf(key: PrimaryKey): string {
+	protected primaryKeyNameOf(key: PrimaryKey): string {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
 		const primaryKeyType = this.schema.collections[this.collection]!
@@ -1442,6 +1509,78 @@ implements AbstractService<Item> {
 	}
 
 	/**
+	 * Refuses a change that names an existing o2m child for several rows: each row
+	 * would take the child from the one before, leaving it on the last. A child
+	 * created inline is each row's own, and so is an m2m's junction row. Rows are
+	 * counted over every group, so two rows of a batch can't share a child either.
+	 */
+	private refuseChildJoiningSeveralRows(writingGroups: UpdateGroup<Item>[]): void {
+		for (const relation of this.schema.relations) {
+			const childrenField = relation.meta?.one_field;
+
+			if (
+				relation.related_collection !== this.collection
+				|| !childrenField
+				|| relation.meta?.junction_field
+			) {
+				continue;
+			}
+
+			const childPrimaryKeyField = this.schema.collections[relation.collection]!
+				.primary;
+
+			const joiningRowNames = new Map<string, Set<string>>();
+
+			for (const group of writingGroups) {
+				const groupData = group.data as Partial<AnyItem>;
+
+				if (!(childrenField in groupData)) {
+					continue;
+				}
+
+				const childrenValue = groupData[childrenField];
+
+				let namedChildren: unknown[] = [childrenValue].flat();
+
+				// The `{ create, update, delete }` form moves only what `update` names.
+				if (!Array.isArray(childrenValue)) {
+					namedChildren = [childrenValue?.update].filter(Array.isArray).flat();
+				}
+
+				const joiningChildKeys = new Set(namedChildren
+					.map((namedChild) => {
+						if (isPlainObject(namedChild)) {
+							return (namedChild as AnyItem)[childPrimaryKeyField];
+						}
+
+						return namedChild;
+					})
+					.filter((childKey) => !isMissingPrimaryKey(childKey))
+					.map(String));
+
+				for (const joiningChildKey of joiningChildKeys) {
+					// A row lastWins sends in two groups is still one row.
+					const rowNames = new Set([
+						...joiningRowNames.get(joiningChildKey) ?? [],
+						...group.keys.map((rowKey) => this.primaryKeyNameOf(rowKey)),
+					]);
+
+					if (rowNames.size > 1) {
+						throw new InvalidPayloadError({
+							reason: oneLine`
+								"${joiningChildKey}" can't join more than one
+								"${this.collection}"
+							`,
+						});
+					}
+
+					joiningRowNames.set(joiningChildKey, rowNames);
+				}
+			}
+		}
+	}
+
+	/**
 	 * The user integrity checks writing these groups calls for. Handed the groups
 	 * the hooks left, so a field a hook adds counts like the caller's own.
 	 */
@@ -1450,6 +1589,24 @@ implements AbstractService<Item> {
 	): UserIntegrityCheckFlag {
 		return UserIntegrityCheckFlag.None;
 	}
+
+	/**
+	 * Refuses rows a create would insert. Handed them after the hooks and the
+	 * permission presets, inside the create's transaction.
+	 */
+	protected async validateRowsToCreate(
+		_rows: Partial<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
+
+	/**
+	 * Refuses groups an update would write. Handed the groups the hooks left,
+	 * with the permission presets, inside the update's transaction.
+	 */
+	protected async validateGroupsToUpdate(
+		_groups: UpdateGroup<Item>[],
+		_trx: Knex,
+	): Promise<void> {}
 
 	/**
 	 * What writing these groups sets off once they are written — a cache clear,
@@ -1537,6 +1694,13 @@ implements AbstractService<Item> {
 		}
 
 		validateKeys(this.schema, this.collection, primaryKeyField, inputKeys);
+
+		// Refused here, so a missing change is not blamed on a hook's answer.
+		if (groups.some((group) => !isPlainObject(group.data))) {
+			throw new InvalidPayloadError({
+				reason: `Each update group needs a "data" object`,
+			});
+		}
 
 		// Answered like an empty batch or a query matching nothing: no row, no hook.
 		if (inputKeys.length === 0) {
@@ -1985,7 +2149,8 @@ implements AbstractService<Item> {
 					| this.requiredIntegrityChecks(writingGroups);
 
 				// Every group before any is applied, so a row the caller may not update
-				// is refused whatever error a guard stored for another row.
+				// is refused whatever error a guard stored for another row, and before
+				// any payload refusal tells a caller with no access about the rows.
 				if (this.accountability) {
 					for (const group of writingGroups) {
 						await validateAccess(
@@ -2004,8 +2169,36 @@ implements AbstractService<Item> {
 					}
 				}
 
+				// The presets before the guards, so a value a preset sets is judged
+				// like one the caller sent.
+				const presetGroups: UpdateGroup<Item>[] = [];
+
+				for (const group of writingGroups) {
+					presetGroups.push({
+						...group,
+						data: this.accountability
+							? await processPayload(
+								{
+									accountability: this.accountability,
+									action: 'update',
+									collection: this.collection,
+									payload: group.data,
+									nested: this.nested,
+								},
+								{
+									knex: trx,
+									schema: this.schema,
+								},
+							)
+							: group.data,
+					});
+				}
+
+				this.refuseChildJoiningSeveralRows(presetGroups);
+				await this.validateGroupsToUpdate(presetGroups, trx);
+
 				const appliedGroups = await service.applyUpdateGroups(
-					writingGroups,
+					presetGroups,
 					aliasFields,
 					{
 						...opts,
@@ -2415,7 +2608,8 @@ implements AbstractService<Item> {
 	 * `updateGroups` around the loop, never here. Returns what was written: the
 	 * payload after presets, and the keys it reached. A group that changes nothing
 	 * never gets here — `updateGroups` filters those out before the transaction —
-	 * and `updateGroups` has checked the caller may update every group's rows.
+	 * and `updateGroups` has checked the caller may update every group's rows
+	 * and applied the presets to `group.data`.
 	 */
 	private async applyUpdateGroup(
 		group: UpdateGroup<Item>,
@@ -2426,12 +2620,10 @@ implements AbstractService<Item> {
 		// Sorted for the work below only. `group.keys` stays in the caller's row order,
 		// which is what `updateGroups` returns and what the per-row action events walk.
 		const keys = [...group.keys].sort();
-		const payloadAfterHooks = group.data as Partial<AnyItem>;
+		const payloadWithPresets = group.data as Partial<AnyItem>;
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
-
-		const payloadWithPresets = await this.presetUpdatePayload(group.data);
 
 		const preMutationError = opts.preMutationError ?? group.keys
 			.map((key) => opts.preMutationErrorsByKey?.get(String(key)))
@@ -2472,7 +2664,7 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, payloadAfterHooks, this.knex, {
+					throw await translateDatabaseError(err, payloadWithPresets, this.knex, {
 						collection: this.collection,
 						operation: 'update',
 					});
@@ -2519,7 +2711,7 @@ implements AbstractService<Item> {
 			);
 		}, opts.mutationTracker.snapshot());
 
-		return { data: payloadWithPresets, keys: group.keys };
+		return { data: group.data, keys: group.keys };
 	}
 
 	/**
@@ -2677,7 +2869,7 @@ implements AbstractService<Item> {
 
 		for (const group of groupRun) {
 			try {
-				const payloadWithPresets = await this.presetUpdatePayload(group.data);
+				const payloadWithPresets = group.data as Partial<AnyItem>;
 
 				const payloadWithTypeCasting = await payloadService.processValues(
 					'update',
@@ -2725,18 +2917,12 @@ implements AbstractService<Item> {
 
 		let wroteBatch = false;
 
-		// A preset can set a field no batch carries, presets or special fields can
-		// make two groups set different columns, and a geometry or invalid date
-		// stays an object, which JSON would mangle. knex binds a valid Date as
-		// node-pg would.
+		// Special fields can make two groups set different columns, and a geometry
+		// or invalid date stays an object, which JSON would mangle. knex binds a
+		// valid Date as node-pg would.
 		if (
 			columnSets.size === 1
 			&& !columnSets.has('[]')
-			&& preparedGroups.every(({ group, payloadWithPresets }) => {
-				const presetGroup = { ...group, data: payloadWithPresets as Partial<Item> };
-
-				return this.batchColumnsOf(presetGroup, aliases, opts) !== null;
-			})
 			&& batchRows.every((batchRow) => {
 				return Object.values(batchRow).every((value) => {
 					return typeof value !== 'object'
@@ -2803,31 +2989,6 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * The payload a group writes once the caller's permission presets fill it.
-	 */
-	private async presetUpdatePayload(
-		payload: Partial<Item>,
-	): Promise<Partial<Item>> {
-		if (!this.accountability) {
-			return payload;
-		}
-
-		return processPayload(
-			{
-				accountability: this.accountability,
-				action: 'update',
-				collection: this.collection,
-				payload,
-				nested: this.nested,
-			},
-			{
-				knex: this.knex,
-				schema: this.schema,
-			},
-		);
-	}
-
-	/**
 	 * Save the activity of the updated rows, one per row, and, where the
 	 * collection tracks them, a revision per row its payload changed, the first
 	 * one parenting `childrenRevisions`.
@@ -2879,20 +3040,13 @@ implements AbstractService<Item> {
 				// with `updatedRows` by position files a revision under one item
 				// holding another item's data, which `revert` would then
 				// write straight back onto the wrong row.
-				//
-				// `snapshots` is always an array: a read hook can return
-				// anything, but `withMeta` rejects a non-object before
-				// `readByQuery` returns (see the TODO there), so this guard
-				// and the ternary below it cannot currently fire.
 				const snapshotJsonByKey = new Map<string, string>();
 
-				if (Array.isArray(snapshots)) {
-					for (const snapshot of snapshots) {
-						snapshotJsonByKey.set(
-							String(snapshot[primaryKeyField]),
-							JSON.stringify(snapshot),
-						);
-					}
+				for (const snapshot of snapshots) {
+					snapshotJsonByKey.set(
+						String(snapshot[primaryKeyField]),
+						JSON.stringify(snapshot),
+					);
 				}
 
 				const payloadService = new PayloadService(this.collection, {
@@ -2916,10 +3070,7 @@ implements AbstractService<Item> {
 								activity: activity,
 								collection: this.collection,
 								item: updatedRow.key,
-								data:
-									snapshots && Array.isArray(snapshots)
-										? snapshotJsonByKey.get(String(updatedRow.key))
-										: JSON.stringify(snapshots),
+								data: snapshotJsonByKey.get(String(updatedRow.key)),
 								delta: await payloadService.prepareDelta(updatedRow.payload),
 							};
 						}),
@@ -2961,12 +3112,12 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
 
-		if (primaryKey) {
+		if (!isMissingPrimaryKey(primaryKey)) {
 			validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 		}
 
 		const exists =
-			primaryKey &&
+			!isMissingPrimaryKey(primaryKey) &&
 			!!(await this.knex
 				.select(primaryKeyField)
 				.from(this.collection)
@@ -2987,7 +3138,10 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.upsertOne` under the hood.
 	 */
-	async upsertMany(payloads: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	async upsertMany(
+		payloads: Partial<Item>[],
+		opts: MutationOptions & ResponseCacheFlushDeferral = {},
+	): Promise<PrimaryKey[]> {
 		if (!opts.mutationTracker) {
 			opts.mutationTracker = this.createMutationTracker();
 		}
@@ -3054,6 +3208,29 @@ implements AbstractService<Item> {
 			});
 		};
 
+		// A row whose side effect flushes the response cache (a user's role, a
+		// permission) leaves it to this batch, which flushes once for every row.
+		let responseCacheFlushDeferred = false;
+
+		// Logged, not thrown, like a flush a transaction drains: the rows have
+		// committed, and the scoped purge below must still run.
+		const flushDeferredResponseCache = async () => {
+			if (!responseCacheFlushDeferred) {
+				return;
+			}
+
+			try {
+				await flushResponseCacheAfterCommit(this.knex, this.cache, opts);
+			}
+			catch (error) {
+				useLogger().error(
+					error,
+					oneLine`[cache] the response-cache flush a batch held until its
+						transaction settled failed: ${error}`,
+				);
+			}
+		};
+
 		// Per attempt, like the keys: sqlite and cockroach re-run the handler after a
 		// retryable error.
 		const { primaryKeys, hookAddedKeys, hookAddedSnapshots } = await transaction(
@@ -3076,6 +3253,9 @@ implements AbstractService<Item> {
 
 						hookAddedSnapshots.push(addedSnapshot);
 					},
+					onResponseCacheFlushDeferred: () => {
+						responseCacheFlushDeferred = true;
+					},
 				};
 
 				for (const payload of payloads) {
@@ -3086,6 +3266,8 @@ implements AbstractService<Item> {
 			},
 			opts.mutationTracker.snapshot(),
 		).catch(async (error) => {
+			await flushDeferredResponseCache();
+
 			if (!shouldClearCache(this.cache, opts, this.collection)) {
 				throw error;
 			}
@@ -3118,6 +3300,8 @@ implements AbstractService<Item> {
 
 			throw error;
 		});
+
+		await flushDeferredResponseCache();
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const takenOverKeys = changedTakenOverKeys();
@@ -3186,7 +3370,7 @@ implements AbstractService<Item> {
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
 		return keys.length
-			? await this.deleteMany(keys, opts)
+			? await this.deleteMany(keys, { ...opts, keysFromQuery: true })
 			: [];
 	}
 
@@ -3199,8 +3383,118 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
+		await this.refuseMissingKeyForAdmin(key);
 		await this.deleteMany([key], opts);
 		return key;
+	}
+
+	/**
+	 * An admin reaches every item, so a key no row holds is a 404 for them. For
+	 * anyone else the permissions decide, and a missing item stays as forbidden
+	 * as a hidden one.
+	 */
+	private async refuseMissingKeyForAdmin(key: PrimaryKey): Promise<void> {
+		if (this.accountability?.admin !== true) {
+			return;
+		}
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const existingRow = await this.knex
+			.select(primaryKeyField)
+			.from(this.collection)
+			.where(primaryKeyField, key)
+			.first();
+
+		if (!existingRow) {
+			throw new ItemNotFoundError({
+				collection: this.collection,
+				primaryKey: key,
+			});
+		}
+	}
+
+	/**
+	 * Delete the rows `keys` name. An admin reaches every row, so a key no row
+	 * holds is a 404 for them, as it is for deleteOne. It is told off the
+	 * delete's count, so a delete reaching every key reads nothing more; the
+	 * delete runs under a savepoint so that, on a shortfall, the rows come back
+	 * to be read for the key none holds. Keys a query resolved were not named
+	 * by the caller, so one another delete took meanwhile is skipped.
+	 */
+	private async deleteKeyRows(
+		keys: PrimaryKey[],
+		trx: Knex,
+		keysFromQuery: boolean,
+	): Promise<void> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		if (this.accountability?.admin !== true) {
+			await trx(this.collection).whereIn(primaryKeyField, keys)
+				.delete();
+
+			return;
+		}
+
+		const keyNames = new Set(keys.map((key) => this.primaryKeyNameOf(key)));
+		const savepoint = await trx.transaction();
+		let deletedCount: number;
+
+		try {
+			deletedCount = await savepoint(this.collection)
+				.whereIn(primaryKeyField, keys)
+				.delete();
+		}
+		catch (error) {
+			await savepoint.rollback();
+			throw error;
+		}
+
+		if (deletedCount >= keyNames.size) {
+			await savepoint.commit();
+			return;
+		}
+
+		const keptRows: Item[] = await savepoint
+			.select(primaryKeyField)
+			.from(this.collection)
+			.whereIn(primaryKeyField, keys);
+
+		// No row is left, so the shortfall is only keys no row held.
+		if (keysFromQuery && keptRows.length === 0) {
+			await savepoint.commit();
+			return;
+		}
+
+		await savepoint.rollback();
+
+		const heldRows: Item[] = await trx
+			.select(primaryKeyField)
+			.from(this.collection)
+			.whereIn(primaryKeyField, keys);
+
+		const heldKeyNames = new Set(heldRows.map((heldRow) => {
+			return this.primaryKeyNameOf(heldRow[primaryKeyField]);
+		}));
+
+		const missingKey = keys.find((key) => {
+			return !heldKeyNames.has(this.primaryKeyNameOf(key));
+		});
+
+		// Every key is held, so the database itself kept rows: a DO INSTEAD rule,
+		// or a trigger skipping the delete.
+		if (missingKey === undefined) {
+			throw new InvalidPayloadError({
+				reason: `"${this.collection}" deleted ${deletedCount} of the`
+					+ ` ${keyNames.size} rows named: a rule or trigger on the table`
+					+ ' kept the others',
+			});
+		}
+
+		throw new ItemNotFoundError({
+			collection: this.collection,
+			primaryKey: missingKey,
+		});
 	}
 
 	/**
@@ -3322,10 +3616,13 @@ implements AbstractService<Item> {
 			}
 
 			try {
-				await trx(this.collection).whereIn(primaryKeyField, keys)
-					.delete();
+				await this.deleteKeyRows(keys, trx, opts.keysFromQuery === true);
 			}
 			catch (err: any) {
+				if (isDirectusError(err, ErrorCode.ItemNotFound)) {
+					throw err;
+				}
+
 				// Parity with createOne/updateMany: a direct delete's FK/constraint
 				// violation must surface as a translated Directus error, not raw knex.
 				throw await translateDatabaseError(err, {}, this.knex, {
@@ -3384,6 +3681,12 @@ implements AbstractService<Item> {
 					{ includeBareFingerprint: false },
 				);
 			}
+
+			await this.purgeHookWrittenScopedCache(
+				[],
+				scopedCacheHookDeclarations,
+				opts,
+			);
 
 			throw error;
 		});

@@ -7,7 +7,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { monitorRedisCommands } from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'events';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
@@ -66,7 +66,7 @@ describe.each(vendors)('%s', (vendor) => {
 	}
 
 	async function startInstance() {
-		env[vendor].PORT = String(await getPort());
+		env[vendor].PORT = String(await freePortOfWorker());
 		instance = await spawnInstance(env[vendor]);
 	}
 
@@ -139,7 +139,7 @@ describe.each(vendors)('%s', (vendor) => {
 	async function startSecondInstance(buildId: string) {
 		secondInstance = await spawnInstance({
 			...env[vendor],
-			PORT: String(await getPort()),
+			PORT: String(await freePortOfWorker()),
 			CACHE_BUILD_ID: buildId,
 			CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX: '0',
 		});

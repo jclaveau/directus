@@ -1,5 +1,9 @@
 import { getUrl } from '@common/config';
-import { CreateCollections, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollections,
+	CreateItem,
+	DeleteCollectionIfPresent,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import request from 'supertest';
@@ -97,7 +101,7 @@ export const seedDBStructure = () => {
 				collectionFlowCancels,
 				collectionFlowKeys,
 			]) {
-				await DeleteCollection(vendor, { collection });
+				await DeleteCollectionIfPresent(vendor, { collection });
 			}
 
 			// Deleting a flow deletes its operations.

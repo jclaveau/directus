@@ -8,9 +8,10 @@ import type {
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { getMatch } from 'ip-matching';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
-import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
+import {
+	clearCachesAfterCommit,
+	clearPermissionsCacheAfterCommit,
+} from '../utils/clear-caches-after-commit.js';
 import { ItemsService } from './items.js';
 
 export class PoliciesService extends ItemsService<Policy> {
@@ -19,11 +20,7 @@ export class PoliciesService extends ItemsService<Policy> {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 
 	private isIpAccessValid(value?: any[] | null): boolean {
@@ -65,7 +62,7 @@ export class PoliciesService extends ItemsService<Policy> {
 
 		// TODO is this necessary? Since the attachment should be handled in the AccessService
 		// A new policy has created, clear the permissions cache
-		await clearPermissionsCache();
+		await clearPermissionsCacheAfterCommit(this.knex);
 
 		return result;
 	}

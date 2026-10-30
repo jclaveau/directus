@@ -24,15 +24,22 @@ export function resolveSystemAdmin(
 	const Field = getFieldType(schemaComposer, schema, 'write');
 	const Relation = getRelationType(schemaComposer, schema, 'write');
 
+	// toInputObjectType hands both mutations one shared input type: the create
+	// adds `fields` and the update strips `collection` and `schema`, so the
+	// create works on its own copy.
+	const CreateCollectionInput = toInputObjectType(Collection, {
+		postfix: '_input',
+	})
+		.clone('create_directus_collections_input')
+		.addFields({
+			fields: [toInputObjectType(Field, { postfix: '_input' }).NonNull],
+		});
+
 	schemaComposer.Mutation.addFields({
 		create_collections_item: {
 			type: Collection,
 			args: {
-				data: toInputObjectType(Collection, {
-					postfix: '_input',
-				}).addFields({
-					fields: [toInputObjectType(Field, { postfix: '_input' }).NonNull],
-				}).NonNull,
+				data: CreateCollectionInput.NonNull,
 			},
 			resolve: async (_, args) => {
 				const collectionsService = new CollectionsService({
@@ -119,7 +126,7 @@ export function resolveSystemAdmin(
 					field: args['field'],
 				});
 
-				return await service.readOne(args['collection'], args['data'].field);
+				return await service.readOne(args['collection'], args['field']);
 			},
 		},
 		delete_fields_item: {
@@ -177,7 +184,7 @@ export function resolveSystemAdmin(
 				});
 
 				await relationsService.updateOne(args['collection'], args['field'], args['data']);
-				return await relationsService.readOne(args['data'].collection, args['data'].field);
+				return await relationsService.readOne(args['collection'], args['field']);
 			},
 		},
 		delete_relations_item: {

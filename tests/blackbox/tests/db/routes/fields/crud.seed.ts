@@ -1,4 +1,4 @@
-import { CreateCollection, DeleteCollection } from '@common/functions';
+import { CreateCollection, DeleteCollectionIfPresent } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
 import { expect, it } from 'vitest';
@@ -14,7 +14,7 @@ export const seedDBStructure = () => {
 					const localCollection = `${collection}_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localCollection });
+					await DeleteCollectionIfPresent(vendor, { collection: localCollection });
 
 					// Create countries collection
 					await CreateCollection(vendor, {

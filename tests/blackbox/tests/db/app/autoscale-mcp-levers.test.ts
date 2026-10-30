@@ -3,7 +3,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -60,7 +60,7 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 			env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
 			env[vendor]['SYSTEM_MCP_TOOLS'] = 'autoscale';
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 			envs[vendor] = env;
 

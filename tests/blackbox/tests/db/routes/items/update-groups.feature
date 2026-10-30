@@ -469,9 +469,9 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status     |
-      | strip-a |            |
-      | strip-b |            |
+      | name    | status |
+      | strip-a |        |
+      | strip-b |        |
 
   Scenario: a grouped hook reading a field off the list is refused, writing nothing
     Given the rows:
@@ -490,9 +490,9 @@ Feature: An update reaches its hooks as one grouped event
       """
     And the refusal's code is "INVALID_PAYLOAD"
     And the rows hold:
-      | name    | status       |
-      | check-a |              |
-      | check-b |              |
+      | name    | status |
+      | check-a |        |
+      | check-b |        |
 
   Scenario: a malformed key is refused before any update hook runs
     When a malformed key is updated to the status "archived"

@@ -9,6 +9,7 @@ import type { InvalidForeignKeyErrorExtensions } from './errors/invalid-foreign-
 import type { InvalidPayloadErrorExtensions } from './errors/invalid-payload.js';
 import type { InvalidProviderConfigErrorExtensions } from './errors/invalid-provider-config.js';
 import type { InvalidQueryErrorExtensions } from './errors/invalid-query.js';
+import type { ItemNotFoundErrorExtensions } from './errors/item-not-found.js';
 import type { MethodNotAllowedErrorExtensions } from './errors/method-not-allowed.js';
 import type { NotNullViolationErrorExtensions } from './errors/not-null-violation.js';
 import type { RangeNotSatisfiableErrorExtensions } from './errors/range-not-satisfiable.js';
@@ -28,6 +29,7 @@ type Map = {
 	[ErrorCode.InvalidPayload]: InvalidPayloadErrorExtensions;
 	[ErrorCode.InvalidProviderConfig]: InvalidProviderConfigErrorExtensions;
 	[ErrorCode.InvalidQuery]: InvalidQueryErrorExtensions;
+	[ErrorCode.ItemNotFound]: ItemNotFoundErrorExtensions;
 	[ErrorCode.MethodNotAllowed]: MethodNotAllowedErrorExtensions;
 	[ErrorCode.NotNullViolation]: NotNullViolationErrorExtensions;
 	[ErrorCode.RangeNotSatisfiable]: RangeNotSatisfiableErrorExtensions;

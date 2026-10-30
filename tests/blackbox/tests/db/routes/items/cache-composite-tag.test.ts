@@ -15,7 +15,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -148,7 +148,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.send({ meta: { scoped_cache_fields: ['course_part', 'method_range'] } })
 			.set('Authorization', auth);
 
-		const port = await getPort();
+		const port = await freePortOfWorker();
 		env[vendor].PORT = String(port);
 
 		instance = spawn('node', [paths.cli, 'start'], {

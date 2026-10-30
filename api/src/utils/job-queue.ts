@@ -20,13 +20,16 @@ export class JobQueue {
 	private async run(): Promise<void> {
 		this.running = true;
 
-		while (this.jobs.length > 0) {
-			const job = this.jobs.shift()!;
+		try {
+			while (this.jobs.length > 0) {
+				const job = this.jobs.shift()!;
 
-			await job();
+				await job();
+			}
 		}
-
-		this.running = false;
+		finally {
+			this.running = false;
+		}
 	}
 
 	public get size(): number {
