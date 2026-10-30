@@ -417,7 +417,10 @@ implements AbstractService<Item> {
 		};
 	}
 
-	async getKeysByQuery(query: Query): Promise<PrimaryKey[]> {
+	async getKeysByQuery(
+		query: Query,
+		opts?: Pick<QueryOptions, 'emitEvents'>,
+	): Promise<PrimaryKey[]> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const readQuery = cloneDeep(query);
 		readQuery.fields = [primaryKeyField];
@@ -436,6 +439,7 @@ implements AbstractService<Item> {
 		// them: a missed snapshot costs staleness, and only a call site owning the whole
 		// round trip can know its rows never reach the cache.
 		const items = await itemsService.readByQuery(readQuery, {
+			...opts,
 			skipScopedCacheEpochs: true,
 		});
 

@@ -402,10 +402,13 @@ export class UsersService extends ItemsService {
 						schema: this.schema,
 					});
 
-					const unlinkedKeys = await itemsService.getKeysByQuery({
-						filter: { [userField]: { _in: keys } },
-						limit: -1,
-					});
+					const unlinkedKeys = await itemsService.getKeysByQuery(
+						{
+							filter: { [userField]: { _in: keys } },
+							limit: -1,
+						},
+						{ emitEvents: false },
+					);
 
 					for (const keyChunk of chunk(unlinkedKeys, UNLINK_CHUNK_SIZE)) {
 						await itemsService.updateMany(

@@ -1244,12 +1244,7 @@ describe('Integration Tests', () => {
 
 				await service.deleteMany(['8e2b4c10-5d3a-4f6e-9a7b-000000000047']);
 
-				expect(emittedActions).toEqual([
-					['comments.read', ['ongoing']],
-					['notifications.read', ['ongoing']],
-					['versions.read', ['ongoing']],
-					['users.delete', ['committed']],
-				]);
+				expect(emittedActions).toEqual([['users.delete', ['committed']]]);
 			});
 		});
 
