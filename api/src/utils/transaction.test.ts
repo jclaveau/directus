@@ -782,6 +782,32 @@ describe('trackTransactionsOf', () => {
 	});
 
 	it(oneLine`
+		runs only the tasks held for a rollback once commit() resolves over a failed
+		COMMIT
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const committedTask = vi.fn(async () => {});
+		const settledTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+
+		const failingCommit = vi.spyOn(MockClient.prototype, '_query')
+			.mockRejectedValueOnce(new Error('deferred check failed'));
+
+		queueAfterCommit(trx, committedTask);
+		queueAfterCommitOrRollback(trx, settledTask);
+
+		await trx.commit();
+		failingCommit.mockRestore();
+
+		expect(committedTask).not.toHaveBeenCalled();
+		expect(settledTask).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
 		holds a task queued on a trx database.transaction(config) opened
 	`, async () => {
 		const db = knex.default({ client: MockClient });

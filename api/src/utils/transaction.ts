@@ -334,7 +334,13 @@ async function holdTasksUntilSettled(
 				throw error;
 			}
 
-			await drainOnce('commit');
+			// knex resolves commit() over a failed COMMIT, rejecting only this.
+			const settlement = await trx.executionPromise.then(
+				() => 'commit' as const,
+				() => 'rollback' as const,
+			);
+
+			await drainOnce(settlement);
 
 			return committedValue;
 		},
