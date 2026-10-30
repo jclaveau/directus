@@ -24,6 +24,6 @@ what makes it usable on a slate of thousands (the descriptor reaper's orphan rul
 A rebuilt prefix that drifts on a library bump would answer "gone" for every key and
 silently reap the whole dimension.
 
-**How to check it live:** see [[project_directus_prod_db_access]] —
-`railway run -s Redis -- sh -c 'redis-cli -u "$REDIS_URL" exists "<candidate>"'`
+**How to check it live:** `redis-cli -u "$REDIS_URL" exists "<candidate>"` (prod access
+how-to: see the consumer repo's memories)
 against a hash freshly read from `directus_cache_stats_descriptors`.

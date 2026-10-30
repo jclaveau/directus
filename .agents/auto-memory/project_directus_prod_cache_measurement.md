@@ -6,10 +6,8 @@ metadata:
   type: project
 ---
 
-Read-only probe of the planner's production Redis, `scalabus` namespace, 2026-08-26.
-Reached via `planner_2/apps/directus/data/redis_cli_railway.sh production <cmd>`
-(`railway run --service Redis`, `REDIS_URL` injected). `db_query_railway.sh` REFUSES
-production by design — do not edit that guard.
+Read-only probe of a prod consumer's Redis, `scalabus` namespace, 2026-08-26
+(how to reach it: the consumer repo's memories).
 
 | | |
 |---|---|
@@ -20,14 +18,14 @@ production by design — do not edit that guard.
 | **cost per index member** | **130 B** |
 | observed tag-set TTL | 345 600 s (96 h) |
 
-**Effective `CACHE_TTL` is 48 h, not the `1h` in `apps/directus/env/.env`.** A tag set
+**Effective `CACHE_TTL` is 48 h, not the `1h` in the consumer's env file.** A tag set
 expires at `SCOPED_CACHE_TAG_TTL_FACTOR` (2) x the cache TTL, and 345600/2 = 172800 s.
 Almost certainly a durable override in `directus_settings`, which `resolvedCacheTtl()`
-reads BEFORE the env. Filed with the rest as **the-HipHipHip/Planner#727**.
+reads BEFORE the env. Filed in the consumer repo.
 
 **Zero primary-key-shaped tags does NOT mean #358 is absent — it IS in production.**
-Every prod read filters on a declared scope path (`enrollment.student.user=`,
-`student.user=`, `course=`), so the implicit pk pin has nothing to bind to. I read the
+Every prod read filters on a declared scope path (relational paths
+ending in a user field), so the implicit pk pin has nothing to bind to. I read the
 absence as "not deployed" and jean corrected me. See
 [[feedback_failed_probe_may_be_invalid_not_refuting]].
 

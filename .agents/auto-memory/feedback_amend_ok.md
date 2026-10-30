@@ -1,5 +1,5 @@
 ---
-name: feedback-amend-ok-in-directus-pr-flow
+name: feedback_amend_ok
 description:
   Amending the prior commit is acceptable in this Directus PR-flow context without asking; force-with-lease push
   afterwards is fine.

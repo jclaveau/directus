@@ -2,7 +2,7 @@
 name: project_directus_contributor_check_author
 description:
   The fork's "Check" workflow rejects PR commits whose author email isn't GitHub-associated — author commits as
-  jean's GitHub noreply, not his gmail.
+  jean's GitHub noreply, not the personal gmail.
 metadata:
   author: Jean Claveau
   type: project
@@ -13,7 +13,7 @@ The fork's **"Check" workflow** validates `contributors.yml` against every PR co
 GitHub account.
 
 - **Author commits as `Jean Claveau <1556489+jclaveau@users.noreply.github.com>`** — the GitHub-associated
-  noreply. `comptes.jc@gmail.com` (the session `userEmail`) is NOT linked on the GH account → fails the check.
+  noreply. The personal gmail address (the session `userEmail`) is NOT linked on the GH account → fails the check.
 - The original fork commits all use the noreply (`git log --format='%ae'`); match that.
 - Fix after the fact: `git -c user.name="Jean Claveau" -c user.email="1556489+jclaveau@users.noreply.github.com"
   commit --amend --reset-author --no-edit`, or rebase the chain with an `--exec` that re-authors any commit whose

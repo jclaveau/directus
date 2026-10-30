@@ -1,4 +1,24 @@
+import type { Type } from '@directus/types';
 import { CapabilitiesHelper } from '../types.js';
+
+// A json field arrives stringified and would land as a JSON string, a geometry
+// as a raw call, and an unknown type as anything.
+const JSON_BATCH_UPDATE_TYPES: ReadonlySet<Type> = new Set<Type>([
+	'bigInteger',
+	'boolean',
+	'csv',
+	'date',
+	'dateTime',
+	'decimal',
+	'float',
+	'hash',
+	'integer',
+	'string',
+	'text',
+	'time',
+	'timestamp',
+	'uuid',
+]);
 
 export class CapabilitiesHelperPostgres extends CapabilitiesHelper {
 	override supportsColumnPositionInGroupBy(): boolean {
@@ -19,5 +39,14 @@ export class CapabilitiesHelperPostgres extends CapabilitiesHelper {
 		// within a single statement. Same semantics inherited by CockroachDB and Redshift.
 		// https://www.postgresql.org/docs/current/sql-insert.html
 		return true;
+	}
+
+	override supportsJsonBatchUpdate(): boolean {
+		// knex expands the rows from one jsonb param via jsonb_populate_recordset.
+		return true;
+	}
+
+	override jsonBatchUpdateTypes(): ReadonlySet<Type> {
+		return JSON_BATCH_UPDATE_TYPES;
 	}
 }

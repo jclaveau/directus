@@ -24,6 +24,7 @@ import type {
 	QueryOptions,
 	SchemaOverview,
 	ScopedCacheFingerprint,
+	Type,
 	UpdateEntries,
 	UpdateEntry,
 	UpdateGroup,
@@ -48,6 +49,7 @@ import {
 	takenOverScopedCacheKey,
 	withScopedCacheOwnershipInjections,
 } from '../scoped-cache/index.js';
+import { isUniqueViolation } from '../database/errors/dialects/postgres.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
@@ -251,6 +253,17 @@ function isTakenOverRow<Item extends AnyItem>(
 		&& Object.keys(entry).length === 1
 		&& isPrimaryKey((entry as { key: PrimaryKey }).key);
 }
+
+// The field types a number is sent to as text, as the per-group update binds
+// it: knex keeps a finite number a JSON number, which jsonb renders `1e-7` as
+// `0.0000001`.
+const BATCH_TEXT_FIELD_TYPES = new Set<Type>([
+	'csv',
+	'hash',
+	'string',
+	'text',
+	'uuid',
+]);
 
 /**
  * Merge each group into the one before it when both carry the same change, so one
@@ -983,6 +996,16 @@ implements AbstractService<Item> {
 				results[index] = results[sameRowAs]!;
 			}
 
+			if (opts.emitEvents !== false && postPrepared.length > 0) {
+				await this.emitWrittenEvent(
+					'created',
+					postPrepared.map((p) => p.actionHookPayload),
+					postPrepared.map((p) => p.primaryKey),
+					trx,
+					scopedCacheHookDeclarations,
+				);
+			}
+
 			return {
 				nestedActionEvents,
 				actionPayloads: postPrepared.map(
@@ -1590,6 +1613,46 @@ implements AbstractService<Item> {
 		_opts: MutationOptions,
 	): Promise<void> {}
 
+	/**
+	 * Hand the rows a mutation wrote to its `.created` or `.updated` filters,
+	 * inside the transaction before it commits: a hook that throws rolls the
+	 * mutation back, and a hook writing through `context.transaction` commits with
+	 * it. The rows are already written, so a hook answering anything is refused,
+	 * and one changing them in place changes only what the action is handed.
+	 *
+	 * A row is the payload as written, presets applied and its key set, not the
+	 * row read back: no database default, relations as the caller sent them. A
+	 * nested create or update emits its own event, from its own service.
+	 *
+	 * Bounds: on a transaction the caller opened, a throw rolls back only when
+	 * the caller does; a retried transaction runs the hooks again; a hook writing
+	 * the same collection through `ItemsService` emits again.
+	 */
+	private async emitWrittenEvent(
+		writtenAction: 'created' | 'updated',
+		writtenRows: AnyItem[] | UpdateGroup<Item>[],
+		keys: PrimaryKey[],
+		trx: Knex,
+		declarations: NonNullable<MutationOptions['scopedCacheHookDeclarations']>,
+	): Promise<void> {
+		await emitter.emitWrittenFilter(
+			this.eventScope === 'items'
+				? [`items.${writtenAction}`, `${this.collection}.items.${writtenAction}`]
+				: `${this.eventScope}.${writtenAction}`,
+			writtenRows,
+			{ keys, collection: this.collection },
+			{
+				transaction: trx,
+				database: trx,
+				schema: this.schema,
+				accountability: this.accountability,
+				scopedCache: {
+					purgeBy: declarations.purgeHandleFor(this.collection).purgeBy,
+				},
+			},
+		);
+	}
+
 	async updateGroups(
 		groups: UpdateGroup<Item>[],
 		opts: DeferredPurgeOptions & { allowFilterCancel: true },
@@ -2130,22 +2193,20 @@ implements AbstractService<Item> {
 				this.refuseChildJoiningSeveralRows(presetGroups);
 				await this.validateGroupsToUpdate(presetGroups, trx);
 
-				for (const group of presetGroups) {
-					const result = await service.applyUpdateGroup(
-						group,
-						aliasFields,
-						{
-							...opts,
-							mutationTracker,
-							onRequireUserIntegrityCheck: (flags) => {
-								userIntegrityCheckFlags |= flags;
-							},
+				const appliedGroups = await service.applyUpdateGroups(
+					presetGroups,
+					aliasFields,
+					{
+						...opts,
+						mutationTracker,
+						onRequireUserIntegrityCheck: (flags) => {
+							userIntegrityCheckFlags |= flags;
 						},
-						nestedActionEvents,
-					);
+					},
+					nestedActionEvents,
+				);
 
-					applied.push(result as UpdateGroup<Item>);
-				}
+				applied.push(...(appliedGroups as UpdateGroup<Item>[]));
 
 				if (userIntegrityCheckFlags) {
 					if (opts.onRequireUserIntegrityCheck) {
@@ -2157,6 +2218,16 @@ implements AbstractService<Item> {
 							knex: trx,
 						});
 					}
+				}
+
+				if (opts.emitEvents !== false) {
+					await this.emitWrittenEvent(
+						'updated',
+						applied,
+						directusWrittenKeys,
+						trx,
+						scopedCacheHookDeclarations,
+					);
 				}
 
 				return answeredUpdate;
@@ -2542,9 +2613,6 @@ implements AbstractService<Item> {
 		opts: MutationOptions & { mutationTracker: MutationTracker },
 		nestedActionEvents: ActionEventParams[],
 	): Promise<UpdateGroup<Item>> {
-		const { ActivityService } = await import('./activity.js');
-		const { RevisionsService } = await import('./revisions.js');
-
 		// Sorted for the work below only. `group.keys` stays in the caller's row order,
 		// which is what `updateGroups` returns and what the per-row action events walk.
 		const keys = [...group.keys].sort();
@@ -2631,15 +2699,319 @@ implements AbstractService<Item> {
 				}
 			}
 
-			// If this is an authenticated action, and accountability tracking is enabled, save activity row
-			if (this.accountability && this.schema.collections[this.collection]!.accountability !== null) {
-				const activityService = new ActivityService({
-					knex: trx,
-					schema: this.schema,
-				});
+			await this.recordUpdatedRows(
+				trx,
+				keys.map((key) => ({ key, payload: payloadWithTypeCasting })),
+				childrenRevisions,
+				opts,
+			);
+		}, opts.mutationTracker.snapshot());
 
-				const activity = await activityService.createMany(
-					keys.map((key) => ({
+		return { data: group.data, keys: group.keys };
+	}
+
+	/**
+	 * Apply the groups in the caller's order.
+	 *
+	 * On postgres, groups side by side that set the same scalar columns, on rows
+	 * none of the others names, are written by one `batchUpdate` statement per
+	 * chunk; every other group by `applyUpdateGroup` alone.
+	 *
+	 * TODO(#610): sqlite / mariadb / cockroachdb keep one statement per group.
+	 */
+	private async applyUpdateGroups(
+		groups: UpdateGroup<Item>[],
+		aliases: string[],
+		opts: MutationOptions & { mutationTracker: MutationTracker },
+		nestedActionEvents: ActionEventParams[],
+	): Promise<UpdateGroup<Item>[]> {
+		const appliedGroups: UpdateGroup<Item>[] = [];
+
+		for (const groupRun of this.splitBatchRuns(groups, aliases, opts)) {
+			if (groupRun.length === 1) {
+				appliedGroups.push(await this.applyUpdateGroup(
+					groupRun[0]!,
+					aliases,
+					opts,
+					nestedActionEvents,
+				));
+			}
+			else {
+				appliedGroups.push(...await this.applyUpdateBatch(
+					groupRun,
+					aliases,
+					opts,
+					nestedActionEvents,
+				));
+			}
+		}
+
+		return appliedGroups;
+	}
+
+	/**
+	 * Cut the groups, in order, into runs one statement can write: groups side by
+	 * side setting the same columns, none naming a row another of the run names.
+	 * A group no batch can carry is a run of its own.
+	 */
+	private splitBatchRuns(
+		groups: UpdateGroup<Item>[],
+		aliases: string[],
+		opts: MutationOptions,
+	): UpdateGroup<Item>[][] {
+		const groupRuns: UpdateGroup<Item>[][] = [];
+		let runColumns: string | null = null;
+		let runKeyNames = new Set<string>();
+
+		for (const group of groups) {
+			const batchColumns = this.batchColumnsOf(group, aliases, opts);
+			const keyNames = group.keys.map((key) => this.primaryKeyNameOf(key));
+
+			if (
+				batchColumns === null
+				|| batchColumns !== runColumns
+				|| keyNames.some((keyName) => runKeyNames.has(keyName))
+			) {
+				groupRuns.push([]);
+				runColumns = batchColumns;
+				runKeyNames = new Set();
+			}
+
+			groupRuns.at(-1)!.push(group);
+
+			for (const keyName of keyNames) {
+				runKeyNames.add(keyName);
+			}
+		}
+
+		return groupRuns;
+	}
+
+	/**
+	 * The columns a group sets, serialized for `splitBatchRuns` to compare, or
+	 * null where no batch can carry the group: on a dialect without a json batch,
+	 * behind a stored refusal, or setting an alias, a nested item, an object value
+	 * or a field whose type is not in `jsonBatchUpdateTypes`.
+	 */
+	private batchColumnsOf(
+		group: UpdateGroup<Item>,
+		aliases: string[],
+		opts: MutationOptions,
+	): string | null {
+		const collectionSchema = this.schema.collections[this.collection]!;
+
+		const isRefused = opts.preMutationError !== undefined
+			|| group.keys.some((key) => {
+				return opts.preMutationErrorsByKey?.get(String(key)) !== undefined;
+			});
+
+		const { capabilities } = getHelpers(this.knex);
+
+		if (!capabilities.supportsJsonBatchUpdate() || isRefused) {
+			return null;
+		}
+
+		const fieldNames = Object.keys(group.data).filter((field) => {
+			return field !== collectionSchema.primary;
+		});
+
+		if (fieldNames.length === 0) {
+			return null;
+		}
+
+		return fieldNames.every((field) => {
+			const fieldType = collectionSchema.fields[field]?.type;
+			const value: unknown = group.data[field];
+
+			return !aliases.includes(field)
+				&& fieldType !== undefined
+				&& capabilities.jsonBatchUpdateTypes().has(fieldType)
+				&& (typeof value !== 'object' || value === null || value instanceof Date);
+		})
+			? JSON.stringify(fieldNames.sort())
+			: null;
+	}
+
+	/**
+	 * Apply a run `splitBatchRuns` cut: one `batchUpdate` statement per chunk for
+	 * every row, then their activity and revisions in one pass.
+	 *
+	 * The groups are prepared in the caller's order, and one refused there throws
+	 * once the groups before it are written, as `applyUpdateGroup` would.
+	 */
+	private async applyUpdateBatch(
+		groupRun: UpdateGroup<Item>[],
+		aliases: string[],
+		opts: MutationOptions & { mutationTracker: MutationTracker },
+		nestedActionEvents: ActionEventParams[],
+	): Promise<UpdateGroup<Item>[]> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
+
+		const payloadService = new PayloadService(this.collection, {
+			accountability: this.accountability,
+			knex: this.knex,
+			schema: this.schema,
+			nested: this.nested,
+		});
+
+		const preparedGroups: {
+			group: UpdateGroup<Item>;
+			payloadWithPresets: Partial<AnyItem>;
+			payloadWithTypeCasting: Partial<AnyItem>;
+		}[] = [];
+
+		let prepareError: unknown = null;
+
+		for (const group of groupRun) {
+			try {
+				const payloadWithPresets = group.data as Partial<AnyItem>;
+
+				const payloadWithTypeCasting = await payloadService.processValues(
+					'update',
+					pick(payloadWithPresets, without(fields, primaryKeyField, ...aliases)),
+				) as Partial<AnyItem>;
+
+				preparedGroups.push({ group, payloadWithPresets, payloadWithTypeCasting });
+			}
+			catch (error) {
+				prepareError = error;
+				break;
+			}
+		}
+
+		const fieldSchemas = this.schema.collections[this.collection]!.fields;
+
+		// A field set to undefined is left out, as knex's update leaves it: one
+		// group may set to undefined a field another leaves out, and knex refuses
+		// rows of different columns.
+		const groupBatchValues = preparedGroups.map(({ payloadWithTypeCasting }) => {
+			return Object.fromEntries(
+				Object.entries(payloadWithTypeCasting)
+					.filter(([, value]) => value !== undefined)
+					.map(([field, value]) => {
+						const fieldType = fieldSchemas[field]?.type;
+
+						return typeof value === 'number'
+							&& fieldType !== undefined
+							&& BATCH_TEXT_FIELD_TYPES.has(fieldType)
+							? [field, String(value)]
+							: [field, value];
+					}),
+			);
+		});
+
+		const batchRows = preparedGroups.flatMap(({ group }, index) => {
+			return group.keys.map((key) => {
+				return { ...groupBatchValues[index], [primaryKeyField]: key };
+			});
+		});
+
+		const columnSets = new Set(groupBatchValues.map((batchValues) => {
+			return JSON.stringify(Object.keys(batchValues).sort());
+		}));
+
+		let wroteBatch = false;
+
+		// Special fields can make two groups set different columns, and a geometry
+		// or invalid date stays an object, which JSON would mangle. knex binds a
+		// valid Date as node-pg would.
+		if (
+			columnSets.size === 1
+			&& !columnSets.has('[]')
+			&& batchRows.every((batchRow) => {
+				return Object.values(batchRow).every((value) => {
+					return typeof value !== 'object'
+						|| value === null
+						|| (value instanceof Date && !Number.isNaN(value.getTime()));
+				});
+			})
+		) {
+			// The statement updates the rows in its own order, so it can break a
+			// unique constraint the caller's order would not: that batch rolls back
+			// to its savepoint and leaves the run to `applyUpdateGroup`. Any other
+			// error would fail the same group by group, so it is raised, with no
+			// group's payload since the failing row is unknown.
+			wroteBatch = await this.knex
+				.batchUpdate(this.collection, batchRows, primaryKeyField, { mode: 'json' })
+				.then(() => true, async (error) => {
+					if (isUniqueViolation(error)) {
+						return false;
+					}
+
+					throw await translateDatabaseError(error, {}, this.knex, {
+						collection: this.collection,
+						operation: 'update',
+					});
+				});
+		}
+
+		if (!wroteBatch) {
+			const appliedGroups: UpdateGroup<Item>[] = [];
+
+			for (const { group } of preparedGroups) {
+				appliedGroups.push(
+					await this.applyUpdateGroup(group, aliases, opts, nestedActionEvents),
+				);
+			}
+
+			if (prepareError !== null) {
+				throw prepareError;
+			}
+
+			return appliedGroups;
+		}
+
+		await transaction(this.knex, async (trx) => {
+			await this.recordUpdatedRows(
+				trx,
+				preparedGroups.flatMap(({ group, payloadWithTypeCasting }) => {
+					return [...group.keys].sort().map((key) => {
+						return { key, payload: payloadWithTypeCasting };
+					});
+				}),
+				[],
+				opts,
+			);
+		}, opts.mutationTracker.snapshot());
+
+		if (prepareError !== null) {
+			throw prepareError;
+		}
+
+		return preparedGroups.map(({ group, payloadWithPresets }) => {
+			return { data: payloadWithPresets as Partial<Item>, keys: group.keys };
+		});
+	}
+
+	/**
+	 * Save the activity of the updated rows, one per row, and, where the
+	 * collection tracks them, a revision per row its payload changed, the first
+	 * one parenting `childrenRevisions`.
+	 */
+	private async recordUpdatedRows(
+		trx: Knex,
+		updatedRows: { key: PrimaryKey; payload: Partial<AnyItem> }[],
+		childrenRevisions: PrimaryKey[],
+		opts: MutationOptions,
+	): Promise<void> {
+		const { ActivityService } = await import('./activity.js');
+		const { RevisionsService } = await import('./revisions.js');
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const collectionAccountability =
+			this.schema.collections[this.collection]!.accountability;
+
+		// If this is an authenticated action, and accountability tracking is
+		// enabled, save activity row
+		if (this.accountability && collectionAccountability !== null) {
+			const activity = await new ActivityService({
+				knex: trx,
+				schema: this.schema,
+			}).createMany(
+				updatedRows.map(({ key }) => {
+					return {
 						action: Action.UPDATE,
 						user: this.accountability!.user,
 						collection: this.collection,
@@ -2647,72 +3019,84 @@ implements AbstractService<Item> {
 						user_agent: this.accountability!.userAgent,
 						origin: this.accountability!.origin,
 						item: key,
-					})),
-					{ bypassLimits: true },
+					};
+				}),
+				{ bypassLimits: true },
+			);
+
+			if (collectionAccountability === 'all') {
+				const snapshots = await new ItemsService(this.collection, {
+					knex: trx,
+					schema: this.schema,
+				}).readMany(
+					updatedRows.map(({ key }) => key),
 				);
 
-				if (this.schema.collections[this.collection]!.accountability === 'all') {
-					const itemsService = new ItemsService(this.collection, {
-						knex: trx,
-						schema: this.schema,
-					});
+				// `readMany` applies no ordering, so pairing its rows
+				// with `updatedRows` by position files a revision under one item
+				// holding another item's data, which `revert` would then
+				// write straight back onto the wrong row.
+				const snapshotJsonByKey = new Map<string, string>();
 
-					const snapshots = await itemsService.readMany(keys);
+				for (const snapshot of snapshots) {
+					snapshotJsonByKey.set(
+						String(snapshot[primaryKeyField]),
+						JSON.stringify(snapshot),
+					);
+				}
 
-					// `readMany` applies no ordering, so pairing its rows
-					// with `keys` by position files a revision under one item
-					// holding another item's data, which `revert` would then
-					// write straight back onto the wrong row.
-					const snapshotJsonByKey = new Map<string, string>();
+				const payloadService = new PayloadService(this.collection, {
+					accountability: this.accountability,
+					knex: trx,
+					schema: this.schema,
+					nested: this.nested,
+				});
 
-					for (const snapshot of snapshots) {
-						snapshotJsonByKey.set(
-							String(snapshot[primaryKeyField]),
-							JSON.stringify(snapshot),
-						);
-					}
+				const revisionsService = new RevisionsService({
+					knex: trx,
+					schema: this.schema,
+				});
 
-					const revisionsService = new RevisionsService({
-						knex: trx,
-						schema: this.schema,
-					});
+				const revisions = (
+					await Promise.all(
+						activity.map(async (activity, index) => {
+							const updatedRow = updatedRows[index]!;
 
-					const revisions = (
-						await Promise.all(
-							activity.map(async (activity, index) => ({
+							return {
 								activity: activity,
 								collection: this.collection,
-								item: keys[index],
-								data: snapshotJsonByKey.get(String(keys[index])),
-								delta: await payloadService.prepareDelta(payloadWithTypeCasting),
-							})),
-						)
-					).filter((revision) => revision.delta);
+								item: updatedRow.key,
+								data: snapshotJsonByKey.get(String(updatedRow.key)),
+								delta: await payloadService.prepareDelta(updatedRow.payload),
+							};
+						}),
+					)
+				).filter((revision) => revision.delta);
 
-					const revisionIDs = await revisionsService.createMany(revisions);
+				const revisionIDs = await revisionsService.createMany(revisions);
 
-					for (let i = 0; i < revisionIDs.length; i++) {
-						const revisionID = revisionIDs[i]!;
+				for (let i = 0; i < revisionIDs.length; i++) {
+					const revisionID = revisionIDs[i]!;
 
-						if (opts.onRevisionCreate) {
-							opts.onRevisionCreate(revisionID);
-						}
+					if (opts.onRevisionCreate) {
+						opts.onRevisionCreate(revisionID);
+					}
 
-						if (i === 0) {
-							// In case of a nested relational creation/update in a updateMany, the nested m2o/a2o
-							// creation is only done once. We treat the first updated item as the "main" update,
-							// with all other revisions on the current level as regular "flat" updates, and
-							// nested revisions as children of this first "root" item.
-							if (childrenRevisions.length > 0) {
-								await revisionsService.updateMany(childrenRevisions, { parent: revisionID });
-							}
+					if (i === 0) {
+						// In case of a nested relational creation/update in a updateMany,
+						// the nested m2o/a2o creation is only done once. We treat the first
+						// updated item as the "main" update, with all other revisions on the
+						// current level as regular "flat" updates, and nested revisions as
+						// children of this first "root" item.
+						if (childrenRevisions.length > 0) {
+							await revisionsService.updateMany(childrenRevisions, {
+								parent: revisionID,
+							});
 						}
 					}
 				}
 			}
-		}, opts.mutationTracker.snapshot());
-
-		return { data: group.data, keys: group.keys };
+		}
 	}
 
 	/**
@@ -3330,8 +3714,11 @@ implements AbstractService<Item> {
 		const { selfRelationSurvivorKeys, oldScopedCacheSnapshot } = deletion;
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const survivorScopedCacheSnapshot =
-				await this.scopedCache.snapshot(selfRelationSurvivorKeys);
+			// After the commit: a failed read must not fail a delete that went through.
+			// Null widens the purge to the collection, as in updateMany.
+			const survivorScopedCacheSnapshot = await this.scopedCache
+				.snapshot(selfRelationSurvivorKeys)
+				.catch(() => null);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheMutatedFingerprints(

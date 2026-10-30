@@ -30,7 +30,7 @@ will want to re-flag several of these:
 - **`eslint.config.js` registers the style plugin switched off** so a source line can
   carry `eslint-disable-line local/…`; unused-directive reporting is off in that
   block by design.
-- **The planner-side env (`CACHE_STATS_RETENTION=3d`, `MAX_BYTES=1gb`, dropping the
+- **The consumer-side env (`CACHE_STATS_RETENTION=3d`, `MAX_BYTES=1gb`, dropping the
   `512mb` pin) is jean's, after merge + Scalabus bump.** Out of scope here.
 
 Still genuinely open at handoff: the `TODO(reviewer)` on `compress_orderby` for the

@@ -3,6 +3,7 @@ import {
 	InvalidForeignKeyError,
 	InvalidPayloadError,
 	ItemNotFoundError,
+	NotNullViolationError,
 	RecordNotUniqueError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
@@ -25,9 +26,6 @@ import {
 } from 'vitest';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import {
-	processPayload,
-} from '../permissions/modules/process-payload/process-payload.js';
-import {
 	validateAccess,
 } from '../permissions/modules/validate-access/validate-access.js';
 import {
@@ -41,6 +39,9 @@ import {
 	purgeScopedCache,
 	scopedCachePinKeys,
 } from '../scoped-cache/index.js';
+import {
+	processPayload,
+} from '../permissions/modules/process-payload/process-payload.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -207,6 +208,9 @@ describe('Integration Tests', () => {
 	afterEach(() => {
 		tracker.reset();
 		vi.restoreAllMocks();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('Services / Items', () => {
@@ -360,6 +364,115 @@ describe('Integration Tests', () => {
 				}
 				finally {
 					emitter.offFilter('items.create', createFilter);
+				}
+			});
+
+			it(oneLine`
+				hands the created filter the written rows inside the mutation
+				transaction
+			`, async () => {
+				tracker.on.insert('test').response([{ id: 7 }]);
+
+				const createdFilter = vi.fn();
+
+				emitter.onFilter('items.created', createdFilter);
+
+				try {
+					await service.createOne({ name: 'Test' });
+
+					// The key 7 comes back from the insert: the filter runs after it.
+					expect(createdFilter).toHaveBeenCalledWith(
+						[{ id: 7, name: 'Test' }],
+						{
+							collection: 'test',
+							event: 'items.created',
+							keys: [7],
+							originalPayload: [{ id: 7, name: 'Test' }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.created', createdFilter);
+				}
+			});
+
+			it('rolls the create back when a created filter throws', async () => {
+				const refuseCreated = () => {
+					throw new Error('refused by the created hook');
+				};
+
+				emitter.onFilter('items.created', refuseCreated);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new Error('refused by the created hook'));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.created', refuseCreated);
+				}
+			});
+
+			it('refuses a created filter answering other rows', async () => {
+				const answerOtherRows = () => [{ name: 'other' }];
+
+				emitter.onFilter('items.created', answerOtherRows);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "items.created" filter hook must return nothing: '
+								+ 'the rows are already written',
+						}));
+				}
+				finally {
+					emitter.offFilter('items.created', answerOtherRows);
+				}
+			});
+
+			it('refuses a created filter answering the rows it was handed', async () => {
+				const answerHandedRows = (rows: unknown) => rows;
+
+				emitter.onFilter('test.items.created', answerHandedRows);
+
+				try {
+					await expect(service.createOne({ name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "test.items.created" filter hook must return '
+								+ 'nothing: the rows are already written',
+						}));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('test.items.created', answerHandedRows);
+				}
+			});
+
+			it('emits no created event when emitEvents is false', async () => {
+				const createdFilter = vi.fn();
+
+				emitter.onFilter('items.created', createdFilter);
+
+				try {
+					await service.createOne({ name: 'Test' }, { emitEvents: false });
+
+					expect(createdFilter).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.created', createdFilter);
 				}
 			});
 
@@ -823,6 +936,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('returns the keys in the order the caller sent the rows', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				const keys = await service.updateBatch([
 					{ id: 5, name: 'same' },
 					{ id: 4, name: 'other' },
@@ -857,6 +972,8 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				writes rows apart carrying the same change in the order sent
 			`, async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				// Row 1 may free a value row 2 takes, or row 2 one row 3 takes, so
 				// writing rows 1 and 3 together would reorder the batch.
 				const keys = await service.updateBatch([
@@ -941,7 +1058,7 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				keeps a row a hook answers with its integer key with a leading zero
 			`, async () => {
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 					data: { name: 'after' },
 					keys: ['01'],
 				}]);
@@ -1008,7 +1125,7 @@ describe('Integration Tests', () => {
 			`, async () => {
 				tracker.on.update('test').response(1);
 
-				vi.spyOn(emitter, 'emitFilter').mockResolvedValue([
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([
 					{ data: { name: 'after' }, keys: [1, 3] },
 				]);
 
@@ -1479,6 +1596,126 @@ describe('Integration Tests', () => {
 				}
 				finally {
 					emitter.offFilter('items.update', updateFilter);
+				}
+			});
+
+			it(oneLine`
+				hands the updated filter the applied groups inside the mutation
+				transaction
+			`, async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('test.items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					expect(updatedFilter).toHaveBeenCalledWith(
+						[{ data: { name: 'Test' }, keys: [1] }],
+						{
+							collection: 'test',
+							event: 'test.items.updated',
+							keys: [1],
+							originalPayload: [{ data: { name: 'Test' }, keys: [1] }],
+						},
+						expect.objectContaining({
+							transaction: expect.objectContaining({ isTransaction: true }),
+							database: expect.objectContaining({ isTransaction: true }),
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('test.items.updated', updatedFilter);
+				}
+			});
+
+			it(oneLine`
+				hands an updated filter a purge handle that declares no take-over
+				inert
+			`, async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' });
+
+					// A skipPurgeFor here would spare a row an update hook took over and
+					// moved, leaving its old slice cached.
+					expect(updatedFilter).toHaveBeenCalledWith(
+						expect.anything(),
+						expect.anything(),
+						expect.objectContaining({
+							scopedCache: { purgeBy: expect.any(Function) },
+						}),
+					);
+				}
+				finally {
+					emitter.offFilter('items.updated', updatedFilter);
+				}
+			});
+
+			it('emits no updated event when emitEvents is false', async () => {
+				const updatedFilter = vi.fn();
+
+				emitter.onFilter('items.updated', updatedFilter);
+
+				try {
+					await service.updateMany([1], { name: 'Test' }, { emitEvents: false });
+
+					expect(updatedFilter).not.toHaveBeenCalled();
+				}
+				finally {
+					emitter.offFilter('items.updated', updatedFilter);
+				}
+			});
+
+			it('rolls the update back when an updated filter throws', async () => {
+				const refuseUpdated = () => {
+					throw new Error('refused by the updated hook');
+				};
+
+				emitter.onFilter('items.updated', refuseUpdated);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' }))
+						.rejects
+						.toThrow(new Error('refused by the updated hook'));
+
+					expect(tracker.history.transactions).toEqual([{
+						id: 0,
+						state: 'rolled back',
+						queries: [expect.objectContaining({
+							sql: 'update "test" set "name" = ? where "id" in (?)',
+						})],
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.updated', refuseUpdated);
+				}
+			});
+
+			it(oneLine`
+				refuses an updated filter answering the groups it was handed
+			`, async () => {
+				const answerHandedGroups = (groups: unknown) => groups;
+
+				emitter.onFilter('items.updated', answerHandedGroups);
+
+				try {
+					await expect(service.updateMany([1], { name: 'Test' }))
+						.rejects
+						.toThrow(new InvalidPayloadError({
+							reason: 'A "items.updated" filter hook must return nothing: '
+								+ 'the rows are already written',
+						}));
+
+					expect(tracker.history.transactions).toMatchObject([{
+						state: 'rolled back',
+					}]);
+				}
+				finally {
+					emitter.offFilter('items.updated', answerHandedGroups);
 				}
 			});
 
@@ -2471,6 +2708,9 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		revisionIds.issued = 0;
 		vi.clearAllMocks();
 		vi.restoreAllMocks();
+		// A test writing its groups one by one runs off postgres, since this
+		// MockClient has no dialect to compile their batch with.
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('system collection event scope', () => {
@@ -2619,7 +2859,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps a row a hook answers with its uuid in capitals', async () => {
 			tracker.on.update('uuid_coll').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 				data: { name: 'after' },
 				keys: ['AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'],
 			}]);
@@ -2681,7 +2921,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('keeps a row a hook answers with its key with a leading zero', async () => {
 			tracker.on.update('big_coll').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockResolvedValue([{
+			vi.spyOn(emitter, 'emitFilter').mockResolvedValueOnce([{
 				data: { name: 'after' },
 				keys: ['05'],
 			}]);
@@ -2695,6 +2935,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('keeps two keys apart past the safe integers', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('big_coll').response(1);
 
 			const updatedKeys = await new ItemsService('big_coll', {
@@ -2743,6 +2985,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('writes two keys apart that differ in case only', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('code_coll').response(1);
 
 			const updatedKeys = await new ItemsService('code_coll', {
@@ -3417,7 +3661,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3439,7 +3683,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('answers a null per row when every row is cancelled', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, () => null);
 				},
@@ -3457,7 +3701,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('refuses a row cancel the caller did not opt into', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3480,10 +3724,12 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 
 		it('splits off the row it rewrote and answers in the caller order', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 2
@@ -3511,7 +3757,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			tracker.on.update('test').response(1);
 			tracker.on.select('test').response([{ id: 2 }]);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (data, key) => {
 						return key === 1
@@ -3535,7 +3781,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('writes nothing when it takes every row over', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
 				},
@@ -3554,7 +3800,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('emits no update action when it takes every row over', async () => {
 			tracker.on.update('test').response(1);
 
-			vi.spyOn(emitter, 'emitFilter').mockImplementation(
+			vi.spyOn(emitter, 'emitFilter').mockImplementationOnce(
 				async (_event, payload: any) => {
 					return mapUpdateRows(payload, (_data, key) => key);
 				},
@@ -4748,10 +4994,13 @@ describe('Services / Items / a failed mutation on the caller\'s transaction', ()
 
 	beforeEach(() => {
 		vi.mocked(purgeScopedCache).mockClear();
+		// A failed write purges on the database `getDatabase()` returns.
+		vi.mocked(getDatabase).mockReturnValue(db);
 		tracker.on.select('test').response([]);
 	});
 
 	afterEach(() => {
+		vi.mocked(getDatabase).mockReset();
 		tracker.reset();
 	});
 
@@ -5020,6 +5269,126 @@ describe('Services / Items / a failed upsert on its own transaction', () => {
 	});
 });
 
+describe(oneLine`
+	Services / Items / a write a written hook makes on its transaction
+`, () => {
+	let db: Knex;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+		tracker.on.select('test').response([{ id: 1, name: 'Before' }]);
+		tracker.on.insert('test').response([{ id: 1 }]);
+		tracker.on.update('test').response(1);
+		tracker.on.insert('children').response([{ id: 9 }]);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+	});
+
+	it(oneLine`
+		purges the child a created hook writes on its transaction once the create
+		commits
+	`, async () => {
+		// On `test` alone: the child's own create emits `items.created` too.
+		const writeChild = async (_rows: unknown, _meta: unknown, context: any) => {
+			await new ItemsService('children', { knex: context.transaction, schema })
+				.createOne({ parent_id: 1 });
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		};
+
+		emitter.onFilter('test.items.created', writeChild);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.createOne({ name: 'Test' });
+
+			expect(purgeScopedCache).toHaveBeenNthCalledWith(
+				1,
+				expect.anything(),
+				'children',
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.created', writeChild);
+		}
+	});
+
+	it(oneLine`
+		purges the child an updated hook writes on its transaction once the update
+		commits
+	`, async () => {
+		const writeChild = async (_groups: unknown, _meta: unknown, context: any) => {
+			await new ItemsService('children', { knex: context.transaction, schema })
+				.createOne({ parent_id: 1 });
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		};
+
+		emitter.onFilter('test.items.updated', writeChild);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.updateOne(1, { name: 'Test' });
+
+			expect(purgeScopedCache).toHaveBeenNthCalledWith(
+				1,
+				expect.anything(),
+				'children',
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.updated', writeChild);
+		}
+	});
+
+	it(oneLine`
+		purges the child a created hook writes in a savepoint of its transaction
+		once the create commits
+	`, async () => {
+		const writeChild = async (_rows: unknown, _meta: unknown, context: any) => {
+			await context.transaction.transaction(async (savepointTrx: Knex) => {
+				await new ItemsService('children', { knex: savepointTrx, schema })
+					.createOne({ parent_id: 1 });
+			});
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		};
+
+		emitter.onFilter('test.items.created', writeChild);
+
+		try {
+			await new ItemsService('test', { knex: db, schema })
+				.createOne({ name: 'Test' });
+
+			expect(purgeScopedCache).toHaveBeenNthCalledWith(
+				1,
+				expect.anything(),
+				'children',
+				expect.anything(),
+				expect.anything(),
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.created', writeChild);
+		}
+	});
+});
+
 describe('Services / Items / a batch delete naming a key no row holds', () => {
 	let database: Knex;
 
@@ -5139,5 +5508,312 @@ describe('Services / Items / a batch delete naming a key no row holds', () => {
 
 		await expect(database('test').select('id'))
 			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+});
+
+describe('updateBatch on postgres', () => {
+	const postsSchema = new SchemaBuilder()
+		.collection('posts', (c) => {
+			c.field('id').id();
+			c.field('title').string();
+			c.field('status').string();
+			c.field('published').timestamp();
+			c.field('views').integer();
+			c.field('meta').json();
+		})
+		.build();
+
+	let pgDatabase: Knex;
+	let pgTracker: Tracker;
+
+	beforeAll(() => {
+		pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+
+		// `dialect` makes a pg client instance the prototype of MockClient, so
+		// every transaction client inherits its `_events` and a savepoint
+		// re-emits 'query' to itself forever.
+		delete Object.getPrototypeOf(MockClient.prototype)._events;
+
+		pgTracker = createTracker(pgDatabase);
+	});
+
+	beforeEach(() => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+	});
+
+	afterEach(() => {
+		pgTracker.reset();
+		vi.unstubAllEnvs();
+	});
+
+	it('writes rows setting the same columns in one statement', async () => {
+		pgTracker.on.any('posts').response({});
+
+		const keys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+			{ id: 3, title: 'third' },
+		]);
+
+		expect(keys).toEqual([1, 2, 3]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: oneLine`
+					update "posts" set "title" = "v"."title"
+					from jsonb_populate_recordset(null::"posts", $1) as "v"
+					where "posts"."id" = "v"."id"
+				`,
+				bindings: [
+					'[{"title":"first","id":1},{"title":"second","id":2},'
+					+ '{"title":"third","id":3}]',
+				],
+			}),
+		]);
+	});
+
+	it('writes each run of side-by-side groups in its own statement', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+			{ id: 3, status: 'draft' },
+			{ id: 1, title: 'again' },
+		], { onRepeatedPk: 'lastWins' });
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "status" = $1 where "id" in ($2)',
+				bindings: ['draft', 3],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['again', 1],
+			}),
+		]);
+	});
+
+	it('writes a timestamp as the local time node-pg would bind', async () => {
+		vi.stubEnv('TZ', 'Europe/Paris');
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, published: '2026-10-24T10:00:00.000Z' },
+			{ id: 2, published: '2026-10-24T11:00:00.000Z' },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: [
+					'[{"published":"2026-10-24T12:00:00.000+02:00","id":1},'
+					+ '{"published":"2026-10-24T13:00:00.000+02:00","id":2}]',
+				],
+			}),
+		]);
+	});
+
+	it('writes a number into a string field as node-pg would bind it', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 1e-7 },
+			{ id: 2, title: 1e21 },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"1e-7","id":1},{"title":"1e+21","id":2}]'],
+			}),
+		]);
+	});
+
+	it('writes a number into an integer field as a JSON number', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, views: 10 },
+			{ id: 2, views: 20 },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"views":10,"id":1},{"views":20,"id":2}]'],
+			}),
+		]);
+	});
+
+	it('writes the groups one by one on a dialect without a json batch', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('cockroachdb');
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['first', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['second', 2],
+			}),
+		]);
+	});
+
+	it('leaves a field the rows set to undefined as it is', async () => {
+		pgTracker.on.any('posts').response({});
+
+		await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first', status: undefined },
+			{ id: 2, title: 'second', status: undefined },
+		]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				sql: oneLine`
+					update "posts" set "title" = "v"."title"
+					from jsonb_populate_recordset(null::"posts", $1) as "v"
+					where "posts"."id" = "v"."id"
+				`,
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+		]);
+	});
+
+	it(oneLine`
+		writes the groups one by one when a permission preset sets a json field
+	`, async () => {
+		vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+			return { ...payload, meta: { origin: 'preset' } };
+		});
+
+		pgTracker.on.select('posts').response([]);
+		pgTracker.on.any('posts').response({});
+
+		try {
+			await new ItemsService('posts', {
+				knex: pgDatabase,
+				schema: postsSchema,
+				accountability: { user: 'u1', role: 'r1', admin: false, app: true } as any,
+			}).updateBatch([
+				{ id: 1, title: 'first' },
+				{ id: 2, title: 'second' },
+			]);
+		}
+		finally {
+			vi.mocked(processPayload).mockImplementation(async ({ payload }) => {
+				return payload;
+			});
+		}
+
+		expect(pgTracker.history.all).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1, "meta" = $2 where "id" in ($3)',
+				bindings: ['first', '{"origin":"preset"}', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1, "meta" = $2 where "id" in ($3)',
+				bindings: ['second', '{"origin":"preset"}', 2],
+			}),
+		]));
+	});
+
+	it(oneLine`
+		writes the groups one by one when the batch breaks a unique constraint
+	`, async () => {
+		const uniqueError: any = new Error(
+			'duplicate key value violates unique constraint "posts_title_unique"',
+		);
+
+		uniqueError.code = '23505';
+
+		pgTracker.on.any(/jsonb_populate_recordset/).simulateError(uniqueError);
+
+		pgTracker.on.any('posts').response({});
+
+		const keys = await new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		]);
+
+		expect(keys).toEqual([1, 2]);
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['first', 1],
+			}),
+			expect.objectContaining({
+				sql: 'update "posts" set "title" = $1 where "id" in ($2)',
+				bindings: ['second', 2],
+			}),
+		]);
+	});
+
+	it(oneLine`
+		raises any other batch error without writing the groups one by one
+	`, async () => {
+		const notNullError: any = new Error(oneLine`
+			null value in column "title" of relation "posts" violates not-null
+			constraint
+		`);
+
+		notNullError.code = '23502';
+		notNullError.table = 'posts';
+		notNullError.column = 'title';
+
+		pgTracker.on.any(/jsonb_populate_recordset/).simulateError(notNullError);
+		pgTracker.on.any('posts').response({});
+
+		await expect(new ItemsService('posts', {
+			knex: pgDatabase,
+			schema: postsSchema,
+		}).updateBatch([
+			{ id: 1, title: 'first' },
+			{ id: 2, title: 'second' },
+		])).rejects.toThrow(new NotNullViolationError({
+			collection: 'posts',
+			field: 'title',
+		}));
+
+		expect(pgTracker.history.all).toEqual([
+			expect.objectContaining({
+				bindings: ['[{"title":"first","id":1},{"title":"second","id":2}]'],
+			}),
+		]);
 	});
 });

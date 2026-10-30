@@ -17,6 +17,7 @@ import {
 	vi,
 	type MockInstance,
 } from 'vitest';
+import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { getStorage } from '../storage/index.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -25,7 +26,7 @@ import { FilesService, ItemsService } from './index.js';
 vi.mock('../database/index.js', () => {
 	return {
 		default: vi.fn(),
-		getDatabaseClient: () => 'postgres',
+		getDatabaseClient: vi.fn(() => 'postgres'),
 	};
 });
 
@@ -46,6 +47,7 @@ describe('Integration Tests', () => {
 		tracker.reset();
 		vi.restoreAllMocks();
 		vi.clearAllMocks();
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 	});
 
 	describe('Services / Files', () => {
@@ -887,6 +889,10 @@ describe('Integration Tests', () => {
 			it(oneLine`
 				gives a row the disk name the same batch moves another row off
 			`, async () => {
+				// One statement per group: this MockClient has no dialect to compile
+				// the postgres batch with.
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				tracker.on
 					.select('select "id", "filename_disk" from "directus_files"')
 					.response([{

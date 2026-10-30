@@ -42,7 +42,7 @@
 			"rangeStrategy": "update-lockfile"
 		},
 		{
-			"description": "hold - knex >=3.2 double-wraps directus_row_number, 500 on o2m/m2m/m2a sort - https://github.com/knex/knex/issues/6392",
+			"description": "hold - knex is the jclaveau/knex fork pinned by commit in pnpm-workspace.yaml catalog; bump the sha by hand",
 			"matchPackageNames": ["knex"],
 			"enabled": false
 		},

@@ -1,6 +1,6 @@
 ---
 name: project_scalabus_derived_branches
-description: jclaveau/directus derived branches — *-dist (release-fork.yml) and ci-dialect-* (refresh-dialect-ci.yml) are regenerated from the trunk on every push, so never rewrite or hand-edit them; -dist is what the planner installs
+description: jclaveau/directus derived branches — *-dist (release-fork.yml) and ci-dialect-* (refresh-dialect-ci.yml) are regenerated from the trunk on every push, so never rewrite or hand-edit them; -dist is what consumers install
 metadata:
   author: Jean Claveau
   type: project
@@ -14,7 +14,7 @@ replacement, never a merge or rebase.
   and recreates it as trunk + one bot commit "Add dist folders content". It runs
   `pnpm pack` per workspace package and extracts the packed `package.json` back, to
   de-catalog `catalog:`/`workspace:` specs so external `github:` consumers can resolve
-  deps. **Don't hand-roll this** — the planner installs from it.
+  deps. **Don't hand-roll this** — consumers install from it.
 - **`ci-dialect-{sqlite3,maria}`** — `refresh-dialect-ci.yml`, on push to the trunk only.
   One deterministic no-op commit naming the dialect in `.github/ci-dialect`; the
   force-push fires `pull_request: synchronize` on standing PRs #332/#333, which is what
@@ -28,10 +28,10 @@ replacement, never a merge or rebase.
   themselves on the next trunk push anyway. 2026-08-06 both dialect branches cleared their
   stale licence automatically that way.
 - **Never delete `ci-dialect-*`** — that closes the standing PRs that run sqlite3/maria.
-- The planner consumes the fork as a codeload tarball, `github:jclaveau/directus#<branch>&path:<pkg>`,
+- A consumer consumes the fork as a codeload tarball, `github:jclaveau/directus#<branch>&path:<pkg>`,
   which delivers **`api/src`, not just `dist`** — full TypeScript source lands in every
   consumer's `node_modules` on `pnpm install`.
-- `planner` and `planner_2` are separate checkouts pinning *different* lines
+- Two checkouts of a consumer can pin *different* lines
   (`v11.9.2-hhh-dev-dist` vs `v11.10.1-hhh-dev-dist`). Check which is live before drawing
   conclusions from a lockfile — [[feedback_review_actual_pr_branch_not_preview_tree]].
 

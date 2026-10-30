@@ -1,5 +1,5 @@
 ---
-name: directus-db-clients-and-returning-support
+name: project_directus_db_clients
 description: Canonical Directus DB client list lives in api/src/types/database.ts; which clients return all IDs after batch insert vs. only the last
 metadata:
   author: Jean Claveau

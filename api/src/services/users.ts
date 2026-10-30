@@ -26,7 +26,7 @@ import { createDefaultAccountability } from '../permissions/utils/create-default
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
-import { isEmpty } from '../utils/lodash-es-used.js';
+import { chunk, isEmpty } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { transaction } from '../utils/transaction.js';
 import { Url } from '../utils/url.js';
@@ -36,6 +36,9 @@ import { SettingsService } from './settings.js';
 
 const env = useEnv();
 const logger = useLogger();
+
+// Bounds the bind parameters of one update and the rows one cache snapshot holds.
+const UNLINK_CHUNK_SIZE = 10_000;
 
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -382,20 +385,36 @@ export class UsersService extends ItemsService {
 		const heldActionEvents: ActionEventParams[] = [];
 
 		// Manual constraint, see https://github.com/directus/directus/pull/19912
+		const userReferences = [
+			['directus_comments', 'user_updated'],
+			['directus_notifications', 'sender'],
+			['directus_versions', 'user_updated'],
+		] as const;
+
 		// In the delete's transaction: a delete refused there rolls it back.
 		await transaction(this.knex, async (trx) => {
+			// Through ItemsService so the cache purges the nulled rows, without the
+			// hooks, activity and revisions the raw update never had.
 			if (!opts.preMutationError) {
-				await trx('directus_comments')
-					.update({ user_updated: null })
-					.whereIn('user_updated', keys);
+				for (const [collection, userField] of userReferences) {
+					const itemsService = new ItemsService(collection, {
+						knex: trx,
+						schema: this.schema,
+					});
 
-				await trx('directus_notifications')
-					.update({ sender: null })
-					.whereIn('sender', keys);
+					const unlinkedKeys = await itemsService.getKeysByQuery({
+						filter: { [userField]: { _in: keys } },
+						limit: -1,
+					});
 
-				await trx('directus_versions')
-					.update({ user_updated: null })
-					.whereIn('user_updated', keys);
+					for (const keyChunk of chunk(unlinkedKeys, UNLINK_CHUNK_SIZE)) {
+						await itemsService.updateMany(
+							keyChunk,
+							{ [userField]: null },
+							{ emitEvents: false },
+						);
+					}
+				}
 			}
 
 			await new ItemsService('directus_users', {

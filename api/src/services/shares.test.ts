@@ -4,12 +4,13 @@ import {
 	ItemNotFoundError,
 } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import type { Accountability } from '@directus/types';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import {
@@ -55,6 +56,17 @@ const { send } = vi.hoisted(() => {
 	return { send: vi.fn(async (_options: EmailOptions): Promise<null> => null) };
 });
 
+const scopedCache = vi.hoisted(() => {
+	// Off by default, as on the memory store the other tests run against.
+	return { scoped: false };
+});
+
+vi.mock('../scoped-cache/index.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../scoped-cache/index.js')>();
+
+	return { ...actual, scopedCachePurgeEnabled: () => scopedCache.scoped };
+});
+
 vi.mock('./mail/index.js', () => {
 	return {
 		MailService: vi.fn(function () {
@@ -66,6 +78,7 @@ vi.mock('./mail/index.js', () => {
 const schema = new SchemaBuilder()
 	.collection('directus_shares', (c) => {
 		c.field('id').id();
+		c.field('times_used').integer();
 	})
 	.build();
 
@@ -268,7 +281,7 @@ describe('Services / Shares', () => {
 			});
 
 			tracker.on.select('directus_shares').response({
-				share_id: 'share-id-7',
+				share_id: 7,
 				share_times_used: 2,
 				share_password: null,
 			});
@@ -282,7 +295,7 @@ describe('Services / Shares', () => {
 
 			const service = new SharesService({ knex: db, schema });
 
-			await expect(service.login({ share: 'share-id-7' })).resolves
+			await expect(service.login({ share: '7' })).resolves
 				.toStrictEqual({
 					accessToken: 'access-token-1',
 					refreshToken: 'refresh-token-1',
@@ -294,25 +307,25 @@ describe('Services / Shares', () => {
 					app_access: false,
 					admin_access: false,
 					role: null,
-					share: 'share-id-7',
+					share: 7,
 				},
 				'test-secret',
 				{ expiresIn: '15m', issuer: 'directus' },
 			);
 
 			expect(tracker.history.update[0]?.bindings)
-				.toStrictEqual([3, 'share-id-7']);
+				.toStrictEqual([3, 7]);
 
 			expect(tracker.history.insert[0]?.bindings).toStrictEqual([
 				new Date('2026-01-08T00:00:00.000Z'),
-				'share-id-7',
+				7,
 				'refresh-token-1',
 			]);
 		});
 
 		it('binds the access token to the session it opens', async () => {
 			tracker.on.select('directus_shares').response({
-				share_id: 'share-id-8',
+				share_id: 8,
 				share_times_used: 0,
 				share_password: '$argon2id$stored-hash',
 			});
@@ -328,7 +341,7 @@ describe('Services / Shares', () => {
 			const service = new SharesService({ knex: db, schema });
 
 			await expect(service.login(
-				{ share: 'share-id-8', password: 'right' },
+				{ share: '8', password: 'right' },
 				{ session: true },
 			)).resolves.toStrictEqual({
 				accessToken: 'access-token-2',
@@ -341,7 +354,7 @@ describe('Services / Shares', () => {
 					app_access: false,
 					admin_access: false,
 					role: null,
-					share: 'share-id-8',
+					share: 8,
 					session: 'refresh-token-1',
 				},
 				'test-secret',
@@ -546,6 +559,76 @@ describe('Services / Shares', () => {
 
 			expect(validateAccess).not.toHaveBeenCalled();
 			expect(tracker.history.select).toStrictEqual([]);
+		});
+	});
+
+	describe('login', () => {
+		beforeEach(() => {
+			tracker.on.select('directus_shares').response([
+				{ share_id: 's-1', share_times_used: 2, share_password: null },
+			]);
+
+			tracker.on.insert('directus_sessions').response([]);
+			tracker.on.delete('directus_sessions').response(0);
+		});
+
+		afterEach(() => {
+			scopedCache.scoped = false;
+			vi.restoreAllMocks();
+		});
+
+		it(oneLine`
+			counts the use through ItemsService, so the purge sees the row before and
+			after the write, with no hook as upstream's raw write had none
+		`, async () => {
+			scopedCache.scoped = true;
+			const countCalls: unknown[] = [];
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementation(async function (this: ItemsService, key, data, opts) {
+					countCalls.push([this.collection, this.accountability, key, data, opts]);
+
+					return key;
+				});
+
+			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
+
+			expect(countCalls).toEqual([
+				[
+					'directus_shares',
+					null,
+					's-1',
+					{ times_used: 3 },
+					{ emitEvents: false, autoPurgeCache: true },
+				],
+			]);
+		});
+
+		it(oneLine`
+			leaves the cache alone in full mode, as upstream does: a full purge on every
+			share login would flush the whole cache
+		`, async () => {
+			scopedCache.scoped = false;
+			const countCalls: unknown[] = [];
+
+			vi.spyOn(ItemsService.prototype, 'updateOne')
+				.mockImplementation(async function (this: ItemsService, key, data, opts) {
+					countCalls.push([this.collection, this.accountability, key, data, opts]);
+
+					return key;
+				});
+
+			await new SharesService({ knex: db, schema }).login({ share: 's-1' });
+
+			expect(countCalls).toEqual([
+				[
+					'directus_shares',
+					null,
+					's-1',
+					{ times_used: 3 },
+					{ emitEvents: false, autoPurgeCache: false },
+				],
+			]);
 		});
 	});
 

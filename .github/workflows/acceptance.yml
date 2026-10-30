@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ghcr.io/jclaveau/postgres:16-alpine
         env:
           POSTGRES_USER: directus
           POSTGRES_PASSWORD: directus
@@ -40,7 +40,7 @@ jobs:
           --health-cmd "pg_isready -U directus"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: valkey/valkey:9.1.2-alpine
+        image: ghcr.io/jclaveau/valkey:9.1.2-alpine
         ports:
           - 6379:6379
         options: >-

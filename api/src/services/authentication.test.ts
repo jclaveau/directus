@@ -5,7 +5,16 @@ import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => {
-	return { scoped: true, purgeForMutatedRows: vi.fn() };
+	return {
+		scoped: true,
+		purgeForMutatedRows: vi.fn(),
+		provider: {
+			getUserID: async () => 'u-1',
+			login: async () => {
+				throw new Error('wrong password');
+			},
+		},
+	};
 });
 
 vi.mock('../database/index.js', () => {
@@ -16,11 +25,38 @@ vi.mock('../database/index.js', () => {
 });
 
 vi.mock('../auth.js', () => {
-	return { getAuthProvider: vi.fn() };
+	return { getAuthProvider: () => state.provider };
 });
 
 vi.mock('../rate-limiter.js', () => {
-	return { createRateLimiter: () => ({ set: vi.fn() }), RateLimiterRes: class {} };
+	// A spent budget: the consume that suspends the user.
+	class RateLimiterRes {
+		remainingPoints = 0;
+	}
+
+	return {
+		createRateLimiter: () => {
+			return {
+				set: vi.fn(),
+				consume: async () => {
+					throw new RateLimiterRes();
+				},
+			};
+		},
+		RateLimiterRes,
+	};
+});
+
+vi.mock('./settings.js', () => {
+	return {
+		SettingsService: vi.fn(function () {
+			return { readSingleton: async () => ({ auth_login_attempts: 1 }) };
+		}),
+	};
+});
+
+vi.mock('../utils/stall.js', () => {
+	return { stall: async () => {} };
 });
 
 vi.mock('../extensions/lib/scoped-cache-handle.js', () => {
@@ -38,6 +74,7 @@ vi.mock('../scoped-cache/index.js', async (importOriginal) => {
 });
 
 const { AuthenticationService } = await import('./authentication.js');
+const { ItemsService } = await import('./items.js');
 
 const schema = new SchemaBuilder()
 	.collection('directus_users', (c) => {
@@ -85,5 +122,63 @@ describe('a login or a refresh touching last_access', () => {
 
 		expect(tracker.history.update).toHaveLength(1);
 		expect(state.purgeForMutatedRows).not.toHaveBeenCalled();
+	});
+});
+
+describe('a login spending the last attempt', () => {
+	const db = knex.default({ client: MockClient });
+	let tracker: Tracker;
+
+	beforeEach(() => {
+		tracker = createTracker(db);
+
+		tracker.on.select('directus_users').response([
+			{ id: 'u-1', status: 'active', provider: 'default', tfa_secret: null },
+		]);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		vi.restoreAllMocks();
+	});
+
+	it(oneLine`
+		suspends the user through ItemsService, so the purge sees the row before and
+		after the write, with no hook as upstream's raw write had none
+	`, async () => {
+		const suspendCalls: unknown[] = [];
+
+		vi.spyOn(ItemsService.prototype, 'updateOne')
+			.mockImplementation(async function (
+				this: InstanceType<typeof ItemsService>,
+				key,
+				data,
+				opts,
+			) {
+				suspendCalls.push([
+					this.collection,
+					this.accountability,
+					key,
+					data,
+					opts,
+				]);
+
+				return key;
+			});
+
+		const service = new AuthenticationService({ knex: db, schema });
+
+		await expect(service.login('default', { password: 'nope' }))
+			.rejects.toEqual(new Error('wrong password'));
+
+		expect(suspendCalls).toEqual([
+			[
+				'directus_users',
+				null,
+				'u-1',
+				{ status: 'suspended' },
+				{ emitEvents: false },
+			],
+		]);
 	});
 });

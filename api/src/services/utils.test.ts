@@ -73,6 +73,7 @@ import {
 } from '../schedules/cache-audit.js';
 import { countScopedCachePinMembers } from '../scoped-cache/index.js';
 import { compress } from '../utils/compress.js';
+import { queueAfterCommit } from '../utils/transaction.js';
 import { SettingsService } from './settings.js';
 import { UtilsService } from './utils.js';
 
@@ -1192,6 +1193,31 @@ describe('Services / Utils', () => {
 			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
 
 			expect(announceSharedSettings).toHaveBeenCalledWith('cache_settings');
+		});
+
+		// The settings row is served from the cache: a purge run before the
+		// commit lets a read in between cache the row this write replaces.
+		it(oneLine`
+			runs what the write queues once it committed, before answering
+		`, async () => {
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
+
+			const taskSteps: string[] = [];
+
+			// The state is copied when the task starts: the tracker rewrites it in
+			// place. The task outlasts a tick, so an answer that does not wait for
+			// it comes before 'task ended'.
+			vi.mocked(writeSharedSettings).mockImplementationOnce(async (...args) => {
+				queueAfterCommit(args[2].knex!, async () => {
+					taskSteps.push(tracker.history.transactions[0]!.state);
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					taskSteps.push('task ended');
+				});
+			});
+
+			await service(admin).updateCacheSettings({ audit_limit: 40 }, 'admin');
+
+			expect(taskSteps).toEqual(['committed', 'task ended']);
 		});
 
 		// A clear held inside the transaction keeps the row locked for as long

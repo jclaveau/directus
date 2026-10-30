@@ -11,7 +11,7 @@ Grant: None`, Change Date four years, Change License GPLv3.** Production use of 
 additions needs a grant from him, given on request. Upstream Directus stays under
 Monospace's BSL-1.1 in `license`.
 
-**Why:** the goal is defensive — deny a competitor of the planner the use of the
+**Why:** the goal is defensive — deny a competitor of jean's consumer app the use of the
 optimisations. GPLv3 (which `LICENSE.fork` briefly carried) is the wrong instrument: it
 constrains *redistribution*, not *use*, and never triggers for a server app run as a
 service, so it granted free production use of exactly what needed protecting.

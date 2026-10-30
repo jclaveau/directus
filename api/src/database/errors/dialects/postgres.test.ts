@@ -9,7 +9,11 @@ import {
 } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { describe, expect, it } from 'vitest';
-import { extractError, getPoolExhaustedError } from './postgres.js';
+import {
+	extractError,
+	getPoolExhaustedError,
+	isUniqueViolation,
+} from './postgres.js';
 import type { PostgresError } from './types.js';
 
 function pgError(overrides: Partial<PostgresError>): PostgresError {
@@ -357,5 +361,20 @@ describe('getPoolExhaustedError', () => {
 	it('returns null for a non-pool error or non-object', () => {
 		expect(getPoolExhaustedError(pgError({ code: '23505' }))).toBeNull();
 		expect(getPoolExhaustedError(null)).toBeNull();
+	});
+});
+
+describe('isUniqueViolation', () => {
+	it('is true for a unique violation', () => {
+		expect(isUniqueViolation(pgError({ code: '23505' }))).toBe(true);
+	});
+
+	it('is false for another SQLSTATE', () => {
+		expect(isUniqueViolation(pgError({ code: '23502' }))).toBe(false);
+	});
+
+	it('is false for a value that is not an error object', () => {
+		expect(isUniqueViolation(undefined)).toBe(false);
+		expect(isUniqueViolation('23505')).toBe(false);
 	});
 });

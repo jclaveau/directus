@@ -1,6 +1,7 @@
 import type { ExtensionOptionsBundleEntry } from '@directus/extensions';
 import { API_EXTENSION_TYPES, APP_EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants';
-import { isIn, isTypeIn, pluralize } from '@directus/utils';
+import { isIn, isTypeIn } from '@directus/utils/array-helpers';
+import { pluralize } from '@directus/utils/pluralize';
 import { pathToRelativeUrl } from '@directus/utils/node';
 import path from 'path';
 

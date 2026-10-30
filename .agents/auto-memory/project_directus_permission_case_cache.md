@@ -8,7 +8,7 @@ metadata:
 
 PR **#212** `feat(cache): pin scoped-cache read tags off permission cases`. Branch `v11.10.1-feat/scoped-cache-permission-cases`, base `v11.10.1-hhh-dev` (carries #205 scoped-cache + #210 relational pin). Supersedes #206. **MERGED** (green pg+sqlite+lint at tip `550a639f30`).
 
-**Problem:** planner reads get the BARE collection tag (one user's write purges everyone's slice) because the partition predicate (`owner_field = $CURRENT_USER`) lives in a **permission policy** → injected as `ast.cases`, not in the query filter. `pinnedScopedCacheTagsFromFilter` only read the filter.
+**Problem:** a consumer's reads get the BARE collection tag (one user's write purges everyone's slice) because the partition predicate (`owner_field = $CURRENT_USER`) lives in a **permission policy** → injected as `ast.cases`, not in the query filter. `pinnedScopedCacheTagsFromFilter` only read the filter.
 
 **Mechanism (final):**
 - Recursive evaluator (`evalNode`/`evalOr`/`evalLeaf` + `unionTags`) returns `{tags, covered}` per node — `covered` = "every row this node matches carries ≥1 pinned tag". `_and`/root **union** tags and are covered if **ANY** conjunct is (row meets all); `_or` is pinnable **iff EVERY branch is covered** (else a row matching an uncovered branch is stale), then **unions all branches' tags across fields**.

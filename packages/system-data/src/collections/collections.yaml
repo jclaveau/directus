@@ -167,3 +167,9 @@ data:
     icon: fact_check
     note: $t:directus_collection.directus_cache_audit_findings
     accountability: null
+
+  - collection: directus_scoped_cache_pending_purges
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_scoped_cache_pending_purges
+    accountability: null

@@ -2,6 +2,7 @@ import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { describe, expect, it, vi } from 'vitest';
+import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
 	queueAfterCommit,
@@ -12,7 +13,7 @@ import {
 } from './transaction.js';
 
 vi.mock('../database/index.js', () => {
-	return { getDatabaseClient: vi.fn(() => 'sqlite') };
+	return { default: vi.fn(), getDatabaseClient: vi.fn(() => 'sqlite') };
 });
 
 vi.mock('../logger/index.js', () => {
@@ -77,6 +78,48 @@ describe('queueAfterCommit', () => {
 		expect(queuedTask).toHaveBeenCalledOnce();
 	});
 
+	it(oneLine`
+		runs a task queued on a savepoint of the trx once the outer transaction
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await transaction(db, async (trx) => {
+			await trx.transaction(async (savepointTrx) => {
+				expect(queueAfterCommit(savepointTrx, queuedTask)).toBe(true);
+			});
+
+			expect(queuedTask).not.toHaveBeenCalled();
+		});
+
+		expect(queuedTask).toHaveBeenCalledWith(db);
+	});
+
+	it(oneLine`
+		runs a task queued on a rolled-back savepoint once the outer transaction
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await transaction(db, async (trx) => {
+			await expect(trx.transaction(async (savepointTrx) => {
+				queueAfterCommit(savepointTrx, queuedTask);
+
+				throw new Error('savepoint rolled back');
+			})).rejects.toThrow('savepoint rolled back');
+		});
+
+		expect(queuedTask).toHaveBeenCalledOnce();
+	});
+
 	it('queues nothing on a knex that transaction() did not open', () => {
 		const db = knex.default({ client: MockClient });
 
@@ -86,6 +129,155 @@ describe('queueAfterCommit', () => {
 
 		expect(queueAfterCommit(db, queuedTask)).toBe(false);
 		expect(queuedTask).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		runs a task queued on a trx a raw database.transaction() opened once
+		that trx committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await db.transaction(async (trx) => {
+			expect(queueAfterCommit(trx, queuedTask)).toBe(true);
+			expect(queuedTask).not.toHaveBeenCalled();
+		});
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledWith(db));
+	});
+
+	it(oneLine`
+		runs a task queued on a savepoint of a raw trx once the raw trx
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await db.transaction(async (trx) => {
+			await trx.transaction(async (savepointTrx) => {
+				expect(queueAfterCommit(savepointTrx, queuedTask)).toBe(true);
+			});
+
+			expect(queuedTask).not.toHaveBeenCalled();
+		});
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledOnce());
+	});
+
+	it('drops the tasks of a raw trx its handler rolled back', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await expect(db.transaction(async (trx) => {
+			expect(queueAfterCommit(trx, queuedTask)).toBe(true);
+
+			throw new Error('write failed');
+		})).rejects.toThrow('write failed');
+
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(queuedTask).not.toHaveBeenCalled();
+	});
+
+	// Opened without a handler, a rolled-back trx resolves as a committed one
+	// does: only the commit tells them apart.
+	it('drops the tasks of a raw trx rolled back by hand', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+
+		expect(queueAfterCommit(trx, queuedTask)).toBe(true);
+
+		await trx.rollback();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(queuedTask).not.toHaveBeenCalled();
+	});
+
+	it('runs a task queued on a raw trx committed by hand', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+
+		expect(queueAfterCommit(trx, queuedTask)).toBe(true);
+
+		await trx.commit();
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledWith(db));
+	});
+
+	// A purge missed leaves the old row cached until TTL; one too many only
+	// re-reads it.
+	it(oneLine`
+		runs a task queued on a raw trx committed through a commit taken before
+		the task was queued
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+		const trx = await db.transaction();
+		const { commit } = trx;
+
+		expect(queueAfterCommit(trx, queuedTask)).toBe(true);
+
+		await commit();
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledWith(db));
+	});
+
+	it(oneLine`
+		runs a task queued on a released savepoint of a raw trx once the raw trx
+		committed
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const queuedTask = vi.fn(async () => {});
+
+		await db.transaction(async (trx) => {
+			const savepointTrx = await trx.transaction();
+
+			await savepointTrx.commit();
+
+			expect(queueAfterCommit(savepointTrx, queuedTask)).toBe(true);
+		});
+
+		await vi.waitFor(() => expect(queuedTask).toHaveBeenCalledOnce());
+	});
+
+	it('queues nothing on a raw trx that already committed', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const trx = await db.transaction();
+
+		await trx.commit();
+
+		expect(queueAfterCommit(trx, vi.fn())).toBe(false);
 	});
 
 	it('queues nothing on a trx that already committed', async () => {
@@ -334,6 +526,31 @@ describe('queueMergedAfterCommit', () => {
 		expect(taskSteps).toEqual(['purge row 1, row 2', 'other task']);
 	});
 
+	it('merges the requests queued on a raw trx', async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		vi.mocked(getDatabase).mockReturnValue(db);
+
+		const runRequest = vi.fn(async (_database: Knex, _request: string[]) => {});
+
+		const rowsMerger = {
+			mergeRequests: (queued: string[], incoming: string[]) => {
+				return [...queued, ...incoming];
+			},
+			runRequest,
+		};
+
+		await db.transaction(async (trx) => {
+			queueMergedAfterCommit(trx, 'rows', ['row 1'], rowsMerger);
+			queueMergedAfterCommit(trx, 'rows', ['row 2'], rowsMerger);
+		});
+
+		await vi.waitFor(() => {
+			expect(runRequest.mock.calls).toEqual([[db, ['row 1', 'row 2']]]);
+		});
+	});
+
 	it(oneLine`
 		runs apart the requests two callers queue under one key, each merged by its
 		own function
@@ -383,6 +600,34 @@ describe('queueMergedAfterCommit', () => {
 		});
 
 		expect(runRequest.mock.calls).toEqual([[db, 'row 1'], [db, 'row 2']]);
+	});
+
+	it(oneLine`
+		merges a request queued on a savepoint into the one its outer transaction
+		holds
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+
+		const runRequest = vi.fn(async () => {});
+
+		const rowsMerger = {
+			mergeRequests: (queued: string[], incoming: string[]) => {
+				return [...queued, ...incoming];
+			},
+			runRequest,
+		};
+
+		await transaction(db, async (trx) => {
+			queueMergedAfterCommit(trx, 'rows', ['row 1'], rowsMerger);
+
+			await trx.transaction(async (savepointTrx) => {
+				queueMergedAfterCommit(savepointTrx, 'rows', ['row 2'], rowsMerger);
+			});
+		});
+
+		expect(runRequest.mock.calls).toEqual([[db, ['row 1', 'row 2']]]);
 	});
 
 	it('queues nothing on a knex that transaction() did not open', () => {

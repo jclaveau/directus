@@ -11,6 +11,7 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { randomUUID } from 'crypto';
+import { pickBy } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect } from 'vitest';
 import {
@@ -339,6 +340,42 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		when.optional(
+			'the batch sends the owners, a blank one as null:',
+			async (table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send(parseGherkinTable<{ name: string; owner: number | null }>(table)
+						.map((change) => {
+							return {
+								id: update.rows.find((row) => row.name === change.name)!.id,
+								owner: change.owner,
+							};
+						}))
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		// A blank cell leaves that field out of the row's change.
+		when.optional(
+			'the batch sends the slots and labels:',
+			async (table: Record<string, string>[]) => {
+				update.response = await request(getUrl(vendor))
+					.patch(`/items/${update.collection}`)
+					.send(parseGherkinTable<{
+						name: string;
+						slot: string | null;
+						label: string | null;
+					}>(table).map(({ name, ...fields }) => {
+						return {
+							id: update.rows.find((row) => row.name === name)!.id,
+							...pickBy(fields, (value) => value !== null),
+						};
+					}))
+					.set('Authorization', update.authorization);
+			},
+		);
+
+		when.optional(
 			/^the rows are updated to the status "(.*)"$/,
 			async (status: string) => {
 				update.response = await request(getUrl(vendor))
@@ -554,6 +591,20 @@ describe.each(vendors)('%s', (vendor) => {
 			expect(response.body.data).toEqual(parseGherkinTable(table));
 		});
 
+		and.optional('the labels hold:', async (table: Record<string, string>[]) => {
+			const response = await request(getUrl(vendor))
+				.get(`/items/${update.collection}`)
+				.query({
+					'filter[id][_in]': update.rows.map((row) => row.id).join(','),
+					fields: 'name,label',
+					sort: 'id',
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.data).toEqual(parseGherkinTable(table));
+		});
+
 		and.optional(
 			'the update events are:',
 			async (table: Record<string, string>[]) => {
@@ -664,6 +715,15 @@ describe.each(vendors)('%s', (vendor) => {
 				a batch hands a slot over when a row frees it before the next takes
 				it
 			`,
+			oneLine`
+				a batch hands a slot over to a row stored before the one freeing it
+			`,
+			oneLine`
+				a batch taking a slot its holder still holds is refused, writing
+				nothing
+			`,
+			'a batch naming an owner that does not exist is refused',
+			'rows side by side changing different fields are each written',
 			oneLine`
 				a row a batch changes back and forth keeps the last change it was
 				sent

@@ -210,7 +210,7 @@ router.post(
 
 const CacheClearSchema = Joi.object<{ targets: CacheFlushTarget[] }>({
 	targets: Joi.array()
-		.items(Joi.string().valid('response', 'system', 'locks'))
+		.items(Joi.string().valid('response', 'system', 'permissions', 'locks'))
 		.single()
 		.default(['response']),
 });

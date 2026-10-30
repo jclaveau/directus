@@ -5,6 +5,7 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
+import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { transaction } from '../utils/transaction.js';
 import { AccessService, ItemsService, PresetsService, RolesService, UsersService } from './index.js';
@@ -50,6 +51,9 @@ describe('Integration Tests', () => {
 
 		afterEach(() => {
 			vi.clearAllMocks();
+			// A test writing its groups one by one runs off postgres, since this
+			// MockClient has no dialect to compile their batch with.
+			vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 		});
 
 		describe('updateMany', () => {
@@ -144,6 +148,8 @@ describe('Integration Tests', () => {
 			});
 
 			it('validates the nesting of every row of a batch', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
 				superUpdateGroupsSpy.mockImplementationOnce(itemsUpdateGroups);
 				tracker.on.update('directus_roles').response(1);
 
