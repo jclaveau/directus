@@ -4,6 +4,7 @@ import {
 	defineFeature,
 	loadFeature,
 	parseGherkinTable,
+	responseCellOf,
 	type StepFunctions,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
@@ -199,9 +200,8 @@ describe.each(vendors)('%s', (vendor) => {
 				expect(responses.map((response) => {
 					return { code: response.statusCode, body: response.body };
 				})).toMatchObject(table.map(({ response }) => {
-					return cellOfKnownKeys<object>(
-						'response',
-						loadYaml(withKeys(response, batch)) ?? {},
+					return responseCellOf<object>(
+						loadYaml(withKeys(response, batch)),
 						RESPONSE_CELL_KEYS,
 						'update-batch-guards.test.ts',
 					);

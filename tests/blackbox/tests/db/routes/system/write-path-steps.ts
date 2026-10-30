@@ -4,6 +4,7 @@ import {
 	defineFeature,
 	loadFeature,
 	rememberedText,
+	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { createWebSocketConn } from '@common/transport';
@@ -80,11 +81,11 @@ export function defineWritePathFeature(featurePath: string) {
 					};
 
 					given.optional('these requests are sent:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table);
+						return sendRows(vendor, scenarioKeys, table, true);
 					});
 
 					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table);
+						return sendRows(vendor, scenarioKeys, table, false);
 					});
 				}, 60_000);
 			}
@@ -187,6 +188,7 @@ async function sendRows(
 	vendor: Vendor,
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
+	allowsBlankResponse: boolean,
 ) {
 	const rememberingRows: Record<string, RememberingRow> = {};
 
@@ -198,9 +200,10 @@ async function sendRows(
 			'write-path-steps.ts',
 		);
 
-		const expectedAnswer = cellOfKnownKeys<object>(
-			'response',
-			loadYaml(withKeys(responseText, scenarioKeys)) ?? {},
+		const expectedAnswer = responseCellOf<object>(
+			allowsBlankResponse
+				? loadYaml(withKeys(responseText, scenarioKeys)) ?? {}
+				: loadYaml(withKeys(responseText, scenarioKeys)),
 			RESPONSE_CELL_KEYS,
 			'write-path-steps.ts',
 		);

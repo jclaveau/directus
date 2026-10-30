@@ -3,6 +3,7 @@ import {
 	defineFeature,
 	loadFeature,
 	messageOfDocString,
+	responseCellOf,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -78,9 +79,8 @@ describe.each(vendors)('%s', (vendor) => {
 						expect(responses.map((response) => {
 							return { code: response.statusCode, body: response.body };
 						})).toMatchObject(table.map(({ response }) => {
-							return cellOfKnownKeys<object>(
-								'response',
-								loadYaml(response) ?? {},
+							return responseCellOf<object>(
+								loadYaml(response),
 								RESPONSE_CELL_KEYS,
 								'nested-m2o-a2o.test.ts',
 							);

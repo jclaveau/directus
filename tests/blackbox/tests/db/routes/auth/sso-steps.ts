@@ -3,6 +3,7 @@ import {
 	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
+	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -227,9 +228,8 @@ async function sendRows(
 			: await sendRequest(vendor, ssoInstance, requestCell);
 
 		expect({ code: response.statusCode, body: response.body })
-			.toMatchObject(cellOfKnownKeys<object>(
-				'response',
-				loadYaml(responseText) ?? {},
+			.toMatchObject(responseCellOf<object>(
+				loadYaml(responseText),
 				RESPONSE_CELL_KEYS,
 				'sso-steps.ts',
 			));

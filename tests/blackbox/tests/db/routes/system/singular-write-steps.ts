@@ -4,6 +4,7 @@ import {
 	defineFeature,
 	loadFeature,
 	rememberedText,
+	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -94,11 +95,11 @@ export function defineSingularWriteFeature(
 					};
 
 					given.optional('these requests are sent:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table);
+						return sendRows(vendor, scenarioKeys, table, true);
 					});
 
 					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table);
+						return sendRows(vendor, scenarioKeys, table, false);
 					});
 				}, 60_000);
 			}
@@ -269,6 +270,7 @@ async function sendRows(
 	vendor: Vendor,
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
+	allowsBlankResponse: boolean,
 ) {
 	const schema = yamlSchemaFor(vendor);
 
@@ -284,9 +286,10 @@ async function sendRows(
 			'singular-write-steps.ts',
 		);
 
-		const expectedResponse = cellOfKnownKeys<object>(
-			'response',
-			loadYaml(withKeys(responseText, scenarioKeys), { schema }) ?? {},
+		const expectedResponse = responseCellOf<object>(
+			allowsBlankResponse
+				? loadYaml(withKeys(responseText, scenarioKeys), { schema }) ?? {}
+				: loadYaml(withKeys(responseText, scenarioKeys), { schema }),
 			RESPONSE_CELL_KEYS,
 			'singular-write-steps.ts',
 		);

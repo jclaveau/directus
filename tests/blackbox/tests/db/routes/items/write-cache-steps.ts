@@ -2,6 +2,7 @@ import { getUrl, type Env } from '@common/config';
 import {
 	cellOfKnownKeys,
 	messageOfDocString,
+	responseCellOf,
 	type StepFunctions,
 } from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
@@ -90,9 +91,8 @@ export function defineWriteCacheSteps(
 					body: receivedResponse.body,
 				};
 			})).toMatchObject(table.map(({ response }) => {
-				return cellOfKnownKeys<object>(
-					'response',
-					loadYaml(response) ?? {},
+				return responseCellOf<object>(
+					loadYaml(response),
 					RESPONSE_CELL_KEYS,
 					'write-cache-steps.ts',
 				);

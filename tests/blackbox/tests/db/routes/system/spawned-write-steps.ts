@@ -4,6 +4,7 @@ import {
 	defineFeature,
 	loadFeature,
 	rememberedText,
+	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -117,11 +118,11 @@ export function defineSpawnedWriteFeature(
 					};
 
 					given.optional('these requests are sent:', (table: Row[]) => {
-						return sendRows(getUrl(vendor, env), scenarioKeys, table);
+						return sendRows(getUrl(vendor, env), scenarioKeys, table, true);
 					});
 
 					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(getUrl(vendor, env), scenarioKeys, table);
+						return sendRows(getUrl(vendor, env), scenarioKeys, table, false);
 					});
 				}, 60_000);
 			}
@@ -229,6 +230,7 @@ async function sendRows(
 	instanceUrl: string,
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
+	allowsBlankResponse: boolean,
 ) {
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = cellOfKnownKeys<RequestCell>(
@@ -238,9 +240,10 @@ async function sendRows(
 			'spawned-write-steps.ts',
 		);
 
-		const expectedResponse = cellOfKnownKeys<ResponseCell>(
-			'response',
-			loadYaml(withKeys(responseText, scenarioKeys)) ?? {},
+		const expectedResponse = responseCellOf<ResponseCell>(
+			allowsBlankResponse
+				? loadYaml(withKeys(responseText, scenarioKeys)) ?? {}
+				: loadYaml(withKeys(responseText, scenarioKeys)),
 			RESPONSE_CELL_KEYS,
 			'spawned-write-steps.ts',
 		);

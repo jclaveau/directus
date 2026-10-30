@@ -279,3 +279,20 @@ export function cellOfKnownKeys<Cell>(
 
 	return cell as Cell;
 }
+
+// A blank response cell would make `toMatchObject({})` pass whatever the server
+// answers, so a row whose response is checked has to state it.
+export function responseCellOf<Cell>(
+	cell: unknown,
+	knownKeys: readonly string[],
+	stepLibrary: string,
+): Cell {
+	if (cell === null || cell === undefined) {
+		throw new Error(
+			`Blank response cell in ${stepLibrary}: a row of "these requests get `
+			+ 'these responses:" has to state the response it checks',
+		);
+	}
+
+	return cellOfKnownKeys<Cell>('response', cell, knownKeys, stepLibrary);
+}
