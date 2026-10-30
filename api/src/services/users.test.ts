@@ -173,6 +173,12 @@ describe('Integration Tests', () => {
 				expect(checkPasswordPolicySpy).toHaveBeenCalledWith(['']);
 			});
 
+			it('skips a null password, as an update does', async () => {
+				await service.createMany([{ password: null }, { password: 'testpassword' }]);
+
+				expect(checkPasswordPolicySpy).toHaveBeenCalledWith(['testpassword']);
+			});
+
 			it('refuses an empty email', async () => {
 				const opts: MutationOptions = {};
 

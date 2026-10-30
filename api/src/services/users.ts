@@ -200,7 +200,7 @@ export class UsersService extends ItemsService {
 			.map((payload) => payload['email']);
 
 		const passwords = data
-			.filter((payload) => 'password' in payload)
+			.filter((payload) => 'password' in payload && payload['password'] !== null)
 			.map((payload) => payload['password']);
 
 		const someActive = data.some((payload) => !('status' in payload) || payload['status'] === 'active');
