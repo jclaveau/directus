@@ -747,8 +747,8 @@ catalogs:
       specifier: 5.6.0
       version: 5.6.0
     knex:
-      specifier: git+https://github.com/jclaveau/knex.git#8c59616dba2f69e4a8003b857d2aa1b56333f745
-      version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745
+      specifier: git+https://github.com/jclaveau/knex.git#4e2ff562d2e3a703d0b02e26849629e0ace17e9d
+      version: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d
     knex-mock-client:
       specifier: 3.0.2
       version: 3.0.2
@@ -1332,7 +1332,7 @@ importers:
         version: 5.6.0
       knex:
         specifier: 'catalog:'
-        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       ldapjs:
         specifier: 'catalog:'
         version: 3.0.7
@@ -1594,7 +1594,7 @@ importers:
         version: 7.2.0
       knex-mock-client:
         specifier: 'catalog:'
-        version: 3.0.2(knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)))
+        version: 3.0.2(knex@https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)))
       rolldown-plugin-istanbul:
         specifier: 'catalog:'
         version: https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b(rolldown@1.2.10)(rollup@4.62.3)(supports-color@10.2.2)
@@ -2234,7 +2234,7 @@ importers:
         version: 4.1.11(vitest@4.1.11)
       knex:
         specifier: 'catalog:'
-        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       pino:
         specifier: 'catalog:'
         version: 10.3.1
@@ -2503,7 +2503,7 @@ importers:
     dependencies:
       knex:
         specifier: 'catalog:'
-        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
     devDependencies:
       '@directus/tsconfig':
         specifier: 'catalog:'
@@ -2965,7 +2965,7 @@ importers:
         version: 1.0.5
       knex:
         specifier: 'catalog:'
-        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -3229,7 +3229,7 @@ importers:
         version: 2.3.0
       knex:
         specifier: 'catalog:'
-        version: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+        version: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       listr2:
         specifier: 10.1.2
         version: 10.1.2
@@ -9850,8 +9850,8 @@ packages:
     peerDependencies:
       knex: '>=2.0.0'
 
-  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745:
-    resolution: {gitHosted: true, integrity: sha512-JZ1BdJwj3d6cpz4hfrCGlLA6EkGWuLKMB64jjVY5EcKJyK152lJ4Vpv76XJEKA0BU8IWEJDEMGuP0C4M7Bju1g==, tarball: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745}
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d:
+    resolution: {gitHosted: true, integrity: sha512-dWtyoawAUoXgBwery/NnkI6gp21Bl6gV0n6Z9SPYFyS7R05+6MA2atO8imPYzi3Ggo6meGt45neVDHcf7EhfbQ==, tarball: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d}
     version: 3.3.0
     engines: {node: '>=16'}
     hasBin: true
@@ -21152,12 +21152,12 @@ snapshots:
 
   kind-of@6.0.3: {}
 
-  knex-mock-client@3.0.2(knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))):
+  knex-mock-client@3.0.2(knex@https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))):
     dependencies:
-      knex: https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
+      knex: https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2))
       lodash.clonedeep: 4.5.0
 
-  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.22.5(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -21181,7 +21181,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.22.5(@types/node@26.0.0))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -21205,7 +21205,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  knex@https://codeload.github.com/jclaveau/knex/tar.gz/8c59616dba2f69e4a8003b857d2aa1b56333f745(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
+  knex@https://codeload.github.com/jclaveau/knex/tar.gz/4e2ff562d2e3a703d0b02e26849629e0ace17e9d(mysql2@3.23.1(@types/node@22.20.1))(pg@8.22.0)(sqlite3@6.0.1)(supports-color@10.2.2)(tedious@18.6.2(supports-color@10.2.2)):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
