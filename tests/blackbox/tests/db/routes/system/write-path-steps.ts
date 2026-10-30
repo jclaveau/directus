@@ -287,7 +287,8 @@ async function answerRetakingHash(
 		attempt < STALE_HASH_ATTEMPTS && isStaleHashRefusal(answer);
 		attempt++
 	) {
-		scenarioKeys.keysByName[hashName] = String(
+		scenarioKeys.keysByName[hashName] = rememberedText(
+			hashName,
 			valueAtPath(await sendRow(hashRow.requestText), hashRow.dottedPath),
 		);
 

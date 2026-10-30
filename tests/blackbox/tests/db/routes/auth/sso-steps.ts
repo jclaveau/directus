@@ -3,6 +3,7 @@ import {
 	cellOfKnownKeys,
 	defineFeature,
 	loadFeature,
+	rememberedText,
 	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
@@ -235,8 +236,10 @@ async function sendRows(
 			));
 
 		if ('login' in requestCell && requestCell.remember_session) {
-			ssoInstance.keysByName[requestCell.remember_session]
-				= response.body.data.refresh_token;
+			ssoInstance.keysByName[requestCell.remember_session] = rememberedText(
+				requestCell.remember_session,
+				response.body.data.refresh_token,
+			);
 		}
 	}
 }

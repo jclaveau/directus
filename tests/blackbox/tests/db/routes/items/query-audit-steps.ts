@@ -47,9 +47,11 @@ export function startAuditedInstance(vendor: Vendor) {
 		await awaitDirectusConnection(port);
 
 		// The first request also reads the admin's access, cached after it.
-		await request(getUrl(vendor, env))
+		const warmUp = await request(getUrl(vendor, env))
 			.get('/users/me')
 			.set('Authorization', AUTH);
+
+		expect(warmUp.statusCode).toBe(200);
 	}, 60_000);
 
 	afterAll(() => {
