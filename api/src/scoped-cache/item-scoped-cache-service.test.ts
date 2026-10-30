@@ -762,3 +762,40 @@ describe('purge', () => {
 		]]);
 	});
 });
+
+describe('selfRelationSurvivorKeys', () => {
+	// Past 32767 deleted keys, one bind per key would put the statement over
+	// Postgres' 65535 bind parameters and fail the delete (#645).
+	it('binds each key list as one array on Postgres', async () => {
+		const pgDatabase = knex.default({ client: MockClient, dialect: 'pg' });
+		const pgTracker = createTracker(pgDatabase);
+
+		const nodeSchema = new SchemaBuilder()
+			.collection('node', (c) => {
+				c.field('id').id();
+				c.field('parent').m2o('node');
+			})
+			.build();
+
+		nodeSchema.relations[0]!.schema = { on_delete: 'SET NULL' } as any;
+
+		pgTracker.on.select('node').response([{ id: 40001 }]);
+
+		const deletedKeys = Array.from({ length: 40000 }, (_, index) => index + 1);
+
+		const scopedCache =
+			new ItemScopedCacheService('node', nodeSchema, pgDatabase, null, null);
+
+		expect(await scopedCache.selfRelationSurvivorKeys(deletedKeys))
+		.toEqual([40001]);
+
+		expect(pgTracker.history.select)
+		.toMatchObject([
+			{
+				sql: 'select "id" from "node"'
+					+ ' where ("parent" = any($1)) and "id" <> all($2)',
+				bindings: [deletedKeys, deletedKeys],
+			},
+		]);
+	});
+});
