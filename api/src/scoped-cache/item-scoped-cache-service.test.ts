@@ -792,7 +792,8 @@ describe('selfRelationSurvivorKeys', () => {
 		expect(pgTracker.history.select)
 		.toMatchObject([
 			{
-				sql: 'select "id" from "node" where ("parent" = any($1)) and "id" <> all($2)',
+				sql: 'select "id" from "node"'
+					+ ' where ("parent" = any($1)) and "id" <> all($2)',
 				bindings: [deletedKeys, deletedKeys],
 			},
 		]);
