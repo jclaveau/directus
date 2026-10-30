@@ -593,4 +593,37 @@ Sam Sender has mentioned you in a comment:
 			expect(loggerWarn).not.toHaveBeenCalled();
 		});
 	});
+
+	describe('without a user', () => {
+		const publicAccountability: Accountability = {
+			user: null,
+			role: null,
+			admin: false,
+			app: false,
+			roles: [],
+			ip: null,
+		};
+
+		it('refuses a batch update', async () => {
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: publicAccountability,
+			});
+
+			await expect(service.updateMany(['comment-1'], { comment: 'x' }))
+				.rejects.toStrictEqual(new ForbiddenError());
+		});
+
+		it('refuses a batch delete', async () => {
+			const service = new CommentsService({
+				knex: db,
+				schema,
+				accountability: publicAccountability,
+			});
+
+			await expect(service.deleteMany(['comment-1']))
+				.rejects.toStrictEqual(new ForbiddenError());
+		});
+	});
 });

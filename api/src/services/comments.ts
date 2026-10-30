@@ -6,7 +6,15 @@ import {
 	isDirectusError,
 	ItemNotFoundError,
 } from '@directus/errors';
-import type { AbstractServiceOptions, Accountability, Comment, MutationOptions, PrimaryKey } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Accountability,
+	Comment,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { useLogger } from '../logger/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
@@ -256,15 +264,21 @@ ${comment}
 		return readableIds;
 	}
 
-	override updateOne(key: PrimaryKey, data: Partial<Comment>, opts?: MutationOptions): Promise<PrimaryKey> {
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		if (!this.accountability?.user) throw new ForbiddenError();
 
-		return super.updateOne(key, data, opts);
+		return super.updateGroups(groups, opts);
 	}
 
-	override deleteOne(key: PrimaryKey, opts?: MutationOptions): Promise<PrimaryKey> {
+	override async deleteMany(
+		keys: PrimaryKey[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		if (!this.accountability?.user) throw new ForbiddenError();
 
-		return super.deleteOne(key, opts);
+		return super.deleteMany(keys, opts);
 	}
 }
