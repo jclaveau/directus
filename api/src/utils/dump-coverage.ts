@@ -1,10 +1,8 @@
-import { useEnv } from '@directus/env';
 import type { Extension } from '@directus/types';
 import { mkdir, realpath, rename, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { getExtensionManager } from '../extensions/index.js';
 import { useLogger } from '../logger/index.js';
-import { getMilliseconds } from './get-milliseconds.js';
 
 /**
  * istanbul's coverage object, keyed by source file. It is cumulative: every
@@ -176,26 +174,4 @@ async function writeCoverage(): Promise<WrittenCoverage[]> {
 	}
 
 	return writtenCoverage;
-}
-
-/**
- * Dump every `COVERAGE_FLUSH_INTERVAL`, so a process that dies without a
- * graceful shutdown loses at most one interval. Off at 0, and in a build with
- * nothing instrumented. The timer never holds the process open.
- */
-export function startCoverageFlush(): void {
-	const flushInterval = getMilliseconds(
-		useEnv()['COVERAGE_FLUSH_INTERVAL'],
-		0,
-	);
-
-	if (flushInterval === 0 || readCoverage() === undefined) {
-		return;
-	}
-
-	setInterval(() => {
-		dumpCoverage().catch((error) => {
-			useLogger().error(error, 'Coverage flush failed');
-		});
-	}, flushInterval).unref();
 }

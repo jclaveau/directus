@@ -7,7 +7,6 @@ import {
 	realpath,
 	rm,
 	symlink,
-	writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,18 +16,15 @@ import {
 	dumpCoverage,
 	listCoveredExtensions,
 	splitCoverage,
-	startCoverageFlush,
 } from './dump-coverage.js';
 
-const { env, logger, extensionManager } = vi.hoisted(() => {
+const { logger, extensionManager } = vi.hoisted(() => {
 	return {
-		env: {} as Record<string, unknown>,
-		logger: { warn: vi.fn(), error: vi.fn() },
+		logger: { warn: vi.fn() },
 		extensionManager: { extensions: [] as unknown[] },
 	};
 });
 
-vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('../logger/index.js', () => ({ useLogger: () => logger }));
 
 vi.mock('../extensions/index.js', () => {
@@ -47,10 +43,6 @@ afterEach(async () => {
 	vi.unstubAllEnvs();
 	delete (globalThis as Record<string, unknown>)['__coverage__'];
 	extensionManager.extensions = [];
-
-	for (const key of Object.keys(env)) {
-		delete env[key];
-	}
 
 	await rm(workDir, { recursive: true, force: true });
 });
@@ -249,55 +241,5 @@ describe('dumpCoverage', () => {
 		const reloadedModule = await import('./dump-coverage.js');
 
 		expect(reloadedModule.COVERAGE_DUMP_NAME).not.toBe(COVERAGE_DUMP_NAME);
-	});
-});
-
-describe('startCoverageFlush', () => {
-	test('dumps on an unref timer every COVERAGE_FLUSH_INTERVAL', () => {
-		env['COVERAGE_FLUSH_INTERVAL'] = '10s';
-		(globalThis as Record<string, unknown>)['__coverage__'] = {};
-		const unref = vi.fn();
-
-		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
-			.mockReturnValue({ unref } as unknown as NodeJS.Timeout);
-
-		startCoverageFlush();
-
-		expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 10_000);
-		expect(unref).toHaveBeenCalledOnce();
-	});
-
-	test('logs a failed flush instead of throwing it', async () => {
-		env['COVERAGE_FLUSH_INTERVAL'] = '10s';
-		(globalThis as Record<string, unknown>)['__coverage__'] = { 'src/app.ts': {} };
-		await writeFile(join(workDir, 'file'), '');
-		vi.stubEnv('COVERAGE_DIR', join(workDir, 'file/core'));
-
-		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
-			.mockReturnValue({ unref: vi.fn() } as unknown as NodeJS.Timeout);
-
-		startCoverageFlush();
-		const flush = setIntervalSpy.mock.calls[0]![0] as () => void;
-		flush();
-
-		await vi.waitFor(() => {
-			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({ code: 'ENOTDIR' }),
-				'Coverage flush failed',
-			);
-		});
-	});
-
-	test.each([
-		['the interval is 0', '0', {}],
-		['nothing is instrumented', '10s', undefined],
-	])('starts no timer when %s', (_case, flushInterval, coverage) => {
-		env['COVERAGE_FLUSH_INTERVAL'] = flushInterval;
-		(globalThis as Record<string, unknown>)['__coverage__'] = coverage;
-		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
-
-		startCoverageFlush();
-
-		expect(setIntervalSpy).not.toHaveBeenCalled();
 	});
 });
