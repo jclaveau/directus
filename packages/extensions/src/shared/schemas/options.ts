@@ -54,6 +54,7 @@ export type ExtensionOptionsBundleEntry = z.infer<typeof ExtensionOptionsBundleE
 export const ExtensionOptionsBase = z.object({
 	host: z.string(),
 	hidden: z.boolean().optional(),
+	coverage: z.string().optional(),
 });
 
 export const ExtensionOptionsApp = z.object({
@@ -89,6 +90,18 @@ export type ExtensionOptionsBundleEntries = z.infer<typeof ExtensionOptionsBundl
 
 export const ExtensionOptions = ExtensionOptionsBase.and(
 	z.union([ExtensionOptionsApp, ExtensionOptionsApi, ExtensionOptionsHybrid, ExtensionOptionsBundle]),
-);
+).superRefine((options, context) => {
+	const appTypes: readonly string[] = APP_EXTENSION_TYPES;
+
+	// The API never loads an app extension's code, so its coverage is never read.
+	if (options.coverage !== undefined && appTypes.includes(options.type)) {
+		context.addIssue({
+			code: 'custom',
+			path: ['coverage'],
+			message: 'coverage is only read for an api, hybrid or bundle '
+				+ `extension, not for an extension of type "${options.type}".`,
+		});
+	}
+});
 
 export type ExtensionOptions = z.infer<typeof ExtensionOptions>;

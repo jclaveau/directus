@@ -35,6 +35,8 @@ const CHANGED_BY_DECLARING: Record<string, string> = {
 	// unset value by an explicit empty string rather than by truthiness.
 	MIGRATIONS_STATEMENT_TIMEOUT: 'number(0) -> string("0")',
 	MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: 'number(0) -> string("0")',
+	// getMilliseconds() parses either, and validateDurationEnv takes "0" as off.
+	COVERAGE_FLUSH_INTERVAL: 'number(0) -> string("0")',
 };
 
 function shapeOf(value: unknown): string {

@@ -98,6 +98,11 @@ type ExtensionBase = {
 	local: boolean;
 	version?: string;
 	host?: string;
+	/**
+	 * The directory, relative to the package, that receives the istanbul
+	 * coverage of this extension's own source files when the server dumps it.
+	 */
+	coverage?: string | undefined;
 };
 
 export type AppExtension = ExtensionBase & {

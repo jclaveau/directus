@@ -5,6 +5,7 @@ import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import { ServerService } from '../services/server.js';
 import { SpecificationService } from '../services/specifications.js';
 import asyncHandler from '../utils/async-handler.js';
+import { dumpCoverage, readCoverage } from '../utils/dump-coverage.js';
 import { format } from '../utils/date-fns-used.js';
 
 const router = Router();
@@ -90,6 +91,25 @@ router.get(
 		if (data['status'] === 'error') res.status(503);
 		res.locals['payload'] = data;
 		res.locals['cache'] = false;
+		return next();
+	}),
+	respond,
+);
+
+/**
+ * Dump the coverage this process collected so far, for a test run to report
+ * while the server is still up. The route exists only in a build with something
+ * instrumented, never a deployed one, so it asks for no authentication. It
+ * dumps the process that receives it: a coverage run is a single process.
+ */
+router.post(
+	'/coverage',
+	asyncHandler(async (req, res, next) => {
+		if (readCoverage() === undefined) {
+			throw new RouteNotFoundError({ path: req.path });
+		}
+
+		res.locals['payload'] = { data: { written: await dumpCoverage() } };
 		return next();
 	}),
 	respond,
