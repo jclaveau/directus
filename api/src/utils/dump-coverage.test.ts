@@ -177,7 +177,7 @@ describe('dumpCoverage', () => {
 		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
 
 		extensionManager.extensions = [
-			{ name: 'ext', path: join(workDir, 'ext'), coverage: 'coverage' },
+			{ name: 'ext', path: join(workDir, 'ext'), coverage: 'cov' },
 		];
 
 		(globalThis as Record<string, unknown>)['__coverage__'] = {
@@ -193,18 +193,18 @@ describe('dumpCoverage', () => {
 		};
 
 		expect(await dumpCoverage()).toEqual([
-			{ dir: join(workDir, 'ext/coverage'), fileCount: 1 },
+			{ dir: join(workDir, 'ext/cov'), fileCount: 1 },
 			{ dir: join(workDir, 'core'), fileCount: 1 },
 		]);
 
 		// Overwritten, not added: the merge would sum two snapshots of one process.
-		await expect(readdir(join(workDir, 'ext/coverage')))
+		await expect(readdir(join(workDir, 'ext/cov')))
 			.resolves.toEqual([COVERAGE_DUMP_NAME]);
 
 		await expect(readdir(join(workDir, 'core')))
 			.resolves.toEqual([COVERAGE_DUMP_NAME]);
 
-		await expect(readFile(join(workDir, 'ext/coverage', COVERAGE_DUMP_NAME), 'utf8'))
+		await expect(readFile(join(workDir, 'ext/cov', COVERAGE_DUMP_NAME), 'utf8'))
 			.resolves.toBe(JSON.stringify({
 				[join(workDir, 'ext/src/a.ts')]: { s: { 0: 2 } },
 			}));

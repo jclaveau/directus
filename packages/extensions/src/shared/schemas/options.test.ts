@@ -8,7 +8,7 @@ describe('ExtensionOptions coverage', () => {
 			path: 'dist/index.js',
 			source: 'src/index.ts',
 			host: '^11.0.0',
-			coverage: 'coverage',
+			coverage: 'coverage/.tmp/backend',
 		}).error?.issues).toEqual([
 			{
 				code: 'custom',
@@ -25,7 +25,7 @@ describe('ExtensionOptions coverage', () => {
 			path: 'dist/index.js',
 			source: 'src/index.ts',
 			host: '^11.0.0',
-			coverage: 'coverage',
+			coverage: 'coverage/.tmp/backend',
 		}).success).toBe(true);
 	});
 });
