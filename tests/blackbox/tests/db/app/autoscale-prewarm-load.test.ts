@@ -2,7 +2,7 @@ import config, { getUrl } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';

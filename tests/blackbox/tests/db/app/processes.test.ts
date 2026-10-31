@@ -9,7 +9,7 @@ import type {
 	ResolvedEnvVariable,
 } from '@directus/types';
 import { ChildProcess, execFileSync, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import { cloneDeep } from 'lodash-es';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';

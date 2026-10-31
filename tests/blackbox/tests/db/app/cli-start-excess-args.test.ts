@@ -3,7 +3,7 @@ import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import { cloneDeep } from 'lodash-es';
 import { createRequire } from 'module';
 import { tmpdir } from 'os';

@@ -14,7 +14,7 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import { oneLine } from '@directus/utils';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';

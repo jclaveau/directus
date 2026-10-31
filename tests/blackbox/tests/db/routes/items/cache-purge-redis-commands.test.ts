@@ -15,7 +15,7 @@ import {
 	monitorRedisCommands,
 } from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep, omit } from 'lodash-es';

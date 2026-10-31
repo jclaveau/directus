@@ -10,7 +10,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';

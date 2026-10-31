@@ -2,7 +2,7 @@ import config, { paths, type Env } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import { cloneDeep } from 'lodash-es';
 import { createHmac } from 'node:crypto';
 import request from 'supertest';

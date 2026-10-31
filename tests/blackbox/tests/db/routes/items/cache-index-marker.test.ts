@@ -7,7 +7,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { monitorRedisCommands } from '@utils/monitor-redis-commands';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'events';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';

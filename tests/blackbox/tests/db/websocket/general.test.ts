@@ -6,7 +6,7 @@ import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import knex, { Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import { randomUUID } from 'node:crypto';

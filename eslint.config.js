@@ -387,6 +387,27 @@ export default typescriptEslint.config(
 		rules: { 'no-restricted-imports': 'off' },
 	},
 
+	// get-port draws from one range every blackbox worker shares, so two of them
+	// can be handed the same port, and the loser's tests then run against the
+	// winner's instance. The wrapper draws from the worker's own slice.
+	{
+		files: ['tests/blackbox/**/*.ts'],
+		ignores: ['tests/blackbox/utils/get-port.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: 'get-port',
+							message: "Import { getPort } from '@utils/get-port'.",
+						},
+					],
+				},
+			],
+		},
+	},
+
 	// Test files
 	{
 		files: ['**/*.test.ts'],

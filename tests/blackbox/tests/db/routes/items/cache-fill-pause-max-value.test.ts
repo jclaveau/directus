@@ -4,7 +4,7 @@ import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'events';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import { afterAll, describe, expect, vi } from 'vitest';

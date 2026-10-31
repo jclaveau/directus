@@ -4,7 +4,7 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import type { ProcessesReport } from '@directus/types';
 import { ChildProcess, execFileSync, spawn } from 'child_process';
-import getPort from 'get-port';
+import { getPort } from '@utils/get-port';
 import { cloneDeep } from 'lodash-es';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
