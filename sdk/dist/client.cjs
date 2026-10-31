@@ -1,0 +1,2 @@
+const e={fetch:globalThis.fetch,WebSocket:globalThis.WebSocket,URL:globalThis.URL,logger:globalThis.console},t=(t,n={})=>{let r=n.globals?{...e,...n.globals}:e;return{globals:r,url:new r.URL(t),with(e){return{...this,...e(this)}}}};exports.createDirectus=t;
+//# sourceMappingURL=client.cjs.map

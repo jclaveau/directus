@@ -1,0 +1,157 @@
+import { getMilliseconds } from "../utils/get-milliseconds.js";
+import { useLogger } from "../logger/index.js";
+import { cacheEnabled } from "../cache-settings.js";
+import { earlierScopedCacheEpoch } from "./pins.js";
+import { scopedCacheEpochKey } from "./redis-store.js";
+import { useScopedCacheStore } from "./store.js";
+import { scopedCachePurgeEnabled } from "./config.js";
+import { useEnv } from "@directus/env";
+
+//#region src/scoped-cache/fill-guard.ts
+const env = useEnv();
+/**
+* The entry a reading carries when it skipped the counters because this node
+* was not serving. A fill from it has no counter to compare a purge against, so
+* `respond` refuses it when serving came back on before the read answered.
+*/
+const SERVING_OFF_EPOCH = "*serving-off";
+/** Whether a reading was skipped because this node was not serving. */
+function readWhileServingOff(epochsBeforeQuery) {
+	return epochsBeforeQuery !== void 0 && SERVING_OFF_EPOCH in epochsBeforeQuery;
+}
+/**
+* How long a purge counter is held. Long enough that no read outlives its own
+* before-query reading, short enough that a collection nobody writes to stops
+* holding a key.
+*
+* A value that is not a positive duration falls back to the default: `EXPIRE`
+* with `0` or less deletes the counter on the command that bumps it, and every
+* fill racing that purge would read no counter on both sides and be kept.
+*
+* A positive duration below five minutes is raised to five minutes: a counter
+* that expires while a read is between its two readings is recreated only by a
+* purge, so a shorter hold would drop the counter under a slow read and keep a
+* fill that raced a purge before the expiry.
+*/
+function scopedCacheEpochTtlSeconds() {
+	const defaultTtlMilliseconds = 1440 * 60 * 1e3;
+	const ttlMilliseconds = getMilliseconds(env["CACHE_SCOPED_EPOCH_TTL"], defaultTtlMilliseconds);
+	if (!Number.isFinite(ttlMilliseconds) || ttlMilliseconds <= 0) return defaultTtlMilliseconds / 1e3;
+	return Math.max(Math.ceil(ttlMilliseconds / 1e3), 300);
+}
+/**
+* Read the purge counters of the collections a read depends on.
+*
+* A read's fingerprints reach the index only in `respond`, long after the rows
+* were fetched: a purge landing in between finds nothing to drop, and the fill then
+* stores rows it already superseded — stale for the whole TTL, and (its index
+* members having just been deleted) unreachable to every later purge. Comparing the
+* counter read before the query against the one at fill time is what closes that
+* window.
+*/
+async function readScopedCacheEpochs(collections) {
+	if (!cacheEnabled()) return { [SERVING_OFF_EPOCH]: null };
+	if (!scopedCachePurgeEnabled()) return {};
+	const names = [...new Set([...collections, "*"])];
+	const values = await useScopedCacheStore().readPurgeEpochs(names.map(scopedCacheEpochKey));
+	if (values === null) return {};
+	return Object.fromEntries(names.map((name, index) => [name, values[index] ?? null]));
+}
+/**
+* Bump the counters of the collections a purge just dropped entries for. Expiring,
+* so a collection nothing writes to stops costing a key. A counter that expired
+* between a read's two readings comes back only through a purge, and the store
+* recreates it at a value it never held, so the read compares unequal and evicts.
+*/
+async function bumpScopedCacheEpochs(collections) {
+	if (!scopedCachePurgeEnabled()) return;
+	await bumpScopedCacheEpochsInEveryMode(collections);
+}
+/**
+* `bumpScopedCacheEpochs` whatever the purge mode, for a drop of the index: the
+* flush command drops it in every mode, and a node still purging scoped — the
+* mode is per process — keeps filing into the index it is cutting.
+*/
+async function bumpScopedCacheEpochsInEveryMode(collections) {
+	const names = [...new Set(collections)];
+	if (names.length === 0) return;
+	try {
+		await useScopedCacheStore().bumpPurgeEpochs(names.map(scopedCacheEpochKey), scopedCacheEpochTtlSeconds());
+	} catch (error) {
+		useLogger().warn(error, `[scoped-cache] purge counters not bumped, fills racing this purge are unguarded: ${error}`);
+	}
+}
+/**
+* Fold in the counters the hook declarations carry, keeping the read's OWN
+* before-query reading wherever it has one.
+*
+* Not the rule the hook declarations use to merge two DECLARED counters, and it
+* does not need to be: the read's own value was read before its query, so it is
+* earlier than anything a hook could hand over, with no comparison required. A
+* collection that reading never named has no such guarantee, which is why the
+* hook's value is taken there and compared where two of them meet.
+*/
+function foldScopedCacheEpochsFromHookDeclarations(epochsBeforeQuery, fromHookDeclarations) {
+	const folded = { ...epochsBeforeQuery };
+	for (const [collection, epoch] of Object.entries(fromHookDeclarations)) if (collection in folded === false) folded[collection] = epoch;
+	return folded;
+}
+/**
+* Merge the before-query readings of two reads whose results become ONE cached
+* entry — the roots of a GraphQL query, say. The EARLIER reading wins per
+* collection: a root reading `E+1` where another read `E` means a purge landed
+* between them, and only the earlier value makes the post-fill comparison notice.
+*/
+function mergeScopedCacheEpochs(into, from) {
+	for (const [collection, epoch] of Object.entries(from)) into[collection] = collection in into ? earlierScopedCacheEpoch(into[collection], epoch) : epoch;
+}
+/**
+* The two readings one response may carry, folded into one — `undefined` when it
+* carries neither, which is how the guard tells an unguarded read from a guarded
+* one that read nothing.
+*/
+function mergedScopedCacheEpochs(...epochsPerRead) {
+	const taken = epochsPerRead.filter((epochs) => epochs !== void 0);
+	if (taken.length === 0) return;
+	const merged = {};
+	for (const epochs of taken) mergeScopedCacheEpochs(merged, epochs);
+	return merged;
+}
+/**
+* The collections a response depends on that its before-query reading never
+* covered — so a purge of them landing mid-read passes the post-fill comparison
+* unnoticed, and the entry would be stored already stale under an index that purge
+* has swept.
+*
+* A read hook's `scopeTo` is how one gets there: it names any collection it likes,
+* and it runs after the reading was taken. There is no reading it late, since the
+* check needs a value from BEFORE the query — so the caller refuses the fill.
+*
+* `*` rides every reading, so its presence is what says the guard ran at all.
+* Without it (no redis, purging off, a read that opted out) nothing is guarded
+* anyway, and refusing the whole cache over that would be a far worse trade.
+*/
+function scopedCacheCollectionsWithoutGuard(epochsBeforeQuery, fingerprints) {
+	if (epochsBeforeQuery === void 0 || "*" in epochsBeforeQuery === false) return [];
+	const collections = fingerprints.map((fingerprint) => fingerprint.collection);
+	return [...new Set(collections)].filter((collection) => collection in epochsBeforeQuery === false);
+}
+/**
+* The collection whose counter moved between a read's before-query reading and now,
+* or `undefined` when none did.
+*
+* Called AFTER the entry is written, which is the comparison that closes the
+* window: a purge that started after the pre-fill check either read the index
+* before this key was filed, or deleted the key between the value and its sidecar,
+* and either way the entry outlives it. A purge bumps the counters BEFORE it
+* sweeps, so re-reading them here catches every such interleaving.
+*/
+async function scopedCacheSweptDuringFill(epochsBeforeQuery) {
+	const epochsAfterFill = await readScopedCacheEpochs(Object.keys(epochsBeforeQuery));
+	return Object.entries(epochsBeforeQuery).find(([collection, epoch]) => {
+		return epochsAfterFill[collection] !== epoch;
+	})?.[0];
+}
+
+//#endregion
+export { SERVING_OFF_EPOCH, bumpScopedCacheEpochs, bumpScopedCacheEpochsInEveryMode, foldScopedCacheEpochsFromHookDeclarations, mergeScopedCacheEpochs, mergedScopedCacheEpochs, readScopedCacheEpochs, readWhileServingOff, scopedCacheCollectionsWithoutGuard, scopedCacheEpochTtlSeconds, scopedCacheSweptDuringFill };

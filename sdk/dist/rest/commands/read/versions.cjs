@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/versions`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/versions/${t}`,params:n??{},method:`GET`});exports.readContentVersion=n,exports.readContentVersions=t;
+//# sourceMappingURL=versions.cjs.map

@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/translations`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/translations`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createTranslation,e as createTranslations};
+//# sourceMappingURL=translations.js.map

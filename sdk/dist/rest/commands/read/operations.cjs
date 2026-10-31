@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/operations`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/operations/${t}`,params:n??{},method:`GET`});exports.readOperation=n,exports.readOperations=t;
+//# sourceMappingURL=operations.cjs.map
