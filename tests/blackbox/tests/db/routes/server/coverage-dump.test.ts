@@ -22,11 +22,21 @@ import { afterAll, describe, expect } from 'vitest';
 const feature = loadFeature('./tests/db/routes/server/coverage-dump.feature');
 
 /**
- * What istanbul records for a file with nothing in it, set the way an
+ * What `directus-extension build` with `coverage` emits, minus the
+ * instrumentation: the banner registering the package's coverage directory,
+ * then what istanbul records for a file with nothing in it, set the way an
  * instrumented module sets it: on the global, when the module loads.
  */
-const FIXTURE_HOOK = `
+function renderFixtureHook(coverageDir: string): string {
+	return `
 import { fileURLToPath } from 'node:url';
+
+const sourceRoot = fileURLToPath(new URL('.', import.meta.url)).slice(0, -1);
+
+(globalThis.__extensionCoverageDirs ??= []).push({
+	sourceRoot,
+	coverageDir: sourceRoot + '/' + ${JSON.stringify(coverageDir)},
+});
 
 const sourceFile = fileURLToPath(new URL('./src/index.js', import.meta.url));
 
@@ -44,6 +54,7 @@ globalThis.__coverage__[sourceFile] = {
 
 export default () => {};
 `;
+}
 
 describe.each(vendors)('%s', (vendor) => {
 	const instances: ChildProcess[] = [];
@@ -70,7 +81,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	defineFeature(feature, (scenario) => {
 		scenario(
-			'an extension declaring a coverage directory receives its own files',
+			'an extension built with coverage receives its own files',
 			({ given, and, when, then }) => {
 				let extensionsPath: string;
 				let extensionPath: string;
@@ -78,7 +89,7 @@ describe.each(vendors)('%s', (vendor) => {
 				let response: request.Response;
 
 				given(
-					/^an extension declaring the coverage directory (\S+)$/,
+					/^an extension built with the coverage directory (\S+)$/,
 					async (coverageDir: string) => {
 						extensionsPath = await realpath(await mkdtemp(
 							join(tmpdir(), 'directus-blackbox-coverage-'),
@@ -99,12 +110,15 @@ describe.each(vendors)('%s', (vendor) => {
 									path: 'index.js',
 									source: 'src/index.js',
 									host: '^11.0.0',
-									coverage: coverageDir,
 								},
 							}),
 						);
 
-						await writeFile(join(extensionPath, 'index.js'), FIXTURE_HOOK);
+						await writeFile(
+							join(extensionPath, 'index.js'),
+							renderFixtureHook(coverageDir),
+						);
+
 						await writeFile(join(extensionPath, 'src/index.js'), '');
 					},
 				);

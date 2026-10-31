@@ -1,12 +1,9 @@
-import type { Extension } from '@directus/types';
 import {
-	mkdir,
 	mkdtemp,
 	readdir,
 	readFile,
 	realpath,
 	rm,
-	symlink,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,22 +11,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
 	COVERAGE_DUMP_NAME,
 	dumpCoverage,
-	listCoveredExtensions,
+	readExtensionCoverageDirs,
 	splitCoverage,
 } from './dump-coverage.js';
 
-const { logger, extensionManager } = vi.hoisted(() => {
-	return {
-		logger: { warn: vi.fn() },
-		extensionManager: { extensions: [] as unknown[] },
-	};
+const { logger } = vi.hoisted(() => {
+	return { logger: { warn: vi.fn() } };
 });
 
 vi.mock('../logger/index.js', () => ({ useLogger: () => logger }));
-
-vi.mock('../extensions/index.js', () => {
-	return { getExtensionManager: () => extensionManager };
-});
 
 let workDir: string;
 
@@ -42,7 +32,7 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
 	delete (globalThis as Record<string, unknown>)['__coverage__'];
-	extensionManager.extensions = [];
+	delete (globalThis as Record<string, unknown>)['__extensionCoverageDirs'];
 
 	await rm(workDir, { recursive: true, force: true });
 });
@@ -55,7 +45,7 @@ describe('splitCoverage', () => {
 				'/repo/ext-ab/src/b.ts': 'ab',
 				'src/controllers/server.ts': 'core',
 			},
-			[{ realPath: '/repo/ext-a', coverageDir: '/repo/ext-a/coverage' }],
+			[{ sourceRoot: '/repo/ext-a', coverageDir: '/repo/ext-a/coverage' }],
 			'/cov/core',
 		);
 
@@ -77,7 +67,7 @@ describe('splitCoverage', () => {
 	test('counts the files no extension owns when there is no core directory', () => {
 		const split = splitCoverage(
 			{ '/repo/ext-a/src/a.ts': 'a', '/repo/shared/y.ts': 'y' },
-			[{ realPath: '/repo/ext-a', coverageDir: '/repo/ext-a/coverage' }],
+			[{ sourceRoot: '/repo/ext-a', coverageDir: '/repo/ext-a/coverage' }],
 			undefined,
 		);
 
@@ -90,69 +80,21 @@ describe('splitCoverage', () => {
 	});
 });
 
-describe('listCoveredExtensions', () => {
-	test('reads an extension loaded through a symlink at its real path', async () => {
-		await mkdir(join(workDir, 'packages/ext'), { recursive: true });
-		await mkdir(join(workDir, 'node_modules'));
-
-		await symlink(
-			join(workDir, 'packages/ext'),
-			join(workDir, 'node_modules/ext'),
-		);
-
-		const coveredExtensions = await listCoveredExtensions([
-			{
-				name: 'ext',
-				path: join(workDir, 'node_modules/ext'),
-				coverage: 'coverage/.tmp/backend',
-			},
-			{ name: 'uncovered', path: join(workDir, 'missing') },
-		] as Extension[]);
-
-		expect(coveredExtensions).toEqual([
-			{
-				realPath: join(workDir, 'packages/ext'),
-				coverageDir: join(workDir, 'packages/ext/coverage/.tmp/backend'),
-			},
-		]);
+describe('readExtensionCoverageDirs', () => {
+	test('reads nothing when no instrumented extension is loaded', () => {
+		expect(readExtensionCoverageDirs()).toEqual([]);
 	});
 
-	test('skips a vanished extension path, with a warning', async () => {
-		await mkdir(join(workDir, 'ext'));
+	test('lists a package nested in another one first, to own its own files', () => {
+		(globalThis as Record<string, unknown>)['__extensionCoverageDirs'] = [
+			{ sourceRoot: '/repo/outer', coverageDir: '/repo/outer/cov' },
+			{ sourceRoot: '/repo/outer/inner', coverageDir: '/repo/outer/inner/cov' },
+		];
 
-		const coveredExtensions = await listCoveredExtensions([
-			{ name: 'gone', path: join(workDir, 'gone'), coverage: 'cov' },
-			{ name: 'ext', path: join(workDir, 'ext'), coverage: 'cov' },
-		] as Extension[]);
-
-		expect(coveredExtensions).toEqual([
-			{ realPath: join(workDir, 'ext'), coverageDir: join(workDir, 'ext/cov') },
+		expect(readExtensionCoverageDirs()).toEqual([
+			{ sourceRoot: '/repo/outer/inner', coverageDir: '/repo/outer/inner/cov' },
+			{ sourceRoot: '/repo/outer', coverageDir: '/repo/outer/cov' },
 		]);
-
-		expect(logger.warn).toHaveBeenCalledWith(
-			'Coverage of extension "gone" not written to its own '
-				+ `directory: ${join(workDir, 'gone')} no longer exists.`,
-		);
-	});
-
-	test('lets a nested package own its own files', async () => {
-		await mkdir(join(workDir, 'outer/inner'), { recursive: true });
-
-		const coveredExtensions = await listCoveredExtensions([
-			{ name: 'outer', path: join(workDir, 'outer'), coverage: 'cov' },
-			{ name: 'inner', path: join(workDir, 'outer/inner'), coverage: 'cov' },
-		] as Extension[]);
-
-		expect(splitCoverage(
-			{ [join(workDir, 'outer/inner/src/i.ts')]: 'i' },
-			coveredExtensions,
-			undefined,
-		).coverageByDir).toEqual(new Map([
-			[
-				join(workDir, 'outer/inner/cov'),
-				{ [join(workDir, 'outer/inner/src/i.ts')]: 'i' },
-			],
-		]));
 	});
 });
 
@@ -165,11 +107,10 @@ describe('dumpCoverage', () => {
 	});
 
 	test('writes each directory its own files, one file per process', async () => {
-		await mkdir(join(workDir, 'ext'));
 		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
 
-		extensionManager.extensions = [
-			{ name: 'ext', path: join(workDir, 'ext'), coverage: 'cov' },
+		(globalThis as Record<string, unknown>)['__extensionCoverageDirs'] = [
+			{ sourceRoot: join(workDir, 'ext'), coverageDir: join(workDir, 'ext/cov') },
 		];
 
 		(globalThis as Record<string, unknown>)['__coverage__'] = {
@@ -216,8 +157,8 @@ describe('dumpCoverage', () => {
 		expect(await dumpCoverage()).toEqual([]);
 
 		expect(logger.warn).toHaveBeenCalledWith(
-			'Coverage of 2 source files not written: no extension declaring a '
-				+ 'coverage directory owns them, and COVERAGE_DIR is unset.',
+			'Coverage of 2 source files not written: no extension built with '
+				+ 'coverage owns them, and COVERAGE_DIR is unset.',
 		);
 	});
 

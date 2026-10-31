@@ -49,6 +49,7 @@
 		"inquirer": "catalog:",
 		"ora": "catalog:",
 		"rolldown": "catalog:",
+		"rolldown-plugin-istanbul": "catalog:",
 		"rollup-plugin-styler": "catalog:",
 		"semver": "catalog:",
 		"vite": "catalog:",

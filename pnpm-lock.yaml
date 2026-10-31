@@ -2344,6 +2344,9 @@ importers:
       rolldown:
         specifier: 'catalog:'
         version: 1.2.10
+      rolldown-plugin-istanbul:
+        specifier: 'catalog:'
+        version: https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/29c826380f1b9b87de352a8e9c85bc8e56345e0b(rolldown@1.2.10)(rollup@4.62.3)(supports-color@10.2.2)
       rollup-plugin-styler:
         specifier: 'catalog:'
         version: 2.0.0(rollup@4.62.3)(typescript@5.8.3)

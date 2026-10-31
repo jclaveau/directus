@@ -1,5 +1,7 @@
 import fse from 'fs-extra';
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
 import { create } from '../index.js';
 import build, { APP_ONLY_PACKAGES } from './build.js';
@@ -56,6 +58,7 @@ describe('build', () => {
 	async function buildEndpoint(
 		source: string | null,
 		options: Parameters<typeof build>[0] = {},
+		extensionConfig: string | null = null,
 	) {
 		const random = Math.random().toString(36);
 		const extensionPath = `${TEST_PREFIX}-endpoint-${Date.now()}-${random.slice(2)}`;
@@ -77,6 +80,13 @@ describe('build', () => {
 			const entrypoint = resolve(origCwd, extensionPath, 'src', 'index.ts');
 
 			await fse.writeFile(entrypoint, source);
+		}
+
+		if (extensionConfig !== null) {
+			await fse.writeFile(
+				resolve(origCwd, extensionPath, 'extension.config.mjs'),
+				extensionConfig,
+			);
 		}
 
 		process.chdir(resolve(origCwd, extensionPath));
@@ -484,4 +494,117 @@ describe('build', () => {
 		},
 		30_000,
 	);
+
+	describe('coverage', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+			delete (globalThis as Record<string, unknown>)['__coverage__'];
+			delete (globalThis as Record<string, unknown>)['__extensionCoverageDirs'];
+		});
+
+		test(
+			'builds a plain api entrypoint when coverage is off',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{},
+					"export default { coverage: { enabled: false, dir: 'cov' } };\n",
+				);
+
+				const builtCode = await fse.readFile(
+					resolve(distPath, 'index.js'),
+					'utf8',
+				);
+
+				expect(builtCode).not.toContain('__coverage__');
+				expect(builtCode).not.toContain('__extensionCoverageDirs');
+			},
+			30_000,
+		);
+
+		test(
+			'instruments the api entrypoint, which registers its coverage directory',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					(globalThis as Record<string, unknown>)['__extensionCoverageDirs'],
+				).toEqual([
+					{
+						sourceRoot: packageRoot,
+						coverageDir: resolve(packageRoot, 'coverage/backend'),
+					},
+				]);
+
+				expect(
+					Object.keys(
+						(globalThis as Record<string, object>)['__coverage__']!,
+					),
+				).toEqual([resolve(packageRoot, 'src/index.ts')]);
+			},
+			30_000,
+		);
+
+		test(
+			'builds an instrumented api entrypoint that refuses to load in production',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				vi.stubEnv('NODE_ENV', 'production');
+
+				await expect(
+					import(pathToFileURL(resolve(distPath, 'index.js')).href),
+				).rejects.toThrow(new Error(
+					'Coverage instrumentation is forbidden when NODE_ENV is production.',
+				));
+			},
+			30_000,
+		);
+
+		test(
+			'refuses to instrument a build made with NODE_ENV=production',
+			async () => {
+				const error = vi.spyOn(console, 'error')
+					.mockImplementation(() => undefined);
+
+				const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+					throw new Error('exited');
+				});
+
+				vi.stubEnv('NODE_ENV', 'production');
+
+				try {
+					await expect(buildEndpoint(
+						null,
+						{},
+						'export default { coverage: true };\n',
+					)).rejects.toThrow('exited');
+
+					expect(error).toHaveBeenCalledWith(
+						expect.stringContaining(
+							'Coverage instrumentation is forbidden when NODE_ENV is '
+								+ 'production.',
+						),
+					);
+				}
+				finally {
+					error.mockRestore();
+					exit.mockRestore();
+				}
+			},
+			30_000,
+		);
+	});
 });

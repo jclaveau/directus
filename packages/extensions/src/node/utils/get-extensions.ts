@@ -24,7 +24,6 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 			},
 			entries: extensionOptions.entries.map((entry) => pick(entry, 'name', 'type')),
 			host: extensionOptions.host,
-			coverage: extensionOptions.coverage,
 			local,
 		};
 	} else if (isTypeIn(extensionOptions, HYBRID_EXTENSION_TYPES)) {
@@ -38,7 +37,6 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 				api: extensionOptions.path.api,
 			},
 			host: extensionOptions.host,
-			coverage: extensionOptions.coverage,
 			sandbox: extensionOptions.sandbox,
 			local,
 		};
@@ -50,7 +48,6 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 			type: extensionOptions.type,
 			entrypoint: extensionOptions.path,
 			host: extensionOptions.host,
-			coverage: extensionOptions.coverage,
 			sandbox: extensionOptions.sandbox,
 			local,
 		};
@@ -63,7 +60,6 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 			type: extensionOptions.type,
 			entrypoint: extensionOptions.path,
 			host: extensionOptions.host,
-			coverage: extensionOptions.coverage,
 			local,
 		};
 	}

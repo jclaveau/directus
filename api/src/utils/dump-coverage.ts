@@ -1,7 +1,5 @@
-import type { Extension } from '@directus/types';
-import { mkdir, realpath, rename, writeFile } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
-import { getExtensionManager } from '../extensions/index.js';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import { useLogger } from '../logger/index.js';
 
 /**
@@ -10,8 +8,14 @@ import { useLogger } from '../logger/index.js';
  */
 export type CoverageMap = Record<string, unknown>;
 
-export interface CoveredExtension {
-	realPath: string;
+/**
+ * What an extension built by `directus-extension build` with `coverage` in its
+ * extension.config.js registers when loaded: the files under `sourceRoot` have
+ * their coverage written to `coverageDir`. Both are absolute, `sourceRoot` a
+ * real path, as istanbul keys its files.
+ */
+export interface ExtensionCoverageDir {
+	sourceRoot: string;
 	coverageDir: string;
 }
 
@@ -41,48 +45,18 @@ export function readCoverage(): CoverageMap | undefined {
 }
 
 /**
- * The extensions whose manifest declares a coverage directory, deepest package
- * first so a package nested in another one owns its own files. Paths are real
- * paths: a workspace dependency is loaded through a `node_modules` symlink while
- * istanbul keys its files by where they really are. An extension removed since
- * the last reload is skipped: its files go where unowned files go. An
- * extension with no `coverage` takes no part, so a package nested in a covered
- * one without declaring its own has its files written to the covered one's.
+ * The coverage directories registered by the instrumented extensions loaded so
+ * far, deepest package first so a package nested in another one owns its own
+ * files. An extension unloaded since keeps its entry: its files stay in the
+ * cumulative coverage too.
  */
-export async function listCoveredExtensions(
-	extensions: Extension[],
-): Promise<CoveredExtension[]> {
-	const coveredExtensions = await Promise.all(
-		extensions
-			.filter((extension) => extension.coverage !== undefined)
-			.map(async (extension) => {
-				let realPath: string;
+export function readExtensionCoverageDirs(): ExtensionCoverageDir[] {
+	const extensionCoverageDirs = (globalThis as Record<string, unknown>)[
+		'__extensionCoverageDirs'
+	] as ExtensionCoverageDir[] | undefined;
 
-				try {
-					realPath = await realpath(extension.path);
-				}
-				catch (error) {
-					if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-						throw error;
-					}
-
-					useLogger().warn(
-						`Coverage of extension "${extension.name}" not written to its `
-							+ `own directory: ${extension.path} no longer exists.`,
-					);
-
-					return [];
-				}
-
-				return [{
-					realPath,
-					coverageDir: resolve(realPath, extension.coverage!),
-				}];
-			}),
-	);
-
-	return coveredExtensions.flat().sort(
-		(left, right) => right.realPath.length - left.realPath.length,
+	return [...(extensionCoverageDirs ?? [])].sort(
+		(left, right) => right.sourceRoot.length - left.sourceRoot.length,
 	);
 }
 
@@ -93,15 +67,15 @@ export async function listCoveredExtensions(
  */
 export function splitCoverage(
 	coverage: CoverageMap,
-	coveredExtensions: CoveredExtension[],
+	extensionCoverageDirs: ExtensionCoverageDir[],
 	coreDir: string | undefined,
 ): { coverageByDir: Map<string, CoverageMap>; unownedCount: number } {
 	const coverageByDir = new Map<string, CoverageMap>();
 	let unownedCount = 0;
 
 	for (const [sourceFile, fileCoverage] of Object.entries(coverage)) {
-		const targetDir = coveredExtensions.find((extension) => {
-			return sourceFile.startsWith(extension.realPath + sep);
+		const targetDir = extensionCoverageDirs.find((extensionDir) => {
+			return sourceFile.startsWith(extensionDir.sourceRoot + sep);
 		})?.coverageDir ?? coreDir;
 
 		if (targetDir === undefined) {
@@ -118,8 +92,8 @@ export function splitCoverage(
 }
 
 /**
- * Write the coverage collected so far: each extension declaring a `coverage`
- * directory gets its own files, `COVERAGE_DIR` gets the rest. Dumps run one
+ * Write the coverage collected so far: each extension built with coverage gets
+ * its own files, `COVERAGE_DIR` gets the rest. Dumps run one
  * after the other, since two of them would write the same files.
  */
 export function dumpCoverage(): Promise<WrittenCoverage[]> {
@@ -138,20 +112,16 @@ async function writeCoverage(): Promise<WrittenCoverage[]> {
 		return [];
 	}
 
-	const coveredExtensions = await listCoveredExtensions(
-		getExtensionManager().extensions,
-	);
-
 	const { coverageByDir, unownedCount } = splitCoverage(
 		coverage,
-		coveredExtensions,
+		readExtensionCoverageDirs(),
 		process.env['COVERAGE_DIR'] || undefined,
 	);
 
 	if (unownedCount > 0) {
 		useLogger().warn(
 			`Coverage of ${unownedCount} source files not written: no extension `
-				+ 'declaring a coverage directory owns them, and COVERAGE_DIR is unset.',
+				+ 'built with coverage owns them, and COVERAGE_DIR is unset.',
 		);
 	}
 
