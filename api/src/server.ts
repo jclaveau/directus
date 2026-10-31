@@ -19,7 +19,7 @@ import {
 	watchOutstandingMigrations,
 } from './outstanding-migrations.js';
 import { reportInFlightRequests } from './processes/lib/report-in-flight.js';
-import { dumpCoverage } from './utils/dump-coverage.js';
+import { dumpCoverage, startCoverageFlush } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
 import { guardUnhandledRejections } from './utils/report-unhandled-rejection.js';
@@ -193,6 +193,10 @@ export async function startServer(): Promise<void> {
 	const server = await createServer();
 
 	void watchOutstandingMigrations();
+
+	// After `createServer`: the extensions are loaded, so an instrumented one has
+	// already defined the coverage this reads.
+	startCoverageFlush();
 
 	const host = env['HOST'] as string;
 	const path = env['UNIX_SOCKET_PATH'] as string | undefined;

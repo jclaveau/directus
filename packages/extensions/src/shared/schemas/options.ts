@@ -54,6 +54,7 @@ export type ExtensionOptionsBundleEntry = z.infer<typeof ExtensionOptionsBundleE
 export const ExtensionOptionsBase = z.object({
 	host: z.string(),
 	hidden: z.boolean().optional(),
+	coverage: z.string().optional(),
 });
 
 export const ExtensionOptionsApp = z.object({

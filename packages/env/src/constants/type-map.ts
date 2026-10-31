@@ -182,6 +182,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	MIGRATIONS_WAIT_TIMEOUT: 'string',
 	MIGRATIONS_WAIT_INTERVAL: 'string',
+
+	COVERAGE_FLUSH_INTERVAL: 'string',
 	'PGBOUNCER_.+_ADMIN_HOSTS': 'array',
 	'PGBOUNCER_.+_ADMIN_DATABASE': 'string',
 	'PGBOUNCER_.+_ADMIN_USER': 'string',

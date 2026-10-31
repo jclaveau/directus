@@ -22,6 +22,12 @@ vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 
+const { readCoverage, dumpCoverage } = vi.hoisted(() => {
+	return { readCoverage: vi.fn(), dumpCoverage: vi.fn() };
+});
+
+vi.mock('../utils/dump-coverage.js', () => ({ readCoverage, dumpCoverage }));
+
 const { default: router } = await import('./server.js');
 
 async function callInfo() {
@@ -62,5 +68,52 @@ describe('server controller /info', () => {
 		expect(res.locals['cache']).toBeUndefined();
 		expect(res.locals['payload']).toEqual({ data: { project_name: 'x' } });
 		expect(next).toHaveBeenCalledOnce();
+	});
+});
+
+describe('server controller POST /coverage', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	async function callCoverage() {
+		const req = { path: '/coverage' } as any;
+		const res = { locals: {} } as any;
+		const next = vi.fn();
+
+		const layer = router.stack.find((l: any) => l.route?.path === '/coverage');
+		await layer!.route!.stack[0]!.handle(req, res, next);
+
+		return { res, next };
+	}
+
+	test('answers 404 in a build with nothing instrumented', async () => {
+		readCoverage.mockReturnValue(undefined);
+
+		const { res, next } = await callCoverage();
+
+		expect(next).toHaveBeenCalledWith(expect.objectContaining({
+			status: 404,
+			message: 'Route /coverage doesn\'t exist.',
+		}));
+
+		expect(dumpCoverage).not.toHaveBeenCalled();
+		expect(res.locals['payload']).toBeUndefined();
+	});
+
+	test('answers with the directories it wrote', async () => {
+		readCoverage.mockReturnValue({ 'src/app.ts': {} });
+
+		dumpCoverage.mockResolvedValue([
+			{ dir: '/repo/ext/coverage/.tmp/backend', fileCount: 121 },
+		]);
+
+		const { res, next } = await callCoverage();
+
+		expect(res.locals['payload']).toEqual({
+			data: {
+				written: [{ dir: '/repo/ext/coverage/.tmp/backend', fileCount: 121 }],
+			},
+		});
+
+		expect(next).toHaveBeenCalledWith();
 	});
 });
