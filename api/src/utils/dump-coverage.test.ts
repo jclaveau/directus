@@ -4,6 +4,7 @@ import {
 	mkdtemp,
 	readdir,
 	readFile,
+	realpath,
 	rm,
 	symlink,
 	writeFile,
@@ -37,7 +38,8 @@ vi.mock('../extensions/index.js', () => {
 let workDir: string;
 
 beforeEach(async () => {
-	workDir = await mkdtemp(join(tmpdir(), 'dump-coverage-'));
+	// Real path: on macOS the tmpdir is a symlink, and coverage keys are real paths.
+	workDir = await realpath(await mkdtemp(join(tmpdir(), 'dump-coverage-')));
 });
 
 afterEach(async () => {
