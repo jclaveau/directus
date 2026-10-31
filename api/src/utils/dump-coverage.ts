@@ -46,7 +46,10 @@ export function readCoverage(): CoverageMap | undefined {
  * The extensions whose manifest declares a coverage directory, deepest package
  * first so a package nested in another one owns its own files. Paths are real
  * paths: a workspace dependency is loaded through a `node_modules` symlink while
- * istanbul keys its files by where they really are.
+ * istanbul keys its files by where they really are. An extension removed since
+ * the last reload is skipped: its files go where unowned files go. An
+ * extension with no `coverage` takes no part, so a package nested in a covered
+ * one without declaring its own has its files written to the covered one's.
  */
 export async function listCoveredExtensions(
 	extensions: Extension[],
@@ -55,16 +58,32 @@ export async function listCoveredExtensions(
 		extensions
 			.filter((extension) => extension.coverage !== undefined)
 			.map(async (extension) => {
-				const realPath = await realpath(extension.path);
+				let realPath: string;
 
-				return {
+				try {
+					realPath = await realpath(extension.path);
+				}
+				catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+						throw error;
+					}
+
+					useLogger().warn(
+						`Coverage of extension "${extension.name}" not written to its `
+							+ `own directory: ${extension.path} no longer exists.`,
+					);
+
+					return [];
+				}
+
+				return [{
 					realPath,
 					coverageDir: resolve(realPath, extension.coverage!),
-				};
+				}];
 			}),
 	);
 
-	return coveredExtensions.sort(
+	return coveredExtensions.flat().sort(
 		(left, right) => right.realPath.length - left.realPath.length,
 	);
 }

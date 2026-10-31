@@ -123,7 +123,7 @@ describe('listCoveredExtensions', () => {
 		]);
 	});
 
-	test('skips an extension whose path no longer exists, with a warning', async () => {
+	test('skips a vanished extension path, with a warning', async () => {
 		await mkdir(join(workDir, 'ext'));
 
 		const coveredExtensions = await listCoveredExtensions([
