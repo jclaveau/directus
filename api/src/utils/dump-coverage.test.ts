@@ -1,5 +1,13 @@
 import type { Extension } from '@directus/types';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises';
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -113,6 +121,24 @@ describe('listCoveredExtensions', () => {
 				coverageDir: join(workDir, 'packages/ext/coverage/.tmp/backend'),
 			},
 		]);
+	});
+
+	test('skips an extension whose path no longer exists, with a warning', async () => {
+		await mkdir(join(workDir, 'ext'));
+
+		const coveredExtensions = await listCoveredExtensions([
+			{ name: 'gone', path: join(workDir, 'gone'), coverage: 'cov' },
+			{ name: 'ext', path: join(workDir, 'ext'), coverage: 'cov' },
+		] as Extension[]);
+
+		expect(coveredExtensions).toEqual([
+			{ realPath: join(workDir, 'ext'), coverageDir: join(workDir, 'ext/cov') },
+		]);
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Coverage of extension "gone" not written to its own '
+				+ `directory: ${join(workDir, 'gone')} no longer exists.`,
+		);
 	});
 
 	test('lets a nested package own its own files', async () => {
@@ -242,10 +268,8 @@ describe('startCoverageFlush', () => {
 	test('logs a failed flush instead of throwing it', async () => {
 		env['COVERAGE_FLUSH_INTERVAL'] = '10s';
 		(globalThis as Record<string, unknown>)['__coverage__'] = { 'src/app.ts': {} };
-
-		extensionManager.extensions = [
-			{ name: 'gone', path: join(workDir, 'gone'), coverage: 'cov' },
-		];
+		await writeFile(join(workDir, 'file'), '');
+		vi.stubEnv('COVERAGE_DIR', join(workDir, 'file/core'));
 
 		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
 			.mockReturnValue({ unref: vi.fn() } as unknown as NodeJS.Timeout);
@@ -256,7 +280,7 @@ describe('startCoverageFlush', () => {
 
 		await vi.waitFor(() => {
 			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({ code: 'ENOENT' }),
+				expect.objectContaining({ code: 'ENOTDIR' }),
 				'Coverage flush failed',
 			);
 		});
