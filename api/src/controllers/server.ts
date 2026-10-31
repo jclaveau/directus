@@ -103,7 +103,7 @@ router.get(
  * dumps the process that receives it: a coverage run is a single process.
  */
 router.post(
-	'/coverage',
+	'/dump-coverage',
 	asyncHandler(async (req, res, next) => {
 		if (readCoverage() === undefined) {
 			throw new RouteNotFoundError({ path: req.path });

@@ -123,10 +123,13 @@ describe.each(vendors)('%s', (vendor) => {
 					await awaitDirectusConnection(port);
 				});
 
-				when('the coverage is asked for with POST /server/coverage', async () => {
-					response = await request(`http://127.0.0.1:${port}`)
-						.post('/server/coverage');
-				});
+				when(
+					'the coverage is asked for with POST /server/dump-coverage',
+					async () => {
+						response = await request(`http://127.0.0.1:${port}`)
+							.post('/server/dump-coverage');
+					},
+				);
 
 				then(
 					/^the answer lists (\d+) file written into the extension's coverage directory$/,

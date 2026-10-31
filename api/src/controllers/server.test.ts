@@ -71,15 +71,15 @@ describe('server controller /info', () => {
 	});
 });
 
-describe('server controller POST /coverage', () => {
+describe('server controller POST /dump-coverage', () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	async function callCoverage() {
-		const req = { path: '/coverage' } as any;
+		const req = { path: '/dump-coverage' } as any;
 		const res = { locals: {} } as any;
 		const next = vi.fn();
 
-		const layer = router.stack.find((l: any) => l.route?.path === '/coverage');
+		const layer = router.stack.find((l: any) => l.route?.path === '/dump-coverage');
 		await layer!.route!.stack[0]!.handle(req, res, next);
 
 		return { res, next };
@@ -92,7 +92,7 @@ describe('server controller POST /coverage', () => {
 
 		expect(next).toHaveBeenCalledWith(expect.objectContaining({
 			status: 404,
-			message: 'Route /coverage doesn\'t exist.',
+			message: 'Route /dump-coverage doesn\'t exist.',
 		}));
 
 		expect(dumpCoverage).not.toHaveBeenCalled();
