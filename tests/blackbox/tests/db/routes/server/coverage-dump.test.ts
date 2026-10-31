@@ -138,14 +138,15 @@ describe.each(vendors)('%s', (vendor) => {
 							fileCount: Number(fileCount),
 						};
 
-						// An instrumented build (COVERAGE_DIR in CI) also writes the core's.
+						// An instrumented build (COVERAGE_DIR in CI) also writes the core's,
+						// first: core modules load before the extension does.
 						if (process.env['COVERAGE_DIR']) {
 							expect(response.body.data.written).toEqual([
-								extensionWritten,
 								{
 									dir: process.env['COVERAGE_DIR'],
 									fileCount: expect.any(Number),
 								},
+								extensionWritten,
 							]);
 						}
 						else {
