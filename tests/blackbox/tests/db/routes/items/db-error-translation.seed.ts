@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldM2O,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -19,12 +19,20 @@ export const seedDBStructure = () => {
 				// Clean up any previous run. Independent collections drop in
 				// parallel; the FK pair stays chained child-before-parent (dropping
 				// the parent table while the child's FK references it would error).
-				await Promise.allSettled([
-					DeleteCollection(vendor, { collection: collectionFkChild }).then(
-						() => DeleteCollection(vendor, { collection: collectionFkParent }),
-					),
-					DeleteCollection(vendor, { collection: collectionUnique }),
-					DeleteCollection(vendor, { collection: collectionContainsNull }),
+				await Promise.all([
+					(async () => {
+						await DeleteCollectionIfPresent(vendor, {
+							collection: collectionFkChild,
+						});
+
+						await DeleteCollectionIfPresent(vendor, {
+							collection: collectionFkParent,
+						});
+					})(),
+					DeleteCollectionIfPresent(vendor, { collection: collectionUnique }),
+					DeleteCollectionIfPresent(vendor, {
+						collection: collectionContainsNull,
+					}),
 				]);
 
 				// One batch POST creates all four collections, each with its fields

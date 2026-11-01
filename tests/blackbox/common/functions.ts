@@ -350,13 +350,58 @@ export type OptionsDeleteCollection = {
 	collection: string;
 };
 
-export async function DeleteCollection(vendor: Vendor, options: OptionsDeleteCollection) {
-	// Action
-	const response = await request(getUrl(vendor))
-		.delete(`/collections/${options.collection}`)
+function deleteAsTestsFlow(vendor: Vendor, path: string) {
+	return request(getUrl(vendor))
+		.delete(path)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+}
 
-	return response.body;
+function refuseUnlessDeleted(response: Response, path: string) {
+	if (response.status !== 204) {
+		throw new Error(
+			`Could not DELETE ${path}: `
+			+ `${response.status} ${JSON.stringify(response.body)}`,
+		);
+	}
+}
+
+/**
+ * Directus answers a missing delete target with 403, never 404, so a missing
+ * collection is told apart from a refused delete only by its exact message.
+ */
+function answeredMissing(response: Response, missingMessage: string) {
+	return response.status === 403
+		&& response.body?.errors?.length === 1
+		&& response.body.errors[0].message === missingMessage;
+}
+
+/** Deletes a collection that must exist, refusing any answer but 204. */
+export async function DeleteCollection(
+	vendor: Vendor,
+	options: OptionsDeleteCollection,
+) {
+	const path = `/collections/${options.collection}`;
+	const response = await deleteAsTestsFlow(vendor, path);
+
+	refuseUnlessDeleted(response, path);
+}
+
+/** A pre-clean: deletes a collection, accepting that it does not exist. */
+export async function DeleteCollectionIfPresent(
+	vendor: Vendor,
+	options: OptionsDeleteCollection,
+) {
+	const path = `/collections/${options.collection}`;
+	const response = await deleteAsTestsFlow(vendor, path);
+
+	if (answeredMissing(
+		response,
+		`Collection to delete '${options.collection}' does not exist`,
+	)) {
+		return;
+	}
+
+	refuseUnlessDeleted(response, path);
 }
 
 export type OptionsDeleteField = {
@@ -364,13 +409,31 @@ export type OptionsDeleteField = {
 	field: string;
 };
 
+/**
+ * Deletes a field, refusing any answer but 204. Directus answers 204 for a
+ * missing field of an existing collection, so only a missing collection fails.
+ */
 export async function DeleteField(vendor: Vendor, options: OptionsDeleteField) {
-	// Action
-	const response = await request(getUrl(vendor))
-		.delete(`/fields/${options.collection}/${options.field}`)
-		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+	const path = `/fields/${options.collection}/${options.field}`;
+	const response = await deleteAsTestsFlow(vendor, path);
 
-	return response.body;
+	refuseUnlessDeleted(response, path);
+}
+
+/** A pre-clean: deletes a field, accepting that its collection does not exist. */
+export async function DeleteFieldIfPresent(
+	vendor: Vendor,
+	options: OptionsDeleteField,
+) {
+	const path = `/fields/${options.collection}/${options.field}`;
+	const response = await deleteAsTestsFlow(vendor, path);
+
+	// collection-exists middleware: a bare ForbiddenError, no reason
+	if (answeredMissing(response, `You don't have permission to access this.`)) {
+		return;
+	}
+
+	refuseUnlessDeleted(response, path);
 }
 
 export type OptionsCreateField = {

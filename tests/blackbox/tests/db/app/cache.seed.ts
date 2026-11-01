@@ -7,7 +7,8 @@ import {
 	CreateFieldM2O,
 	CreateFieldO2M,
 	CreateItem,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
+	DeleteFieldIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { randomUUID } from 'node:crypto';
@@ -83,23 +84,44 @@ export const seedDBStructure = () => {
 				// Delete existing collections — FK-holders before their targets. grandChild holds
 				// FKs to child + related; child holds FKs to first + grandRelated; first/related/
 				// tag/block all point at grandRelated, so grandRelated goes last.
-				await DeleteCollection(vendor, { collection: junctionTag });
-				await DeleteCollection(vendor, { collection: junctionBlock });
-				await DeleteCollection(vendor, { collection: collectionMember });
-				await DeleteCollection(vendor, { collection: collectionTeam });
-				await DeleteCollection(vendor, { collection: collectionOwnedSubItem });
-				await DeleteCollection(vendor, { collection: collectionOwnedItem });
-				await DeleteCollection(vendor, { collection: collectionScopedRel });
-				await DeleteCollection(vendor, { collection: collectionScopedMulti });
-				await DeleteCollection(vendor, { collection: collectionScoped });
-				await DeleteCollection(vendor, { collection: collectionIgnored });
-				await DeleteCollection(vendor, { collection: collectionGrandChild });
-				await DeleteCollection(vendor, { collection: collectionChild });
-				await DeleteCollection(vendor, { collection: collectionFirst });
-				await DeleteCollection(vendor, { collection: collectionRelated });
-				await DeleteCollection(vendor, { collection: collectionTag });
-				await DeleteCollection(vendor, { collection: collectionBlock });
-				await DeleteCollection(vendor, { collection: collectionGrandRelated });
+				await DeleteCollectionIfPresent(vendor, { collection: junctionTag });
+				await DeleteCollectionIfPresent(vendor, { collection: junctionBlock });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionMember });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionTeam });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionOwnedSubItem,
+				});
+
+				await DeleteCollectionIfPresent(vendor, { collection: collectionOwnedItem });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionScopedRel });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionScopedMulti,
+				});
+
+				// Directus drops the table before the self-FK, then fails on it.
+				await DeleteFieldIfPresent(vendor, {
+					collection: collectionScoped,
+					field: 'parent',
+				});
+
+				await DeleteCollectionIfPresent(vendor, { collection: collectionScoped });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionIgnored });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionGrandChild,
+				});
+
+				await DeleteCollectionIfPresent(vendor, { collection: collectionChild });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionFirst });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionRelated });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionTag });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionBlock });
+
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionGrandRelated,
+				});
 
 				// Create first collection
 				await CreateCollection(vendor, {

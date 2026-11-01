@@ -63,6 +63,7 @@ vi.mock('../permissions/lib/fetch-permissions.js', () => {
 const { PermissionsService } = await import('./permissions.js');
 const { ItemsService } = await import('./items.js');
 const { clearSystemCache } = await import('../cache.js');
+const { transaction } = await import('../utils/transaction.js');
 
 const plainSchema = new SchemaBuilder()
 	.collection('articles', (c) => {
@@ -230,6 +231,27 @@ describe('PermissionsService updates', () => {
 		]);
 
 		expect(clearSystemCache).toHaveBeenCalledTimes(1);
+	});
+
+	it('clears the system cache once the parent transaction commits', async () => {
+		vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([3]);
+
+		const database = knex.default({ client: MockClient });
+		const databaseTracker = createTracker(database);
+		const transactionStates: string[][] = [];
+
+		vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+			transactionStates.push(
+				databaseTracker.history.transactions.map((trx) => trx.state),
+			);
+		});
+
+		await transaction(database, async (trx) => {
+			await new PermissionsService({ knex: trx, schema: permissionsSchema })
+				.createOne({ action: 'read' });
+		});
+
+		expect(transactionStates).toEqual([['committed']]);
 	});
 
 	it('clears the system cache once per single-row update', async () => {

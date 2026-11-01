@@ -9,7 +9,7 @@ import type {
 	ResolvedEnvVariable,
 } from '@directus/types';
 import { ChildProcess, execFileSync, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -132,8 +132,8 @@ describe('Processes Report Tests', () => {
 			delete envSupervised[vendor]['CONFIG_PATH'];
 			delete envSupervised[vendor]['ROOT_REDIRECT_FILE'];
 
-			const ports = await Promise.all(envKeys.map(() => getPort()));
-			const supervisedPort = await getPort();
+			const ports = await Promise.all(envKeys.map(() => freePortOfWorker()));
+			const supervisedPort = await freePortOfWorker();
 
 			envs[vendor] = {
 				envReplicaA,

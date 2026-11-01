@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -16,8 +16,8 @@ export const seedDBStructure = () => {
 			try {
 				// Chained, not parallel: the child holds the FK, so dropping the
 				// parent while it still points at one errors.
-				await DeleteCollection(vendor, { collection: collectionChildren });
-				await DeleteCollection(vendor, { collection: collectionParents });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionChildren });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionParents });
 
 				await CreateCollections(vendor, {
 					collections: [

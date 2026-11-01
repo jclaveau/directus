@@ -9,6 +9,7 @@ export function withAppMinimalPermissions(
 	filter: Query['filter'],
 ): Permission[] {
 	if (accountability?.app === true) {
+		// The minimal rows carry no id, so a filter on id never matches them.
 		const filteredAppMinimalPermissions = cloneDeep(filterItems(appAccessMinimalPermissions, filter));
 		return [...permissions, ...filteredAppMinimalPermissions];
 	}

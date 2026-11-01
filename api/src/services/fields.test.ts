@@ -66,6 +66,26 @@ describe('Services / Fields', () => {
 				'does not have the permission to update the field',
 			);
 		});
+
+		it('rejects with the error the column builder throws', async () => {
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValueOnce({
+				name: 'title',
+				table: 'test',
+				data_type: 'varchar',
+			} as any);
+
+			const service = new FieldsService({ knex: db, schema, accountability: admin });
+
+			const promise = service.updateField(
+				'test',
+				{ field: 'title', type: 'illegal', schema: { is_nullable: true } } as any,
+				{ emitEvents: false, autoPurgeCache: false, autoPurgeSystemCache: false },
+			);
+
+			await expect(promise).rejects.toThrowError(
+				'Invalid payload. Illegal type passed: "illegal".',
+			);
+		});
 	});
 
 	describe('deleteField', () => {

@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -23,9 +23,17 @@ export const seedDBStructure = () => {
 		async (vendor) => {
 			try {
 				for (const prefix of scenarioCollectionPrefixes) {
-					await DeleteCollection(vendor, { collection: `${prefix}_witness` });
-					await DeleteCollection(vendor, { collection: `${prefix}_child` });
-					await DeleteCollection(vendor, { collection: `${prefix}_item` });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: `${prefix}_witness`,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: `${prefix}_child`,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: `${prefix}_item`,
+					});
 				}
 
 				await CreateCollections(vendor, {

@@ -21,7 +21,7 @@ import {
 } from '@utils/monitor-redis-commands';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -114,7 +114,7 @@ describe.each(vendors)('%s', (vendor) => {
 			.send({ meta: { scoped_cache_fields: ['owner', 'zone.label'] } })
 			.set('Authorization', auth);
 
-		const port = await getPort();
+		const port = await freePortOfWorker();
 		env[vendor].PORT = String(port);
 
 		instance = spawn('node', [paths.cli, 'start'], {
