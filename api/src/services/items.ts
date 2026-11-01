@@ -1544,13 +1544,7 @@ implements AbstractService<Item> {
 			const joiningRowNames = new Map<string, Set<string>>();
 
 			for (const group of writingGroups) {
-				const groupData = group.data as Partial<AnyItem>;
-
-				if (!(childrenField in groupData)) {
-					continue;
-				}
-
-				const childrenValue = groupData[childrenField];
+				const childrenValue = (group.data as Partial<AnyItem>)[childrenField];
 
 				let namedChildren: unknown[] = [childrenValue].flat();
 
