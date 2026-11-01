@@ -41,6 +41,7 @@ import { getFlowManager } from '../flows.js';
 import { useLogger } from '../logger/index.js';
 import * as services from '../services/index.js';
 import { deleteFromRequireCache } from '../utils/delete-from-require-cache.js';
+import { trackSandboxCoverage } from '../utils/dump-coverage.js';
 import getModuleDefault from '../utils/get-module-default.js';
 import { getSchema } from '../utils/get-schema.js';
 import { importFileUrl } from '../utils/import-file-url.js';
@@ -593,6 +594,22 @@ export class ExtensionManager {
 
 		await module.evaluate({ timeout: sandboxTimeout });
 
+		// what an instrumented build records stays on the isolate's globalThis
+		const isInstrumented = await context.eval(
+			'globalThis.__coverage__ !== undefined',
+			{ timeout: sandboxTimeout },
+		);
+
+		const releaseSandboxCoverage = isInstrumented
+			? trackSandboxCoverage(async () => {
+				return JSON.parse(await context.eval(
+					'JSON.stringify({ coverage: globalThis.__coverage__, '
+						+ 'coverageDirs: globalThis.__extensionCoverageDirs ?? [] })',
+					{ timeout: sandboxTimeout },
+				));
+			})
+			: undefined;
+
 		const cb = await module.namespace.get('default', { reference: true });
 
 		const { code, hostFunctions, unregisterFunction } = generateApiExtensionsSandboxEntrypoint(
@@ -608,6 +625,7 @@ export class ExtensionManager {
 
 		this.unregisterFunctionMap.set(extension.name, async () => {
 			await unregisterFunction();
+			await releaseSandboxCoverage?.();
 
 			if (!isolate.isDisposed) isolate.dispose();
 		});

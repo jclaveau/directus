@@ -256,6 +256,81 @@ describe('dumpCoverage', () => {
 		]);
 	});
 
+	test('runs the dump asked after a failed one', async () => {
+		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
+		await writeFile(join(workDir, 'core'), '');
+		(globalThis as Record<string, unknown>)['__coverage__'] = { 'src/app.ts': {} };
+
+		await expect(dumpCoverage()).rejects.toThrow(new Error(
+			`Coverage not written to ${join(workDir, 'core')}: EEXIST: file already `
+				+ `exists, mkdir '${join(workDir, 'core')}'`,
+		));
+
+		await rm(join(workDir, 'core'));
+
+		await expect(dumpCoverage()).resolves.toEqual([
+			{ dir: join(workDir, 'core'), fileCount: 1 },
+		]);
+	});
+
+	test('writes the coverage a sandbox recorded where it registered', async () => {
+		vi.resetModules();
+		const reloadedModule = await import('./dump-coverage.js');
+
+		expect(reloadedModule.isCoverageInstrumented()).toBe(false);
+
+		reloadedModule.trackSandboxCoverage(async () => {
+			return {
+				coverage: { '/ext/src/a.ts': { hash: 'h1', s: { 0: 1 }, f: {}, b: {} } },
+				coverageDirs: [{
+					sourceRoot: '/ext',
+					coverageDir: join(workDir, 'ext/cov'),
+					sourceFiles: ['/ext/src/a.ts'],
+				}],
+			};
+		});
+
+		expect(reloadedModule.isCoverageInstrumented()).toBe(true);
+
+		await expect(reloadedModule.dumpCoverage()).resolves.toEqual([
+			{ dir: join(workDir, 'ext/cov'), fileCount: 1 },
+		]);
+	});
+
+	test('starts a file over when its code changed between two loads', async () => {
+		vi.resetModules();
+		const reloadedModule = await import('./dump-coverage.js');
+
+		const coverageDirs = [{
+			sourceRoot: '/ext',
+			coverageDir: join(workDir, 'ext/cov'),
+			sourceFiles: ['/ext/src/a.ts'],
+		}];
+
+		reloadedModule.trackSandboxCoverage(async () => {
+			return {
+				coverage: { '/ext/src/a.ts': { hash: 'h1', s: { 0: 5 }, f: {}, b: {} } },
+				coverageDirs,
+			};
+		});
+
+		reloadedModule.trackSandboxCoverage(async () => {
+			return {
+				coverage: { '/ext/src/a.ts': { hash: 'h2', s: { 0: 1 }, f: {}, b: {} } },
+				coverageDirs,
+			};
+		});
+
+		await reloadedModule.dumpCoverage();
+
+		await expect(readFile(
+			join(workDir, 'ext/cov', reloadedModule.COVERAGE_DUMP_NAME),
+			'utf8',
+		)).resolves.toBe(JSON.stringify({
+			'/ext/src/a.ts': { hash: 'h2', s: { 0: 1 }, f: {}, b: {} },
+		}));
+	});
+
 	test('gives a reused pid a new file', async () => {
 		expect(COVERAGE_DUMP_NAME).toMatch(
 			new RegExp(`^cov-${process.pid}-\\d+\\.json$`),

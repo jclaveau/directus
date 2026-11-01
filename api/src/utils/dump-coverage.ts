@@ -21,6 +21,15 @@ export interface ExtensionCoverageDir {
 	sourceFiles: string[];
 }
 
+/**
+ * What the instrumented code of a sandboxed extension recorded: it runs in its
+ * own isolate, whose globalThis is not the server's.
+ */
+export interface SandboxCoverage {
+	coverage: CoverageMap;
+	coverageDirs: ExtensionCoverageDir[];
+}
+
 export interface WrittenCoverage {
 	dir: string;
 	fileCount: number;
@@ -36,6 +45,16 @@ export const COVERAGE_DUMP_NAME
 
 let pendingDump: Promise<unknown> = Promise.resolve();
 
+const sandboxCoverageReaders = new Set<() => Promise<SandboxCoverage>>();
+
+/** istanbul's hit counters of one file, the part two runs of it add up. */
+interface FileCoverage {
+	hash?: string;
+	s: Record<string, number>;
+	f: Record<string, number>;
+	b: Record<string, number[]>;
+}
+
 /**
  * The coverage of every instrumented module loaded so far, or undefined when
  * nothing loaded was instrumented, which is every build but a coverage one.
@@ -44,6 +63,32 @@ export function readCoverage(): CoverageMap | undefined {
 	return (globalThis as Record<string, unknown>)['__coverage__'] as
 		| CoverageMap
 		| undefined;
+}
+
+/**
+ * Whether anything loaded so far is instrumented, in the server or in a
+ * sandbox.
+ */
+export function isCoverageInstrumented(): boolean {
+	return readCoverage() !== undefined;
+}
+
+/**
+ * Have every dump read the coverage of a sandboxed extension through
+ * `readSandboxCoverage`. The returned function reads it one last time, for an
+ * isolate about to be disposed: an unloaded extension keeps its coverage, as
+ * one loaded in the server does.
+ */
+export function trackSandboxCoverage(
+	readSandboxCoverage: () => Promise<SandboxCoverage>,
+): () => Promise<void> {
+	let readTrackedCoverage = readSandboxCoverage;
+
+	sandboxCoverageReaders.add(() => readTrackedCoverage());
+
+	return async () => {
+		readTrackedCoverage = readSandboxCoverage;
+	};
 }
 
 /**
@@ -113,24 +158,92 @@ export function splitCoverage(
  * after the other, since two of them would write the same files.
  */
 export function dumpCoverage(): Promise<WrittenCoverage[]> {
-	const dump = pendingDump.then(writeCoverage, writeCoverage);
+	const dump = pendingDump.then(writeCoverage);
 
 	// The chain only orders the dumps; the caller of this one gets its error.
-	pendingDump = dump.catch(() => undefined);
+	pendingDump = dump;
 
 	return dump;
 }
 
-async function writeCoverage(): Promise<WrittenCoverage[]> {
-	const coverage = readCoverage();
+/**
+ * The server's coverage and every sandbox's, in one map. A file two sandboxes
+ * recorded, the same extension loaded again, has its hits added up while its
+ * code is unchanged; changed code starts over, as istanbul does in the server.
+ */
+async function collectCoverage(): Promise<SandboxCoverage | undefined> {
+	const serverCoverage = readCoverage();
 
-	if (coverage === undefined) {
+	const sandboxCoverages = await Promise.all(
+		[...sandboxCoverageReaders].map((readSandboxCoverage) => {
+			return readSandboxCoverage();
+		}),
+	);
+
+	if (serverCoverage === undefined && sandboxCoverages.length === 0) {
+		return undefined;
+	}
+
+	const coverage: CoverageMap = { ...serverCoverage };
+	const coverageDirs = readExtensionCoverageDirs();
+
+	for (const sandboxCoverage of sandboxCoverages) {
+		coverageDirs.push(...sandboxCoverage.coverageDirs);
+
+		for (const [sourceFile, fileCoverage] of Object.entries(
+			sandboxCoverage.coverage,
+		)) {
+			coverage[sourceFile] = sourceFile in coverage
+				? addFileCoverage(
+					coverage[sourceFile] as FileCoverage,
+					fileCoverage as FileCoverage,
+				)
+				: fileCoverage;
+		}
+	}
+
+	return { coverage, coverageDirs };
+}
+
+function addFileCoverage(
+	earlierCoverage: FileCoverage,
+	laterCoverage: FileCoverage,
+): FileCoverage {
+	if (earlierCoverage.hash === undefined) {
+		return laterCoverage;
+	}
+
+	const addHits = (
+		earlierHits: Record<string, number>,
+		laterHits: Record<string, number>,
+	) => {
+		return Object.fromEntries(Object.entries(laterHits).map(([id, hitCount]) => {
+			return [id, hitCount + (earlierHits[id] ?? 0)];
+		}));
+	};
+
+	return {
+		...laterCoverage,
+		s: addHits(earlierCoverage.s, laterCoverage.s),
+		f: addHits(earlierCoverage.f, laterCoverage.f),
+		b: Object.fromEntries(Object.entries(laterCoverage.b).map(([id, hitCounts]) => {
+			return [id, hitCounts.map((hitCount, index) => {
+				return hitCount + (earlierCoverage.b[id]?.[index] ?? 0);
+			})];
+		})),
+	};
+}
+
+async function writeCoverage(): Promise<WrittenCoverage[]> {
+	const collectedCoverage = await collectCoverage();
+
+	if (collectedCoverage === undefined) {
 		return [];
 	}
 
 	const { coverageByDir, unownedCount } = splitCoverage(
-		coverage,
-		readExtensionCoverageDirs(),
+		collectedCoverage.coverage,
+		collectedCoverage.coverageDirs,
 		process.env['COVERAGE_DIR'] || undefined,
 	);
 

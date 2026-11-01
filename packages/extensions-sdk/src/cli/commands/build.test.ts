@@ -556,6 +556,81 @@ describe('build', () => {
 		);
 
 		test(
+			'registers the coverage directory from a spread-out api entrypoint',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{ preserveModules: true },
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					(globalThis as Record<string, unknown>)['__extensionCoverageDirs'],
+				).toEqual([
+					{
+						sourceRoot: packageRoot,
+						coverageDir: resolve(packageRoot, 'coverage/backend'),
+						sourceFiles: [resolve(packageRoot, 'src/index.ts')],
+					},
+				]);
+			},
+			30_000,
+		);
+
+		test(
+			'instruments the api side of a hybrid, never its app side',
+			async () => {
+				const random = Math.random().toString(36);
+
+				const extensionPath
+					= `${TEST_PREFIX}-operation-${Date.now()}-${random.slice(2)}`;
+
+				await create('operation', extensionPath, {
+					language: 'typescript',
+					install: false,
+				});
+
+				await fse.ensureSymlink(
+					origCwd,
+					resolve(
+						origCwd,
+						extensionPath,
+						'node_modules/@directus/extensions-sdk',
+					),
+					'dir',
+				);
+
+				await fse.writeFile(
+					resolve(origCwd, extensionPath, 'extension.config.mjs'),
+					'export default { coverage: true };\n',
+				);
+
+				process.chdir(resolve(origCwd, extensionPath));
+
+				try {
+					await build({});
+				}
+				finally {
+					process.chdir(origCwd);
+				}
+
+				const distPath = resolve(origCwd, extensionPath, 'dist');
+
+				// app.js is downloaded by the browser, which never dumps a coverage
+				await expect(fse.readFile(resolve(distPath, 'app.js'), 'utf8'))
+					.resolves.not.toContain('__coverage__');
+
+				await expect(fse.readFile(resolve(distPath, 'api.js'), 'utf8'))
+					.resolves.toContain('__extensionCoverageDirs');
+			},
+			60_000,
+		);
+
+		test(
 			'registers a file it imports from outside the package as its own',
 			async () => {
 				const sharedPath = `${TEST_PREFIX}-shared-${Date.now()}`;

@@ -110,6 +110,26 @@ describe('resolveCoverageTarget', () => {
 		});
 	});
 
+	test('escapes the extglob characters of the package path', () => {
+		expect(resolveCoverageTarget({
+			coverageConfig: { include: 'src/**' },
+			extensionType: 'endpoint',
+			sourceRoot: '/repo/e*x?t!+@|',
+			nodeEnv: 'test',
+		})).toEqual({
+			sourceRoot: '/repo/e*x?t!+@|',
+			coverageDir: '/repo/e*x?t!+@|/coverage/backend',
+			pluginOptions: {
+				include: ['/repo/e[*]x[?]t[!][+][@][|]/src/**'],
+				exclude: [
+					'/repo/e[*]x[?]t[!][+][@][|]/node_modules/**',
+					'**/*.d.ts',
+				],
+				instrumenterConfig: DEFAULT_INSTRUMENTER_CONFIG,
+			},
+		});
+	});
+
 	test('passes the plugin options through, anchoring relative globs', () => {
 		const customInstrumenter = { createInstrumenter: () => ({}) };
 
@@ -266,10 +286,15 @@ describe('resolveCoverageTarget', () => {
 		}).toThrow(new Error(refusal));
 	});
 
-	test('refuses a coverage that is neither a boolean nor an options object', () => {
+	test.each([
+		{ coverageConfig: 'coverage/backend', shown: '"coverage/backend"' },
+		{ coverageConfig: ['coverage/backend'], shown: '["coverage/backend"]' },
+		{ coverageConfig: { enabled: 'false' }, shown: '{"enabled":"false"}' },
+		{ coverageConfig: { dir: 5 }, shown: '{"dir":5}' },
+	])('refuses the coverage $shown', ({ coverageConfig, shown }) => {
 		expect(() => {
 			return resolveCoverageTarget({
-				coverageConfig: 'coverage/backend' as never,
+				coverageConfig: coverageConfig as never,
 				extensionType: 'endpoint',
 				sourceRoot: '/repo/ext',
 				nodeEnv: 'test',
@@ -277,7 +302,7 @@ describe('resolveCoverageTarget', () => {
 		}).toThrow(new Error(
 			'coverage in extension.config.js must be true, false or an object of '
 				+ 'rolldown-plugin-istanbul options with an optional enabled and dir, '
-				+ 'not "coverage/backend".',
+				+ `not ${shown}.`,
 		));
 	});
 });

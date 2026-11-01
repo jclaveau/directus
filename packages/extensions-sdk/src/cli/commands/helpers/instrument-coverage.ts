@@ -207,22 +207,11 @@ function isFilterPattern(filterPattern: unknown): boolean {
  * every one into a path separator, so each special character goes in a class.
  */
 function escapeGlob(literalPath: string): string {
-	return literalPath.replace(/[()[\]{}*?!+@|]/g, '[$&]');
+	return literalPath.replace(/[()[\]{}]/g, '[$&]');
 }
 
 function isCoverageObject(coverageConfig: unknown): boolean {
-	if (
-		typeof coverageConfig !== 'object'
-		|| coverageConfig === null
-		|| Array.isArray(coverageConfig)
-	) {
-		return false;
-	}
-
-	const { enabled, dir } = coverageConfig as Record<string, unknown>;
-
-	return (enabled === undefined || typeof enabled === 'boolean')
-		&& (dir === undefined || typeof dir === 'string');
+	return typeof coverageConfig === 'object' && coverageConfig !== null;
 }
 
 /**

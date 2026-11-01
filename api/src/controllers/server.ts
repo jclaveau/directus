@@ -6,7 +6,7 @@ import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import { ServerService } from '../services/server.js';
 import { SpecificationService } from '../services/specifications.js';
 import asyncHandler from '../utils/async-handler.js';
-import { dumpCoverage, readCoverage } from '../utils/dump-coverage.js';
+import { dumpCoverage, isCoverageInstrumented } from '../utils/dump-coverage.js';
 import { format } from '../utils/date-fns-used.js';
 
 const router = Router();
@@ -115,7 +115,7 @@ router.get(
 router.post(
 	'/dump-coverage',
 	asyncHandler(async (req, res, next) => {
-		if (readCoverage() === undefined) {
+		if (!isCoverageInstrumented()) {
 			// unset counts as production: a deployed server must not reveal the route
 			if ((getNodeEnv() || 'production') === 'production') {
 				throw new RouteNotFoundError({ path: req.path });

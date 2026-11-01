@@ -789,9 +789,7 @@ function getRollupOptions({
 		plugins: [
 			typeof input !== 'string' ? virtual(input) : null,
 			// only the api side runs on the server that dumps the coverage
-			mode === 'node'
-				? coverageInstrumentation?.plugin
-				: null,
+			coverageInstrumentation?.plugin,
 			mode === 'browser' ? vue({ isProduction: true }) : null,
 			mode === 'browser' ? styles() : null,
 			...plugins,
@@ -851,7 +849,6 @@ function getRollupOutputOptions({
 			exports: 'auto',
 			preserveModules: true,
 			sourcemap,
-			...bannerOption,
 		};
 	}
 

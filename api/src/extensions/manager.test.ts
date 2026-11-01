@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 // The manager reaches half the api to register an extension, so everything below
@@ -85,6 +88,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 const { ExtensionManager } = await import('./manager.js');
 const { default: emitter } = await import('../emitter.js');
+
+const { COVERAGE_DUMP_NAME, dumpCoverage } = await import(
+	'../utils/dump-coverage.js'
+);
 
 beforeEach(() => {
 	mocks.env = { ...mocks.defaultEnv };
@@ -220,4 +227,74 @@ export default ({ filter }) => {
 	const filtered = emitter.emitFilter(SANDBOX_EVENT, { value: 1 }, {}, null);
 
 	await expect(filtered).resolves.toEqual({ value: 1, seen: true });
+});
+
+test('dumps what a sandboxed extension recorded, unloaded or not', async () => {
+	const coverageDir = await realpath(
+		await mkdtemp(join(tmpdir(), 'sandbox-coverage-')),
+	);
+
+	// what an instrumented build records, on the isolate's own globalThis
+	mocks.sandboxedCode = `
+globalThis.__extensionCoverageDirs = [{
+	sourceRoot: '/ext',
+	coverageDir: ${JSON.stringify(coverageDir)},
+	sourceFiles: ['/ext/src/index.ts'],
+}];
+globalThis.__coverage__ = {
+	'/ext/src/index.ts': {
+		hash: 'h1', s: { 0: 1 }, f: { 0: 1 }, b: { 0: [1, 0] },
+	},
+};
+export default () => {};
+`;
+
+	mocks.extensions = {
+		local: new Map([
+			[
+				SANDBOX_FOLDER,
+				{
+					type: 'hook',
+					name: SANDBOX_FOLDER,
+					path: `/extensions/${SANDBOX_FOLDER}`,
+					entrypoint: 'index.js',
+					local: true,
+					sandbox: { enabled: true, requestedScopes: {} },
+				},
+			],
+		]),
+		registry: new Map(),
+		module: new Map(),
+	};
+
+	mocks.settings = [
+		{ id: '1', source: 'local', folder: SANDBOX_FOLDER, enabled: true },
+	];
+
+	const manager = new ExtensionManager();
+
+	try {
+		await manager.initialize({ schedule: false, watch: false });
+
+		// the first isolate is disposed, and a second one records the same file
+		await manager.reload();
+
+		await expect(dumpCoverage()).resolves.toEqual([
+			{ dir: coverageDir, fileCount: 1 },
+		]);
+
+		await expect(
+			readFile(join(coverageDir, COVERAGE_DUMP_NAME), 'utf8'),
+		).resolves.toBe(JSON.stringify({
+			'/ext/src/index.ts': {
+				hash: 'h1',
+				s: { 0: 2 },
+				f: { 0: 2 },
+				b: { 0: [2, 0] },
+			},
+		}));
+	}
+	finally {
+		await rm(coverageDir, { recursive: true, force: true });
+	}
 });

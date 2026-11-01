@@ -23,11 +23,13 @@ vi.mock('../scoped-cache/index.js', () => {
 	return { scopedCachePurgeEnabled: () => scopedCachePurgeEnabled() };
 });
 
-const { readCoverage, dumpCoverage } = vi.hoisted(() => {
-	return { readCoverage: vi.fn(), dumpCoverage: vi.fn() };
+const { isCoverageInstrumented, dumpCoverage } = vi.hoisted(() => {
+	return { isCoverageInstrumented: vi.fn(), dumpCoverage: vi.fn() };
 });
 
-vi.mock('../utils/dump-coverage.js', () => ({ readCoverage, dumpCoverage }));
+vi.mock('../utils/dump-coverage.js', () => {
+	return { isCoverageInstrumented, dumpCoverage };
+});
 
 const { default: router } = await import('./server.js');
 
@@ -94,7 +96,7 @@ describe('server controller POST /dump-coverage', () => {
 		{ nodeEnv: '' },
 	])('hides the route when NODE_ENV is $nodeEnv', async ({ nodeEnv }) => {
 		vi.stubEnv('NODE_ENV', nodeEnv);
-		readCoverage.mockReturnValue(undefined);
+		isCoverageInstrumented.mockReturnValue(false);
 
 		const { res, next } = await callCoverage();
 
@@ -108,7 +110,7 @@ describe('server controller POST /dump-coverage', () => {
 
 	test('says nothing is instrumented outside production', async () => {
 		vi.stubEnv('NODE_ENV', 'development');
-		readCoverage.mockReturnValue(undefined);
+		isCoverageInstrumented.mockReturnValue(false);
 
 		const { res, next } = await callCoverage();
 
@@ -124,7 +126,7 @@ describe('server controller POST /dump-coverage', () => {
 	});
 
 	test('answers with the directories it wrote', async () => {
-		readCoverage.mockReturnValue({ 'src/app.ts': {} });
+		isCoverageInstrumented.mockReturnValue(true);
 
 		dumpCoverage.mockResolvedValue([
 			{ dir: '/repo/ext/coverage/.tmp/backend', fileCount: 121 },
