@@ -173,6 +173,13 @@ export type MutationOptions = {
 	keysFromQuery?: boolean | undefined;
 
 	/**
+	 * An update refuses with a 404 a key no row holds, told off the UPDATE's
+	 * count: the filter hooks run before it, and the rollback undoes what they
+	 * wrote through the transaction. Set by updateOne for an admin.
+	 */
+	refuseMissingKeys?: boolean | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
