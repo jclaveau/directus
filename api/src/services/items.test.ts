@@ -5620,6 +5620,33 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 		]);
 	});
 
+	it('refuses an admin update of a key no row holds a hook cancelled', async () => {
+		const cancellingFilter = vi.fn(() => null);
+
+		emitter.onFilter('test.items.update', cancellingFilter);
+
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		try {
+			await expect(adminService.updateOne(
+				999,
+				{ name: 'patched' },
+				{ allowFilterCancel: true },
+			)).rejects.toStrictEqual(
+				new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.update', cancellingFilter);
+		}
+
+		expect(cancellingFilter).toHaveBeenCalledTimes(1);
+	});
+
 	it('refuses an admin delete of a key no row holds', async () => {
 		const adminService = new ItemsService('test', {
 			knex: database,
