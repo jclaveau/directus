@@ -177,7 +177,8 @@ export type MutationOptions = {
 	 * count: the filter hooks run before it, and the rollback undoes what they
 	 * wrote through the transaction. Set by updateOne for an admin. It is not
 	 * gated on accountability: a non-admin caller setting it learns whether a key
-	 * it cannot read is held.
+	 * it cannot read is held. A postgres `DO INSTEAD` rule on the table answers
+	 * with its own statement's count, which the check trusts as the UPDATE's.
 	 */
 	refuseMissingKeys?: boolean | undefined;
 

@@ -3506,7 +3506,9 @@ implements AbstractService<Item> {
 	 * delete's count, so a delete reaching every key reads nothing more; the
 	 * delete runs under a savepoint so that, on a shortfall, the rows come back
 	 * to be read for the key none holds. Keys a query resolved were not named
-	 * by the caller, so one another delete took meanwhile is skipped.
+	 * by the caller, so one another delete took meanwhile is skipped. A postgres
+	 * `DO INSTEAD` rule on the table answers with its own statement's count,
+	 * which is trusted as the delete's.
 	 */
 	private async deleteKeyRows(
 		keys: PrimaryKey[],
