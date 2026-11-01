@@ -147,6 +147,22 @@ export function resolveCoverageTarget({
  * or that leaves its files somewhere no merge looks.
  */
 function refuseUnreadCoverage(coverageOptions: CoverageConfig): void {
+	const instrumenterConfig: unknown = coverageOptions.instrumenterConfig;
+
+	// spread over the defaults, anything but an object would be dropped unseen
+	if (
+		instrumenterConfig !== undefined
+		&& (typeof instrumenterConfig !== 'object'
+			|| instrumenterConfig === null
+			|| Array.isArray(instrumenterConfig))
+	) {
+		throw new Error(
+			'coverage.instrumenterConfig must be an object of '
+				+ 'istanbul-lib-instrument options, not '
+				+ `${JSON.stringify(instrumenterConfig)}.`,
+		);
+	}
+
 	const {
 		coverageVariable,
 		coverageGlobalScope,
@@ -180,13 +196,42 @@ function refuseUnreadCoverage(coverageOptions: CoverageConfig): void {
 		throw new Error('coverage.dir must name a directory, not "".');
 	}
 
-	for (const filterKey of ['include', 'exclude'] as const) {
-		const filterPattern: unknown = coverageOptions[filterKey];
+	const includePattern: unknown = coverageOptions.include;
 
-		if (filterPattern !== undefined && !isFilterPattern(filterPattern)) {
+	// createFilter reads an empty include as every module outside node_modules
+	if (
+		includePattern !== undefined
+		&& (!isFilterPattern(includePattern)
+			|| includePattern === null
+			|| (Array.isArray(includePattern) && includePattern.length === 0))
+	) {
+		throw new Error(
+			'coverage.include must be a glob, a regular expression or a non-empty '
+				+ `array of them, not ${JSON.stringify(includePattern)}.`,
+		);
+	}
+
+	const excludePattern: unknown = coverageOptions.exclude;
+
+	if (excludePattern !== undefined && !isFilterPattern(excludePattern)) {
+		throw new Error(
+			'coverage.exclude must be a glob, a regular expression, an array of '
+				+ `them or null, not ${JSON.stringify(excludePattern)}.`,
+		);
+	}
+
+	for (const filterKey of ['include', 'exclude'] as const) {
+		const filterEntries = [coverageOptions[filterKey] ?? []].flat();
+
+		const negatedGlob = filterEntries.find((filterEntry) => {
+			return typeof filterEntry === 'string' && filterEntry.startsWith('!');
+		});
+
+		// anchored to the package, the ! lands mid-path, where it negates nothing
+		if (negatedGlob !== undefined) {
 			throw new Error(
-				`coverage.${filterKey} must be a glob, a regular expression, an `
-					+ `array of them or null, not ${JSON.stringify(filterPattern)}.`,
+				`coverage.${filterKey} cannot hold the negated glob `
+					+ `"${negatedGlob}": createFilter matches it as a literal path.`,
 			);
 		}
 	}

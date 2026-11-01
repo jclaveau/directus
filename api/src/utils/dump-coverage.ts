@@ -45,7 +45,13 @@ export const COVERAGE_DUMP_NAME
 
 let pendingDump: Promise<unknown> = Promise.resolve();
 
-const sandboxCoverageReaders = new Set<() => Promise<SandboxCoverage>>();
+/** Reads one sandbox's coverage; `readSource` names it in a failed read. */
+interface SandboxCoverageReader {
+	readSource: string;
+	readCoverage: () => Promise<SandboxCoverage>;
+}
+
+const sandboxCoverageReaders = new Set<SandboxCoverageReader>();
 
 /** istanbul's hit counters of one file, the part two runs of it add up. */
 interface FileCoverage {
@@ -78,15 +84,21 @@ export function isCoverageInstrumented(): boolean {
  * `readSandboxCoverage`. The returned function reads it one last time, for an
  * isolate about to be disposed: an unloaded extension keeps its coverage, as
  * one loaded in the server does. Each load keeps its last coverage until the
- * process exits, which bounds a coverage run, not a production server.
+ * process exits, which bounds a coverage run, not a production server. A last
+ * read that fails does not fail the unload: every later dump names the sandbox.
  */
 export function trackSandboxCoverage(
 	readSandboxCoverage: () => Promise<SandboxCoverage>,
+	extensionName: string,
 ): () => Promise<void> {
-	let readTrackedCoverage = readSandboxCoverage;
+	const sandboxReader: SandboxCoverageReader = {
+		readSource: `the sandbox of "${extensionName}"`,
+		readCoverage: readSandboxCoverage,
+	};
+
 	let isReleased = false;
 
-	sandboxCoverageReaders.add(() => readTrackedCoverage());
+	sandboxCoverageReaders.add(sandboxReader);
 
 	return async () => {
 		// a removed extension is unloaded again by every later reload
@@ -96,9 +108,18 @@ export function trackSandboxCoverage(
 
 		isReleased = true;
 
-		const lastCoverage = await readSandboxCoverage();
+		try {
+			const lastCoverage = await readSandboxCoverage();
 
-		readTrackedCoverage = async () => lastCoverage;
+			sandboxReader.readCoverage = async () => lastCoverage;
+		}
+		catch (error) {
+			sandboxReader.readSource += ' when it was unloaded';
+
+			sandboxReader.readCoverage = async () => {
+				throw error;
+			};
+		}
 	};
 }
 
@@ -177,21 +198,35 @@ export function dumpCoverage(): Promise<WrittenCoverage[]> {
 	return dump;
 }
 
+interface CollectedCoverage extends SandboxCoverage {
+	failedReads: string[];
+}
+
 /**
  * The server's coverage and every sandbox's, in one map. A file two sandboxes
  * recorded, the same extension loaded again, has its hits added up while its
  * code is unchanged; changed code starts over, as istanbul does in the server.
  */
-async function collectCoverage(): Promise<SandboxCoverage | undefined> {
+async function collectCoverage(): Promise<CollectedCoverage | undefined> {
 	const serverCoverage = readCoverage();
+	const sandboxCoverages: SandboxCoverage[] = [];
+	const failedReads: string[] = [];
 
-	const sandboxCoverages = await Promise.all(
-		[...sandboxCoverageReaders].map((readSandboxCoverage) => {
-			return readSandboxCoverage();
-		}),
-	);
+	// one sandbox that cannot be read must not cost the others their coverage
+	for (const sandboxReader of sandboxCoverageReaders) {
+		try {
+			sandboxCoverages.push(await sandboxReader.readCoverage());
+		}
+		catch (error) {
+			const { message } = error as Error;
 
-	if (serverCoverage === undefined && sandboxCoverages.length === 0) {
+			failedReads.push(
+				`Coverage not read from ${sandboxReader.readSource}: ${message}`,
+			);
+		}
+	}
+
+	if (serverCoverage === undefined && sandboxCoverageReaders.size === 0) {
 		return undefined;
 	}
 
@@ -213,7 +248,7 @@ async function collectCoverage(): Promise<SandboxCoverage | undefined> {
 		}
 	}
 
-	return { coverage, coverageDirs };
+	return { coverage, coverageDirs, failedReads };
 }
 
 function addFileCoverage(
@@ -287,8 +322,15 @@ async function writeCoverage(): Promise<WrittenCoverage[]> {
 		});
 	}
 
-	if (failedWrites.length > 0) {
-		throw new Error(`Coverage not written to ${failedWrites.join('; ')}`);
+	const failures = [
+		...collectedCoverage.failedReads,
+		...(failedWrites.length > 0
+			? [`Coverage not written to ${failedWrites.join('; ')}`]
+			: []),
+	];
+
+	if (failures.length > 0) {
+		throw new Error(failures.join('; '));
 	}
 
 	return writtenCoverage;

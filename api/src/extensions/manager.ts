@@ -651,7 +651,7 @@ export class ExtensionManager {
 						+ 'coverageDirs: globalThis.__extensionCoverageDirs ?? [] })',
 					{ timeout: sandboxTimeout },
 				));
-			})
+			}, extension.name)
 			: undefined;
 
 		const cb = await module.namespace.get('default', { reference: true });
@@ -668,10 +668,15 @@ export class ExtensionManager {
 		});
 
 		this.unregisterFunctionMap.set(extension.name, async () => {
-			await unregisterFunction();
-			await releaseSandboxCoverage?.();
-
-			if (!isolate.isDisposed) isolate.dispose();
+			try {
+				await unregisterFunction();
+				await releaseSandboxCoverage?.();
+			}
+			finally {
+				if (!isolate.isDisposed) {
+					isolate.dispose();
+				}
+			}
 		});
 	}
 
