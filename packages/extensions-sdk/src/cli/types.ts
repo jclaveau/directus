@@ -18,7 +18,9 @@ export type Config = {
 	 * Instrument the api entrypoint with istanbul, for the server to dump its
 	 * coverage to `dir`, relative to the package: `true` is `{}`, which
 	 * instruments the package's own sources and dumps to `coverage/backend`.
-	 * Refused for an app-only extension and when NODE_ENV is production.
+	 * Every file the build instrumented goes to `dir`, one imported from outside
+	 * the package too. Refused for an app-only extension and when NODE_ENV is
+	 * production.
 	 */
 	coverage?: boolean | CoverageConfig;
 	watch?: {

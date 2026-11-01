@@ -1,7 +1,12 @@
 import { APP_EXTENSION_TYPES } from '@directus/constants';
 import { realpathSync } from 'node:fs';
 import path from 'path';
-import type { Plugin } from 'rolldown';
+import type {
+	Plugin,
+	RenderedChunk,
+	TransformPluginContext,
+	TransformResult,
+} from 'rolldown';
 import type {
 	FilterPattern,
 	InstrumenterOptions,
@@ -34,6 +39,7 @@ export const DEFAULT_INSTRUMENTER_CONFIG: InstrumenterOptions = {
 		'classProperties',
 		'classPrivateProperties',
 		'classPrivateMethods',
+		'decorators-legacy',
 		'dynamicImport',
 		'importMeta',
 		'numericSeparator',
@@ -105,15 +111,7 @@ export function resolveCoverageTarget({
 		? {}
 		: coverageConfig;
 
-	const coverageVariable = coverageOptions.instrumenterConfig?.coverageVariable;
-
-	if (coverageVariable !== undefined && coverageVariable !== COVERAGE_VARIABLE) {
-		throw new Error(
-			'coverage.instrumenterConfig.coverageVariable must be '
-				+ `"${COVERAGE_VARIABLE}", the global the server dumps, not `
-				+ `"${coverageVariable}".`,
-		);
-	}
+	refuseUnreadCoverage(coverageOptions);
 
 	const globRoot = escapeGlob(sourceRoot);
 
@@ -142,6 +140,66 @@ export function resolveCoverageTarget({
 				: { instrumenter: coverageOptions.instrumenter }),
 		},
 	};
+}
+
+/**
+ * Refuses an option that builds fine but whose coverage the server never finds,
+ * or that leaves its files somewhere no merge looks.
+ */
+function refuseUnreadCoverage(coverageOptions: CoverageConfig): void {
+	const {
+		coverageVariable,
+		coverageGlobalScope,
+		coverageGlobalScopeFunc,
+	} = coverageOptions.instrumenterConfig ?? {};
+
+	if (coverageVariable !== undefined && coverageVariable !== COVERAGE_VARIABLE) {
+		throw new Error(
+			'coverage.instrumenterConfig.coverageVariable must be '
+				+ `"${COVERAGE_VARIABLE}", the global the server dumps, not `
+				+ `"${coverageVariable}".`,
+		);
+	}
+
+	if (coverageGlobalScope !== undefined && coverageGlobalScope !== 'this') {
+		throw new Error(
+			'coverage.instrumenterConfig.coverageGlobalScope must be "this", the '
+				+ 'global object the server dumps from, not '
+				+ `"${coverageGlobalScope}".`,
+		);
+	}
+
+	if (coverageGlobalScopeFunc === false) {
+		throw new Error(
+			'coverage.instrumenterConfig.coverageGlobalScopeFunc must be true: an '
+				+ 'ES module has no top-level this to hold the coverage.',
+		);
+	}
+
+	if (coverageOptions.dir === '') {
+		throw new Error('coverage.dir must name a directory, not "".');
+	}
+
+	for (const filterKey of ['include', 'exclude'] as const) {
+		const filterPattern: unknown = coverageOptions[filterKey];
+
+		if (filterPattern !== undefined && !isFilterPattern(filterPattern)) {
+			throw new Error(
+				`coverage.${filterKey} must be a glob, a regular expression, an `
+					+ `array of them or null, not ${JSON.stringify(filterPattern)}.`,
+			);
+		}
+	}
+}
+
+function isFilterPattern(filterPattern: unknown): boolean {
+	const isFilterEntry = (filterEntry: unknown) => {
+		return typeof filterEntry === 'string' || filterEntry instanceof RegExp;
+	};
+
+	return filterPattern === null
+		|| isFilterEntry(filterPattern)
+		|| (Array.isArray(filterPattern) && filterPattern.every(isFilterEntry));
 }
 
 /**
@@ -202,29 +260,49 @@ function anchorFilterPattern(
 /**
  * Prepended to every chunk of an instrumented API bundle. It refuses to run in
  * production, before any instrumented code does, and tells the server which
- * directory this package's coverage is dumped to: the server reads no
- * extension.config.js.
+ * directory the files instrumented into this chunk have their coverage dumped
+ * to: the server reads no extension.config.js. A file is routed by the build
+ * that bundled it, not by where it lies, so a shared one imported from outside
+ * the package goes with it.
  */
-export function renderCoverageBanner(coverageTarget: CoverageTarget): string {
+export function renderCoverageBanner(
+	coverageTarget: CoverageTarget,
+	sourceFiles: string[],
+): string {
 	const registeredDir = JSON.stringify({
 		sourceRoot: coverageTarget.sourceRoot,
 		coverageDir: coverageTarget.coverageDir,
+		sourceFiles: [...sourceFiles].sort(),
 	});
 
-	// one entry per package, every chunk of a preserveModules build carrying
-	// this banner, and a rebuild reloaded in the same process replacing its own
+	// one entry per package: every chunk of a preserveModules build adds its
+	// files to it, and a rebuild with another dir, reloaded in the same
+	// process, replaces it
 	return [
 		`if (process.env.NODE_ENV === 'production') {`,
 		`\tthrow new Error(${JSON.stringify(COVERAGE_IN_PRODUCTION_MESSAGE)});`,
 		`}`,
 		`{`,
 		`\tconst registeredDir = ${registeredDir};`,
-		`\tglobalThis.__extensionCoverageDirs = [`,
-		`\t\t...(globalThis.__extensionCoverageDirs ?? []).filter((otherDir) => {`,
-		`\t\t\treturn otherDir.sourceRoot !== registeredDir.sourceRoot;`,
-		`\t\t}),`,
-		`\t\tregisteredDir,`,
-		`\t];`,
+		`\tconst registeredDirs = globalThis.__extensionCoverageDirs ?? [];`,
+		`\tconst samePackageDir = registeredDirs.find((otherDir) => {`,
+		`\t\treturn otherDir.sourceRoot === registeredDir.sourceRoot`,
+		`\t\t\t&& otherDir.coverageDir === registeredDir.coverageDir;`,
+		`\t});`,
+		`\tif (samePackageDir === undefined) {`,
+		`\t\tglobalThis.__extensionCoverageDirs = [`,
+		`\t\t\t...registeredDirs.filter((otherDir) => {`,
+		`\t\t\t\treturn otherDir.sourceRoot !== registeredDir.sourceRoot;`,
+		`\t\t\t}),`,
+		`\t\t\tregisteredDir,`,
+		`\t\t];`,
+		`\t}`,
+		`\telse {`,
+		`\t\tsamePackageDir.sourceFiles = [...new Set([`,
+		`\t\t\t...samePackageDir.sourceFiles,`,
+		`\t\t\t...registeredDir.sourceFiles,`,
+		`\t\t])];`,
+		`\t}`,
 		`}`,
 		'',
 	].join('\n');
@@ -232,7 +310,17 @@ export function renderCoverageBanner(coverageTarget: CoverageTarget): string {
 
 export interface CoverageInstrumentation {
 	plugin: Plugin;
-	banner: string;
+	banner: (renderedChunk: RenderedChunk) => string;
+}
+
+/** rolldown-plugin-istanbul's plugin, which instruments in `transform` alone. */
+interface IstanbulPlugin {
+	name: string;
+	transform: (
+		this: TransformPluginContext,
+		code: string,
+		id: string,
+	) => TransformResult | undefined;
 }
 
 /**
@@ -259,10 +347,32 @@ export async function loadCoverageInstrumentation(
 	// Loaded on demand: a plain build never pays for babel and istanbul.
 	const { default: createIstanbulPlugin } = await import(
 		'rolldown-plugin-istanbul'
-	) as { default: (pluginOptions: IstanbulPluginOptions) => Plugin };
+	) as { default: (pluginOptions: IstanbulPluginOptions) => IstanbulPlugin };
+
+	const istanbulPlugin = createIstanbulPlugin(coverageTarget.pluginOptions);
+	const instrumentedFiles = new Set<string>();
 
 	return {
-		plugin: createIstanbulPlugin(coverageTarget.pluginOptions),
-		banner: renderCoverageBanner(coverageTarget),
+		// istanbul keys a file by the module id it instrumented
+		plugin: {
+			name: istanbulPlugin.name,
+			transform(code, id) {
+				const instrumentedModule = istanbulPlugin.transform.call(this, code, id);
+
+				if (instrumentedModule !== undefined) {
+					instrumentedFiles.add(id);
+				}
+
+				return instrumentedModule;
+			},
+		},
+		banner: (renderedChunk) => {
+			return renderCoverageBanner(
+				coverageTarget,
+				renderedChunk.moduleIds.filter((moduleId) => {
+					return instrumentedFiles.has(moduleId);
+				}),
+			);
+		},
 	};
 }

@@ -1,5 +1,5 @@
 import { mkdir, rename, writeFile } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import { useLogger } from '../logger/index.js';
 
 /**
@@ -10,13 +10,15 @@ export type CoverageMap = Record<string, unknown>;
 
 /**
  * What an extension built by `directus-extension build` with `coverage` in its
- * extension.config.js registers when loaded: the files under `sourceRoot` have
- * their coverage written to `coverageDir`. Both are absolute, `sourceRoot` a
- * real path, as istanbul keys its files.
+ * extension.config.js registers when loaded: the `sourceFiles` its build
+ * instrumented, keyed as istanbul keys them, have their coverage written to
+ * `coverageDir`. `sourceRoot` is the package, which a rebuild replaces its
+ * entry by.
  */
 export interface ExtensionCoverageDir {
 	sourceRoot: string;
 	coverageDir: string;
+	sourceFiles: string[];
 }
 
 export interface WrittenCoverage {
@@ -46,8 +48,7 @@ export function readCoverage(): CoverageMap | undefined {
 
 /**
  * The coverage directories registered by the instrumented extensions loaded so
- * far, deepest package first so a package nested in another one owns its own
- * files. An extension unloaded since keeps its entry: its files stay in the
+ * far. An extension unloaded since keeps its entry: its files stay in the
  * cumulative coverage too.
  */
 export function readExtensionCoverageDirs(): ExtensionCoverageDir[] {
@@ -55,39 +56,52 @@ export function readExtensionCoverageDirs(): ExtensionCoverageDir[] {
 		'__extensionCoverageDirs'
 	] as ExtensionCoverageDir[] | undefined;
 
-	return [...(extensionCoverageDirs ?? [])].sort(
-		(left, right) => right.sourceRoot.length - left.sourceRoot.length,
-	);
+	return extensionCoverageDirs ?? [];
 }
 
 /**
- * Group the coverage by the directory it is written to: an extension's own
- * files go to its directory, every other file to `coreDir`. Without a
- * `coreDir`, those are counted instead, for the caller to report.
+ * Group the coverage by the directory it is written to: a file goes to the
+ * directory of every extension whose build bundled it, any other file to
+ * `coreDir`. Without a `coreDir`, those are counted instead, for the caller to
+ * report.
  */
 export function splitCoverage(
 	coverage: CoverageMap,
 	extensionCoverageDirs: ExtensionCoverageDir[],
 	coreDir: string | undefined,
 ): { coverageByDir: Map<string, CoverageMap>; unownedCount: number } {
+	const coverageDirsByFile = new Map<string, string[]>();
+
+	for (const extensionDir of extensionCoverageDirs) {
+		for (const sourceFile of extensionDir.sourceFiles) {
+			coverageDirsByFile.set(sourceFile, [
+				...(coverageDirsByFile.get(sourceFile) ?? []),
+				extensionDir.coverageDir,
+			]);
+		}
+	}
+
 	const coverageByDir = new Map<string, CoverageMap>();
 	let unownedCount = 0;
 
 	for (const [sourceFile, fileCoverage] of Object.entries(coverage)) {
-		const unresolvedDir = extensionCoverageDirs.find((extensionDir) => {
-			return sourceFile.startsWith(extensionDir.sourceRoot + sep);
-		})?.coverageDir ?? coreDir;
+		const unresolvedDirs = coverageDirsByFile.get(sourceFile)
+			?? (coreDir === undefined
+				? []
+				: [coreDir]);
 
-		if (unresolvedDir === undefined) {
+		if (unresolvedDirs.length === 0) {
 			unownedCount++;
 			continue;
 		}
 
-		// one directory spelled two ways must be one file, not two overwriting
-		const targetDir = resolve(unresolvedDir);
-		const dirCoverage = coverageByDir.get(targetDir) ?? {};
-		dirCoverage[sourceFile] = fileCoverage;
-		coverageByDir.set(targetDir, dirCoverage);
+		for (const unresolvedDir of unresolvedDirs) {
+			// one directory spelled two ways must be one file, not two overwriting
+			const targetDir = resolve(unresolvedDir);
+			const dirCoverage = coverageByDir.get(targetDir) ?? {};
+			dirCoverage[sourceFile] = fileCoverage;
+			coverageByDir.set(targetDir, dirCoverage);
+		}
 	}
 
 	return { coverageByDir, unownedCount };
