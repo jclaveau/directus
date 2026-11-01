@@ -1,5 +1,5 @@
 import { mkdir, rename, writeFile } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { useLogger } from '../logger/index.js';
 
 /**
@@ -74,15 +74,17 @@ export function splitCoverage(
 	let unownedCount = 0;
 
 	for (const [sourceFile, fileCoverage] of Object.entries(coverage)) {
-		const targetDir = extensionCoverageDirs.find((extensionDir) => {
+		const unresolvedDir = extensionCoverageDirs.find((extensionDir) => {
 			return sourceFile.startsWith(extensionDir.sourceRoot + sep);
 		})?.coverageDir ?? coreDir;
 
-		if (targetDir === undefined) {
+		if (unresolvedDir === undefined) {
 			unownedCount++;
 			continue;
 		}
 
+		// one directory spelled two ways must be one file, not two overwriting
+		const targetDir = resolve(unresolvedDir);
 		const dirCoverage = coverageByDir.get(targetDir) ?? {};
 		dirCoverage[sourceFile] = fileCoverage;
 		coverageByDir.set(targetDir, dirCoverage);

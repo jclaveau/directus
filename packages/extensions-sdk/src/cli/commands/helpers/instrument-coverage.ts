@@ -115,6 +115,8 @@ export function resolveCoverageTarget({
 		);
 	}
 
+	const globRoot = escapeGlob(sourceRoot);
+
 	return {
 		sourceRoot,
 		coverageDir: path.resolve(
@@ -122,14 +124,15 @@ export function resolveCoverageTarget({
 			coverageOptions.dir ?? DEFAULT_COVERAGE_DIR,
 		),
 		pluginOptions: {
-			// the package's own sources: a workspace dependency is resolved to its
-			// real path outside the package
+			// the package's own scripts: a workspace dependency is resolved to its
+			// real path outside the package, and the plugin runs before rolldown
+			// turns a json (or anything a user plugin loads) into a script
 			include: coverageOptions.include === undefined
-				? [path.posix.join(sourceRoot, '**')]
-				: anchorFilterPattern(coverageOptions.include, sourceRoot),
+				? [path.posix.join(globRoot, '**/*.{js,mjs,cjs,ts,mts,cts}')]
+				: anchorFilterPattern(coverageOptions.include, globRoot),
 			exclude: coverageOptions.exclude === undefined
-				? [path.posix.join(sourceRoot, 'node_modules/**'), '**/*.d.ts']
-				: anchorFilterPattern(coverageOptions.exclude, sourceRoot),
+				? [path.posix.join(globRoot, 'node_modules/**'), '**/*.d.ts']
+				: anchorFilterPattern(coverageOptions.exclude, globRoot),
 			instrumenterConfig: {
 				...DEFAULT_INSTRUMENTER_CONFIG,
 				...coverageOptions.instrumenterConfig,
@@ -139,6 +142,14 @@ export function resolveCoverageTarget({
 				: { instrumenter: coverageOptions.instrumenter }),
 		},
 	};
+}
+
+/**
+ * A path a glob matches literally. A backslash would not do: createFilter turns
+ * every one into a path separator, so each special character goes in a class.
+ */
+function escapeGlob(literalPath: string): string {
+	return literalPath.replace(/[()[\]{}*?!+@|]/g, '[$&]');
 }
 
 function isCoverageObject(coverageConfig: unknown): boolean {
@@ -163,28 +174,28 @@ function isCoverageObject(coverageConfig: unknown): boolean {
  */
 function anchorFilterPattern(
 	filterPattern: FilterPattern,
-	sourceRoot: string,
+	globRoot: string,
 ): FilterPattern {
 	if (filterPattern === null) {
 		return null;
 	}
 
-	const patterns = typeof filterPattern === 'string'
+	const filterPatterns = typeof filterPattern === 'string'
 		|| filterPattern instanceof RegExp
 		? [filterPattern]
 		: filterPattern;
 
-	return patterns.map((pattern) => {
+	return filterPatterns.map((filterEntry) => {
 		// as createFilter tells a relative glob apart
 		if (
-			typeof pattern === 'string'
-			&& !path.isAbsolute(pattern)
-			&& !pattern.startsWith('**')
+			typeof filterEntry === 'string'
+			&& !path.isAbsolute(filterEntry)
+			&& !filterEntry.startsWith('**')
 		) {
-			return path.posix.join(sourceRoot, pattern);
+			return path.posix.join(globRoot, filterEntry);
 		}
 
-		return pattern;
+		return filterEntry;
 	});
 }
 
@@ -200,19 +211,20 @@ export function renderCoverageBanner(coverageTarget: CoverageTarget): string {
 		coverageDir: coverageTarget.coverageDir,
 	});
 
-	// pushed once: every chunk of a preserveModules build carries this banner
+	// one entry per package, every chunk of a preserveModules build carrying
+	// this banner, and a rebuild reloaded in the same process replacing its own
 	return [
 		`if (process.env.NODE_ENV === 'production') {`,
 		`\tthrow new Error(${JSON.stringify(COVERAGE_IN_PRODUCTION_MESSAGE)});`,
 		`}`,
 		`{`,
 		`\tconst registeredDir = ${registeredDir};`,
-		`\tconst registeredDirs = (globalThis.__extensionCoverageDirs ??= []);`,
-		`\tif (!registeredDirs.some((registered) => {`,
-		`\t\treturn registered.sourceRoot === registeredDir.sourceRoot;`,
-		`\t})) {`,
-		`\t\tregisteredDirs.push(registeredDir);`,
-		`\t}`,
+		`\tglobalThis.__extensionCoverageDirs = [`,
+		`\t\t...(globalThis.__extensionCoverageDirs ?? []).filter((otherDir) => {`,
+		`\t\t\treturn otherDir.sourceRoot !== registeredDir.sourceRoot;`,
+		`\t\t}),`,
+		`\t\tregisteredDir,`,
+		`\t];`,
 		`}`,
 		'',
 	].join('\n');
@@ -245,12 +257,12 @@ export async function loadCoverageInstrumentation(
 	}
 
 	// Loaded on demand: a plain build never pays for babel and istanbul.
-	const { default: istanbul } = await import('rolldown-plugin-istanbul') as {
-		default: (pluginOptions: IstanbulPluginOptions) => Plugin;
-	};
+	const { default: createIstanbulPlugin } = await import(
+		'rolldown-plugin-istanbul'
+	) as { default: (pluginOptions: IstanbulPluginOptions) => Plugin };
 
 	return {
-		plugin: istanbul(coverageTarget.pluginOptions),
+		plugin: createIstanbulPlugin(coverageTarget.pluginOptions),
 		banner: renderCoverageBanner(coverageTarget),
 	};
 }

@@ -22,10 +22,11 @@ import { afterAll, describe, expect } from 'vitest';
 const feature = loadFeature('./tests/db/routes/server/coverage-dump.feature');
 
 /**
- * What `directus-extension build` with `coverage` emits, minus the
- * instrumentation: the banner registering the package's coverage directory,
- * then what istanbul records for a file with nothing in it, set the way an
- * instrumented module sets it: on the global, when the module loads.
+ * A hand-written stand-in for what `directus-extension build` with `coverage`
+ * emits: it registers the package's coverage directory on the same global, then
+ * records what istanbul records for a file with nothing in it. It is not the
+ * SDK's banner, which its own unit tests run; this proves the server routes a
+ * registered directory through the real extension loader.
  */
 function renderFixtureHook(coverageDir: string): string {
 	return `

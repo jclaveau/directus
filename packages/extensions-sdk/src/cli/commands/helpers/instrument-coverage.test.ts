@@ -82,7 +82,7 @@ describe('resolveCoverageTarget', () => {
 	});
 
 	test('passes the plugin options through, anchoring relative globs', () => {
-		const instrumenter = { createInstrumenter: () => ({}) };
+		const customInstrumenter = { createInstrumenter: () => ({}) };
 
 		expect(resolveCoverageTarget({
 			coverageConfig: {
@@ -90,7 +90,7 @@ describe('resolveCoverageTarget', () => {
 				include: ['src/**', /\.ts$/, '/abs/**'],
 				exclude: '**/*.spec.ts',
 				instrumenterConfig: { compact: false, parserPlugins: ['jsx'] },
-				instrumenter,
+				instrumenter: customInstrumenter,
 			},
 			extensionType: 'hybrid',
 			sourceRoot: '/repo/ext',
@@ -109,7 +109,7 @@ describe('resolveCoverageTarget', () => {
 					preserveComments: true,
 					parserPlugins: ['jsx'],
 				},
-				instrumenter,
+				instrumenter: customInstrumenter,
 			},
 		});
 	});

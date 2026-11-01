@@ -28,7 +28,9 @@ export type Config = {
 
 /**
  * The object form of `coverage`: rolldown-plugin-istanbul's own options, plus
- * the switch and the directory the server dumps to.
+ * the switch and the directory the server dumps to. `include` and `exclude`
+ * replace the defaults; `instrumenterConfig` is merged over them key by key, so
+ * a `parserPlugins` of your own replaces the default list, `typescript` with it.
  */
 export type CoverageConfig = IstanbulPluginOptions & {
 	/** Off when false, keeping the rest for when it is switched back on. */
