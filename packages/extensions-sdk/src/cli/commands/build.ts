@@ -416,7 +416,6 @@ async function buildHybridExtension({
 		minify,
 		external,
 		config,
-		coverageInstrumentation,
 	});
 
 	const rollupOptionsApi = getRollupOptions({
@@ -790,7 +789,9 @@ function getRollupOptions({
 		plugins: [
 			typeof input !== 'string' ? virtual(input) : null,
 			// only the api side runs on the server that dumps the coverage
-			coverageInstrumentation?.plugin,
+			mode === 'node'
+				? coverageInstrumentation?.plugin
+				: null,
 			mode === 'browser' ? vue({ isProduction: true }) : null,
 			mode === 'browser' ? styles() : null,
 			...plugins,
