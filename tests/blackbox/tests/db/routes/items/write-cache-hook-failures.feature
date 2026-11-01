@@ -132,9 +132,11 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       |   fields: body                        |   data:                |
       |   filter[slot][_eq]: c                |     - body: bystander  |
       | method: PATCH                         | code: 400              |+
-      | path: /items/test_wcf_update_coarse/1 |                        |
+      | path: /items/test_wcf_update_coarse   |                        |
       | payload:                              |                        |
-      |   body: take-over-sibling             |                        |
+      |   keys: [1]                           |                        |
+      |   data:                               |                        |
+      |     body: take-over-sibling           |                        |
       | method: GET                           | code: 200              |+
       | path: /items/test_wcf_update_coarse   | cache: MISS            |
       | query:                                | body:                  |

@@ -1968,15 +1968,6 @@ implements AbstractService<Item> {
 					return !inputKeyNames.has(keyNameOf(key));
 				});
 
-				if (opts.refuseHookAddedRows && hookAddedKeys.length > 0) {
-					throw refuseHookAnswer(new InvalidPayloadError({
-						reason: oneLine`
-							A "${this.eventScope}.update" filter hook answered updateOne
-							with row ${keyNameOf(hookAddedKeys[0]!)}, which it was not sent
-						`,
-					}));
-				}
-
 				// Keys a hook added are counted and validated like the caller's own,
 				// before any of them is compared with another.
 				try {
@@ -1993,6 +1984,15 @@ implements AbstractService<Item> {
 				}
 				catch (error) {
 					throw refuseHookAnswer(error);
+				}
+
+				if (opts.refuseHookAddedRows && hookAddedKeys.length > 0) {
+					throw refuseHookAnswer(new InvalidPayloadError({
+						reason: oneLine`
+							A "${this.eventScope}.update" filter hook answered updateOne
+							with row ${keyNameOf(hookAddedKeys[0]!)}, which it was not sent
+						`,
+					}));
 				}
 
 				const groupedKeyNames = new Set(dataGroups.flatMap((group) => {

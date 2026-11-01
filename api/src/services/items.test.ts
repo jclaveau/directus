@@ -5685,6 +5685,57 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 		]);
 	});
 
+	it('refuses a single-item update a hook takes another row over in', async () => {
+		const takingOverFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ key: 2 }, entries[0]!];
+		});
+
+		emitter.onFilter('test.items.update', takingOverFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.updateOne(1, { name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'A "items.update" filter hook answered updateOne '
+						+ 'with row 2, which it was not sent',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', takingOverFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('refuses the key a single-item update hook adds before the row', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{
+				data: entries[0]!.data,
+				keys: [...entries[0]!.keys, 'not-a-number'],
+			}];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.updateOne(1, { name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'Primary key of test must be an integer '
+						+ 'instead of "not-a-number"',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+	});
+
 	it('refuses a single-item upsert a hook adds a row to', async () => {
 		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
 			return [{ data: entries[0]!.data, keys: [...entries[0]!.keys, 2] }];
