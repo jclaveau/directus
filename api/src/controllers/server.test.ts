@@ -91,6 +91,7 @@ describe('server controller POST /dump-coverage', () => {
 	test.each([
 		{ nodeEnv: 'production' },
 		{ nodeEnv: undefined },
+		{ nodeEnv: '' },
 	])('hides the route when NODE_ENV is $nodeEnv', async ({ nodeEnv }) => {
 		vi.stubEnv('NODE_ENV', nodeEnv);
 		readCoverage.mockReturnValue(undefined);

@@ -4,6 +4,7 @@ import {
 	readFile,
 	realpath,
 	rm,
+	writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -216,6 +217,32 @@ describe('dumpCoverage', () => {
 			'Coverage of 2 source files not written: no extension built with '
 				+ 'coverage owns them, and COVERAGE_DIR is unset.',
 		);
+	});
+
+	test('writes every other directory when one cannot be written', async () => {
+		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
+		await writeFile(join(workDir, 'blocked'), '');
+
+		(globalThis as Record<string, unknown>)['__extensionCoverageDirs'] = [
+			{
+				sourceRoot: join(workDir, 'ext'),
+				coverageDir: join(workDir, 'blocked/cov'),
+				sourceFiles: [join(workDir, 'ext/src/a.ts')],
+			},
+		];
+
+		(globalThis as Record<string, unknown>)['__coverage__'] = {
+			[join(workDir, 'ext/src/a.ts')]: {},
+			'src/app.ts': {},
+		};
+
+		await expect(dumpCoverage()).rejects.toThrow(new Error(
+			`Coverage not written to ${join(workDir, 'blocked/cov')}: ENOTDIR: not `
+				+ `a directory, mkdir '${join(workDir, 'blocked/cov')}'`,
+		));
+
+		await expect(readdir(join(workDir, 'core')))
+			.resolves.toEqual([COVERAGE_DUMP_NAME]);
 	});
 
 	test('runs two dumps asked at once one after the other', async () => {
