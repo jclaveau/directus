@@ -142,16 +142,17 @@ async function writeCoverage(): Promise<WrittenCoverage[]> {
 	}
 
 	const writtenCoverage: WrittenCoverage[] = [];
+	const failedWrites: string[] = [];
 
 	for (const [targetDir, dirCoverage] of coverageByDir) {
-		await mkdir(targetDir, { recursive: true });
-
-		const partialPath = join(targetDir, `${COVERAGE_DUMP_NAME}.partial`);
-
-		// Write then rename: a server killed mid-write must not leave a
-		// truncated cov-*.json that the merge would then fail to parse.
-		await writeFile(partialPath, JSON.stringify(dirCoverage));
-		await rename(partialPath, join(targetDir, COVERAGE_DUMP_NAME));
+		// one directory that cannot be written must not cost the others theirs
+		try {
+			await writeDirCoverage(targetDir, dirCoverage);
+		}
+		catch (error) {
+			failedWrites.push(`${targetDir}: ${(error as Error).message}`);
+			continue;
+		}
 
 		writtenCoverage.push({
 			dir: targetDir,
@@ -159,5 +160,23 @@ async function writeCoverage(): Promise<WrittenCoverage[]> {
 		});
 	}
 
+	if (failedWrites.length > 0) {
+		throw new Error(`Coverage not written to ${failedWrites.join('; ')}`);
+	}
+
 	return writtenCoverage;
+}
+
+async function writeDirCoverage(
+	targetDir: string,
+	dirCoverage: CoverageMap,
+): Promise<void> {
+	await mkdir(targetDir, { recursive: true });
+
+	const partialPath = join(targetDir, `${COVERAGE_DUMP_NAME}.partial`);
+
+	// Write then rename: a server killed mid-write must not leave a
+	// truncated cov-*.json that the merge would then fail to parse.
+	await writeFile(partialPath, JSON.stringify(dirCoverage));
+	await rename(partialPath, join(targetDir, COVERAGE_DUMP_NAME));
 }

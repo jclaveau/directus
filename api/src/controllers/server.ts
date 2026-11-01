@@ -1,4 +1,5 @@
 import { createError, RouteNotFoundError } from '@directus/errors';
+import { getNodeEnv } from '@directus/utils/node';
 import { Router } from 'express';
 import { respond } from '../middleware/respond.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
@@ -116,7 +117,7 @@ router.post(
 	asyncHandler(async (req, res, next) => {
 		if (readCoverage() === undefined) {
 			// unset counts as production: a deployed server must not reveal the route
-			if ((process.env['NODE_ENV'] ?? 'production') === 'production') {
+			if ((getNodeEnv() || 'production') === 'production') {
 				throw new RouteNotFoundError({ path: req.path });
 			}
 
