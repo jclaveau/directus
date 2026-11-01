@@ -49,12 +49,35 @@ describe('Services / Revisions', () => {
 			const updateOne = vi.spyOn(ItemsService.prototype, 'updateOne')
 				.mockResolvedValue(7);
 
+			const db = knex.default({ client: MockClient });
+
 			await new RevisionsService({
-				knex: knex.default({ client: MockClient }),
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'editor',
+				},
+				knex: db,
 				schema,
 			}).revert(1);
 
 			expect(updateOne).toHaveBeenCalledWith(7, { title: 'Old title' });
+
+			expect(updateOne.mock.contexts).toMatchObject([{
+				accountability: {
+					admin: false,
+					app: true,
+					ip: null,
+					role: null,
+					roles: [],
+					user: 'editor',
+				},
+				collection: 'articles',
+				knex: db,
+			}]);
 		});
 	});
 
