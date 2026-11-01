@@ -297,6 +297,62 @@ describe('dumpCoverage', () => {
 		]);
 	});
 
+	test('leaves the directories the server registered as they were', async () => {
+		vi.resetModules();
+		const reloadedModule = await import('./dump-coverage.js');
+
+		(globalThis as Record<string, unknown>)['__extensionCoverageDirs'] = [{
+			sourceRoot: '/server-ext',
+			coverageDir: join(workDir, 'server-ext/cov'),
+			sourceFiles: ['/server-ext/src/a.ts'],
+		}];
+
+		reloadedModule.trackSandboxCoverage(async () => {
+			return {
+				coverage: { '/ext/src/a.ts': { hash: 'h1', s: { 0: 1 }, f: {}, b: {} } },
+				coverageDirs: [{
+					sourceRoot: '/ext',
+					coverageDir: join(workDir, 'ext/cov'),
+					sourceFiles: ['/ext/src/a.ts'],
+				}],
+			};
+		});
+
+		await reloadedModule.dumpCoverage();
+
+		expect((globalThis as Record<string, unknown>)['__extensionCoverageDirs'])
+			.toEqual([{
+				sourceRoot: '/server-ext',
+				coverageDir: join(workDir, 'server-ext/cov'),
+				sourceFiles: ['/server-ext/src/a.ts'],
+			}]);
+	});
+
+	test('reads a sandbox once when it is unloaded twice', async () => {
+		vi.resetModules();
+		const reloadedModule = await import('./dump-coverage.js');
+
+		// a removed extension is unloaded again by every later reload
+		const releaseSandboxCoverage = reloadedModule.trackSandboxCoverage(vi.fn()
+			.mockResolvedValueOnce({
+				coverage: { '/ext/src/a.ts': { hash: 'h1', s: { 0: 1 }, f: {}, b: {} } },
+				coverageDirs: [{
+					sourceRoot: '/ext',
+					coverageDir: join(workDir, 'ext/cov'),
+					sourceFiles: ['/ext/src/a.ts'],
+				}],
+			})
+			.mockRejectedValue(new Error('Isolate is disposed')));
+
+		await releaseSandboxCoverage();
+
+		await expect(releaseSandboxCoverage()).resolves.toBeUndefined();
+
+		await expect(reloadedModule.dumpCoverage()).resolves.toEqual([
+			{ dir: join(workDir, 'ext/cov'), fileCount: 1 },
+		]);
+	});
+
 	test('starts a file over when its code changed between two loads', async () => {
 		vi.resetModules();
 		const reloadedModule = await import('./dump-coverage.js');
