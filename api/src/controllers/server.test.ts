@@ -1,3 +1,4 @@
+import { RouteNotFoundError } from '@directus/errors';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const serverInfo = vi.fn();
@@ -72,15 +73,16 @@ describe('server controller /info', () => {
 });
 
 describe('server controller POST /dump-coverage', () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => vi.resetAllMocks());
 
 	async function callCoverage() {
 		const req = { path: '/dump-coverage' } as any;
 		const res = { locals: {} } as any;
 		const next = vi.fn();
 
-		const layer = router.stack.find((l: any) => l.route?.path === '/dump-coverage');
-		await layer!.route!.stack[0]!.handle(req, res, next);
+		await router.stack.find((routerLayer: any) => {
+			return routerLayer.route?.path === '/dump-coverage';
+		})!.route!.stack[0]!.handle(req, res, next);
 
 		return { res, next };
 	}
@@ -90,10 +92,9 @@ describe('server controller POST /dump-coverage', () => {
 
 		const { res, next } = await callCoverage();
 
-		expect(next).toHaveBeenCalledWith(expect.objectContaining({
-			status: 404,
-			message: 'Route /dump-coverage doesn\'t exist.',
-		}));
+		expect(next).toHaveBeenCalledWith(
+			new RouteNotFoundError({ path: '/dump-coverage' }),
+		);
 
 		expect(dumpCoverage).not.toHaveBeenCalled();
 		expect(res.locals['payload']).toBeUndefined();

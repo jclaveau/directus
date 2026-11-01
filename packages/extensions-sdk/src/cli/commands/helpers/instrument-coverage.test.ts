@@ -1,8 +1,34 @@
-import { describe, expect, test } from 'vitest';
+import { runInThisContext } from 'node:vm';
+import { afterEach, describe, expect, test } from 'vitest';
 import {
 	DEFAULT_INSTRUMENTER_CONFIG,
+	renderCoverageBanner,
 	resolveCoverageTarget,
 } from './instrument-coverage.js';
+
+describe('renderCoverageBanner', () => {
+	afterEach(() => {
+		delete (globalThis as Record<string, unknown>)['__extensionCoverageDirs'];
+	});
+
+	test('registers the directory of the build loaded last', () => {
+		runInThisContext(renderCoverageBanner({
+			sourceRoot: '/repo/ext',
+			coverageDir: '/repo/ext/cov-a',
+			pluginOptions: {},
+		}));
+
+		// the same package rebuilt with another dir, reloaded in the same process
+		runInThisContext(renderCoverageBanner({
+			sourceRoot: '/repo/ext',
+			coverageDir: '/repo/ext/cov-b',
+			pluginOptions: {},
+		}));
+
+		expect((globalThis as Record<string, unknown>)['__extensionCoverageDirs'])
+			.toEqual([{ sourceRoot: '/repo/ext', coverageDir: '/repo/ext/cov-b' }]);
+	});
+});
 
 describe('resolveCoverageTarget', () => {
 	test.each([
@@ -28,8 +54,28 @@ describe('resolveCoverageTarget', () => {
 			sourceRoot: '/repo/ext',
 			coverageDir: '/repo/ext/coverage/backend',
 			pluginOptions: {
-				include: ['/repo/ext/**'],
+				include: ['/repo/ext/**/*.{js,mjs,cjs,ts,mts,cts}'],
 				exclude: ['/repo/ext/node_modules/**', '**/*.d.ts'],
+				instrumenterConfig: DEFAULT_INSTRUMENTER_CONFIG,
+			},
+		});
+	});
+
+	test('escapes the glob characters of the package path', () => {
+		expect(resolveCoverageTarget({
+			coverageConfig: { include: 'src/**' },
+			extensionType: 'endpoint',
+			sourceRoot: '/repo/ext (2){a,b}',
+			nodeEnv: 'test',
+		})).toEqual({
+			sourceRoot: '/repo/ext (2){a,b}',
+			coverageDir: '/repo/ext (2){a,b}/coverage/backend',
+			pluginOptions: {
+				include: ['/repo/ext [(]2[)][{]a,b[}]/src/**'],
+				exclude: [
+					'/repo/ext [(]2[)][{]a,b[}]/node_modules/**',
+					'**/*.d.ts',
+				],
 				instrumenterConfig: DEFAULT_INSTRUMENTER_CONFIG,
 			},
 		});
@@ -74,7 +120,15 @@ describe('resolveCoverageTarget', () => {
 			extensionType: 'bundle',
 			sourceRoot: '/repo/ext',
 			nodeEnv: 'test',
-		})?.coverageDir).toBe('/repo/ext/coverage/backend');
+		})).toEqual({
+			sourceRoot: '/repo/ext',
+			coverageDir: '/repo/ext/coverage/backend',
+			pluginOptions: {
+				include: ['/repo/ext/**/*.{js,mjs,cjs,ts,mts,cts}'],
+				exclude: ['/repo/ext/node_modules/**', '**/*.d.ts'],
+				instrumenterConfig: DEFAULT_INSTRUMENTER_CONFIG,
+			},
+		});
 	});
 
 	test('refuses coverage on an app-only extension', () => {

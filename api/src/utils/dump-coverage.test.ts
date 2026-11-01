@@ -78,6 +78,21 @@ describe('splitCoverage', () => {
 			unownedCount: 1,
 		});
 	});
+
+	test('writes one directory spelled two ways into one file', () => {
+		const split = splitCoverage(
+			{ '/repo/ext/src/a.ts': 'a', 'src/app.ts': 'core' },
+			[{ sourceRoot: '/repo/ext', coverageDir: '/repo/cov' }],
+			'/repo/cov/',
+		);
+
+		expect(split).toEqual({
+			coverageByDir: new Map([
+				['/repo/cov', { '/repo/ext/src/a.ts': 'a', 'src/app.ts': 'core' }],
+			]),
+			unownedCount: 0,
+		});
+	});
 });
 
 describe('readExtensionCoverageDirs', () => {

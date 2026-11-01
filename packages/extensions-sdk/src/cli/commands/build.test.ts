@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import fse from 'fs-extra';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -554,6 +555,29 @@ describe('build', () => {
 		);
 
 		test(
+			'leaves a json the api entrypoint imports to rolldown',
+			async () => {
+				const distPath = await buildEndpoint(
+					"import extensionPackage from '../package.json';\n"
+						+ 'export default () => extensionPackage.name;\n',
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					Object.keys(
+						(globalThis as Record<string, object>)['__coverage__']!,
+					),
+				).toEqual([resolve(packageRoot, 'src/index.ts')]);
+			},
+			30_000,
+		);
+
+		test(
 			'builds an instrumented api entrypoint that refuses to load in production',
 			async () => {
 				const distPath = await buildEndpoint(
@@ -576,12 +600,13 @@ describe('build', () => {
 		test(
 			'refuses to instrument a build made with NODE_ENV=production',
 			async () => {
-				const error = vi.spyOn(console, 'error')
+				const consoleError = vi.spyOn(console, 'error')
 					.mockImplementation(() => undefined);
 
-				const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
-					throw new Error('exited');
-				});
+				const processExit = vi.spyOn(process, 'exit')
+					.mockImplementation(() => {
+						throw new Error('exited');
+					});
 
 				vi.stubEnv('NODE_ENV', 'production');
 
@@ -592,16 +617,14 @@ describe('build', () => {
 						'export default { coverage: true };\n',
 					)).rejects.toThrow('exited');
 
-					expect(error).toHaveBeenCalledWith(
-						expect.stringContaining(
-							'Coverage instrumentation is forbidden when NODE_ENV is '
-								+ 'production.',
-						),
+					expect(consoleError).toHaveBeenCalledWith(
+						`${chalk.bold.red('[Error]')} Coverage instrumentation is `
+							+ 'forbidden when NODE_ENV is production.',
 					);
 				}
 				finally {
-					error.mockRestore();
-					exit.mockRestore();
+					consoleError.mockRestore();
+					processExit.mockRestore();
 				}
 			},
 			30_000,
