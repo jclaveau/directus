@@ -38,8 +38,12 @@ describe.each(vendors)('%s', (vendor) => {
 				others
 			`,
 			oneLine`
-				an update of several keys naming an existing child is refused,
-				writing nothing
+				an update of several keys naming one existing child leaves it on
+				the last key
+			`,
+			oneLine`
+				a batch naming one existing child for two rows leaves it on the
+				last row
 			`,
 			oneLine`
 				a many-to-many list links junction rows and nullifies the ones left

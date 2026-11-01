@@ -143,6 +143,13 @@ export type MutationOptions = {
 	bypassLimits?: boolean | undefined;
 
 	/**
+	 * `true` refuses a create or update naming one existing o2m child for several
+	 * rows, with a 400. Off by default: each row takes the child in turn and the
+	 * last one keeps it, as the database would; a unique index refuses it there.
+	 */
+	refuseChildJoiningSeveralRows?: boolean | undefined;
+
+	/**
 	 * To keep track of mutation limits
 	 */
 	mutationTracker?: MutationTracker | undefined;

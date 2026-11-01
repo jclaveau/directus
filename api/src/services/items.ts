@@ -608,6 +608,17 @@ implements AbstractService<Item> {
 				throw createEntryListRefusal();
 			}
 
+			if (opts.refuseChildJoiningSeveralRows) {
+				// No two created rows are one, so a row's position names it.
+				this.refuseChildJoiningSeveralRows(createEntries.flatMap(
+					(entry, index) => {
+						return entry !== null && 'data' in entry
+							? [{ keys: [index], data: entry.data }]
+							: [];
+					},
+				));
+			}
+
 			for (const [index, entry] of createEntries.entries()) {
 				if (entry !== null && 'sameRowAs' in entry) {
 					sameRowPositions.push({ index, sameRowAs: entry.sameRowAs });
@@ -1513,6 +1524,7 @@ implements AbstractService<Item> {
 	 * would take the child from the one before, leaving it on the last. A child
 	 * created inline is each row's own, and so is an m2m's junction row. Rows are
 	 * counted over every group, so two rows of a batch can't share a child either.
+	 * Run only when the caller asks (`refuseChildJoiningSeveralRows`).
 	 */
 	private refuseChildJoiningSeveralRows(writingGroups: UpdateGroup<Item>[]): void {
 		for (const relation of this.schema.relations) {
@@ -2194,7 +2206,10 @@ implements AbstractService<Item> {
 					});
 				}
 
-				this.refuseChildJoiningSeveralRows(presetGroups);
+				if (opts.refuseChildJoiningSeveralRows) {
+					this.refuseChildJoiningSeveralRows(presetGroups);
+				}
+
 				await this.validateGroupsToUpdate(presetGroups, trx);
 
 				const appliedGroups = await service.applyUpdateGroups(

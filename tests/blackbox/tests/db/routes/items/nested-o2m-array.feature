@@ -243,7 +243,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list_entry | 15     | 0      | 4      | 0      |
 
-  Scenario: an update of several keys naming an existing child is refused, writing nothing
+  Scenario: an update of several keys naming one existing child leaves it on the last key
     Given the rows of test_nested_o2m_list:
       | id   |
       | sk-a |
@@ -254,41 +254,48 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | sk-b1 | sk-b |
       | sk-x1 |      |
     When these requests get these responses:
-      | request                           | response                         |
-      | method: PATCH                     | code: 400                        |+
-      | path: /items/test_nested_o2m_list | body:                            |
-      | payload:                          |   errors:                        |
-      |   keys:                           |     - message: >-                |
-      |     - sk-a                        |         Invalid payload. "sk-x1" |
-      |     - sk-b                        |         can't join more than one |
-      |   data:                           |         "test_nested_o2m_list".  |
-      |     entries:                      |       extensions:                |
-      |       - sk-x1                     |         code: INVALID_PAYLOAD    |
-      | method: PATCH                     | code: 400                        |+
-      | path: /items/test_nested_o2m_list | body:                            |
-      | payload:                          |   errors:                        |
-      |   query:                          |     - message: >-                |
-      |     filter:                       |         Invalid payload. "sk-x1" |
-      |       id:                         |         can't join more than one |
-      |         _starts_with: sk-         |         "test_nested_o2m_list".  |
-      |   data:                           |       extensions:                |
-      |     entries:                      |         code: INVALID_PAYLOAD    |
-      |       - id: sk-x1                 |                                  |
-      |         name: shared              |                                  |
-      | method: PATCH                     | code: 400                        |+
-      | path: /items/test_nested_o2m_list | body:                            |
-      | payload:                          |   errors:                        |
-      |   - id: sk-a                      |     - message: >-                |
-      |     entries:                      |         Invalid payload. "sk-x1" |
-      |       - sk-x1                     |         can't join more than one |
-      |   - id: sk-b                      |         "test_nested_o2m_list".  |
-      |     entries:                      |       extensions:                |
-      |       - sk-x1                     |         code: INVALID_PAYLOAD    |
+      | request                           | response  |
+      | method: PATCH                     | code: 200 |+
+      | path: /items/test_nested_o2m_list |           |
+      | payload:                          |           |
+      |   keys:                           |           |
+      |     - sk-a                        |           |
+      |     - sk-b                        |           |
+      |   data:                           |           |
+      |     entries:                      |           |
+      |       - sk-x1                     |           |
     Then the rows of test_nested_o2m_list_entry whose key starts with "sk-" are:
-      | id    | list | name |
-      | sk-a1 | sk-a |      |
-      | sk-b1 | sk-b |      |
-      | sk-x1 |      |      |
+      | id    | list |
+      | sk-a1 |      |
+      | sk-b1 |      |
+      | sk-x1 | sk-b |
+
+  Scenario: a batch naming one existing child for two rows leaves it on the last row
+    Given the rows of test_nested_o2m_list:
+      | id   |
+      | sb-a |
+      | sb-b |
+    And their children in test_nested_o2m_list_entry:
+      | id    | list |
+      | sb-a1 | sb-a |
+      | sb-b1 | sb-b |
+      | sb-x1 |      |
+    When these requests get these responses:
+      | request                           | response  |
+      | method: PATCH                     | code: 200 |+
+      | path: /items/test_nested_o2m_list |           |
+      | payload:                          |           |
+      |   - id: sb-b                      |           |
+      |     entries:                      |           |
+      |       - sb-x1                     |           |
+      |   - id: sb-a                      |           |
+      |     entries:                      |           |
+      |       - sb-x1                     |           |
+    Then the rows of test_nested_o2m_list_entry whose key starts with "sb-" are:
+      | id    | list |
+      | sb-a1 |      |
+      | sb-b1 |      |
+      | sb-x1 | sb-a |
 
   Scenario: a many-to-many list links junction rows and nullifies the ones left out
     Given the rows of test_nested_o2m_tag:

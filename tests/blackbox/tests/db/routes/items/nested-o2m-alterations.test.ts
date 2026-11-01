@@ -47,8 +47,8 @@ describe.each(vendors)('%s', (vendor) => {
 				nothing
 			`,
 			oneLine`
-				an update of several keys updating one child is refused, writing
-				nothing
+				an update of several keys updating one child leaves it on the last
+				key
 			`,
 		]) {
 			scenario(title, (steps) => {

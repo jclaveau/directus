@@ -912,6 +912,19 @@ describe('Integration Tests', () => {
 					transactionSpy.mockRestore();
 				}
 			});
+
+			it(oneLine`
+				refuses, when asked, to give one existing child to two created rows
+			`, async () => {
+				await expect(service.createMany(
+					[{ children: [7] }, { children: [7] }],
+					{ refuseChildJoiningSeveralRows: true },
+				))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+			});
 		});
 
 		describe('updateBatch', () => {
@@ -1439,10 +1452,14 @@ describe('Integration Tests', () => {
 				{ children: [{ id: 7 }] },
 				{ children: { update: [{ id: 7 }] } },
 			])(oneLine`
-				refuses to give one existing child to several rows, writing nothing:
-				%j
+				refuses, when asked, to give one existing child to several rows,
+				writing nothing: %j
 			`, async (payload) => {
-				await expect(service.updateMany([1, 2], payload))
+				await expect(service.updateMany(
+					[1, 2],
+					payload,
+					{ refuseChildJoiningSeveralRows: true },
+				))
 					.rejects
 					.toThrow(new InvalidPayloadError({
 						reason: `"7" can't join more than one "test"`,
@@ -1464,10 +1481,13 @@ describe('Integration Tests', () => {
 					],
 				},
 			])(oneLine`
-				refuses to give one existing child to two rows of a batch, writing
-				nothing: %j
+				refuses, when asked, to give one existing child to two rows of a
+				batch, writing nothing: %j
 			`, async ({ batch }) => {
-				await expect(service.updateBatch(batch))
+				await expect(service.updateBatch(
+					batch,
+					{ refuseChildJoiningSeveralRows: true },
+				))
 					.rejects
 					.toThrow(new InvalidPayloadError({
 						reason: `"7" can't join more than one "test"`,
@@ -1478,6 +1498,18 @@ describe('Integration Tests', () => {
 					state: 'rolled back',
 					queries: [],
 				}]);
+			});
+
+			it(oneLine`
+				gives one existing child to several rows by default, the last one
+				keeping it
+			`, async () => {
+				await expect(service.updateMany(
+					[1, 2],
+					{ children: { update: [{ id: 7 }] } },
+				))
+					.resolves
+					.toEqual([1, 2]);
 			});
 
 			it(oneLine`
