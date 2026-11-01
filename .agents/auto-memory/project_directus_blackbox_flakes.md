@@ -205,3 +205,8 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - **`api/src/utils/stall.test.ts` flake (`0≠1`, then `2≠1`)**: `vi.useFakeTimers()` with no `toFake` also fakes `performance` (vitest 4.1.11) → `vi.spyOn(performance,'now')` mocks the fake while `stall()` reads real `node:perf_hooks`; outcome depends on worker uptime R (<100 ms = CI pattern, ≥1100 ms = other failure). NOT a cross-file leak (pool forks, isolate). Red `28481d36d1` busy-waits `beforeAll` past 1100 ms; fix `e96dda8ab6` `toFake: ['setTimeout','clearTimeout']`.
 - **#603 deep-review findings (fixed in the loop)**: completion-reporter retry can double-post after a 10 s axios timeout on a POST the server saved (gate counts rows, `test_file_path` not unique) → look the row up before retrying; `FOR UPDATE` hold in retry-timer stalls other instances' retries (pending-purge list not namespaced) → hold 3 s→500 ms; `finally{commit()}` must not mask the assertion error; restore the `performance.now` spy.
 - Method that worked: read-only subagents mine logs, then I re-verify the claimed mechanism (sim / grep vitest dist) before building the red.
+
+## 2026-10-31 (#655 shard 3): two flakes, dedicated fix PR asked by jean
+- `cache-purge-fingerprint-index-race` `expected 742 to be greater than 900` recurred AFTER be95ff8418 (purge shorter than the 900 ms floor; the test's own comment says raise `decoyMemberCount`).
+- `cache-m2o-through-fk-no-key.test.ts:206` `expected 'HIT' to be 'MISS'` after a write (shard-3 rerun; the first run passed). Root cause undecided: test race vs real stale cache (HIGH if product). #655 touches no cache code.
+- The rerun relocated the failure to the second test; a push replaces a second rerun. jean: "fix both flakes in a dedicated pr".
