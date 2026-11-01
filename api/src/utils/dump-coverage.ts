@@ -77,16 +77,25 @@ export function isCoverageInstrumented(): boolean {
  * Have every dump read the coverage of a sandboxed extension through
  * `readSandboxCoverage`. The returned function reads it one last time, for an
  * isolate about to be disposed: an unloaded extension keeps its coverage, as
- * one loaded in the server does.
+ * one loaded in the server does. Each load keeps its last coverage until the
+ * process exits, which bounds a coverage run, not a production server.
  */
 export function trackSandboxCoverage(
 	readSandboxCoverage: () => Promise<SandboxCoverage>,
 ): () => Promise<void> {
 	let readTrackedCoverage = readSandboxCoverage;
+	let isReleased = false;
 
 	sandboxCoverageReaders.add(() => readTrackedCoverage());
 
 	return async () => {
+		// a removed extension is unloaded again by every later reload
+		if (isReleased) {
+			return;
+		}
+
+		isReleased = true;
+
 		const lastCoverage = await readSandboxCoverage();
 
 		readTrackedCoverage = async () => lastCoverage;
@@ -187,7 +196,7 @@ async function collectCoverage(): Promise<SandboxCoverage | undefined> {
 	}
 
 	const coverage: CoverageMap = { ...serverCoverage };
-	const coverageDirs = readExtensionCoverageDirs();
+	const coverageDirs = [...readExtensionCoverageDirs()];
 
 	for (const sandboxCoverage of sandboxCoverages) {
 		coverageDirs.push(...sandboxCoverage.coverageDirs);
