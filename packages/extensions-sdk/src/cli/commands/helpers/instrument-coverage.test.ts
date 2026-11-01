@@ -267,8 +267,49 @@ describe('resolveCoverageTarget', () => {
 	test.each([
 		{
 			coverageConfig: { include: 5 },
-			refusal: 'coverage.include must be a glob, a regular expression, an '
-				+ 'array of them or null, not 5.',
+			refusal: 'coverage.include must be a glob, a regular expression or a '
+				+ 'non-empty array of them, not 5.',
+		},
+		{
+			// createFilter would instrument every module outside node_modules
+			coverageConfig: { include: null },
+			refusal: 'coverage.include must be a glob, a regular expression or a '
+				+ 'non-empty array of them, not null.',
+		},
+		{
+			coverageConfig: { include: [] },
+			refusal: 'coverage.include must be a glob, a regular expression or a '
+				+ 'non-empty array of them, not [].',
+		},
+		{
+			coverageConfig: { include: ['src/**', '!src/gen/**'] },
+			refusal: 'coverage.include cannot hold the negated glob "!src/gen/**": '
+				+ 'createFilter matches it as a literal path.',
+		},
+		{
+			coverageConfig: { exclude: '!src/index.ts' },
+			refusal: 'coverage.exclude cannot hold the negated glob "!src/index.ts": '
+				+ 'createFilter matches it as a literal path.',
+		},
+		{
+			coverageConfig: { instrumenterConfig: 'reportLogic' },
+			refusal: 'coverage.instrumenterConfig must be an object of '
+				+ 'istanbul-lib-instrument options, not "reportLogic".',
+		},
+		{
+			coverageConfig: { instrumenterConfig: 5 },
+			refusal: 'coverage.instrumenterConfig must be an object of '
+				+ 'istanbul-lib-instrument options, not 5.',
+		},
+		{
+			coverageConfig: { instrumenterConfig: ['x'] },
+			refusal: 'coverage.instrumenterConfig must be an object of '
+				+ 'istanbul-lib-instrument options, not ["x"].',
+		},
+		{
+			coverageConfig: { instrumenterConfig: null },
+			refusal: 'coverage.instrumenterConfig must be an object of '
+				+ 'istanbul-lib-instrument options, not null.',
 		},
 		{
 			coverageConfig: { exclude: ['src/**', {}] },

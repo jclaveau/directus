@@ -288,7 +288,7 @@ describe('dumpCoverage', () => {
 					sourceFiles: ['/ext/src/a.ts'],
 				}],
 			};
-		});
+		}, 'my-ext');
 
 		expect(reloadedModule.isCoverageInstrumented()).toBe(true);
 
@@ -316,7 +316,7 @@ describe('dumpCoverage', () => {
 					sourceFiles: ['/ext/src/a.ts'],
 				}],
 			};
-		});
+		}, 'my-ext');
 
 		await reloadedModule.dumpCoverage();
 
@@ -342,7 +342,7 @@ describe('dumpCoverage', () => {
 					sourceFiles: ['/ext/src/a.ts'],
 				}],
 			})
-			.mockRejectedValue(new Error('Isolate is disposed')));
+			.mockRejectedValue(new Error('Isolate is disposed')), 'my-ext');
 
 		await releaseSandboxCoverage();
 
@@ -351,6 +351,54 @@ describe('dumpCoverage', () => {
 		await expect(reloadedModule.dumpCoverage()).resolves.toEqual([
 			{ dir: join(workDir, 'ext/cov'), fileCount: 1 },
 		]);
+	});
+
+	test('writes the rest when one sandbox cannot be read', async () => {
+		vi.resetModules();
+		const reloadedModule = await import('./dump-coverage.js');
+
+		reloadedModule.trackSandboxCoverage(async () => {
+			return {
+				coverage: { '/ext/src/a.ts': { hash: 'h1', s: { 0: 1 }, f: {}, b: {} } },
+				coverageDirs: [{
+					sourceRoot: '/ext',
+					coverageDir: join(workDir, 'ext/cov'),
+					sourceFiles: ['/ext/src/a.ts'],
+				}],
+			};
+		}, 'my-ext');
+
+		reloadedModule.trackSandboxCoverage(async () => {
+			throw new Error('Script execution timed out.');
+		}, 'slow-ext');
+
+		await expect(reloadedModule.dumpCoverage()).rejects.toThrow(new Error(
+			'Coverage not read from the sandbox of "slow-ext": Script execution '
+				+ 'timed out.',
+		));
+
+		await expect(readdir(join(workDir, 'ext/cov')))
+			.resolves.toEqual([reloadedModule.COVERAGE_DUMP_NAME]);
+	});
+
+	test('names a sandbox whose last read failed in every later dump', async () => {
+		vi.resetModules();
+		const reloadedModule = await import('./dump-coverage.js');
+
+		const releaseSandboxCoverage = reloadedModule.trackSandboxCoverage(
+			async () => {
+				throw new Error('Isolate is disposed');
+			},
+			'gone-ext',
+		);
+
+		// an unload that throws would fail the reload it runs in
+		await expect(releaseSandboxCoverage()).resolves.toBeUndefined();
+
+		await expect(reloadedModule.dumpCoverage()).rejects.toThrow(new Error(
+			'Coverage not read from the sandbox of "gone-ext" when it was unloaded: '
+				+ 'Isolate is disposed',
+		));
 	});
 
 	test('starts a file over when its code changed between two loads', async () => {
@@ -368,14 +416,14 @@ describe('dumpCoverage', () => {
 				coverage: { '/ext/src/a.ts': { hash: 'h1', s: { 0: 5 }, f: {}, b: {} } },
 				coverageDirs,
 			};
-		});
+		}, 'my-ext');
 
 		reloadedModule.trackSandboxCoverage(async () => {
 			return {
 				coverage: { '/ext/src/a.ts': { hash: 'h2', s: { 0: 1 }, f: {}, b: {} } },
 				coverageDirs,
 			};
-		});
+		}, 'my-ext');
 
 		await reloadedModule.dumpCoverage();
 
