@@ -23,23 +23,24 @@ const feature = loadFeature('./tests/db/routes/server/coverage-dump.feature');
 
 /**
  * A hand-written stand-in for what `directus-extension build` with `coverage`
- * emits: it registers the package's coverage directory on the same global, then
- * records what istanbul records for a file with nothing in it. It is not the
- * SDK's banner, which its own unit tests run; this proves the server routes a
- * registered directory through the real extension loader.
+ * emits: it registers the package's coverage directory and the files bundled
+ * into it on the same global, then records what istanbul records for a file
+ * with nothing in it. It is not the SDK's banner, which its own unit tests
+ * run; this proves the server routes a registered directory through the real
+ * extension loader.
  */
 function renderFixtureHook(coverageDir: string): string {
 	return `
 import { fileURLToPath } from 'node:url';
 
 const sourceRoot = fileURLToPath(new URL('.', import.meta.url)).slice(0, -1);
+const sourceFile = fileURLToPath(new URL('./src/index.js', import.meta.url));
 
 (globalThis.__extensionCoverageDirs ??= []).push({
 	sourceRoot,
 	coverageDir: sourceRoot + '/' + ${JSON.stringify(coverageDir)},
+	sourceFiles: [sourceFile],
 });
-
-const sourceFile = fileURLToPath(new URL('./src/index.js', import.meta.url));
 
 globalThis.__coverage__ ??= {};
 

@@ -16,17 +16,46 @@ describe('renderCoverageBanner', () => {
 			sourceRoot: '/repo/ext',
 			coverageDir: '/repo/ext/cov-a',
 			pluginOptions: {},
-		}));
+		}, ['/repo/ext/src/index.ts']));
 
 		// the same package rebuilt with another dir, reloaded in the same process
 		runInThisContext(renderCoverageBanner({
 			sourceRoot: '/repo/ext',
 			coverageDir: '/repo/ext/cov-b',
 			pluginOptions: {},
-		}));
+		}, ['/repo/ext/src/index.ts']));
 
 		expect((globalThis as Record<string, unknown>)['__extensionCoverageDirs'])
-			.toEqual([{ sourceRoot: '/repo/ext', coverageDir: '/repo/ext/cov-b' }]);
+			.toEqual([{
+				sourceRoot: '/repo/ext',
+				coverageDir: '/repo/ext/cov-b',
+				sourceFiles: ['/repo/ext/src/index.ts'],
+			}]);
+	});
+
+	test('adds up the files of every chunk of one build', () => {
+		runInThisContext(renderCoverageBanner({
+			sourceRoot: '/repo/ext',
+			coverageDir: '/repo/ext/cov',
+			pluginOptions: {},
+		}, ['/repo/shared/date.ts', '/repo/ext/src/index.ts']));
+
+		runInThisContext(renderCoverageBanner({
+			sourceRoot: '/repo/ext',
+			coverageDir: '/repo/ext/cov',
+			pluginOptions: {},
+		}, ['/repo/ext/src/index.ts', '/repo/ext/src/routes.ts']));
+
+		expect((globalThis as Record<string, unknown>)['__extensionCoverageDirs'])
+			.toEqual([{
+				sourceRoot: '/repo/ext',
+				coverageDir: '/repo/ext/cov',
+				sourceFiles: [
+					'/repo/ext/src/index.ts',
+					'/repo/shared/date.ts',
+					'/repo/ext/src/routes.ts',
+				],
+			}]);
 	});
 });
 
@@ -170,6 +199,71 @@ describe('resolveCoverageTarget', () => {
 			'coverage.instrumenterConfig.coverageVariable must be "__coverage__", '
 				+ 'the global the server dumps, not "__cov".',
 		));
+	});
+
+	test('refuses a coverage global scope the server does not read', () => {
+		expect(() => {
+			return resolveCoverageTarget({
+				coverageConfig: { instrumenterConfig: { coverageGlobalScope: 'process' } },
+				extensionType: 'endpoint',
+				sourceRoot: '/repo/ext',
+				nodeEnv: 'test',
+			});
+		}).toThrow(new Error(
+			'coverage.instrumenterConfig.coverageGlobalScope must be "this", the '
+				+ 'global object the server dumps from, not "process".',
+		));
+	});
+
+	test('refuses a coverage global scope read as a bare this', () => {
+		expect(() => {
+			return resolveCoverageTarget({
+				coverageConfig: {
+					instrumenterConfig: { coverageGlobalScopeFunc: false },
+				},
+				extensionType: 'endpoint',
+				sourceRoot: '/repo/ext',
+				nodeEnv: 'test',
+			});
+		}).toThrow(new Error(
+			'coverage.instrumenterConfig.coverageGlobalScopeFunc must be true: an '
+				+ 'ES module has no top-level this to hold the coverage.',
+		));
+	});
+
+	test('refuses an empty coverage dir', () => {
+		expect(() => {
+			return resolveCoverageTarget({
+				coverageConfig: { dir: '' },
+				extensionType: 'endpoint',
+				sourceRoot: '/repo/ext',
+				nodeEnv: 'test',
+			});
+		}).toThrow(new Error(
+			'coverage.dir must name a directory, not "".',
+		));
+	});
+
+	test.each([
+		{
+			coverageConfig: { include: 5 },
+			refusal: 'coverage.include must be a glob, a regular expression, an '
+				+ 'array of them or null, not 5.',
+		},
+		{
+			coverageConfig: { exclude: ['src/**', {}] },
+			refusal: 'coverage.exclude must be a glob, a regular expression, an '
+				+ 'array of them or null, not ["src/**",{}].',
+		},
+	])('refuses the filter of $coverageConfig', ({ coverageConfig, refusal }) => {
+		expect(() => {
+			return resolveCoverageTarget({
+				coverageConfig: coverageConfig as never,
+				extensionType: 'endpoint',
+				sourceRoot: '/repo/ext',
+				nodeEnv: 'test',
+			});
+		}).toThrow(new Error(refusal));
 	});
 
 	test('refuses a coverage that is neither a boolean nor an options object', () => {

@@ -542,6 +542,7 @@ describe('build', () => {
 					{
 						sourceRoot: packageRoot,
 						coverageDir: resolve(packageRoot, 'coverage/backend'),
+						sourceFiles: [resolve(packageRoot, 'src/index.ts')],
 					},
 				]);
 
@@ -550,6 +551,72 @@ describe('build', () => {
 						(globalThis as Record<string, object>)['__coverage__']!,
 					),
 				).toEqual([resolve(packageRoot, 'src/index.ts')]);
+			},
+			30_000,
+		);
+
+		test(
+			'registers a file it imports from outside the package as its own',
+			async () => {
+				const sharedPath = `${TEST_PREFIX}-shared-${Date.now()}`;
+
+				await fse.outputFile(
+					resolve(origCwd, sharedPath, 'date.ts'),
+					'export const today = () => new Date().toDateString();\n',
+				);
+
+				const distPath = await buildEndpoint(
+					`import { today } from '../../${sharedPath}/date.ts';\n`
+						+ 'export default () => today();\n',
+					{},
+					'export default { coverage: '
+						+ `{ include: ['src/**', '../${sharedPath}/**'] } };\n`,
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+				const sharedRoot = realpathSync(resolve(origCwd, sharedPath));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					(globalThis as Record<string, unknown>)['__extensionCoverageDirs'],
+				).toEqual([
+					{
+						sourceRoot: packageRoot,
+						coverageDir: resolve(packageRoot, 'coverage/backend'),
+						sourceFiles: [
+							resolve(packageRoot, 'src/index.ts'),
+							resolve(sharedRoot, 'date.ts'),
+						],
+					},
+				]);
+			},
+			30_000,
+		);
+
+		test(
+			'instruments a source with legacy decorators',
+			async () => {
+				const distPath = await buildEndpoint(
+					'function sealed(target: Function) {\n'
+						+ '\tObject.seal(target);\n'
+						+ '}\n'
+						+ '@sealed class MailService {}\n'
+						+ 'export default () => new MailService();\n',
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				const builtCode = await fse.readFile(
+					resolve(distPath, 'index.js'),
+					'utf8',
+				);
+
+				expect(builtCode).toContain(
+					JSON.stringify(resolve(packageRoot, 'src/index.ts')),
+				);
 			},
 			30_000,
 		);

@@ -38,24 +38,34 @@ afterEach(async () => {
 });
 
 describe('splitCoverage', () => {
-	test('sends an extension its own files and core the rest', () => {
+	test('sends an extension the files it bundled and core the rest', () => {
 		const split = splitCoverage(
 			{
 				'/repo/ext-a/src/a.ts': 'a',
-				'/repo/ext-ab/src/b.ts': 'ab',
+				'/repo/shared/date.ts': 'shared',
+				'/repo/ext-a/scripts/seed.ts': 'seed',
 				'src/controllers/server.ts': 'core',
 			},
-			[{ sourceRoot: '/repo/ext-a', coverageDir: '/repo/ext-a/coverage' }],
+			[
+				{
+					sourceRoot: '/repo/ext-a',
+					coverageDir: '/repo/ext-a/coverage',
+					sourceFiles: ['/repo/ext-a/src/a.ts', '/repo/shared/date.ts'],
+				},
+			],
 			'/cov/core',
 		);
 
 		expect(split).toEqual({
 			coverageByDir: new Map([
-				['/repo/ext-a/coverage', { '/repo/ext-a/src/a.ts': 'a' }],
+				[
+					'/repo/ext-a/coverage',
+					{ '/repo/ext-a/src/a.ts': 'a', '/repo/shared/date.ts': 'shared' },
+				],
 				[
 					'/cov/core',
 					{
-						'/repo/ext-ab/src/b.ts': 'ab',
+						'/repo/ext-a/scripts/seed.ts': 'seed',
 						'src/controllers/server.ts': 'core',
 					},
 				],
@@ -64,10 +74,43 @@ describe('splitCoverage', () => {
 		});
 	});
 
+	test('sends a file two extensions bundled to both', () => {
+		const split = splitCoverage(
+			{ '/repo/shared/date.ts': 'shared' },
+			[
+				{
+					sourceRoot: '/repo/ext-a',
+					coverageDir: '/repo/ext-a/coverage',
+					sourceFiles: ['/repo/shared/date.ts'],
+				},
+				{
+					sourceRoot: '/repo/ext-b',
+					coverageDir: '/repo/ext-b/coverage',
+					sourceFiles: ['/repo/shared/date.ts'],
+				},
+			],
+			undefined,
+		);
+
+		expect(split).toEqual({
+			coverageByDir: new Map([
+				['/repo/ext-a/coverage', { '/repo/shared/date.ts': 'shared' }],
+				['/repo/ext-b/coverage', { '/repo/shared/date.ts': 'shared' }],
+			]),
+			unownedCount: 0,
+		});
+	});
+
 	test('counts the files no extension owns when there is no core directory', () => {
 		const split = splitCoverage(
 			{ '/repo/ext-a/src/a.ts': 'a', '/repo/shared/y.ts': 'y' },
-			[{ sourceRoot: '/repo/ext-a', coverageDir: '/repo/ext-a/coverage' }],
+			[
+				{
+					sourceRoot: '/repo/ext-a',
+					coverageDir: '/repo/ext-a/coverage',
+					sourceFiles: ['/repo/ext-a/src/a.ts'],
+				},
+			],
 			undefined,
 		);
 
@@ -82,7 +125,13 @@ describe('splitCoverage', () => {
 	test('writes one directory spelled two ways into one file', () => {
 		const split = splitCoverage(
 			{ '/repo/ext/src/a.ts': 'a', 'src/app.ts': 'core' },
-			[{ sourceRoot: '/repo/ext', coverageDir: '/repo/cov' }],
+			[
+				{
+					sourceRoot: '/repo/ext',
+					coverageDir: '/repo/cov',
+					sourceFiles: ['/repo/ext/src/a.ts'],
+				},
+			],
 			'/repo/cov/',
 		);
 
@@ -99,18 +148,6 @@ describe('readExtensionCoverageDirs', () => {
 	test('reads nothing when no instrumented extension is loaded', () => {
 		expect(readExtensionCoverageDirs()).toEqual([]);
 	});
-
-	test('lists a package nested in another one first, to own its own files', () => {
-		(globalThis as Record<string, unknown>)['__extensionCoverageDirs'] = [
-			{ sourceRoot: '/repo/outer', coverageDir: '/repo/outer/cov' },
-			{ sourceRoot: '/repo/outer/inner', coverageDir: '/repo/outer/inner/cov' },
-		];
-
-		expect(readExtensionCoverageDirs()).toEqual([
-			{ sourceRoot: '/repo/outer/inner', coverageDir: '/repo/outer/inner/cov' },
-			{ sourceRoot: '/repo/outer', coverageDir: '/repo/outer/cov' },
-		]);
-	});
 });
 
 describe('dumpCoverage', () => {
@@ -125,7 +162,11 @@ describe('dumpCoverage', () => {
 		vi.stubEnv('COVERAGE_DIR', join(workDir, 'core'));
 
 		(globalThis as Record<string, unknown>)['__extensionCoverageDirs'] = [
-			{ sourceRoot: join(workDir, 'ext'), coverageDir: join(workDir, 'ext/cov') },
+			{
+				sourceRoot: join(workDir, 'ext'),
+				coverageDir: join(workDir, 'ext/cov'),
+				sourceFiles: [join(workDir, 'ext/src/a.ts')],
+			},
 		];
 
 		(globalThis as Record<string, unknown>)['__coverage__'] = {
