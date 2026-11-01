@@ -1356,13 +1356,12 @@ implements AbstractService<Item> {
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
 		// An admin reaches every item, so a key no row holds is a 404 for them.
-		await this.updateMany(
-			[key],
-			data,
-			this.accountability?.admin === true
-				? { ...opts, refuseMissingKeys: true }
-				: opts,
-		);
+		await this.updateMany([key], data, {
+			...opts,
+			refuseHookAddedRows: opts?.refuseHookAddedRows ?? true,
+			refuseMissingKeys: this.accountability?.admin === true
+				|| opts?.refuseMissingKeys,
+		});
 
 		return key;
 	}
@@ -1968,6 +1967,15 @@ implements AbstractService<Item> {
 				const hookAddedKeys = answeredKeys.filter((key) => {
 					return !inputKeyNames.has(keyNameOf(key));
 				});
+
+				if (opts.refuseHookAddedRows && hookAddedKeys.length > 0) {
+					throw refuseHookAnswer(new InvalidPayloadError({
+						reason: oneLine`
+							A "${this.eventScope}.update" filter hook answered updateOne
+							with row ${keyNameOf(hookAddedKeys[0]!)}, which it was not sent
+						`,
+					}));
+				}
 
 				// Keys a hook added are counted and validated like the caller's own,
 				// before any of them is compared with another.
@@ -3300,6 +3308,9 @@ implements AbstractService<Item> {
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
+					// upsertMany takes the rows its update hook adds (onHookAddedRows),
+					// though it writes them one upsertOne at a time (#414).
+					refuseHookAddedRows: false,
 					scopedCacheHookDeclarations,
 					onHookAddedRows: (addedKeys, addedSnapshot) => {
 						for (const addedKey of addedKeys) {

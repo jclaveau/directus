@@ -5658,6 +5658,60 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 		expect(cancellingFilter).toHaveBeenCalledTimes(1);
 	});
 
+	it('refuses a single-item update a hook adds a row to', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ data: entries[0]!.data, keys: [...entries[0]!.keys, 2] }];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.updateOne(1, { name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'A "items.update" filter hook answered updateOne '
+						+ 'with row 2, which it was not sent',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('refuses a single-item upsert a hook adds a row to', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ data: entries[0]!.data, keys: [...entries[0]!.keys, 2] }];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.upsertOne({ id: 1, name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'A "items.update" filter hook answered updateOne '
+						+ 'with row 2, which it was not sent',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
 	it('refuses an admin delete of a key no row holds', async () => {
 		const adminService = new ItemsService('test', {
 			knex: database,

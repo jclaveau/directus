@@ -183,6 +183,13 @@ export type MutationOptions = {
 	refuseMissingKeys?: boolean | undefined;
 
 	/**
+	 * An update refuses with a 400 a row an `items.update` filter hook adds to
+	 * the keys it was sent. updateOne, whose caller names one row, defaults it
+	 * to `true`; upsertMany, which takes the rows a hook adds, passes `false`.
+	 */
+	refuseHookAddedRows?: boolean | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
