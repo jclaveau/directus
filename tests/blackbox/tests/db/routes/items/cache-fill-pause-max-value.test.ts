@@ -4,7 +4,7 @@ import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { once } from 'events';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import { afterAll, describe, expect, vi } from 'vitest';
@@ -47,7 +47,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 	async function restartInstance() {
 		await stopInstance();
-		env[vendor].PORT = String(await getPort());
+		env[vendor].PORT = String(await freePortOfWorker());
 		instanceLog = [];
 
 		const spawned = spawn('node', [paths.cli, 'start'], {
@@ -171,7 +171,7 @@ describe.each(vendors)('%s', (vendor) => {
 						env[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
 						env[vendor]['CACHE_BUILD_ID'] = buildId;
 						env[vendor]['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX'] = fillPause;
-						env[vendor].PORT = String(await getPort());
+						env[vendor].PORT = String(await freePortOfWorker());
 						instanceLog = [];
 
 						const spawned = spawn('node', [paths.cli, 'start'], {

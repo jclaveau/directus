@@ -3,7 +3,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -80,7 +80,7 @@ describe('System MCP Tests', () => {
 			const envMcpNoProcessesReport = cloneDeep(envMcp);
 			envMcpNoProcessesReport[vendor]['PROCESSES_REPORT_ENABLED'] = 'false';
 
-			const ports = await Promise.all(envKeys.map(() => getPort()));
+			const ports = await Promise.all(envKeys.map(() => freePortOfWorker()));
 
 			envs[vendor] = {
 				envMcp,

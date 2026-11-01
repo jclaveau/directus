@@ -14,6 +14,7 @@ export enum ErrorCode {
 	InvalidProviderConfig = 'INVALID_PROVIDER_CONFIG',
 	InvalidQuery = 'INVALID_QUERY',
 	InvalidToken = 'INVALID_TOKEN',
+	ItemNotFound = 'ITEM_NOT_FOUND',
 	LimitExceeded = 'LIMIT_EXCEEDED',
 	MethodNotAllowed = 'METHOD_NOT_ALLOWED',
 	NotNullViolation = 'NOT_NULL_VIOLATION',

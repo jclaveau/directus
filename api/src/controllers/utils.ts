@@ -5,6 +5,7 @@ import {
 	UnsupportedMediaTypeError,
 } from '@directus/errors';
 import type { CacheFlushTarget } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import argon2 from 'argon2';
 import Busboy from 'busboy';
 import { Router } from 'express';
@@ -20,7 +21,11 @@ import {
 	processesReportEnabled,
 	requestedProcessDetails,
 } from '../processes/index.js';
-import { ExportService, ImportService } from '../services/import-export.js';
+import {
+	ExportService,
+	exportMimeTypes,
+	ImportService,
+} from '../services/import-export.js';
 import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
@@ -171,6 +176,19 @@ router.post(
 
 		if (!req.body.format) {
 			throw new InvalidPayloadError({ reason: `"format" is required` });
+		}
+
+		const exportFormats = Object.keys(exportMimeTypes);
+
+		// Checked before the export is scheduled: once it runs, the request has
+		// been answered and the failure only reaches a notification.
+		if (!exportFormats.includes(req.body.format)) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					Invalid format "${req.body.format}". Allowed:
+					${exportFormats.join(', ')}
+				`,
+			});
 		}
 
 		const service = new ExportService({

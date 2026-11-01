@@ -7,7 +7,7 @@ import { oneLine } from '@directus/utils';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -109,7 +109,7 @@ describe.each(vendors)('%s', (vendor) => {
 			],
 		});
 
-		env[vendor].PORT = String(await getPort());
+		env[vendor].PORT = String(await freePortOfWorker());
 
 		instance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,

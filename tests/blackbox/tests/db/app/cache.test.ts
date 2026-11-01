@@ -4,7 +4,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
@@ -124,13 +124,13 @@ describe('App Caching Tests', () => {
 			envRedisVary[vendor]['CACHE_VARY_REQUEST_HEADERS'] = 'x-tenant-id,x-feature-*';
 			envRedisVary[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_vary`;
 
-			const newServerPortMem = await getPort();
-			const newServerPortMemPurge = await getPort();
-			const newServerPortRedis = await getPort();
-			const newServerPortRedisPurge = await getPort();
-			const newServerPortRedisScopedPurge = await getPort();
-			const newServerPortRedisAnomaly = await getPort();
-			const newServerPortRedisVary = await getPort();
+			const newServerPortMem = await freePortOfWorker();
+			const newServerPortMemPurge = await freePortOfWorker();
+			const newServerPortRedis = await freePortOfWorker();
+			const newServerPortRedisPurge = await freePortOfWorker();
+			const newServerPortRedisScopedPurge = await freePortOfWorker();
+			const newServerPortRedisAnomaly = await freePortOfWorker();
+			const newServerPortRedisVary = await freePortOfWorker();
 
 			envMem[vendor].PORT = String(newServerPortMem);
 			envMemPurge[vendor].PORT = String(newServerPortMemPurge);

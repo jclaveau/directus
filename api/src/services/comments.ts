@@ -1,6 +1,20 @@
 import { useEnv } from '@directus/env';
-import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
-import type { AbstractServiceOptions, Accountability, Comment, MutationOptions, PrimaryKey } from '@directus/types';
+import {
+	ErrorCode,
+	ForbiddenError,
+	InvalidPayloadError,
+	isDirectusError,
+	ItemNotFoundError,
+} from '@directus/errors';
+import type {
+	AbstractServiceOptions,
+	Accountability,
+	Comment,
+	Item,
+	MutationOptions,
+	PrimaryKey,
+	UpdateGroup,
+} from '@directus/types';
 import { useLogger } from '../logger/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
@@ -58,12 +72,26 @@ export class CommentsService extends ItemsService {
 			}
 		}
 
-		const keys = await super.createMany(data, opts);
-
 		const usersRegExp = new RegExp(/@[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}/gi);
 
-		for (const item of data) {
-			const mentions = uniq(item['comment']!.match(usersRegExp) ?? []);
+		const mentionsByItem = data.map((item) => {
+			return uniq(item['comment']!.match(usersRegExp) ?? []);
+		});
+
+		// A uuid is case-insensitive (RFC 9562), and Directus stores it lowercase.
+		const mentionedIds = uniq(mentionsByItem.flat()
+			.map((mention) => mention.substring(1).toLowerCase()));
+
+		// Resolved before the insert: an admin's mention of a missing user
+		// refuses the comment instead of failing after it is written.
+		const authorReadableIds = mentionedIds.length === 0
+			? new Set<string>()
+			: await this.readableUserIds(mentionedIds);
+
+		const keys = await super.createMany(data, opts);
+
+		for (const [itemIndex, item] of data.entries()) {
+			const mentions = mentionsByItem[itemIndex]!;
 
 			if (mentions.length === 0) {
 				continue;
@@ -77,8 +105,21 @@ export class CommentsService extends ItemsService {
 				fields: ['id', 'first_name', 'last_name', 'email'],
 			});
 
-			for (const mention of mentions) {
-				const userID = mention.substring(1);
+			// Two spellings of one uuid mention one user, who is notified once;
+			// the preview below still replaces every spelling the comment holds.
+			const mentionedUserIds = uniq(mentions.map((mention) => {
+				return mention.substring(1).toLowerCase();
+			}));
+
+			for (const userID of mentionedUserIds) {
+				if (!authorReadableIds.has(userID)) {
+					logger.warn(
+						`Mention of user "${userID}" skipped:`
+						+ ' the author cannot read that user',
+					);
+
+					continue;
+				}
 
 				const user = await this.usersService.readOne(userID, {
 					fields: ['id', 'first_name', 'last_name', 'email', 'role.id'],
@@ -116,7 +157,19 @@ export class CommentsService extends ItemsService {
 
 					const templateData = await usersService.readByQuery({
 						fields: ['id', 'first_name', 'last_name', 'email'],
-						filter: { id: { _in: mentions.map((mention) => mention.substring(1)) } },
+						filter: {
+							id: {
+								_in: mentionedUserIds,
+							},
+						},
+					}).catch((error: unknown) => {
+						// The recipient is notified all the same: a user they may not
+						// read is previewed as "@Unknown User".
+						if (!isDirectusError(error, ErrorCode.Forbidden)) {
+							throw error;
+						}
+
+						return [];
 					});
 
 					const userPreviews = templateData.reduce(
@@ -130,7 +183,7 @@ export class CommentsService extends ItemsService {
 					let comment = item['comment']!;
 
 					for (const mention of mentions) {
-						const uuid = mention.substring(1);
+						const uuid = mention.substring(1).toLowerCase();
 						// We only match on UUIDs in the first place. This is just an extra sanity check.
 						if (isValidUuid(uuid) === false) continue;
 						// Literal replace (not a user-built RegExp) avoids regex injection; mention is a literal @<uuid>.
@@ -172,15 +225,60 @@ ${comment}
 		return keys;
 	}
 
-	override updateOne(key: PrimaryKey, data: Partial<Comment>, opts?: MutationOptions): Promise<PrimaryKey> {
-		if (!this.accountability?.user) throw new ForbiddenError();
+	private async readableUserIds(userIds: string[]): Promise<Set<string>> {
+		const authorUsersService = new UsersService({
+			schema: this.schema,
+			knex: this.knex,
+			accountability: this.accountability,
+		});
 
-		return super.updateOne(key, data, opts);
+		const readableUsers = await authorUsersService.readByQuery({
+			fields: ['id'],
+			filter: { id: { _in: userIds } },
+			limit: -1,
+		}).catch((error: unknown) => {
+			if (!isDirectusError(error, ErrorCode.Forbidden)) {
+				throw error;
+			}
+
+			return [];
+		});
+
+		const readableIds = new Set<string>(readableUsers.map((readableUser) => {
+			return String(readableUser['id']).toLowerCase();
+		}));
+
+		// Only an admin may learn a user is missing: anyone else cannot tell it
+		// from a user they may not read, so that mention is skipped.
+		const missingId = this.accountability?.admin
+			? userIds.find((userId) => !readableIds.has(userId.toLowerCase()))
+			: undefined;
+
+		if (missingId !== undefined) {
+			throw new ItemNotFoundError({
+				collection: 'directus_users',
+				primaryKey: missingId,
+			});
+		}
+
+		return readableIds;
 	}
 
-	override deleteOne(key: PrimaryKey, opts?: MutationOptions): Promise<PrimaryKey> {
+	override async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
 		if (!this.accountability?.user) throw new ForbiddenError();
 
-		return super.deleteOne(key, opts);
+		return super.updateGroups(groups, opts);
+	}
+
+	override async deleteMany(
+		keys: PrimaryKey[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		if (!this.accountability?.user) throw new ForbiddenError();
+
+		return super.deleteMany(keys, opts);
 	}
 }

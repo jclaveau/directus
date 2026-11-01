@@ -1,11 +1,15 @@
 import config, { getUrl, paths } from '@common/config';
-import { defineFeature, loadFeature } from '@common/cucumber';
+import {
+	cellOfKnownKeys,
+	defineFeature,
+	loadFeature,
+} from '@common/cucumber';
 import { CreateCollection } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
 import request, { type Response } from 'supertest';
@@ -32,7 +36,7 @@ describe.each(vendors)('%s', (vendor) => {
 	// The collection goes through the spawned instance only: a schema change on
 	// the shared one would disturb the files running beside this one.
 	beforeAll(async () => {
-		const port = await getPort();
+		const port = await freePortOfWorker();
 		env[vendor].PORT = String(port);
 
 		instance = spawn('node', [paths.cli, 'start'], {
@@ -119,15 +123,32 @@ describe.each(vendors)('%s', (vendor) => {
 		headers?: Record<string, string>;
 	};
 
+	const REQUEST_CELL_KEYS = [
+		'method',
+		'path',
+		'payload',
+		'headers',
+	] as const satisfies readonly (keyof RequestCell)[];
+
+	const RESPONSE_CELL_KEYS = ['code', 'body', 'headers'] as const;
+
 	type QueryAudit = Record<string, unknown> & {
 		statements: Record<string, unknown>[];
 	};
 
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(instanceUrl: string, requestCell: string) {
-		const { method, path, payload, headers = {} } = loadYaml(
-			requestCell,
-		) as RequestCell;
+		const {
+			method,
+			path,
+			payload,
+			headers = {},
+		} = cellOfKnownKeys<RequestCell>(
+			'request',
+			loadYaml(requestCell),
+			REQUEST_CELL_KEYS,
+			'query-audit-header.test.ts',
+		);
 
 		const pendingRequest = method === 'POST'
 			? request(instanceUrl).post(path)
@@ -174,7 +195,14 @@ describe.each(vendors)('%s', (vendor) => {
 					[queryAuditHeader]: auditOf(response),
 				},
 			};
-		})).toMatchObject(table.map(({ response }) => loadYaml(response)));
+		})).toMatchObject(table.map(({ response }) => {
+			return cellOfKnownKeys<object>(
+				'response',
+				loadYaml(response),
+				RESPONSE_CELL_KEYS,
+				'query-audit-header.test.ts',
+			);
+		}));
 
 		return responses;
 	}
@@ -396,7 +424,7 @@ describe.each(vendors)('%s', (vendor) => {
 				given(
 					'an instance whose QUERY_AUDIT_HEADER_MAX_SIZE is 285',
 					async () => {
-						const port = await getPort();
+						const port = await freePortOfWorker();
 
 						cappedEnv[vendor].PORT = String(port);
 						cappedEnv[vendor]['QUERY_AUDIT_HEADER_MAX_SIZE'] = '285';
@@ -462,7 +490,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 				when('an instance starts with QUERY_AUDIT_LEVEL every', async () => {
 					exit = await refusedStartOf({
-						PORT: String(await getPort()),
+						PORT: String(await freePortOfWorker()),
 						QUERY_AUDIT_LEVEL: 'every',
 					});
 				});
@@ -490,7 +518,7 @@ describe.each(vendors)('%s', (vendor) => {
 					'an instance starts with QUERY_AUDIT_HEADER "x query audit"',
 					async () => {
 						exit = await refusedStartOf({
-							PORT: String(await getPort()),
+							PORT: String(await freePortOfWorker()),
 							QUERY_AUDIT_HEADER: 'x query audit',
 						});
 					},

@@ -6,8 +6,7 @@ import type {
 	UpdateGroup,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { ItemsService } from './items.js';
 
 export class AccessService extends ItemsService {
@@ -16,14 +15,13 @@ export class AccessService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 
-	override async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
+	override async createMany(
+		data: Partial<Item>[],
+		opts: MutationOptions = {},
+	): Promise<PrimaryKey[]> {
 		// Creating a new policy attachments affects the number of admin/app/api users.
 		// But it can only add app or admin users, so no need to check the remaining admin users.
 		opts.userIntegrityCheckFlags =
@@ -31,7 +29,7 @@ export class AccessService extends ItemsService {
 
 		opts.onRequireUserIntegrityCheck?.(opts.userIntegrityCheckFlags);
 
-		const result = await super.createOne(data, opts);
+		const result = await super.createMany(data, opts);
 
 		// A new policy has been attached to a user or a role, clear the caches
 		await this.clearCaches();

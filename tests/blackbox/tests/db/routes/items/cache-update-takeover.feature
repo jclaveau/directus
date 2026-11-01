@@ -148,8 +148,8 @@ Feature: A row a mutation hook took over is purged from the response cache
     When a create sends "take-over" beside the key of the "duplicate" row
     Then the create is refused with the status 400 and the message:
       """
-      Value for field "id" in collection "test_takeover_create_failed" has to be
-      unique.
+      Value "2" for field "id" in collection "test_takeover_create_failed" has
+      to be unique.
       """
     And the read of test_takeover_create_failed marked "taken" answers:
       | cache | response               |
@@ -162,8 +162,8 @@ Feature: A row a mutation hook took over is purged from the response cache
     When the parent creates "take-over" beside the key of the "duplicate" child
     Then the update is refused with the status 400 and the message:
       """
-      Value for field "id" in collection "test_takeover_nested_child" has to be
-      unique.
+      Value "2" for field "id" in collection "test_takeover_nested_child" has
+      to be unique.
       """
     And the read of test_takeover_nested_child marked "taken" answers:
       | cache | response               |

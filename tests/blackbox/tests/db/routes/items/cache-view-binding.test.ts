@@ -15,7 +15,7 @@ import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import Redis from 'ioredis';
 import { load as loadYaml } from 'js-yaml';
 import { cloneDeep } from 'lodash-es';
@@ -220,7 +220,7 @@ describe.each(vendors)('%s', (vendor) => {
 
 		userId = userResponse.body.data.id;
 
-		const port = await getPort();
+		const port = await freePortOfWorker();
 		env[vendor].PORT = String(port);
 
 		instance = spawn('node', [paths.cli, 'start'], {
