@@ -256,6 +256,8 @@ catalog:
   rate-limiter-flexible: 7.4.0
   rimraf: 6.1.3
   rolldown: 1.2.10
+  # Parked: a published SDK installs this from GitHub until the fork is on npm,
+  # https://github.com/jclaveau/rolldown-plugin-istanbul/issues/2
   rolldown-plugin-istanbul: git+https://github.com/jclaveau/rolldown-plugin-istanbul.git#29c826380f1b9b87de352a8e9c85bc8e56345e0b
   rollup: 4.62.3
   rollup-plugin-node-externals: 8.1.2
