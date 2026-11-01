@@ -808,6 +808,34 @@ describe('trackTransactionsOf', () => {
 	});
 
 	it(oneLine`
+		runs only the tasks held for a rollback, then raises the error, when
+		commit() rejects
+	`, async () => {
+		const db = knex.default({ client: MockClient });
+
+		createTracker(db);
+		trackTransactionsOf(db);
+
+		const committedTask = vi.fn(async () => {});
+		const settledTask = vi.fn(async () => {});
+		const openedTransaction = vi.spyOn(db.client, 'transaction');
+		const trx = await db.transaction();
+
+		// knex's own commit() resolves over any failed COMMIT, so its rejection
+		// can only be stubbed.
+		vi.spyOn(openedTransaction.mock.results[0]!.value, 'commit')
+			.mockRejectedValueOnce(new Error('connection lost'));
+
+		queueAfterCommit(trx, committedTask);
+		queueAfterCommitOrRollback(trx, settledTask);
+
+		await expect(trx.commit()).rejects.toEqual(new Error('connection lost'));
+
+		expect(committedTask).not.toHaveBeenCalled();
+		expect(settledTask).toHaveBeenCalledOnce();
+	});
+
+	it(oneLine`
 		holds a task queued on a trx database.transaction(config) opened
 	`, async () => {
 		const db = knex.default({ client: MockClient });
