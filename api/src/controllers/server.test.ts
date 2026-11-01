@@ -1,5 +1,5 @@
 import { RouteNotFoundError } from '@directus/errors';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const serverInfo = vi.fn();
 
@@ -74,6 +74,7 @@ describe('server controller /info', () => {
 
 describe('server controller POST /dump-coverage', () => {
 	beforeEach(() => vi.resetAllMocks());
+	afterEach(() => vi.unstubAllEnvs());
 
 	async function callCoverage() {
 		const req = { path: '/dump-coverage' } as any;
@@ -87,7 +88,11 @@ describe('server controller POST /dump-coverage', () => {
 		return { res, next };
 	}
 
-	test('answers 404 in a build with nothing instrumented', async () => {
+	test.each([
+		{ nodeEnv: 'production' },
+		{ nodeEnv: undefined },
+	])('hides the route when NODE_ENV is $nodeEnv', async ({ nodeEnv }) => {
+		vi.stubEnv('NODE_ENV', nodeEnv);
 		readCoverage.mockReturnValue(undefined);
 
 		const { res, next } = await callCoverage();
@@ -95,6 +100,23 @@ describe('server controller POST /dump-coverage', () => {
 		expect(next).toHaveBeenCalledWith(
 			new RouteNotFoundError({ path: '/dump-coverage' }),
 		);
+
+		expect(dumpCoverage).not.toHaveBeenCalled();
+		expect(res.locals['payload']).toBeUndefined();
+	});
+
+	test('says nothing is instrumented outside production', async () => {
+		vi.stubEnv('NODE_ENV', 'development');
+		readCoverage.mockReturnValue(undefined);
+
+		const { res, next } = await callCoverage();
+
+		expect(next).toHaveBeenCalledWith(expect.objectContaining({
+			code: 'NOT_INSTRUMENTED',
+			status: 404,
+			message: 'Nothing this server loaded is instrumented for coverage: '
+				+ 'build an extension with coverage in its extension.config.js.',
+		}));
 
 		expect(dumpCoverage).not.toHaveBeenCalled();
 		expect(res.locals['payload']).toBeUndefined();
