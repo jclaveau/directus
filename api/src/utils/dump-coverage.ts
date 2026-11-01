@@ -70,7 +70,7 @@ export function readCoverage(): CoverageMap | undefined {
  * sandbox.
  */
 export function isCoverageInstrumented(): boolean {
-	return readCoverage() !== undefined;
+	return readCoverage() !== undefined || sandboxCoverageReaders.size > 0;
 }
 
 /**
@@ -87,7 +87,9 @@ export function trackSandboxCoverage(
 	sandboxCoverageReaders.add(() => readTrackedCoverage());
 
 	return async () => {
-		readTrackedCoverage = readSandboxCoverage;
+		const lastCoverage = await readSandboxCoverage();
+
+		readTrackedCoverage = async () => lastCoverage;
 	};
 }
 
@@ -158,10 +160,10 @@ export function splitCoverage(
  * after the other, since two of them would write the same files.
  */
 export function dumpCoverage(): Promise<WrittenCoverage[]> {
-	const dump = pendingDump.then(writeCoverage);
+	const dump = pendingDump.then(writeCoverage, writeCoverage);
 
 	// The chain only orders the dumps; the caller of this one gets its error.
-	pendingDump = dump;
+	pendingDump = dump.catch(() => undefined);
 
 	return dump;
 }
@@ -209,7 +211,10 @@ function addFileCoverage(
 	earlierCoverage: FileCoverage,
 	laterCoverage: FileCoverage,
 ): FileCoverage {
-	if (earlierCoverage.hash === undefined) {
+	if (
+		earlierCoverage.hash === undefined
+		|| earlierCoverage.hash !== laterCoverage.hash
+	) {
 		return laterCoverage;
 	}
 

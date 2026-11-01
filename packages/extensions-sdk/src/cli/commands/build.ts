@@ -416,6 +416,7 @@ async function buildHybridExtension({
 		minify,
 		external,
 		config,
+		coverageInstrumentation,
 	});
 
 	const rollupOptionsApi = getRollupOptions({
@@ -849,6 +850,7 @@ function getRollupOutputOptions({
 			exports: 'auto',
 			preserveModules: true,
 			sourcemap,
+			...bannerOption,
 		};
 	}
 
