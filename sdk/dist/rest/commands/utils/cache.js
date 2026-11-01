@@ -1,0 +1,2 @@
+const e=(e=[])=>{let t=`/utils/cache/clear`,n=new URLSearchParams(e.map(e=>[`targets`,e])).toString();return()=>({method:`POST`,path:n?`${t}?${n}`:t})};export{e as clearCache};
+//# sourceMappingURL=cache.js.map

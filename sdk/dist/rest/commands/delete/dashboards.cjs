@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/dashboards`,body:JSON.stringify(t),method:`DELETE`}),n=t=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/dashboards/${t}`,method:`DELETE`});exports.deleteDashboard=n,exports.deleteDashboards=t;
+//# sourceMappingURL=dashboards.cjs.map

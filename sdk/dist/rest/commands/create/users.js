@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/users`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/users`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createUser,e as createUsers};
+//# sourceMappingURL=users.js.map
