@@ -5543,6 +5543,10 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 			{ id: 2, name: 'two' },
 		]);
 
+		// The revision snapshot reads the children too, and `run-ast` pages a
+		// to-many until a batch comes back short: unset, it never does.
+		env['RELATIONAL_BATCH_SIZE'] = 250;
+
 		selectStatements = [];
 
 		database.on('query', (query: { sql: string }) => {
@@ -5553,10 +5557,11 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 	});
 
 	afterEach(async () => {
+		delete env['RELATIONAL_BATCH_SIZE'];
 		await database.destroy();
 	});
 
-	it('updates for an admin a row that exists with no read', async () => {
+	it('updates for an admin a row that exists, reading its revision', async () => {
 		const adminService = new ItemsService('test', {
 			knex: database,
 			schema,
@@ -5566,7 +5571,13 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 		await expect(adminService.updateOne(1, { name: 'patched' }))
 			.resolves.toBe(1);
 
-		expect(selectStatements).toStrictEqual([]);
+		expect(selectStatements).toStrictEqual([
+			'select `test`.`id`, `test`.`name` from `test`'
+				+ ' where (`test`.`id` in (?)) order by `test`.`id` asc limit ?',
+			'select `children`.`parent_id`, `children`.`id` from `children`'
+				+ ' where `children`.`parent_id` in (?)'
+				+ ' order by `children`.`id` asc limit ?',
+		]);
 
 		await expect(database('test').select('id', 'name')
 			.orderBy('id')).resolves.toStrictEqual([
@@ -5690,6 +5701,16 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 
 		await expect(adminService.updateOne(2, { name: 'patched' }))
 			.resolves.toBe(2);
+
+		// the short count reads the held row, then the revision reads it again
+		expect(selectStatements).toStrictEqual([
+			'select `id` from `test` where `id` in (?)',
+			'select `test`.`id`, `test`.`name` from `test`'
+				+ ' where (`test`.`id` in (?)) order by `test`.`id` asc limit ?',
+			'select `children`.`parent_id`, `children`.`id` from `children`'
+				+ ' where `children`.`parent_id` in (?)'
+				+ ' order by `children`.`id` asc limit ?',
+		]);
 
 		await expect(database('test').select('id', 'name')
 			.orderBy('id')).resolves.toStrictEqual([

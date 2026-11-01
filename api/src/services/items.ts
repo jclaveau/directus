@@ -1924,6 +1924,11 @@ implements AbstractService<Item> {
 						}));
 					}
 
+					// A cancelled update writes nothing, so no count tells a key missing.
+					if (opts.refuseMissingKeys) {
+						await this.refuseKeysNoRowHolds(inputKeys, trx);
+					}
+
 					// The filter cancelled the update: nothing is written; a null per key
 					// keeps the result index-aligned with the input keys.
 					return {
