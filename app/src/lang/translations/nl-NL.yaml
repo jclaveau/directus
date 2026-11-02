@@ -1235,7 +1235,6 @@ installed: Geïnstalleerd
 reinstall: Herinstalleer
 open_in_marketplace: Openen in de Marktplaats
 source_registry: Marktplaats
-source_local: Lokaal
 source_module: Node Module
 collection: Collectie
 collections: Collecties
