@@ -252,4 +252,76 @@ describe('processO2M', () => {
 			expect.any(Object),
 		);
 	});
+
+	test('skips a record given by its key that already belongs to it', async () => {
+		tracker.on.select('city').response([{ id: 4, country_id: 1 }]);
+		const upsertManySpy = vi.fn().mockResolvedValue([]);
+
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: upsertManySpy,
+			updateByQuery: vi.fn().mockResolvedValue([]),
+		} as unknown as ItemsService);
+
+		await new PayloadService('country', { knex: db, schema })
+			.processO2M({ cities: [4] }, 1);
+
+		expect(upsertManySpy).toHaveBeenCalledWith([], expect.any(Object));
+	});
+
+	test('moves a record given by its key from another parent', async () => {
+		tracker.on.select('city').response([{ id: 4, country_id: 2 }]);
+		const upsertManySpy = vi.fn().mockResolvedValue([4]);
+
+		vi.mocked(getService).mockReturnValue({
+			upsertMany: upsertManySpy,
+			updateByQuery: vi.fn().mockResolvedValue([]),
+		} as unknown as ItemsService);
+
+		await new PayloadService('country', { knex: db, schema })
+			.processO2M({ cities: [4] }, 1);
+
+		expect(upsertManySpy).toHaveBeenCalledWith(
+			[{ id: 4, country_id: 1 }],
+			expect.any(Object),
+		);
+	});
+
+	test('sorts a created record last unless it carries a sort', async () => {
+		const sortedSchema = new SchemaBuilder()
+			.collection('country', (c) => {
+				c.field('id').id();
+				c.field('cities').o2m('city', 'country_id');
+			})
+			.collection('city', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('sort').integer();
+				c.field('country_id').integer();
+			})
+			.build();
+
+		sortedSchema.relations[0]!.meta!.sort_field = 'sort';
+
+		tracker.on.select('city').response([{ max: 3 }]);
+		const createManySpy = vi.fn().mockResolvedValue([5, 6]);
+
+		vi.mocked(getService).mockReturnValue({
+			createMany: createManySpy,
+		} as unknown as ItemsService);
+
+		await new PayloadService('country', { knex: db, schema: sortedSchema })
+			.processO2M({
+				cities: {
+					create: [{ name: 'Lyon' }, { name: 'Nice', sort: 1 }],
+				},
+			}, 1);
+
+		expect(createManySpy).toHaveBeenCalledWith(
+			[
+				{ name: 'Lyon', sort: 4, country_id: 1 },
+				{ name: 'Nice', sort: 1, country_id: 1 },
+			],
+			expect.any(Object),
+		);
+	});
 });
