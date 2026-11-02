@@ -1647,6 +1647,33 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
+				refuses a missing string key rather than give its children to the
+				payload's key, writing nothing
+			`, async () => {
+				const stringKeySchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id')
+							.string()
+							.primary();
+
+						c.field('children').o2m('child', 'parent');
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: stringKeySchema })
+					.updateOne(
+						undefined as never,
+						{ id: 'k5', children: { create: [{}] } },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'Primary key of test must be a string instead of undefined',
+					}));
+
+				expect(tracker.history.all).toEqual([]);
+			});
+
+			it(oneLine`
 				lets a last-winning batch give its child twice to the one row
 			`, async () => {
 				await expect(service.updateBatch(

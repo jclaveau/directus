@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import type { PrimaryKey, SchemaOverview } from '@directus/types';
 import { isValidUuid } from './is-valid-uuid.js';
 
@@ -29,6 +30,15 @@ export function validateKeys(
 		) {
 			throw new InvalidPayloadError({
 				reason: `Primary key of ${collection} must be an integer instead of ${JSON.stringify(keys, null, 2)}`,
+			});
+		}
+		// The uuid and integer checks above refuse a missing key already.
+		else if (keys === undefined || keys === null) {
+			throw new InvalidPayloadError({
+				reason: oneLine`
+					Primary key of ${collection} must be a ${primaryKeyFieldType} instead
+					of ${String(keys)}
+				`,
 			});
 		}
 	}

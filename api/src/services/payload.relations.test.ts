@@ -1,6 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { PrimaryKey } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import {
@@ -250,26 +249,6 @@ describe('processO2M', () => {
 		expect(updateOneSpy).toHaveBeenCalledWith(
 			4,
 			{ name: 'Lyon' },
-			expect.any(Object),
-		);
-	});
-
-	test('falls back to the payload key without a parent key', async () => {
-		tracker.on.select('city').response([{ id: 4, country_id: 2 }]);
-		const updateOneSpy = vi.fn().mockResolvedValue(4);
-
-		vi.mocked(getService).mockReturnValue({
-			updateOne: updateOneSpy,
-		} as unknown as ItemsService);
-
-		await new PayloadService('country', { knex: db, schema }).processO2M(
-			{ id: 7, cities: { update: [{ id: 4, name: 'Lyon' }] } },
-			null as unknown as PrimaryKey,
-		);
-
-		expect(updateOneSpy).toHaveBeenCalledWith(
-			4,
-			{ name: 'Lyon', country_id: 7 },
 			expect.any(Object),
 		);
 	});
