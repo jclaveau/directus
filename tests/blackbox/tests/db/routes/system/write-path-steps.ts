@@ -1,4 +1,3 @@
-import { getUrl } from '@common/config';
 import {
 	cellOfKnownKeys,
 	defineFeature,
@@ -6,7 +5,11 @@ import {
 	rememberedText,
 	responseCellOf,
 } from '@common/cucumber';
-import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import vendors from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { createWebSocketConn } from '@common/transport';
 import { USER } from '@common/variables';
 import { randomUUID } from 'crypto';
@@ -72,21 +75,32 @@ export function defineWritePathFeature(featurePath: string) {
 	const feature = loadFeature(featurePath);
 
 	describe.each(vendors)('%s', (vendor) => {
+		const instanceUrl = instanceUrlForFeature(feature, vendor);
+
 		defineFeature(feature, (scenario) => {
 			for (const { title } of feature.scenarios) {
-				scenario(title, ({ given, then }) => {
+				scenario(title, ({ given, then, and }) => {
 					const scenarioKeys: ScenarioKeys = {
 						run: randomUUID(),
 						keysByName: {},
 					};
 
-					given.optional('these requests are sent:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table, true);
+					const receivedResponses: (Response | undefined)[] = [];
+
+					given.optional('these requests are sent:', async (table: Row[]) => {
+						await sendRows(instanceUrl(), scenarioKeys, table, true);
 					});
 
-					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table, false);
+					then('these requests get these responses:', async (table: Row[]) => {
+						receivedResponses.push(...await sendRows(
+							instanceUrl(),
+							scenarioKeys,
+							table,
+							false,
+						));
 					});
+
+					defineStatementCountsStep(and, vendor, receivedResponses);
 				}, 60_000);
 			}
 		});
@@ -107,14 +121,14 @@ function withKeys(cell: string, scenarioKeys: ScenarioKeys) {
 	});
 }
 
-function sendHttpRequest(vendor: Vendor, requestCell: HttpCell) {
+function sendHttpRequest(instanceUrl: string, requestCell: HttpCell) {
 	const { method, path, query = {}, payload, file } = requestCell;
 
 	const pendingRequest = {
-		DELETE: () => request(getUrl(vendor)).delete(path),
-		GET: () => request(getUrl(vendor)).get(path),
-		PATCH: () => request(getUrl(vendor)).patch(path),
-		POST: () => request(getUrl(vendor)).post(path),
+		DELETE: () => request(instanceUrl).delete(path),
+		GET: () => request(instanceUrl).get(path),
+		PATCH: () => request(instanceUrl).patch(path),
+		POST: () => request(instanceUrl).post(path),
 	}[method]();
 
 	pendingRequest.query(query).set('Authorization', AUTH);
@@ -133,8 +147,11 @@ function sendHttpRequest(vendor: Vendor, requestCell: HttpCell) {
 }
 
 // One socket per message: the reply carrying the message's uid is the answer.
-async function sendWebSocketMessage(vendor: Vendor, requestCell: WebSocketCell) {
-	const socket = createWebSocketConn(getUrl(vendor), {
+async function sendWebSocketMessage(
+	instanceUrl: string,
+	requestCell: WebSocketCell,
+) {
+	const socket = createWebSocketConn(instanceUrl, {
 		auth: { access_token: USER.ADMIN.TOKEN },
 	});
 
@@ -156,12 +173,18 @@ async function sendWebSocketMessage(vendor: Vendor, requestCell: WebSocketCell) 
 	}
 }
 
-async function answerOf(vendor: Vendor, requestCell: RequestCell) {
+// An HTTP call's response is also logged, for the statements it ran.
+async function answerOf(
+	instanceUrl: string,
+	requestCell: RequestCell,
+	responseLog: Response[],
+) {
 	if ('websocket' in requestCell) {
-		return { reply: await sendWebSocketMessage(vendor, requestCell) };
+		return { reply: await sendWebSocketMessage(instanceUrl, requestCell) };
 	}
 
-	const response: Response = await sendHttpRequest(vendor, requestCell);
+	const response: Response = await sendHttpRequest(instanceUrl, requestCell);
+	responseLog.push(response);
 
 	return { code: response.statusCode, body: response.body as unknown };
 }
@@ -183,16 +206,20 @@ function rememberedPaths(remember: RequestCell['remember']) {
 
 // One row at a time, so a row can name a value one before it remembered. A
 // response cell states the keys it checks; an array still has to hold as many
-// items as it states.
+// items as it states. Returns each row's last HTTP response, none for a
+// `websocket:` row.
 async function sendRows(
-	vendor: Vendor,
+	instanceUrl: string,
 	scenarioKeys: ScenarioKeys,
 	table: Row[],
 	allowsBlankResponse: boolean,
 ) {
 	const rememberingRows: Record<string, RememberingRow> = {};
+	const rowResponses: (Response | undefined)[] = [];
 
 	for (const { request: requestText, response: responseText } of table) {
+		const responseLog: Response[] = [];
+
 		const requestCell = cellOfKnownKeys<RequestCell>(
 			'request',
 			loadYaml(withKeys(requestText, scenarioKeys)),
@@ -212,7 +239,8 @@ async function sendRows(
 
 		if (requestCell.retry_stale_hash !== undefined) {
 			answer = await answerRetakingHash(
-				vendor,
+				instanceUrl,
+				responseLog,
 				scenarioKeys,
 				requestText,
 				requestCell.retry_stale_hash,
@@ -223,7 +251,7 @@ async function sendRows(
 		}
 		else if (requestCell.eventually) {
 			await expect.poll(async () => {
-				answer = await answerOf(vendor, requestCell);
+				answer = await answerOf(instanceUrl, requestCell, responseLog);
 
 				return answer;
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
@@ -231,7 +259,7 @@ async function sendRows(
 			);
 		}
 		else {
-			answer = await answerOf(vendor, requestCell);
+			answer = await answerOf(instanceUrl, requestCell, responseLog);
 
 			expect(answer).toMatchObject(expectedAnswer);
 		}
@@ -246,7 +274,11 @@ async function sendRows(
 
 			rememberingRows[name] = { requestText, dottedPath };
 		}
+
+		rowResponses.push(responseLog.at(-1));
 	}
+
+	return rowResponses;
 }
 
 function isStaleHashRefusal(answer: unknown) {
@@ -264,10 +296,12 @@ function isStaleHashRefusal(answer: unknown) {
 // A diff applies only under the hash it was taken from, and files in the
 // parallel middle move the schema too: on a stale-hash refusal the row takes
 // the hash again from the row that remembered it, then re-sends, as a client
-// of /schema/apply would.
+// of /schema/apply would. The row's response is its last attempt's, so a
+// statement count names only that attempt's statements.
 // TODO(#617): hold a harness lock around every schema-moving file instead.
 async function answerRetakingHash(
-	vendor: Vendor,
+	instanceUrl: string,
+	responseLog: Response[],
 	scenarioKeys: ScenarioKeys,
 	requestText: string,
 	hashName: string,
@@ -275,8 +309,9 @@ async function answerRetakingHash(
 ) {
 	const sendRow = (rowText: string) => {
 		return answerOf(
-			vendor,
+			instanceUrl,
 			loadYaml(withKeys(rowText, scenarioKeys)) as RequestCell,
+			responseLog,
 		);
 	};
 

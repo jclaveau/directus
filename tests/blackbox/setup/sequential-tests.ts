@@ -178,6 +178,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// waiting on before it will report itself ready at all.
 			'/tests/db/app/autoscale-prewarm-health.test.ts',
 			'/tests/db/app/autoscale-prewarm-daemon-lost.test.ts',
+			// Its release waits for the CPU to fall under a threshold: beside the
+			// instances that count statements, the pool came down 6, 4, 2, 1.
+			'/tests/db/app/autoscale-prewarm-load.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 			// Reads the whole schema back against a snapshot taken a moment before:
 			// a sibling creating its collections in between is a drift.

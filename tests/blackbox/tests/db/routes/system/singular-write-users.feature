@@ -19,6 +19,9 @@ Feature: A single user is checked as it is created
       | query:                              |   data: []                   |
       |   fields: id                        |                              |
       |   filter[first_name][_eq]: sw-<run> |                              |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a user created with an email already taken is refused
     Given these requests are sent:
@@ -45,3 +48,6 @@ Feature: A single user is checked as it is created
       | query:                                  |   data: []                          |
       |   fields: id                            |                                     |
       |   filter[first_name][_eq]: second-<run> |                                     |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |

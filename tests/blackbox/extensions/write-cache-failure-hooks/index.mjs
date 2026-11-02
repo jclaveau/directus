@@ -211,14 +211,14 @@ export default function registerHooks({ filter }, { database }) {
 	}
 
 	filter(
-		'test_wcf_nested_delete_child.items.delete',
+		'test_wcf_nested_del_child.items.delete',
 		async (keys, _meta, { scopedCache, database: hookDatabase }) => {
-			const declaringRows = await hookDatabase('test_wcf_nested_delete_child')
+			const declaringRows = await hookDatabase('test_wcf_nested_del_child')
 				.whereIn('id', keys)
 				.where({ body: 'declare-foreign' });
 
 			if (declaringRows.length > 0) {
-				scopedCache.purgeBy({ collection: 'test_wcf_nested_delete_foreign' });
+				scopedCache.purgeBy({ collection: 'test_wcf_nested_del_foreign' });
 			}
 
 			return keys;

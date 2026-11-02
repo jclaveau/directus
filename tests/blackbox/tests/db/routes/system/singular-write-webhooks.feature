@@ -16,3 +16,7 @@ Feature: A single webhook is deleted by its key
       |                            |         doesn't exist in     |
       |                            |         collection           |
       |                            |         "directus_webhooks". |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 1       | directus_webhooks | 1      | 0      | 0      | 0      |
