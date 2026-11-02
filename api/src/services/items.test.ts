@@ -1667,7 +1667,7 @@ describe('Integration Tests', () => {
 					))
 					.rejects
 					.toThrow(new InvalidPayloadError({
-						reason: 'Primary key of test must be a string instead of undefined',
+						reason: 'Primary key of "test" must be a "string" instead of undefined',
 					}));
 
 				expect(tracker.history.all).toEqual([]);

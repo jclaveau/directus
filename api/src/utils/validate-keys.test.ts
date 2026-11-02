@@ -208,8 +208,14 @@ describe('validate keys', () => {
 
 	describe('of string type', () => {
 		it.each([
-			[undefined, 'Primary key of pk_string must be a string instead of undefined'],
-			[null, 'Primary key of pk_string must be a string instead of null'],
+			[
+				undefined,
+				'Primary key of "pk_string" must be a "string" instead of undefined',
+			],
+			[
+				null,
+				'Primary key of "pk_string" must be a "string" instead of null',
+			],
 		])('refuses a missing key: %s', (key, reason) => {
 			expect(() => validateKeys(schema, 'pk_string', 'id', key as never))
 				.toThrow(new InvalidPayloadError({ reason }));
@@ -220,7 +226,10 @@ describe('validate keys', () => {
 
 			expect(() => validateKeys(schema, 'pk_string', 'id', keysMissingOne))
 				.toThrow(new InvalidPayloadError({
-					reason: 'Primary key of pk_string must be a string instead of undefined',
+					reason: oneLine`
+						Primary key of "pk_string" must be a "string" instead of
+						undefined
+					`,
 				}));
 		});
 

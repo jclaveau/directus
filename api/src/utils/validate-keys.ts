@@ -36,8 +36,8 @@ export function validateKeys(
 		else if (keys === undefined || keys === null) {
 			throw new InvalidPayloadError({
 				reason: oneLine`
-					Primary key of ${collection} must be a ${primaryKeyFieldType} instead
-					of ${String(keys)}
+					Primary key of ${JSON.stringify(collection)} must be a
+					${JSON.stringify(primaryKeyFieldType)} instead of ${JSON.stringify(keys)}
 				`,
 			});
 		}

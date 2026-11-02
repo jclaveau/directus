@@ -1570,8 +1570,8 @@ implements AbstractService<Item> {
 					if (rowNames.size > 1) {
 						throw new InvalidPayloadError({
 							reason: oneLine`
-								"${joiningChildKey}" can't join more than one
-								"${this.collection}"
+								${JSON.stringify(joiningChildKey)} can't join more than
+								one ${JSON.stringify(this.collection)}
 							`,
 						});
 					}
