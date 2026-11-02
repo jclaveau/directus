@@ -27,7 +27,13 @@ describe('generateExtensionsEntrypoint', () => {
 		});
 
 		const mockSettings: ExtensionSettings[] = [
-			{ id: 'x', folder: 'mock-bundle0-extension', enabled: true, source: 'module', bundle: null },
+			{
+				id: 'x',
+				folder: 'mock-bundle0-extension',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
 		];
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toMatchInlineSnapshot(
@@ -123,7 +129,13 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		const mockSettings = [{ source: 'module', folder: 'mock-panel-extension', enabled: true }] as ExtensionSettings[];
+		const mockSettings = [
+			{
+				source: 'module',
+				folder: 'mock-panel-extension',
+				enabled: true,
+			},
+		] as ExtensionSettings[];
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toMatchInlineSnapshot(
 			`"import panel0 from './extensions/panel/index.js';export const interfaces = [];export const displays = [];export const layouts = [];export const modules = [];export const panels = [panel0];export const themes = [];export const operations = [];"`,
@@ -186,7 +198,12 @@ describe('generateExtensionsEntrypoint', () => {
 		});
 
 		const mockSettings = [
-			{ id: 'mock-bundle-id', source: 'module', folder: 'mock-bundle-extension', enabled: true },
+			{
+				id: 'mock-bundle-id',
+				source: 'module',
+				folder: 'mock-bundle-extension',
+				enabled: true,
+			},
 			{
 				id: 'mock-bundle-interface-id',
 				source: 'module',
@@ -285,7 +302,13 @@ describe('generateExtensionsEntrypoint', () => {
 				source: 'module',
 				bundle: null,
 			},
-			{ id: 'mock-bundle-id', folder: 'mock-bundle0-extension', enabled: true, source: 'module', bundle: null },
+			{
+				id: 'mock-bundle-id',
+				folder: 'mock-bundle0-extension',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
 			{
 				id: 'mock-bundle-layout-id',
 				folder: 'mock-bundle-layout',
