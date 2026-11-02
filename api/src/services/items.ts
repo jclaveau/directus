@@ -1355,8 +1355,14 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
-		await this.refuseMissingKeyForAdmin(key);
-		await this.updateMany([key], data, opts);
+		// An admin reaches every item, so a key no row holds is a 404 for them.
+		await this.updateMany([key], data, {
+			...opts,
+			refuseHookAddedRows: opts?.refuseHookAddedRows ?? true,
+			refuseMissingKeys: this.accountability?.admin === true
+				|| opts?.refuseMissingKeys,
+		});
+
 		return key;
 	}
 
@@ -1920,6 +1926,11 @@ implements AbstractService<Item> {
 						}));
 					}
 
+					// A cancelled update writes nothing, so no count tells a key missing.
+					if (opts.refuseMissingKeys) {
+						await this.refuseKeysNoRowHolds(inputKeys, trx);
+					}
+
 					// The filter cancelled the update: nothing is written; a null per key
 					// keeps the result index-aligned with the input keys.
 					return {
@@ -1976,6 +1987,15 @@ implements AbstractService<Item> {
 				}
 				catch (error) {
 					throw refuseHookAnswer(error);
+				}
+
+				if (opts.refuseHookAddedRows && hookAddedKeys.length > 0) {
+					throw refuseHookAnswer(new InvalidPayloadError({
+						reason: oneLine`
+							A "${this.eventScope}.update" filter hook answered updateOne
+							with row ${keyNameOf(hookAddedKeys[0]!)}, which it was not sent
+						`,
+					}));
 				}
 
 				const groupedKeyNames = new Set(dataGroups.flatMap((group) => {
@@ -2152,6 +2172,22 @@ implements AbstractService<Item> {
 					oldScopedCacheSnapshot,
 					takeoverUndeclared,
 				};
+
+				// A row no group writes gets no UPDATE count to be told missing by: a
+				// change of nothing, or a row a hook took over.
+				if (opts.refuseMissingKeys) {
+					const writtenKeyNamesByDirectus = new Set(directusWrittenKeys.map(
+						(key) => keyNameOf(key),
+					));
+
+					const unwrittenInputKeys = inputKeys.filter((key) => {
+						return !writtenKeyNamesByDirectus.has(keyNameOf(key));
+					});
+
+					if (unwrittenInputKeys.length > 0) {
+						await this.refuseKeysNoRowHolds(unwrittenInputKeys, trx);
+					}
+				}
 
 				// Directus writes nothing — every group was a no-op, the per-row filter
 				// cancelled every row, or a hook took every row over.
@@ -2676,9 +2712,12 @@ implements AbstractService<Item> {
 			const payloadWithoutAliasAndPK = pick(payloadWithA2O, without(fields, primaryKeyField, ...aliases));
 			const payloadWithTypeCasting = await payloadService.processValues('update', payloadWithoutAliasAndPK);
 
+			let updatedRowCount = 0;
+
 			if (Object.keys(payloadWithTypeCasting).length > 0) {
 				try {
-					await trx(this.collection).update(payloadWithTypeCasting)
+					updatedRowCount = await trx(this.collection)
+						.update(payloadWithTypeCasting)
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
@@ -2687,6 +2726,12 @@ implements AbstractService<Item> {
 						operation: 'update',
 					});
 				}
+			}
+
+			// A full count tells every row was there without a read. A short one,
+			// or no UPDATE at all, is read: a trigger may have skipped a held row.
+			if (opts.refuseMissingKeys && updatedRowCount < keys.length) {
+				await this.refuseKeysNoRowHolds(keys, trx);
 			}
 
 			const childrenRevisions = [...revisionsM2O, ...revisionsA2O];
@@ -2822,7 +2867,10 @@ implements AbstractService<Item> {
 	): string | null {
 		const collectionSchema = this.schema.collections[this.collection]!;
 
+		// A batch statement's count is per run, not per group, so a key no row
+		// holds is told only by a group written alone.
 		const isRefused = opts.preMutationError !== undefined
+			|| opts.refuseMissingKeys === true
 			|| group.keys.some((key) => {
 				return opts.preMutationErrorsByKey?.get(String(key)) !== undefined;
 			});
@@ -3263,6 +3311,9 @@ implements AbstractService<Item> {
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
+					// upsertMany takes the rows its update hook adds (onHookAddedRows),
+					// though it writes them one upsertOne at a time (#414).
+					refuseHookAddedRows: false,
 					scopedCacheHookDeclarations,
 					onHookAddedRows: (addedKeys, addedSnapshot) => {
 						for (const addedKey of addedKeys) {
@@ -3401,9 +3452,42 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
-		await this.refuseMissingKeyForAdmin(key);
+		// deleteMany tells an admin a key no row holds off the delete's count.
 		await this.deleteMany([key], opts);
 		return key;
+	}
+
+	/**
+	 * Refuses with a 404 the first of `keys` no row holds, read through `knex`
+	 * so that a write's transaction sees its own rows. A row matches a key by
+	 * its spelling: a `citext` or `char(n)` key the row stores spelled otherwise
+	 * (`'Abc'`, `'abc  '` for `'abc'`) counts as no row's.
+	 */
+	private async refuseKeysNoRowHolds(
+		keys: PrimaryKey[],
+		knex: Knex,
+	): Promise<void> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const heldRows: Item[] = await knex
+			.select(primaryKeyField)
+			.from(this.collection)
+			.whereIn(primaryKeyField, keys);
+
+		const heldKeyNames = new Set(heldRows.map((heldRow) => {
+			return this.primaryKeyNameOf(heldRow[primaryKeyField]);
+		}));
+
+		const missingKey = keys.find((key) => {
+			return !heldKeyNames.has(this.primaryKeyNameOf(key));
+		});
+
+		if (missingKey !== undefined) {
+			throw new ItemNotFoundError({
+				collection: this.collection,
+				primaryKey: missingKey,
+			});
+		}
 	}
 
 	/**
@@ -3438,7 +3522,9 @@ implements AbstractService<Item> {
 	 * delete's count, so a delete reaching every key reads nothing more; the
 	 * delete runs under a savepoint so that, on a shortfall, the rows come back
 	 * to be read for the key none holds. Keys a query resolved were not named
-	 * by the caller, so one another delete took meanwhile is skipped.
+	 * by the caller, so one another delete took meanwhile is skipped. A postgres
+	 * `DO INSTEAD` rule on the table answers with its own statement's count,
+	 * which is trusted as the delete's.
 	 */
 	private async deleteKeyRows(
 		keys: PrimaryKey[],

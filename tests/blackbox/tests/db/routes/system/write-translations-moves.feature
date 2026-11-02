@@ -45,9 +45,9 @@ Feature: A translation moves to another key or language only onto a free one
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_translations | 5      | 0      | 1      | 0      |
+      | 1       | directus_translations | 4      | 0      | 1      | 0      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | directus_translations | 3      | 0      | 0      | 0      |
+      | 2       | directus_translations | 2      | 0      | 0      | 0      |
       | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: one key and language given to several translations is refused
@@ -153,9 +153,9 @@ Feature: A translation moves to another key or language only onto a free one
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_translations | 5      | 0      | 1      | 0      |
+      | 1       | directus_translations | 4      | 0      | 1      | 0      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | directus_translations | 3      | 0      | 0      | 0      |
+      | 2       | directus_translations | 2      | 0      | 0      | 0      |
       | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a batch naming no keys moves no translation

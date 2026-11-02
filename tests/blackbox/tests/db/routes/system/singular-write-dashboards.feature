@@ -52,7 +52,7 @@ Feature: Dashboards and their panels are written one at a time or in batches
       | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 1       | directus_users      | 1      | 0      | 0      | 0      |
       | 2       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 2       | directus_dashboards | 3      | 0      | 1      | 0      |
+      | 2       | directus_dashboards | 2      | 0      | 1      | 0      |
       | 2       | directus_panels     | 1      | 0      | 0      | 0      |
       | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 2       | directus_users      | 1      | 0      | 0      | 0      |
@@ -67,7 +67,7 @@ Feature: Dashboards and their panels are written one at a time or in batches
       | 4       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 4       | directus_users      | 1      | 0      | 0      | 0      |
       | 5       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 5       | directus_dashboards | 1      | 0      | 0      | 1      |
+      | 5       | directus_dashboards | 0      | 0      | 0      | 1      |
       | 5       | directus_users      | 1      | 0      | 0      | 0      |
 
   Scenario: a panel is created, moved one by one and in batches, deleted
@@ -131,7 +131,7 @@ Feature: Dashboards and their panels are written one at a time or in batches
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
       | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_panels    | 3      | 0      | 1      | 0      |
+      | 2       | directus_panels    | 2      | 0      | 1      | 0      |
       | 2       | directus_revisions | 0      | 1      | 0      | 0      |
       | 2       | directus_users     | 1      | 0      | 0      | 0      |
       | 3       | directus_activity  | 0      | 1      | 0      | 0      |
@@ -143,5 +143,5 @@ Feature: Dashboards and their panels are written one at a time or in batches
       | 4       | directus_revisions | 0      | 1      | 0      | 0      |
       | 4       | directus_users     | 1      | 0      | 0      | 0      |
       | 5       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 5       | directus_panels    | 1      | 0      | 0      | 1      |
+      | 5       | directus_panels    | 0      | 0      | 0      | 1      |
       | 5       | directus_users     | 1      | 0      | 0      | 0      |

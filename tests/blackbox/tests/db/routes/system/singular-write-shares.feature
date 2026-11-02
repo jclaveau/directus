@@ -183,7 +183,7 @@ Feature: A single share is created only for an item its sender may share
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 1      | 0      | 0      |
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 1       | directus_shares    | 3      | 0      | 1      | 0      |
+      | 1       | directus_shares    | 2      | 0      | 1      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
       | 2       | directus_access    | 2      | 0      | 0      | 0      |
       | 2       | directus_activity  | 0      | 1      | 0      | 0      |
@@ -200,7 +200,7 @@ Feature: A single share is created only for an item its sender may share
       | 4       | directus_access    | 2      | 0      | 0      | 0      |
       | 4       | directus_activity  | 0      | 1      | 0      | 0      |
       | 4       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 4       | directus_shares    | 1      | 0      | 0      | 1      |
+      | 4       | directus_shares    | 0      | 0      | 0      | 1      |
       | 4       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a batch of shares is checked share by share like a single one

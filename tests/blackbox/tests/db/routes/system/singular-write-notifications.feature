@@ -62,7 +62,7 @@ Feature: Notifications are written one at a time or in batches
       | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
       | 1       | directus_users         | 2      | 0      | 0      | 0      |
       | 2       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 2       | directus_notifications | 3      | 0      | 1      | 0      |
+      | 2       | directus_notifications | 2      | 0      | 1      | 0      |
       | 2       | directus_revisions     | 0      | 1      | 0      | 0      |
       | 2       | directus_users         | 1      | 0      | 0      | 0      |
       | 3       | directus_activity      | 0      | 1      | 0      | 0      |
@@ -74,5 +74,5 @@ Feature: Notifications are written one at a time or in batches
       | 4       | directus_revisions     | 0      | 1      | 0      | 0      |
       | 4       | directus_users         | 1      | 0      | 0      | 0      |
       | 5       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 5       | directus_notifications | 1      | 0      | 0      | 1      |
+      | 5       | directus_notifications | 0      | 0      | 0      | 1      |
       | 5       | directus_users         | 1      | 0      | 0      | 0      |

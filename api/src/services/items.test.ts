@@ -283,33 +283,6 @@ describe('Integration Tests', () => {
 		});
 
 		describe('updateOne and deleteOne of a key no row holds', () => {
-			it('refuse an admin with a not found before any write', async () => {
-				tracker.reset();
-				tracker.on.select('test').response(undefined);
-
-				const adminService = new ItemsService('test', {
-					knex: db,
-					schema,
-					accountability: { admin: true } as any,
-				});
-
-				adminService.updateMany = vi.fn();
-				adminService.deleteMany = vi.fn();
-
-				await expect(
-					adminService.updateOne(999, { name: 'patched' }),
-				).rejects.toStrictEqual(
-					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
-				);
-
-				await expect(adminService.deleteOne(999)).rejects.toStrictEqual(
-					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
-				);
-
-				expect(adminService.updateMany).not.toHaveBeenCalled();
-				expect(adminService.deleteMany).not.toHaveBeenCalled();
-			});
-
 			it('refuse an admin a key that is no integer before the lookup', async () => {
 				tracker.reset();
 
@@ -5766,6 +5739,326 @@ describe('Services / Items / a batch delete naming a key no row holds', () => {
 
 		await expect(database('test').select('id'))
 			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+});
+
+describe('Services / Items / a single-item write naming a key no row holds', () => {
+	let database: Knex;
+	let selectStatements: string[];
+
+	beforeEach(async () => {
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database.schema.createTable('children', (table) => {
+			table.increments('id');
+			table.integer('parent_id');
+		});
+
+		await database('test').insert([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+
+		// The revision snapshot reads the children too, and `run-ast` pages a
+		// to-many until a batch comes back short: unset, it never does.
+		env['RELATIONAL_BATCH_SIZE'] = 250;
+
+		selectStatements = [];
+
+		database.on('query', (query: { sql: string }) => {
+			if (query.sql.startsWith('select')) {
+				selectStatements.push(query.sql);
+			}
+		});
+	});
+
+	afterEach(async () => {
+		delete env['RELATIONAL_BATCH_SIZE'];
+		await database.destroy();
+	});
+
+	it('updates for an admin a row that exists, reading its revision', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.updateOne(1, { name: 'patched' }))
+			.resolves.toBe(1);
+
+		expect(selectStatements).toStrictEqual([
+			'select `test`.`id`, `test`.`name` from `test`'
+				+ ' where (`test`.`id` in (?)) order by `test`.`id` asc limit ?',
+			'select `children`.`parent_id`, `children`.`id` from `children`'
+				+ ' where `children`.`parent_id` in (?)'
+				+ ' order by `children`.`id` asc limit ?',
+		]);
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'patched' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('deletes for an admin a row that exists with no read', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteOne(1)).resolves.toBe(1);
+
+		expect(selectStatements).toStrictEqual([]);
+
+		await expect(database('test').select('id'))
+			.resolves.toStrictEqual([{ id: 2 }]);
+	});
+
+	it('refuses an admin update of a key no row holds, after its hooks', async () => {
+		const updateFilter = vi.fn((payload: unknown) => payload);
+
+		emitter.onFilter('test.items.update', updateFilter);
+
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		try {
+			await expect(adminService.updateOne(999, { name: 'patched' }))
+				.rejects.toStrictEqual(
+					new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+				);
+		}
+		finally {
+			emitter.offFilter('test.items.update', updateFilter);
+		}
+
+		expect(updateFilter).toHaveBeenCalledTimes(1);
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('refuses an admin update of a key no row holds a hook cancelled', async () => {
+		const cancellingFilter = vi.fn(() => null);
+
+		emitter.onFilter('test.items.update', cancellingFilter);
+
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		try {
+			await expect(adminService.updateOne(
+				999,
+				{ name: 'patched' },
+				{ allowFilterCancel: true },
+			)).rejects.toStrictEqual(
+				new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.update', cancellingFilter);
+		}
+
+		expect(cancellingFilter).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses a single-item update a hook adds a row to', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ data: entries[0]!.data, keys: [...entries[0]!.keys, 2] }];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.updateOne(1, { name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'A "items.update" filter hook answered updateOne '
+						+ 'with row 2, which it was not sent',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('refuses a single-item update a hook takes another row over in', async () => {
+		const takingOverFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ key: 2 }, entries[0]!];
+		});
+
+		emitter.onFilter('test.items.update', takingOverFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.updateOne(1, { name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'A "items.update" filter hook answered updateOne '
+						+ 'with row 2, which it was not sent',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', takingOverFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('refuses the key a single-item update hook adds before the row', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{
+				data: entries[0]!.data,
+				keys: [...entries[0]!.keys, 'not-a-number'],
+			}];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.updateOne(1, { name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'Primary key of test must be an integer '
+						+ 'instead of "not-a-number"',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+	});
+
+	it('refuses a single-item upsert a hook adds a row to', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ data: entries[0]!.data, keys: [...entries[0]!.keys, 2] }];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.upsertOne({ id: 1, name: 'patched' }))
+				.rejects.toStrictEqual(new InvalidPayloadError({
+					reason: 'A "items.update" filter hook answered updateOne '
+						+ 'with row 2, which it was not sent',
+				}));
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('refuses an admin delete of a key no row holds', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.deleteOne(999)).rejects.toStrictEqual(
+			new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+		);
+
+		await expect(database('test').select('id')
+			.orderBy('id')).resolves.toStrictEqual([{ id: 1 }, { id: 2 }]);
+	});
+
+	it('refuses an admin update writing nothing to a key no row holds', async () => {
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.updateOne(999, {})).rejects.toStrictEqual(
+			new ItemNotFoundError({ collection: 'test', primaryKey: 999 }),
+		);
+
+		await expect(adminService.updateOne(1, {})).resolves.toBe(1);
+	});
+
+	it('updates for an admin a row a trigger keeps unchanged', async () => {
+		await database.raw(`
+			CREATE TRIGGER keep_two BEFORE UPDATE ON test WHEN old.id = 2
+			BEGIN SELECT RAISE(IGNORE); END
+		`);
+
+		const adminService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: true } as any,
+		});
+
+		await expect(adminService.updateOne(2, { name: 'patched' }))
+			.resolves.toBe(2);
+
+		// the short count reads the held row, then the revision reads it again
+		expect(selectStatements).toStrictEqual([
+			'select `id` from `test` where `id` in (?)',
+			'select `test`.`id`, `test`.`name` from `test`'
+				+ ' where (`test`.`id` in (?)) order by `test`.`id` asc limit ?',
+			'select `children`.`parent_id`, `children`.`id` from `children`'
+				+ ' where `children`.`parent_id` in (?)'
+				+ ' order by `children`.`id` asc limit ?',
+		]);
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+	});
+
+	it('keeps a non-admin update of a key no row holds going', async () => {
+		const userService = new ItemsService('test', {
+			knex: database,
+			schema,
+			accountability: { admin: false, user: 'user-1' } as any,
+		});
+
+		await expect(userService.updateOne(999, { name: 'patched' }))
+			.resolves.toBe(999);
 	});
 });
 
