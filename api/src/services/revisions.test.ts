@@ -38,7 +38,7 @@ describe('Services / Revisions', () => {
 		});
 
 		it('writes the revision\'s data back onto its item', async () => {
-			vi.spyOn(ItemsService.prototype, 'readOne')
+			const readOne = vi.spyOn(ItemsService.prototype, 'readOne')
 				.mockResolvedValue({
 					id: 1,
 					collection: 'articles',
@@ -64,6 +64,8 @@ describe('Services / Revisions', () => {
 				schema,
 			}).revert(1);
 
+			expect(readOne).toHaveBeenCalledWith(1);
+
 			expect(updateOne).toHaveBeenCalledWith(7, { title: 'Old title' });
 
 			expect(updateOne.mock.contexts).toMatchObject([{
@@ -77,6 +79,7 @@ describe('Services / Revisions', () => {
 				},
 				collection: 'articles',
 				knex: db,
+				schema,
 			}]);
 		});
 	});
