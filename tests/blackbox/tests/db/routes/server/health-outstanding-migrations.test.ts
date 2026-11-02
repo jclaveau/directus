@@ -12,7 +12,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
- * A migration file the database has never recorded, staged in an extensions path
+ * A migration file the database has never recorded, staged in a MIGRATIONS_PATH
  * of this instance's own so no other instance in the run can see it. That is what
  * the boot guard is meant to notice, and the only way to reach it from outside:
  * the watch stops as soon as it reads a clean database, so a correctly migrated
@@ -46,7 +46,7 @@ describe('/server', () => {
 			);
 
 			const env = cloneDeep(config.envs) as { [vendor: string]: Env };
-			env[vendor]['EXTENSIONS_PATH'] = directory;
+			env[vendor]['MIGRATIONS_PATH'] = join(directory, 'migrations');
 			env[vendor]['MIGRATIONS_WAIT_INTERVAL'] = '100ms';
 			env[vendor]['MIGRATIONS_WAIT_TIMEOUT'] = '2s';
 

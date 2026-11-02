@@ -9,6 +9,7 @@ import {
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
+	validateUnreadEnv,
 } from './validate-env.js';
 
 vi.mock('@directus/env');
@@ -259,6 +260,29 @@ test('takes a header name Node can write', () => {
 	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
 
 	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+test('refuses EXTENSIONS_PATH, which this build does not read', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
+
+	validateUnreadEnv();
+
+	expect(mockLogger.error).toHaveBeenCalledWith(
+		'"EXTENSIONS_PATH" Environment Variable is "./extensions", which this'
+			+ ' build does not read: extensions load only as the dependencies of'
+			+ ' the package.json in PACKAGE_FILE_LOCATION. Unset it.',
+	);
+
+	expect(process.exit).toHaveBeenCalledWith(1);
+});
+
+test('passes an environment without EXTENSIONS_PATH', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
+
+	validateUnreadEnv();
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

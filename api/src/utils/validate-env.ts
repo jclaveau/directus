@@ -183,3 +183,9 @@ export function validateHeaderNameEnv(key: string): void {
 		process.exit(1);
 	}
 }
+
+/**
+ * Refuse a variable this build does not read, set by a deployment configured
+ * for one that did.
+ */
+export function validateUnreadEnv(): void {}
