@@ -1,4 +1,4 @@
-import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
+import { InvalidPayloadError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
 	Item,
@@ -15,8 +15,6 @@ export class RevisionsService extends ItemsService {
 
 	async revert(pk: PrimaryKey): Promise<void> {
 		const revision = await super.readOne(pk);
-
-		if (!revision) throw new ForbiddenError();
 
 		if (!revision['data']) throw new InvalidPayloadError({ reason: `Revision doesn't contain data to revert to` });
 
