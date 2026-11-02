@@ -8,7 +8,7 @@ type TransactionOutcome = 'commit' | 'rollback';
 /**
  * One statement as reported: `stmt` is its SQL, or `<keyword> <table>...` at
  * `counts`, and `cutStmt` that shorter form whatever the level. A statement
- * naming no table is cut to `<keyword> <function>...`, the first function it
+ * naming no table is cut to `<keyword> <function>()...`, the first function it
  * calls, or to `<keyword>...` when it calls none.
  */
 type StatementAudit = {
@@ -542,8 +542,11 @@ export function auditStatementStart(
 		};
 	}
 
+	const calledFunction = FUNCTION_PATTERN.exec(sql)?.[1]?.toLowerCase();
+
+	// `()` tells a function from a table of the same name.
 	const cutObject = TABLE_PATTERN.exec(sql)?.[1]
-		?? FUNCTION_PATTERN.exec(sql)?.[1]?.toLowerCase();
+		?? (calledFunction && `${calledFunction}()`);
 
 	const cutStmt = cutObject
 		? `${keyword} ${cutObject}...`

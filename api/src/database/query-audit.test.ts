@@ -257,11 +257,11 @@ test.each([
 	],
 	[
 		'select nextval(\'articles_id_seq\')',
-		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval..."}]}',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval()..."}]}',
 	],
 	[
 		'SELECT NEXTVAL(\'articles_id_seq\')',
-		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval..."}]}',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval()..."}]}',
 	],
 	[
 		'select 1',

@@ -72,7 +72,7 @@ export function startAuditedInstance(vendor: Vendor) {
 
 /**
  * Each table a response's statements touched, with how many of each keyword.
- * A counts-level `stmt` is `<keyword> <table>...`, `<keyword> <function>...`
+ * A counts-level `stmt` is `<keyword> <table>...`, `<keyword> <function>()...`
  * when it names no table, or `<keyword>...` when it calls no function either.
  */
 function countStatements(response: Response) {
@@ -136,7 +136,7 @@ function gherkinTableOf(rows: Record<string, unknown>[]): string {
  * When table, every table it touched and how many statements of each keyword.
  * A keyword outside select, insert, update and delete is a column of its own,
  * named after it, whose empty or 0 cells are left out; a statement naming no
- * table counts under its function, or under `(no table)`.
+ * table counts under its function, as `nextval()`, or under `(no table)`.
  * Other vendors run other statements, so only postgres is held to it.
  */
 export function defineStatementCountsStep(
