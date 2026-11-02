@@ -22,12 +22,48 @@ describe('deleting the local extension settings', () => {
 		});
 
 		await database('directus_extensions').insert([
-			{ id: 'a', enabled: true, folder: 'local-hook', source: 'local', bundle: null },
-			{ id: 'b', enabled: true, folder: 'local-bundle', source: 'local', bundle: null },
-			{ id: 'c', enabled: false, folder: 'bundle-entry', source: 'local', bundle: 'b' },
-			{ id: 'd', enabled: true, folder: 'module-bundle', source: 'module', bundle: null },
-			{ id: 'e', enabled: true, folder: 'bundle-entry', source: 'module', bundle: 'd' },
-			{ id: 'f', enabled: true, folder: 'registry-uuid', source: 'registry', bundle: null },
+			{
+				id: 'a',
+				enabled: true,
+				folder: 'local-hook',
+				source: 'local',
+				bundle: null,
+			},
+			{
+				id: 'b',
+				enabled: true,
+				folder: 'local-bundle',
+				source: 'local',
+				bundle: null,
+			},
+			{
+				id: 'c',
+				enabled: false,
+				folder: 'bundle-entry',
+				source: 'local',
+				bundle: 'b',
+			},
+			{
+				id: 'd',
+				enabled: true,
+				folder: 'module-bundle',
+				source: 'module',
+				bundle: null,
+			},
+			{
+				id: 'e',
+				enabled: true,
+				folder: 'bundle-entry',
+				source: 'module',
+				bundle: 'd',
+			},
+			{
+				id: 'f',
+				enabled: true,
+				folder: 'registry-uuid',
+				source: 'registry',
+				bundle: null,
+			},
 		]);
 	});
 
@@ -35,18 +71,24 @@ describe('deleting the local extension settings', () => {
 		await database.destroy();
 	});
 
-	it('deletes the local rows and their bundle entries, keeping the others', async () => {
+	it('deletes the local rows and their bundle entries', async () => {
 		await up(database);
 
-		await expect(database('directus_extensions').select('id').orderBy('id'))
-			.resolves.toStrictEqual([{ id: 'd' }, { id: 'e' }, { id: 'f' }]);
+		const remainingRows = await database('directus_extensions')
+			.select('id')
+			.orderBy('id');
+
+		expect(remainingRows).toStrictEqual([{ id: 'd' }, { id: 'e' }, { id: 'f' }]);
 	});
 
 	it('leaves the rows as they are on the way down', async () => {
 		await up(database);
 		await down(database);
 
-		await expect(database('directus_extensions').select('id').orderBy('id'))
-			.resolves.toStrictEqual([{ id: 'd' }, { id: 'e' }, { id: 'f' }]);
+		const remainingRows = await database('directus_extensions')
+			.select('id')
+			.orderBy('id');
+
+		expect(remainingRows).toStrictEqual([{ id: 'd' }, { id: 'e' }, { id: 'f' }]);
 	});
 });

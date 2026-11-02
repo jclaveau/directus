@@ -2,6 +2,7 @@ import config, { paths, type Env } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { writeExtensionPackage } from '@utils/write-extension-package';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import { cloneDeep } from 'lodash-es';
@@ -85,7 +86,7 @@ describe.each(vendors)('%s', (vendor) => {
 		scenario(
 			'an extension built with coverage receives its own files',
 			({ given, and, when, then }) => {
-				let extensionsPath: string;
+				let packagePath: string;
 				let extensionPath: string;
 				let port: number;
 				let response: request.Response;
@@ -93,12 +94,12 @@ describe.each(vendors)('%s', (vendor) => {
 				given(
 					/^an extension built with the coverage directory (\S+)$/,
 					async (coverageDir: string) => {
-						extensionsPath = await realpath(await mkdtemp(
+						packagePath = await realpath(await mkdtemp(
 							join(tmpdir(), 'directus-blackbox-coverage-'),
 						));
 
-						directories.push(extensionsPath);
-						extensionPath = join(extensionsPath, 'coverage-fixture');
+						directories.push(packagePath);
+						extensionPath = join(packagePath, 'coverage-fixture');
 						await mkdir(join(extensionPath, 'src'), { recursive: true });
 
 						await writeFile(
@@ -122,12 +123,16 @@ describe.each(vendors)('%s', (vendor) => {
 						);
 
 						await writeFile(join(extensionPath, 'src/index.js'), '');
+
+						await writeExtensionPackage(packagePath, {
+							'directus-extension-coverage-fixture': extensionPath,
+						});
 					},
 				);
 
 				and('a server runs with that extension', async () => {
 					const env = cloneDeep(config.envs) as { [vendor: string]: Env };
-					env[vendor]['EXTENSIONS_PATH'] = extensionsPath;
+					env[vendor]['PACKAGE_FILE_LOCATION'] = packagePath;
 					port = await getPort();
 					env[vendor].PORT = String(port);
 

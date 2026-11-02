@@ -10,7 +10,10 @@ import { useBus } from '../../bus/index.js';
 import { useLock } from '../../lock/index.js';
 import { useLogger } from '../../logger/index.js';
 import { getStorage } from '../../storage/index.js';
-import { getExtensionsPath } from './get-extensions-path.js';
+import {
+	getRegistryRootPath,
+	REGISTRY_STORAGE_ROOT,
+} from './get-registry-root-path.js';
 import { SyncStatus, getSyncStatus, setSyncStatus } from './sync-status.js';
 
 export const syncExtensions = async (options?: { force: boolean }): Promise<void> => {
@@ -41,8 +44,8 @@ export const syncExtensions = async (options?: { force: boolean }): Promise<void
 	}
 
 	try {
-		const extensionsPath = getExtensionsPath();
-		const storageExtensionsPath = env['EXTENSIONS_PATH'] as string;
+		const extensionsPath = getRegistryRootPath();
+		const storageExtensionsPath = REGISTRY_STORAGE_ROOT;
 
 		if (await exists(extensionsPath)) {
 			// In case the FS still contains the cached extensions from a previous invocation. We have to

@@ -39,7 +39,6 @@ const mocks = vi.hoisted(() => {
 		importFileUrl: vi.fn(async () => ({ default: mocks.moduleDefault })),
 		moduleDefault: (() => undefined) as unknown,
 		extensions: {
-			local: new Map(),
 			registry: new Map(),
 			module: new Map(),
 		} as Record<string, Map<string, unknown>>,
@@ -167,7 +166,7 @@ test.each(shapes)(
 		const folder = `test-${type}`;
 
 		mocks.extensions = {
-			local: new Map([
+			module: new Map([
 				[
 					folder,
 					{
@@ -180,10 +179,9 @@ test.each(shapes)(
 				],
 			]),
 			registry: new Map(),
-			module: new Map(),
 		};
 
-		mocks.settings = [{ id: '1', source: 'local', folder, enabled: true }];
+		mocks.settings = [{ id: '1', source: 'module', folder, enabled: true }];
 
 		const manager = new ExtensionManager();
 
@@ -220,7 +218,7 @@ export default ({ filter }) => {
 `;
 
 	mocks.extensions = {
-		local: new Map([
+		module: new Map([
 			[
 				SANDBOX_FOLDER,
 				{
@@ -234,11 +232,10 @@ export default ({ filter }) => {
 			],
 		]),
 		registry: new Map(),
-		module: new Map(),
 	};
 
 	mocks.settings = [
-		{ id: '1', source: 'local', folder: SANDBOX_FOLDER, enabled: true },
+		{ id: '1', source: 'module', folder: SANDBOX_FOLDER, enabled: true },
 	];
 
 	await new ExtensionManager().initialize({ schedule: false, watch: false });
@@ -275,7 +272,7 @@ export default () => {};
 `;
 
 	mocks.extensions = {
-		local: new Map([
+		module: new Map([
 			[
 				SANDBOX_FOLDER,
 				{
@@ -289,11 +286,10 @@ export default () => {};
 			],
 		]),
 		registry: new Map(),
-		module: new Map(),
 	};
 
 	mocks.settings = [
-		{ id: '1', source: 'local', folder: SANDBOX_FOLDER, enabled: true },
+		{ id: '1', source: 'module', folder: SANDBOX_FOLDER, enabled: true },
 	];
 
 	const manager = new ExtensionManager();
@@ -325,7 +321,7 @@ export default () => {};
 });
 
 test('shares the queued reload with a reload asked behind it', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { registry: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -360,7 +356,7 @@ test('shares the queued reload with a reload asked behind it', async () => {
 });
 
 test('force-syncs the queued reload when a reload joining it asks to', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { registry: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -397,7 +393,7 @@ test('force-syncs the queued reload when a reload joining it asks to', async () 
 });
 
 test('runs the next reload after one whose load threw', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { registry: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -421,7 +417,7 @@ test('runs the next reload after one whose load threw', async () => {
 
 test('retries the load a failed reload left undone', async () => {
 	mocks.moduleDefault = () => undefined;
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { registry: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -429,7 +425,7 @@ test('retries the load a failed reload left undone', async () => {
 	await manager.initialize({ schedule: false, watch: false });
 
 	mocks.extensions = {
-		local: new Map([
+		module: new Map([
 			[
 				'test-retried-hook',
 				{
@@ -442,11 +438,10 @@ test('retries the load a failed reload left undone', async () => {
 			],
 		]),
 		registry: new Map(),
-		module: new Map(),
 	};
 
 	mocks.settings = [
-		{ id: '1', source: 'local', folder: 'test-retried-hook', enabled: true },
+		{ id: '1', source: 'module', folder: 'test-retried-hook', enabled: true },
 	];
 
 	vi.spyOn(manager as any, 'registerApiExtensions')
@@ -477,7 +472,7 @@ test('retries the load a failed reload left undone', async () => {
 });
 
 test('logs a reload asked by another process that fails', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { registry: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const subscribeSpy = vi.spyOn(mocks.bus, 'subscribe');
@@ -505,8 +500,7 @@ test.each([
 ])('logs a failed reload on a watched $watchedEvent', async (watchedChange) => {
 	const { watchedEvent, debounceMs } = watchedChange;
 
-	mocks.env = { ...mocks.defaultEnv, EXTENSIONS_PATH: './extensions' };
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { registry: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -525,6 +519,6 @@ test.each([
 
 	expect(mocks.logger.error).toHaveBeenCalledWith(
 		reloadFailure,
-		'Failed to reload the extensions on a change in the extensions folder',
+		'Failed to reload the extensions on a change in the extension packages',
 	);
 });

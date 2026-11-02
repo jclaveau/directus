@@ -2,35 +2,13 @@ Feature: Extension settings rows are rewritten, toggled and removed
 
   - A request authenticates as the admin. `<run>` stands for a value unique to
     the scenario. A response cell states the keys it checks.
-  - `/extension-settings-probe` is a harness endpoint living in the folder of
-    that name, while its package is named `extension-settings-probe-package`.
-    It answers with its own settings row, plants a registry row for a folder
-    no extension holds, and reads a planted row back, null once it is gone.
+  - `/extension-settings-probe` is a harness endpoint loaded as a package
+    dependency of the instance. It answers with its own settings row, plants a
+    registry row for a folder no extension holds, and reads a planted row back,
+    null once it is gone.
   - An extension update answers once the extensions are reloaded. A request
     marked `eventually` is sent again until its response matches, for up to
     ten seconds: the probe answers only once the extensions are loaded.
-
-  Scenario: a settings row named after the package is taken back by the folder
-    Given these requests are sent:
-      | request                                      | response          |
-      | method: GET                                  | code: 200         |+
-      | path: /extension-settings-probe              | body:             |
-      | remember: probe                              |   data:           |
-      | eventually: true                             |                   |
-      |                                              |     source: local |
-      | method: PATCH                                | code: 200         |+
-      | path: /extensions/<probe>                    | body:             |
-      | payload:                                     |   data:           |
-      |   meta:                                      |     id: <probe>   |
-      |     folder: extension-settings-probe-package |     bundle: null  |
-      |                                              |     schema: null  |
-    Then these requests get these responses:
-      | request                         | response                             |
-      | method: GET                     | code: 200                            |+
-      | path: /extension-settings-probe | body:                                |
-      |                                 |   data:                              |
-      |                                 |     id: <probe>                      |
-      |                                 |     folder: extension-settings-probe |
 
   Scenario: a GraphQL update of an extension answers with its settings
     Given these requests are sent:
@@ -88,12 +66,12 @@ Feature: Extension settings rows are rewritten, toggled and removed
 
   Scenario: an endpoint answers as its extension was just toggled
     Given these requests are sent:
-      | request                         | response          |
-      | method: GET                     | code: 200         |+
-      | path: /extension-settings-probe | body:             |
-      | remember: probe                 |   data:           |
-      | eventually: true                |                   |
-      |                                 |     source: local |
+      | request                         | response           |
+      | method: GET                     | code: 200          |+
+      | path: /extension-settings-probe | body:              |
+      | remember: probe                 |   data:            |
+      | eventually: true                |                    |
+      |                                 |     source: module |
     Then these requests get these responses:
       | request                         | response                          |
       | method: PATCH                   | code: 200                         |+

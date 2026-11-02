@@ -11,11 +11,9 @@ import { list } from '@directus/extensions-registry';
  * longer installed.
  */
 export const getExtensionsSettings = async ({
-	local,
 	module,
 	registry,
 }: {
-	local: Map<string, Extension>;
 	module: Map<string, Extension>;
 	registry: Map<string, Extension>;
 }) => {
@@ -31,7 +29,6 @@ export const getExtensionsSettings = async ({
 	const newSettings: ExtensionSettings[] = [];
 	const removedSettingIds: string[] = [];
 
-	const localSettings = existingSettings.filter(({ source }) => source === 'local');
 	const registrySettings = existingSettings.filter(({ source }) => source === 'registry');
 	const moduleSettings = existingSettings.filter(({ source }) => source === 'module');
 
@@ -70,7 +67,7 @@ export const getExtensionsSettings = async ({
 	const generateSettingsEntry = async (
 		folder: string,
 		extension: Extension,
-		source: 'local' | 'registry' | 'module',
+		source: 'registry' | 'module',
 	) => {
 		let marketplaceId;
 
@@ -109,37 +106,6 @@ export const getExtensionsSettings = async ({
 			});
 		}
 	};
-
-	for (const [folder, extension] of local.entries()) {
-		const existingSettings = localSettings.find((settings) => settings.folder === folder);
-
-		if (existingSettings) {
-			if (extension.type === 'bundle') {
-				updateBundleEntriesSettings(extension, existingSettings, localSettings);
-			}
-
-			continue;
-		}
-
-		const settingsForName = localSettings.find((settings) => settings.folder === extension.name);
-
-		/*
-		 * TODO: Consider removing this in follow-up versions after v10.10.0
-		 *
-		 * Previously, the package name (from package.json) was used to identify
-		 * local extensions - now it's the folder name.
-		 * If those two are different, we need to check for existing settings
-		 * with the package name, too. On a match and if there's no other local extension
-		 * with such a folder name, these settings can be taken over with the folder updated.
-		 */
-		if (settingsForName && !local.has(extension.name)) {
-			await service.extensionsItemService.updateOne(settingsForName.id, { folder });
-			settingsForName.folder = folder;
-			continue;
-		}
-
-		await generateSettingsEntry(folder, extension, 'local');
-	}
 
 	for (const [folder, extension] of module.entries()) {
 		const existingSettings = moduleSettings.find((settings) => settings.folder === folder);

@@ -184,8 +184,29 @@ export function validateHeaderNameEnv(key: string): void {
 	}
 }
 
+const UNREAD_VARIABLE_ADVICE: Record<string, string> = {
+	EXTENSIONS_PATH: 'extensions load only as the dependencies of the'
+		+ ' package.json in PACKAGE_FILE_LOCATION. Unset it.',
+};
+
 /**
  * Refuse a variable this build does not read, set by a deployment configured
  * for one that did.
  */
-export function validateUnreadEnv(): void {}
+export function validateUnreadEnv(): void {
+	const env = useEnv();
+
+	for (const [key, advice] of Object.entries(UNREAD_VARIABLE_ADVICE)) {
+		if (env[key] === undefined) {
+			continue;
+		}
+
+		useLogger().error(
+			`${JSON.stringify(key)} Environment Variable is `
+				+ `${JSON.stringify(env[key])}, which this build does not read: `
+				+ advice,
+		);
+
+		process.exit(1);
+	}
+}

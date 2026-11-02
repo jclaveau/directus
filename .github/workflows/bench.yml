@@ -72,7 +72,6 @@ env:
   # Minted by `cli bootstrap` so a bench reaches the API with no login round trip.
   ADMIN_TOKEN: bench-admin-token
   TELEMETRY: 'false'
-  EXTENSIONS_PATH: tests/perf/extensions
 
 jobs:
   startup:
@@ -172,12 +171,8 @@ jobs:
           npm_config_workspace_concurrency: 2
           NODE_OPTIONS: --max_old_space_size=6144
 
-      # An empty extensions directory rather than none: a missing one makes every boot
-      # log a resolution failure, and the retry is measured time.
       - name: Bootstrap the database
-        run: |
-          mkdir -p tests/perf/extensions
-          node dist-head/cli bootstrap
+        run: node dist-head/cli bootstrap
 
       - name: Measure
         run: pnpm --filter tests-perf bench
@@ -415,12 +410,8 @@ jobs:
         with:
           node-version-file: package.json
 
-      # An empty extensions directory rather than none: a missing one makes every
-      # boot log a resolution failure, and four instances pay for it.
       - name: Bootstrap the database
-        run: |
-          mkdir -p tests/perf/cache-extensions
-          node dist/cli bootstrap
+        run: node dist/cli bootstrap
 
       - name: Measure the cache
         id: measure
@@ -599,9 +590,7 @@ jobs:
           pnpm install
 
       - name: Bootstrap the database
-        run: |
-          mkdir -p tests/perf/cache-extensions
-          node dist/cli bootstrap
+        run: node dist/cli bootstrap
 
       - name: Measure the pin fan-out
         run: pnpm --filter tests-perf bench:pin-fanout
@@ -834,9 +823,7 @@ jobs:
           pnpm install
 
       - name: Bootstrap the database
-        run: |
-          mkdir -p tests/perf/cache-extensions
-          node dist/cli bootstrap
+        run: node dist/cli bootstrap
 
       - name: Measure the retry
         run: pnpm --filter tests-perf bench:pending-retry
@@ -901,9 +888,7 @@ jobs:
           pnpm --filter directus deploy --legacy --prod "$GITHUB_WORKSPACE/baseline-dist"
 
       - name: Bootstrap the database
-        run: |
-          mkdir -p tests/perf/cache-extensions
-          node dist/cli bootstrap
+        run: node dist/cli bootstrap
 
       - name: Measure the walk
         run: pnpm --filter tests-perf bench:purge-walk

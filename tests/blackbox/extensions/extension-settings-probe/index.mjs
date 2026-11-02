@@ -1,26 +1,24 @@
 // Reads and plants directus_extensions rows, because the routes that
 // write them need rows no HTTP route creates: a registry install needs the
-// marketplace, and the folder takeover needs a row named after the package.
+// marketplace.
 //
 //   GET  /                   — this extension's own settings row.
 //   POST /registry-rows      — plants a registry row for `folder`.
 //   GET  /registry-rows/:id  — that row, or null once it is gone.
 //
-// The package name differs from the folder on purpose: a row holding the
-// package name as its folder is the one the loader takes over. The id is
-// declared, so the route stays the folder name whichever row the loader keeps.
+// A package of its own rather than a bundle entry: toggling its row would
+// otherwise switch every harness endpoint off with it.
 //
 // Routes here have no asyncHandler around them, so an escaping rejection
 // would exit the shared test server: every one answers with a status instead.
 
 import { randomUUID } from 'node:crypto';
 
-const FOLDER_NAME = 'extension-settings-probe';
-const PACKAGE_NAME = 'extension-settings-probe-package';
+const PACKAGE_NAME = 'extension-settings-probe';
 const ROW_COLUMNS = ['id', 'folder', 'source', 'bundle'];
 
 export default {
-	id: FOLDER_NAME,
+	id: PACKAGE_NAME,
 	handler(router, { database }) {
 		function answerWith(readRow) {
 			return async (req, res) => {
@@ -47,7 +45,7 @@ export default {
 		router.get('/', answerWith(() => {
 			return database('directus_extensions')
 				.select(ROW_COLUMNS)
-				.whereIn('folder', [FOLDER_NAME, PACKAGE_NAME])
+				.where({ folder: PACKAGE_NAME, source: 'module' })
 				.first();
 		}));
 

@@ -2,6 +2,7 @@ import config, { paths, type Env } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { writeExtensionPackage } from '@utils/write-extension-package';
 import { ChildProcess, spawn } from 'child_process';
 import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
@@ -47,6 +48,8 @@ describe('/server', () => {
 
 			const env = cloneDeep(config.envs) as { [vendor: string]: Env };
 			env[vendor]['MIGRATIONS_PATH'] = join(directory, 'migrations');
+			await writeExtensionPackage(directory);
+			env[vendor]['PACKAGE_FILE_LOCATION'] = directory;
 			env[vendor]['MIGRATIONS_WAIT_INTERVAL'] = '100ms';
 			env[vendor]['MIGRATIONS_WAIT_TIMEOUT'] = '2s';
 

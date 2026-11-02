@@ -65,10 +65,6 @@ vi.mock('../utils/node-id.js', () => {
 	return { nodeId: 'testnode' };
 });
 
-vi.mock('../extensions/lib/get-extensions-path.js', () => {
-	return { getExtensionsPath: () => '/extensions' };
-});
-
 vi.mock('fs-extra', () => {
 	return {
 		default: {
