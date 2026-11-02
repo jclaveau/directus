@@ -21,6 +21,15 @@ type AuditEntry =
 
 const QUERY_AUDIT_HEADER = 'x-query-audit';
 
+const COUNTED_COLUMNS = [
+	'request',
+	'table',
+	'select',
+	'insert',
+	'update',
+	'delete',
+];
+
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
 /**
@@ -61,7 +70,11 @@ export function startAuditedInstance(vendor: Vendor) {
 	return () => getUrl(vendor, env);
 }
 
-// Each table a response's statements touched, with how many of each kind.
+/**
+ * Each table a response's statements touched, with how many of each keyword.
+ * A counts-level `stmt` is `<keyword> <table>...`, `<keyword> <function>()...`
+ * when it names no table, or `<keyword>...` when it calls no function either.
+ */
 function countStatements(response: Response) {
 	const countsByTable: Record<string, Record<string, number>> = {};
 
@@ -77,21 +90,53 @@ function countStatements(response: Response) {
 	});
 
 	for (const { stmt, count = 1 } of auditedStatements) {
-		const [statementKind, tableName] = stmt
-			.replace(/\.\.\.$/, '')
-			.split(' ') as [string, string];
+		const cutMatch = /^([a-z]+)(?: (\S+))?\.\.\.$/.exec(stmt);
+
+		if (cutMatch === null) {
+			throw new Error(`"${stmt}" is no counts-level stmt`);
+		}
+
+		const [, statementKeyword, tableName = '(no table)'] = cutMatch as [
+			string,
+			string,
+			string | undefined,
+		];
 
 		countsByTable[tableName] ??= { select: 0, insert: 0, update: 0, delete: 0 };
 		const tableCounts = countsByTable[tableName];
-		tableCounts[statementKind] = (tableCounts[statementKind] ?? 0) + count;
+
+		tableCounts[statementKeyword] = (tableCounts[statementKeyword] ?? 0)
+			+ count;
 	}
 
 	return countsByTable;
 }
 
+// The rows as a Gherkin table to paste back, every keyword a column, 0 if unrun.
+function gherkinTableOf(rows: Record<string, unknown>[]): string {
+	const columns = [...new Set([...COUNTED_COLUMNS, ...rows.flatMap(Object.keys)])];
+
+	const lines = [columns, ...rows.map((row) => {
+		return columns.map((column) => String(row[column] ?? 0));
+	})];
+
+	const widths = columns.map((_column, columnIndex) => {
+		return Math.max(...lines.map((line) => line[columnIndex]!.length));
+	});
+
+	return lines.map((line) => {
+		return `| ${line.map((cell, columnIndex) => {
+			return cell.padEnd(widths[columnIndex]!);
+		}).join(' | ')} |`;
+	}).join('\n');
+}
+
 /**
  * The last step of a scenario: per request it names, by its position in the
- * When table, every table it touched and how many statements of each kind.
+ * When table, every table it touched and how many statements of each keyword.
+ * A keyword outside select, insert, update and delete is a column of its own,
+ * named after it, whose empty or 0 cells are left out; a statement naming no
+ * table counts under its function, as `nextval()`, or under `(no table)`.
  * Other vendors run other statements, so only postgres is held to it.
  */
 export function defineStatementCountsStep(
@@ -106,7 +151,7 @@ export function defineStatementCountsStep(
 				return;
 			}
 
-			expect([...new Set(table.map(({ request: requestPosition }) => {
+			const receivedRows = [...new Set(table.map(({ request: requestPosition }) => {
 				return Number(requestPosition);
 			}))].flatMap((requestPosition) => {
 				const countsByTable = countStatements(
@@ -122,7 +167,19 @@ export function defineStatementCountsStep(
 							...countsByTable[tableName],
 						};
 					});
-			})).toEqual(parseGherkinTable(table));
+			});
+
+			const expectedRows = parseGherkinTable(table).map((row) => {
+				return Object.fromEntries(Object.entries(row).filter(([column, value]) => {
+					return COUNTED_COLUMNS.includes(column)
+						|| (value !== null && value !== 0);
+				}));
+			});
+
+			expect(
+				receivedRows,
+				`the requests ran these statements:\n${gherkinTableOf(receivedRows)}`,
+			).toEqual(expectedRows);
 		},
 	);
 }

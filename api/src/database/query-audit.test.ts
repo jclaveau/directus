@@ -218,27 +218,81 @@ test('cuts a lone statement to its kind and table past the size', () => {
 		);
 });
 
-test('counts a statement of no other kind as other', () => {
+test.each([
+	[
+		'with "kept" as (select 1) select * from "articles"',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"with articles..."}]}',
+	],
+	[
+		'insert into "articles" ("title") values (?)',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"insert articles..."}]}',
+	],
+	[
+		'truncate "articles"',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"truncate articles..."}]}',
+	],
+	[
+		'truncate table "articles"',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"truncate articles..."}]}',
+	],
+	[
+		'alter table "articles" add column "x" integer',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"alter articles..."}]}',
+	],
+	[
+		'create table "x" ("id" serial primary key)',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"create x..."}]}',
+	],
+	[
+		'drop table "x"',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"drop x..."}]}',
+	],
+	[
+		'drop table if exists "x"',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"drop x..."}]}',
+	],
+	[
+		'alter table only "articles" add column "x" integer',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"alter articles..."}]}',
+	],
+	[
+		'select nextval(\'articles_id_seq\')',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval()..."}]}',
+	],
+	[
+		'SELECT NEXTVAL(\'articles_id_seq\')',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval()..."}]}',
+	],
+	[
+		'select 1',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select..."}]}',
+	],
+])('cuts %s at counts to %s', (sql, formattedAudit) => {
 	vi.spyOn(performance, 'now').mockReturnValue(0);
 
 	const audit = emptyQueryAudit();
 
-	auditStatementStart(audit, 'delete from "articles" where "id" = ?', 'a')();
-
-	auditStatementStart(
-		audit,
-		'with "kept" as (select 1) select * from "kept"',
-		'a',
-	)();
+	auditStatementStart(audit, sql, 'a')();
 
 	expect(formatQueryAudit(audit, {
 		level: 'counts',
 		maxSize: 0,
 		timings: false,
-	})).toBe(
-		'{"maxPoolConnections":1,"statements":['
-		+ '{"stmt":"delete articles..."},{"stmt":"other kept..."}]}',
-	);
+	})).toBe(formattedAudit);
+});
+
+test('cuts a long dotted name calling no function in linear time', () => {
+	const startAndEnd = [Date.now()];
+
+	auditStatementStart(
+		emptyQueryAudit(),
+		`select ${'a.'.repeat(40_000)}`,
+		'a',
+	)();
+
+	startAndEnd.push(Date.now());
+
+	expect(startAndEnd[1]! - startAndEnd[0]!).toBeLessThan(500);
 });
 
 test('keeps two transactions open at once apart', () => {
