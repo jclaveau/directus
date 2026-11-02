@@ -22,6 +22,14 @@ type AuditEntry =
 
 const QUERY_AUDIT_HEADER = 'x-query-audit';
 
+// Past its default 8kb the header drops its last entries, which would leave
+// their statements uncounted: an audited instance keeps them all.
+const QUERY_AUDIT_ENV = {
+	QUERY_AUDIT_HEADER,
+	QUERY_AUDIT_LEVEL: 'counts',
+	QUERY_AUDIT_HEADER_MAX_SIZE: '0',
+};
+
 const STATEMENT_COUNTS_STEP = 'on postgres the requests ran these statements:';
 
 const STATEMENT_COUNTS_COLUMNS = [
@@ -53,8 +61,7 @@ export function startAuditedInstance(vendor: Vendor) {
 		const port = await freePortOfWorker();
 		env[vendor].PORT = String(port);
 		env[vendor]['PUBLIC_URL'] = getUrl(vendor, env);
-		env[vendor]['QUERY_AUDIT_HEADER'] = QUERY_AUDIT_HEADER;
-		env[vendor]['QUERY_AUDIT_LEVEL'] = 'counts';
+		Object.assign(env[vendor], QUERY_AUDIT_ENV);
 
 		auditedInstance = spawn('node', [paths.cli, 'start'], {
 			cwd: paths.cwd,
@@ -109,10 +116,7 @@ export function auditEnvForFeature(feature: ParsedFeature, vendor: Vendor) {
 		return {};
 	}
 
-	return {
-		QUERY_AUDIT_HEADER,
-		QUERY_AUDIT_LEVEL: 'counts',
-	};
+	return QUERY_AUDIT_ENV;
 }
 
 // Each table a response's statements touched, with how many of each kind.
@@ -133,14 +137,23 @@ function countStatements(
 	if (auditHeader === undefined) {
 		throw new Error(
 			`Request ${requestPosition} answered without the ${QUERY_AUDIT_HEADER} `
-			+ 'header: it was not sent to the instance startAuditedInstance '
-			+ 'started',
+			+ 'header: it was not sent to an instance started with the audit env',
 		);
 	}
 
-	const auditedStatements = (JSON.parse(auditHeader) as {
+	const { entriesDropped, statements } = JSON.parse(auditHeader) as {
+		entriesDropped?: number;
 		statements: AuditEntry[];
-	}).statements.flatMap((auditEntry) => {
+	};
+
+	if (entriesDropped !== undefined) {
+		throw new Error(
+			`Request ${requestPosition}'s ${QUERY_AUDIT_HEADER} header dropped `
+			+ `${entriesDropped} entries: their statements cannot be counted`,
+		);
+	}
+
+	const auditedStatements = statements.flatMap((auditEntry) => {
 		// A transaction's entry holds the statements it ran.
 		if ('statements' in auditEntry) {
 			return auditEntry.statements;
@@ -202,9 +215,29 @@ export function defineStatementCountsStep(
 				return;
 			}
 
+			if (table.length === 0) {
+				throw new Error(
+					'The statement counts name no request: a header-only table '
+					+ 'holds every request to nothing',
+				);
+			}
+
 			const ranCounts = [
-				...new Set(table.map(({ request }) => Number(request))),
-			].flatMap((requestPosition) => {
+				...new Set(table.map(({ request }) => request)),
+			].flatMap((requestCell) => {
+				const requestPosition = Number(requestCell);
+
+				if (
+					!Number.isInteger(requestPosition)
+					|| requestPosition < 1
+					|| requestPosition > receivedResponses.length
+				) {
+					throw new Error(
+						`The statement counts name request "${requestCell}": only `
+						+ `requests 1 to ${receivedResponses.length} were sent`,
+					);
+				}
+
 				const countsByTable = countStatements(
 					receivedResponses[requestPosition - 1],
 					requestPosition,
