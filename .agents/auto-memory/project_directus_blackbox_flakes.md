@@ -206,7 +206,8 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - **#603 deep-review findings (fixed in the loop)**: completion-reporter retry can double-post after a 10 s axios timeout on a POST the server saved (gate counts rows, `test_file_path` not unique) → look the row up before retrying; `FOR UPDATE` hold in retry-timer stalls other instances' retries (pending-purge list not namespaced) → hold 3 s→500 ms; `finally{commit()}` must not mask the assertion error; restore the `performance.now` spy.
 - Method that worked: read-only subagents mine logs, then I re-verify the claimed mechanism (sim / grep vitest dist) before building the red.
 
-## 2026-10-31 (#655 shard 3): two flakes, dedicated fix PR asked by jean
-- `cache-purge-fingerprint-index-race` `expected 742 to be greater than 900` recurred AFTER be95ff8418 (purge shorter than the 900 ms floor; the test's own comment says raise `decoyMemberCount`).
-- `cache-m2o-through-fk-no-key.test.ts:206` `expected 'HIT' to be 'MISS'` after a write (shard-3 rerun; the first run passed). Root cause undecided: test race vs real stale cache (HIGH if product). #655 touches no cache code.
-- The rerun relocated the failure to the second test; a push replaces a second rerun. jean: "fix both flakes in a dedicated pr".
+## fk-no-key + fingerprint calibration (2026-10-31, PR from `v11.10.1-fix/fk-no-key-and-fingerprint-flakes`)
+
+- **`cache-m2o-through-fk-no-key` 3/3 red (tags undefined ×2, `HIT`≠`MISS` :206) = PORT COLLISION, not stale cache.** Its boot and `cache-entry-envelope`'s share port 45195 in `boots.jsonl`; envelope's env has no tags header and no scoped purge → every symptom. Fix: [[reference_directus_blackbox_port_slices]]. A whole file red with an undefined dev header is the tell.
+- **`cache-purge-fingerprint-index-race` `expected 742 to be greater than 900`** = the pass costs 6-26 µs/decoy across runners; 120k decoys gave 742-3095 ms. Raised to 360k (≥2.2 s at the fastest rate). Guard unchanged. First green (run 41246413805): purge 5221-8374 ms, file 45.6 s (hint 19_000 → 46_000).
+- **Red proof, PR #656:** scratch commit spawning a foreign instance (envelope-like env) on fk-no-key's port reproduced all 3 failures exactly (run 41245632960, job 124668408758); force-pushed away. The decoy count has no deterministic red: runner speed cannot be forced.

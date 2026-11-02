@@ -41,7 +41,7 @@ line appended below.
 - [Cache layers fail differently](project_directus_cache_failure_semantics.md) — ioredis raises, Keyv swallows, bus fire-and-forget
 - [Cache tier switches](project_directus_cache_tier_switches.md) — only response+schema switchable
 
-## blackbox (24) — seeds, sharding, flakes, spawned instances
+## blackbox (25) — seeds, sharding, flakes, spawned instances
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
