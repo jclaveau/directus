@@ -3459,7 +3459,9 @@ implements AbstractService<Item> {
 
 	/**
 	 * Refuses with a 404 the first of `keys` no row holds, read through `knex`
-	 * so that a write's transaction sees its own rows.
+	 * so that a write's transaction sees its own rows. A row matches a key by
+	 * its spelling: a `citext` or `char(n)` key the row stores spelled otherwise
+	 * (`'Abc'`, `'abc  '` for `'abc'`) counts as no row's.
 	 */
 	private async refuseKeysNoRowHolds(
 		keys: PrimaryKey[],
