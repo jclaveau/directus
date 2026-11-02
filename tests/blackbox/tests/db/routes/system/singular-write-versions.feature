@@ -46,7 +46,7 @@ Feature: A single version is checked and stamped with its item as it is created
       | 3       | directus_activity    | 0      | 1      | 0      | 0      |
       | 3       | directus_revisions   | 0      | 1      | 0      | 0      |
       | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 3       | test_draft_items     | 3      | 0      | 1      | 0      |
+      | 3       | test_draft_items     | 2      | 0      | 1      | 0      |
 
   Scenario: a batch of versions is checked and stamped like a single one
     Given these requests are sent:

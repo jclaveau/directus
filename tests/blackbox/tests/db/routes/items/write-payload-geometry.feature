@@ -79,4 +79,4 @@ Feature: A geometry is written from GeoJSON and read back as GeoJSON
       | 2       | directus_activity   | 0      | 1      | 0      | 0      |
       | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 2       | directus_users      | 1      | 0      | 0      | 0      |
-      | 2       | test_write_geo_spot | 3      | 0      | 1      | 0      |
+      | 2       | test_write_geo_spot | 2      | 0      | 1      | 0      |

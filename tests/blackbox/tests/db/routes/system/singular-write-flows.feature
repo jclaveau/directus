@@ -40,7 +40,7 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 1       | directus_users      | 1      | 0      | 0      | 0      |
       | 3       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 3       | directus_flows      | 1      | 0      | 0      | 1      |
+      | 3       | directus_flows      | 0      | 0      | 0      | 1      |
       | 3       | directus_operations | 0      | 0      | 1      | 0      |
       | 3       | directus_users      | 1      | 0      | 0      | 0      |
 
@@ -142,7 +142,7 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
     And on postgres the requests ran these statements:
       | request | table               | select | insert | update | delete |
       | 1       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 1       | directus_flows      | 1      | 0      | 0      | 1      |
+      | 1       | directus_flows      | 0      | 0      | 0      | 1      |
       | 1       | directus_operations | 0      | 0      | 1      | 0      |
       | 1       | directus_users      | 1      | 0      | 0      | 0      |
 
@@ -249,7 +249,7 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | request | table               | select | insert | update | delete |
       | 1       | directus_activity   | 0      | 1      | 0      | 0      |
       | 1       | directus_flows      | 1      | 0      | 0      | 0      |
-      | 1       | directus_operations | 3      | 0      | 1      | 0      |
+      | 1       | directus_operations | 2      | 0      | 1      | 0      |
       | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 1       | directus_users      | 1      | 0      | 0      | 0      |
       | 2       | directus_activity   | 0      | 1      | 0      | 0      |
@@ -263,5 +263,5 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | 3       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 3       | directus_users      | 1      | 0      | 0      | 0      |
       | 4       | directus_activity   | 0      | 1      | 0      | 0      |
-      | 4       | directus_operations | 1      | 0      | 0      | 1      |
+      | 4       | directus_operations | 0      | 0      | 0      | 1      |
       | 4       | directus_users      | 1      | 0      | 0      | 0      |

@@ -57,7 +57,7 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | request | table          | select | insert | update | delete |
       | 1       | directus_files | 1      | 0      | 0      | 0      |
       | 1       | directus_users | 1      | 0      | 0      | 0      |
-      | 2       | directus_files | 2      | 0      | 0      | 0      |
+      | 2       | directus_files | 1      | 0      | 0      | 0      |
       | 2       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a disk name that is not a normalised relative path is refused
@@ -112,7 +112,6 @@ Feature: A file's disk name is held by one file, whichever way it is written
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 1      | 0      | 0      | 0      |
-      | 2       | directus_files | 1      | 0      | 0      | 0      |
       | 2       | directus_users | 1      | 0      | 0      | 0      |
       | 3       | directus_users | 1      | 0      | 0      | 0      |
 
@@ -191,7 +190,7 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_access      | 2      | 0      | 0      | 0      | 0    |
       | 3       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
-      | 3       | directus_files       | 4      | 1      | 1      | 0      | 0    |
+      | 3       | directus_files       | 3      | 1      | 1      | 0      | 0    |
       | 3       | directus_revisions   | 0      | 2      | 0      | 0      | 0    |
       | 3       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
       | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    |

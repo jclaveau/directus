@@ -111,7 +111,7 @@ Feature: A write casts each field by its special, and reads it back cast
       | 2       | directus_activity   | 0      | 1      | 0      | 0      |
       | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 2       | directus_users      | 1      | 0      | 0      | 0      |
-      | 2       | test_write_cast_row | 3      | 0      | 1      | 0      |
+      | 2       | test_write_cast_row | 2      | 0      | 1      | 0      |
 
   Scenario: a date that does not parse is refused
     When these requests get these responses:
@@ -168,7 +168,7 @@ Feature: A write casts each field by its special, and reads it back cast
       | 1       | test_write_cast_activity | 1      | 1      | 0      | 0      |
       | 2       | directus_activity        | 0      | 1      | 0      | 0      |
       | 2       | directus_users           | 1      | 0      | 0      | 0      |
-      | 2       | test_write_cast_activity | 2      | 0      | 1      | 0      |
+      | 2       | test_write_cast_activity | 1      | 0      | 1      | 0      |
 
   Scenario: a batch update of an empty list updates nothing
     When these requests get these responses:

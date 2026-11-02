@@ -91,4 +91,4 @@ Feature: A user moved to another role through the role drops the cached reads
       | 3       | directus_activity  | 0      | 2      | 0      | 0      |
       | 3       | directus_revisions | 0      | 1      | 0      | 0      |
       | 3       | directus_roles     | 6      | 0      | 0      | 0      |
-      | 3       | directus_users     | 9      | 0      | 1      | 0      |
+      | 3       | directus_users     | 8      | 0      | 1      | 0      |

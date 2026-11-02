@@ -138,9 +138,11 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       |   fields: body                        |   data:                |
       |   filter[slot][_eq]: c                |     - body: bystander  |
       | method: PATCH                         | code: 400              |+
-      | path: /items/test_wcf_update_coarse/1 |                        |
+      | path: /items/test_wcf_update_coarse   |                        |
       | payload:                              |                        |
-      |   body: take-over-sibling             |                        |
+      |   keys: [1]                           |                        |
+      |   data:                               |                        |
+      |     body: take-over-sibling           |                        |
       | method: GET                           | code: 200              |+
       | path: /items/test_wcf_update_coarse   | cache: MISS            |
       | query:                                | body:                  |
@@ -160,7 +162,7 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       | 1       | directus_users         | 1      | 0      | 0      | 0      | 0    |
       | 1       | test_wcf_update_coarse | 2      | 1      | 0      | 0      | 1    |
       | 6       | directus_users         | 1      | 0      | 0      | 0      | 0    |
-      | 6       | test_wcf_update_coarse | 4      | 0      | 2      | 0      | 0    |
+      | 6       | test_wcf_update_coarse | 3      | 0      | 2      | 0      | 0    |
 
   Scenario: a refused nested update purges what its hook declared, not its rows
     When these requests get these responses:
@@ -238,7 +240,7 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       | 3       | directus_users          | 1      | 0      | 0      | 0      | 0    |
       | 3       | test_wcf_nested_foreign | 1      | 1      | 0      | 0      | 1    |
       | 8       | directus_users          | 1      | 0      | 0      | 0      | 0    |
-      | 8       | test_wcf_nested_child   | 4      | 0      | 1      | 0      | 0    |
+      | 8       | test_wcf_nested_child   | 3      | 0      | 1      | 0      | 0    |
       | 8       | test_wcf_nested_parent  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a refused nested delete purges what its hook declared

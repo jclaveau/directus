@@ -46,7 +46,7 @@ Feature: A file's record is written one at a time or in batches, its data replac
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 1       | directus_files     | 3      | 0      | 1      | 0      |
+      | 1       | directus_files     | 2      | 0      | 1      | 0      |
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
       | 2       | directus_activity  | 0      | 1      | 0      | 0      |
@@ -95,7 +95,7 @@ Feature: A file's record is written one at a time or in batches, its data replac
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 3       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 3       | directus_files     | 6      | 0      | 2      | 0      |
+      | 3       | directus_files     | 5      | 0      | 2      | 0      |
       | 3       | directus_revisions | 0      | 1      | 0      | 0      |
       | 3       | directus_users     | 1      | 0      | 0      | 0      |
 
@@ -154,7 +154,7 @@ Feature: A file's record is written one at a time or in batches, its data replac
     And on postgres the requests ran these statements:
       | request | table          | select | insert | update | delete |
       | 1       | directus_users | 1      | 0      | 0      | 0      |
-      | 2       | directus_files | 2      | 0      | 0      | 0      |
+      | 2       | directus_files | 1      | 0      | 0      | 0      |
       | 2       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: deleting a file leaves the files whose name only starts like it
@@ -186,7 +186,7 @@ Feature: A file's record is written one at a time or in batches, its data replac
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
       | 1       | directus_activity | 0      | 1      | 0      | 0      |
-      | 1       | directus_files    | 2      | 0      | 0      | 1      |
+      | 1       | directus_files    | 1      | 0      | 0      | 1      |
       | 1       | directus_users    | 1      | 0      | 0      | 0      |
 
   Scenario: a new file sending its id is refused when its disk name is taken
@@ -252,6 +252,6 @@ Feature: A file's record is written one at a time or in batches, its data replac
       | 2       | directus_files     | 1      | 0      | 0      | 0      |
       | 2       | directus_users     | 1      | 0      | 0      | 0      |
       | 5       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 5       | directus_files     | 4      | 0      | 1      | 0      |
+      | 5       | directus_files     | 3      | 0      | 1      | 0      |
       | 5       | directus_revisions | 0      | 1      | 0      | 0      |
       | 5       | directus_users     | 1      | 0      | 0      | 0      |

@@ -48,7 +48,7 @@ Feature: A version is saved, renamed and promoted onto its item
       | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 2       | directus_users      | 1      | 0      | 0      | 0      |
       | 2       | directus_versions   | 1      | 0      | 0      | 0      |
-      | 2       | test_wp_draft_posts | 3      | 0      | 1      | 0      |
+      | 2       | test_wp_draft_posts | 2      | 0      | 1      | 0      |
 
   Scenario: a promote naming its fields writes only those fields
     Given these requests are sent:
@@ -93,7 +93,7 @@ Feature: A version is saved, renamed and promoted onto its item
       | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
       | 1       | directus_users      | 1      | 0      | 0      | 0      |
       | 1       | directus_versions   | 1      | 0      | 0      | 0      |
-      | 1       | test_wp_draft_posts | 3      | 0      | 1      | 0      |
+      | 1       | test_wp_draft_posts | 2      | 0      | 1      | 0      |
 
   Scenario: a version with nothing saved has no changes to promote
     Given these requests are sent:
@@ -292,7 +292,7 @@ Feature: A version is saved, renamed and promoted onto its item
       | 1       | directus_activity  | 0      | 1      | 0      | 0      |
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
-      | 1       | directus_versions  | 3      | 0      | 1      | 0      |
+      | 1       | directus_versions  | 2      | 0      | 1      | 0      |
 
   Scenario: a version patched with a field other than its key or name is refused
     Given these requests are sent:
@@ -318,9 +318,8 @@ Feature: A version is saved, renamed and promoted onto its item
       |                         |         Invalid payload. "item" is |
       |                         |         not allowed.               |
     And on postgres the requests ran these statements:
-      | request | table             | select | insert | update | delete |
-      | 1       | directus_users    | 1      | 0      | 0      | 0      |
-      | 1       | directus_versions | 1      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a version renamed to a key its item already holds is refused
     Given these requests are sent:
@@ -356,7 +355,7 @@ Feature: A version is saved, renamed and promoted onto its item
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
       | 1       | directus_users    | 1      | 0      | 0      | 0      |
-      | 1       | directus_versions | 3      | 0      | 0      | 0      |
+      | 1       | directus_versions | 2      | 0      | 0      | 0      |
 
   Scenario: versions patched by a query take the change
     Given these requests are sent:

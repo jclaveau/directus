@@ -52,7 +52,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 13     | 0      | 3      | 0      |
+      | 1       | test_nested_o2m_list_entry | 11     | 0      | 3      | 0      |
 
   Scenario: a child named by a key no row has is refused, writing nothing
     Given the rows of test_nested_o2m_list:
@@ -113,7 +113,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 3      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 13     | 1      | 2      | 0      |
+      | 1       | test_nested_o2m_list_entry | 11     | 1      | 2      | 0      |
 
   Scenario: a batch deletes the children each parent leaves out when the relation deletes
     Given the rows of test_nested_o2m_bin:
@@ -204,7 +204,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 4      | 2      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 1      | 1      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 11     | 2      | 1      | 0      |
+      | 1       | test_nested_o2m_list_entry | 10     | 2      | 1      | 0      |
 
   Scenario: a batch swaps children between its parents, nullifying each one's others
     Given the rows of test_nested_o2m_list:
@@ -241,7 +241,7 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
       | 1       | directus_revisions         | 0      | 4      | 0      | 0      |
       | 1       | directus_users             | 1      | 0      | 0      | 0      |
       | 1       | test_nested_o2m_list       | 3      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_list_entry | 15     | 0      | 4      | 0      |
+      | 1       | test_nested_o2m_list_entry | 13     | 0      | 4      | 0      |
 
   Scenario: an update of several keys naming one existing child leaves it on the last key
     Given the rows of test_nested_o2m_list:

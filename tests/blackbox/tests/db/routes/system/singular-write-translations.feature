@@ -105,7 +105,7 @@ Feature: A single translation is checked as it is created and deleted
     And on postgres the requests ran these statements:
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
-      | 1       | directus_translations | 1      | 0      | 0      | 1      |
+      | 1       | directus_translations | 0      | 0      | 0      | 1      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: deleting a translation by a key that is no uuid is refused
@@ -157,7 +157,7 @@ Feature: A single translation is checked as it is created and deleted
       | request | table                 | select | insert | update | delete |
       | 1       | directus_activity     | 0      | 1      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
-      | 1       | directus_translations | 3      | 0      | 1      | 0      |
+      | 1       | directus_translations | 2      | 0      | 1      | 0      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
       | 2       | directus_activity     | 0      | 1      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 1      | 0      | 0      |

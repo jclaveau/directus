@@ -66,7 +66,7 @@ Feature: A file is uploaded, replaced and terminated through tus
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_files     | 3      | 1      | 1      | 0      |
+      | 1       | directus_files     | 2      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
@@ -140,7 +140,7 @@ Feature: A file is uploaded, replaced and terminated through tus
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_files     | 4      | 1      | 1      | 0      |
+      | 1       | directus_files     | 3      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
@@ -178,7 +178,7 @@ Feature: A file is uploaded, replaced and terminated through tus
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_files     | 3      | 1      | 1      | 0      |
+      | 1       | directus_files     | 2      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
@@ -368,7 +368,7 @@ Feature: A file is uploaded, replaced and terminated through tus
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_files     | 3      | 1      | 1      | 0      |
+      | 1       | directus_files     | 2      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
@@ -407,7 +407,7 @@ Feature: A file is uploaded, replaced and terminated through tus
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_files     | 4      | 1      | 1      | 0      |
+      | 1       | directus_files     | 3      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
@@ -484,7 +484,7 @@ Feature: A file is uploaded, replaced and terminated through tus
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
-      | 1       | directus_files     | 4      | 1      | 1      | 0      |
+      | 1       | directus_files     | 3      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
