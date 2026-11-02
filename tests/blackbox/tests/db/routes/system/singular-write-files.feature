@@ -44,10 +44,19 @@ Feature: A file's record is written one at a time or in batches, its data replac
       |   data:                     |                            |
       |     description: queried    |                            |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_files     | 3      | 0      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_files     | 2      | 0      | 1      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_files     | 3      | 0      | 1      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a file uploaded again under its key takes the new data's name and type
     Given these requests are sent:
@@ -84,8 +93,11 @@ Feature: A file's record is written one at a time or in batches, its data replac
       | query:                                 |   data:                           |
       |   fields: filename_disk                |     filename_disk: <replaced>.csv |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_files     | 6      | 0      | 2      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a disk name another file holds is refused, leaving that file whole
     Given these requests are sent:
@@ -140,9 +152,10 @@ Feature: A file's record is written one at a time or in batches, its data replac
       | method: GET                       | code: 200                       |+
       | path: /assets/<held>              | text: held                      |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
+      | 2       | directus_files | 2      | 0      | 0      | 0      |
+      | 2       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: deleting a file leaves the files whose name only starts like it
     Given these requests are sent:
@@ -171,8 +184,10 @@ Feature: A file's record is written one at a time or in batches, its data replac
       | method: GET          | code: 200  |+
       | path: /assets/<kept> | text: kept |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_activity | 0      | 1      | 0      | 0      |
+      | 1       | directus_files    | 2      | 0      | 0      | 1      |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
 
   Scenario: a new file sending its id is refused when its disk name is taken
     Given these requests are sent:
@@ -231,7 +246,12 @@ Feature: A file's record is written one at a time or in batches, its data replac
       | method: GET                       | code: 200                            |+
       | path: /assets/<orphaned>          | text: orphaned                       |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 5       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_files     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 1      | 0      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 5       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 5       | directus_files     | 4      | 0      | 1      | 0      |
+      | 5       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 5       | directus_users     | 1      | 0      | 0      | 0      |

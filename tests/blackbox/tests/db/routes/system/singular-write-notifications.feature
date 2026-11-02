@@ -56,9 +56,23 @@ Feature: Notifications are written one at a time or in batches
       |   fields: id                          |                            |
       |   filter[recipient][_eq]: <recipient> |                            |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
-      | 5       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_notifications | 1      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 2      | 0      | 0      | 0      |
+      | 2       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 2       | directus_notifications | 3      | 0      | 1      | 0      |
+      | 2       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 2       | directus_users         | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 3       | directus_notifications | 2      | 0      | 1      | 0      |
+      | 3       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 3       | directus_users         | 1      | 0      | 0      | 0      |
+      | 4       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 4       | directus_notifications | 3      | 0      | 1      | 0      |
+      | 4       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 4       | directus_users         | 1      | 0      | 0      | 0      |
+      | 5       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 5       | directus_notifications | 1      | 0      | 0      | 1      |
+      | 5       | directus_users         | 1      | 0      | 0      | 0      |

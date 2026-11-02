@@ -42,8 +42,14 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |                                                |   data:         |
       |                                                |     parent: 0   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 4      | 1      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_write_zero_listed | 4      | 1      | 0      | 0      |
+      | 1       | test_write_zero_parent | 1      | 1      | 0      | 0      |
+      | 1       | test_write_zero_plain  | 1      | 1      | 0      | 0      |
+      | 1       | test_write_zero_sorted | 2      | 1      | 0      | 0      |
 
   Scenario: a row keyed 0 updated with its children adopts them
     When these requests get these responses:
@@ -72,9 +78,18 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |                                                |     parent: 0   |
       |                                                |     position: 7 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_write_zero_sorted | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity      | 0      | 4      | 0      | 0      |
+      | 2       | directus_revisions     | 0      | 3      | 0      | 0      |
+      | 2       | directus_users         | 1      | 0      | 0      | 0      |
+      | 2       | test_write_zero_listed | 6      | 1      | 1      | 0      |
+      | 2       | test_write_zero_parent | 3      | 0      | 0      | 0      |
+      | 2       | test_write_zero_plain  | 2      | 0      | 0      | 0      |
+      | 2       | test_write_zero_sorted | 5      | 0      | 1      | 0      |
 
   Scenario: a row keyed 0 created beside a higher key answers with its own row
     When these requests get these responses:
@@ -90,9 +105,15 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |   id: 0                              |     id: 0      |
       |   name: zero                         |     name: zero |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions      | 0      | 1      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_write_zero_counted | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity       | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions      | 0      | 1      | 0      | 0      |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      |
+      | 2       | test_write_zero_counted | 1      | 1      | 0      | 0      |
 
   Scenario: a row keyed 0 updated by its keys adopts the children it creates
     When these requests get these responses:
@@ -110,8 +131,14 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |                                               |   data:       |
       |                                               |     parent: 0 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_write_zero_listed | 2      | 0      | 0      | 0      |
+      | 1       | test_write_zero_parent | 2      | 0      | 0      | 0      |
+      | 1       | test_write_zero_plain  | 2      | 1      | 0      | 0      |
+      | 1       | test_write_zero_sorted | 2      | 0      | 0      | 0      |
 
   Scenario: a row keyed 0 updated in a list of rows adopts the children it creates
     When these requests get these responses:
@@ -128,8 +155,14 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |                                               |   data:       |
       |                                               |     parent: 0 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_write_zero_listed | 2      | 0      | 0      | 0      |
+      | 1       | test_write_zero_parent | 2      | 0      | 0      | 0      |
+      | 1       | test_write_zero_plain  | 2      | 1      | 0      | 0      |
+      | 1       | test_write_zero_sorted | 2      | 0      | 0      | 0      |
 
   Scenario: a child keyed 0 linked by its key is adopted, not created again
     When these requests get these responses:
@@ -151,7 +184,18 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |                                       |   data:       |
       |                                       |     holder: 1 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_write_zero_member | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 2       | directus_users         | 1      | 0      | 0      | 0      |
+      | 2       | test_write_zero_holder | 1      | 1      | 0      | 0      |
+      | 2       | test_write_zero_member | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity      | 0      | 2      | 0      | 0      |
+      | 3       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 3       | directus_users         | 1      | 0      | 0      | 0      |
+      | 3       | test_write_zero_holder | 3      | 0      | 0      | 0      |
+      | 3       | test_write_zero_member | 7      | 0      | 1      | 0      |

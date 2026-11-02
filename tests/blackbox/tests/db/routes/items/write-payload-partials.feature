@@ -32,10 +32,19 @@ Feature: A write takes the less travelled side of each payload rule
       |   id: one-<run>           |     answer: true  |
       |   answer: '1'             |                   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_row       | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_wpp_row       | 1      | 1      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |
+      | 3       | test_wpp_row       | 1      | 1      | 0      | 0      |
 
   Scenario: a user of no role records no role on the rows it writes
     Given these requests are sent:
@@ -70,9 +79,24 @@ Feature: A write takes the less travelled side of each payload rule
       | payload:                                 |     role_made: null    |
       |   answer: 'true'                         |     role_changed: null |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_row         | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_wpp_row         | 3      | 0      | 1      | 0      |
 
   Scenario: a point written as a GeoJSON string or as null reads back as written
     Then these requests get these responses:
@@ -91,9 +115,17 @@ Feature: A write takes the less travelled side of each payload rule
       |   id: no-spot-<run>                      |     spot: null     |
       |   spot: null                             |                    |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_access    | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_row       | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_wpp_row       | 1      | 1      | 0      | 0      |
 
   Scenario: a date and a dateTime written as valid strings read back as written
     Then these requests get these responses:
@@ -105,8 +137,11 @@ Feature: A write takes the less travelled side of each payload rule
       |   day: '2026-03-04'             |     moment: '2026-03-04T05:06:07' |
       |   moment: '2026-03-04T05:06:07' |                                   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_row       | 1      | 1      | 0      | 0      |
 
   Scenario: a nested child creates, updates or keeps the leaf it targets
     Given these requests are sent:
@@ -150,8 +185,13 @@ Feature: A write takes the less travelled side of each payload rule
       |   fields: target                       |     - target: '<leaf>'    |
       |   filter[name][_eq]: keeping-<run>     |                           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 6      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 6      | 3      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_child     | 2      | 3      | 0      | 0      |
+      | 1       | test_wpp_leaf      | 3      | 1      | 1      | 0      |
+      | 1       | test_wpp_parent    | 1      | 1      | 0      | 0      |
 
   Scenario: a nested child drops the leaves and notes it no longer lists
     Given these requests are sent:
@@ -227,8 +267,14 @@ Feature: A write takes the less travelled side of each payload rule
       | query:                                    |   data:                  |
       |   fields: child                           |     child: <child>       |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_child     | 7      | 0      | 0      | 0      |
+      | 1       | test_wpp_leaf      | 3      | 0      | 0      | 1      |
+      | 1       | test_wpp_note      | 4      | 0      | 1      | 0      |
+      | 1       | test_wpp_parent    | 3      | 0      | 0      | 0      |
 
   Scenario: a row keyed by a uuid the database draws reads back under it
     Then these requests get these responses:
@@ -245,6 +291,12 @@ Feature: A write takes the less travelled side of each payload rule
       | payload:                        |   data:                   |
       |   label: single-<run>           |     label: single-<run>   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | test_wpp_generated | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | test_wpp_generated | 1      | 1      | 0      | 0      |

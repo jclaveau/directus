@@ -36,8 +36,10 @@ Feature: A read runs the statements its query needs, and no more
       |                                       |       author:       |
       |                                       |         name: Bob   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author  | 1      | 0      | 0      | 0      |
 
   Scenario: an admin reads one article through every kind of relation
     When these requests get these responses:
@@ -60,8 +62,15 @@ Feature: A read runs the statements its query needs, and no more
       |                                             |       - item:                    |
       |                                             |           text: Measure first    |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                          | select | insert | update | delete |
+      | 1       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article       | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article_block | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article_tag   | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author        | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_comment       | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_quote         | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_tag           | 1      | 0      | 0      | 0      |
 
   Scenario: an admin filters the articles on their author's name
     When these requests get these responses:
@@ -73,8 +82,9 @@ Feature: A read runs the statements its query needs, and no more
       |   fields: id                          |     - id: third |
       |   sort: id                            |                 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
 
   Scenario: an admin counts the articles of each status
     When these requests get these responses:
@@ -86,8 +96,9 @@ Feature: A read runs the statements its query needs, and no more
       |   groupBy: status                     |     - status: published |
       |   sort: status                        |                         |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
 
   Scenario: a user whose policy filters the articles lists the ones it allows, twice
     When these requests get these responses:
@@ -111,9 +122,17 @@ Feature: A read runs the statements its query needs, and no more
       |                                       |       author:       |
       |                                       |         name: Bob   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_access          | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions     | 4      | 0      | 0      | 0      |
+      | 1       | directus_policies        | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles           | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author  | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_author  | 1      | 0      | 0      | 0      |
 
   Scenario: a user whose policy filters the articles reads one through every relation
     When these requests get these responses:
@@ -136,8 +155,16 @@ Feature: A read runs the statements its query needs, and no more
       |                                             |       - item:                    |
       |                                             |           text: Measure first    |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                          | select | insert | update | delete |
+      | 1       | directus_permissions           | 6      | 0      | 0      | 0      |
+      | 1       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article       | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article_block | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article_tag   | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author        | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_comment       | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_quote         | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_tag           | 1      | 0      | 0      | 0      |
 
   Scenario: a user whose policy filters the articles is refused a draft
     When these requests get these responses:
@@ -146,8 +173,10 @@ Feature: A read runs the statements its query needs, and no more
       | path: /items/test_read_counts_article/third |           |
       | token: ReadStatementCountsToken             |           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_permissions     | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
 
 
 
@@ -170,9 +199,12 @@ Feature: A read runs the statements its query needs, and no more
       |   sort: id                                 |                  |
       | as: reader-token                           |                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_sessions        | 0      | 1      | 0      | 1      |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
 
   Scenario: a user signs in for a session, reads with it twice and refreshes it
     When these requests get these responses:
@@ -205,11 +237,17 @@ Feature: A read runs the statements its query needs, and no more
       |   mode: session                            |                  |
       | as: reader-session                         |                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_sessions        | 0      | 1      | 0      | 1      |
+      | 1       | directus_settings        | 1      | 0      | 0      | 0      |
+      | 1       | directus_users           | 2      | 0      | 1      | 0      |
+      | 2       | directus_sessions        | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions        | 1      | 0      | 0      | 0      |
+      | 3       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 4       | directus_sessions        | 2      | 1      | 1      | 1      |
+      | 4       | directus_users           | 0      | 0      | 1      | 0      |
 
   Scenario: an admin lists the published articles with their author over GraphQL
     When these requests get these responses:
@@ -225,8 +263,10 @@ Feature: A read runs the statements its query needs, and no more
       |                                               |         author:               |
       |                                               |           name: Bob           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author  | 1      | 0      | 0      | 0      |
 
   Scenario: an admin reads one article through every kind of relation over GraphQL
     When these requests get these responses:
@@ -250,8 +290,15 @@ Feature: A read runs the statements its query needs, and no more
       |                                       |         - item:                     |
       |                                       |             text: Measure first     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                          | select | insert | update | delete |
+      | 1       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article       | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article_block | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article_tag   | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author        | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_comment       | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_quote         | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_tag           | 1      | 0      | 0      | 0      |
 
   Scenario: a user whose policy filters the articles lists them over GraphQL, twice
     When these requests get these responses:
@@ -277,9 +324,14 @@ Feature: A read runs the statements its query needs, and no more
       | token: ReadStatementCountsToken               |         author:               |
       |                                               |           name: Bob           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_permissions     | 3      | 0      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_author  | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_author  | 1      | 0      | 0      | 0      |
 
   Scenario: an admin opens the app
     When these requests get these responses:
@@ -301,15 +353,31 @@ Feature: A read runs the statements its query needs, and no more
       | method: GET                | code: 200 |+
       | path: /policies/me/globals |           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
-      | 5       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
-      | 7       | -     | 0      | 0      | 0      | 0      |
-      | 8       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 2      | 0      | 0      | 0      |
+      | 2       | directus_files       | 1      | 0      | 0      | 0      |
+      | 2       | directus_settings    | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | directus_collections | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | pg_class             | 1      | 0      | 0      | 0      |
+      | 5       | directus_fields      | 2      | 0      | 0      | 0      |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      |
+      | 5       | geometry_columns     | 0      | 0      | 0      | 0      |
+      | 5       | pg_attribute         | 1      | 0      | 0      | 0      |
+      | 5       | pg_depend            | 1      | 0      | 0      | 0      |
+      | 5       | pg_proc              | 1      | 0      | 0      | 0      |
+      | 5       | undefined            | 0      | 0      | 0      | 0      |
+      | 6       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      |
+      | 6       | pg_constraint        | 1      | 0      | 0      | 0      |
+      | 7       | directus_users       | 1      | 0      | 0      | 0      |
+      | 8       | directus_access      | 1      | 0      | 0      | 0      |
+      | 8       | directus_policies    | 2      | 0      | 0      | 0      |
+      | 8       | directus_users       | 1      | 0      | 0      | 0      |
 
   Scenario: a user whose policy filters the articles opens the app
     When these requests get these responses:
@@ -339,15 +407,29 @@ Feature: A read runs the statements its query needs, and no more
       | path: /policies/me/globals      |           |
       | token: ReadStatementCountsToken |           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
-      | 5       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
-      | 7       | -     | 0      | 0      | 0      | 0      |
-      | 8       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 2      | 0      | 0      | 0      |
+      | 2       | directus_files       | 1      | 0      | 0      | 0      |
+      | 2       | directus_settings    | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | directus_collections | 1      | 0      | 0      | 0      |
+      | 4       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | pg_class             | 1      | 0      | 0      | 0      |
+      | 5       | directus_fields      | 2      | 0      | 0      | 0      |
+      | 5       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      |
+      | 6       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 6       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      |
+      | 7       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 7       | directus_users       | 1      | 0      | 0      | 0      |
+      | 8       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 8       | directus_users       | 1      | 0      | 0      | 0      |
 
   Scenario: an admin and a user whose policy filters the articles count them while listing
     When these requests get these responses:
@@ -366,9 +448,11 @@ Feature: A read runs the statements its query needs, and no more
       |   meta: [filter_count, total_count]   |                     |
       | token: ReadStatementCountsToken       |                     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 3      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_article | 3      | 0      | 0      | 0      |
 
   Scenario: an admin and a user whose policy filters the articles search them
     When these requests get these responses:
@@ -385,9 +469,11 @@ Feature: A read runs the statements its query needs, and no more
       |   fields: id                          |                 |
       | token: ReadStatementCountsToken       |                 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_read_counts_article | 1      | 0      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_read_counts_article | 1      | 0      | 0      | 0      |
 
   Scenario: an admin and a user whose policy reads the files download one
     When these requests get these responses:

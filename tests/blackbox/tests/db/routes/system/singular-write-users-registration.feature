@@ -41,9 +41,12 @@ Feature: A visitor registers and verifies the email address
       |   filter[email][_eq]: >-          |                                         |
       |     off-<run>@example.com         |                                         |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 2      | 0      | 0      | 0      |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 2       | directus_access   | 2      | 0      | 0      | 0      |
+      | 2       | directus_settings | 1      | 0      | 0      | 0      |
+      | 2       | directus_users    | 1      | 0      | 0      | 0      |
 
   Scenario: a registered user is active once the email address is verified
     Given these requests are sent:
@@ -132,8 +135,16 @@ Feature: A visitor registers and verifies the email address
       |   filter[email][_eq]: >-                 |       first_name: registered-<run> |
       |     new-<run>@allowed.example.com        |                                    |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 11       | -     | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 2      | 0      | 0      | 0      |
+      | 1       | directus_settings | 1      | 0      | 0      | 0      |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 2       | directus_access   | 2      | 0      | 0      | 0      |
+      | 2       | directus_settings | 3      | 0      | 0      | 0      |
+      | 2       | directus_users    | 3      | 1      | 0      | 0      |
+      | 3       | directus_access   | 2      | 0      | 0      | 0      |
+      | 3       | directus_settings | 2      | 0      | 0      | 0      |
+      | 3       | directus_users    | 2      | 0      | 0      | 0      |
+      | 11      | directus_access   | 2      | 0      | 0      | 0      |
+      | 11      | directus_settings | 1      | 0      | 0      | 0      |
+      | 11      | directus_users    | 2      | 0      | 0      | 0      |

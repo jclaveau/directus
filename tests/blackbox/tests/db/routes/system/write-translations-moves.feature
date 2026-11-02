@@ -42,9 +42,13 @@ Feature: A translation moves to another key or language only onto a free one
       |   fields: key,language         |     key: moved-<run>          |
       |                                |     language: fr-FR           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_translations | 5      | 0      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | directus_translations | 3      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: one key and language given to several translations is refused
     Given these requests are sent:
@@ -83,8 +87,8 @@ Feature: A translation moves to another key or language only onto a free one
       |     key:               |       language: fr-FR         |
       |       _eq: tm-<run>    |                               |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: two translations for one key and language created at once are refused
     Then these requests get these responses:
@@ -106,8 +110,9 @@ Feature: A translation moves to another key or language only onto a free one
       |     key:            |                                    |
       |       _eq: tm-<run> |                                    |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_translations | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a translation moved by its language alone lands on a free one only
     Given these requests are sent:
@@ -145,9 +150,13 @@ Feature: A translation moves to another key or language only onto a free one
       | query:                         |   data:                       |
       |   fields: language             |     language: de-DE           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_translations | 5      | 0      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | directus_translations | 3      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a batch naming no keys moves no translation
     Given these requests are sent:
@@ -174,5 +183,6 @@ Feature: A translation moves to another key or language only onto a free one
       |   fields: key,language         |     key: tm-<run>   |
       |                                |     language: en-US |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_translations | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |

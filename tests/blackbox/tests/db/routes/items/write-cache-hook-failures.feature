@@ -93,9 +93,21 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       Value "c" for field "code" in collection "test_wcf_update_precise" has to be unique.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_access         | 2      | 0      | 0      | 0      |
+      | 1       | directus_collections    | 1      | 0      | 0      | 0      |
+      | 1       | directus_fields         | 1      | 0      | 0      | 0      |
+      | 1       | directus_relations      | 1      | 0      | 0      | 0      |
+      | 1       | directus_roles          | 1      | 0      | 0      | 0      |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | geometry_columns        | 0      | 0      | 0      | 0      |
+      | 1       | information_schema      | 1      | 0      | 0      | 0      |
+      | 1       | pg_constraint           | 1      | 0      | 0      | 0      |
+      | 1       | pg_index                | 1      | 0      | 0      | 0      |
+      | 1       | pg_proc                 | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_update_precise | 2      | 1      | 0      | 0      |
+      | 6       | directus_users          | 1      | 0      | 0      | 0      |
+      | 6       | test_wcf_update_precise | 2      | 0      | 2      | 0      |
 
   Scenario: a refused update purges the collection whole for an undeclared takeover
     When these requests get these responses:
@@ -154,9 +166,11 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       Value "c" for field "code" in collection "test_wcf_update_coarse" has to be unique.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_update_coarse | 2      | 1      | 0      | 0      |
+      | 6       | directus_users         | 1      | 0      | 0      | 0      |
+      | 6       | test_wcf_update_coarse | 4      | 0      | 2      | 0      |
 
   Scenario: a refused nested update purges what its hook declared, not its rows
     When these requests get these responses:
@@ -225,11 +239,17 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       Value "b" for field "code" in collection "test_wcf_nested_child" has to be unique.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 8       | -     | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_nested_child   | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_nested_parent  | 1      | 1      | 0      | 0      |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      |
+      | 2       | test_wcf_nested_child   | 2      | 1      | 0      | 0      |
+      | 3       | directus_users          | 1      | 0      | 0      | 0      |
+      | 3       | test_wcf_nested_foreign | 1      | 1      | 0      | 0      |
+      | 8       | directus_users          | 1      | 0      | 0      | 0      |
+      | 8       | test_wcf_nested_child   | 4      | 0      | 1      | 0      |
+      | 8       | test_wcf_nested_parent  | 1      | 0      | 0      | 0      |
 
   Scenario: a refused nested delete purges what its hook declared
     When these requests get these responses:
@@ -282,12 +302,19 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       collection "test_wcf_nested_delete_holder".
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
-      | 7       | -     | 0      | 0      | 0      | 0      |
+      | request | table                          | select | insert | update | delete |
+      | 1       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_nested_delete_child   | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_nested_delete_parent  | 1      | 1      | 0      | 0      |
+      | 2       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 2       | test_wcf_nested_delete_child   | 1      | 1      | 0      | 0      |
+      | 3       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 3       | test_wcf_nested_delete_holder  | 1      | 1      | 0      | 0      |
+      | 4       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 4       | test_wcf_nested_delete_foreign | 1      | 1      | 0      | 0      |
+      | 7       | directus_users                 | 1      | 0      | 0      | 0      |
+      | 7       | test_wcf_nested_delete_child   | 2      | 0      | 0      | 1      |
+      | 7       | test_wcf_nested_delete_parent  | 1      | 0      | 0      | 0      |
 
   Scenario: a delete its hook cancels is refused, purging what the hook declared
     When these requests get these responses:
@@ -350,10 +377,13 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       it.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 7       | -     | 0      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_delete         | 2      | 1      | 0      | 0      |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      |
+      | 2       | test_wcf_delete_foreign | 1      | 1      | 0      | 0      |
+      | 7       | directus_users          | 1      | 0      | 0      | 0      |
+      | 7       | test_wcf_delete         | 1      | 0      | 0      | 0      |
 
   Scenario: a failed upsert purges the slice its hook declared for the row it took over
     When these requests get these responses:
@@ -409,9 +439,11 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       The body "refuse" is refused
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_upsert_takeover | 2      | 1      | 0      | 0      |
+      | 6       | directus_users           | 1      | 0      | 0      | 0      |
+      | 6       | test_wcf_upsert_takeover | 2      | 0      | 1      | 0      |
 
   Scenario: a failed upsert taking nothing over purges only what its hook declared
     When these requests get these responses:
@@ -468,10 +500,12 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       The body "refuse-declaring-foreign" is refused
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 7       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_upsert_declared | 2      | 1      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_wcf_upsert_foreign  | 1      | 1      | 0      | 0      |
+      | 7       | directus_users           | 1      | 0      | 0      | 0      |
 
   Scenario: an upsert failing on a transaction it shares purges the collection whole
     When these requests get these responses:
@@ -528,9 +562,11 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       The body "refuse" is refused
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_upsert_shared | 2      | 1      | 0      | 0      |
+      | 6       | directus_users         | 1      | 0      | 0      | 0      |
+      | 6       | test_wcf_upsert_shared | 3      | 0      | 1      | 0      |
 
   Scenario: an upsert failing on an instance without a cache purges nothing
     When these requests get these responses:
@@ -600,6 +636,8 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       |   fields: body                               |   data:                 |
       |   filter[slot][_eq]: c                       |     - body: bystander   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_wcf_upsert_added | 2      | 1      | 0      | 0      |
+      | 6       | directus_users        | 1      | 0      | 0      | 0      |
+      | 6       | test_wcf_upsert_added | 6      | 0      | 1      | 0      |

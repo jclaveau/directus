@@ -85,11 +85,25 @@ Feature: A single access row grants its policy from the next request on
       |                                   |         "test_singular_access" or it     |
       |                                   |         does not exist. Queried in root. |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
-      | 8       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 2       | directus_access    | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 4       | directus_access    | 6      | 0      | 1      | 0      |
+      | 4       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 4       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 4       | directus_roles     | 2      | 0      | 0      | 0      |
+      | 4       | directus_users     | 2      | 0      | 0      | 0      |
+      | 6       | directus_access    | 6      | 0      | 1      | 0      |
+      | 6       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 6       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 6       | directus_roles     | 2      | 0      | 0      | 0      |
+      | 6       | directus_users     | 2      | 0      | 0      | 0      |
+      | 8       | directus_access    | 4      | 0      | 0      | 1      |
+      | 8       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 8       | directus_roles     | 2      | 0      | 0      | 0      |
+      | 8       | directus_users     | 2      | 0      | 0      | 0      |
 
   Scenario: an access row is moved in batches and by a query
     Given these requests are sent:
@@ -140,9 +154,33 @@ Feature: A single access row grants its policy from the next request on
       |   data:                     |                               |
       |     policy: <first-policy>  |                               |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 5      | 0      | 1      | 0      |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles       | 2      | 0      | 0      | 0      |
+      | 1       | directus_users       | 2      | 0      | 0      | 0      |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
+      | 2       | directus_access      | 6      | 0      | 1      | 0      |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_collections | 1      | 0      | 0      | 0      |
+      | 2       | directus_fields      | 1      | 0      | 0      | 0      |
+      | 2       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles       | 2      | 0      | 0      | 0      |
+      | 2       | directus_users       | 2      | 0      | 0      | 0      |
+      | 2       | geometry_columns     | 0      | 0      | 0      | 0      |
+      | 2       | information_schema   | 1      | 0      | 0      | 0      |
+      | 2       | pg_constraint        | 1      | 0      | 0      | 0      |
+      | 2       | pg_index             | 1      | 0      | 0      | 0      |
+      | 2       | pg_proc              | 1      | 0      | 0      | 0      |
 
   Scenario: a key no item holds is not found for the admin, forbidden to a user
     Given these requests are sent:
@@ -227,11 +265,17 @@ Feature: A single access row grants its policy from the next request on
       |                                              |         "test_singular_access"  |
       |                                              |         or it does not exist.   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 5       | -     | 0      | 0      | 0      | 0      |
-      | 6       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_singular_access | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | test_singular_access | 1      | 0      | 0      | 0      |
+      | 5       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      |
+      | 5       | test_singular_access | 1      | 0      | 0      | 0      |
+      | 6       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      |
+      | 6       | test_singular_access | 1      | 0      | 0      | 0      |
 
   Scenario: a key a batch delete misses is not found for the admin, forbidden to a user
     Given these requests are sent:
@@ -290,7 +334,13 @@ Feature: A single access row grants its policy from the next request on
       |                                          |         "test_singular_access"  |
       |                                          |         or it does not exist.   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | test_singular_access | 2      | 0      | 0      | 1      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_singular_access | 2      | 0      | 0      | 1      |
+      | 4       | directus_access      | 3      | 0      | 0      | 0      |
+      | 4       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 4       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | test_singular_access | 1      | 0      | 0      | 0      |

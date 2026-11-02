@@ -28,8 +28,11 @@ Feature: A geometry is written from GeoJSON and read back as GeoJSON
       |                                          |         - 1        |
       |                                          |         - 2        |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_geo_spot | 1      | 1      | 0      | 0      |
 
   Scenario: the revision of an updated point holds the point as GeoJSON
     When these requests get these responses:
@@ -68,6 +71,12 @@ Feature: A geometry is written from GeoJSON and read back as GeoJSON
       |                                                |             - 3         |
       |                                                |             - 4         |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_geo_spot | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | test_write_geo_spot | 3      | 0      | 1      | 0      |

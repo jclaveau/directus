@@ -33,9 +33,16 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | eventually: true            |         You don't have permission to |
       |                             |         access this.                 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_flows      | 2      | 1      | 0      | 0      |
+      | 1       | directus_operations | 2      | 0      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 3       | directus_flows      | 1      | 0      | 0      | 1      |
+      | 3       | directus_operations | 0      | 0      | 1      | 0      |
+      | 3       | directus_users      | 1      | 0      | 0      | 0      |
 
   Scenario: webhook flows created in one batch answer their triggers
     Then these requests get these responses:
@@ -73,9 +80,16 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       |   - <first-flow>                   |                         |
       |   - <second-flow>                  |                         |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_flows      | 2      | 1      | 0      | 0      |
+      | 1       | directus_operations | 2      | 0      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 4       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 4       | directus_flows      | 0      | 0      | 0      | 1      |
+      | 4       | directus_operations | 0      | 0      | 1      | 0      |
+      | 4       | directus_users      | 1      | 0      | 0      | 0      |
 
   Scenario: a flow deleted with its chained operations takes them along
     Given these requests are sent:
@@ -126,8 +140,11 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       |   fields: id                |            |
       |   filter[id][_eq]: <flow>   |            |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_flows      | 1      | 0      | 0      | 1      |
+      | 1       | directus_operations | 0      | 0      | 1      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
 
   Scenario: an inactive flow is renamed in batches and by a query
     Given these requests are sent:
@@ -161,9 +178,17 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       |   data:                        |                                  |
       |     description: queried-<run> |                                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_flows      | 3      | 0      | 1      | 0      |
+      | 1       | directus_operations | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_flows      | 4      | 0      | 1      | 0      |
+      | 2       | directus_operations | 1      | 0      | 0      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
 
   Scenario: an operation is moved one by one and in batches, then deleted
     Given these requests are sent:
@@ -221,8 +246,22 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       |   fields: id                    |                     |
       |   filter[flow][_eq]: <flow>     |                     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_flows      | 1      | 0      | 0      | 0      |
+      | 1       | directus_operations | 3      | 0      | 1      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_flows      | 1      | 0      | 0      | 0      |
+      | 2       | directus_operations | 2      | 0      | 1      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 3       | directus_flows      | 1      | 0      | 0      | 0      |
+      | 3       | directus_operations | 3      | 0      | 1      | 0      |
+      | 3       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 3       | directus_users      | 1      | 0      | 0      | 0      |
+      | 4       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 4       | directus_operations | 1      | 0      | 0      | 1      |
+      | 4       | directus_users      | 1      | 0      | 0      | 0      |

@@ -64,10 +64,18 @@ Feature: A file is uploaded, replaced and terminated through tus
       | headers:                               |                        |
       |   Tus-Resumable: 1.0.0                 |                        |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 5       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_access    | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_files     | 3      | 1      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 0      | 0      |
+      | 1       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 2      | 0      | 1      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 5       | directus_files     | 3      | 0      | 2      | 0      |
+      | 5       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: an upload naming an existing file replaces its content and its name
     Given these requests are sent:
@@ -132,9 +140,14 @@ Feature: A file is uploaded, replaced and terminated through tus
       | headers:                              |                            |
       |   Tus-Resumable: 1.0.0                |                            |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_files     | 4      | 1      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 5      | 0      | 2      | 1      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a terminated upload leaves no file behind
     Then these requests get these responses:
@@ -165,10 +178,16 @@ Feature: A file is uploaded, replaced and terminated through tus
       | headers:                               |           |
       |   Tus-Resumable: 1.0.0                 |           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_files     | 3      | 1      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 2      | 0      | 1      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 3       | directus_files     | 1      | 0      | 0      | 1      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: an upload whose disk name names a directory is refused
     Given these requests are sent:
@@ -225,9 +244,9 @@ Feature: A file is uploaded, replaced and terminated through tus
       | method: GET                          | code: 200                   |+
       | path: /assets/<file>                 | text: kept                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
+      | 2       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: an upload naming the disk name another file holds is refused
     Given these requests are sent:
@@ -270,8 +289,8 @@ Feature: A file is uploaded, replaced and terminated through tus
       | method: GET                          | code: 200                 |+
       | path: /assets/<file>                 | text: kept                |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a replacement that cannot start leaves no row behind
     Given these requests are sent:
@@ -315,8 +334,12 @@ Feature: A file is uploaded, replaced and terminated through tus
       | method: GET                              | code: 200                  |+
       | path: /assets/<file>                     | text: kept                 |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_files     | 2      | 1      | 0      | 1      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: an upload of an unknown type without extension is stored under its id
     Then these requests get these responses:
@@ -345,9 +368,14 @@ Feature: A file is uploaded, replaced and terminated through tus
       | query:                              |   data:                   |
       |   fields: filename_disk             |     filename_disk: <file> |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_files     | 3      | 1      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 3      | 0      | 2      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: an upload naming an id no file holds reports the id it created
     Then these requests get these responses:
@@ -379,9 +407,14 @@ Feature: A file is uploaded, replaced and terminated through tus
       |   filter[filename_download][_eq]: >- |                  |
       |     ghost-<run>.txt                  |                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_files     | 4      | 1      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 3      | 0      | 2      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a replacement keeps a file whose disk name starts with the replaced id
     Given these requests are sent:
@@ -451,6 +484,11 @@ Feature: A file is uploaded, replaced and terminated through tus
       | method: GET                            | code: 200         |+
       | path: /assets/<copy>                   | text: copy        |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 1       | directus_files     | 4      | 1      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 2      | 0      | 0      |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_files     | 5      | 0      | 2      | 1      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |

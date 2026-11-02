@@ -34,5 +34,11 @@ Feature: A user is deleted through a nested write on a related item
       |   fields: id                           |            |
       |   filter[id][_eq]: <member>            |            |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 2      | 0      | 0      |
+      | 1       | directus_comments      | 1      | 0      | 0      | 0      |
+      | 1       | directus_notifications | 1      | 0      | 0      | 0      |
+      | 1       | directus_sessions      | 0      | 0      | 0      | 1      |
+      | 1       | directus_users         | 4      | 0      | 0      | 1      |
+      | 1       | directus_versions      | 1      | 0      | 0      | 0      |
+      | 1       | test_sw_user_teams     | 3      | 0      | 0      | 0      |

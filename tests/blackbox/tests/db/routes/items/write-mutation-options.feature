@@ -25,8 +25,11 @@ Feature: ItemsService honours the write options no HTTP route sets
       |                                                 |   data:             |
       |                                                 |     name: unawaited |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_write_option_row | 0      | 1      | 0      | 0      |
 
   Scenario: a delete refused by its preMutationError deletes nothing
     When these requests get these responses:
@@ -45,9 +48,12 @@ Feature: ItemsService honours the write options no HTTP route sets
       |                                               |   data:                         |
       |                                               |     name: kept                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_write_option_row | 1      | 1      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: updateGroups called with no options writes its group
     When these requests get these responses:
@@ -67,9 +73,15 @@ Feature: ItemsService honours the write options no HTTP route sets
       |                                             |   data:         |
       |                                             |     name: after |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_write_option_row | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_write_option_row | 1      | 0      | 1      | 0      |
 
   Scenario: a row the system creates records no user, one the admin creates records it
     When these requests get these responses:
@@ -93,6 +105,10 @@ Feature: ItemsService honours the write options no HTTP route sets
       |   filter[user_created][_null]: true      |                     |
       |   fields: id                             |                     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_write_option_row | 0      | 1      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_write_option_row | 1      | 1      | 0      | 0      |

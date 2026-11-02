@@ -36,8 +36,12 @@ Feature: A create reaches its hooks as one event carrying its entries
       | items.create | filter | 1     |
       | items.create | action | 1     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups     | 1      | 1      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a grouped hook answering with one payload is refused
     When these requests get these responses:
@@ -58,8 +62,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       hook that handles one row maps them with mapCreateRows.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a grouped hook deleting a field off the list is refused, creating nothing
     When these requests get these responses:
@@ -80,8 +85,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       hook that handles one row maps them with mapCreateRows.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a grouped hook reading a field off the list is refused, creating nothing
     When these requests get these responses:
@@ -102,8 +108,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       hook that handles one row maps them with mapCreateRows.
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 1      | 0      | 0      |
 
   Scenario: a grouped hook marking a twin inserts the row once
     When these requests get these responses:
@@ -122,8 +129,12 @@ Feature: A create reaches its hooks as one event carrying its entries
       | event        | phase  | count |
       | items.create | filter | 1     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups     | 1      | 1      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a hook mapping its rows cancels one, writing its siblings
     When these requests get these responses:
@@ -144,8 +155,12 @@ Feature: A create reaches its hooks as one event carrying its entries
       | event        | phase  | count |
       | items.create | filter | 1     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups     | 1      | 1      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 2      | 0      | 0      |
 
   Scenario: a row a hook mapping its rows takes over is left out of the action
     When these requests get these responses:
@@ -167,5 +182,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       | items.create | action | 0     |
     And the grouped action naming "takeover-peer" carries that row alone
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_create_groups     | 1      | 2      | 0      | 0      |
+      | 1       | test_create_groups_log | 0      | 2      | 0      | 0      |

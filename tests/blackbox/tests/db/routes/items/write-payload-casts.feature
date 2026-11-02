@@ -22,8 +22,11 @@ Feature: A write casts each field by its special, and reads it back cast
       |   id: wc-flag                    |     id: wc-flag |
       |                                  |     flag: null  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_row | 1      | 1      | 0      | 0      |
 
   Scenario: a cast-json text holding no JSON reads as the text it holds
     When these requests get these responses:
@@ -34,8 +37,11 @@ Feature: A write casts each field by its special, and reads it back cast
       |   id: wc-notes                   |     notes: not json |
       |   notes: not json                |                     |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_row | 1      | 1      | 0      | 0      |
 
   Scenario: a cast-csv written as a text or a list reads as a list
     When these requests get these responses:
@@ -59,10 +65,19 @@ Feature: A write casts each field by its special, and reads it back cast
       |   id: wc-csv-empty               |     tags: [] |
       |   tags: ''                       |              |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_row | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | test_write_cast_row | 1      | 1      | 0      | 0      |
+      | 3       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 3       | directus_users      | 1      | 0      | 0      | 0      |
+      | 3       | test_write_cast_row | 1      | 1      | 0      | 0      |
 
   Scenario: the role fields record the role of the user who created and updated
     When these requests get these responses:
@@ -86,9 +101,17 @@ Feature: A write casts each field by its special, and reads it back cast
       |   filter[role_updated][_eq]: $CURRENT_ROLE |                   |
       |   fields: id                               |                   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_access     | 2      | 0      | 0      | 0      |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_roles      | 1      | 0      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_row | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | test_write_cast_row | 3      | 0      | 1      | 0      |
 
   Scenario: a date that does not parse is refused
     When these requests get these responses:
@@ -103,8 +126,8 @@ Feature: A write casts each field by its special, and reads it back cast
       Invalid payload. Invalid Date format in field "day".
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a dateTime that does not parse is refused
     When these requests get these responses:
@@ -119,8 +142,8 @@ Feature: A write casts each field by its special, and reads it back cast
       Invalid payload. Invalid DateTime format in field "moment".
       """
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a collection logging activity only writes no revision on create or update
     When these requests get these responses:
@@ -139,9 +162,13 @@ Feature: A write casts each field by its special, and reads it back cast
       | query:                                              |   data: []        |
       |   filter[collection][_eq]: test_write_cast_activity |                   |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_activity | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      |
+      | 2       | test_write_cast_activity | 2      | 0      | 1      | 0      |
 
   Scenario: a batch update of an empty list updates nothing
     When these requests get these responses:
@@ -150,8 +177,9 @@ Feature: A write casts each field by its special, and reads it back cast
       | path: /items/test_write_cast_row | body:      |
       | payload: []                      |   data: [] |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | test_write_cast_row | 1      | 0      | 0      | 0      |
 
   Scenario: a singleton never written reads as its defaults, its key null
     When these requests get these responses:

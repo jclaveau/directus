@@ -81,10 +81,22 @@ Feature: A single share is created only for an item its sender may share
       |   collection: test_singular_shares |                                        |
       |   item: '<open>'                   |                                        |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 2      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | directus_access      | 2      | 0      | 0      | 0      |
+      | 2       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 2       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_singular_shares | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 3       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 3       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 3       | directus_shares      | 1      | 1      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | test_singular_shares | 1      | 0      | 0      | 0      |
 
   Scenario: the admin shares any item of a collection that exists
     Given these requests are sent:
@@ -112,9 +124,12 @@ Feature: A single share is created only for an item its sender may share
       |                                     |         "test_singular_missing" or   |
       |                                     |         it does not exist.           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_shares    | 1      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a share is renamed one by one and in batches, then deleted
     Given these requests are sent:
@@ -165,11 +180,28 @@ Feature: A single share is created only for an item its sender may share
       |   fields: id               |                         |
       |   filter[id][_eq]: <share> |                         |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_shares    | 3      | 0      | 1      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_access    | 2      | 0      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 2       | directus_shares    | 2      | 0      | 1      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 3       | directus_access    | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 3       | directus_shares    | 3      | 0      | 1      | 0      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |
+      | 4       | directus_access    | 2      | 0      | 0      | 0      |
+      | 4       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 4       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 4       | directus_shares    | 1      | 0      | 0      | 1      |
+      | 4       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a batch of shares is checked share by share like a single one
     Given these requests are sent:
@@ -240,9 +272,26 @@ Feature: A single share is created only for an item its sender may share
       |   - collection: test_singular_shares   |                                        |
       |     item: '<open>'                     |                                        |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
+      | 1       | test_singular_shares | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 3       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 3       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 3       | directus_shares      | 1      | 1      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | test_singular_shares | 1      | 0      | 0      | 0      |
 
   Scenario: a share is re-pointed only to an item its editor may share
     Given these requests are sent:
@@ -328,8 +377,30 @@ Feature: A single share is created only for an item its sender may share
       | payload:                             |                                        |
       |   name: renamed-<run>                |                                        |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
-      | 4       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
+      | 1       | directus_permissions | 3      | 0      | 0      | 0      |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
+      | 1       | test_singular_shares | 1      | 0      | 0      | 0      |
+      | 2       | directus_shares      | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | test_singular_shares | 1      | 0      | 0      | 0      |
+      | 3       | directus_shares      | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | test_singular_shares | 1      | 0      | 0      | 0      |
+      | 4       | directus_access      | 1      | 0      | 0      | 0      |
+      | 4       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 4       | directus_permissions | 5      | 0      | 0      | 0      |
+      | 4       | directus_policies    | 1      | 0      | 0      | 0      |
+      | 4       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 4       | directus_shares      | 3      | 0      | 1      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |

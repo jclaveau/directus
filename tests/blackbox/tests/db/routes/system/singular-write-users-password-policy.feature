@@ -34,9 +34,14 @@ Feature: A single user's password is checked against the password policy
       |   email: long-<run>@example.com            |                                  |
       |   password: long-enough-to-pass-the-policy |                                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 3       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 1       | directus_users     | 2      | 0      | 0      | 0      |
+      | 3       | directus_access    | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_settings  | 1      | 0      | 0      | 0      |
+      | 3       | directus_users     | 3      | 1      | 0      | 0      |
 
   Scenario: a batch creating a user with an empty password is checked like a single create
     Given these requests are sent:
@@ -61,8 +66,9 @@ Feature: A single user's password is checked against the password policy
       |   fields: id                           |                                  |
       |   filter[first_name][_eq]: empty-<run> |                                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_settings | 1      | 0      | 0      | 0      |
+      | 1       | directus_users    | 2      | 0      | 0      | 0      |
 
   Scenario: a reset to a password the policy refuses leaves the token usable
     Given these requests are sent:
@@ -94,7 +100,13 @@ Feature: A single user's password is checked against the password policy
       |     hash: 33c587                           |                                  |
       |   password: long-enough-to-pass-the-policy |                                  |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_settings  | 2      | 0      | 0      | 0      |
+      | 1       | directus_users     | 3      | 0      | 0      | 0      |
+      | 2       | directus_access    | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_sessions  | 0      | 0      | 0      | 1      |
+      | 2       | directus_settings  | 2      | 0      | 0      | 0      |
+      | 2       | directus_users     | 4      | 0      | 1      | 0      |
 
