@@ -492,3 +492,13 @@ Feature: A read runs the statements its query needs, and no more
       | 2       | directus_permissions | 1      | 0      | 0      | 0      |
       | 2       | directus_settings    | 2      | 0      | 0      | 0      |
       | 2       | directus_users       | 1      | 0      | 0      | 0      |
+
+  Scenario: a public ping runs no statement
+    When these requests get these responses:
+      | request            | response  |
+      | method: GET        | code: 200 |+
+      | path: /server/ping |           |
+      | as: public         |           |
+    And on postgres the requests ran these statements:
+      | request | table  | select | insert | update | delete |
+      | 1       | (none) | 0      | 0      | 0      | 0      |
