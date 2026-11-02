@@ -252,7 +252,15 @@ test.each([
 		'{"maxPoolConnections":1,"statements":[{"stmt":"drop x..."}]}',
 	],
 	[
+		'alter table only "articles" add column "x" integer',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"alter articles..."}]}',
+	],
+	[
 		'select nextval(\'articles_id_seq\')',
+		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval..."}]}',
+	],
+	[
+		'SELECT NEXTVAL(\'articles_id_seq\')',
 		'{"maxPoolConnections":1,"statements":[{"stmt":"select nextval..."}]}',
 	],
 	[
@@ -271,6 +279,20 @@ test.each([
 		maxSize: 0,
 		timings: false,
 	})).toBe(formattedAudit);
+});
+
+test('cuts a long dotted name calling no function in linear time', () => {
+	const startAndEnd = [Date.now()];
+
+	auditStatementStart(
+		emptyQueryAudit(),
+		`select ${'a.'.repeat(40_000)}`,
+		'a',
+	)();
+
+	startAndEnd.push(Date.now());
+
+	expect(startAndEnd[1]! - startAndEnd[0]!).toBeLessThan(500);
 });
 
 test('keeps two transactions open at once apart', () => {

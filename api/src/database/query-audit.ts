@@ -149,12 +149,14 @@ const TRANSACTION_KEYWORDS = new Set([
 
 const TABLE_PATTERN = new RegExp(
 	'\\b(?:from|into|update|truncate(?:\\s+table)?|table)'
-	+ '\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?'
+	+ '\\s+(?:if\\s+(?:not\\s+)?exists\\s+|only\\s+)?'
 	+ '["`[]?([^\\s"`\\]().,;]+)',
 	'i',
 );
 
-const FUNCTION_PATTERN = /\b([a-z_][\w.]*)\(/i;
+// A name starts after neither a word character nor a dot, so a long dotted
+// name calling nothing is tried once, not once per dot.
+const FUNCTION_PATTERN = /(?<![\w.])([a-z_]\w*(?:\.\w+)*)\(/i;
 
 const auditedPrototypes = new WeakSet<object>();
 
@@ -541,7 +543,7 @@ export function auditStatementStart(
 	}
 
 	const cutObject = TABLE_PATTERN.exec(sql)?.[1]
-		?? FUNCTION_PATTERN.exec(sql)?.[1];
+		?? FUNCTION_PATTERN.exec(sql)?.[1]?.toLowerCase();
 
 	const cutStmt = cutObject
 		? `${keyword} ${cutObject}...`
