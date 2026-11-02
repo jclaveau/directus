@@ -11,11 +11,9 @@ const props = defineProps<{
 	stateLocked: boolean;
 }>();
 
-defineEmits<{ toggleState: [enabled: boolean]; uninstall: []; reinstall: []; remove: [] }>();
+defineEmits<{ toggleState: [enabled: boolean]; remove: [] }>();
 
 const { t } = useI18n();
-
-const uninstallLocked = computed(() => props.extension.meta.source !== 'registry');
 
 const stateActions = computed(() => {
 	const enabled = props.state === 'enabled';
@@ -53,37 +51,9 @@ const stateActions = computed(() => {
 						{{ action.text }}
 					</v-list-item-content>
 				</v-list-item>
-				<template v-if="!extension.bundle">
-					<v-divider />
-					<v-list-item
-						v-tooltip.left="uninstallLocked ? t('uninstall_locked') : null"
-						:disabled="uninstallLocked"
-						class="uninstall"
-						clickable
-						@click="$emit('uninstall')"
-					>
-						<v-list-item-icon>
-							<v-icon name="delete" />
-						</v-list-item-icon>
-						<v-list-item-content>
-							{{ t('uninstall') }}
-						</v-list-item-content>
-					</v-list-item>
-				</template>
 			</template>
 
 			<template v-else>
-				<template v-if="props.extension.meta.source === 'registry'">
-					<v-list-item clickable @click="$emit('reinstall')">
-						<v-list-item-icon>
-							<v-icon name="download" />
-						</v-list-item-icon>
-						<v-list-item-content>
-							{{ t('reinstall') }}
-						</v-list-item-content>
-					</v-list-item>
-					<v-divider />
-				</template>
 				<v-list-item clickable @click="$emit('remove')">
 					<v-list-item-icon>
 						<v-icon name="delete" />

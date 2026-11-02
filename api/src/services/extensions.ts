@@ -1,13 +1,9 @@
-import { useEnv } from '@directus/env';
 import {
-	ForbiddenError,
 	InvalidPayloadError,
-	LimitExceededError,
 	ServiceUnavailableError,
 	UnprocessableContentError,
 } from '@directus/errors';
 import type { ApiOutput, BundleExtension, ExtensionSettings, ExtensionManager } from '@directus/types';
-import { describe, type DescribeOptions } from '@directus/extensions-registry';
 import type { AbstractServiceOptions, Accountability, DeepPartial, SchemaOverview } from '@directus/types';
 import { isObject, oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
@@ -43,110 +39,6 @@ export class ExtensionsService {
 			schema: this.schema,
 			accountability: this.accountability,
 		});
-	}
-
-	private async preInstall(extensionId: string, versionId: string) {
-		const env = useEnv();
-
-		const describeOptions: DescribeOptions = {};
-
-		if (typeof env['MARKETPLACE_REGISTRY'] === 'string') {
-			describeOptions.registry = env['MARKETPLACE_REGISTRY'];
-		}
-
-		const extension = await describe(extensionId, describeOptions);
-		const version = extension.data.versions.find((version) => version.id === versionId);
-
-		if (!version) {
-			throw new ForbiddenError();
-		}
-
-		const limit = env['EXTENSIONS_LIMIT'] ? Number(env['EXTENSIONS_LIMIT']) : null;
-
-		if (limit !== null) {
-			const currentlyInstalledCount = this.extensionsManager.extensions.length;
-
-			/**
-			 * Bundle extensions should be counted as the number of nested entries rather than a single
-			 * extension to avoid a vulnerability where you can get around the technical limit by bundling
-			 * all extensions you want
-			 */
-			const points = version.bundled.length ?? 1;
-
-			const afterInstallCount = currentlyInstalledCount + points;
-
-			if (afterInstallCount >= limit) {
-				throw new LimitExceededError({ category: 'Extensions' });
-			}
-		}
-
-		return { extension, version };
-	}
-
-	async install(extensionId: string, versionId: string) {
-		const { extension, version } = await this.preInstall(extensionId, versionId);
-
-		await this.extensionsItemService.createOne({
-			id: extensionId,
-			enabled: true,
-			folder: versionId,
-			source: 'registry',
-			bundle: null,
-		});
-
-		if (extension.data.type === 'bundle' && version.bundled.length > 0) {
-			await this.extensionsItemService.createMany(
-				version.bundled.map((entry) => ({
-					enabled: true,
-					folder: entry.name,
-					source: 'registry',
-					bundle: extensionId,
-				})),
-			);
-		}
-
-		await this.extensionsManager.install(versionId);
-	}
-
-	async uninstall(id: string) {
-		const settings = await this.extensionsItemService.readOne(id);
-
-		if (settings.source !== 'registry') {
-			throw new InvalidPayloadError({
-				reason: 'Cannot uninstall extensions that were not installed via marketplace',
-			});
-		}
-
-		if (settings.bundle !== null) {
-			throw new InvalidPayloadError({
-				reason: 'Cannot uninstall sub extensions of bundles separately',
-			});
-		}
-
-		await this.deleteOne(id);
-		await this.extensionsManager.uninstall(settings.folder);
-	}
-
-	async reinstall(id: string) {
-		const settings = await this.extensionsItemService.readOne(id);
-
-		if (settings.source !== 'registry') {
-			throw new InvalidPayloadError({
-				reason: 'Cannot reinstall extensions that were not installed via marketplace',
-			});
-		}
-
-		if (settings.bundle !== null) {
-			throw new InvalidPayloadError({
-				reason: 'Cannot reinstall sub extensions of bundles separately',
-			});
-		}
-
-		const extensionId = settings.id;
-		const versionId = settings.folder;
-
-		await this.preInstall(extensionId, versionId);
-		await this.extensionsManager.install(versionId);
 	}
 
 	async readAll() {

@@ -253,8 +253,6 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	MIGRATIONS_LOCK_TIMEOUT: 'string',
 	MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: 'string',
 
-	MARKETPLACE_TRUST: 'string',
-
 	TELEMETRY: 'boolean',
 	TELEMETRY_URL: 'string',
 

@@ -6,11 +6,9 @@ describe('generateExtensionsEntrypoint', () => {
 	it('returns an empty extension entrypoint if there is no App, Hybrid or Bundle extension', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
-			registry: Map<string, Extension>;
 			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
-			registry: new Map(),
 			local: new Map(),
 		};
 
@@ -38,11 +36,9 @@ describe('generateExtensionsEntrypoint', () => {
 	it('returns an empty extension entrypoint if there are no enabled extensions', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
-			registry: Map<string, Extension>;
 			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
-			registry: new Map(),
 			local: new Map(),
 		};
 
@@ -107,11 +103,9 @@ describe('generateExtensionsEntrypoint', () => {
 	it('returns an extension entrypoint exporting a single App extension', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
-			registry: Map<string, Extension>;
 			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
-			registry: new Map(),
 			local: new Map(),
 		};
 
@@ -133,11 +127,9 @@ describe('generateExtensionsEntrypoint', () => {
 	it('returns an extension entrypoint exporting a single Hybrid extension', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
-			registry: Map<string, Extension>;
 			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
-			registry: new Map(),
 			local: new Map(),
 		};
 
@@ -161,11 +153,9 @@ describe('generateExtensionsEntrypoint', () => {
 	it('returns an extension entrypoint exporting from a single Bundle extension', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
-			registry: Map<string, Extension>;
 			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
-			registry: new Map(),
 			local: new Map(),
 		};
 
@@ -218,11 +208,9 @@ describe('generateExtensionsEntrypoint', () => {
 	it('returns an extension entrypoint exporting multiple extensions', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
-			registry: Map<string, Extension>;
 			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
-			registry: new Map(),
 			local: new Map(),
 		};
 

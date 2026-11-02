@@ -154,10 +154,6 @@ function directusExtensions() {
 		const localExtensions = extensionsPathExists ? await resolveFsExtensions(EXTENSIONS_PATH) : new Map();
 		const moduleExtensions = await resolveModuleExtensions(API_PATH);
 
-		const registryExtensions = extensionsPathExists
-			? await resolveFsExtensions(path.join(EXTENSIONS_PATH, '.registry'))
-			: new Map();
-
 		const mockSetting = (source, folder, extension) => {
 			const settings = [
 				{
@@ -191,13 +187,10 @@ function directusExtensions() {
 			...Array.from(moduleExtensions.entries()).flatMap(([folder, extension]) =>
 				mockSetting('module', folder, extension),
 			),
-			...Array.from(registryExtensions.entries()).flatMap(([folder, extension]) =>
-				mockSetting('registry', folder, extension),
-			),
 		];
 
 		extensionsEntrypoint = generateExtensionsEntrypoint(
-			{ module: moduleExtensions, local: localExtensions, registry: registryExtensions },
+			{ module: moduleExtensions, local: localExtensions },
 			extensionSettings,
 		);
 	}

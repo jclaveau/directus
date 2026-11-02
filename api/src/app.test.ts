@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { oneLine } from '@directus/utils';
 import { Router } from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -119,13 +120,20 @@ const request = async (path: string = '') => {
 };
 
 describe('createApp', async () => {
-	test('refuses the Marketplace variables before reaching the database', async () => {
+	test(oneLine`
+		refuses the Marketplace variables before reaching the database
+	`, async () => {
 		await createApp();
 
 		expect(validateMarketplaceEnvUnset).toHaveBeenCalledExactlyOnceWith();
 
-		expect(vi.mocked(validateMarketplaceEnvUnset).mock.invocationCallOrder[0])
-			.toBeLessThan(vi.mocked(validateDatabaseConnection).mock.invocationCallOrder[0]!);
+		const refusalOrder = vi.mocked(validateMarketplaceEnvUnset)
+			.mock.invocationCallOrder[0];
+
+		const connectionOrder = vi.mocked(validateDatabaseConnection)
+			.mock.invocationCallOrder[0];
+
+		expect(refusalOrder).toBeLessThan(connectionOrder!);
 	});
 
 	describe('Content Security Policy', () => {

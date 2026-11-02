@@ -36,7 +36,6 @@
 		"@directus/constants": "workspace:*",
 		"@directus/errors": "workspace:*",
 		"@directus/extensions": "workspace:*",
-		"@directus/extensions-registry": "workspace:*",
 		"@directus/extensions-sdk": "workspace:*",
 		"@directus/format-title": "workspace:*",
 		"@directus/sdk": "workspace:*",

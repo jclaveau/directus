@@ -184,6 +184,32 @@ export function validateHeaderNameEnv(key: string): void {
 	}
 }
 
+/** The variables configuring the extensions Marketplace. */
+const MARKETPLACE_ENV = [
+	'EXTENSIONS_LOCATION',
+	'MARKETPLACE_REGISTRY',
+	'MARKETPLACE_TRUST',
+];
+
+/**
+ * Refuse a Marketplace variable that is set, at boot like
+ * {@link validateDurationEnv}: extensions change only with a deploy (#627), so a
+ * deployment configuring the Marketplace expects installs it does not get.
+ */
 export function validateMarketplaceEnvUnset(): void {
-	return;
+	const env = useEnv();
+
+	for (const key of MARKETPLACE_ENV) {
+		if (key in env === false) {
+			continue;
+		}
+
+		useLogger().error(
+			`${JSON.stringify(key)} Environment Variable is set, but extensions `
+				+ 'change only with a deploy: the Marketplace it configures is '
+				+ 'removed. Unset it.',
+		);
+
+		process.exit(1);
+	}
 }

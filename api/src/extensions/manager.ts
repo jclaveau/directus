@@ -53,12 +53,9 @@ import { getExtensionsPath } from './lib/get-extensions-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
 import { getExtensions } from './lib/get-extensions.js';
 import { getSharedDepsMapping } from './lib/get-shared-deps-mapping.js';
-import { getInstallationManager } from './lib/installation/index.js';
-import type { InstallationManager } from './lib/installation/manager.js';
 import { generateApiExtensionsSandboxEntrypoint } from './lib/sandbox/generate-api-extensions-sandbox-entrypoint.js';
 import { instantiateSandboxSdk } from './lib/sandbox/sdk/instantiate.js';
 import { createScopedCacheExtensionHandle } from './lib/scoped-cache-handle.js';
-import { syncExtensions } from './lib/sync-extensions.js';
 import { wrapEmbeds } from './lib/wrap-embeds.js';
 import DriverLocal from '@directus/storage-driver-local';
 
@@ -95,9 +92,6 @@ export class ExtensionManager {
 
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
-
-	// versionId:Extension
-	private registryExtensions: Map<string, Extension> = new Map();
 
 	// name:Extension
 	private moduleExtensions: Map<string, Extension> = new Map();
@@ -150,39 +144,28 @@ export class ExtensionManager {
 	/** The reload waiting behind the running one, which later callers share. */
 	private queuedReload: Promise<unknown> | null = null;
 
-	/** What the queued reload loads with, forced if any caller sharing it asked. */
-	private queuedReloadOptions: { forceSync: boolean } | undefined = undefined;
-
 	/**
 	 * Optional file system watcher to auto-reload extensions when the local file system changes
 	 */
 	private watcher: FSWatcher | null = null;
 
-	/**
-	 * installation manager responsible for installing extensions from registries
-	 */
-
-	private installationManager: InstallationManager = getInstallationManager();
-
 	private messenger = useBus();
 
 	/**
-	 * channel to publish on registering extension from external registry
+	 * channel to publish on asking the other processes to reload the extensions
 	 */
 	private reloadChannel = `extensions.reload`;
 
 	private processId = processId();
 
 	public get extensions() {
-		return [...this.localExtensions.values(), ...this.registryExtensions.values(), ...this.moduleExtensions.values()];
+		return [...this.localExtensions.values(), ...this.moduleExtensions.values()];
 	}
 
 	public getExtension(source: string, folder: string) {
 		switch (source) {
 			case 'module':
 				return this.moduleExtensions.get(folder);
-			case 'registry':
-				return this.registryExtensions.get(folder);
 			case 'local':
 				return this.localExtensions.get(folder);
 		}
@@ -232,41 +215,6 @@ export class ExtensionManager {
 		});
 	}
 
-	/**
-	 * Installs an external extension from registry
-	 */
-	public async install(versionId: string): Promise<void> {
-		const logger = useLogger();
-
-		await this.installationManager.install(versionId);
-		await this.reload({ forceSync: true });
-
-		emitter.emitAction('extensions.installed', {
-			extensions: this.extensions,
-			versionId,
-		});
-
-		logger.info(`Installed extension: ${versionId}`);
-
-		await this.broadcastReloadNotification();
-	}
-
-	public async uninstall(folder: string) {
-		const logger = useLogger();
-
-		await this.installationManager.uninstall(folder);
-		await this.reload({ forceSync: true });
-
-		emitter.emitAction('extensions.uninstalled', {
-			extensions: this.extensions,
-			folder,
-		});
-
-		logger.info(`Uninstalled extension: ${folder}`);
-
-		await this.broadcastReloadNotification();
-	}
-
 	public async broadcastReloadNotification() {
 		await this.messenger.publish(this.reloadChannel, { origin: this.processId });
 	}
@@ -274,27 +222,16 @@ export class ExtensionManager {
 	/**
 	 * Load all extensions from disk and register them in their respective places
 	 */
-	private async load(options?: { forceSync: boolean }): Promise<void> {
+	private async load(): Promise<void> {
 		const logger = useLogger();
 
-		if (env['EXTENSIONS_LOCATION']) {
-			try {
-				await syncExtensions({ force: options?.forceSync ?? false });
-			} catch (error) {
-				logger.error(`Failed to sync extensions`);
-				logger.error(error);
-				process.exit(1);
-			}
-		}
-
 		try {
-			const { local, registry, module } = await getExtensions();
+			const { local, module } = await getExtensions();
 
 			this.localExtensions = local;
-			this.registryExtensions = registry;
 			this.moduleExtensions = module;
 
-			this.extensionsSettings = await getExtensionsSettings({ local, registry, module });
+			this.extensionsSettings = await getExtensionsSettings({ local, module });
 		} catch (error) {
 			this.handleExtensionError({ error, reason: `Couldn't load extensions` });
 		}
@@ -339,13 +276,9 @@ export class ExtensionManager {
 	/**
 	 * Reload all the extensions. Will unload if extensions have already been loaded
 	 */
-	public reload(options?: { forceSync: boolean }): Promise<unknown> {
+	public reload(): Promise<unknown> {
 		if (this.queuedReload !== null) {
 			// The queued job will already handle the additional changes
-			if (options?.forceSync) {
-				this.queuedReloadOptions = options;
-			}
-
 			return this.queuedReload;
 		}
 
@@ -359,14 +292,14 @@ export class ExtensionManager {
 			reject = rej;
 		});
 
-		const reloadExtensions = async (reloadOptions?: { forceSync: boolean }) => {
+		const reloadExtensions = async () => {
 			// A failed load leaves isLoaded false; keeping the last loaded set
 			// instead of retrying it is tracked in #627.
 			if (this.hasLoadedBefore) {
 				const prevExtensions = this.lastLoadedExtensions;
 
 				await this.unload();
-				await this.load(reloadOptions);
+				await this.load();
 
 				logger.info('Extensions reloaded');
 
@@ -405,16 +338,12 @@ export class ExtensionManager {
 		};
 
 		this.queuedReload = promise;
-		this.queuedReloadOptions = options;
 
 		this.reloadQueue.enqueue(async () => {
-			const reloadOptions = this.queuedReloadOptions;
-
 			this.queuedReload = null;
-			this.queuedReloadOptions = undefined;
 
 			try {
-				await reloadExtensions(reloadOptions);
+				await reloadExtensions();
 			}
 			catch (error) {
 				reject(error);
@@ -526,12 +455,9 @@ export class ExtensionManager {
 	private updateWatchedExtensions(added: Extension[], removed: Extension[] = []): void {
 		if (!this.watcher) return;
 
-		const extensionDir = path.resolve(getExtensionsPath());
-		const registryDir = path.join(extensionDir, '.registry');
-
 		const toPackageExtensionPaths = (extensions: Extension[]) =>
 			extensions
-				.filter((extension) => extension.local && !extension.path.startsWith(registryDir))
+				.filter((extension) => extension.local)
 				.flatMap((extension) =>
 					isTypeIn(extension, HYBRID_EXTENSION_TYPES) || extension.type === 'bundle'
 						? [
@@ -561,7 +487,7 @@ export class ExtensionManager {
 		}));
 
 		const entrypoint = generateExtensionsEntrypoint(
-			{ module: this.moduleExtensions, registry: this.registryExtensions, local: this.localExtensions },
+			{ module: this.moduleExtensions, local: this.localExtensions },
 			this.extensionsSettings,
 		);
 
@@ -683,7 +609,6 @@ export class ExtensionManager {
 	private async registerApiExtensions(): Promise<void> {
 		const sources = {
 			module: this.moduleExtensions,
-			registry: this.registryExtensions,
 			local: this.localExtensions,
 		} as const;
 
@@ -708,7 +633,12 @@ export class ExtensionManager {
 								await this.registerOperationExtension(extension);
 								break;
 							case 'bundle':
-								await this.registerBundleExtension(extension, source as 'module' | 'registry' | 'local', id);
+								await this.registerBundleExtension(
+									extension,
+									source as 'module' | 'local',
+									id,
+								);
+
 								break;
 							default:
 								return;
@@ -807,7 +737,7 @@ export class ExtensionManager {
 
 	private async registerBundleExtension(
 		bundle: BundleExtension,
-		source: 'local' | 'registry' | 'module',
+		source: 'local' | 'module',
 		bundleId: string,
 	) {
 		const extensionEnabled = (extensionName: string) => {

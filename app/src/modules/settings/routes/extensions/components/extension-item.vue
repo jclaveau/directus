@@ -86,8 +86,6 @@ const requestHandler = (requestCallback: () => Promise<any>) => async () => {
 };
 
 const toggleState = requestHandler(() => extensionsStore.toggleState(props.extension.id));
-const uninstall = requestHandler(() => extensionsStore.uninstall(props.extension.id));
-const reinstall = requestHandler(() => extensionsStore.reinstall(props.extension.id));
 const remove = requestHandler(() => extensionsStore.remove(props.extension.id));
 
 function isAppExtension(type?: ExtensionType) {
@@ -101,15 +99,7 @@ function isAppExtension(type?: ExtensionType) {
 		<v-list-item-icon v-tooltip="t(`extension_${type}`)"><v-icon :name="icon" small /></v-list-item-icon>
 		<v-list-item-content>
 			<span class="meta" :class="{ disabled }">
-				<router-link
-					v-if="extension.meta.source === 'registry' && !extension.bundle"
-					v-tooltip="t('open_in_marketplace')"
-					class="marketplace-link"
-					:to="`/settings/marketplace/extension/${extension.id}`"
-				>
-					{{ name }}
-				</router-link>
-				<span v-else>{{ name }}</span>
+				<span>{{ name }}</span>
 				{{ ' ' }}
 				<v-chip v-if="version" class="version" small>
 					{{ version }}
@@ -132,8 +122,6 @@ function isAppExtension(type?: ExtensionType) {
 			:state="state.value"
 			:state-locked
 			@toggle-state="toggleState"
-			@uninstall="uninstall"
-			@reinstall="reinstall"
 			@remove="remove"
 		/>
 	</v-list-item>
@@ -146,12 +134,6 @@ function isAppExtension(type?: ExtensionType) {
 <style lang="scss" scoped>
 .meta {
 	font-family: var(--theme--fonts--monospace--font-family);
-
-	.marketplace-link {
-		&:hover {
-			text-decoration: underline;
-		}
-	}
 
 	.version {
 		margin-inline-end: 8px;

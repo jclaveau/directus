@@ -1,12 +1,8 @@
-import { useEnv } from '@directus/env';
 import {
-	ForbiddenError,
 	InvalidPayloadError,
-	LimitExceededError,
 	ServiceUnavailableError,
 	UnprocessableContentError,
 } from '@directus/errors';
-import { describe as describeExtension } from '@directus/extensions-registry';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
@@ -25,13 +21,6 @@ vi.mock('../database/index.js', () => {
 	};
 });
 
-vi.mock('@directus/env', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('@directus/env')>();
-
-	return { ...actual, useEnv: vi.fn(actual.useEnv) };
-});
-
-vi.mock('@directus/extensions-registry', () => ({ describe: vi.fn() }));
 vi.mock('../extensions/index.js', () => ({ getExtensionManager: vi.fn() }));
 
 vi.mock('../logger/index.js', () => {
@@ -57,375 +46,6 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe('Services / Extensions / install', () => {
-	it('refuses a version the registry does not list', async () => {
-		vi.mocked(getExtensionManager).mockReturnValue({ extensions: [] } as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: { type: 'interface', versions: [{ id: 'version-2', bundled: [] }] },
-		} as any);
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({
-			MARKETPLACE_REGISTRY: 'https://registry.example.com',
-		});
-
-		const installation = service.install('extension-id', 'version-1');
-
-		await expect(installation).rejects.toThrowError(ForbiddenError);
-
-		await expect(installation).rejects.toHaveProperty(
-			'message',
-			`You don't have permission to access this.`,
-		);
-
-		expect(describeExtension).toHaveBeenCalledWith('extension-id', {
-			registry: 'https://registry.example.com',
-		});
-	});
-
-	it('counts each bundled entry against the extensions limit', async () => {
-		vi.mocked(getExtensionManager).mockReturnValue({
-			extensions: [{ name: 'one' }, { name: 'two' }],
-		} as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: {
-				type: 'bundle',
-				versions: [
-					{
-						id: 'version-1',
-						bundled: [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
-					},
-				],
-			},
-		} as any);
-
-		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne');
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
-
-		const installation = service.install('extension-id', 'version-1');
-
-		await expect(installation).rejects.toThrowError(LimitExceededError);
-
-		await expect(installation).rejects.toHaveProperty(
-			'message',
-			'Extensions limit exceeded.',
-		);
-
-		expect(createOneSpy).not.toHaveBeenCalled();
-	});
-
-	it('refuses a single extension once the limit is reached', async () => {
-		vi.mocked(getExtensionManager).mockReturnValue({
-			extensions: [{ name: 'one' }, { name: 'two' }],
-		} as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: { type: 'interface', versions: [{ id: 'version-1', bundled: [] }] },
-		} as any);
-
-		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne');
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_LIMIT: '2' });
-
-		const installation = service.install('extension-id', 'version-1');
-
-		await expect(installation).rejects.toThrowError(LimitExceededError);
-
-		await expect(installation).rejects.toHaveProperty(
-			'message',
-			'Extensions limit exceeded.',
-		);
-
-		expect(createOneSpy).not.toHaveBeenCalled();
-	});
-
-	it('records a bundle without entries as a single row', async () => {
-		vi.mocked(getExtensionManager).mockReturnValue({
-			extensions: [],
-			install: vi.fn(),
-		} as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: { type: 'bundle', versions: [{ id: 'version-1', bundled: [] }] },
-		} as any);
-
-		vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue('extension-id');
-		const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany');
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({});
-
-		await service.install('extension-id', 'version-1');
-
-		expect(createManySpy).not.toHaveBeenCalled();
-	});
-
-	it('records a bundle and each of its entries, then installs it', async () => {
-		const installSpy = vi.fn();
-
-		vi.mocked(getExtensionManager).mockReturnValue({
-			extensions: [],
-			install: installSpy,
-		} as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: {
-				type: 'bundle',
-				versions: [
-					{
-						id: 'version-1',
-						bundled: [{ name: 'entry-one' }, { name: 'entry-two' }],
-					},
-				],
-			},
-		} as any);
-
-		const createOneSpy = vi
-			.spyOn(ItemsService.prototype, 'createOne')
-			.mockResolvedValue('extension-id');
-
-		const createManySpy = vi
-			.spyOn(ItemsService.prototype, 'createMany')
-			.mockResolvedValue([]);
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({});
-
-		await service.install('extension-id', 'version-1');
-
-		expect(describeExtension).toHaveBeenCalledWith('extension-id', {});
-
-		expect(createOneSpy).toHaveBeenCalledWith({
-			id: 'extension-id',
-			enabled: true,
-			folder: 'version-1',
-			source: 'registry',
-			bundle: null,
-		});
-
-		expect(createManySpy).toHaveBeenCalledWith([
-			{
-				enabled: true,
-				folder: 'entry-one',
-				source: 'registry',
-				bundle: 'extension-id',
-			},
-			{
-				enabled: true,
-				folder: 'entry-two',
-				source: 'registry',
-				bundle: 'extension-id',
-			},
-		]);
-
-		expect(installSpy).toHaveBeenCalledWith('version-1');
-	});
-
-	it('records a single extension under the limit without entries', async () => {
-		const installSpy = vi.fn();
-
-		vi.mocked(getExtensionManager).mockReturnValue({
-			extensions: [{ name: 'one' }],
-			install: installSpy,
-		} as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: { type: 'interface', versions: [{ id: 'version-1', bundled: [] }] },
-		} as any);
-
-		const createOneSpy = vi
-			.spyOn(ItemsService.prototype, 'createOne')
-			.mockResolvedValue('extension-id');
-
-		const createManySpy = vi.spyOn(ItemsService.prototype, 'createMany');
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_LIMIT: '4' });
-
-		await service.install('extension-id', 'version-1');
-
-		expect(createOneSpy).toHaveBeenCalledWith({
-			id: 'extension-id',
-			enabled: true,
-			folder: 'version-1',
-			source: 'registry',
-			bundle: null,
-		});
-
-		expect(createManySpy).not.toHaveBeenCalled();
-		expect(installSpy).toHaveBeenCalledWith('version-1');
-	});
-});
-
-describe('Services / Extensions / uninstall', () => {
-	it.each([
-		[
-			{ id: 'extension-id', source: 'local', bundle: null, folder: 'version-1' },
-			oneLine`
-				Invalid payload. Cannot uninstall extensions
-				that were not installed via marketplace.
-			`,
-		],
-		[
-			{
-				id: 'extension-id',
-				source: 'registry',
-				bundle: 'parent-id',
-				folder: 'entry',
-			},
-			'Invalid payload. Cannot uninstall sub extensions of bundles separately.',
-		],
-	])('refuses %j', async (settings, message) => {
-		vi.mocked(getExtensionManager).mockReturnValue({} as any);
-		vi.spyOn(ItemsService.prototype, 'readOne').mockResolvedValue(settings);
-		const deleteOneSpy = vi.spyOn(ItemsService.prototype, 'deleteOne');
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		const removal = service.uninstall('extension-id');
-
-		await expect(removal).rejects.toThrowError(InvalidPayloadError);
-		await expect(removal).rejects.toHaveProperty('message', message);
-		expect(deleteOneSpy).not.toHaveBeenCalled();
-	});
-
-	it('deletes the row and its entries, then removes the folder', async () => {
-		const uninstallSpy = vi.fn();
-
-		vi.mocked(getExtensionManager)
-			.mockReturnValue({ uninstall: uninstallSpy } as any);
-
-		vi.spyOn(ItemsService.prototype, 'readOne').mockResolvedValue({
-			id: 'extension-id',
-			source: 'registry',
-			bundle: null,
-			folder: 'version-1',
-		});
-
-		const deleteOneSpy = vi
-			.spyOn(ItemsService.prototype, 'deleteOne')
-			.mockResolvedValue('extension-id');
-
-		const deleteByQuerySpy = vi
-			.spyOn(ItemsService.prototype, 'deleteByQuery')
-			.mockResolvedValue([]);
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		await service.uninstall('extension-id');
-
-		expect(deleteOneSpy).toHaveBeenCalledWith('extension-id');
-
-		expect(deleteByQuerySpy).toHaveBeenCalledWith({
-			filter: { bundle: { _eq: 'extension-id' } },
-		});
-
-		expect(uninstallSpy).toHaveBeenCalledWith('version-1');
-	});
-});
-
-describe('Services / Extensions / reinstall', () => {
-	it.each([
-		[
-			{ id: 'extension-id', source: 'local', bundle: null, folder: 'version-1' },
-			oneLine`
-				Invalid payload. Cannot reinstall extensions
-				that were not installed via marketplace.
-			`,
-		],
-		[
-			{
-				id: 'extension-id',
-				source: 'registry',
-				bundle: 'parent-id',
-				folder: 'entry',
-			},
-			'Invalid payload. Cannot reinstall sub extensions of bundles separately.',
-		],
-	])('refuses %j', async (settings, message) => {
-		vi.mocked(getExtensionManager).mockReturnValue({} as any);
-		vi.spyOn(ItemsService.prototype, 'readOne').mockResolvedValue(settings);
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		const reinstallation = service.reinstall('extension-id');
-
-		await expect(reinstallation).rejects.toThrowError(InvalidPayloadError);
-		await expect(reinstallation).rejects.toHaveProperty('message', message);
-		expect(describeExtension).not.toHaveBeenCalled();
-	});
-
-	it('checks the recorded version again, then installs it', async () => {
-		const installSpy = vi.fn();
-
-		vi.mocked(getExtensionManager).mockReturnValue({
-			extensions: [],
-			install: installSpy,
-		} as any);
-
-		vi.mocked(describeExtension).mockResolvedValue({
-			data: { type: 'interface', versions: [{ id: 'version-1', bundled: [] }] },
-		} as any);
-
-		vi.spyOn(ItemsService.prototype, 'readOne').mockResolvedValue({
-			id: 'extension-id',
-			source: 'registry',
-			bundle: null,
-			folder: 'version-1',
-		});
-
-		const service = new ExtensionsService({
-			knex: knex.default({ client: MockClient }),
-			schema,
-		});
-
-		vi.mocked(useEnv).mockReturnValueOnce({});
-
-		await service.reinstall('extension-id');
-
-		expect(describeExtension).toHaveBeenCalledWith('extension-id', {});
-		expect(installSpy).toHaveBeenCalledWith('version-1');
-	});
-});
-
 describe('Services / Extensions / readAll', () => {
 	it(oneLine`
 		lists the regular extensions, then the entries of a known bundle
@@ -441,15 +61,15 @@ describe('Services / Extensions / readAll', () => {
 		} as any);
 
 		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([
-			{ id: 'bundle-id', bundle: null, source: 'registry', folder: 'bundle-folder' },
+			{ id: 'bundle-id', bundle: null, source: 'module', folder: 'bundle-folder' },
 			{
 				id: 'entry-id',
 				bundle: 'bundle-id',
-				source: 'registry',
+				source: 'module',
 				folder: 'entry-one',
 			},
-			{ id: 'stale-id', bundle: 'bundle-id', source: 'registry', folder: 'removed' },
-			{ id: 'orphan-id', bundle: 'missing-id', source: 'registry', folder: 'x' },
+			{ id: 'stale-id', bundle: 'bundle-id', source: 'module', folder: 'removed' },
+			{ id: 'orphan-id', bundle: 'missing-id', source: 'module', folder: 'x' },
 			{ id: 'local-id', bundle: null, source: 'local', folder: 'local-folder' },
 		] as any);
 
@@ -465,7 +85,7 @@ describe('Services / Extensions / readAll', () => {
 				meta: {
 					id: 'bundle-id',
 					bundle: null,
-					source: 'registry',
+					source: 'module',
 					folder: 'bundle-folder',
 				},
 				schema: {
@@ -490,7 +110,7 @@ describe('Services / Extensions / readAll', () => {
 				meta: {
 					id: 'entry-id',
 					bundle: 'bundle-id',
-					source: 'registry',
+					source: 'module',
 					folder: 'entry-one',
 				},
 				schema: { name: 'entry-one', type: 'interface' },

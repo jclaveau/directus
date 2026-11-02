@@ -11,19 +11,11 @@ export type ExtensionManager = {
 	readonly extensions: Extension[];
 	getExtension: (source: string, folder: string) => Extension | undefined;
 	initialize: (options: Partial<ExtensionManagerOptions>) => Promise<void>;
-	/**
-	 * Installs an external extension from registry
-	 */
-	install: (versionId: string) => Promise<void>;
-	/**
-	 * Uninstall an extension
-	 */
-	uninstall: (folder: string) => Promise<void>;
 	broadcastReloadNotification: () => Promise<void>;
 	/**
 	 * Reload all the extensions. Will unload if extensions have already been loaded
 	 */
-	reload: (options?: { forceSync: boolean }) => Promise<unknown>;
+	reload: () => Promise<unknown>;
 	/**
 	 * Return the previously generated app extension bundle chunk by name
 	 */

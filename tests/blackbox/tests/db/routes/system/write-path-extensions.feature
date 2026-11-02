@@ -52,23 +52,6 @@ Feature: Extension settings rows are rewritten, toggled and removed
       |     data: { meta: { enabled: false } })          |         enabled: false      |
       |     { bundle meta { enabled } } }                |                             |
 
-  Scenario: uninstalling a registry extension removes its settings row
-    Given these requests are sent:
-      | request                                       | response  |
-      | method: POST                                  | code: 200 |+
-      | path: /extension-settings-probe/registry-rows |           |
-      | payload:                                      |           |
-      |   folder: probe-uninstalled-<run>             |           |
-      | remember: registry_row                        |           |
-      | eventually: true                              |           |
-    Then these requests get these responses:
-      | request                                                      | response     |
-      | method: DELETE                                               | code: 204    |+
-      | path: /extensions/registry/uninstall/<registry_row>          |              |
-      | method: GET                                                  | code: 200    |+
-      | path: /extension-settings-probe/registry-rows/<registry_row> | body:        |
-      | eventually: true                                             |   data: null |
-
   Scenario: deleting an extension by its key removes its settings row
     Given these requests are sent:
       | request                                       | response  |

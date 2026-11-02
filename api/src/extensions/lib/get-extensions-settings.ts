@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import getDatabase from '../../database/index.js';
 import { ExtensionsService } from '../../services/extensions.js';
 import { getSchema } from '../../utils/get-schema.js';
-import { list } from '@directus/extensions-registry';
 
 /**
  * Loads stored settings for all extensions. Creates empty new rows in extensions tables for
@@ -13,11 +12,9 @@ import { list } from '@directus/extensions-registry';
 export const getExtensionsSettings = async ({
 	local,
 	module,
-	registry,
 }: {
 	local: Map<string, Extension>;
 	module: Map<string, Extension>;
-	registry: Map<string, Extension>;
 }) => {
 	const database = getDatabase();
 
@@ -32,7 +29,6 @@ export const getExtensionsSettings = async ({
 	const removedSettingIds: string[] = [];
 
 	const localSettings = existingSettings.filter(({ source }) => source === 'local');
-	const registrySettings = existingSettings.filter(({ source }) => source === 'registry');
 	const moduleSettings = existingSettings.filter(({ source }) => source === 'module');
 
 	const updateBundleEntriesSettings = (
@@ -67,19 +63,12 @@ export const getExtensionsSettings = async ({
 		}
 	};
 
-	const generateSettingsEntry = async (
+	const generateSettingsEntry = (
 		folder: string,
 		extension: Extension,
-		source: 'local' | 'registry' | 'module',
+		source: 'local' | 'module',
 	) => {
-		let marketplaceId;
-
-		if (source === 'registry') {
-			const marketplace = await list({ search: extension.name });
-			marketplaceId = marketplace.data.find((ext) => ext.name === extension.name)?.id;
-		}
-
-		const id = marketplaceId ?? randomUUID();
+		const id = randomUUID();
 
 		if (extension.type === 'bundle') {
 			newSettings.push({
@@ -138,26 +127,16 @@ export const getExtensionsSettings = async ({
 			continue;
 		}
 
-		await generateSettingsEntry(folder, extension, 'local');
+		generateSettingsEntry(folder, extension, 'local');
 	}
 
 	for (const [folder, extension] of module.entries()) {
 		const existingSettings = moduleSettings.find((settings) => settings.folder === folder);
 
 		if (!existingSettings) {
-			await generateSettingsEntry(folder, extension, 'module');
+			generateSettingsEntry(folder, extension, 'module');
 		} else if (extension.type === 'bundle') {
 			updateBundleEntriesSettings(extension, existingSettings, moduleSettings);
-		}
-	}
-
-	for (const [folder, extension] of registry.entries()) {
-		const existingSettings = registrySettings.find((settings) => settings.folder === folder);
-
-		if (!existingSettings) {
-			await generateSettingsEntry(folder, extension, 'registry');
-		} else if (extension.type === 'bundle') {
-			updateBundleEntriesSettings(extension, existingSettings, registrySettings);
 		}
 	}
 

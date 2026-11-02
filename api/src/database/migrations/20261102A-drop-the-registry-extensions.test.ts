@@ -22,13 +22,55 @@ describe('dropping the registry extensions', () => {
 		});
 
 		await database('directus_extensions').insert([
-			{ id: 'local-hook', enabled: true, folder: 'hook', source: 'local', bundle: null },
-			{ id: 'module-bundle', enabled: true, folder: 'pkg', source: 'module', bundle: null },
-			{ id: 'module-entry', enabled: true, folder: 'entry', source: 'module', bundle: 'module-bundle' },
-			{ id: 'registry-hook', enabled: true, folder: 'version-a', source: 'registry', bundle: null },
-			{ id: 'registry-bundle', enabled: true, folder: 'version-b', source: 'registry', bundle: null },
-			{ id: 'registry-entry', enabled: true, folder: 'entry', source: 'registry', bundle: 'registry-bundle' },
-			{ id: 'stray-entry', enabled: true, folder: 'other', source: 'local', bundle: 'registry-bundle' },
+			{
+				id: 'local-hook',
+				enabled: true,
+				folder: 'hook',
+				source: 'local',
+				bundle: null,
+			},
+			{
+				id: 'module-bundle',
+				enabled: true,
+				folder: 'pkg',
+				source: 'module',
+				bundle: null,
+			},
+			{
+				id: 'module-entry',
+				enabled: true,
+				folder: 'entry',
+				source: 'module',
+				bundle: 'module-bundle',
+			},
+			{
+				id: 'registry-hook',
+				enabled: true,
+				folder: 'version-a',
+				source: 'registry',
+				bundle: null,
+			},
+			{
+				id: 'registry-bundle',
+				enabled: true,
+				folder: 'version-b',
+				source: 'registry',
+				bundle: null,
+			},
+			{
+				id: 'registry-entry',
+				enabled: true,
+				folder: 'entry',
+				source: 'registry',
+				bundle: 'registry-bundle',
+			},
+			{
+				id: 'stray-entry',
+				enabled: true,
+				folder: 'other',
+				source: 'local',
+				bundle: 'registry-bundle',
+			},
 		]);
 	});
 
@@ -39,7 +81,9 @@ describe('dropping the registry extensions', () => {
 	it('deletes the registry rows and every entry of a registry bundle', async () => {
 		await up(database);
 
-		await expect(database('directus_extensions').select('id').orderBy('id'))
+		await expect(database('directus_extensions')
+			.select('id')
+			.orderBy('id'))
 			.resolves.toStrictEqual([
 				{ id: 'local-hook' },
 				{ id: 'module-bundle' },
@@ -51,7 +95,9 @@ describe('dropping the registry extensions', () => {
 		await up(database);
 		await down(database);
 
-		await expect(database('directus_extensions').select('id').orderBy('id'))
+		await expect(database('directus_extensions')
+			.select('id')
+			.orderBy('id'))
 			.resolves.toStrictEqual([
 				{ id: 'local-hook' },
 				{ id: 'module-bundle' },

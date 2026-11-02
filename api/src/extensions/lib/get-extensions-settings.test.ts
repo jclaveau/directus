@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('../../database/index.js', () => ({ default: vi.fn() }));
 vi.mock('../../utils/get-schema.js', () => ({ getSchema: vi.fn() }));
-vi.mock('@directus/extensions-registry', () => ({ list: vi.fn() }));
 
 vi.mock('../../services/extensions.js', () => {
 	return {
@@ -49,7 +48,6 @@ test(oneLine`
 			['probe-folder', { type: 'endpoint', name: 'probe-package' } as any],
 		]),
 		module: new Map(),
-		registry: new Map(),
 	});
 
 	expect(mocks.updateOne).toHaveBeenCalledWith('probe-id', {

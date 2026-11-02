@@ -169,8 +169,6 @@ export const DEFAULTS = {
 	EMAIL_SENDMAIL_PATH: '/usr/sbin/sendmail',
 	EMAIL_TEMPLATES_PATH: './templates',
 
-	MARKETPLACE_TRUST: 'sandbox',
-
 	TELEMETRY: false,
 	TELEMETRY_URL: 'https://telemetry.directus.io',
 

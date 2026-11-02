@@ -90,8 +90,6 @@ export function getTriggers() {
 									'extensions.load',
 									'extensions.unload',
 									'extensions.reload',
-									'extensions.installed',
-									'extensions.uninstalled',
 								],
 								font: 'monospace',
 							},

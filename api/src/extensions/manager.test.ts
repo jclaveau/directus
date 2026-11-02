@@ -35,12 +35,10 @@ const mocks = vi.hoisted(() => {
 			unsubscribe: noop,
 		},
 		flows: { addOperation: noop, removeOperation: noop },
-		installation: { install: noop, uninstall: noop },
 		importFileUrl: vi.fn(async () => ({ default: mocks.moduleDefault })),
 		moduleDefault: (() => undefined) as unknown,
 		extensions: {
 			local: new Map(),
-			registry: new Map(),
 			module: new Map(),
 		} as Record<string, Map<string, unknown>>,
 		settings: [] as unknown[],
@@ -70,7 +68,6 @@ vi.mock('../database/index.js', () => ({ default: () => ({}) }));
 vi.mock('../utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 vi.mock('../services/index.js', () => ({}));
 vi.mock('../flows.js', () => ({ getFlowManager: () => mocks.flows }));
-vi.mock('./lib/sync-extensions.js', () => ({ syncExtensions: vi.fn() }));
 
 vi.mock('../utils/import-file-url.js', () => {
 	return { importFileUrl: mocks.importFileUrl };
@@ -82,10 +79,6 @@ vi.mock('./lib/get-extensions.js', () => {
 
 vi.mock('./lib/get-extensions-settings.js', () => {
 	return { getExtensionsSettings: async () => mocks.settings };
-});
-
-vi.mock('./lib/installation/index.js', () => {
-	return { getInstallationManager: () => mocks.installation };
 });
 
 // The internal operations are read off disk and imported by a computed specifier,
@@ -179,7 +172,6 @@ test.each(shapes)(
 					},
 				],
 			]),
-			registry: new Map(),
 			module: new Map(),
 		};
 
@@ -233,7 +225,6 @@ export default ({ filter }) => {
 				},
 			],
 		]),
-		registry: new Map(),
 		module: new Map(),
 	};
 
@@ -288,7 +279,6 @@ export default () => {};
 				},
 			],
 		]),
-		registry: new Map(),
 		module: new Map(),
 	};
 
@@ -325,7 +315,7 @@ export default () => {};
 });
 
 test('shares the queued reload with a reload asked behind it', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { local: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -359,45 +349,8 @@ test('shares the queued reload with a reload asked behind it', async () => {
 	await expect(queuedReload).resolves.toBeUndefined();
 });
 
-test('force-syncs the queued reload when a reload joining it asks to', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
-	mocks.settings = [];
-
-	const manager = new ExtensionManager();
-
-	await manager.initialize({ schedule: false, watch: false });
-
-	let releaseFirstLoad: () => void = () => undefined;
-
-	vi.spyOn(manager as any, 'unload').mockResolvedValue(undefined);
-
-	const loadSpy = vi.spyOn(manager as any, 'load')
-		.mockImplementationOnce(() => {
-			return new Promise<void>((resolve) => {
-				releaseFirstLoad = resolve;
-			});
-		})
-		.mockResolvedValue(undefined);
-
-	const runningReload = manager.reload();
-	const queuedReload = manager.reload();
-	const forcedReload = manager.reload({ forceSync: true });
-
-	await expect(Promise.race([forcedReload, setImmediate('pending')]))
-		.resolves.toBe('pending');
-
-	releaseFirstLoad();
-
-	await Promise.all([runningReload, queuedReload, forcedReload]);
-
-	expect(loadSpy.mock.calls).toEqual([
-		[undefined],
-		[{ forceSync: true }],
-	]);
-});
-
 test('runs the next reload after one whose load threw', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { local: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -421,7 +374,7 @@ test('runs the next reload after one whose load threw', async () => {
 
 test('retries the load a failed reload left undone', async () => {
 	mocks.moduleDefault = () => undefined;
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { local: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();
@@ -441,7 +394,6 @@ test('retries the load a failed reload left undone', async () => {
 				},
 			],
 		]),
-		registry: new Map(),
 		module: new Map(),
 	};
 
@@ -477,7 +429,7 @@ test('retries the load a failed reload left undone', async () => {
 });
 
 test('logs a reload asked by another process that fails', async () => {
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { local: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const subscribeSpy = vi.spyOn(mocks.bus, 'subscribe');
@@ -506,7 +458,7 @@ test.each([
 	const { watchedEvent, debounceMs } = watchedChange;
 
 	mocks.env = { ...mocks.defaultEnv, EXTENSIONS_PATH: './extensions' };
-	mocks.extensions = { local: new Map(), registry: new Map(), module: new Map() };
+	mocks.extensions = { local: new Map(), module: new Map() };
 	mocks.settings = [];
 
 	const manager = new ExtensionManager();

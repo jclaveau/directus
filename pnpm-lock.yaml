@@ -1129,9 +1129,6 @@ importers:
       '@directus/extensions':
         specifier: workspace:*
         version: link:../packages/extensions
-      '@directus/extensions-registry':
-        specifier: workspace:*
-        version: link:../packages/extensions-registry
       '@directus/extensions-sdk':
         specifier: workspace:*
         version: link:../packages/extensions-sdk
@@ -1644,9 +1641,6 @@ importers:
       '@directus/extensions':
         specifier: workspace:*
         version: link:../packages/extensions
-      '@directus/extensions-registry':
-        specifier: workspace:*
-        version: link:../packages/extensions-registry
       '@directus/extensions-sdk':
         specifier: workspace:*
         version: link:../packages/extensions-sdk
