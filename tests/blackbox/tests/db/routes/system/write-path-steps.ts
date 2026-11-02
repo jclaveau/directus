@@ -296,7 +296,8 @@ function isStaleHashRefusal(answer: unknown) {
 // A diff applies only under the hash it was taken from, and files in the
 // parallel middle move the schema too: on a stale-hash refusal the row takes
 // the hash again from the row that remembered it, then re-sends, as a client
-// of /schema/apply would.
+// of /schema/apply would. The row's response is its last attempt's, so a
+// statement count names only that attempt's statements.
 // TODO(#617): hold a harness lock around every schema-moving file instead.
 async function answerRetakingHash(
 	instanceUrl: string,
