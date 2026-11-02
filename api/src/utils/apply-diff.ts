@@ -285,7 +285,11 @@ export async function applyDiff(
 				set(structure, diffEdit.path!, undefined);
 			}
 
-			if (diff?.[0]?.kind === DiffKind.NEW) {
+			// A whole-relation create or delete is one entry without a path; any
+			// entry with one, whatever its kind, edits the existing relation.
+			const isWholeRelationDiff = diff?.[0]?.path === undefined;
+
+			if (isWholeRelationDiff && diff?.[0]?.kind === DiffKind.NEW) {
 				try {
 					await relationsService.createOne(
 						{
@@ -301,7 +305,7 @@ export async function applyDiff(
 				}
 			}
 
-			if (diff?.[0]?.kind === DiffKind.EDIT || diff?.[0]?.kind === DiffKind.ARRAY) {
+			if (!isWholeRelationDiff) {
 				const currentRelation = currentSnapshot.relations.find((relation) => {
 					return relation.collection === collection && relation.field === field;
 				});
@@ -321,7 +325,7 @@ export async function applyDiff(
 				}
 			}
 
-			if (diff?.[0]?.kind === DiffKind.DELETE) {
+			if (isWholeRelationDiff && diff?.[0]?.kind === DiffKind.DELETE) {
 				try {
 					await relationsService.deleteOne(collection, field, mutationOptions);
 				} catch (err) {

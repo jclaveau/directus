@@ -11,7 +11,7 @@ import { awaitRequestedReap } from '@utils/await-requested-reap';
 import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
-import { getPort } from '@utils/get-port';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -39,11 +39,12 @@ const HELD_SLOT = 'window';
 const REDIS_PORT = 6108;
 const cacheStatusHeader = 'x-cache-status';
 
-// Enough members that the purge's pass over the set is seconds. Planted straight
-// into it, in the set's own grammar: a member naming a slice no write touches is
-// read and compared like any other, and reading it is the cost this needs. The
-// pass costs 6-26 µs a member across CI runners, so 120k ran 742 ms on the
-// fastest: under the 900 ms the reads need. 360k clears it by more than twice.
+// Enough members that the purge's pass over the set outlasts the held reads:
+// the pass costs 6-26 µs a member across CI runners, so 120k ran 742 ms on
+// the fastest, under the 900 ms the reads need; 360k clears it by more than
+// twice. Planted straight into it, in the set's own grammar: a member naming
+// a slice no write touches is read and compared like any other, and reading
+// it is the cost this needs.
 const decoyMemberCount = 360_000;
 const decoyChunkSize = 4_000;
 
@@ -131,7 +132,7 @@ describe(oneLine`
 				item: [{ slot: HELD_SLOT, label: 'v1' }],
 			});
 
-			const port = await getPort();
+			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 
 			sweeperInstance = spawn('node', [paths.cli, 'start'], {
@@ -148,7 +149,7 @@ describe(oneLine`
 
 			rowId = seeded.body.data[0].id;
 
-			const readerPort = await getPort();
+			const readerPort = await freePortOfWorker();
 			readerEnv[vendor].PORT = String(readerPort);
 
 			readerInstance = spawn('node', [paths.cli, 'start'], {

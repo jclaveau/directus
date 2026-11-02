@@ -41,6 +41,7 @@ import { getFlowManager } from '../flows.js';
 import { useLogger } from '../logger/index.js';
 import * as services from '../services/index.js';
 import { deleteFromRequireCache } from '../utils/delete-from-require-cache.js';
+import { trackSandboxCoverage } from '../utils/dump-coverage.js';
 import getModuleDefault from '../utils/get-module-default.js';
 import { getSchema } from '../utils/get-schema.js';
 import { importFileUrl } from '../utils/import-file-url.js';
@@ -85,6 +86,12 @@ export class ExtensionManager {
 	 * Node's own compile cache miss every time.
 	 */
 	private hasLoadedBefore = false;
+
+	/**
+	 * The extensions the last successful load registered, which a failed reload
+	 * leaves in place for the retry to compare against.
+	 */
+	private lastLoadedExtensions: Extension[] = [];
 
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
@@ -139,6 +146,12 @@ export class ExtensionManager {
 	 * sequence.
 	 */
 	private reloadQueue: JobQueue = new JobQueue();
+
+	/** The reload waiting behind the running one, which later callers share. */
+	private queuedReload: Promise<unknown> | null = null;
+
+	/** What the queued reload loads with, forced if any caller sharing it asked. */
+	private queuedReloadOptions: { forceSync: boolean } | undefined = undefined;
 
 	/**
 	 * Optional file system watcher to auto-reload extensions when the local file system changes
@@ -215,7 +228,7 @@ export class ExtensionManager {
 		this.messenger.subscribe(this.reloadChannel, (payload: Record<string, unknown>) => {
 			// Ignore requests for reloading that were published by the current process
 			if (isPlainObject(payload) && 'origin' in payload && payload['origin'] === this.processId) return;
-			this.reload();
+			this.reloadLoggingFailure('a request from another process');
 		});
 	}
 
@@ -295,6 +308,7 @@ export class ExtensionManager {
 		}
 
 		this.isLoaded = true;
+		this.lastLoadedExtensions = clone(this.extensions);
 
 		emitter.emitAction('extensions.load', {
 			extensions: this.extensions,
@@ -326,9 +340,13 @@ export class ExtensionManager {
 	 * Reload all the extensions. Will unload if extensions have already been loaded
 	 */
 	public reload(options?: { forceSync: boolean }): Promise<unknown> {
-		if (this.reloadQueue.size > 0) {
-			// The pending job in the queue will already handle the additional changes
-			return Promise.resolve();
+		if (this.queuedReload !== null) {
+			// The queued job will already handle the additional changes
+			if (options?.forceSync) {
+				this.queuedReloadOptions = options;
+			}
+
+			return this.queuedReload;
 		}
 
 		const logger = useLogger();
@@ -341,12 +359,14 @@ export class ExtensionManager {
 			reject = rej;
 		});
 
-		this.reloadQueue.enqueue(async () => {
-			if (this.isLoaded) {
-				const prevExtensions = clone(this.extensions);
+		const reloadExtensions = async (reloadOptions?: { forceSync: boolean }) => {
+			// A failed load leaves isLoaded false; keeping the last loaded set
+			// instead of retrying it is tracked in #627.
+			if (this.hasLoadedBefore) {
+				const prevExtensions = this.lastLoadedExtensions;
 
 				await this.unload();
-				await this.load(options);
+				await this.load(reloadOptions);
 
 				logger.info('Extensions reloaded');
 
@@ -381,6 +401,23 @@ export class ExtensionManager {
 			} else {
 				logger.warn('Extensions have to be loaded before they can be reloaded');
 				reject(new Error('Extensions have to be loaded before they can be reloaded'));
+			}
+		};
+
+		this.queuedReload = promise;
+		this.queuedReloadOptions = options;
+
+		this.reloadQueue.enqueue(async () => {
+			const reloadOptions = this.queuedReloadOptions;
+
+			this.queuedReload = null;
+			this.queuedReloadOptions = undefined;
+
+			try {
+				await reloadExtensions(reloadOptions);
+			}
+			catch (error) {
+				reject(error);
 			}
 		});
 
@@ -427,6 +464,13 @@ export class ExtensionManager {
 		};
 	}
 
+	/** For the callers nothing awaits, whose rejection would be unhandled. */
+	private reloadLoggingFailure(trigger: string): void {
+		this.reload().catch((error) => {
+			useLogger().error(error, `Failed to reload the extensions on ${trigger}`);
+		});
+	}
+
 	/**
 	 * Start the chokidar watcher for extensions on the local filesystem
 	 */
@@ -436,6 +480,7 @@ export class ExtensionManager {
 		logger.info('Watching extensions for changes...');
 
 		const extensionDirUrl = pathToRelativeUrl(getExtensionsPath());
+		const changeTrigger = 'a change in the extensions folder';
 
 		this.watcher = chokidar.watch(
 			[path.resolve('package.json'), path.posix.join(extensionDirUrl, '*', 'package.json')],
@@ -451,15 +496,15 @@ export class ExtensionManager {
 		this.watcher
 			.on(
 				'add',
-				debounce(() => this.reload(), 500),
+				debounce(() => this.reloadLoggingFailure(changeTrigger), 500),
 			)
 			.on(
 				'change',
-				debounce(() => this.reload(), 650),
+				debounce(() => this.reloadLoggingFailure(changeTrigger), 650),
 			)
 			.on(
 				'unlink',
-				debounce(() => this.reload(), 2000),
+				debounce(() => this.reloadLoggingFailure(changeTrigger), 2000),
 			);
 	}
 
@@ -593,6 +638,22 @@ export class ExtensionManager {
 
 		await module.evaluate({ timeout: sandboxTimeout });
 
+		// what an instrumented build records stays on the isolate's globalThis
+		const isInstrumented = await context.eval(
+			'globalThis.__coverage__ !== undefined',
+			{ timeout: sandboxTimeout },
+		);
+
+		const releaseSandboxCoverage = isInstrumented
+			? trackSandboxCoverage(async () => {
+				return JSON.parse(await context.eval(
+					'JSON.stringify({ coverage: globalThis.__coverage__, '
+						+ 'coverageDirs: globalThis.__extensionCoverageDirs ?? [] })',
+					{ timeout: sandboxTimeout },
+				));
+			}, extension.name)
+			: undefined;
+
 		const cb = await module.namespace.get('default', { reference: true });
 
 		const { code, hostFunctions, unregisterFunction } = generateApiExtensionsSandboxEntrypoint(
@@ -607,9 +668,15 @@ export class ExtensionManager {
 		});
 
 		this.unregisterFunctionMap.set(extension.name, async () => {
-			await unregisterFunction();
-
-			if (!isolate.isDisposed) isolate.dispose();
+			try {
+				await unregisterFunction();
+				await releaseSandboxCoverage?.();
+			}
+			finally {
+				if (!isolate.isDisposed) {
+					isolate.dispose();
+				}
+			}
 		});
 	}
 

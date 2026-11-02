@@ -1,4 +1,8 @@
-import { CreateCollection, CreateField, DeleteCollection } from '@common/functions';
+import {
+	CreateCollection,
+	CreateField,
+	DeleteCollectionIfPresent,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
 import { expect, it } from 'vitest';
@@ -18,7 +22,9 @@ export const seedDBStructure = () => {
 				try {
 					const localCollectionFirst = `${collectionFirst}_${pkType}`;
 
-					await DeleteCollection(vendor, { collection: localCollectionFirst });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionFirst,
+					});
 
 					await CreateCollection(vendor, {
 						collection: localCollectionFirst,

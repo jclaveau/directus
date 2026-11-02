@@ -14,8 +14,11 @@ export class FlowsService extends ItemsService<FlowRaw> {
 		super('directus_flows', options);
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		const result = await super.createOne(data, opts);
+	override async createMany(
+		data: Partial<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]> {
+		const result = await super.createMany(data, opts);
 
 		const flowManager = getFlowManager();
 		await flowManager.reload();

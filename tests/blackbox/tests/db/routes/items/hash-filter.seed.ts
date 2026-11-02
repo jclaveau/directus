@@ -1,4 +1,10 @@
-import { CreateCollection, CreateField, CreateFieldO2M, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollection,
+	CreateField,
+	CreateFieldO2M,
+	CreateItem,
+	DeleteCollectionIfPresent,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
 import { randomUUID } from 'node:crypto';
@@ -28,8 +34,13 @@ export const seedDBStructure = () => {
 					const localCollectionSecond = `${collectionSecond}_${pkType}`;
 
 					// Delete existing collections
-					await DeleteCollection(vendor, { collection: localCollectionSecond });
-					await DeleteCollection(vendor, { collection: localCollectionFirst });
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionSecond,
+					});
+
+					await DeleteCollectionIfPresent(vendor, {
+						collection: localCollectionFirst,
+					});
 
 					// Create first collection
 					await CreateCollection(vendor, {

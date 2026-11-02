@@ -1,13 +1,22 @@
-import { RouteNotFoundError } from '@directus/errors';
+import { createError, RouteNotFoundError } from '@directus/errors';
+import { getNodeEnv } from '@directus/utils/node';
 import { Router } from 'express';
 import { respond } from '../middleware/respond.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import { ServerService } from '../services/server.js';
 import { SpecificationService } from '../services/specifications.js';
 import asyncHandler from '../utils/async-handler.js';
+import { dumpCoverage, isCoverageInstrumented } from '../utils/dump-coverage.js';
 import { format } from '../utils/date-fns-used.js';
 
 const router = Router();
+
+const NotInstrumentedError = createError(
+	'NOT_INSTRUMENTED',
+	'Nothing this server loaded is instrumented for coverage: build an '
+		+ 'extension with coverage in its extension.config.js.',
+	404,
+);
 
 router.get(
 	'/specs/oas',
@@ -90,6 +99,32 @@ router.get(
 		if (data['status'] === 'error') res.status(503);
 		res.locals['payload'] = data;
 		res.locals['cache'] = false;
+		return next();
+	}),
+	respond,
+);
+
+/**
+ * Dump the coverage this process collected so far, for a test run to report
+ * while the server is still up. The route exists only in a build with something
+ * instrumented, never a deployed one, so it asks for no authentication. It
+ * dumps the process that receives it: a coverage run is a single process.
+ * Outside production, a build with nothing instrumented answers
+ * NOT_INSTRUMENTED rather than ROUTE_NOT_FOUND, for the test run to say why.
+ */
+router.post(
+	'/dump-coverage',
+	asyncHandler(async (req, res, next) => {
+		if (!isCoverageInstrumented()) {
+			// unset counts as production: a deployed server must not reveal the route
+			if ((getNodeEnv() || 'production') === 'production') {
+				throw new RouteNotFoundError({ path: req.path });
+			}
+
+			throw new NotInstrumentedError();
+		}
+
+		res.locals['payload'] = { data: { written: await dumpCoverage() } };
 		return next();
 	}),
 	respond,

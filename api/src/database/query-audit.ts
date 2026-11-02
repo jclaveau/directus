@@ -3,13 +3,13 @@ import type { Knex } from 'knex';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { performance } from 'node:perf_hooks';
 
-type StatementKind = 'select' | 'insert' | 'update' | 'delete' | 'other';
-
 type TransactionOutcome = 'commit' | 'rollback';
 
 /**
- * One statement as reported: `stmt` is its SQL, or `<kind> <table>...` at
- * `counts`, and `cutStmt` that shorter form whatever the level.
+ * One statement as reported: `stmt` is its SQL, or `<keyword> <table>...` at
+ * `counts`, and `cutStmt` that shorter form whatever the level. A statement
+ * naming no table is cut to `<keyword> <function>()...`, the first function it
+ * calls, or to `<keyword>...` when it calls none.
  */
 type StatementAudit = {
 	stmt: string;
@@ -147,7 +147,16 @@ const TRANSACTION_KEYWORDS = new Set([
 	'release',
 ]);
 
-const TABLE_PATTERN = /\b(?:from|into|update)\s+["`[]?([^\s"`\]().,;]+)/i;
+const TABLE_PATTERN = new RegExp(
+	'\\b(?:from|into|update|truncate(?:\\s+table)?|table)'
+	+ '\\s+(?:if\\s+(?:not\\s+)?exists\\s+|only\\s+)?'
+	+ '["`[]?([^\\s"`\\]().,;]+)',
+	'i',
+);
+
+// A name starts after neither a word character nor a dot, so a long dotted
+// name calling nothing is tried once, not once per dot.
+const FUNCTION_PATTERN = /(?<![\w.])([a-z_]\w*(?:\.\w+)*)\(/i;
 
 const auditedPrototypes = new WeakSet<object>();
 
@@ -166,6 +175,42 @@ export function isQueryAuditLevel(value: unknown): value is QueryAuditLevel {
 // Bound values carry what the request read and wrote.
 export function levelCarriesBindings(level: QueryAuditLevel): boolean {
 	return level === 'bindings' || level === 'full';
+}
+
+const TIMINGS_WORDS: readonly string[] = ['timings', 'no-timings'];
+
+/**
+ * `<level>`, `<timings word>` or `<level>; <timings word>`: an ask that leaves
+ * out the level gets QUERY_AUDIT_LEVEL's, one that leaves out the timings word
+ * gets the durations. `undefined` for an ask that is none of those.
+ */
+export function auditAskOf(askedValue: string | undefined, instanceLevel: unknown) {
+	const askedWords = askedValue === undefined
+		? []
+		: askedValue.split(';').map((askedWord) => askedWord.trim());
+
+	const lastWord = askedWords.at(-1) ?? '';
+
+	const levelWords = TIMINGS_WORDS.includes(lastWord)
+		? askedWords.slice(0, -1)
+		: askedWords;
+
+	const askedLevel = levelWords.length === 0
+		? instanceLevel
+		: levelWords[0];
+
+	if (levelWords.length > 1 || !isQueryAuditLevel(askedLevel)) {
+		return undefined;
+	}
+
+	return { level: askedLevel, timings: lastWord !== 'no-timings' };
+}
+
+export function auditAskRefusalOf(askName: string): string {
+	return `"${askName}" must be a level, a timings word, or both as `
+		+ '"<level>; <timings word>". '
+		+ `Levels: ${QUERY_AUDIT_LEVELS.join(', ')}. `
+		+ `Timings words: ${TIMINGS_WORDS.join(', ')}`;
 }
 
 /**
@@ -497,10 +542,14 @@ export function auditStatementStart(
 		};
 	}
 
-	const tableName = TABLE_PATTERN.exec(sql)?.[1];
+	const calledFunction = FUNCTION_PATTERN.exec(sql)?.[1]?.toLowerCase();
 
-	const cutStmt = tableName
-		? `${kindOfKeyword(keyword)} ${tableName}...`
+	// `()` tells a function from a table of the same name.
+	const cutObject = TABLE_PATTERN.exec(sql)?.[1]
+		?? (calledFunction && `${calledFunction}()`);
+
+	const cutStmt = cutObject
+		? `${keyword} ${cutObject}...`
 		: `${keyword}...`;
 
 	const stmt = audit.recordsStatements
@@ -1005,17 +1054,4 @@ function asciiJson(value: unknown): string {
 
 function leadingKeyword(sql: string): string {
 	return /^[\s(]*([a-z]+)/i.exec(sql)?.[1]?.toLowerCase() ?? '';
-}
-
-function kindOfKeyword(keyword: string): StatementKind {
-	if (
-		keyword === 'select'
-		|| keyword === 'insert'
-		|| keyword === 'update'
-		|| keyword === 'delete'
-	) {
-		return keyword;
-	}
-
-	return 'other';
 }

@@ -61,8 +61,19 @@ vi.mock('../processes/autoscale/lib/drill.js', () => {
 	return { autoscaleDrillEnabled: () => true };
 });
 
+const ExportService = vi.fn();
+
 vi.mock('../services/import-export.js', () => {
-	return { ExportService: vi.fn(), ImportService: vi.fn() };
+	return {
+		ExportService,
+		exportMimeTypes: {
+			csv: 'text/csv',
+			json: 'application/json',
+			xml: 'text/xml',
+			yaml: 'text/yaml',
+		},
+		ImportService: vi.fn(),
+	};
 });
 
 vi.mock('../utils/cache-audit-enabled.js', () => ({ cacheAuditEnabled }));
@@ -598,5 +609,33 @@ describe('utils controller /autoscale/drill', () => {
 		);
 
 		expect(json).toHaveBeenCalledWith({ data: drill });
+	});
+});
+
+describe('utils controller /export/:collection', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	test('refuses a format no exporter knows before scheduling it', async () => {
+		const next = vi.fn();
+
+		// Behind the collectionExists middleware.
+		await router.stack.find((entry: any) => {
+			return entry.route?.path === '/export/:collection';
+		})!.route!.stack[1]!.handle(
+			{
+				accountability: null,
+				schema: {},
+				params: { collection: 'crates' },
+				body: { format: 'pdf', query: {}, file: {} },
+			} as any,
+			{ locals: {} } as any,
+			next,
+		);
+
+		expect(next.mock.calls[0]![0].message).toEqual(
+			'Invalid payload. Invalid format "pdf". Allowed: csv, json, xml, yaml.',
+		);
+
+		expect(ExportService).not.toHaveBeenCalled();
 	});
 });

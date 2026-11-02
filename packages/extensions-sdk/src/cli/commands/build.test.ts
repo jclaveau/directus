@@ -1,5 +1,8 @@
+import chalk from 'chalk';
 import fse from 'fs-extra';
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
 import { create } from '../index.js';
 import build, { APP_ONLY_PACKAGES } from './build.js';
@@ -56,6 +59,7 @@ describe('build', () => {
 	async function buildEndpoint(
 		source: string | null,
 		options: Parameters<typeof build>[0] = {},
+		extensionConfig: string | null = null,
 	) {
 		const random = Math.random().toString(36);
 		const extensionPath = `${TEST_PREFIX}-endpoint-${Date.now()}-${random.slice(2)}`;
@@ -77,6 +81,13 @@ describe('build', () => {
 			const entrypoint = resolve(origCwd, extensionPath, 'src', 'index.ts');
 
 			await fse.writeFile(entrypoint, source);
+		}
+
+		if (extensionConfig !== null) {
+			await fse.writeFile(
+				resolve(origCwd, extensionPath, 'extension.config.mjs'),
+				extensionConfig,
+			);
 		}
 
 		process.chdir(resolve(origCwd, extensionPath));
@@ -484,4 +495,281 @@ describe('build', () => {
 		},
 		30_000,
 	);
+
+	describe('coverage', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+			delete (globalThis as Record<string, unknown>)['__coverage__'];
+			delete (globalThis as Record<string, unknown>)['__extensionCoverageDirs'];
+		});
+
+		test(
+			'builds a plain api entrypoint when coverage is off',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{},
+					"export default { coverage: { enabled: false, dir: 'cov' } };\n",
+				);
+
+				const builtCode = await fse.readFile(
+					resolve(distPath, 'index.js'),
+					'utf8',
+				);
+
+				expect(builtCode).not.toContain('__coverage__');
+				expect(builtCode).not.toContain('__extensionCoverageDirs');
+			},
+			30_000,
+		);
+
+		test(
+			'instruments the api entrypoint, which registers its coverage directory',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					(globalThis as Record<string, unknown>)['__extensionCoverageDirs'],
+				).toEqual([
+					{
+						sourceRoot: packageRoot,
+						coverageDir: resolve(packageRoot, 'coverage/backend'),
+						sourceFiles: [resolve(packageRoot, 'src/index.ts')],
+					},
+				]);
+
+				expect(
+					Object.keys(
+						(globalThis as Record<string, object>)['__coverage__']!,
+					),
+				).toEqual([resolve(packageRoot, 'src/index.ts')]);
+			},
+			30_000,
+		);
+
+		test(
+			'registers the coverage directory from a spread-out api entrypoint',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{ preserveModules: true },
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					(globalThis as Record<string, unknown>)['__extensionCoverageDirs'],
+				).toEqual([
+					{
+						sourceRoot: packageRoot,
+						coverageDir: resolve(packageRoot, 'coverage/backend'),
+						sourceFiles: [resolve(packageRoot, 'src/index.ts')],
+					},
+				]);
+			},
+			30_000,
+		);
+
+		test(
+			'instruments the api side of a hybrid, never its app side',
+			async () => {
+				const random = Math.random().toString(36);
+
+				const extensionPath
+					= `${TEST_PREFIX}-operation-${Date.now()}-${random.slice(2)}`;
+
+				await create('operation', extensionPath, {
+					language: 'typescript',
+					install: false,
+				});
+
+				await fse.ensureSymlink(
+					origCwd,
+					resolve(
+						origCwd,
+						extensionPath,
+						'node_modules/@directus/extensions-sdk',
+					),
+					'dir',
+				);
+
+				await fse.writeFile(
+					resolve(origCwd, extensionPath, 'extension.config.mjs'),
+					'export default { coverage: true };\n',
+				);
+
+				process.chdir(resolve(origCwd, extensionPath));
+
+				try {
+					await build({});
+				}
+				finally {
+					process.chdir(origCwd);
+				}
+
+				const distPath = resolve(origCwd, extensionPath, 'dist');
+
+				// app.js is downloaded by the browser, which never dumps a coverage
+				await expect(fse.readFile(resolve(distPath, 'app.js'), 'utf8'))
+					.resolves.not.toContain('__coverage__');
+
+				await expect(fse.readFile(resolve(distPath, 'api.js'), 'utf8'))
+					.resolves.toContain('__extensionCoverageDirs');
+			},
+			60_000,
+		);
+
+		test(
+			'registers a file it imports from outside the package as its own',
+			async () => {
+				const sharedPath = `${TEST_PREFIX}-shared-${Date.now()}`;
+
+				await fse.outputFile(
+					resolve(origCwd, sharedPath, 'date.ts'),
+					'export const today = () => new Date().toDateString();\n',
+				);
+
+				const distPath = await buildEndpoint(
+					`import { today } from '../../${sharedPath}/date.ts';\n`
+						+ 'export default () => today();\n',
+					{},
+					'export default { coverage: '
+						+ `{ include: ['src/**', '../${sharedPath}/**'] } };\n`,
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+				const sharedRoot = realpathSync(resolve(origCwd, sharedPath));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					(globalThis as Record<string, unknown>)['__extensionCoverageDirs'],
+				).toEqual([
+					{
+						sourceRoot: packageRoot,
+						coverageDir: resolve(packageRoot, 'coverage/backend'),
+						sourceFiles: [
+							resolve(packageRoot, 'src/index.ts'),
+							resolve(sharedRoot, 'date.ts'),
+						],
+					},
+				]);
+			},
+			30_000,
+		);
+
+		test(
+			'instruments a source with legacy decorators',
+			async () => {
+				const distPath = await buildEndpoint(
+					'function sealed(target: Function) {\n'
+						+ '\tObject.seal(target);\n'
+						+ '}\n'
+						+ '@sealed class MailService {}\n'
+						+ 'export default () => new MailService();\n',
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				const builtCode = await fse.readFile(
+					resolve(distPath, 'index.js'),
+					'utf8',
+				);
+
+				expect(builtCode).toContain(
+					JSON.stringify(resolve(packageRoot, 'src/index.ts')),
+				);
+			},
+			30_000,
+		);
+
+		test(
+			'leaves a json the api entrypoint imports to rolldown',
+			async () => {
+				const distPath = await buildEndpoint(
+					"import extensionPackage from '../package.json';\n"
+						+ 'export default () => extensionPackage.name;\n',
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				const packageRoot = realpathSync(resolve(distPath, '..'));
+
+				await import(pathToFileURL(resolve(distPath, 'index.js')).href);
+
+				expect(
+					Object.keys(
+						(globalThis as Record<string, object>)['__coverage__']!,
+					),
+				).toEqual([resolve(packageRoot, 'src/index.ts')]);
+			},
+			30_000,
+		);
+
+		test(
+			'builds an instrumented api entrypoint that refuses to load in production',
+			async () => {
+				const distPath = await buildEndpoint(
+					null,
+					{},
+					'export default { coverage: true };\n',
+				);
+
+				vi.stubEnv('NODE_ENV', 'production');
+
+				await expect(
+					import(pathToFileURL(resolve(distPath, 'index.js')).href),
+				).rejects.toThrow(new Error(
+					'Coverage instrumentation is forbidden when NODE_ENV is production.',
+				));
+			},
+			30_000,
+		);
+
+		test(
+			'refuses to instrument a build made with NODE_ENV=production',
+			async () => {
+				const consoleError = vi.spyOn(console, 'error')
+					.mockImplementation(() => undefined);
+
+				const processExit = vi.spyOn(process, 'exit')
+					.mockImplementation(() => {
+						throw new Error('exited');
+					});
+
+				vi.stubEnv('NODE_ENV', 'production');
+
+				try {
+					await expect(buildEndpoint(
+						null,
+						{},
+						'export default { coverage: true };\n',
+					)).rejects.toThrow('exited');
+
+					expect(consoleError).toHaveBeenCalledWith(
+						`${chalk.bold.red('[Error]')} Coverage instrumentation is `
+							+ 'forbidden when NODE_ENV is production.',
+					);
+				}
+				finally {
+					consoleError.mockRestore();
+					processExit.mockRestore();
+				}
+			},
+			30_000,
+		);
+	});
 });

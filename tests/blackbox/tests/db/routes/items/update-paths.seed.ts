@@ -1,7 +1,7 @@
 import {
 	CreateCollections,
 	CreateFieldO2M,
-	DeleteCollection,
+	DeleteCollectionIfPresent,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { expect, it } from 'vitest';
@@ -15,9 +15,12 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				await DeleteCollection(vendor, { collection: collectionPathsChild });
-				await DeleteCollection(vendor, { collection: collectionPaths });
-				await DeleteCollection(vendor, { collection: collectionPathsLog });
+				await DeleteCollectionIfPresent(vendor, {
+					collection: collectionPathsChild,
+				});
+
+				await DeleteCollectionIfPresent(vendor, { collection: collectionPaths });
+				await DeleteCollectionIfPresent(vendor, { collection: collectionPathsLog });
 
 				await CreateCollections(vendor, {
 					collections: [

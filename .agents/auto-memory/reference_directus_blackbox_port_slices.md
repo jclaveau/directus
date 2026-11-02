@@ -1,17 +1,17 @@
 ---
 name: reference_directus_blackbox_port_slices
-description: A bb file spawning its own Directus takes its port from @utils/get-port (a per-worker slice), never get-port directly — two workers can draw the same port and one file silently tests the other's instance
+description: A bb file spawning its own Directus takes its port from freePortOfWorker (@utils/free-port-of-worker, a per-worker slice), never get-port directly — two workers can draw the same port and one file silently tests the other's instance
 metadata:
   author: Jean Claveau
   type: reference
 ---
 
-`import { getPort } from '@utils/get-port'` — never `get-port` (lint-enforced in
+`import { freePortOfWorker } from '@utils/free-port-of-worker'` — never `get-port` (lint-enforced in
 `eslint.config.js`, block over `tests/blackbox/**/*.ts`).
 
 ```
-VITEST_POOL_ID=1 -> 21000-21999
-VITEST_POOL_ID=2 -> 22000-22999   (maxWorkers 6 -> up to 26999)
+VITEST_POOL_ID=1 -> 21000-21199
+VITEST_POOL_ID=2 -> 21200-21399   (200 ports a worker)
 no VITEST_POOL_ID -> throws; slice exhausted -> throws (no random fallback)
 ```
 

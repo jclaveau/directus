@@ -7,7 +7,8 @@ Feature: A request reports the SQL it ran, one entry per transaction
   - A response states the keys it checks; `x-query-audit` reads parsed.
   - Every header is a map of the request's own fields and its `statements`,
     the first being the read that authenticates it, outside any transaction.
-  - At `counts`, `stmt` is `<kind> <table>...`; at the other levels, the SQL.
+  - At `counts`, `stmt` is `<keyword> <table>...`, `<keyword> <function>()...` for a
+    statement naming no table, or `<keyword>...`; at the other levels, the SQL.
 
   Scenario: a create reports its transaction and the reads around it
     Then on postgres these requests get these responses:

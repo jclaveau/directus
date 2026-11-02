@@ -11,8 +11,7 @@ import type {
 	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
-import { clearSystemCache } from '../cache.js';
-import { flushResponseCache } from '../scoped-cache/index.js';
+import { clearCachesAfterCommit } from '../utils/clear-caches-after-commit.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
@@ -28,11 +27,7 @@ export class PermissionsService extends ItemsService {
 	}
 
 	private async clearCaches(opts?: MutationOptions) {
-		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
-
-		if (this.cache && opts?.autoPurgeCache !== false) {
-			await flushResponseCache(this.cache);
-		}
+		await clearCachesAfterCommit(this.knex, this.cache, opts);
 	}
 
 	override async readByQuery(
@@ -51,14 +46,6 @@ export class PermissionsService extends ItemsService {
 			) as Partial<Item>[],
 			result.getMeta(),
 		);
-	}
-
-	override async createOne(data: Partial<Item>, opts?: MutationOptions) {
-		const res = await super.createOne(data, opts);
-
-		await this.clearCaches(opts);
-
-		return res;
 	}
 
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions) {

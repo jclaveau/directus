@@ -26,6 +26,7 @@ import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
 import { format, isValid, parseISO } from '../utils/date-fns-used.js';
 import { generateHash } from '../utils/generate-hash.js';
+import { isMissingPrimaryKey } from '../utils/is-primary-key.js';
 import {
 	clone,
 	cloneDeep,
@@ -688,7 +689,6 @@ export class PayloadService {
 		for (const relation of relationsToProcess) {
 			if (!relation.meta) continue;
 
-			const currentPrimaryKeyField = this.schema.collections[relation.related_collection!]!.primary;
 			const relatedPrimaryKeyField = this.schema.collections[relation.collection]!.primary;
 
 			const { getService } = await import('../utils/get-service.js');
@@ -710,7 +710,6 @@ export class PayloadService {
 				const updates = field || []; // treat falsey values as removing all children
 
 				for (let i = 0; i < updates.length; i++) {
-					const currentId = parent || payload[currentPrimaryKeyField];
 					const relatedRecord = updates[i];
 
 					const relatedId =
@@ -723,7 +722,7 @@ export class PayloadService {
 					let existingRecord;
 
 					// No relatedId means it's a new record
-					if (relatedId) {
+					if (!isMissingPrimaryKey(relatedId)) {
 						existingRecord = await this.knex
 							.select(relatedPrimaryKeyField, relation.field)
 							.from(relation.collection)
@@ -745,7 +744,10 @@ export class PayloadService {
 						// for items that aren't actually being updated. NOTE: We use == here, as the
 						// primary key might be reported as a string instead of number, coming from the
 						// http route, and or a bigInteger in the DB
-						if (isNil(existingRecord[relation.field]) === false && existingRecord[relation.field] == currentId) {
+						if (
+							isNil(existingRecord[relation.field]) === false
+							&& existingRecord[relation.field] == parent
+						) {
 							savedPrimaryKeys.push(existingRecord[relatedPrimaryKeyField]);
 							continue;
 						}
@@ -756,7 +758,7 @@ export class PayloadService {
 					}
 
 					if (!existingRecord || existingRecord[relation.field] != parent) {
-						record[relation.field] = currentId;
+						record[relation.field] = parent;
 					}
 
 					recordsToUpsert.push(record);
@@ -839,19 +841,19 @@ export class PayloadService {
 							const record = cloneDeep(item);
 
 							// add sort field value if it is not supplied in the item
-							if (parent !== null && record[sortField] === undefined) {
+							if (record[sortField] === undefined) {
 								record[sortField] = highestOrderNumber?.max ? highestOrderNumber.max + index + 1 : index + 1;
 							}
 
 							return {
 								...record,
-								[relation.field]: parent || payload[currentPrimaryKeyField],
+								[relation.field]: parent,
 							};
 						});
 					} else {
 						createPayload = alterations.create.map((item) => ({
 							...item,
-							[relation.field]: parent || payload[currentPrimaryKeyField],
+							[relation.field]: parent,
 						}));
 					}
 
@@ -876,7 +878,7 @@ export class PayloadService {
 							.first();
 
 						if (!existingRecord || existingRecord[relation.field] != parent) {
-							record[relation.field] = parent || payload[currentPrimaryKeyField];
+							record[relation.field] = parent;
 						}
 
 						await service.updateOne(key, record, {
@@ -955,6 +957,12 @@ export class PayloadService {
 
 		if (Object.keys(payload).length === 0) return null;
 
-		return JSON.stringify(payload);
+		// A filter hook may answer a BigInt, which JSON cannot hold as a number
+		// without losing digits.
+		return JSON.stringify(payload, (_key, fieldValue) => {
+			return typeof fieldValue === 'bigint'
+				? fieldValue.toString()
+				: fieldValue;
+		});
 	}
 }

@@ -392,7 +392,7 @@ export default typescriptEslint.config(
 	// winner's instance. The wrapper draws from the worker's own slice.
 	{
 		files: ['tests/blackbox/**/*.ts'],
-		ignores: ['tests/blackbox/utils/get-port.ts'],
+		ignores: ['tests/blackbox/utils/free-port-of-worker.ts'],
 		rules: {
 			'no-restricted-imports': [
 				'error',
@@ -400,7 +400,7 @@ export default typescriptEslint.config(
 					paths: [
 						{
 							name: 'get-port',
-							message: "Import { getPort } from '@utils/get-port'.",
+							message: "Import { freePortOfWorker } from '@utils/free-port-of-worker'.",
 						},
 					],
 				},

@@ -4,7 +4,9 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearSystemCache } from '../cache.js';
+import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import emitter from '../emitter.js';
+import { transaction } from '../utils/transaction.js';
 import { ItemsService } from './items.js';
 import { PoliciesService } from './policies.js';
 
@@ -19,6 +21,13 @@ vi.mock('../cache.js', async (importOriginal) => {
 	return {
 		...await importOriginal<typeof import('../cache.js')>(),
 		clearSystemCache: vi.fn(),
+	};
+});
+
+vi.mock('../permissions/cache.js', async (importOriginal) => {
+	return {
+		...await importOriginal<typeof import('../permissions/cache.js')>(),
+		clearCache: vi.fn(),
 	};
 });
 
@@ -101,6 +110,50 @@ describe('Services / Policies', () => {
 				.toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 
 			expect(clearSystemCache).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('createMany', () => {
+		it('clears the permissions cache once the transaction commits', async () => {
+			vi.spyOn(ItemsService.prototype, 'createMany')
+				.mockResolvedValue(['7d3e5f40-1a2b-4c3d-9e8f-000000000007']);
+
+			const transactionStates: string[][] = [];
+
+			vi.mocked(clearPermissionsCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await transaction(db, async (trx) => {
+				await new PoliciesService({ knex: trx, schema })
+					.createMany([{ name: 'editors' }]);
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
+		});
+	});
+
+	describe('deleteMany', () => {
+		it('clears the caches once the parent transaction has committed', async () => {
+			vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['7d3e5f40-1a2b-4c3d-9e8f-000000000006']);
+
+			const transactionStates: string[][] = [];
+
+			vi.mocked(clearSystemCache).mockImplementationOnce(async () => {
+				transactionStates.push(
+					tracker.history.transactions.map((trx) => trx.state),
+				);
+			});
+
+			await transaction(db, async (trx) => {
+				await new PoliciesService({ knex: trx, schema })
+					.deleteMany(['7d3e5f40-1a2b-4c3d-9e8f-000000000006']);
+			});
+
+			expect(transactionStates).toEqual([['committed']]);
 		});
 	});
 });
