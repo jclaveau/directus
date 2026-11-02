@@ -7,14 +7,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-bundle0-extension', {
+		mockExtensions.module.set('mock-bundle0-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle0-extension',
 			version: '1.0.0',
@@ -45,14 +43,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-display-extension', {
+		mockExtensions.module.set('mock-display-extension', {
 			path: './extensions/display',
 			name: 'mock-display-extension',
 			type: 'display',
@@ -60,7 +56,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-operation-extension', {
+		mockExtensions.module.set('mock-operation-extension', {
 			path: './extensions/operation',
 			name: 'mock-operation-extension',
 			type: 'operation',
@@ -68,7 +64,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-bundle0-extension', {
+		mockExtensions.module.set('mock-bundle0-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle0-extension',
 			version: '1.0.0',
@@ -84,7 +80,7 @@ describe('generateExtensionsEntrypoint', () => {
 			partial: false,
 		});
 
-		mockExtensions.local.set('mock-bundle-no-app-extension', {
+		mockExtensions.module.set('mock-bundle-no-app-extension', {
 			path: './extensions/bundle-no-app',
 			name: 'mock-bundle-no-app-extension',
 			version: '1.0.0',
@@ -114,14 +110,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-panel-extension', {
+		mockExtensions.module.set('mock-panel-extension', {
 			path: './extensions/panel',
 			name: 'mock-panel-extension',
 			type: 'panel',
@@ -146,14 +140,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-operation-extension', {
+		mockExtensions.module.set('mock-operation-extension', {
 			path: './extensions/operation',
 			name: 'mock-operation-extension',
 			type: 'operation',
@@ -174,14 +166,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-bundle-extension', {
+		mockExtensions.module.set('mock-bundle-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle-extension',
 			version: '1.0.0',
@@ -236,14 +226,12 @@ describe('generateExtensionsEntrypoint', () => {
 		const mockExtensions: {
 			module: Map<string, Extension>;
 			registry: Map<string, Extension>;
-			local: Map<string, Extension>;
 		} = {
 			module: new Map(),
 			registry: new Map(),
-			local: new Map(),
 		};
 
-		mockExtensions.local.set('mock-display-extension', {
+		mockExtensions.module.set('mock-display-extension', {
 			path: './extensions/display',
 			name: 'mock-display-extension',
 			type: 'display',
@@ -251,7 +239,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-operation-extension', {
+		mockExtensions.module.set('mock-operation-extension', {
 			path: './extensions/operation',
 			name: 'mock-operation-extension',
 			type: 'operation',
@@ -259,7 +247,7 @@ describe('generateExtensionsEntrypoint', () => {
 			local: true,
 		});
 
-		mockExtensions.local.set('mock-bundle0-extension', {
+		mockExtensions.module.set('mock-bundle0-extension', {
 			path: './extensions/bundle',
 			name: 'mock-bundle0-extension',
 			version: '1.0.0',
@@ -275,7 +263,7 @@ describe('generateExtensionsEntrypoint', () => {
 			partial: true,
 		});
 
-		mockExtensions.local.set('mock-bundle-no-app-extension', {
+		mockExtensions.module.set('mock-bundle-no-app-extension', {
 			path: './extensions/bundle-no-app',
 			name: 'mock-bundle-no-app-extension',
 			version: '1.0.0',
