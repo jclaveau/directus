@@ -35,7 +35,7 @@ afterEach(() => {
 
 describe('a parsed message', () => {
 	test('emits the websocket.message action once its filter passes', async () => {
-		const emitAction = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+		const emitAction = vi.spyOn(emitter, 'emitAction').mockResolvedValue();
 
 		const send = vi.fn();
 		const ws = Object.assign(new EventEmitter(), { send });
@@ -61,7 +61,7 @@ describe('a parsed message', () => {
 		replies a server error and emits no action when its filter throws
 	`, async () => {
 		vi.spyOn(emitter, 'emitFilter').mockRejectedValue(new ForbiddenError());
-		const emitAction = vi.spyOn(emitter, 'emitAction').mockReturnValue();
+		const emitAction = vi.spyOn(emitter, 'emitAction').mockResolvedValue();
 
 		const send = vi.fn();
 		const ws = Object.assign(new EventEmitter(), { send });
@@ -100,7 +100,7 @@ describe('a parsed message', () => {
 			expires_at: null,
 		});
 
-		vi.spyOn(emitter, 'emitAction').mockImplementation(() => {
+		vi.spyOn(emitter, 'emitAction').mockImplementation(async () => {
 			ws.send('{"type":"items","data":[],"uid":1}');
 		});
 
