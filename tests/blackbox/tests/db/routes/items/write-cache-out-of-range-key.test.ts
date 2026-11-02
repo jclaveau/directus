@@ -1,7 +1,10 @@
-import config, { paths } from '@common/config';
+import config, { getUrl, paths } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
-import { auditEnvForFeature } from '@common/query-audit-steps';
+import {
+	auditEnvForFeature,
+	warmUpAuditedInstance,
+} from '@common/query-audit-steps';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
@@ -44,6 +47,12 @@ describe.each(vendors)('%s', (vendor) => {
 			});
 
 			await awaitDirectusConnection(Number(cacheEnv[vendor].PORT));
+
+			await warmUpAuditedInstance(
+				feature,
+				vendor,
+				getUrl(vendor, cacheEnv),
+			);
 		}, 60_000);
 
 		afterAll(() => {

@@ -10,6 +10,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import {
 	auditEnvForFeature,
 	defineStatementCountsStep,
+	warmUpAuditedInstance,
 } from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
@@ -111,6 +112,7 @@ export function defineSpawnedWriteFeature(
 
 			await awaitDirectusConnection(port);
 			await featureOptions.beforeFeature?.(vendor);
+			await warmUpAuditedInstance(feature, vendor, getUrl(vendor, env));
 		}, 60_000);
 
 		afterAll(async () => {

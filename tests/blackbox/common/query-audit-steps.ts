@@ -69,13 +69,7 @@ export function startAuditedInstance(vendor: Vendor) {
 		});
 
 		await awaitDirectusConnection(port);
-
-		// The first request also reads the admin's access, cached after it.
-		const warmUp = await request(getUrl(vendor, env))
-			.get('/users/me')
-			.set('Authorization', AUTH);
-
-		expect(warmUp.statusCode).toBe(200);
+		await sendWarmUpRequest(getUrl(vendor, env));
 	}, 60_000);
 
 	afterAll(() => {
@@ -117,6 +111,33 @@ export function auditEnvForFeature(feature: ParsedFeature, vendor: Vendor) {
 	}
 
 	return QUERY_AUDIT_ENV;
+}
+
+/**
+ * Readies the instance a feature spawned for its counts, as
+ * `startAuditedInstance` readies its own: whichever scenario runs first then
+ * counts the same statements as when it runs after the others.
+ */
+export async function warmUpAuditedInstance(
+	feature: ParsedFeature,
+	vendor: Vendor,
+	instanceUrl: string,
+) {
+	if (vendor !== 'postgres' || !countsStatements(feature)) {
+		return;
+	}
+
+	await sendWarmUpRequest(instanceUrl);
+}
+
+// An instance's first request also reads the admin's access and the schema,
+// both cached after it.
+async function sendWarmUpRequest(instanceUrl: string) {
+	const warmUp = await request(instanceUrl)
+		.get('/users/me')
+		.set('Authorization', AUTH);
+
+	expect(warmUp.statusCode).toBe(200);
 }
 
 /**
