@@ -52,7 +52,7 @@ Feature: A read runs the statements its query needs, and no more
       |   - tags.test_read_counts_tag_id.name       |       - body: More               |
       |   - blocks.item:test_read_counts_quote.text |       - body: Nice               |
       |   deep[comments][_sort]: body               |     tags:                        |
-      |                                             |       - test_read_counts_tag_id: |
+      |   deep[tags][_sort]: id                     |       - test_read_counts_tag_id: |
       |                                             |           name: Perf             |
       |                                             |       - test_read_counts_tag_id: |
       |                                             |           name: SQL              |
@@ -128,8 +128,8 @@ Feature: A read runs the statements its query needs, and no more
       |   - tags.test_read_counts_tag_id.name       |       - body: More               |
       |   - blocks.item:test_read_counts_quote.text |       - body: Nice               |
       |   deep[comments][_sort]: body               |     tags:                        |
-      | token: ReadStatementCountsToken             |       - test_read_counts_tag_id: |
-      |                                             |           name: Perf             |
+      |   deep[tags][_sort]: id                     |       - test_read_counts_tag_id: |
+      | token: ReadStatementCountsToken             |           name: Perf             |
       |                                             |       - test_read_counts_tag_id: |
       |                                             |           name: SQL              |
       |                                             |     blocks:                      |
@@ -239,12 +239,12 @@ Feature: A read runs the statements its query needs, and no more
       |     id: "first") {                    |       author:                       |
       |     title author { name }             |         name: Ada                   |
       |     comments(sort: ["body"]) { body } |       comments:                     |
-      |     tags { test_read_counts_tag_id {  |         - body: More                |
-      |     name } }                          |         - body: Nice                |
-      |     blocks { item {                   |       tags:                         |
-      |     ... on test_read_counts_quote {   |         - test_read_counts_tag_id:  |
-      |     text } } } } }                    |             name: Perf              |
-      |                                       |         - test_read_counts_tag_id:  |
+      |     tags(sort: ["id"]) {              |         - body: More                |
+      |     test_read_counts_tag_id {         |         - body: Nice                |
+      |     name } }                          |       tags:                         |
+      |     blocks { item {                   |         - test_read_counts_tag_id:  |
+      |     ... on test_read_counts_quote {   |             name: Perf              |
+      |     text } } } } }                    |         - test_read_counts_tag_id:  |
       |                                       |             name: SQL               |
       |                                       |       blocks:                       |
       |                                       |         - item:                     |

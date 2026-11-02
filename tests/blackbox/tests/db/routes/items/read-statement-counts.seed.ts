@@ -232,7 +232,8 @@ export const seedDBStructure = () => {
 					.get(`/files/${MEASURE_FILE_ID}`)
 					.set('Authorization', AUTH);
 
-				if (fileResponse.statusCode === 403) {
+				// An admin asking for a file no row holds gets a 404.
+				if (fileResponse.statusCode === 404) {
 					const uploadResponse = await request(getUrl(vendor))
 						.post('/files')
 						.set('Authorization', AUTH)
