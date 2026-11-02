@@ -6,6 +6,7 @@ import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
 import { getAddress } from '../../utils/get-address.js';
 import { WebSocketError, handleWebSocketError } from '../errors.js';
+import { auditMessageQueries, reportQueryAuditInReplies } from '../query-audit.js';
 import type { AuthenticationState, WebSocketClient } from '../types.js';
 import SocketController from './base.js';
 import { registerWebSocketEvents } from './hooks.js';
@@ -25,14 +26,22 @@ export class WebSocketController extends SocketController {
 	}
 
 	private bindEvents(client: WebSocketClient) {
+		reportQueryAuditInReplies(client);
+
 		client.on('parsed-message', async (message: WebSocketMessage) => {
-			try {
-				message = WebSocketMessage.parse(await emitter.emitFilter('websocket.message', message, { client }));
-				emitter.emitAction('websocket.message', { message, client });
-			} catch (error) {
-				handleWebSocketError(client, error, 'server');
-				return;
-			}
+			await auditMessageQueries(client, message, async () => {
+				try {
+					message = WebSocketMessage.parse(
+						await emitter.emitFilter('websocket.message', message, { client }),
+					);
+
+					emitter.emitAction('websocket.message', { message, client });
+				}
+				catch (error) {
+					handleWebSocketError(client, error, 'server');
+					return;
+				}
+			});
 		});
 
 		client.on('error', (event: WebSocket.Event) => {

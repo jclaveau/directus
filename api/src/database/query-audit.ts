@@ -168,6 +168,42 @@ export function levelCarriesBindings(level: QueryAuditLevel): boolean {
 	return level === 'bindings' || level === 'full';
 }
 
+const TIMINGS_WORDS: readonly string[] = ['timings', 'no-timings'];
+
+/**
+ * `<level>`, `<timings word>` or `<level>; <timings word>`: an ask that leaves
+ * out the level gets QUERY_AUDIT_LEVEL's, one that leaves out the timings word
+ * gets the durations. `undefined` for an ask that is none of those.
+ */
+export function auditAskOf(askedValue: string | undefined, instanceLevel: unknown) {
+	const askedWords = askedValue === undefined
+		? []
+		: askedValue.split(';').map((askedWord) => askedWord.trim());
+
+	const lastWord = askedWords.at(-1) ?? '';
+
+	const levelWords = TIMINGS_WORDS.includes(lastWord)
+		? askedWords.slice(0, -1)
+		: askedWords;
+
+	const askedLevel = levelWords.length === 0
+		? instanceLevel
+		: levelWords[0];
+
+	if (levelWords.length > 1 || !isQueryAuditLevel(askedLevel)) {
+		return undefined;
+	}
+
+	return { level: askedLevel, timings: lastWord !== 'no-timings' };
+}
+
+export function auditAskRefusalOf(askName: string): string {
+	return `"${askName}" must be a level, a timings word, or both as `
+		+ '"<level>; <timings word>". '
+		+ `Levels: ${QUERY_AUDIT_LEVELS.join(', ')}. `
+		+ `Timings words: ${TIMINGS_WORDS.join(', ')}`;
+}
+
 /**
  * A request holds only what its `level` reports: no statements at `counts`,
  * each run's bound values from `bindings` up while `bindingsAllowed` says so,
