@@ -64,6 +64,10 @@ Feature: A write whose hook takes over a key the database refuses purges whole
       | query:                                       | body:                 |
       |   fields: body                               |   data:               |
       |   filter[slot][_eq]: c                       |     - body: bystander |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 6       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upsert whose takeover cannot be re-read purges the collection whole
     When these requests get these responses:
@@ -113,6 +117,10 @@ Feature: A write whose hook takes over a key the database refuses purges whole
       | query:                                       | body:                 |
       |   fields: body                               |   data:               |
       |   filter[slot][_eq]: c                       |     - body: bystander |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 6       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a create whose takeover cannot be re-read purges the collection whole
     When these requests get these responses:
@@ -162,3 +170,7 @@ Feature: A write whose hook takes over a key the database refuses purges whole
       | query:                                       | body:                 |
       |   fields: body                               |   data:               |
       |   filter[slot][_eq]: c                       |     - body: bystander |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 6       | -     | 0      | 0      | 0      | 0      |

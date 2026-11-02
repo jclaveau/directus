@@ -1,6 +1,7 @@
 import config, { paths } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import { auditEnvForFeature } from '@common/query-audit-steps';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
 import { type ChildProcess, spawn } from 'child_process';
@@ -29,6 +30,8 @@ describe.each(vendors)('%s', (vendor) => {
 		// A re-run inside the TTL would otherwise read the last run's entries.
 		cacheEnv[vendor]['CACHE_NAMESPACE']
 			= `directus-write-cache-out-of-range-key-${vendor}-${randomUUID()}`;
+
+		Object.assign(cacheEnv[vendor], auditEnvForFeature(feature, vendor));
 
 		let cacheInstance: ChildProcess;
 

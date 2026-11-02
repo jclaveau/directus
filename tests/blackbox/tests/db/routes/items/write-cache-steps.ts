@@ -6,6 +6,7 @@ import {
 	type StepFunctions,
 } from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
+import { defineStatementCountsStep } from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request, { type Response } from 'supertest';
@@ -34,10 +35,11 @@ export const cacheStatusHeader = 'x-cache-status';
 /**
  * The write-coverage steps against a scoped-cache instance: a request|response
  * table whose response cell may state the `cache` status a read answered with,
- * and the message a response was refused with.
+ * the message a response was refused with, and the statements the requests
+ * ran.
  */
 export function defineWriteCacheSteps(
-	{ when, then }: StepFunctions,
+	{ when, then, and }: StepFunctions,
 	vendor: Vendor,
 	cachedEnv: Env,
 ) {
@@ -125,4 +127,6 @@ export function defineWriteCacheSteps(
 			).toMatchObject([{ message: messageOfDocString(docString) }]);
 		},
 	);
+
+	defineStatementCountsStep(and, vendor, receivedResponses);
 }

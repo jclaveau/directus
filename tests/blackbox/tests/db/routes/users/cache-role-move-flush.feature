@@ -85,3 +85,6 @@ Feature: A user moved to another role through the role drops the cached reads
       |                                    |         "cache_role_move_notes" |
       |                                    |         or it does not exist.   |
       |                                    |         Queried in root.        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 3       | -     | 0      | 0      | 0      | 0      |

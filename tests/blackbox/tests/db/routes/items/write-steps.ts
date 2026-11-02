@@ -18,6 +18,8 @@ type RequestCell = {
 	payload?: unknown;
 	file?: unknown;
 	token?: string;
+	as?: string;
+	remember?: string;
 };
 
 const REQUEST_CELL_KEYS = [
@@ -27,6 +29,8 @@ const REQUEST_CELL_KEYS = [
 	'payload',
 	'file',
 	'token',
+	'as',
+	'remember',
 ] as const satisfies readonly (keyof RequestCell)[];
 
 const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
@@ -43,15 +47,74 @@ export function defineWriteSteps(
 ) {
 	const receivedResponses: Response[] = [];
 
+	// The credentials a login answered, by the name its row remembered them as.
+	const rememberedCredentials: Record<string, Record<string, string>> = {};
+
+	// A request sends the admin's token, another `token`, the credentials a
+	// login remembered under `as`, or none when `as` is `public`.
+	function credentialHeadersOf(token: string | undefined, as?: string) {
+		if (token !== undefined && as !== undefined) {
+			throw new Error(
+				`A request names both the token "${token}" and the credentials `
+				+ `"${as}": it sends one or the other`,
+			);
+		}
+
+		if (as === 'public') {
+			return {};
+		}
+
+		if (as !== undefined) {
+			const credentialHeaders = rememberedCredentials[as];
+
+			if (credentialHeaders === undefined) {
+				throw new Error(
+					`No login remembered the credentials "${as}" before the `
+					+ 'request sending them',
+				);
+			}
+
+			return credentialHeaders;
+		}
+
+		return { Authorization: `Bearer ${token ?? USER.ADMIN.TOKEN}` };
+	}
+
+	// A json login answers its access token, a session login its cookie.
+	function credentialHeadersAnswered(loginResponse: Response) {
+		const accessToken = loginResponse.body?.data?.access_token;
+
+		if (typeof accessToken === 'string') {
+			return { Authorization: `Bearer ${accessToken}` };
+		}
+
+		const setCookies = [loginResponse.headers['set-cookie'] ?? []].flat();
+
+		if (setCookies.length === 0) {
+			throw new Error(
+				`The login answered ${loginResponse.statusCode} with neither an `
+				+ 'access token nor a cookie to remember',
+			);
+		}
+
+		return {
+			Cookie: setCookies.map((setCookie) => {
+				return setCookie.split(';')[0];
+			}).join('; '),
+		};
+	}
+
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
-	function sendRequest(requestCell: string) {
+	async function sendRequest(requestCell: string) {
 		const {
 			method,
 			path,
 			query = {},
 			payload,
 			file,
-			token = USER.ADMIN.TOKEN,
+			token,
+			as,
+			remember,
 		} = cellOfKnownKeys<RequestCell>(
 			'request',
 			loadYaml(requestCell),
@@ -59,6 +122,34 @@ export function defineWriteSteps(
 			'write-steps.ts',
 		);
 
+		const receivedResponse = await sentRequest({
+			method,
+			path,
+			query,
+			payload,
+			file,
+			credentialHeaders: credentialHeadersOf(token, as),
+		});
+
+		if (remember !== undefined) {
+			rememberedCredentials[remember]
+				= credentialHeadersAnswered(receivedResponse);
+		}
+
+		return receivedResponse;
+	}
+
+	function sentRequest({
+		method,
+		path,
+		query,
+		payload,
+		file,
+		credentialHeaders,
+	}: Omit<RequestCell, 'token' | 'as' | 'remember'> & {
+		query: Record<string, string | string[]>;
+		credentialHeaders: Record<string, string>;
+	}) {
 		const pendingRequest = {
 			DELETE: () => request(instanceUrl()).delete(path),
 			GET: () => request(instanceUrl()).get(path),
@@ -70,7 +161,7 @@ export function defineWriteSteps(
 					return [parameter, [value].flat().join(',')];
 				}),
 			))
-			.set('Authorization', `Bearer ${token}`);
+			.set(credentialHeaders);
 
 		// A `file` is the JSON an import reads, sent as the upload it expects.
 		if (file !== undefined) {

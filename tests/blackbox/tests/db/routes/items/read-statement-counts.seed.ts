@@ -28,6 +28,9 @@ const READER_POLICY = 'Read Statement Counts Policy';
 
 const AUTH = `Bearer ${USER.TESTS_FLOW.TOKEN}`;
 
+// The feature reads this file through `/assets` by its id.
+const MEASURE_FILE_ID = '4f6c2a9e-1b3d-4c8e-9a7f-2d5e8b1c0a63';
+
 export const seedDBStructure = () => {
 	it.each(vendors)(
 		'%s',
@@ -171,6 +174,7 @@ export const seedDBStructure = () => {
 				await CreateUser(vendor, {
 					token: 'ReadStatementCountsToken',
 					email: 'read-statement-counts@default.com',
+					password: 'read-statement-counts-password',
 					roleName: READER_ROLE,
 				});
 
@@ -192,7 +196,7 @@ export const seedDBStructure = () => {
 					.post('/policies')
 					.send({
 						name: READER_POLICY,
-						app_access: false,
+						app_access: true,
 						admin_access: false,
 						roles: [{ role: role.id }],
 						permissions: [
@@ -209,6 +213,7 @@ export const seedDBStructure = () => {
 								collectionArticleTag,
 								collectionQuote,
 								collectionArticleBlock,
+								'directus_files',
 							].map((collection) => {
 								return {
 									collection,
@@ -222,6 +227,27 @@ export const seedDBStructure = () => {
 					.set('Authorization', AUTH);
 
 				expect(policyResponse.statusCode).toEqual(200);
+
+				const fileResponse = await request(getUrl(vendor))
+					.get(`/files/${MEASURE_FILE_ID}`)
+					.set('Authorization', AUTH);
+
+				if (fileResponse.statusCode === 403) {
+					const uploadResponse = await request(getUrl(vendor))
+						.post('/files')
+						.set('Authorization', AUTH)
+						.field('id', MEASURE_FILE_ID)
+						.field('storage', 'local')
+						.attach('file', Buffer.from('Measure first'), {
+							filename: 'measure.txt',
+							contentType: 'text/plain',
+						});
+
+					expect(uploadResponse.statusCode).toEqual(200);
+				}
+				else {
+					expect(fileResponse.statusCode).toEqual(200);
+				}
 			}
 			catch (error) {
 				expect(error).toBeFalsy();
