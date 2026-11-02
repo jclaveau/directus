@@ -1521,20 +1521,16 @@ implements AbstractService<Item> {
 
 	/**
 	 * Refuses a change that names an existing o2m child for several rows: each row
-	 * would take the child from the one before, leaving it on the last. A child
-	 * created inline is each row's own, and so is an m2m's junction row. Rows are
-	 * counted over every group, so two rows of a batch can't share a child either.
-	 * Run only when the caller asks (`refuseChildJoiningSeveralRows`).
+	 * would take the child from the one before, leaving it on the last. An m2m's
+	 * existing junction row is such a child; a child created inline is each row's
+	 * own. Rows are counted over every group, so two rows of a batch can't share a
+	 * child either. Run only when the caller asks (`refuseChildJoiningSeveralRows`).
 	 */
 	private refuseChildJoiningSeveralRows(writingGroups: UpdateGroup<Item>[]): void {
 		for (const relation of this.schema.relations) {
 			const childrenField = relation.meta?.one_field;
 
-			if (
-				relation.related_collection !== this.collection
-				|| !childrenField
-				|| relation.meta?.junction_field
-			) {
+			if (relation.related_collection !== this.collection || !childrenField) {
 				continue;
 			}
 

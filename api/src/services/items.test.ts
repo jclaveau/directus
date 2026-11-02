@@ -1615,11 +1615,9 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
-				gives, when asked, one m2m junction row to several rows, each row
-				having its own
+				refuses, when asked, to give one existing m2m junction row to
+				several rows, writing nothing
 			`, async () => {
-				tracker.on.any('test_tags_junction').response([]);
-
 				const tagsSchema = new SchemaBuilder()
 					.collection('test', (c) => {
 						c.field('id').id();
@@ -1636,8 +1634,16 @@ describe('Integration Tests', () => {
 						{ tags: { update: [{ id: 7 }] } },
 						{ refuseChildJoiningSeveralRows: true },
 					))
-					.resolves
-					.toEqual([1, 2]);
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
 			});
 
 			it(oneLine`
