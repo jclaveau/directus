@@ -3,13 +3,13 @@ import type { Knex } from 'knex';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { performance } from 'node:perf_hooks';
 
-type StatementKind = 'select' | 'insert' | 'update' | 'delete' | 'other';
-
 type TransactionOutcome = 'commit' | 'rollback';
 
 /**
- * One statement as reported: `stmt` is its SQL, or `<kind> <table>...` at
- * `counts`, and `cutStmt` that shorter form whatever the level.
+ * One statement as reported: `stmt` is its SQL, or `<keyword> <table>...` at
+ * `counts`, and `cutStmt` that shorter form whatever the level. A statement
+ * naming no table is cut to `<keyword> <function>...`, the first function it
+ * calls, or to `<keyword>...` when it calls none.
  */
 type StatementAudit = {
 	stmt: string;
@@ -147,7 +147,14 @@ const TRANSACTION_KEYWORDS = new Set([
 	'release',
 ]);
 
-const TABLE_PATTERN = /\b(?:from|into|update)\s+["`[]?([^\s"`\]().,;]+)/i;
+const TABLE_PATTERN = new RegExp(
+	'\\b(?:from|into|update|truncate(?:\\s+table)?|table)'
+	+ '\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?'
+	+ '["`[]?([^\\s"`\\]().,;]+)',
+	'i',
+);
+
+const FUNCTION_PATTERN = /\b([a-z_][\w.]*)\(/i;
 
 const auditedPrototypes = new WeakSet<object>();
 
@@ -533,10 +540,11 @@ export function auditStatementStart(
 		};
 	}
 
-	const tableName = TABLE_PATTERN.exec(sql)?.[1];
+	const cutObject = TABLE_PATTERN.exec(sql)?.[1]
+		?? FUNCTION_PATTERN.exec(sql)?.[1];
 
-	const cutStmt = tableName
-		? `${kindOfKeyword(keyword)} ${tableName}...`
+	const cutStmt = cutObject
+		? `${keyword} ${cutObject}...`
 		: `${keyword}...`;
 
 	const stmt = audit.recordsStatements
@@ -1041,17 +1049,4 @@ function asciiJson(value: unknown): string {
 
 function leadingKeyword(sql: string): string {
 	return /^[\s(]*([a-z]+)/i.exec(sql)?.[1]?.toLowerCase() ?? '';
-}
-
-function kindOfKeyword(keyword: string): StatementKind {
-	if (
-		keyword === 'select'
-		|| keyword === 'insert'
-		|| keyword === 'update'
-		|| keyword === 'delete'
-	) {
-		return keyword;
-	}
-
-	return 'other';
 }
