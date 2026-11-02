@@ -119,7 +119,11 @@ export function auditEnvForFeature(feature: ParsedFeature, vendor: Vendor) {
 	return QUERY_AUDIT_ENV;
 }
 
-// Each table a response's statements touched, with how many of each kind.
+/**
+ * Each table a response's statements touched, with how many of each keyword.
+ * A counts-level `stmt` is `<keyword> <table>...`, `<keyword> <function>()...`
+ * when it names no table, or `<keyword>...` when it calls no function either.
+ */
 function countStatements(
 	response: Response | undefined,
 	requestPosition: number,
@@ -163,31 +167,44 @@ function countStatements(
 	});
 
 	for (const { stmt, count = 1 } of auditedStatements) {
-		const [statementKind, tableName] = stmt
-			.replace(/\.\.\.$/, '')
-			.split(' ') as [string, string];
+		const cutMatch = /^([a-z]+)(?: (\S+))?\.\.\.$/.exec(stmt);
+
+		if (cutMatch === null) {
+			throw new Error(`"${stmt}" is no counts-level stmt`);
+		}
+
+		const [, statementKeyword, tableName = '(no table)'] = cutMatch as [
+			string,
+			string,
+			string | undefined,
+		];
 
 		countsByTable[tableName] ??= { select: 0, insert: 0, update: 0, delete: 0 };
 		const tableCounts = countsByTable[tableName];
-		tableCounts[statementKind] = (tableCounts[statementKind] ?? 0) + count;
+
+		tableCounts[statementKeyword] = (tableCounts[statementKeyword] ?? 0)
+			+ count;
 	}
 
 	return countsByTable;
 }
 
 // The rows as the feature file spells them, so a failure prints the table
-// the scenario should hold.
+// the scenario should hold: every keyword a column, 0 where it did not run.
 function gherkinTableOf(countRows: Record<string, unknown>[]) {
+	const tableColumns = [...new Set([
+		...STATEMENT_COUNTS_COLUMNS,
+		...countRows.flatMap(Object.keys),
+	])];
+
 	const cellRows = [
-		[...STATEMENT_COUNTS_COLUMNS],
+		tableColumns,
 		...countRows.map((countRow) => {
-			return STATEMENT_COUNTS_COLUMNS.map((column) => {
-				return String(countRow[column]);
-			});
+			return tableColumns.map((column) => String(countRow[column] ?? 0));
 		}),
 	];
 
-	const columnWidths = STATEMENT_COUNTS_COLUMNS.map((_column, position) => {
+	const columnWidths = tableColumns.map((_column, position) => {
 		return Math.max(...cellRows.map((cells) => cells[position]!.length));
 	});
 
@@ -200,7 +217,10 @@ function gherkinTableOf(countRows: Record<string, unknown>[]) {
 
 /**
  * The last step of a scenario: per request it names, by its position in the
- * request table, every table it touched and how many statements of each kind.
+ * request table, every table it touched and how many statements of each keyword.
+ * A keyword outside select, insert, update and delete is a column of its own,
+ * named after it, whose empty or 0 cells are left out; a statement naming no
+ * table counts under its function, as `nextval()`, or under `(no table)`.
  * Other vendors run other statements, so only postgres is held to it.
  */
 export function defineStatementCountsStep(
@@ -254,10 +274,19 @@ export function defineStatementCountsStep(
 					});
 			});
 
+			// A keyword column of its own lists only the requests that ran it.
 			expect(
 				ranCounts,
 				`The requests ran these statements:\n${gherkinTableOf(ranCounts)}\n`,
-			).toEqual(parseGherkinTable(table));
+			).toEqual(parseGherkinTable(table).map((expectedRow) => {
+				return Object.fromEntries(Object.entries(expectedRow).filter(
+					([column, value]) => {
+						return (STATEMENT_COUNTS_COLUMNS as readonly string[])
+							.includes(column)
+							|| (value !== null && value !== 0);
+					},
+				));
+			}));
 		},
 	);
 }
