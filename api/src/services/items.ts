@@ -1424,14 +1424,22 @@ implements AbstractService<Item> {
 	 * spellings of one row read as two rows, and a row named by the spelling
 	 * the read does not return is told missing.
 	 */
-	protected primaryKeyNameOf(key: PrimaryKey): string {
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+	protected primaryKeyNameOf(
+		key: PrimaryKey,
+		keyCollection: string = this.collection,
+	): string {
+		const primaryKeyField = this.schema.collections[keyCollection]!.primary;
 
-		const primaryKeyType = this.schema.collections[this.collection]!
+		const primaryKeyType = this.schema.collections[keyCollection]!
 			.fields[primaryKeyField]!.type;
 
 		if (primaryKeyType === 'uuid') {
 			return String(key).toLowerCase();
+		}
+
+		// A child key comes unvalidated: as numbers, 'abc' and 'xyz' would both be NaN.
+		if (!/^[+-]?\d+$/.test(String(key))) {
+			return String(key);
 		}
 
 		if (primaryKeyType === 'integer') {
@@ -1439,7 +1447,7 @@ implements AbstractService<Item> {
 		}
 
 		// Past 2^53 a Number would round two rows onto one name.
-		return primaryKeyType === 'bigInteger' && /^[+-]?\d+$/.test(String(key))
+		return primaryKeyType === 'bigInteger'
 			? String(BigInt(key))
 			: String(key);
 	}
@@ -1521,20 +1529,16 @@ implements AbstractService<Item> {
 
 	/**
 	 * Refuses a change that names an existing o2m child for several rows: each row
-	 * would take the child from the one before, leaving it on the last. A child
-	 * created inline is each row's own, and so is an m2m's junction row. Rows are
-	 * counted over every group, so two rows of a batch can't share a child either.
-	 * Run only when the caller asks (`refuseChildJoiningSeveralRows`).
+	 * would take the child from the one before, leaving it on the last. An m2m's
+	 * existing junction row is such a child; a child created inline is each row's
+	 * own. Rows are counted over every group, so two rows of a batch can't share a
+	 * child either. Run only when the caller asks (`refuseChildJoiningSeveralRows`).
 	 */
 	private refuseChildJoiningSeveralRows(writingGroups: UpdateGroup<Item>[]): void {
 		for (const relation of this.schema.relations) {
 			const childrenField = relation.meta?.one_field;
 
-			if (
-				relation.related_collection !== this.collection
-				|| !childrenField
-				|| relation.meta?.junction_field
-			) {
+			if (relation.related_collection !== this.collection || !childrenField) {
 				continue;
 			}
 
@@ -1544,13 +1548,7 @@ implements AbstractService<Item> {
 			const joiningRowNames = new Map<string, Set<string>>();
 
 			for (const group of writingGroups) {
-				const groupData = group.data as Partial<AnyItem>;
-
-				if (!(childrenField in groupData)) {
-					continue;
-				}
-
-				const childrenValue = groupData[childrenField];
+				const childrenValue = (group.data as Partial<AnyItem>)[childrenField];
 
 				let namedChildren: unknown[] = [childrenValue].flat();
 
@@ -1568,7 +1566,12 @@ implements AbstractService<Item> {
 						return namedChild;
 					})
 					.filter((childKey) => !isMissingPrimaryKey(childKey))
-					.map(String));
+					.map((childKey) => {
+						return this.primaryKeyNameOf(
+							childKey as PrimaryKey,
+							relation.collection,
+						);
+					}));
 
 				for (const joiningChildKey of joiningChildKeys) {
 					// A row lastWins sends in two groups is still one row.
@@ -1580,8 +1583,8 @@ implements AbstractService<Item> {
 					if (rowNames.size > 1) {
 						throw new InvalidPayloadError({
 							reason: oneLine`
-								"${joiningChildKey}" can't join more than one
-								"${this.collection}"
+								${JSON.stringify(joiningChildKey)} can't join more than
+								one ${JSON.stringify(this.collection)}
 							`,
 						});
 					}

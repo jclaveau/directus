@@ -64,6 +64,12 @@ Feature: A write whose hook takes over a key the database refuses purges whole
       | query:                                       | body:                 |
       |   fields: body                               |   data:               |
       |   filter[slot][_eq]: c                       |     - body: bystander |
+    And on postgres the requests ran these statements:
+      | request | table           | select | insert | update | delete | with |
+      | 1       | directus_users  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wca_update | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users  | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wca_update | 3      | 0      | 0      | 0      | 0    |
 
   Scenario: an upsert whose takeover cannot be re-read purges the collection whole
     When these requests get these responses:
@@ -113,6 +119,12 @@ Feature: A write whose hook takes over a key the database refuses purges whole
       | query:                                       | body:                 |
       |   fields: body                               |   data:               |
       |   filter[slot][_eq]: c                       |     - body: bystander |
+    And on postgres the requests ran these statements:
+      | request | table           | select | insert | update | delete | with |
+      | 1       | directus_users  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wca_upsert | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users  | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wca_upsert | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a create whose takeover cannot be re-read purges the collection whole
     When these requests get these responses:
@@ -162,3 +174,9 @@ Feature: A write whose hook takes over a key the database refuses purges whole
       | query:                                       | body:                 |
       |   fields: body                               |   data:               |
       |   filter[slot][_eq]: c                       |     - body: bystander |
+    And on postgres the requests ran these statements:
+      | request | table           | select | insert | update | delete | with |
+      | 1       | directus_users  | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wca_create | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users  | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wca_create | 1      | 0      | 0      | 0      | 0    |

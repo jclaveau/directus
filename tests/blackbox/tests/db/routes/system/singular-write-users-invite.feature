@@ -45,6 +45,16 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   fields: status,role              |     - status: invited     |
       |   filter[email][_eq]: >-           |       role: <second-role> |
       |     invited-<run>@example.com      |                           |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 3      | 1      | 0      | 0      |
+      | 3       | directus_access    | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles     | 1      | 0      | 0      | 0      |
+      | 3       | directus_users     | 5      | 0      | 1      | 0      |
 
   Scenario: an invitation accepted with its token activates the user
     Given these requests are sent:
@@ -79,6 +89,17 @@ Feature: A user is invited, re-invited and accepts the invitation
       | payload:                               |                              |
       |   email: accepting-<run>@example.com   |                              |
       |   password: accepted-password          |                              |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_sessions | 0      | 0      | 0      | 1      |
+      | 1       | directus_settings | 1      | 0      | 0      | 0      |
+      | 1       | directus_users    | 2      | 0      | 1      | 0      |
+      | 3       | directus_access   | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles    | 1      | 0      | 0      | 0      |
+      | 3       | directus_sessions | 0      | 1      | 0      | 1      |
+      | 3       | directus_settings | 1      | 0      | 0      | 0      |
+      | 3       | directus_users    | 3      | 0      | 1      | 0      |
 
   Scenario: an invitation token is refused for another scope or a user not invited
     Given these requests are sent:
@@ -109,6 +130,10 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   fields: status,password           |     - status: active                    |
       |   filter[email][_eq]: >-            |       password: null                    |
       |     active-<run>@example.com        |                                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
+      | 2       | directus_users | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation to a URL off the allow list creates no user
     Given these requests are sent:
@@ -133,6 +158,9 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   fields: id                       |                                         |
       |   filter[email][_eq]: >-           |                                         |
       |     refused-<run>@example.com      |                                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 3      | 0      | 0      | 0      |
 
   Scenario: a user invited again to a URL off the allow list is refused
     Given these requests are sent:
@@ -167,3 +195,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       |   role: <again-role>              |         Invalid payload. URL            |
       |   invite_url: >-                  |         "https://elsewhere.test/accept" |
       |     https://elsewhere.test/accept |         can't be used to invite users.  |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | 2       | directus_users | 2      | 0      | 0      | 0      |

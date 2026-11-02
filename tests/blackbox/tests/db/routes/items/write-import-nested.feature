@@ -63,6 +63,25 @@ Feature: An import writes the nested changes of every row it reads
       |     - id                                         |                       |
       |     - parent                                     |                       |
       |   sort: id                                       |                       |
+    And on postgres the requests ran these statements:
+      | request | table                     | select | insert | update | delete |
+      | 1       | directus_activity         | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions        | 0      | 1      | 0      | 0      |
+      | 1       | directus_users            | 1      | 0      | 0      | 0      |
+      | 1       | test_write_import_page    | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity         | 0      | 3      | 0      | 0      |
+      | 2       | directus_revisions        | 0      | 3      | 1      | 0      |
+      | 2       | directus_users            | 1      | 0      | 0      | 0      |
+      | 2       | test_write_import_deleted | 4      | 1      | 0      | 0      |
+      | 2       | test_write_import_nulled  | 4      | 1      | 0      | 0      |
+      | 2       | test_write_import_parent  | 1      | 1      | 0      | 0      |
+      | 3       | directus_activity         | 0      | 6      | 0      | 0      |
+      | 3       | directus_revisions        | 0      | 5      | 1      | 0      |
+      | 3       | directus_users            | 1      | 0      | 0      | 0      |
+      | 3       | test_write_import_deleted | 4      | 1      | 0      | 1      |
+      | 3       | test_write_import_nulled  | 5      | 1      | 1      | 0      |
+      | 3       | test_write_import_page    | 3      | 0      | 1      | 0      |
+      | 3       | test_write_import_parent  | 3      | 0      | 1      | 0      |
 
   Scenario: an import creating a row creates the page its any-to-one field holds
     When these requests get these responses:
@@ -83,6 +102,13 @@ Feature: An import writes the nested changes of every row it reads
       | path: /items/test_write_import_page/ip-page-new | body:                   |
       |                                                 |   data:                 |
       |                                                 |     title: created      |
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete |
+      | 1       | directus_activity        | 0      | 2      | 0      | 0      |
+      | 1       | directus_revisions       | 0      | 2      | 1      | 0      |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      |
+      | 1       | test_write_import_page   | 1      | 1      | 0      | 0      |
+      | 1       | test_write_import_parent | 1      | 1      | 0      | 0      |
 
   Scenario: an import updating a row given changes to its children applies them
     When these requests get these responses:
@@ -124,3 +150,17 @@ Feature: An import writes the nested changes of every row it reads
       |     - name                                   |       parent: null      |
       |     - parent                                 |                         |
       |   sort: id                                   |                         |
+    And on postgres the requests ran these statements:
+      | request | table                     | select | insert | update | delete |
+      | 1       | directus_activity         | 0      | 4      | 0      | 0      |
+      | 1       | directus_revisions        | 0      | 4      | 1      | 0      |
+      | 1       | directus_users            | 1      | 0      | 0      | 0      |
+      | 1       | test_write_import_deleted | 4      | 1      | 0      | 0      |
+      | 1       | test_write_import_nulled  | 6      | 2      | 0      | 0      |
+      | 1       | test_write_import_parent  | 1      | 1      | 0      | 0      |
+      | 2       | directus_activity         | 0      | 4      | 0      | 0      |
+      | 2       | directus_revisions        | 0      | 2      | 0      | 0      |
+      | 2       | directus_users            | 1      | 0      | 0      | 0      |
+      | 2       | test_write_import_deleted | 2      | 0      | 0      | 1      |
+      | 2       | test_write_import_nulled  | 6      | 0      | 2      | 0      |
+      | 2       | test_write_import_parent  | 3      | 0      | 0      | 0      |

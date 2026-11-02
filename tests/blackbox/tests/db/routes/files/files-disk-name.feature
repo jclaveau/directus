@@ -53,6 +53,12 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | path: /files/<other>                 | body:                               |
       | query:                               |   data:                             |
       |   fields: filename_disk              |     filename_disk: other-<run>.txt  |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_files | 1      | 0      | 0      | 0      |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
+      | 2       | directus_files | 2      | 0      | 0      | 0      |
+      | 2       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a disk name that is not a normalised relative path is refused
     Given these requests are sent:
@@ -103,6 +109,12 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | path: /files/<other>                     | body:                                |
       | query:                                   |   data:                              |
       |   fields: filename_disk                  |     filename_disk: other-<run>.txt   |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
+      | 2       | directus_files | 1      | 0      | 0      | 0      |
+      | 2       | directus_users | 1      | 0      | 0      | 0      |
+      | 3       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: an upload that fails to start leaves neither its row nor its file behind
     Given these requests are sent:
@@ -154,6 +166,36 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | upload_metadata:                      |           |
       |   filename_download: rolled-<run>.txt |           |
       |   filename_disk: rolled-<run>.txt     |           |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_files       | 1      | 1      | 0      | 1      | 0    |
+      | 1       | directus_permissions | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_files       | 1      | 1      | 0      | 1      | 0    |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_files       | 4      | 1      | 1      | 0      | 0    |
+      | 3       | directus_revisions   | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an upload naming the disk name a row holds without its bytes is refused
     Given these requests are sent:
@@ -175,6 +217,10 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | upload_metadata:                    |                                    |
       |   filename_download: lost-<run>.txt |                                    |
       |   filename_disk: held-<run>.txt     |                                    |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_files | 1      | 0      | 0      | 0      |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a disk name a permission preset claims is refused when another file holds it
     Given these requests are sent:
@@ -223,6 +269,21 @@ Feature: A file's disk name is held by one file, whichever way it is written
       |   fields: id                          |                                     |
       |   filter[filename_download][_eq]: >-  |                                     |
       |     preset-<run>.txt                  |                                     |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_files       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a disk name is judged once per file a batch writes, and not for no file
     Given these requests are sent:
@@ -265,3 +326,11 @@ Feature: A file's disk name is held by one file, whichever way it is written
       |         _eq: nothing-<run>.txt       |                                      |
       |   data:                              |                                      |
       |     filename_disk: held-<run>.txt    |                                      |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_files     | 3      | 0      | 1      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 3       | directus_files     | 2      | 0      | 0      | 0      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |

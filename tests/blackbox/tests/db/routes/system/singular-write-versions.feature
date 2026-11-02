@@ -34,6 +34,19 @@ Feature: A single version is checked and stamped with its item as it is created
       | path: /versions/<draft>/compare          | body:                  |
       |                                          |   data:                |
       |                                          |     outdated: true     |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions    | 2      | 1      | 0      | 0      |
+      | 1       | pg_class             | 1      | 0      | 0      | 0      |
+      | 1       | test_draft_items     | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | test_draft_items     | 3      | 0      | 1      | 0      |
 
   Scenario: a batch of versions is checked and stamped like a single one
     Given these requests are sent:
@@ -70,6 +83,20 @@ Feature: A single version is checked and stamped with its item as it is created
       |   sort: key                       |     - key: review               |
       |   filter[item][_eq]: '<document>' |                                 |
       |   filter[hash][_nnull]: true      |                                 |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions    | 1      | 0      | 0      | 0      |
+      | 1       | pg_class             | 1      | 0      | 0      | 0      |
+      | 1       | test_draft_items     | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_collections | 2      | 0      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | directus_versions    | 3      | 1      | 0      | 0      |
+      | 2       | pg_class             | 2      | 0      | 0      | 0      |
+      | 2       | test_draft_items     | 2      | 0      | 0      | 0      |
 
   Scenario: a second version of one key for one item is refused
     Given these requests are sent:
@@ -103,6 +130,12 @@ Feature: A single version is checked and stamped with its item as it is created
       |   fields: key                               |     - key: draft                |
       |   filter[collection][_eq]: test_draft_items |                                 |
       |   filter[item][_eq]: '<document>'           |                                 |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions    | 1      | 0      | 0      | 0      |
+      | 1       | pg_class             | 1      | 0      | 0      | 0      |
 
   Scenario: a version is refused before it is written
     Given these requests are sent:
@@ -152,3 +185,11 @@ Feature: A single version is checked and stamped with its item as it is created
       |   fields: key                               |                                   |
       |   filter[collection][_eq]: test_draft_items |                                   |
       |   filter[item][_eq]: '<document>'           |                                   |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | directus_collections | 1      | 0      | 0      | 0      |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | 3       | pg_class             | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |

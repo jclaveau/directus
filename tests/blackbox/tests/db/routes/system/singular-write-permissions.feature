@@ -75,6 +75,25 @@ Feature: A single permission reaches its policy's users from the next request on
       |                                         |         "test_singular_permissions"   |
       |                                         |         or it does not exist. Queried |
       |                                         |         in root.                      |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 2       | directus_access      | 2      | 0      | 0      | 0      |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 2       | directus_permissions | 1      | 1      | 0      | 0      |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 2       | directus_roles       | 1      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |
+      | 4       | directus_access      | 2      | 0      | 0      | 0      |
+      | 4       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 4       | directus_permissions | 3      | 0      | 1      | 0      |
+      | 4       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 4       | directus_roles       | 1      | 0      | 0      | 0      |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      |
+      | 6       | directus_access      | 2      | 0      | 0      | 0      |
+      | 6       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 6       | directus_permissions | 1      | 0      | 0      | 1      |
+      | 6       | directus_roles       | 1      | 0      | 0      | 0      |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      |
 
   Scenario: a permission matched by a query takes the update
     Given these requests are sent:
@@ -111,6 +130,22 @@ Feature: A single permission reaches its policy's users from the next request on
       |   fields: policy,fields                 |     - policy: <queried-policy> |
       |   filter[policy][_eq]: <queried-policy> |       fields:                  |
       |                                         |         - name                 |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions | 3      | 0      | 1      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a permission filter on id leaves out the app minimal permissions
     Given these requests are sent:
