@@ -162,9 +162,6 @@ interface ExtensionsService {
 	schema: SchemaOverview;
 	extensionsItemService: AbstractService<ExtensionSettings>;
 	extensionsManager: ExtensionManager;
-	install: (extensionId: string, versionId: string) => Promise<void>;
-	uninstall: (id: string) => Promise<void>;
-	reinstall: (id: string) => Promise<void>;
 	readAll: () => Promise<ApiOutput[]>;
 	readOne: (id: string) => Promise<ApiOutput>;
 	updateOne: (id: string, data: DeepPartial<ApiOutput>) => Promise<ApiOutput>;

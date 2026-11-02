@@ -5,9 +5,11 @@ const mocks = vi.hoisted(() => {
 	return {
 		readByQuery: vi.fn(),
 		updateOne: vi.fn(),
+		createMany: vi.fn(),
 	};
 });
 
+vi.mock('node:crypto', () => ({ randomUUID: () => 'generated-id' }));
 vi.mock('../../database/index.js', () => ({ default: vi.fn() }));
 vi.mock('../../utils/get-schema.js', () => ({ getSchema: vi.fn() }));
 
@@ -17,6 +19,7 @@ vi.mock('../../services/extensions.js', () => {
 			extensionsItemService = {
 				readByQuery: mocks.readByQuery,
 				updateOne: mocks.updateOne,
+				createMany: mocks.createMany,
 			};
 		},
 	};
@@ -61,6 +64,39 @@ test(oneLine`
 			source: 'local',
 			bundle: null,
 			folder: 'probe-folder',
+		},
+	]);
+});
+
+test(oneLine`
+	a module extension without a settings row gets a new enabled one
+`, async () => {
+	mocks.readByQuery.mockResolvedValue([]);
+
+	const extensionsSettings = await getExtensionsSettings({
+		local: new Map(),
+		module: new Map([
+			['module-folder', { type: 'endpoint', name: 'module-package' } as any],
+		]),
+	});
+
+	expect(mocks.createMany).toHaveBeenCalledExactlyOnceWith([
+		{
+			id: 'generated-id',
+			enabled: true,
+			source: 'module',
+			bundle: null,
+			folder: 'module-folder',
+		},
+	]);
+
+	expect(extensionsSettings).toStrictEqual([
+		{
+			id: 'generated-id',
+			enabled: true,
+			source: 'module',
+			bundle: null,
+			folder: 'module-folder',
 		},
 	]);
 });

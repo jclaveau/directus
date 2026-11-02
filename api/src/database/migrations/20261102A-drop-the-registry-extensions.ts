@@ -32,6 +32,6 @@ export async function up(knex: Knex): Promise<void> {
  * The deleted rows stay deleted: they named Marketplace installs, which a deploy
  * brings back as packages, with settings rows of their own.
  */
-export async function down(): Promise<void> {
+export async function down(_knex: Knex): Promise<void> {
 	return;
 }
