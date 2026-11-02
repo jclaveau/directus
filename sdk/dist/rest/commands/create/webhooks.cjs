@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/webhooks`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/webhooks`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createWebhook=t,exports.createWebhooks=e;
+//# sourceMappingURL=webhooks.cjs.map

@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=()=>()=>({path:`/fields`,method:`GET`}),n=t=>()=>(e(t,`Collection cannot be empty`),{path:`/fields/${t}`,method:`GET`}),r=(t,n)=>()=>(e(t,`Collection cannot be empty`),e(n,`Field cannot be empty`),{path:`/fields/${t}/${n}`,method:`GET`});export{r as readField,t as readFields,n as readFieldsByCollection};
+//# sourceMappingURL=fields.js.map
