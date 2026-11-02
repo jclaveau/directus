@@ -241,7 +241,8 @@ function gherkinTableOf(countRows: Record<string, unknown>[]) {
  * request table, every table it touched and how many statements of each keyword.
  * A keyword outside select, insert, update and delete is a column of its own,
  * named after it, whose empty or 0 cells are left out; a statement naming no
- * table counts under its function, as `nextval()`, or under `(no table)`.
+ * table counts under its function, as `nextval()`, or under `(no table)`. A
+ * request that ran no statement holds one `(none)` row of zeros.
  * Other vendors run other statements, so only postgres is held to it.
  */
 export function defineStatementCountsStep(
@@ -284,8 +285,21 @@ export function defineStatementCountsStep(
 					requestPosition,
 				);
 
-				return Object.keys(countsByTable)
-					.sort()
+				const ranTableNames = Object.keys(countsByTable).sort();
+
+				// Without a row of its own, a request is left unchecked.
+				if (ranTableNames.length === 0) {
+					return [{
+						request: requestPosition,
+						table: '(none)',
+						select: 0,
+						insert: 0,
+						update: 0,
+						delete: 0,
+					}];
+				}
+
+				return ranTableNames
 					.map((tableName) => {
 						return {
 							request: requestPosition,
