@@ -35,6 +35,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       | event        | phase  | count |
       | items.create | filter | 1     |
       | items.create | action | 1     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a grouped hook answering with one payload is refused
     When these requests get these responses:
@@ -54,6 +57,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       sameRowAs } | null per row it received, a sameRowAs pointing at an earlier row; a
       hook that handles one row maps them with mapCreateRows.
       """
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a grouped hook deleting a field off the list is refused, creating nothing
     When these requests get these responses:
@@ -73,6 +79,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       sameRowAs } | null per row it received, a sameRowAs pointing at an earlier row; a
       hook that handles one row maps them with mapCreateRows.
       """
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a grouped hook reading a field off the list is refused, creating nothing
     When these requests get these responses:
@@ -92,6 +101,9 @@ Feature: A create reaches its hooks as one event carrying its entries
       sameRowAs } | null per row it received, a sameRowAs pointing at an earlier row; a
       hook that handles one row maps them with mapCreateRows.
       """
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a grouped hook marking a twin inserts the row once
     When these requests get these responses:
@@ -109,6 +121,9 @@ Feature: A create reaches its hooks as one event carrying its entries
     Then the create events naming "twin-of-first" are:
       | event        | phase  | count |
       | items.create | filter | 1     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a hook mapping its rows cancels one, writing its siblings
     When these requests get these responses:
@@ -128,6 +143,9 @@ Feature: A create reaches its hooks as one event carrying its entries
     Then the create events naming "cancel-in-group" are:
       | event        | phase  | count |
       | items.create | filter | 1     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a row a hook mapping its rows takes over is left out of the action
     When these requests get these responses:
@@ -148,3 +166,6 @@ Feature: A create reaches its hooks as one event carrying its entries
       | items.create | filter | 1     |
       | items.create | action | 0     |
     And the grouped action naming "takeover-peer" carries that row alone
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

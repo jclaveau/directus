@@ -29,6 +29,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /users/<tfa>      | body:                  |
       | query:                  |   data:                |
       |   fields: first_name    |     first_name: tfa    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch giving two users one email is refused and writes nothing
     Given the rows of /users:
@@ -54,6 +57,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:                            |   data:                     |
       |   fields: email                   |     email: >-               |
       |                                   |       bob-<run>@example.com |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch naming a user its sender may not update is forbidden
     Given the rows of /users:
@@ -80,6 +86,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:                             |   data:                       |
       |   fields: email                    |     email: >-                 |
       |                                    |       other-<run>@example.com |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch making a role its own parent is refused and writes nothing
     Given the rows of /roles:
@@ -99,6 +108,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<solo> | body:                      |
       | query:              |   data:                    |
       |   fields: parent    |     parent: null           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch moving a role under its own child is refused, writing nothing
     Given the rows of /roles:
@@ -121,6 +133,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<elder> | body:                        |
       | query:               |   data:                      |
       |   fields: parent     |     parent: null             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch putting two roles under each other is refused, writing nothing
     Given the rows of /roles:
@@ -147,6 +162,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<right> | body:                        |
       | query:               |   data:                      |
       |   fields: parent     |     parent: null             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch closing a loop through three roles is refused, writing nothing
     Given the rows of /roles:
@@ -178,6 +196,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<third>  | body:                        |
       | query:                |   data:                      |
       |   fields: parent      |     parent: null             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch moving a role under its child while freeing the child is applied
     Given the rows of /roles:
@@ -201,6 +222,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<child> | body:               |
       | query:               |   data:             |
       |   fields: parent     |     parent: null    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch setting an invalid ip_access on a policy is refused
     Given the rows of /policies:
@@ -224,6 +248,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /policies/<fenced> | body:                       |
       | query:                   |   data:                     |
       |   fields: ip_access      |     ip_access: null         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch giving two translations one key and language is refused
     Given the rows of /translations:
@@ -248,6 +275,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /translations/<other> | body:                   |
       | query:                      |   data:                 |
       |   fields: key               |     key: other-<run>    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch giving a version the reserved key "main" is refused
     Given the rows of /items/test_batch_guards_versioned:
@@ -270,6 +300,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /versions/<draft> | body:                      |
       | query:                  |   data:                    |
       |   fields: key           |     key: draft             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch giving two versions of one item the same key is refused
     Given the rows of /items/test_batch_guards_versioned:
@@ -299,6 +332,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /versions/<draft-b> | body:                                   |
       | query:                    |   data:                                 |
       |   fields: key             |     key: draft-b                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch moving an email to a user while freeing it is applied
     Given the rows of /users:
@@ -324,6 +360,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:                           |   data:                     |
       |   fields: email                  |     email: >-               |
       |                                  |       ann-<run>@example.com |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch moving a translation key to a row while freeing it is applied
     Given the rows of /translations:
@@ -347,6 +386,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /translations/<other> | body:                    |
       | query:                      |   data:                  |
       |   fields: key               |     key: first-<run>     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch moving a version key to a version while freeing it is applied
     Given the rows of /items/test_batch_guards_versioned:
@@ -373,6 +415,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /versions/<draft-b> | body:             |
       | query:                    |   data:           |
       |   fields: key             |     key: draft-a  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch giving translations keys that join alike is applied
     Given the rows of /translations:
@@ -398,6 +443,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | query:                      |   data:                  |
       |   fields: key,language      |     key: x-<run>         |
       |                             |     language: en-US      |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch looping two roles through an upper-cased id is refused
     Given the rows of /roles:
@@ -424,6 +472,9 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<right>      | body:                        |
       | query:                    |   data:                      |
       |   fields: parent          |     parent: null             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch making a role its own parent in upper case is refused
     Given the rows of /roles:
@@ -443,3 +494,6 @@ Feature: A batch update of a system collection is checked as a single update is
       | path: /roles/<solo>      | body:                      |
       | query:                   |   data:                    |
       |   fields: parent         |     parent: null           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

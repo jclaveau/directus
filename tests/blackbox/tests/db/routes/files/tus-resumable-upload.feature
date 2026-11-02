@@ -63,6 +63,11 @@ Feature: A file is uploaded, replaced and terminated through tus
       | path: /files/tus/<upload>              |                        |
       | headers:                               |                        |
       |   Tus-Resumable: 1.0.0                 |                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload naming an existing file replaces its content and its name
     Given these requests are sent:
@@ -126,6 +131,10 @@ Feature: A file is uploaded, replaced and terminated through tus
       | path: /files/tus/<second-upload>      |                            |
       | headers:                              |                            |
       |   Tus-Resumable: 1.0.0                |                            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a terminated upload leaves no file behind
     Then these requests get these responses:
@@ -155,6 +164,11 @@ Feature: A file is uploaded, replaced and terminated through tus
       | path: /files/tus/<upload>              |           |
       | headers:                               |           |
       |   Tus-Resumable: 1.0.0                 |           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload whose disk name names a directory is refused
     Given these requests are sent:
@@ -210,6 +224,10 @@ Feature: A file is uploaded, replaced and terminated through tus
       |                                      |       kept-<run>.txt        |
       | method: GET                          | code: 200                   |+
       | path: /assets/<file>                 | text: kept                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload naming the disk name another file holds is refused
     Given these requests are sent:
@@ -251,6 +269,9 @@ Feature: A file is uploaded, replaced and terminated through tus
       |     lost-<run>.txt                   |                           |
       | method: GET                          | code: 200                 |+
       | path: /assets/<file>                 | text: kept                |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a replacement that cannot start leaves no row behind
     Given these requests are sent:
@@ -293,6 +314,9 @@ Feature: A file is uploaded, replaced and terminated through tus
       |     lost-<run>.txt                       |                            |
       | method: GET                              | code: 200                  |+
       | path: /assets/<file>                     | text: kept                 |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload of an unknown type without extension is stored under its id
     Then these requests get these responses:
@@ -320,6 +344,10 @@ Feature: A file is uploaded, replaced and terminated through tus
       | path: /files/<file>                 | body:                     |
       | query:                              |   data:                   |
       |   fields: filename_disk             |     filename_disk: <file> |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload naming an id no file holds reports the id it created
     Then these requests get these responses:
@@ -350,6 +378,10 @@ Feature: A file is uploaded, replaced and terminated through tus
       |   fields: id                         |     - id: <file> |
       |   filter[filename_download][_eq]: >- |                  |
       |     ghost-<run>.txt                  |                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a replacement keeps a file whose disk name starts with the replaced id
     Given these requests are sent:
@@ -418,3 +450,7 @@ Feature: A file is uploaded, replaced and terminated through tus
       | path: /assets/<file>                   | text: new         |
       | method: GET                            | code: 200         |+
       | path: /assets/<copy>                   | text: copy        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |

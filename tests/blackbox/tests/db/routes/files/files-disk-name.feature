@@ -53,6 +53,10 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | path: /files/<other>                 | body:                               |
       | query:                               |   data:                             |
       |   fields: filename_disk              |     filename_disk: other-<run>.txt  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a disk name that is not a normalised relative path is refused
     Given these requests are sent:
@@ -103,6 +107,11 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | path: /files/<other>                     | body:                                |
       | query:                                   |   data:                              |
       |   fields: filename_disk                  |     filename_disk: other-<run>.txt   |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload that fails to start leaves neither its row nor its file behind
     Given these requests are sent:
@@ -154,6 +163,11 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | upload_metadata:                      |           |
       |   filename_download: rolled-<run>.txt |           |
       |   filename_disk: rolled-<run>.txt     |           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an upload naming the disk name a row holds without its bytes is refused
     Given these requests are sent:
@@ -175,6 +189,9 @@ Feature: A file's disk name is held by one file, whichever way it is written
       | upload_metadata:                    |                                    |
       |   filename_download: lost-<run>.txt |                                    |
       |   filename_disk: held-<run>.txt     |                                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a disk name a permission preset claims is refused when another file holds it
     Given these requests are sent:
@@ -223,6 +240,9 @@ Feature: A file's disk name is held by one file, whichever way it is written
       |   fields: id                          |                                     |
       |   filter[filename_download][_eq]: >-  |                                     |
       |     preset-<run>.txt                  |                                     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a disk name is judged once per file a batch writes, and not for no file
     Given these requests are sent:
@@ -265,3 +285,7 @@ Feature: A file's disk name is held by one file, whichever way it is written
       |         _eq: nothing-<run>.txt       |                                      |
       |   data:                              |                                      |
       |     filename_disk: held-<run>.txt    |                                      |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |

@@ -38,3 +38,7 @@ Feature: A singleton's PATCH creates its row once, then updates it
       |                                                  |       item: '1'        |
       |                                                  |       delta:           |
       |                                                  |         title: second  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |

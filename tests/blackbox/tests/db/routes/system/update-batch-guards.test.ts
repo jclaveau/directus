@@ -8,6 +8,10 @@ import {
 	type StepFunctions,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { randomUUID } from 'crypto';
 import { load as loadYaml } from 'js-yaml';
@@ -36,6 +40,7 @@ type Batch = {
 	run: string;
 	keysByName: Record<string, string>;
 	tokensByName: Record<string, string>;
+	responses: Response[];
 };
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -45,6 +50,8 @@ const feature = loadFeature(
 );
 
 describe.each(vendors)('%s', (vendor) => {
+	const instanceUrl = instanceUrlForFeature(feature, vendor);
+
 	// `<run>` and every `<name>` a Given created, `<name:upper>` upper-cased.
 	function withKeys(cell: string, batch: Batch) {
 		return cell.replaceAll(
@@ -95,8 +102,8 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		const pendingRequest = method === 'PATCH'
-			? request(getUrl(vendor)).patch(path)
-			: request(getUrl(vendor)).get(path);
+			? request(instanceUrl()).patch(path)
+			: request(instanceUrl()).get(path);
 
 		pendingRequest.query(query).set(
 			'Authorization',
@@ -189,7 +196,7 @@ describe.each(vendors)('%s', (vendor) => {
 		then(
 			'these requests get these responses:',
 			async (table: { request: string; response: string }[]) => {
-				const responses: Response[] = [];
+				const { responses } = batch;
 
 				for (const { request: requestCell } of table) {
 					responses.push(
@@ -208,6 +215,8 @@ describe.each(vendors)('%s', (vendor) => {
 				}));
 			},
 		);
+
+		defineStatementCountsStep(and, vendor, batch.responses);
 	}
 
 	defineFeature(feature, (scenario) => {
@@ -236,6 +245,7 @@ describe.each(vendors)('%s', (vendor) => {
 					run: randomUUID(),
 					keysByName: {},
 					tokensByName: {},
+					responses: [],
 				});
 			}, 60_000);
 		}

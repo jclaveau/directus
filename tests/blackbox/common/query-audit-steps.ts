@@ -78,28 +78,55 @@ export function startAuditedInstance(vendor: Vendor) {
 	return () => getUrl(vendor, env);
 }
 
+function countsStatements(feature: ParsedFeature) {
+	return [
+		...feature.scenarios,
+		...feature.scenarioOutlines,
+	].some(({ steps }) => {
+		return steps.some(({ stepText }) => stepText === STATEMENT_COUNTS_STEP);
+	});
+}
+
 /**
  * The url a feature's requests go to: an audited instance's when a scenario
  * counts its statements, else the shared instance's. Call it inside the
  * vendor's describe, as it registers the instance's hooks there.
  */
 export function instanceUrlForFeature(feature: ParsedFeature, vendor: Vendor) {
-	const countsStatements = [
-		...feature.scenarios,
-		...feature.scenarioOutlines,
-	].some(({ steps }) => {
-		return steps.some(({ stepText }) => stepText === STATEMENT_COUNTS_STEP);
-	});
-
-	if (countsStatements) {
+	if (countsStatements(feature)) {
 		return startAuditedInstance(vendor);
 	}
 
 	return () => getUrl(vendor);
 }
 
+/**
+ * The env a feature already spawning an instance of its own adds, so that
+ * instance answers with the statements each request ran.
+ */
+export function auditEnvForFeature(feature: ParsedFeature, vendor: Vendor) {
+	if (vendor !== 'postgres' || !countsStatements(feature)) {
+		return {};
+	}
+
+	return {
+		QUERY_AUDIT_HEADER,
+		QUERY_AUDIT_LEVEL: 'counts',
+	};
+}
+
 // Each table a response's statements touched, with how many of each kind.
-function countStatements(response: Response, requestPosition: number) {
+function countStatements(
+	response: Response | undefined,
+	requestPosition: number,
+) {
+	if (response === undefined) {
+		throw new Error(
+			`Request ${requestPosition} got no HTTP response: only an HTTP call `
+			+ 'has its statements counted',
+		);
+	}
+
 	const countsByTable: Record<string, Record<string, number>> = {};
 	const auditHeader = response.headers[QUERY_AUDIT_HEADER];
 
@@ -166,7 +193,7 @@ function gherkinTableOf(countRows: Record<string, unknown>[]) {
 export function defineStatementCountsStep(
 	and: StepFunction,
 	vendor: Vendor,
-	receivedResponses: Response[],
+	receivedResponses: (Response | undefined)[],
 ) {
 	and.optional(
 		STATEMENT_COUNTS_STEP,
@@ -179,7 +206,7 @@ export function defineStatementCountsStep(
 				...new Set(table.map(({ request }) => Number(request))),
 			].flatMap((requestPosition) => {
 				const countsByTable = countStatements(
-					receivedResponses[requestPosition - 1]!,
+					receivedResponses[requestPosition - 1],
 					requestPosition,
 				);
 
