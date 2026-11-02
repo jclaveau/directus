@@ -353,31 +353,31 @@ Feature: A read runs the statements its query needs, and no more
       | method: GET                | code: 200 |+
       | path: /policies/me/globals |           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 2      | 0      | 0      | 0      |
-      | 2       | directus_files       | 1      | 0      | 0      | 0      |
-      | 2       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 3       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | directus_collections | 1      | 0      | 0      | 0      |
-      | 4       | directus_users       | 1      | 0      | 0      | 0      |
-      | 4       | pg_class             | 1      | 0      | 0      | 0      |
-      | 5       | directus_fields      | 2      | 0      | 0      | 0      |
-      | 5       | directus_users       | 1      | 0      | 0      | 0      |
-      | 5       | geometry_columns     | 0      | 0      | 0      | 0      |
-      | 5       | pg_attribute         | 1      | 0      | 0      | 0      |
-      | 5       | pg_depend            | 1      | 0      | 0      | 0      |
-      | 5       | pg_proc              | 1      | 0      | 0      | 0      |
-      | 5       | undefined            | 0      | 0      | 0      | 0      |
-      | 6       | directus_relations   | 1      | 0      | 0      | 0      |
-      | 6       | directus_users       | 1      | 0      | 0      | 0      |
-      | 6       | pg_constraint        | 1      | 0      | 0      | 0      |
-      | 7       | directus_users       | 1      | 0      | 0      | 0      |
-      | 8       | directus_access      | 1      | 0      | 0      | 0      |
-      | 8       | directus_policies    | 2      | 0      | 0      | 0      |
-      | 8       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | show | with |
+      | 1       | directus_access      | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 1       | directus_users       | 2      | 0      | 0      | 0      | 0    | 0    |
+      | 2       | directus_files       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 2       | directus_settings    | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 4       | directus_collections | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 4       | pg_class             | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 5       | (no table)           | 0      | 0      | 0      | 0      | 1    | 0    |
+      | 5       | directus_fields      | 2      | 0      | 0      | 0      | 0    | 0    |
+      | 5       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 5       | geometry_columns     | 0      | 0      | 0      | 0      | 0    | 1    |
+      | 5       | pg_attribute         | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 5       | pg_depend            | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 5       | pg_proc              | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 6       | directus_relations   | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 6       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 6       | pg_constraint        | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 7       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 8       | directus_access      | 1      | 0      | 0      | 0      | 0    | 0    |
+      | 8       | directus_policies    | 2      | 0      | 0      | 0      | 0    | 0    |
+      | 8       | directus_users       | 1      | 0      | 0      | 0      | 0    | 0    |
 
   Scenario: a user whose policy filters the articles opens the app
     When these requests get these responses:
@@ -484,6 +484,11 @@ Feature: A read runs the statements its query needs, and no more
       | path: /assets/4f6c2a9e-1b3d-4c8e-9a7f-2d5e8b1c0a63 |           |
       | token: ReadStatementCountsToken                    |           |
     And on postgres the requests ran these statements:
-      | request | table | select | insert | update | delete |
-      | 1       | -     | 0      | 0      | 0      | 0      |
-      | 2       | -     | 0      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_files       | 1      | 0      | 0      | 0      |
+      | 1       | directus_settings    | 2      | 0      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 2       | directus_files       | 2      | 0      | 0      | 0      |
+      | 2       | directus_permissions | 1      | 0      | 0      | 0      |
+      | 2       | directus_settings    | 2      | 0      | 0      | 0      |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      |

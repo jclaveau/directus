@@ -105,15 +105,15 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |   id: 0                              |     id: 0      |
       |   name: zero                         |     name: zero |
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_activity       | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions      | 0      | 1      | 0      | 0      |
-      | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | test_write_zero_counted | 1      | 1      | 0      | 0      |
-      | 2       | directus_activity       | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions      | 0      | 1      | 0      | 0      |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      |
-      | 2       | test_write_zero_counted | 1      | 1      | 0      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_activity       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_zero_counted | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_activity       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions      | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_zero_counted | 1      | 1      | 0      | 0      | 0    |
 
   Scenario: a row keyed 0 updated by its keys adopts the children it creates
     When these requests get these responses:
@@ -184,18 +184,18 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       |                                       |   data:       |
       |                                       |     holder: 1 |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 1       | directus_users         | 1      | 0      | 0      | 0      |
-      | 1       | test_write_zero_member | 1      | 1      | 0      | 0      |
-      | 2       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 2       | directus_users         | 1      | 0      | 0      | 0      |
-      | 2       | test_write_zero_holder | 1      | 1      | 0      | 0      |
-      | 2       | test_write_zero_member | 1      | 0      | 0      | 0      |
-      | 3       | directus_activity      | 0      | 2      | 0      | 0      |
-      | 3       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 3       | directus_users         | 1      | 0      | 0      | 0      |
-      | 3       | test_write_zero_holder | 3      | 0      | 0      | 0      |
-      | 3       | test_write_zero_member | 7      | 0      | 1      | 0      |
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_zero_member | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_activity      | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_zero_holder | 1      | 1      | 0      | 0      | 1    |
+      | 2       | test_write_zero_member | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity      | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 3       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 3       | test_write_zero_holder | 3      | 0      | 0      | 0      | 0    |
+      | 3       | test_write_zero_member | 7      | 0      | 1      | 0      | 0    |

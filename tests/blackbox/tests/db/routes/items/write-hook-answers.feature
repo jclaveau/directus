@@ -100,9 +100,9 @@ Feature: A write checks what its filter hooks answer before writing it
       |   id: 113                          |     id: 113           |
       |   name: answer-overwrite           |     name: overwritten |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      | 1    |
 
   Scenario: an update filter answering null cancels a batch update, which returns no item
     When these requests get these responses:
@@ -124,11 +124,11 @@ Feature: A write checks what its filter hooks answer before writing it
       |                                        |   data:           |
       |                                        |     status: start |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an update filter cancelling a nested update is refused
     When these requests get these responses:
@@ -157,13 +157,13 @@ Feature: A write checks what its filter hooks answer before writing it
       requires it.
       """
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_owner | 1      | 1      | 0      | 0      |
-      | 1       | test_write_answer_row   | 4      | 1      | 0      | 0      |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_owner | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row   | 2      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_owner | 1      | 1      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row   | 4      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_owner | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row   | 2      | 0      | 0      | 0      | 0    |
 
   Scenario: an update filter dropping a row of a nested update is refused
     When these requests get these responses:
@@ -188,13 +188,13 @@ Feature: A write checks what its filter hooks answer before writing it
       operation requires it.
       """
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_owner | 1      | 1      | 0      | 0      |
-      | 1       | test_write_answer_row   | 4      | 1      | 0      | 0      |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_owner | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row   | 2      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_owner | 1      | 1      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row   | 4      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_owner | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row   | 2      | 0      | 0      | 0      | 0    |
 
   Scenario: an update filter adding a key of the wrong type is refused
     When these requests get these responses:
@@ -214,11 +214,11 @@ Feature: A write checks what its filter hooks answer before writing it
       instead of "not-a-number".
       """
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an update filter answering a row in a group and as a key is refused
     When these requests get these responses:
@@ -238,11 +238,11 @@ Feature: A write checks what its filter hooks answer before writing it
       but also left it in a { data, keys } group; answer each row one way.
       """
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row | 1      | 0      | 0      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an update filter adding a row to a nested upsert writes that row too
     When these requests get these responses:
@@ -277,15 +277,15 @@ Feature: A write checks what its filter hooks answer before writing it
       |     - owner                                 |                              |
       |   sort: id                                  |                              |
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_row   | 1      | 1      | 0      | 0      |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_owner | 1      | 1      | 0      | 0      |
-      | 2       | test_write_answer_row   | 4      | 1      | 0      | 0      |
-      | 3       | directus_users          | 1      | 0      | 0      | 0      |
-      | 3       | test_write_answer_owner | 2      | 0      | 0      | 0      |
-      | 3       | test_write_answer_row   | 5      | 0      | 1      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row   | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_owner | 1      | 1      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row   | 4      | 1      | 0      | 0      | 1    |
+      | 3       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 3       | test_write_answer_owner | 2      | 0      | 0      | 0      | 0    |
+      | 3       | test_write_answer_row   | 5      | 0      | 1      | 0      | 0    |
 
   Scenario: an update filter writing a BigInt writes it as the number it holds
     When these requests get these responses:
@@ -303,11 +303,11 @@ Feature: A write checks what its filter hooks answer before writing it
       |                                        |     status: answer-big-number |
       |                                        |     amount: 7                 |
     And on postgres the requests ran these statements:
-      | request | table                 | select | insert | update | delete |
-      | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      |
-      | 2       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row | 2      | 0      | 1      | 0      |
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row | 2      | 0      | 1      | 0      | 0    |
 
   Scenario: an update filter writing a BigInt keeps it in the revision as a string
     When these requests get these responses:
@@ -330,15 +330,15 @@ Feature: A write checks what its filter hooks answer before writing it
       |   filter[activity][action][_eq]: update   |                                    |
       |   fields: delta                           |                                    |
     And on postgres the requests ran these statements:
-      | request | table                    | select | insert | update | delete |
-      | 1       | directus_activity        | 0      | 1      | 0      | 0      |
-      | 1       | directus_revisions       | 0      | 1      | 0      | 0      |
-      | 1       | directus_users           | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_ledger | 1      | 1      | 0      | 0      |
-      | 2       | directus_activity        | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions       | 0      | 1      | 0      | 0      |
-      | 2       | directus_users           | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_ledger | 3      | 0      | 1      | 0      |
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_ledger | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_activity        | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions       | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_ledger | 3      | 0      | 1      | 0      | 0    |
 
   Scenario: a delete filter cancelling a nested delete is refused, keeping the row
     When these requests get these responses:
@@ -366,10 +366,10 @@ Feature: A write checks what its filter hooks answer before writing it
       requires it.
       """
     And on postgres the requests ran these statements:
-      | request | table                   | select | insert | update | delete |
-      | 1       | directus_users          | 1      | 0      | 0      | 0      |
-      | 1       | test_write_answer_owner | 1      | 1      | 0      | 0      |
-      | 1       | test_write_answer_row   | 4      | 1      | 0      | 0      |
-      | 2       | directus_users          | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_owner | 1      | 0      | 0      | 0      |
-      | 2       | test_write_answer_row   | 1      | 0      | 0      | 0      |
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_write_answer_owner | 1      | 1      | 0      | 0      | 0    |
+      | 1       | test_write_answer_row   | 4      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_owner | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_write_answer_row   | 1      | 0      | 0      | 0      | 0    |

@@ -131,21 +131,21 @@ Feature: A single permission reaches its policy's users from the next request on
       |   filter[policy][_eq]: <queried-policy> |       fields:                  |
       |                                         |         - name                 |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 3      | 0      | 1      | 0      |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles       | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions | 3      | 0      | 1      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a permission filter on id leaves out the app minimal permissions
     Given these requests are sent:

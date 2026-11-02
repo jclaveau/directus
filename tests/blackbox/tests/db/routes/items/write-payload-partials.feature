@@ -79,24 +79,24 @@ Feature: A write takes the less travelled side of each payload rule
       | payload:                                 |     role_made: null    |
       |   answer: 'true'                         |     role_changed: null |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 2      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
-      | 1       | test_wpp_row         | 1      | 1      | 0      | 0      |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | test_wpp_row         | 3      | 0      | 1      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wpp_row         | 1      | 1      | 0      | 0      | 0    |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_wpp_row         | 3      | 0      | 1      | 0      | 0    |
 
   Scenario: a point written as a GeoJSON string or as null reads back as written
     Then these requests get these responses:

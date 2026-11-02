@@ -167,35 +167,35 @@ Feature: A file's disk name is held by one file, whichever way it is written
       |   filename_download: rolled-<run>.txt |           |
       |   filename_disk: rolled-<run>.txt     |           |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
-      | 1       | directus_files       | 1      | 1      | 0      | 1      |
-      | 1       | directus_permissions | 3      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 1       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
-      | 2       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 2       | directus_files       | 1      | 1      | 0      | 1      |
-      | 2       | directus_revisions   | 0      | 1      | 0      | 0      |
-      | 2       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 3       | directus_access      | 2      | 0      | 0      | 0      |
-      | 3       | directus_activity    | 0      | 2      | 0      | 0      |
-      | 3       | directus_files       | 4      | 1      | 1      | 0      |
-      | 3       | directus_revisions   | 0      | 2      | 0      | 0      |
-      | 3       | directus_roles       | 1      | 0      | 0      | 0      |
-      | 3       | directus_settings    | 1      | 0      | 0      | 0      |
-      | 3       | directus_users       | 1      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_files       | 1      | 1      | 0      | 1      | 0    |
+      | 1       | directus_permissions | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_files       | 1      | 1      | 0      | 1      | 0    |
+      | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
+      | 2       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_access      | 2      | 0      | 0      | 0      | 0    |
+      | 3       | directus_activity    | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_files       | 4      | 1      | 1      | 0      | 0    |
+      | 3       | directus_revisions   | 0      | 2      | 0      | 0      | 0    |
+      | 3       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_settings    | 1      | 0      | 0      | 0      | 0    |
+      | 3       | directus_users       | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an upload naming the disk name a row holds without its bytes is refused
     Given these requests are sent:
@@ -270,20 +270,20 @@ Feature: A file's disk name is held by one file, whichever way it is written
       |   filter[filename_download][_eq]: >-  |                                     |
       |     preset-<run>.txt                  |                                     |
     And on postgres the requests ran these statements:
-      | request | table                | select | insert | update | delete |
-      | 1       | directus_access      | 3      | 0      | 0      | 0      |
-      | 1       | directus_collections | 1      | 0      | 0      | 0      |
-      | 1       | directus_fields      | 1      | 0      | 0      | 0      |
-      | 1       | directus_files       | 1      | 0      | 0      | 0      |
-      | 1       | directus_permissions | 1      | 0      | 0      | 0      |
-      | 1       | directus_policies    | 1      | 0      | 0      | 0      |
-      | 1       | directus_relations   | 1      | 0      | 0      | 0      |
-      | 1       | directus_users       | 1      | 0      | 0      | 0      |
-      | 1       | geometry_columns     | 0      | 0      | 0      | 0      |
-      | 1       | information_schema   | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint        | 1      | 0      | 0      | 0      |
-      | 1       | pg_index             | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc              | 1      | 0      | 0      | 0      |
+      | request | table                | select | insert | update | delete | with |
+      | 1       | directus_access      | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_collections | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_files       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies    | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index             | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc              | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a disk name is judged once per file a batch writes, and not for no file
     Given these requests are sent:

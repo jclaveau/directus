@@ -124,25 +124,25 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |                                      |       collection: test_singular_comments |
       |                                      |       item: '<entry>'                    |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 5      | 0      | 0      | 0      |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections   | 1      | 0      | 0      | 0      |
-      | 1       | directus_comments      | 1      | 1      | 0      | 0      |
-      | 1       | directus_fields        | 1      | 0      | 0      | 0      |
-      | 1       | directus_notifications | 0      | 1      | 0      | 0      |
-      | 1       | directus_permissions   | 3      | 0      | 0      | 0      |
-      | 1       | directus_policies      | 1      | 0      | 0      | 0      |
-      | 1       | directus_relations     | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles         | 2      | 0      | 0      | 0      |
-      | 1       | directus_users         | 6      | 0      | 0      | 0      |
-      | 1       | geometry_columns       | 0      | 0      | 0      | 0      |
-      | 1       | information_schema     | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint          | 1      | 0      | 0      | 0      |
-      | 1       | pg_index               | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc                | 1      | 0      | 0      | 0      |
-      | 1       | test_singular_comments | 1      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_access        | 5      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_comments      | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_fields        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_notifications | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions   | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles         | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users         | 6      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns       | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_singular_comments | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a comment notifies a user once, whatever case spells the mention
     Given these requests are sent:
@@ -187,25 +187,25 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |   filter[recipient][_eq]: <reader>     |                       |
       |   filter[item][_eq]: <entry>           |                       |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 5      | 0      | 0      | 0      |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections   | 1      | 0      | 0      | 0      |
-      | 1       | directus_comments      | 1      | 1      | 0      | 0      |
-      | 1       | directus_fields        | 1      | 0      | 0      | 0      |
-      | 1       | directus_notifications | 0      | 1      | 0      | 0      |
-      | 1       | directus_permissions   | 3      | 0      | 0      | 0      |
-      | 1       | directus_policies      | 1      | 0      | 0      | 0      |
-      | 1       | directus_relations     | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles         | 2      | 0      | 0      | 0      |
-      | 1       | directus_users         | 6      | 0      | 0      | 0      |
-      | 1       | geometry_columns       | 0      | 0      | 0      | 0      |
-      | 1       | information_schema     | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint          | 1      | 0      | 0      | 0      |
-      | 1       | pg_index               | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc                | 1      | 0      | 0      | 0      |
-      | 1       | test_singular_comments | 1      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_access        | 5      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_comments      | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_fields        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_notifications | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions   | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles         | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users         | 6      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns       | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_singular_comments | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a comment notifies the user it mentions who cannot read users
     Given these requests are sent:
@@ -284,25 +284,25 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |                                      |       collection: test_singular_comments |
       |                                      |       item: '<entry>'                    |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 6      | 0      | 0      | 0      |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections   | 1      | 0      | 0      | 0      |
-      | 1       | directus_comments      | 1      | 1      | 0      | 0      |
-      | 1       | directus_fields        | 1      | 0      | 0      | 0      |
-      | 1       | directus_notifications | 0      | 1      | 0      | 0      |
-      | 1       | directus_permissions   | 8      | 0      | 0      | 0      |
-      | 1       | directus_policies      | 2      | 0      | 0      | 0      |
-      | 1       | directus_relations     | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 1       | directus_roles         | 1      | 0      | 0      | 0      |
-      | 1       | directus_users         | 5      | 0      | 0      | 0      |
-      | 1       | geometry_columns       | 0      | 0      | 0      | 0      |
-      | 1       | information_schema     | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint          | 1      | 0      | 0      | 0      |
-      | 1       | pg_index               | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc                | 1      | 0      | 0      | 0      |
-      | 1       | test_singular_comments | 2      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_access        | 6      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_comments      | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_fields        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_notifications | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_permissions   | 8      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies      | 2      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_roles         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_users         | 5      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns       | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_singular_comments | 2      | 0      | 0      | 0      | 0    |
 
   Scenario: a comment does not notify a user its author cannot read
     Given these requests are sent:
@@ -374,23 +374,23 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |   fields: id                         |            |
       |   filter[recipient][_eq]: <reader>   |            |
     And on postgres the requests ran these statements:
-      | request | table                  | select | insert | update | delete |
-      | 1       | directus_access        | 3      | 0      | 0      | 0      |
-      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
-      | 1       | directus_collections   | 1      | 0      | 0      | 0      |
-      | 1       | directus_comments      | 1      | 1      | 0      | 0      |
-      | 1       | directus_fields        | 1      | 0      | 0      | 0      |
-      | 1       | directus_permissions   | 5      | 0      | 0      | 0      |
-      | 1       | directus_policies      | 1      | 0      | 0      | 0      |
-      | 1       | directus_relations     | 1      | 0      | 0      | 0      |
-      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
-      | 1       | directus_users         | 2      | 0      | 0      | 0      |
-      | 1       | geometry_columns       | 0      | 0      | 0      | 0      |
-      | 1       | information_schema     | 1      | 0      | 0      | 0      |
-      | 1       | pg_constraint          | 1      | 0      | 0      | 0      |
-      | 1       | pg_index               | 1      | 0      | 0      | 0      |
-      | 1       | pg_proc                | 1      | 0      | 0      | 0      |
-      | 1       | test_singular_comments | 1      | 0      | 0      | 0      |
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_access        | 3      | 0      | 0      | 0      | 0    |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_collections   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_comments      | 1      | 1      | 0      | 0      | 0    |
+      | 1       | directus_fields        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_permissions   | 5      | 0      | 0      | 0      | 0    |
+      | 1       | directus_policies      | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_relations     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
+      | 1       | directus_users         | 2      | 0      | 0      | 0      | 0    |
+      | 1       | geometry_columns       | 0      | 0      | 0      | 0      | 1    |
+      | 1       | information_schema     | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_constraint          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_index               | 1      | 0      | 0      | 0      | 0    |
+      | 1       | pg_proc                | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_singular_comments | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an admin's comment mentioning a missing user is not written
     Given these requests are sent:
