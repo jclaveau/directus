@@ -396,14 +396,75 @@ test('closes an unreplied message audit on disconnect', async () => {
 
 	const audits: unknown[] = [];
 
+	void auditMessageQueries(client, { type: 'items', uid: 'a' }, () => {
+		const audit = queryAuditStore.getStore()!;
+
+		auditStatementStart(audit, 'select 1', 'a')();
+		audits.push(audit);
+
+		return new Promise<void>(() => undefined);
+	});
+
+	client.emit('close');
+
+	expect(audits).toMatchObject([{ closed: true, transactionAudits: [] }]);
+});
+
+test('closes a message audit once its handler settles without a reply', async () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const client = Object.assign(new EventEmitter(), {
+		send: vi.fn(),
+		accountability: null,
+	}) as unknown as WebSocketClient;
+
+	reportQueryAuditInReplies(client);
+
+	const audits: unknown[] = [];
+
 	await auditMessageQueries(client, { type: 'items', uid: 'a' }, async () => {
 		const audit = queryAuditStore.getStore()!;
 
 		auditStatementStart(audit, 'select 1', 'a')();
 		audits.push(audit);
+		client.send('{"type":"items","status":"error"}');
 	});
 
-	client.emit('close');
+	expect(audits).toMatchObject([{ closed: true, transactionAudits: [] }]);
+});
+
+test('closes a message audit once its handler throws', async () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'statements',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const client = Object.assign(new EventEmitter(), {
+		send: vi.fn(),
+		accountability: null,
+	}) as unknown as WebSocketClient;
+
+	reportQueryAuditInReplies(client);
+
+	const audits: unknown[] = [];
+
+	await expect(auditMessageQueries(
+		client,
+		{ type: 'items', uid: 'a' },
+		async () => {
+			const audit = queryAuditStore.getStore()!;
+
+			auditStatementStart(audit, 'select 1', 'a')();
+			audits.push(audit);
+
+			throw new Error('handler failed');
+		},
+	)).rejects.toThrow('handler failed');
 
 	expect(audits).toMatchObject([{ closed: true, transactionAudits: [] }]);
 });

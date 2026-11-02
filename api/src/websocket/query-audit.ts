@@ -76,12 +76,22 @@ export async function auditMessageQueries(
 
 	unrepliedAuditsOf(client).add(audit);
 
-	return queryAuditStore.run(audit, handleMessage);
+	// A handler settling unreplied (an error sent without its uid) ends its
+	// message: what still runs after it belongs to no reply.
+	try {
+		return await queryAuditStore.run(audit, handleMessage);
+	}
+	finally {
+		if (unrepliedAuditsOf(client).delete(audit)) {
+			closeQueryAudit(audit);
+			discardAuditedStatements(audit);
+		}
+	}
 }
 
 /**
  * Add its message's audit to each reply sent to `client`, and close the
- * audits still waiting for a reply when it disconnects.
+ * audits whose handler is still running when it disconnects.
  */
 export function reportQueryAuditInReplies(client: WebSocketClient): void {
 	if (!queryAuditEnabled()) {
