@@ -4,7 +4,9 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import createApp from './app.js';
+import { validateDatabaseConnection } from './database/index.js';
 import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
+import { validateMarketplaceEnvUnset } from './utils/validate-env.js';
 
 vi.mock('./database', () => ({
 	default: vi.fn(),
@@ -117,6 +119,15 @@ const request = async (path: string = '') => {
 };
 
 describe('createApp', async () => {
+	test('refuses the Marketplace variables before reaching the database', async () => {
+		await createApp();
+
+		expect(validateMarketplaceEnvUnset).toHaveBeenCalledExactlyOnceWith();
+
+		expect(vi.mocked(validateMarketplaceEnvUnset).mock.invocationCallOrder[0])
+			.toBeLessThan(vi.mocked(validateDatabaseConnection).mock.invocationCallOrder[0]!);
+	});
+
 	describe('Content Security Policy', () => {
 		test('Should set content-security-policy header by default', async () => {
 			const response = await request();

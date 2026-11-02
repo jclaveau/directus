@@ -183,3 +183,7 @@ export function validateHeaderNameEnv(key: string): void {
 		process.exit(1);
 	}
 }
+
+export function validateMarketplaceEnvUnset(): void {
+	return;
+}

@@ -9,6 +9,7 @@ import {
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
+	validateMarketplaceEnvUnset,
 } from './validate-env.js';
 
 vi.mock('@directus/env');
@@ -259,6 +260,34 @@ test('takes a header name Node can write', () => {
 	vi.mocked(useEnv).mockReturnValueOnce({ HEADER_TEST_VARIABLE: 'X-Query-Audit' });
 
 	validateHeaderNameEnv('HEADER_TEST_VARIABLE');
+
+	expect(mockLogger.error).not.toHaveBeenCalled();
+	expect(process.exit).not.toHaveBeenCalled();
+});
+
+// Extensions change only with a deploy (#627): a deployment still configuring
+// the Marketplace expects installs it no longer gets.
+test.each([
+	{ key: 'EXTENSIONS_LOCATION', value: 's3' },
+	{ key: 'MARKETPLACE_REGISTRY', value: 'https://registry.example.com' },
+	{ key: 'MARKETPLACE_TRUST', value: '' },
+])('refuses $key set', ({ key, value }) => {
+	vi.mocked(useEnv).mockReturnValueOnce({ [key]: value });
+
+	validateMarketplaceEnvUnset();
+
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
+		`"${key}" Environment Variable is set, but extensions change only `
+			+ 'with a deploy: the Marketplace it configures is removed. Unset it.',
+	);
+
+	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
+});
+
+test('takes a deployment setting none of the Marketplace variables', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
+
+	validateMarketplaceEnvUnset();
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();
