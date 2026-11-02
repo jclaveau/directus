@@ -47,4 +47,4 @@ Feature: A singleton's PATCH creates its row once, then updates it
       | 2       | directus_activity     | 0      | 1      | 0      | 0      |
       | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
       | 2       | directus_users        | 1      | 0      | 0      | 0      |
-      | 2       | test_singleton_upsert | 4      | 0      | 1      | 0      |
+      | 2       | test_singleton_upsert | 3      | 0      | 1      | 0      |

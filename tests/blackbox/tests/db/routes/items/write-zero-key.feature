@@ -89,7 +89,7 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       | 2       | test_write_zero_listed | 6      | 1      | 1      | 0      |
       | 2       | test_write_zero_parent | 3      | 0      | 0      | 0      |
       | 2       | test_write_zero_plain  | 2      | 0      | 0      | 0      |
-      | 2       | test_write_zero_sorted | 5      | 0      | 1      | 0      |
+      | 2       | test_write_zero_sorted | 4      | 0      | 1      | 0      |
 
   Scenario: a row keyed 0 created beside a higher key answers with its own row
     When these requests get these responses:
@@ -198,4 +198,4 @@ Feature: A row keyed 0 is written, with its children, though its key is falsy
       | 3       | directus_revisions     | 0      | 1      | 0      | 0      | 0    |
       | 3       | directus_users         | 1      | 0      | 0      | 0      | 0    |
       | 3       | test_write_zero_holder | 3      | 0      | 0      | 0      | 0    |
-      | 3       | test_write_zero_member | 7      | 0      | 1      | 0      | 0    |
+      | 3       | test_write_zero_member | 6      | 0      | 1      | 0      | 0    |

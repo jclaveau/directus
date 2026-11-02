@@ -90,17 +90,17 @@ Feature: A single access row grants its policy from the next request on
       | 2       | directus_activity  | 0      | 1      | 0      | 0      |
       | 2       | directus_revisions | 0      | 1      | 0      | 0      |
       | 2       | directus_users     | 1      | 0      | 0      | 0      |
-      | 4       | directus_access    | 6      | 0      | 1      | 0      |
+      | 4       | directus_access    | 5      | 0      | 1      | 0      |
       | 4       | directus_activity  | 0      | 1      | 0      | 0      |
       | 4       | directus_revisions | 0      | 1      | 0      | 0      |
       | 4       | directus_roles     | 2      | 0      | 0      | 0      |
       | 4       | directus_users     | 2      | 0      | 0      | 0      |
-      | 6       | directus_access    | 6      | 0      | 1      | 0      |
+      | 6       | directus_access    | 5      | 0      | 1      | 0      |
       | 6       | directus_activity  | 0      | 1      | 0      | 0      |
       | 6       | directus_revisions | 0      | 1      | 0      | 0      |
       | 6       | directus_roles     | 2      | 0      | 0      | 0      |
       | 6       | directus_users     | 2      | 0      | 0      | 0      |
-      | 8       | directus_access    | 4      | 0      | 0      | 1      |
+      | 8       | directus_access    | 3      | 0      | 0      | 1      |
       | 8       | directus_activity  | 0      | 1      | 0      | 0      |
       | 8       | directus_roles     | 2      | 0      | 0      | 0      |
       | 8       | directus_users     | 2      | 0      | 0      | 0      |
@@ -267,9 +267,9 @@ Feature: A single access row grants its policy from the next request on
     And on postgres the requests ran these statements:
       | request | table                | select | insert | update | delete |
       | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | test_singular_access | 1      | 0      | 0      | 0      |
+      | 2       | test_singular_access | 1      | 0      | 1      | 0      |
       | 3       | directus_users       | 1      | 0      | 0      | 0      |
-      | 3       | test_singular_access | 1      | 0      | 0      | 0      |
+      | 3       | test_singular_access | 2      | 0      | 0      | 1      |
       | 5       | directus_permissions | 2      | 0      | 0      | 0      |
       | 5       | directus_users       | 1      | 0      | 0      | 0      |
       | 5       | test_singular_access | 1      | 0      | 0      | 0      |

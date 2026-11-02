@@ -96,7 +96,7 @@ Feature: A write takes the less travelled side of each payload rule
       | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_users       | 1      | 0      | 0      | 0      | 0    |
-      | 2       | test_wpp_row         | 3      | 0      | 1      | 0      | 0    |
+      | 2       | test_wpp_row         | 2      | 0      | 1      | 0      | 0    |
 
   Scenario: a point written as a GeoJSON string or as null reads back as written
     Then these requests get these responses:
@@ -190,7 +190,7 @@ Feature: A write takes the less travelled side of each payload rule
       | 1       | directus_revisions | 0      | 6      | 3      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
       | 1       | test_wpp_child     | 2      | 3      | 0      | 0      |
-      | 1       | test_wpp_leaf      | 3      | 1      | 1      | 0      |
+      | 1       | test_wpp_leaf      | 2      | 1      | 1      | 0      |
       | 1       | test_wpp_parent    | 1      | 1      | 0      | 0      |
 
   Scenario: a nested child drops the leaves and notes it no longer lists
