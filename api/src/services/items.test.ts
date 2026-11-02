@@ -1647,6 +1647,71 @@ describe('Integration Tests', () => {
 			});
 
 			it(oneLine`
+				refuses, when asked, one junction row named under two spellings of
+				its key by two rows, writing nothing
+			`, async () => {
+				const tagsSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('tags').m2m('tags');
+					})
+					.collection('tags', (c) => {
+						c.field('id').id();
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: tagsSchema })
+					.updateBatch(
+						[
+							{ id: 1, tags: { update: [{ id: 7 }] } },
+							{ id: 2, tags: { update: [{ id: '07' }] } },
+						],
+						{ refuseChildJoiningSeveralRows: true },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it(oneLine`
+				refuses, when asked, a junction key no integer spells for that key,
+				not for joining several rows
+			`, async () => {
+				const tagsSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('tags').m2m('tags');
+					})
+					.collection('tags', (c) => {
+						c.field('id').id();
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: tagsSchema })
+					.updateBatch(
+						[
+							{ id: 1, tags: { update: [{ id: 'abc' }] } },
+							{ id: 2, tags: { update: [{ id: 'xyz' }] } },
+						],
+						{ refuseChildJoiningSeveralRows: true },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: oneLine`
+							Primary key of test_tags_junction must be an integer instead
+							of "abc"
+						`,
+					}));
+			});
+
+			it(oneLine`
 				refuses a missing string key rather than give its children to the
 				payload's key, writing nothing
 			`, async () => {

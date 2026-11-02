@@ -1424,14 +1424,22 @@ implements AbstractService<Item> {
 	 * spellings of one row read as two rows, and a row named by the spelling
 	 * the read does not return is told missing.
 	 */
-	protected primaryKeyNameOf(key: PrimaryKey): string {
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+	protected primaryKeyNameOf(
+		key: PrimaryKey,
+		keyCollection: string = this.collection,
+	): string {
+		const primaryKeyField = this.schema.collections[keyCollection]!.primary;
 
-		const primaryKeyType = this.schema.collections[this.collection]!
+		const primaryKeyType = this.schema.collections[keyCollection]!
 			.fields[primaryKeyField]!.type;
 
 		if (primaryKeyType === 'uuid') {
 			return String(key).toLowerCase();
+		}
+
+		// A child key comes unvalidated: as numbers, 'abc' and 'xyz' would both be NaN.
+		if (!/^[+-]?\d+$/.test(String(key))) {
+			return String(key);
 		}
 
 		if (primaryKeyType === 'integer') {
@@ -1439,7 +1447,7 @@ implements AbstractService<Item> {
 		}
 
 		// Past 2^53 a Number would round two rows onto one name.
-		return primaryKeyType === 'bigInteger' && /^[+-]?\d+$/.test(String(key))
+		return primaryKeyType === 'bigInteger'
 			? String(BigInt(key))
 			: String(key);
 	}
@@ -1558,7 +1566,12 @@ implements AbstractService<Item> {
 						return namedChild;
 					})
 					.filter((childKey) => !isMissingPrimaryKey(childKey))
-					.map(String));
+					.map((childKey) => {
+						return this.primaryKeyNameOf(
+							childKey as PrimaryKey,
+							relation.collection,
+						);
+					}));
 
 				for (const joiningChildKey of joiningChildKeys) {
 					// A row lastWins sends in two groups is still one row.
