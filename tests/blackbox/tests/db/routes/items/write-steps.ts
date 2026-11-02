@@ -1,4 +1,3 @@
-import { getUrl } from '@common/config';
 import {
 	cellOfKnownKeys,
 	messageOfDocString,
@@ -6,6 +5,7 @@ import {
 	type StepFunctions,
 } from '@common/cucumber';
 import type { Vendor } from '@common/get-dbs-to-test';
+import { defineStatementCountsStep } from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request, { type Response } from 'supertest';
@@ -32,12 +32,14 @@ const REQUEST_CELL_KEYS = [
 const RESPONSE_CELL_KEYS = ['code', 'body'] as const;
 
 /**
- * The steps the write-coverage features share: a request|response table, and
- * the message a response was refused with.
+ * The steps the write-coverage features share: a request|response table, the
+ * message a response was refused with, and the statements the requests ran.
+ * The requests go to the instance `instanceUrl` names.
  */
 export function defineWriteSteps(
-	{ when, then }: StepFunctions,
+	{ when, then, and }: StepFunctions,
 	vendor: Vendor,
+	instanceUrl: () => string,
 ) {
 	const receivedResponses: Response[] = [];
 
@@ -58,10 +60,10 @@ export function defineWriteSteps(
 		);
 
 		const pendingRequest = {
-			DELETE: () => request(getUrl(vendor)).delete(path),
-			GET: () => request(getUrl(vendor)).get(path),
-			PATCH: () => request(getUrl(vendor)).patch(path),
-			POST: () => request(getUrl(vendor)).post(path),
+			DELETE: () => request(instanceUrl()).delete(path),
+			GET: () => request(instanceUrl()).get(path),
+			PATCH: () => request(instanceUrl()).patch(path),
+			POST: () => request(instanceUrl()).post(path),
 		}[method]()
 			.query(Object.fromEntries(
 				Object.entries(query).map(([parameter, value]) => {
@@ -118,4 +120,6 @@ export function defineWriteSteps(
 			).toMatchObject([{ message: messageOfDocString(docString) }]);
 		},
 	);
+
+	defineStatementCountsStep(and, vendor, receivedResponses);
 }

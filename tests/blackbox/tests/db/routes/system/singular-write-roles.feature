@@ -25,6 +25,9 @@ Feature: Roles and policies are updated by a query
       |         _eq: queried-<run>     |                                  |
       |   data:                        |                                  |
       |     description: queried-<run> |                                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a policy matched by a query takes the update
     Given these requests are sent:
@@ -49,3 +52,6 @@ Feature: Roles and policies are updated by a query
       |         _eq: queried-<run>     |                                  |
       |   data:                        |                                  |
       |     description: queried-<run> |                                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

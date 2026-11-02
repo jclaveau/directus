@@ -40,3 +40,8 @@ Feature: Presets are written one at a time or in batches
       | query:                               |   data: []                  |
       |   fields: id                         |                             |
       |   filter[bookmark][_eq]: batch-<run> |                             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |

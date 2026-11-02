@@ -41,6 +41,10 @@ Feature: A translation moves to another key or language only onto a free one
       | query:                         |   data:                       |
       |   fields: key,language         |     key: moved-<run>          |
       |                                |     language: fr-FR           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: one key and language given to several translations is refused
     Given these requests are sent:
@@ -78,6 +82,9 @@ Feature: A translation moves to another key or language only onto a free one
       |   filter:              |     - key: tm-<run>           |
       |     key:               |       language: fr-FR         |
       |       _eq: tm-<run>    |                               |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: two translations for one key and language created at once are refused
     Then these requests get these responses:
@@ -98,6 +105,9 @@ Feature: A translation moves to another key or language only onto a free one
       |   filter:           |                                    |
       |     key:            |                                    |
       |       _eq: tm-<run> |                                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a translation moved by its language alone lands on a free one only
     Given these requests are sent:
@@ -134,6 +144,10 @@ Feature: A translation moves to another key or language only onto a free one
       | path: /translations/<greeting> | body:                         |
       | query:                         |   data:                       |
       |   fields: language             |     language: de-DE           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch naming no keys moves no translation
     Given these requests are sent:
@@ -159,3 +173,6 @@ Feature: A translation moves to another key or language only onto a free one
       | query:                         |   data:             |
       |   fields: key,language         |     key: tm-<run>   |
       |                                |     language: en-US |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

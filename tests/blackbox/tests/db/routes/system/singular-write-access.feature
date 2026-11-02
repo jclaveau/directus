@@ -84,6 +84,12 @@ Feature: A single access row grants its policy from the next request on
       |                                   |         access collection                |
       |                                   |         "test_singular_access" or it     |
       |                                   |         does not exist. Queried in root. |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 6       | -     | 0      | 0      | 0      | 0      |
+      | 8       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an access row is moved in batches and by a query
     Given these requests are sent:
@@ -133,6 +139,10 @@ Feature: A single access row grants its policy from the next request on
       |         _eq: <holder>       |                               |
       |   data:                     |                               |
       |     policy: <first-policy>  |                               |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a key no item holds is not found for the admin, forbidden to a user
     Given these requests are sent:
@@ -216,6 +226,12 @@ Feature: A single access row grants its policy from the next request on
       |                                              |         "delete" for collection |
       |                                              |         "test_singular_access"  |
       |                                              |         or it does not exist.   |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |
+      | 6       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a key a batch delete misses is not found for the admin, forbidden to a user
     Given these requests are sent:
@@ -273,3 +289,8 @@ Feature: A single access row grants its policy from the next request on
       |                                          |         "delete" for collection |
       |                                          |         "test_singular_access"  |
       |                                          |         or it does not exist.   |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |

@@ -31,6 +31,9 @@ Feature: Users are updated by query, by themselves and in their sessions
       |         _eq: queried-<run> |                           |
       |   data:                    |                           |
       |     last_name: by-query    |                           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: users created together with one email twice are refused
     Then these requests get these responses:
@@ -45,6 +48,9 @@ Feature: Users are updated by query, by themselves and in their sessions
       |                                    |         collection                  |
       |                                    |         "directus_users" has        |
       |                                    |         to be unique.               |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an admin updates their own name and two-factor secret
     Given these requests are sent:
@@ -91,6 +97,11 @@ Feature: Users are updated by query, by themselves and in their sessions
       | path: /users/<self-user>             | body:                        |
       | query:                               |   data:                      |
       |   fields: tfa_secret                 |     tfa_secret: null         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: only an admin sets the provider and the external identifier
     Given these requests are sent:
@@ -148,6 +159,12 @@ Feature: Users are updated by query, by themselves and in their sessions
       |     - <limited-user>             |         change the "tfa_secret"    |
       |   data:                          |         value manually.            |
       |     tfa_secret: JBSWY3DPEHPK3PXP |                                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a password change ends every other session of the user
     Given these requests are sent:
@@ -211,3 +228,8 @@ Feature: Users are updated by query, by themselves and in their sessions
       | path: /users/me             |   errors:                            |
       |                             |     - message: >-                    |
       |                             |         Invalid user credentials.    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |

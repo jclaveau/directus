@@ -32,6 +32,10 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       |   probe: <run>              |     - message: >-                    |
       | eventually: true            |         You don't have permission to |
       |                             |         access this.                 |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: webhook flows created in one batch answer their triggers
     Then these requests get these responses:
@@ -68,6 +72,10 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | payload:                           |                         |
       |   - <first-flow>                   |                         |
       |   - <second-flow>                  |                         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a flow deleted with its chained operations takes them along
     Given these requests are sent:
@@ -117,6 +125,9 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | query:                      |   data: [] |
       |   fields: id                |            |
       |   filter[id][_eq]: <flow>   |            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an inactive flow is renamed in batches and by a query
     Given these requests are sent:
@@ -149,6 +160,10 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       |         _eq: batch-<run>       |                                  |
       |   data:                        |                                  |
       |     description: queried-<run> |                                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an operation is moved one by one and in batches, then deleted
     Given these requests are sent:
@@ -205,3 +220,9 @@ Feature: A single flow is loaded as it is created and unloaded as it is deleted
       | query:                          |   data: []          |
       |   fields: id                    |                     |
       |   filter[flow][_eq]: <flow>     |                     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |

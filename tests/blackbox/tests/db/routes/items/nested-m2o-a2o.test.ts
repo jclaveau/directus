@@ -13,7 +13,7 @@ import { describe, expect } from 'vitest';
 import {
 	defineStatementCountsStep,
 	startAuditedInstance,
-} from './query-audit-steps';
+} from '@common/query-audit-steps';
 
 type RequestCell = {
 	method: 'GET' | 'POST' | 'PATCH';

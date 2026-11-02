@@ -75,6 +75,11 @@ Feature: A single permission reaches its policy's users from the next request on
       |                                         |         "test_singular_permissions"   |
       |                                         |         or it does not exist. Queried |
       |                                         |         in root.                      |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 6       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a permission matched by a query takes the update
     Given these requests are sent:
@@ -111,6 +116,9 @@ Feature: A single permission reaches its policy's users from the next request on
       |   fields: policy,fields                 |     - policy: <queried-policy> |
       |   filter[policy][_eq]: <queried-policy> |       fields:                  |
       |                                         |         - name                 |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a permission filter on id leaves out the app minimal permissions
     Given these requests are sent:

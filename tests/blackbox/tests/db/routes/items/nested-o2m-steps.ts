@@ -9,7 +9,7 @@ import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request, { type Response } from 'supertest';
 import { expect } from 'vitest';
-import { defineStatementCountsStep } from './query-audit-steps';
+import { defineStatementCountsStep } from '@common/query-audit-steps';
 
 type RequestCell = {
 	method: 'GET' | 'PATCH' | 'POST';

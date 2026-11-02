@@ -63,6 +63,11 @@ Feature: An import writes the nested changes of every row it reads
       |     - id                                         |                       |
       |     - parent                                     |                       |
       |   sort: id                                       |                       |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an import creating a row creates the page its any-to-one field holds
     When these requests get these responses:
@@ -83,6 +88,9 @@ Feature: An import writes the nested changes of every row it reads
       | path: /items/test_write_import_page/ip-page-new | body:                   |
       |                                                 |   data:                 |
       |                                                 |     title: created      |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an import updating a row given changes to its children applies them
     When these requests get these responses:
@@ -124,3 +132,7 @@ Feature: An import writes the nested changes of every row it reads
       |     - name                                   |       parent: null      |
       |     - parent                                 |                         |
       |   sort: id                                   |                         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |

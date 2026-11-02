@@ -28,6 +28,9 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                       |   data:              |
       |   filter[email][_eq]: a2o-create@write.email |     - status: active |
       |   fields: status                             |                      |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an any-to-one field activates the existing user it holds
     When these requests get these responses:
@@ -50,6 +53,10 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /users/5e1f0000-0000-4000-8000-000000000012 | body:              |
       |                                                   |   data:            |
       |                                                   |     status: active |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a user's policies given as an empty list delete its access rows
     When these requests get these responses:
@@ -78,6 +85,12 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /access                                            | body:      |
       | query:                                                   |   data: [] |
       |   filter[user][email][_eq]: policies-emptied@write.email |            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a user's policies deleting an access row delete it
     When these requests get these responses:
@@ -103,6 +116,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | path: /access                                            | body:      |
       | query:                                                   |   data: [] |
       |   filter[user][email][_eq]: policies-deleted@write.email |            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a role's users given as an empty list leave the role
     When these requests get these responses:
@@ -127,6 +145,11 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                            |   data:          |
       |   filter[email][_eq]: role-emptied@write.email    |     - role: null |
       |   fields: role                                    |                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a role's users creating a user put it in the role
     When these requests get these responses:
@@ -143,6 +166,9 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                            |   data:                 |
       |   filter[email][_eq]: role-created@write.email    |     - role:             |
       |   fields: role.name                               |         name: integrity |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a role's users updating a user outside it activate it and move it in
     When these requests get these responses:
@@ -167,6 +193,10 @@ Feature: A nested write to users, roles or policies hands its user checks up
       |   fields:                                         |       role:             |
       |     - status                                      |         name: integrity |
       |     - role.name                                   |                         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a role's users deleting a user take it out of the role
     When these requests get these responses:
@@ -188,3 +218,7 @@ Feature: A nested write to users, roles or policies hands its user checks up
       | query:                                            |   data:          |
       |   filter[email][_eq]: role-deleted@write.email    |     - role: null |
       |   fields: role                                    |                  |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |

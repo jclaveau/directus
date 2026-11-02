@@ -27,6 +27,9 @@ Feature: A geometry is written from GeoJSON and read back as GeoJSON
       |                                          |       coordinates: |
       |                                          |         - 1        |
       |                                          |         - 2        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: the revision of an updated point holds the point as GeoJSON
     When these requests get these responses:
@@ -64,3 +67,7 @@ Feature: A geometry is written from GeoJSON and read back as GeoJSON
       |                                                |           coordinates:  |
       |                                                |             - 3         |
       |                                                |             - 4         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |

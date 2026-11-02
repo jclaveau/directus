@@ -33,6 +33,11 @@ Feature: A user requests a password reset and resets the password
       | path: /auth/password/request          |                                        |
       | payload:                              |                                        |
       |   email: requesting-<run>@example.com |                                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a reset token is refused for another scope or an inactive user
     Given these requests are sent:
@@ -60,6 +65,10 @@ Feature: A user requests a password reset and resets the password
       |     scope: password-reset              |                                    |
       |     hash: 33c587                       |                                    |
       |   password: reset-password             |                                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a reset token sets the password once
     Given these requests are sent:
@@ -99,3 +108,9 @@ Feature: A user requests a password reset and resets the password
       | payload:                               |                                     |
       |   email: resetting-<run>@example.com   |                                     |
       |   password: reset-password             |                                     |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |

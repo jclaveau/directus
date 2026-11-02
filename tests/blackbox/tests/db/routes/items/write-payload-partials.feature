@@ -31,6 +31,11 @@ Feature: A write takes the less travelled side of each payload rule
       | payload:                  |   data:           |
       |   id: one-<run>           |     answer: true  |
       |   answer: '1'             |                   |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a user of no role records no role on the rows it writes
     Given these requests are sent:
@@ -64,6 +69,10 @@ Feature: A write takes the less travelled side of each payload rule
       | as: roleless-<run>                       |   data:                |
       | payload:                                 |     role_made: null    |
       |   answer: 'true'                         |     role_changed: null |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a point written as a GeoJSON string or as null reads back as written
     Then these requests get these responses:
@@ -81,6 +90,10 @@ Feature: A write takes the less travelled side of each payload rule
       | payload:                                 |   data:            |
       |   id: no-spot-<run>                      |     spot: null     |
       |   spot: null                             |                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a date and a dateTime written as valid strings read back as written
     Then these requests get these responses:
@@ -91,6 +104,9 @@ Feature: A write takes the less travelled side of each payload rule
       |   id: dated-<run>               |     day: '2026-03-04'             |
       |   day: '2026-03-04'             |     moment: '2026-03-04T05:06:07' |
       |   moment: '2026-03-04T05:06:07' |                                   |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a nested child creates, updates or keeps the leaf it targets
     Given these requests are sent:
@@ -133,6 +149,9 @@ Feature: A write takes the less travelled side of each payload rule
       | query:                                 |   data:                   |
       |   fields: target                       |     - target: '<leaf>'    |
       |   filter[name][_eq]: keeping-<run>     |                           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a nested child drops the leaves and notes it no longer lists
     Given these requests are sent:
@@ -207,6 +226,9 @@ Feature: A write takes the less travelled side of each payload rule
       | path: /items/test_wpp_note/<kept-note>    | body:                    |
       | query:                                    |   data:                  |
       |   fields: child                           |     child: <child>       |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a row keyed by a uuid the database draws reads back under it
     Then these requests get these responses:
@@ -222,3 +244,7 @@ Feature: A write takes the less travelled side of each payload rule
       | path: /items/test_wpp_generated | body:                     |
       | payload:                        |   data:                   |
       |   label: single-<run>           |     label: single-<run>   |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |

@@ -47,3 +47,6 @@ Feature: A version is renamed only onto a key its item holds no version under
       |   filter[collection][_eq]: >-     |                               |
       |     test_write_renamed            |                               |
       |   filter[item][_eq]: '<document>' |                               |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

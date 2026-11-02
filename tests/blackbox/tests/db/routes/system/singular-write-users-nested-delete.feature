@@ -33,3 +33,6 @@ Feature: A user is deleted through a nested write on a related item
       | query:                                 |   data: [] |
       |   fields: id                           |            |
       |   filter[id][_eq]: <member>            |            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

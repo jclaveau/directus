@@ -80,6 +80,11 @@ Feature: A single share is created only for an item its sender may share
       | payload:                           |     item: '<open>'                     |
       |   collection: test_singular_shares |                                        |
       |   item: '<open>'                   |                                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: the admin shares any item of a collection that exists
     Given these requests are sent:
@@ -106,6 +111,10 @@ Feature: A single share is created only for an item its sender may share
       |                                     |         "share" from collection      |
       |                                     |         "test_singular_missing" or   |
       |                                     |         it does not exist.           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a share is renamed one by one and in batches, then deleted
     Given these requests are sent:
@@ -155,6 +164,12 @@ Feature: A single share is created only for an item its sender may share
       | query:                     |   data: []              |
       |   fields: id               |                         |
       |   filter[id][_eq]: <share> |                         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a batch of shares is checked share by share like a single one
     Given these requests are sent:
@@ -224,6 +239,10 @@ Feature: A single share is created only for an item its sender may share
       |     item: '<open>'                     |                                        |
       |   - collection: test_singular_shares   |                                        |
       |     item: '<open>'                     |                                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a share is re-pointed only to an item its editor may share
     Given these requests are sent:
@@ -308,3 +327,9 @@ Feature: A single share is created only for an item its sender may share
       |   fields: name,item                  |     item: '<open>'                     |
       | payload:                             |                                        |
       |   name: renamed-<run>                |                                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |

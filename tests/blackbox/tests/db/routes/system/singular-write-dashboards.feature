@@ -45,6 +45,13 @@ Feature: Dashboards and their panels are written one at a time or in batches
       | query:                     |   data: []                |
       |   fields: id               |                           |
       |   filter[id][_eq]: <board> |                           |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a panel is created, moved one by one and in batches, deleted
     Given these requests are sent:
@@ -100,3 +107,10 @@ Feature: Dashboards and their panels are written one at a time or in batches
       | query:                            |   data: []              |
       |   fields: id                      |                         |
       |   filter[dashboard][_eq]: <board> |                         |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |

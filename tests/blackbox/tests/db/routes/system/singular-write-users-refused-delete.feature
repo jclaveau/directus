@@ -52,3 +52,6 @@ Feature: A refused user delete leaves the user's references as they were
       | path: /notifications/<notice> | body:                             |
       | query:                        |   data:                           |
       |   fields: sender              |     sender: <sender>              |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |

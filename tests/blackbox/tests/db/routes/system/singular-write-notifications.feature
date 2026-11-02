@@ -55,3 +55,10 @@ Feature: Notifications are written one at a time or in batches
       | query:                                |   data: []                 |
       |   fields: id                          |                            |
       |   filter[recipient][_eq]: <recipient> |                            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |

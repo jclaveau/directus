@@ -57,6 +57,13 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | query:                               |   data: []                             |
       |   fields: id                         |                                        |
       |   filter[id][_eq]: <remark>          |                                        |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
+      | 2       | -     | 0      | 0      | 0      | 0      |
+      | 3       | -     | 0      | 0      | 0      | 0      |
+      | 4       | -     | 0      | 0      | 0      | 0      |
+      | 5       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a comment notifies the user it mentions who may read its item
     Given these requests are sent:
@@ -102,6 +109,9 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |                                      |         test_singular_comments           |
       |                                      |       collection: test_singular_comments |
       |                                      |       item: '<entry>'                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a comment notifies a user once, whatever case spells the mention
     Given these requests are sent:
@@ -145,6 +155,9 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |   fields: item                         |     - item: '<entry>' |
       |   filter[recipient][_eq]: <reader>     |                       |
       |   filter[item][_eq]: <entry>           |                       |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a comment notifies the user it mentions who cannot read users
     Given these requests are sent:
@@ -222,6 +235,9 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       |                                      |         test_singular_comments           |
       |                                      |       collection: test_singular_comments |
       |                                      |       item: '<entry>'                    |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: a comment does not notify a user its author cannot read
     Given these requests are sent:
@@ -292,6 +308,9 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | query:                               |   data: [] |
       |   fields: id                         |            |
       |   filter[recipient][_eq]: <reader>   |            |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
 
   Scenario: an admin's comment mentioning a missing user is not written
     Given these requests are sent:
@@ -321,3 +340,6 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | query:                               |   data: []                  |
       |   fields: id                         |                             |
       |   filter[recipient][_eq]: <ghost>    |                             |
+    And on postgres the requests ran these statements:
+      | request | table | select | insert | update | delete |
+      | 1       | -     | 0      | 0      | 0      | 0      |
