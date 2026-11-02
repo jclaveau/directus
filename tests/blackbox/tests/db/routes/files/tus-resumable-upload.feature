@@ -65,11 +65,9 @@ Feature: A file is uploaded, replaced and terminated through tus
       |   Tus-Resumable: 1.0.0                 |                        |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
-      | 1       | directus_access    | 2      | 0      | 0      | 0      |
       | 1       | directus_activity  | 0      | 2      | 0      | 0      |
       | 1       | directus_files     | 3      | 1      | 1      | 0      |
       | 1       | directus_revisions | 0      | 2      | 0      | 0      |
-      | 1       | directus_roles     | 1      | 0      | 0      | 0      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
       | 2       | directus_files     | 2      | 0      | 1      | 0      |

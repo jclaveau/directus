@@ -94,17 +94,7 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
     And on postgres the requests ran these statements:
       | request | table                   | select | insert | update | delete | with |
-      | 1       | directus_access         | 2      | 0      | 0      | 0      | 0    |
-      | 1       | directus_collections    | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_fields         | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_relations      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | directus_roles          | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
-      | 1       | geometry_columns        | 0      | 0      | 0      | 0      | 1    |
-      | 1       | information_schema      | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_constraint           | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_index                | 1      | 0      | 0      | 0      | 0    |
-      | 1       | pg_proc                 | 1      | 0      | 0      | 0      | 0    |
       | 1       | test_wcf_update_precise | 2      | 1      | 0      | 0      | 1    |
       | 6       | directus_users          | 1      | 0      | 0      | 0      | 0    |
       | 6       | test_wcf_update_precise | 2      | 0      | 2      | 0      | 0    |
