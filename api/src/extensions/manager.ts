@@ -707,6 +707,7 @@ export class ExtensionManager {
 									source as 'module' | 'registry',
 									id,
 								);
+
 								break;
 							default:
 								return;

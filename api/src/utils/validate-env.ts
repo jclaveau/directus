@@ -204,7 +204,7 @@ export function validateUnreadEnv(): void {
 		useLogger().error(
 			`${JSON.stringify(key)} Environment Variable is `
 				+ `${JSON.stringify(env[key])}, which this build does not read: `
-				+ advice,
+				+ `${advice}`,
 		);
 
 		process.exit(1);

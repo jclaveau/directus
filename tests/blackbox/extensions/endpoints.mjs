@@ -13,12 +13,16 @@ export default {
 	id: '',
 	handler(router, context) {
 		for (const { folderName, folderDefault } of endpointModules) {
-			const isFunction = typeof folderDefault === 'function';
-			const routeName = isFunction ? folderName : folderDefault.id;
 			const folderRouter = Router();
 
-			router.use(`/${routeName}`, folderRouter);
-			(isFunction ? folderDefault : folderDefault.handler)(folderRouter, context);
+			if (typeof folderDefault === 'function') {
+				router.use(`/${folderName}`, folderRouter);
+				folderDefault(folderRouter, context);
+				continue;
+			}
+
+			router.use(`/${folderDefault.id}`, folderRouter);
+			folderDefault.handler(folderRouter, context);
 		}
 	},
 };

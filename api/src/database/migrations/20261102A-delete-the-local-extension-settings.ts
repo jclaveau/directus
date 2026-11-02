@@ -5,13 +5,19 @@ import type { Knex } from 'knex';
  * extensions folder describe nothing this build reads.
  */
 export async function up(knex: Knex): Promise<void> {
-	const localIds = knex
-		.select('id')
-		.from('directus_extensions')
-		.where('source', 'local');
+	await knex('directus_extensions')
+		.whereIn(
+			'bundle',
+			knex
+				.select('id')
+				.from('directus_extensions')
+				.where('source', 'local'),
+		)
+		.delete();
 
-	await knex('directus_extensions').whereIn('bundle', localIds).delete();
-	await knex('directus_extensions').where('source', 'local').delete();
+	await knex('directus_extensions')
+		.where('source', 'local')
+		.delete();
 }
 
 export async function down(_knex: Knex): Promise<void> {
