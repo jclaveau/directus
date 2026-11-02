@@ -42,6 +42,13 @@ Feature: A version is saved, renamed and promoted onto its item
       |                                             |   data:             |
       |                                             |     title: promoted |
       |                                             |     summary: kept   |
+    And on postgres the requests ran these statements:
+      | request | table               | select | insert | update | delete |
+      | 2       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 2       | directus_users      | 1      | 0      | 0      | 0      |
+      | 2       | directus_versions   | 1      | 0      | 0      | 0      |
+      | 2       | test_wp_draft_posts | 3      | 0      | 1      | 0      |
 
   Scenario: a promote naming its fields writes only those fields
     Given these requests are sent:
@@ -80,6 +87,13 @@ Feature: A version is saved, renamed and promoted onto its item
       |                                               |   data:              |
       |                                               |     title: picked    |
       |                                               |     summary: kept    |
+    And on postgres the requests ran these statements:
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions   | 1      | 0      | 0      | 0      |
+      | 1       | test_wp_draft_posts | 3      | 0      | 1      | 0      |
 
   Scenario: a version with nothing saved has no changes to promote
     Given these requests are sent:
@@ -104,6 +118,10 @@ Feature: A version is saved, renamed and promoted onto its item
       |   mainHash: any-hash            |     - message: >-                         |
       |                                 |         Can't process content. No changes |
       |                                 |         to promote.                       |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions | 1      | 0      | 0      | 0      |
 
   Scenario: a promote over a main item changed since is refused
     Given these requests are sent:
@@ -137,6 +155,11 @@ Feature: A version is saved, renamed and promoted onto its item
       | path: /items/test_wp_draft_posts | body:                                    |
       | query:                           |   data:                                  |
       |   filter[id][_eq]: stale-<run>   |     - title: before                      |
+    And on postgres the requests ran these statements:
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions   | 1      | 0      | 0      | 0      |
+      | 1       | test_wp_draft_posts | 1      | 0      | 0      | 0      |
 
   Scenario: a promote without a main hash is refused
     Then these requests get these responses:
@@ -147,6 +170,9 @@ Feature: A version is saved, renamed and promoted onto its item
       |   fields: [title]                 |     - message: >-                   |
       |                                   |         Invalid payload. "mainHash" |
       |                                   |         field is required.          |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: an item read through a version never saved is the item itself
     Given these requests are sent:
@@ -230,6 +256,13 @@ Feature: A version is saved, renamed and promoted onto its item
       |                              |   data:                  |
       |                              |     delta:               |
       |                              |       title: drafted     |
+    And on postgres the requests ran these statements:
+      | request | table               | select | insert | update | delete |
+      | 1       | directus_activity   | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions  | 0      | 1      | 0      | 0      |
+      | 1       | directus_users      | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions   | 2      | 0      | 1      | 0      |
+      | 1       | test_wp_draft_posts | 1      | 0      | 0      | 0      |
 
   Scenario: a version patched with only a new name keeps its key
     Given these requests are sent:
@@ -254,6 +287,12 @@ Feature: A version is saved, renamed and promoted onto its item
       | payload:                |   data:               |
       |   name: second name     |     key: draft        |
       |                         |     name: second name |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions  | 3      | 0      | 1      | 0      |
 
   Scenario: a version patched with a field other than its key or name is refused
     Given these requests are sent:
@@ -278,6 +317,10 @@ Feature: A version is saved, renamed and promoted onto its item
       |   item: elsewhere-<run> |     - message: >-                  |
       |                         |         Invalid payload. "item" is |
       |                         |         not allowed.               |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions | 1      | 0      | 0      | 0      |
 
   Scenario: a version renamed to a key its item already holds is refused
     Given these requests are sent:
@@ -310,6 +353,10 @@ Feature: A version is saved, renamed and promoted onto its item
       |                          |         "draft" already exists for item |
       |                          |         "taken-<run>" in collection     |
       |                          |         "test_wp_draft_posts".          |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_users    | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions | 3      | 0      | 0      | 0      |
 
   Scenario: versions patched by a query take the change
     Given these requests are sent:
@@ -337,6 +384,12 @@ Feature: A version is saved, renamed and promoted onto its item
       |         _eq: <draft> |                     |
       |   data:              |                     |
       |     name: queried    |                     |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions  | 3      | 0      | 1      | 0      |
 
   Scenario: versions created in one batch are each created
     Given these requests are sent:
@@ -359,6 +412,15 @@ Feature: A version is saved, renamed and promoted onto its item
       |   - key: review                     |                           |
       |     collection: test_wp_draft_posts |                           |
       |     item: batched-<run>             |                           |
+    And on postgres the requests ran these statements:
+      | request | table                | select | insert | update | delete |
+      | 1       | directus_activity    | 0      | 1      | 0      | 0      |
+      | 1       | directus_collections | 2      | 0      | 0      | 0      |
+      | 1       | directus_revisions   | 0      | 1      | 0      | 0      |
+      | 1       | directus_users       | 1      | 0      | 0      | 0      |
+      | 1       | directus_versions    | 3      | 1      | 0      | 0      |
+      | 1       | pg_class             | 2      | 0      | 0      | 0      |
+      | 1       | test_wp_draft_posts  | 2      | 0      | 0      | 0      |
 
   Scenario: two versions of one key for one item in one batch are refused
     Given these requests are sent:
@@ -383,3 +445,6 @@ Feature: A version is saved, renamed and promoted onto its item
       | path: /versions                     | body:                                  |
       | query:                              |   data: []                             |
       |   filter[item][_eq]: twin-<run>     |                                        |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |

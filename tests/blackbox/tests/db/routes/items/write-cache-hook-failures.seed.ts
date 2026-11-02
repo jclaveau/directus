@@ -30,10 +30,10 @@ export const seedDBStructure = () => {
 					'test_wcf_nested_child',
 					'test_wcf_nested_parent',
 					'test_wcf_nested_foreign',
-					'test_wcf_nested_delete_holder',
-					'test_wcf_nested_delete_child',
-					'test_wcf_nested_delete_parent',
-					'test_wcf_nested_delete_foreign',
+					'test_wcf_nested_del_holder',
+					'test_wcf_nested_del_child',
+					'test_wcf_nested_del_parent',
+					'test_wcf_nested_del_foreign',
 					'test_wcf_delete',
 					'test_wcf_delete_foreign',
 					'test_wcf_upsert_takeover',
@@ -74,21 +74,21 @@ export const seedDBStructure = () => {
 							fields: [bodyField],
 						},
 						{
-							collection: 'test_wcf_nested_delete_parent',
+							collection: 'test_wcf_nested_del_parent',
 							meta: { accountability: null },
 							fields: [{ field: 'title', type: 'string', meta: {} }],
 						},
 						{
-							collection: 'test_wcf_nested_delete_child',
+							collection: 'test_wcf_nested_del_child',
 							meta: { accountability: null },
 							fields: [bodyField],
 						},
 						{
-							collection: 'test_wcf_nested_delete_holder',
+							collection: 'test_wcf_nested_del_holder',
 							meta: { accountability: null },
 						},
 						{
-							collection: 'test_wcf_nested_delete_foreign',
+							collection: 'test_wcf_nested_del_foreign',
 							meta: { accountability: null },
 							fields: [bodyField],
 						},
@@ -143,17 +143,17 @@ export const seedDBStructure = () => {
 				});
 
 				await CreateFieldO2M(vendor, {
-					collection: 'test_wcf_nested_delete_parent',
+					collection: 'test_wcf_nested_del_parent',
 					field: 'children',
-					otherCollection: 'test_wcf_nested_delete_child',
+					otherCollection: 'test_wcf_nested_del_child',
 					otherField: 'parent',
 					relationMeta: { one_deselect_action: 'delete' },
 				});
 
 				await CreateFieldM2O(vendor, {
-					collection: 'test_wcf_nested_delete_holder',
+					collection: 'test_wcf_nested_del_holder',
 					field: 'child',
-					otherCollection: 'test_wcf_nested_delete_child',
+					otherCollection: 'test_wcf_nested_del_child',
 					relationSchema: { on_delete: 'NO ACTION' },
 				});
 

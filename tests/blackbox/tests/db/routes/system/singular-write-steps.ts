@@ -1,4 +1,4 @@
-import config, { getUrl } from '@common/config';
+import config from '@common/config';
 import {
 	cellOfKnownKeys,
 	defineFeature,
@@ -7,6 +7,10 @@ import {
 	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { createHmac, randomUUID } from 'crypto';
 import { DEFAULT_SCHEMA, load as loadYaml, Type } from 'js-yaml';
@@ -51,6 +55,12 @@ type ScenarioKeys = {
 	keysByName: Record<string, string>;
 };
 
+type SentTo = {
+	vendor: Vendor;
+	instanceUrl: () => string;
+	scenarioKeys: ScenarioKeys;
+};
+
 type FeatureHooks = {
 	beforeFeature?: (vendor: Vendor) => Promise<void>;
 	afterFeature?: (vendor: Vendor) => Promise<void>;
@@ -86,21 +96,32 @@ export function defineSingularWriteFeature(
 			});
 		}
 
+		// After the feature's own hooks, so the instance boots on what they seeded.
+		const instanceUrl = instanceUrlForFeature(feature, vendor);
+
 		defineFeature(feature, (scenario) => {
 			for (const { title } of feature.scenarios) {
-				scenario(title, ({ given, then }) => {
+				scenario(title, ({ given, then, and }) => {
 					const scenarioKeys: ScenarioKeys = {
 						run: randomUUID(),
 						keysByName: {},
 					};
 
+					const receivedResponses: Response[] = [];
+					const sentTo = { vendor, instanceUrl, scenarioKeys };
+
 					given.optional('these requests are sent:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table, true);
+						return sendRows(sentTo, table, true);
 					});
 
-					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(vendor, scenarioKeys, table, false);
-					});
+					then(
+						'these requests get these responses:',
+						async (table: Row[]) => {
+							receivedResponses.push(...await sendRows(sentTo, table, false));
+						},
+					);
+
+					defineStatementCountsStep(and, vendor, receivedResponses);
 				}, 60_000);
 			}
 		});
@@ -207,7 +228,7 @@ function sessionTokenOf(response: Response) {
 		?.split('=')[1];
 }
 
-function sendRequest(vendor: Vendor, requestCell: RequestCell) {
+function sendRequest(instanceUrl: string, requestCell: RequestCell) {
 	const {
 		as: token,
 		method,
@@ -219,10 +240,10 @@ function sendRequest(vendor: Vendor, requestCell: RequestCell) {
 	} = requestCell;
 
 	const pendingRequest = {
-		DELETE: () => request(getUrl(vendor)).delete(path),
-		GET: () => request(getUrl(vendor)).get(path),
-		PATCH: () => request(getUrl(vendor)).patch(path),
-		POST: () => request(getUrl(vendor)).post(path),
+		DELETE: () => request(instanceUrl).delete(path),
+		GET: () => request(instanceUrl).get(path),
+		PATCH: () => request(instanceUrl).patch(path),
+		POST: () => request(instanceUrl).post(path),
 	}[method]();
 
 	pendingRequest
@@ -267,12 +288,12 @@ function codeBodyAndText(response: Response) {
 // response cell states the keys it checks; an array still has to hold as many
 // items as it states.
 async function sendRows(
-	vendor: Vendor,
-	scenarioKeys: ScenarioKeys,
+	{ vendor, instanceUrl, scenarioKeys }: SentTo,
 	table: Row[],
 	allowsBlankResponse: boolean,
 ) {
 	const schema = yamlSchemaFor(vendor);
+	const receivedResponses: Response[] = [];
 
 	for (const { request: requestText, response: responseText } of table) {
 		if (requestText.includes('!totp')) {
@@ -298,7 +319,7 @@ async function sendRows(
 
 		if (requestCell.eventually) {
 			await expect.poll(async () => {
-				response = await sendRequest(vendor, requestCell);
+				response = await sendRequest(instanceUrl(), requestCell);
 
 				return codeBodyAndText(response);
 			}, { timeout: 10_000, interval: 250 }).toMatchObject(
@@ -306,7 +327,7 @@ async function sendRows(
 			);
 		}
 		else {
-			response = await sendRequest(vendor, requestCell);
+			response = await sendRequest(instanceUrl(), requestCell);
 
 			expect(codeBodyAndText(response)).toMatchObject(expectedResponse);
 		}
@@ -324,5 +345,9 @@ async function sendRows(
 				sessionTokenOf(response),
 			);
 		}
+
+		receivedResponses.push(response);
 	}
+
+	return receivedResponses;
 }

@@ -7,6 +7,10 @@ import {
 	type StepFunctions,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { oneLine } from '@directus/utils';
 import { load as loadYaml } from 'js-yaml';
@@ -37,6 +41,8 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 const feature = loadFeature('./tests/db/routes/items/create-groups.feature');
 
 describe.each(vendors)('%s', (vendor) => {
+	const instanceUrl = instanceUrlForFeature(feature, vendor);
+
 	// A cell is YAML: the fork's multiline notation dedents it as a block.
 	function sendRequest(requestCell: string) {
 		const {
@@ -52,8 +58,8 @@ describe.each(vendors)('%s', (vendor) => {
 		);
 
 		const pendingRequest = method === 'POST'
-			? request(getUrl(vendor)).post(path)
-			: request(getUrl(vendor)).get(path);
+			? request(instanceUrl()).post(path)
+			: request(instanceUrl()).get(path);
 
 		pendingRequest.query(query).set('Authorization', AUTH);
 
@@ -175,6 +181,8 @@ describe.each(vendors)('%s', (vendor) => {
 					.toEqual([[{ id: expect.any(Number), name }]]);
 			},
 		);
+
+		defineStatementCountsStep(and, vendor, exchanges.responses);
 	}
 
 	defineFeature(feature, (scenario) => {

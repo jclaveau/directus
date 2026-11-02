@@ -1,4 +1,3 @@
-import { getUrl } from '@common/config';
 import {
 	cellOfKnownKeys,
 	defineFeature,
@@ -6,6 +5,10 @@ import {
 	responseCellOf,
 } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
+import {
+	defineStatementCountsStep,
+	instanceUrlForFeature,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { load as loadYaml } from 'js-yaml';
 import request from 'supertest';
@@ -32,9 +35,11 @@ const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 const feature = loadFeature('./tests/db/routes/items/upsert-singleton.feature');
 
 describe.each(vendors)('%s', (vendor) => {
+	const instanceUrl = instanceUrlForFeature(feature, vendor);
+
 	defineFeature(feature, (scenario) => {
 		for (const { title } of feature.scenarios) {
-			scenario(title, ({ when }) => {
+			scenario(title, ({ when, and }) => {
 				const responses: request.Response[] = [];
 
 				when(
@@ -54,9 +59,9 @@ describe.each(vendors)('%s', (vendor) => {
 							);
 
 							const pendingRequest = {
-								GET: () => request(getUrl(vendor)).get(path),
-								POST: () => request(getUrl(vendor)).post(path),
-								PATCH: () => request(getUrl(vendor)).patch(path),
+								GET: () => request(instanceUrl()).get(path),
+								POST: () => request(instanceUrl()).post(path),
+								PATCH: () => request(instanceUrl()).patch(path),
 							}[method]()
 								.query(Object.fromEntries(
 									Object.entries(query).map(([parameter, value]) => {
@@ -81,6 +86,8 @@ describe.each(vendors)('%s', (vendor) => {
 						}));
 					},
 				);
+
+				defineStatementCountsStep(and, vendor, responses);
 			}, 60_000);
 		}
 	});

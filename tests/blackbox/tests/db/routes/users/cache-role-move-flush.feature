@@ -85,3 +85,10 @@ Feature: A user moved to another role through the role drops the cached reads
       |                                    |         "cache_role_move_notes" |
       |                                    |         or it does not exist.   |
       |                                    |         Queried in root.        |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 3       | directus_access    | 4      | 0      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 2      | 0      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_roles     | 6      | 0      | 0      | 0      |
+      | 3       | directus_users     | 9      | 0      | 1      | 0      |

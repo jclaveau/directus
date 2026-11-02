@@ -22,6 +22,7 @@ import {
 	describe,
 	expect,
 	it,
+	type MockInstance,
 	vi,
 } from 'vitest';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
@@ -898,9 +899,110 @@ describe('Integration Tests', () => {
 						reason: `"7" can't join more than one "test"`,
 					}));
 			});
+
+			it(oneLine`
+				gives, when asked, one existing child to a created row when a hook
+				answers the other row naming it with a stored key
+			`, async () => {
+				tracker.on.insert('test').response([1]);
+
+				const answerStored = async (entries: any) => {
+					return [entries[0], { key: 9 }];
+				};
+
+				emitter.onFilter('test.items.create', answerStored);
+
+				try {
+					await expect(service.createMany(
+						[
+							{ children: { update: [{ id: 7 }] } },
+							{ children: { update: [{ id: 7 }] } },
+						],
+						{ refuseChildJoiningSeveralRows: true },
+					))
+						.resolves
+						.toEqual([1, 9]);
+				}
+				finally {
+					emitter.offFilter('test.items.create', answerStored);
+				}
+			});
 		});
 
 		describe('updateBatch', () => {
+			it(oneLine`
+				writes the groups before one it can't prepare in one statement, then
+				raises that group's error
+			`, async () => {
+				const daysSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('day').date();
+					})
+					.build();
+
+				let batchUpdate: MockInstance | undefined;
+
+				await expect(db.transaction(async (callerTrx) => {
+					batchUpdate = vi.spyOn(callerTrx, 'batchUpdate')
+						.mockResolvedValue([] as any);
+
+					await new ItemsService('test', { knex: callerTrx, schema: daysSchema })
+						.updateBatch([
+							{ id: 1, day: '2026-11-02' },
+							{ id: 2, day: 'not a date' },
+						]);
+				}))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'Invalid Date format in field "day"',
+					}));
+
+				expect(batchUpdate!.mock.calls).toEqual([[
+					'test',
+					[{ day: new Date(2026, 10, 2), id: 1 }],
+					'id',
+					{ mode: 'json' },
+				]]);
+			});
+
+			it(oneLine`
+				writes one by one the groups before one it can't prepare when the
+				statement breaks a unique index, then raises that group's error
+			`, async () => {
+				const daysSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('day').date();
+					})
+					.build();
+
+				let batchUpdate: MockInstance | undefined;
+
+				await expect(db.transaction(async (callerTrx) => {
+					batchUpdate = vi.spyOn(callerTrx, 'batchUpdate')
+						.mockRejectedValue({ code: '23505' });
+
+					await new ItemsService('test', { knex: callerTrx, schema: daysSchema })
+						.updateBatch([
+							{ id: 1, day: '2026-11-02' },
+							{ id: 2, day: 'not a date' },
+						]);
+				}))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'Invalid Date format in field "day"',
+					}));
+
+				expect(batchUpdate).toHaveBeenCalledOnce();
+
+				expect(tracker.history.all).toMatchObject([{
+					method: 'update',
+					sql: 'update "test" set "day" = ? where "id" in (?)',
+					bindings: [new Date(2026, 10, 2), 1],
+				}]);
+			});
+
 			it('should validate user count if requested', async () => {
 				await service.updateBatch(
 					[{ id: 1, name: 'test' }],
@@ -1483,6 +1585,130 @@ describe('Integration Tests', () => {
 				))
 					.resolves
 					.toEqual([1, 2]);
+			});
+
+			it(oneLine`
+				refuses, when asked, to give one existing m2m junction row to
+				several rows, writing nothing
+			`, async () => {
+				const tagsSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('tags').m2m('tags');
+					})
+					.collection('tags', (c) => {
+						c.field('id').id();
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: tagsSchema })
+					.updateMany(
+						[1, 2],
+						{ tags: { update: [{ id: 7 }] } },
+						{ refuseChildJoiningSeveralRows: true },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it(oneLine`
+				refuses, when asked, one junction row named under two spellings of
+				its key by two rows, writing nothing
+			`, async () => {
+				const tagsSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('tags').m2m('tags');
+					})
+					.collection('tags', (c) => {
+						c.field('id').id();
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: tagsSchema })
+					.updateBatch(
+						[
+							{ id: 1, tags: { update: [{ id: 7 }] } },
+							{ id: 2, tags: { update: [{ id: '07' }] } },
+						],
+						{ refuseChildJoiningSeveralRows: true },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: `"7" can't join more than one "test"`,
+					}));
+
+				expect(tracker.history.transactions).toEqual([{
+					id: 0,
+					state: 'rolled back',
+					queries: [],
+				}]);
+			});
+
+			it(oneLine`
+				refuses, when asked, a junction key no integer spells for that key,
+				not for joining several rows
+			`, async () => {
+				const tagsSchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id').id();
+						c.field('tags').m2m('tags');
+					})
+					.collection('tags', (c) => {
+						c.field('id').id();
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: tagsSchema })
+					.updateBatch(
+						[
+							{ id: 1, tags: { update: [{ id: 'abc' }] } },
+							{ id: 2, tags: { update: [{ id: 'xyz' }] } },
+						],
+						{ refuseChildJoiningSeveralRows: true },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: oneLine`
+							Primary key of test_tags_junction must be an integer instead
+							of "abc"
+						`,
+					}));
+			});
+
+			it(oneLine`
+				refuses a missing string key rather than give its children to the
+				payload's key, writing nothing
+			`, async () => {
+				const stringKeySchema = new SchemaBuilder()
+					.collection('test', (c) => {
+						c.field('id')
+							.string()
+							.primary();
+
+						c.field('children').o2m('child', 'parent');
+					})
+					.build();
+
+				await expect(new ItemsService('test', { knex: db, schema: stringKeySchema })
+					.updateOne(
+						undefined as never,
+						{ id: 'k5', children: { create: [{}] } },
+					))
+					.rejects
+					.toThrow(new InvalidPayloadError({
+						reason: 'Primary key of "test" must be a "string" instead of undefined',
+					}));
+
+				expect(tracker.history.all).toEqual([]);
 			});
 
 			it(oneLine`
