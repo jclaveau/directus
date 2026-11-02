@@ -50,12 +50,10 @@ export async function auditMessageQueries(
 
 	const askedValue = message['query_audit'];
 
-	const auditAsk = auditAskOf(
-		askedValue === undefined
-			? undefined
-			: String(askedValue),
-		useEnv()['QUERY_AUDIT_LEVEL'],
-	);
+	// A header carries a string alone: any other value is refused the same.
+	const auditAsk = askedValue === undefined || typeof askedValue === 'string'
+		? auditAskOf(askedValue, useEnv()['QUERY_AUDIT_LEVEL'])
+		: undefined;
 
 	if (auditAsk === undefined) {
 		return handleWebSocketError(client, new WebSocketError(

@@ -348,6 +348,38 @@ test('refuses a message asking a number as its query audit', async () => {
 	]);
 });
 
+test('refuses a message asking its query audit as an array', async () => {
+	vi.mocked(useEnv).mockReturnValue({
+		QUERY_AUDIT_HEADER: 'X-Query-Audit',
+		QUERY_AUDIT_LEVEL: 'counts',
+		QUERY_AUDIT_HEADER_MAX_SIZE: '8kb',
+	});
+
+	const send = vi.fn();
+	const handleMessage = vi.fn();
+
+	await auditMessageQueries(
+		Object.assign(new EventEmitter(), {
+			send,
+			accountability: null,
+		}) as unknown as WebSocketClient,
+		{ type: 'items', uid: 'a', query_audit: ['full'] },
+		handleMessage,
+	);
+
+	expect(handleMessage).not.toHaveBeenCalled();
+
+	expect(send.mock.calls).toEqual([
+		[
+			'{"type":"items","status":"error","error":{"code":"INVALID_QUERY",'
+			+ '"message":"\\"query_audit\\" must be a level, a timings word, '
+			+ 'or both as \\"<level>; <timings word>\\". Levels: counts, '
+			+ 'statements, bindings, full. Timings words: timings, no-timings"},'
+			+ '"uid":"a"}',
+		],
+	]);
+});
+
 test('closes an unreplied message audit on disconnect', async () => {
 	vi.mocked(useEnv).mockReturnValue({
 		QUERY_AUDIT_HEADER: 'X-Query-Audit',
