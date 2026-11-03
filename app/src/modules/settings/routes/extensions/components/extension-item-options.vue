@@ -34,6 +34,18 @@ const uninstallLockedReason = computed(() => {
 	return null;
 });
 
+const stateLockedReason = computed(() => {
+	if (props.stateLocked) {
+		return t('enabled_dev_tooltip');
+	}
+
+	if (!marketplaceEnabled.value) {
+		return t('marketplace_production_locked');
+	}
+
+	return null;
+});
+
 const stateActions = computed(() => {
 	const enabled = props.state === 'enabled';
 
@@ -58,8 +70,8 @@ const stateActions = computed(() => {
 				<v-list-item
 					v-for="(action, index) in stateActions"
 					:key="index"
-					v-tooltip.left="stateLocked ? t('enabled_dev_tooltip') : null"
-					:disabled="stateLocked"
+					v-tooltip.left="stateLockedReason"
+					:disabled="stateLockedReason !== null"
 					clickable
 					@click="$emit('toggleState', action.enabled)"
 				>
