@@ -62,6 +62,24 @@ test('opens the uninstall of a registry extension outside production', () => {
 	expect(uninstall.attributes('title')).toBeUndefined();
 });
 
+test('locks enabling or disabling an extension in production', () => {
+	const toggle = mountOptions('interface', false).find('v-list-item[clickable]');
+
+	expect(toggle.attributes('disabled')).toBe('true');
+
+	expect(toggle.attributes('title')).toBe(
+		'The Marketplace is disabled in production, where extensions change'
+			+ ' only with a deploy',
+	);
+});
+
+test('opens enabling or disabling an extension outside production', () => {
+	const toggle = mountOptions('interface', true).find('v-list-item[clickable]');
+
+	expect(toggle.attributes('disabled')).toBe('false');
+	expect(toggle.attributes('title')).toBeUndefined();
+});
+
 test.each([
 	{ marketplace: true, offered: true },
 	{ marketplace: false, offered: false },

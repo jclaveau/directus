@@ -100,14 +100,14 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
-const request = async (path: string = '') => {
+const request = async (path: string = '', init: RequestInit = {}) => {
 	const app = await createApp();
 	const server = http.createServer(app);
 	server.listen(0);
 	const address = server.address() as AddressInfo;
 	const baseUrl = `http://127.0.0.1:${address.port}`;
 
-	const response = await fetch(`${baseUrl}${path}`, { redirect: 'manual' });
+	const response = await fetch(`${baseUrl}${path}`, { redirect: 'manual', ...init });
 
 	server.close();
 
@@ -291,6 +291,36 @@ describe('createApp', async () => {
 							path: '/extensions/registry',
 						},
 						message: "Route /extensions/registry doesn't exist.",
+					},
+				],
+			});
+		});
+
+		// Enabling or disabling reloads the extensions in place: in production they
+		// change only with a deploy.
+		test('refuses an extension update in production', async () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const response = await request(
+				'/extensions/9f2b8c1e-4d3a-4b5c-8e7f-1a2b3c4d5e6f',
+				{
+					method: 'PATCH',
+					body: '{}',
+					headers: { 'content-type': 'application/json' },
+				},
+			);
+
+			expect(response.status).toBe(404);
+
+			expect(await response.json()).toEqual({
+				errors: [
+					{
+						extensions: {
+							code: 'ROUTE_NOT_FOUND',
+							path: '/extensions/9f2b8c1e-4d3a-4b5c-8e7f-1a2b3c4d5e6f',
+						},
+						message: 'Route /extensions/9f2b8c1e-4d3a-4b5c-8e7f-1a2b3c4d5e6f'
+							+ " doesn't exist.",
 					},
 				],
 			});
