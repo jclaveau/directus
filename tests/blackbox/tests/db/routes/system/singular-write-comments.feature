@@ -64,7 +64,7 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
       | 2       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 2       | directus_comments  | 3      | 0      | 1      | 0      |
+      | 2       | directus_comments  | 2      | 0      | 1      | 0      |
       | 2       | directus_revisions | 0      | 1      | 0      | 0      |
       | 2       | directus_users     | 1      | 0      | 0      | 0      |
       | 3       | directus_activity  | 0      | 1      | 0      | 0      |
@@ -76,7 +76,7 @@ Feature: Comments are written one at a time or in batches, and notify who they m
       | 4       | directus_revisions | 0      | 1      | 0      | 0      |
       | 4       | directus_users     | 1      | 0      | 0      | 0      |
       | 5       | directus_activity  | 0      | 1      | 0      | 0      |
-      | 5       | directus_comments  | 1      | 0      | 0      | 1      |
+      | 5       | directus_comments  | 0      | 0      | 0      | 1      |
       | 5       | directus_users     | 1      | 0      | 0      | 0      |
 
   Scenario: a comment notifies the user it mentions who may read its item

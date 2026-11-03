@@ -841,8 +841,6 @@ describe('Integration Tests', () => {
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
 					.mockResolvedValueOnce(mockUser);
 
-				tracker.on.select('directus_users').response({ id: mockUser.id });
-
 				const promise = service.inviteUser('user@example.com', 'invite-role', null);
 				await expect(promise).resolves.not.toThrow();
 

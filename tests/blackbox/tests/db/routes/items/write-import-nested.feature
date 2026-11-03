@@ -80,8 +80,8 @@ Feature: An import writes the nested changes of every row it reads
       | 3       | directus_users            | 1      | 0      | 0      | 0      |
       | 3       | test_write_import_deleted | 4      | 1      | 0      | 1      |
       | 3       | test_write_import_nulled  | 5      | 1      | 1      | 0      |
-      | 3       | test_write_import_page    | 3      | 0      | 1      | 0      |
-      | 3       | test_write_import_parent  | 3      | 0      | 1      | 0      |
+      | 3       | test_write_import_page    | 2      | 0      | 1      | 0      |
+      | 3       | test_write_import_parent  | 2      | 0      | 1      | 0      |
 
   Scenario: an import creating a row creates the page its any-to-one field holds
     When these requests get these responses:
@@ -162,5 +162,5 @@ Feature: An import writes the nested changes of every row it reads
       | 2       | directus_revisions        | 0      | 2      | 0      | 0      |
       | 2       | directus_users            | 1      | 0      | 0      | 0      |
       | 2       | test_write_import_deleted | 2      | 0      | 0      | 1      |
-      | 2       | test_write_import_nulled  | 6      | 0      | 2      | 0      |
+      | 2       | test_write_import_nulled  | 5      | 0      | 2      | 0      |
       | 2       | test_write_import_parent  | 3      | 0      | 0      | 0      |

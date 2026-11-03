@@ -119,7 +119,7 @@ Feature: A user requests a password reset and resets the password
       | 2       | directus_revisions | 0      | 1      | 0      | 0      |
       | 2       | directus_sessions  | 0      | 0      | 0      | 1      |
       | 2       | directus_settings  | 2      | 0      | 0      | 0      |
-      | 2       | directus_users     | 4      | 0      | 1      | 0      |
+      | 2       | directus_users     | 3      | 0      | 1      | 0      |
       | 3       | directus_settings  | 1      | 0      | 0      | 0      |
       | 3       | directus_users     | 2      | 0      | 0      | 0      |
       | 4       | directus_access    | 2      | 0      | 0      | 0      |

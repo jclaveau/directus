@@ -173,6 +173,26 @@ export type MutationOptions = {
 	keysFromQuery?: boolean | undefined;
 
 	/**
+	 * An update refuses with a 404 a key no row holds, told off the UPDATE's
+	 * count: the filter hooks run before it, and the rollback undoes what they
+	 * wrote through the transaction. On a transaction the caller passed, that
+	 * rollback is the caller's: one committing after the 404 keeps their writes,
+	 * a related row created on the way included. Set by updateOne for an admin.
+	 * It is not gated on accountability: a non-admin caller setting it learns
+	 * whether a key it cannot read is held. A postgres `DO INSTEAD` rule on the
+	 * table answers with its own statement's count, which the check trusts as
+	 * the UPDATE's.
+	 */
+	refuseMissingKeys?: boolean | undefined;
+
+	/**
+	 * An update refuses with a 400 a row an `items.update` filter hook adds to
+	 * the keys it was sent. updateOne, whose caller names one row, defaults it
+	 * to `true`; upsertMany, which takes the rows a hook adds, passes `false`.
+	 */
+	refuseHookAddedRows?: boolean | undefined;
+
+	/**
 	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */

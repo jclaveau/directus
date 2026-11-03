@@ -46,5 +46,5 @@ Feature: Presets are written one at a time or in batches
       | 1       | directus_users   | 1      | 0      | 0      | 0      |
       | 2       | directus_presets | 2      | 0      | 1      | 0      |
       | 2       | directus_users   | 1      | 0      | 0      | 0      |
-      | 3       | directus_presets | 1      | 0      | 0      | 1      |
+      | 3       | directus_presets | 0      | 0      | 0      | 1      |
       | 3       | directus_users   | 1      | 0      | 0      | 0      |

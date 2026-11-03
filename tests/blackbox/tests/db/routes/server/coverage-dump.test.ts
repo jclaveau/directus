@@ -2,9 +2,9 @@ import config, { paths, type Env } from '@common/config';
 import { defineFeature, loadFeature } from '@common/cucumber';
 import vendors from '@common/get-dbs-to-test';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { freePortOfWorker } from '@utils/free-port-of-worker';
 import { writeExtensionPackage } from '@utils/write-extension-package';
 import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
 import { cloneDeep } from 'lodash-es';
 import {
 	mkdir,
@@ -133,7 +133,7 @@ describe.each(vendors)('%s', (vendor) => {
 				and('a server runs with that extension', async () => {
 					const env = cloneDeep(config.envs) as { [vendor: string]: Env };
 					env[vendor]['PACKAGE_FILE_LOCATION'] = packagePath;
-					port = await getPort();
+					port = await freePortOfWorker();
 					env[vendor].PORT = String(port);
 
 					instances.push(spawn('node', [paths.cli, 'start'], {

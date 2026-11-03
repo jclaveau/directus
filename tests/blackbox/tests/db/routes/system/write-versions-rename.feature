@@ -50,4 +50,4 @@ Feature: A version is renamed only onto a key its item holds no version under
     And on postgres the requests ran these statements:
       | request | table             | select | insert | update | delete |
       | 1       | directus_users    | 1      | 0      | 0      | 0      |
-      | 1       | directus_versions | 3      | 0      | 0      | 0      |
+      | 1       | directus_versions | 2      | 0      | 0      | 0      |

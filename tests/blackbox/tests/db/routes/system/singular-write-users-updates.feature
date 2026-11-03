@@ -108,7 +108,7 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 1       | directus_fields      | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_relations   | 1      | 0      | 0      | 0      | 0    |
       | 1       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 1       | directus_users       | 4      | 0      | 1      | 0      | 0    |
+      | 1       | directus_users       | 3      | 0      | 1      | 0      | 0    |
       | 1       | geometry_columns     | 0      | 0      | 0      | 0      | 1    |
       | 1       | information_schema   | 1      | 0      | 0      | 0      | 0    |
       | 1       | pg_constraint        | 1      | 0      | 0      | 0      | 0    |
@@ -117,11 +117,11 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 2       | directus_access      | 1      | 0      | 0      | 0      | 0    |
       | 2       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 2       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 2       | directus_users       | 4      | 0      | 1      | 0      | 0    |
+      | 2       | directus_users       | 3      | 0      | 1      | 0      | 0    |
       | 4       | directus_access      | 1      | 0      | 0      | 0      | 0    |
       | 4       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 4       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
-      | 4       | directus_users       | 3      | 0      | 1      | 0      | 0    |
+      | 4       | directus_users       | 2      | 0      | 1      | 0      | 0    |
 
   Scenario: only an admin sets the provider and the external identifier
     Given these requests are sent:
@@ -198,7 +198,7 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 3       | directus_activity    | 0      | 1      | 0      | 0      | 0    |
       | 3       | directus_revisions   | 0      | 1      | 0      | 0      | 0    |
       | 3       | directus_roles       | 1      | 0      | 0      | 0      | 0    |
-      | 3       | directus_users       | 4      | 0      | 1      | 0      | 0    |
+      | 3       | directus_users       | 3      | 0      | 1      | 0      | 0    |
       | 4       | directus_users       | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a password change ends every other session of the user
@@ -270,14 +270,14 @@ Feature: Users are updated by query, by themselves and in their sessions
       | 1       | directus_revisions | 0      | 1      | 0      | 0      |
       | 1       | directus_sessions  | 1      | 0      | 0      | 1      |
       | 1       | directus_settings  | 1      | 0      | 0      | 0      |
-      | 1       | directus_users     | 3      | 0      | 1      | 0      |
+      | 1       | directus_users     | 2      | 0      | 1      | 0      |
       | 4       | directus_access    | 3      | 0      | 0      | 0      |
       | 4       | directus_activity  | 0      | 1      | 0      | 0      |
       | 4       | directus_revisions | 0      | 1      | 0      | 0      |
       | 4       | directus_roles     | 1      | 0      | 0      | 0      |
       | 4       | directus_sessions  | 0      | 0      | 0      | 1      |
-      | 4       | directus_users     | 5      | 0      | 1      | 0      |
+      | 4       | directus_users     | 4      | 0      | 1      | 0      |
       | 5       | directus_access    | 2      | 0      | 0      | 0      |
       | 5       | directus_activity  | 0      | 1      | 0      | 0      |
       | 5       | directus_revisions | 0      | 1      | 0      | 0      |
-      | 5       | directus_users     | 4      | 0      | 1      | 0      |
+      | 5       | directus_users     | 3      | 0      | 1      | 0      |

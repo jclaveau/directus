@@ -85,13 +85,13 @@ Feature: A single permission reaches its policy's users from the next request on
       | 2       | directus_users       | 1      | 0      | 0      | 0      |
       | 4       | directus_access      | 2      | 0      | 0      | 0      |
       | 4       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 4       | directus_permissions | 3      | 0      | 1      | 0      |
+      | 4       | directus_permissions | 2      | 0      | 1      | 0      |
       | 4       | directus_revisions   | 0      | 1      | 0      | 0      |
       | 4       | directus_roles       | 1      | 0      | 0      | 0      |
       | 4       | directus_users       | 1      | 0      | 0      | 0      |
       | 6       | directus_access      | 2      | 0      | 0      | 0      |
       | 6       | directus_activity    | 0      | 1      | 0      | 0      |
-      | 6       | directus_permissions | 1      | 0      | 0      | 1      |
+      | 6       | directus_permissions | 0      | 0      | 0      | 1      |
       | 6       | directus_roles       | 1      | 0      | 0      | 0      |
       | 6       | directus_users       | 1      | 0      | 0      | 0      |
 

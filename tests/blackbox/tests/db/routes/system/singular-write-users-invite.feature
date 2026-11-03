@@ -54,7 +54,7 @@ Feature: A user is invited, re-invited and accepts the invitation
       | 3       | directus_activity  | 0      | 1      | 0      | 0      |
       | 3       | directus_revisions | 0      | 1      | 0      | 0      |
       | 3       | directus_roles     | 1      | 0      | 0      | 0      |
-      | 3       | directus_users     | 5      | 0      | 1      | 0      |
+      | 3       | directus_users     | 4      | 0      | 1      | 0      |
 
   Scenario: an invitation accepted with its token activates the user
     Given these requests are sent:
