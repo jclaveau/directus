@@ -88,6 +88,9 @@ import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
 import auditRequestQueries from './middleware/query-audit.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
+import {
+	refuseMarketplaceInProduction,
+} from './middleware/refuse-marketplace-in-production.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
 	type RateLimiterCharge,
@@ -364,6 +367,10 @@ export default async function createApp(): Promise<express.Application> {
 	useRateLimiterWhenCharging('every-request');
 
 	app.get('/server/ping', (_req, res) => res.send('pong'));
+
+	// Above the response cache, which would otherwise serve a registry answer
+	// cached by a replica outside production until its TTL.
+	app.use('/extensions/registry', refuseMarketplaceInProduction);
 
 	app.use(authenticate);
 

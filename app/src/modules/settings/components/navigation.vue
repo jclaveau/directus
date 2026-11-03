@@ -81,18 +81,20 @@ const links = computed<Link[][]>(() => [
 		},
 	],
 	[
-		{
-			icon: 'storefront',
-			name: t('marketplace'),
-			to: '/settings/marketplace',
-			chip: t('beta'),
-		},
+		info.value.extensions?.marketplace
+			? {
+					icon: 'storefront',
+					name: t('marketplace'),
+					to: '/settings/marketplace',
+					chip: t('beta'),
+				}
+			: undefined,
 		{
 			icon: 'category',
 			name: t('extensions'),
 			to: '/settings/extensions',
 		},
-	],
+	].filter((link) => link) as Link[],
 	[
 		info.value.websocket && info.value.websocket.logs
 			? {

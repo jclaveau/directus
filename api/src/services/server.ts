@@ -10,6 +10,9 @@ import { RESUMABLE_UPLOADS } from '../constants.js';
 import getDatabase, { hasDatabaseConnection } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import getMailer from '../mailer.js';
+import {
+	isMarketplaceEnabled,
+} from '../middleware/refuse-marketplace-in-production.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
 import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';
@@ -89,6 +92,7 @@ export class ServerService {
 
 			info['extensions'] = {
 				limit: env['EXTENSIONS_LIMIT'] ?? null,
+				marketplace: isMarketplaceEnabled(),
 			};
 
 			info['queryLimit'] = {

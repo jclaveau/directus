@@ -1277,6 +1277,7 @@ no_extensions: No Extensions
 no_extensions_copy: No extensions have been installed yet.
 install_extension: Install Extension
 uninstall_locked: Cannot uninstall extensions that weren't installed through the Marketplace
+marketplace_production_locked: The Marketplace is disabled in production, where extensions change only with a deploy
 uninstall: Uninstall
 installed: Installed
 reinstall: Reinstall

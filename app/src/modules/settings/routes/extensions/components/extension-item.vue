@@ -2,6 +2,7 @@
 import VChip from '@/components/v-chip.vue';
 import VProgressCircular from '@/components/v-progress-circular.vue';
 import { useExtensionsStore } from '@/stores/extensions';
+import { useServerStore } from '@/stores/server';
 import { unexpectedError } from '@/utils/unexpected-error';
 import { APP_OR_HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { ApiOutput, ExtensionType } from '@directus/types';
@@ -23,6 +24,7 @@ const props = withDefaults(
 
 const { t } = useI18n();
 const extensionsStore = useExtensionsStore();
+const serverStore = useServerStore();
 
 const loading = ref(false);
 
@@ -102,7 +104,11 @@ function isAppExtension(type?: ExtensionType) {
 		<v-list-item-content>
 			<span class="meta" :class="{ disabled }">
 				<router-link
-					v-if="extension.meta.source === 'registry' && !extension.bundle"
+					v-if="
+						extension.meta.source === 'registry'
+							&& !extension.bundle
+							&& serverStore.info.extensions?.marketplace
+					"
 					v-tooltip="t('open_in_marketplace')"
 					class="marketplace-link"
 					:to="`/settings/marketplace/extension/${extension.id}`"
