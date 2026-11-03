@@ -497,6 +497,61 @@ describe('Services / Extensions / readAll', () => {
 			},
 		]);
 	});
+
+	it(oneLine`
+		lists an app entry another process stored for a code bundle
+	`, async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({
+			getExtension: vi.fn().mockReturnValue({
+				type: 'bundle',
+				entriesFrom: 'code',
+				entries: [],
+			}),
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([
+			{ id: 'bundle-id', bundle: null, source: 'module', folder: 'orders' },
+			{
+				id: 'picker-id',
+				bundle: 'bundle-id',
+				source: 'module',
+				folder: 'picker',
+				type: 'interface',
+			},
+			{ id: 'untyped-id', bundle: 'bundle-id', source: 'module', folder: 'x' },
+		] as any);
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		expect(await service.readAll()).toEqual([
+			{
+				id: 'bundle-id',
+				bundle: null,
+				meta: {
+					id: 'bundle-id',
+					bundle: null,
+					source: 'module',
+					folder: 'orders',
+				},
+				schema: { type: 'bundle', entriesFrom: 'code', entries: [] },
+			},
+			{
+				id: 'picker-id',
+				bundle: 'bundle-id',
+				meta: {
+					id: 'picker-id',
+					bundle: 'bundle-id',
+					source: 'module',
+					folder: 'picker',
+					type: 'interface',
+				},
+				schema: { name: 'picker', type: 'interface' },
+			},
+		]);
+	});
 });
 
 describe('Services / Extensions / readOne', () => {

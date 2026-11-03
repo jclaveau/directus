@@ -2,12 +2,17 @@ import { describe, expect, test } from 'vitest';
 import {
 	defineBundleApi,
 	defineBundleApp,
+	defineDisplayEntry,
 	defineEndpointEntry,
 	defineHookEntry,
 	defineInterfaceEntry,
+	defineLayoutEntry,
 	defineMigrationEntry,
+	defineModuleEntry,
 	defineOperationApiEntry,
 	defineOperationAppEntry,
+	definePanelEntry,
+	defineThemeEntry,
 } from './define-entry.js';
 
 describe('define<Type>Entry', () => {
@@ -34,6 +39,46 @@ describe('define<Type>Entry', () => {
 			type: 'operation',
 			name: 'notify',
 			config: { id: 'notify', handler },
+		});
+	});
+});
+
+describe('define<AppType>Entry', () => {
+	test('wraps an app config with its type and name', () => {
+		const displayConfig = { id: 'badge' } as never;
+		const layoutConfig = { id: 'board' } as never;
+		const moduleConfig = { id: 'reports' } as never;
+		const panelConfig = { id: 'gauge' } as never;
+		const themeConfig = { id: 'night' } as never;
+
+		expect(defineDisplayEntry('badge', displayConfig)).toEqual({
+			type: 'display',
+			name: 'badge',
+			config: { id: 'badge' },
+		});
+
+		expect(defineLayoutEntry('board', layoutConfig)).toEqual({
+			type: 'layout',
+			name: 'board',
+			config: { id: 'board' },
+		});
+
+		expect(defineModuleEntry('reports', moduleConfig)).toEqual({
+			type: 'module',
+			name: 'reports',
+			config: { id: 'reports' },
+		});
+
+		expect(definePanelEntry('gauge', panelConfig)).toEqual({
+			type: 'panel',
+			name: 'gauge',
+			config: { id: 'gauge' },
+		});
+
+		expect(defineThemeEntry('night', themeConfig)).toEqual({
+			type: 'theme',
+			name: 'night',
+			config: { id: 'night' },
 		});
 	});
 });

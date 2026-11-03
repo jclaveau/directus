@@ -216,6 +216,86 @@ describe('build', () => {
 	);
 
 	test(
+		'builds both sides of a bundle declaring its entries in code',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-code-bundle-${Date.now()}`;
+			const root = resolve(origCwd, extensionPath);
+
+			await fse.outputFile(resolve(root, 'src', 'app.ts'), 'export default {};\n');
+			await fse.outputFile(resolve(root, 'src', 'api.ts'), 'export default {};\n');
+
+			await fse.outputJson(resolve(root, 'package.json'), {
+				name: 'a-code-bundle',
+				version: '0.0.0',
+				type: 'module',
+				'directus:extension': {
+					type: 'bundle',
+					host: '^11.0.0',
+					path: { app: 'dist/app.js', api: 'dist/api.js' },
+				},
+			});
+
+			process.chdir(root);
+
+			try {
+				await build({});
+			}
+			finally {
+				process.chdir(origCwd);
+			}
+
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'api.js'))).toBe(true);
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'app.js'))).toBe(true);
+		},
+		30_000,
+	);
+
+	test(
+		'refuses a bundle declaring its entries in code without a source',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-sourceless-bundle-${Date.now()}`;
+			const root = resolve(origCwd, extensionPath);
+
+			await fse.outputJson(resolve(root, 'package.json'), {
+				name: 'a-sourceless-bundle',
+				version: '0.0.0',
+				type: 'module',
+				'directus:extension': {
+					type: 'bundle',
+					host: '^11.0.0',
+					path: { app: 'dist/app.js', api: 'dist/api.js' },
+				},
+			});
+
+			const consoleError = vi.spyOn(console, 'error')
+				.mockImplementation(() => undefined);
+
+			const processExit = vi.spyOn(process, 'exit')
+				.mockImplementation(() => {
+					throw new Error('exited');
+				});
+
+			process.chdir(root);
+
+			try {
+				await expect(build({})).rejects.toThrow(new Error('exited'));
+
+				expect(consoleError).toHaveBeenCalledWith(
+					`${chalk.bold.red('[Error]')} Bundle "a-sourceless-bundle" has no`
+						+ ' "src/app.ts" or "src/api.ts"; set "source" to point at its'
+						+ ' entry files',
+				);
+			}
+			finally {
+				process.chdir(origCwd);
+				consoleError.mockRestore();
+				processExit.mockRestore();
+			}
+		},
+		30_000,
+	);
+
+	test(
 		'builds a bundle extension from explicit entries',
 		async () => {
 			const extensionPath = `${TEST_PREFIX}-bundle-flags-${Date.now()}`;

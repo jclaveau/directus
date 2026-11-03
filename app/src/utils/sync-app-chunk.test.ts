@@ -85,3 +85,92 @@ describe('watchAppChunk', () => {
 		});
 	});
 });
+
+describe('reportAppEntries failures', () => {
+	test('asks for one reload when the server refuses a stale chunk', async () => {
+		vi.resetModules();
+
+		const { default: freshApi } = await import('@/api');
+
+		const { useNotificationsStore: freshNotifications } = await import(
+			'@/stores/notifications'
+		);
+
+		const { useUserStore: freshUserStore } = await import('@/stores/user');
+		const { reportAppEntries: freshReport } = await import('./sync-app-chunk');
+
+		const notifications = { add: vi.fn() };
+		vi.mocked(freshNotifications).mockReturnValue(notifications as never);
+		vi.mocked(freshUserStore).mockReturnValue({ isAdmin: true } as never);
+		vi.mocked(freshApi.post).mockRejectedValue({ response: { status: 409 } });
+
+		await freshReport({ chunkHash: 'abc', bundleEntries: [] });
+		await freshReport({ chunkHash: 'abc', bundleEntries: [] });
+
+		expect(notifications.add).toHaveBeenCalledTimes(1);
+
+		const reloadSpy = vi.spyOn(window.location, 'reload')
+			.mockImplementation(() => undefined);
+
+		notifications.add.mock.calls[0]![0].dismissAction();
+
+		expect(reloadSpy).toHaveBeenCalledTimes(1);
+	});
+
+	test('warns about a report the server fails otherwise', async () => {
+		const consoleWarn = vi.spyOn(console, 'warn')
+			.mockImplementation(() => undefined);
+
+		vi.mocked(useUserStore).mockReturnValue({ isAdmin: true } as never);
+		vi.mocked(api.post).mockRejectedValue(new Error('offline'));
+
+		await reportAppEntries({ chunkHash: 'abc', bundleEntries: [] });
+
+		expect(consoleWarn).toHaveBeenCalledWith(
+			'Couldn\'t report the app entries of the bundles',
+			new Error('offline'),
+		);
+	});
+});
+
+describe('watchAppChunk without a check', () => {
+	test('watches nothing for a chunk without a hash', () => {
+		const stopWatching = watchAppChunk({});
+
+		document.dispatchEvent(new Event('visibilitychange'));
+		stopWatching();
+
+		expect(api.get).not.toHaveBeenCalled();
+	});
+
+	test('reads nothing while the tab is hidden', () => {
+		vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+
+		const stopWatching = watchAppChunk({ chunkHash: 'abc' });
+
+		document.dispatchEvent(new Event('visibilitychange'));
+		stopWatching();
+
+		expect(api.get).not.toHaveBeenCalled();
+	});
+
+	test('warns about an app chunk it cannot read', async () => {
+		const consoleWarn = vi.spyOn(console, 'warn')
+			.mockImplementation(() => undefined);
+
+		vi.mocked(api.get).mockRejectedValue(new Error('offline'));
+
+		const stopWatching = watchAppChunk({ chunkHash: 'abc' });
+
+		document.dispatchEvent(new Event('visibilitychange'));
+
+		await vi.waitFor(() => {
+			expect(consoleWarn).toHaveBeenCalledWith(
+				'Couldn\'t read the app chunk the server serves',
+				new Error('offline'),
+			);
+		});
+
+		stopWatching();
+	});
+});
