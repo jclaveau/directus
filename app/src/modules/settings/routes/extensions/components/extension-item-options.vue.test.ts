@@ -5,7 +5,11 @@ import { mount } from '@vue/test-utils';
 import { expect, test, vi } from 'vitest';
 import ExtensionItemOptions from './extension-item-options.vue';
 
-function mountOptions(type: string, marketplace: boolean) {
+function mountOptions(
+	type: string,
+	marketplace: boolean,
+	{ source = 'registry', stateLocked = false } = {},
+) {
 	const pinia = createTestingPinia({ createSpy: vi.fn });
 	useServerStore(pinia).info.extensions = { limit: null, marketplace };
 
@@ -18,13 +22,13 @@ function mountOptions(type: string, marketplace: boolean) {
 				meta: {
 					enabled: true,
 					folder: 'extension-id',
-					source: 'registry',
+					source,
 					bundle: null,
 				},
 			} as any,
 			type: type as any,
 			state: 'enabled',
-			stateLocked: false,
+			stateLocked,
 		},
 		global: {
 			plugins: [i18n, pinia],
@@ -60,6 +64,28 @@ test('opens the uninstall of a registry extension outside production', () => {
 
 	expect(uninstall.attributes('disabled')).toBe('false');
 	expect(uninstall.attributes('title')).toBeUndefined();
+});
+
+test('locks the uninstall of an extension not from the registry', () => {
+	const uninstall = mountOptions('interface', true, { source: 'local' })
+		.find('.uninstall');
+
+	expect(uninstall.attributes('disabled')).toBe('true');
+
+	expect(uninstall.attributes('title')).toBe(
+		"Cannot uninstall extensions that weren't installed through the Marketplace",
+	);
+});
+
+test('locks enabling or disabling an app extension in dev mode', () => {
+	const toggle = mountOptions('interface', true, { stateLocked: true })
+		.find('v-list-item[clickable]');
+
+	expect(toggle.attributes('disabled')).toBe('true');
+
+	expect(toggle.attributes('title')).toBe(
+		'App extensions are always enabled in dev mode',
+	);
 });
 
 test('locks enabling or disabling an extension in production', () => {
