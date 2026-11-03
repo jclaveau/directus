@@ -322,8 +322,9 @@ describe('run', () => {
 			});
 
 			for (const version of options.completed ?? []) {
+				// One shared time, as a Postgres batch stamps every row it applies.
 				await database
-					.insert({ version, name: version })
+					.insert({ version, name: version, timestamp: '2026-01-01 00:00:00' })
 					.into('directus_migrations');
 			}
 
@@ -537,6 +538,44 @@ describe('run', () => {
 				expect(error).toBeUndefined();
 				expect(applied).toEqual([]);
 				expect(tables.second).toBe(true);
+			});
+
+			it('undoes the latest-dated one of a batch, not the last version '
+				+ 'string', async () => {
+				const { error, applied, tables } = await runFixtures(
+					{
+						'20990102A-add-probe.js': `export async function up() {}
+						export async function down(knex) {
+							await knex.schema.createTable('probe_first', (t) => t.integer('id'));
+						}`,
+					},
+					{
+						direction: 'down',
+						completed: ['@consumer/domain:20990101A', '20990102A'],
+						runOptions: {
+							extensionMigrations: [
+								{
+									bundle: '@consumer/domain',
+									name: '20990101A-add-orders',
+									config: {
+										up: async () => {},
+										down: async (knex) => {
+											await knex.schema.createTable(
+												'probe_second',
+												(t) => t.integer('id'),
+											);
+										},
+									},
+								},
+							],
+						},
+					},
+				);
+
+				expect(error).toBeUndefined();
+				expect(applied).toEqual(['@consumer/domain:20990101A']);
+				expect(tables.first).toBe(true);
+				expect(tables.second).toBe(false);
 			});
 
 			it('refuses to undo one whose bundle is not installed, '
