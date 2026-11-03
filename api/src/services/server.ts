@@ -12,7 +12,7 @@ import { useLogger } from '../logger/index.js';
 import getMailer from '../mailer.js';
 import {
 	isMarketplaceEnabled,
-} from '../middleware/refuse-marketplace-in-production.js';
+} from '../middleware/refuse-extension-change-in-production.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
 import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';

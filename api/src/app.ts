@@ -89,8 +89,8 @@ import extractToken from './middleware/extract-token.js';
 import auditRequestQueries from './middleware/query-audit.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import {
-	refuseMarketplaceInProduction,
-} from './middleware/refuse-marketplace-in-production.js';
+	refuseExtensionChangeInProduction,
+} from './middleware/refuse-extension-change-in-production.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
 	type RateLimiterCharge,
@@ -370,7 +370,7 @@ export default async function createApp(): Promise<express.Application> {
 
 	// Above the response cache, which would otherwise serve a registry answer
 	// cached by a replica outside production until its TTL.
-	app.use('/extensions/registry', refuseMarketplaceInProduction);
+	app.use('/extensions/registry', refuseExtensionChangeInProduction);
 
 	app.use(authenticate);
 

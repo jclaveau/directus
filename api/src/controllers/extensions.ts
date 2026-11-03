@@ -16,8 +16,8 @@ import express from 'express';
 import { UUID_REGEX } from '../constants.js';
 import { getExtensionManager } from '../extensions/index.js';
 import {
-	refuseMarketplaceInProduction,
-} from '../middleware/refuse-marketplace-in-production.js';
+	refuseExtensionChangeInProduction,
+} from '../middleware/refuse-extension-change-in-production.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { ExtensionReadError, ExtensionsService } from '../services/extensions.js';
@@ -240,7 +240,7 @@ router.delete(
 router.patch(
 	`/:pk(${UUID_REGEX})`,
 	// Enabling or disabling reloads the extensions in place.
-	refuseMarketplaceInProduction,
+	refuseExtensionChangeInProduction,
 	asyncHandler(async (req, res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
