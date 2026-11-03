@@ -331,4 +331,77 @@ describe('generateExtensionsEntrypoint', () => {
 			`"import display0 from './extensions/display/index.js';import operation0 from './extensions/operation/app.js';import {layouts as layoutBundle0,operations as operationBundle0} from './extensions/bundle/app.js';export const interfaces = [];export const displays = [display0];export const layouts = [...layoutBundle0];export const modules = [];export const panels = [];export const themes = [];export const operations = [operation0,...operationBundle0];"`,
 		);
 	});
+
+	it('imports a bundle declaring its entries in code, '
+		+ 'leaving its disabled entries out', () => {
+		const mockExtensions: {
+			module: Map<string, Extension>;
+			registry: Map<string, Extension>;
+		} = {
+			module: new Map(),
+			registry: new Map(),
+		};
+
+		mockExtensions.module.set('@consumer/domain', {
+			path: './extensions/domain',
+			name: '@consumer/domain',
+			version: '1.0.0',
+			type: 'bundle',
+			entrypoint: { app: 'dist/app.js', api: 'dist/api.js' },
+			entries: [],
+			entriesFrom: 'code',
+			host: '^11.0.0',
+			local: true,
+			partial: undefined,
+		});
+
+		const mockSettings: ExtensionSettings[] = [
+			{
+				id: 'domain-id',
+				folder: '@consumer/domain',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
+			{
+				id: 'audit-panel-id',
+				folder: 'audit-panel',
+				enabled: false,
+				source: 'module',
+				bundle: 'domain-id',
+				type: 'panel',
+			},
+			{
+				id: 'picker-id',
+				folder: 'picker',
+				enabled: true,
+				source: 'module',
+				bundle: 'domain-id',
+				type: 'interface',
+			},
+		];
+
+		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
+			"import bundleCode0 from './extensions/domain/dist/app.js';"
+				+ 'const codeEntries0 = bundleCode0.entries.filter((entry) => '
+				+ '!["audit-panel"].includes(entry.name));'
+				+ 'export const interfaces = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "interface").map((entry) => entry.config)];'
+				+ 'export const displays = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "display").map((entry) => entry.config)];'
+				+ 'export const layouts = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "layout").map((entry) => entry.config)];'
+				+ 'export const modules = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "module").map((entry) => entry.config)];'
+				+ 'export const panels = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "panel").map((entry) => entry.config)];'
+				+ 'export const themes = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "theme").map((entry) => entry.config)];'
+				+ 'export const operations = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "operation").map((entry) => entry.config)];'
+				+ 'export const bundleEntries = [{source:"module",folder:"@consumer/domain",'
+				+ 'entries:bundleCode0.entries.map((entry) => '
+				+ '({type:entry.type,name:entry.name}))}];',
+		);
+	});
 });

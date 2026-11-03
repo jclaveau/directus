@@ -3167,6 +3167,9 @@ importers:
       blackbox-extensions:
         specifier: link:./extensions
         version: link:extensions
+      code-entries-probe:
+        specifier: link:./extensions/code-entries-probe
+        version: link:extensions/code-entries-probe
       extension-settings-probe:
         specifier: link:./extensions/extension-settings-probe
         version: link:extensions/extension-settings-probe
