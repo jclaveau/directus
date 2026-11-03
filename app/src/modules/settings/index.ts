@@ -2,6 +2,7 @@ import api from '@/api';
 import { useCollectionsStore } from '@/stores/collections';
 import { useFieldsStore } from '@/stores/fields';
 import { useFlowsStore } from '@/stores/flows';
+import { useServerStore } from '@/stores/server';
 import RouterPass from '@/utils/router-passthrough';
 import { defineModule } from '@directus/extensions';
 import Appearance from './routes/appearance/item.vue';
@@ -267,6 +268,11 @@ export default defineModule({
 			name: 'marketplace',
 			path: 'marketplace',
 			component: RouterPass,
+			beforeEnter() {
+				if (!useServerStore().info.extensions?.marketplace) {
+					return '/settings/extensions';
+				}
+			},
 			children: [
 				{
 					name: 'marketplace-registry',

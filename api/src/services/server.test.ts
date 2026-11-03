@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockEnv, holding } = vi.hoisted(() => {
@@ -78,7 +79,11 @@ vi.mock('../server.js', () => {
 });
 
 vi.mock('./settings.js', () => {
-	return { SettingsService: class {} };
+	return {
+		SettingsService: class {
+			readSingleton = async () => null;
+		},
+	};
 });
 
 vi.mock('../outstanding-migrations.js', () => {
@@ -253,5 +258,31 @@ describe('ServerService health', () => {
 		holding.value = ['20990101A'];
 
 		expect(await healthOf(null)).toEqual({ status: 'error' });
+	});
+});
+
+describe('ServerService serverInfo', () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	// Extensions change only with a deploy in production (#627), so the app
+	// hides the Marketplace there.
+	it.each([
+		{ nodeEnv: 'production', marketplace: false },
+		{ nodeEnv: 'development', marketplace: true },
+	])(oneLine`
+		tells a user the Marketplace is $marketplace under NODE_ENV $nodeEnv
+	`, async ({ nodeEnv, marketplace }) => {
+		vi.stubEnv('NODE_ENV', nodeEnv);
+		vi.resetModules();
+		const { ServerService } = await import('./server.js');
+
+		const info = await new ServerService({
+			accountability: { user: 'user-id', admin: true } as any,
+			schema: { collections: {}, relations: [] } as any,
+		}).serverInfo();
+
+		expect(info['extensions']).toEqual({ limit: null, marketplace });
 	});
 });

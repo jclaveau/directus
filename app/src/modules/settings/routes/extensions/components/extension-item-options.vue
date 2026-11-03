@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useServerStore } from '@/stores/server';
 import { ApiOutput } from '@directus/types';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -15,7 +16,23 @@ defineEmits<{ toggleState: [enabled: boolean]; uninstall: []; reinstall: []; rem
 
 const { t } = useI18n();
 
-const uninstallLocked = computed(() => props.extension.meta.source !== 'registry');
+const serverStore = useServerStore();
+
+const marketplaceEnabled = computed(
+	() => serverStore.info.extensions?.marketplace === true,
+);
+
+const uninstallLockedReason = computed(() => {
+	if (props.extension.meta.source !== 'registry') {
+		return t('uninstall_locked');
+	}
+
+	if (!marketplaceEnabled.value) {
+		return t('marketplace_production_locked');
+	}
+
+	return null;
+});
 
 const stateActions = computed(() => {
 	const enabled = props.state === 'enabled';
@@ -56,8 +73,8 @@ const stateActions = computed(() => {
 				<template v-if="!extension.bundle">
 					<v-divider />
 					<v-list-item
-						v-tooltip.left="uninstallLocked ? t('uninstall_locked') : null"
-						:disabled="uninstallLocked"
+						v-tooltip.left="uninstallLockedReason"
+						:disabled="uninstallLockedReason !== null"
 						class="uninstall"
 						clickable
 						@click="$emit('uninstall')"
@@ -73,7 +90,9 @@ const stateActions = computed(() => {
 			</template>
 
 			<template v-else>
-				<template v-if="props.extension.meta.source === 'registry'">
+				<template
+					v-if="props.extension.meta.source === 'registry' && marketplaceEnabled"
+				>
 					<v-list-item clickable @click="$emit('reinstall')">
 						<v-list-item-icon>
 							<v-icon name="download" />

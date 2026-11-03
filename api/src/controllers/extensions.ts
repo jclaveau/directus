@@ -15,6 +15,9 @@ import { isIn } from '@directus/utils';
 import express from 'express';
 import { UUID_REGEX } from '../constants.js';
 import { getExtensionManager } from '../extensions/index.js';
+import {
+	refuseMarketplaceInProduction,
+} from '../middleware/refuse-marketplace-in-production.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { ExtensionReadError, ExtensionsService } from '../services/extensions.js';
@@ -28,6 +31,7 @@ const router = express.Router();
 const env = useEnv();
 
 router.use(useCollection('directus_extensions'));
+router.use('/registry', refuseMarketplaceInProduction);
 
 router.get(
 	'/',
