@@ -15,7 +15,7 @@ line appended below.
 - [No consumer data in fork memories](feedback_directus_no_consumer_data_in_fork_memories.md) — public repo: consumer specifics go to its private repo; a consumer prod DB is SELECT-only
 - [Non-PG review points go to #610](feedback_directus_non_pg_review_points_to_610.md) — sqlite/cockroach/maria finding → point in #610 + `TODO(#610):`, never fixed in the PR
 - [Postgres only in the main workflow](feedback_directus_pg_only_dialect_focus.md) — no MariaDB/SQLite investment; never report their absence as a gap
-- [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch/rerun is its own ask
+- [CI-triggering action needs its own approval](feedback_ci_trigger_needs_own_approval.md) — label/dispatch is its own ask; a flake rerun is NOT (public fork, free): rerun unasked
 - [The admin preview is not a CI check](feedback_directus_ci_watch_skip_preview.md) — never wait on it, never mention it in a CI report
 - [New bb files are Gherkin](feedback_directus_blackbox_gherkin_standard.md) — `.feature` + step `.test.ts`
 
@@ -45,11 +45,11 @@ line appended below.
 `.agents/auto-memory/index/blackbox.md`
 
 - [Directus blackbox run + logs](project_directus_blackbox_run_and_logs.md) — bb runs on every code PR; the label is NOT required and cancels the run
-- [Blackbox flakes](project_directus_blackbox_flakes.md) — known intermittents; `gh run rerun --failed` only after the run completes (needs its own ask)
+- [Blackbox flakes](project_directus_blackbox_flakes.md) — known intermittents; `gh run rerun --failed` once the run completes, unasked (public fork)
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
 - [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
-## ci (19) — workflows, codecov, lint gates, bench, preview
+## ci (20) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`
 
 - [Two eslint configs](project_directus_two_eslint_configs.md) — Lint vs Style (changes); run both before push
@@ -62,7 +62,7 @@ line appended below.
 - [knex-mock matches raw SQL](reference_directus_knex_mock_sql_matching.md) — register the narrower handler first
 - [useEnv mock needs vi.hoisted](reference_directus_useenv_mock_hoisted.md) — automock evals the real module first
 
-## api (32) — Directus core internals, env, errors, migrations, DB
+## api (34) — Directus core internals, env, errors, migrations, DB
 `.agents/auto-memory/index/api.md`
 
 - [A bad env var fails the boot](feedback_directus_bad_env_var_fails_boot.md) — exit before listen naming the var; never fall back
