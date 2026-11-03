@@ -2,7 +2,6 @@ import api from '@/api';
 import { useCollectionsStore } from '@/stores/collections';
 import { useFieldsStore } from '@/stores/fields';
 import { useFlowsStore } from '@/stores/flows';
-import { useServerStore } from '@/stores/server';
 import RouterPass from '@/utils/router-passthrough';
 import { defineModule } from '@directus/extensions';
 import Appearance from './routes/appearance/item.vue';
@@ -18,6 +17,9 @@ import FlowsOverview from './routes/flows/overview.vue';
 import MarketplaceAccount from './routes/marketplace/routes/account/account.vue';
 import MarketplaceExtension from './routes/marketplace/routes/extension/extension.vue';
 import MarketplaceRegistry from './routes/marketplace/routes/registry/registry.vue';
+import {
+	redirectClosedMarketplace,
+} from './routes/marketplace/redirect-closed-marketplace';
 import NotFound from './routes/not-found.vue';
 import PgBouncer from './routes/pgbouncer/pgbouncer.vue';
 import PoliciesCollection from './routes/policies/collection.vue';
@@ -268,11 +270,7 @@ export default defineModule({
 			name: 'marketplace',
 			path: 'marketplace',
 			component: RouterPass,
-			beforeEnter() {
-				if (!useServerStore().info.extensions?.marketplace) {
-					return '/settings/extensions';
-				}
-			},
+			beforeEnter: redirectClosedMarketplace,
 			children: [
 				{
 					name: 'marketplace-registry',

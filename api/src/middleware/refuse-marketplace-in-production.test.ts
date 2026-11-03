@@ -27,12 +27,28 @@ test('refuses a registry route in production', () => {
 	const req = {
 		baseUrl: '/extensions/registry',
 		path: '/install',
+		originalUrl: '/extensions/registry/install',
 	} as Request;
 
 	expect(() => refuseMarketplaceInProduction(req, {} as Response, next))
-		.toThrow("Route /extensions/registry/install doesn't exist.");
+		.toThrow(new Error("Route /extensions/registry/install doesn't exist."));
 
 	expect(next).not.toHaveBeenCalled();
+});
+
+// The bare registry path reaches the gate as `path: '/'`: the 404 names the path
+// the client asked for, without the query.
+test('names the bare registry path the client asked for', () => {
+	vi.stubEnv('NODE_ENV', 'production');
+
+	const req = {
+		baseUrl: '/extensions/registry',
+		path: '/',
+		originalUrl: '/extensions/registry?search=a',
+	} as Request;
+
+	expect(() => refuseMarketplaceInProduction(req, {} as Response, vi.fn()))
+		.toThrow(new Error("Route /extensions/registry doesn't exist."));
 });
 
 test('passes a registry route outside production', () => {
@@ -40,7 +56,11 @@ test('passes a registry route outside production', () => {
 	const next = vi.fn();
 
 	refuseMarketplaceInProduction(
-		{ baseUrl: '/extensions/registry', path: '/install' } as Request,
+		{
+			baseUrl: '/extensions/registry',
+			path: '/install',
+			originalUrl: '/extensions/registry/install',
+		} as Request,
 		{} as Response,
 		next,
 	);

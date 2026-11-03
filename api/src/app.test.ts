@@ -271,6 +271,45 @@ describe('createApp', async () => {
 		});
 	});
 
+	describe('Marketplace', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		test('refuses a registry read in production', async () => {
+			vi.stubEnv('NODE_ENV', 'production');
+
+			const response = await request('/extensions/registry?search=a');
+
+			expect(response.status).toBe(404);
+
+			expect(await response.json()).toEqual({
+				errors: [
+					{
+						extensions: {
+							code: 'ROUTE_NOT_FOUND',
+							path: '/extensions/registry',
+						},
+						message: "Route /extensions/registry doesn't exist.",
+					},
+				],
+			});
+		});
+
+		// A gate below the cache lets a registry answer cached by a replica outside
+		// production through until its TTL.
+		test('registers the production gate above the cache', async () => {
+			const app = await createApp();
+
+			const names = (app as any)._router.stack.map((layer: any) => layer.name);
+
+			expect(names).toContain('refuseMarketplaceInProduction');
+
+			expect(names.indexOf('refuseMarketplaceInProduction'))
+				.toBeLessThan(names.indexOf('checkCache'));
+		});
+	});
+
 	describe('Not Found Handler', () => {
 		test('Should return ROUTE_NOT_FOUND error when a route does not exist', async () => {
 			const testRoute = '/this-route-does-not-exist';
