@@ -1,3 +1,4 @@
+import { RouteNotFoundError } from '@directus/errors';
 import type { Request, Response } from 'express';
 import { afterEach, expect, test, vi } from 'vitest';
 import {
@@ -31,7 +32,7 @@ test('refuses a registry route in production', () => {
 	} as Request;
 
 	expect(() => refuseMarketplaceInProduction(req, {} as Response, next))
-		.toThrow(new Error("Route /extensions/registry/install doesn't exist."));
+		.toThrow(new RouteNotFoundError({ path: '/extensions/registry/install' }));
 
 	expect(next).not.toHaveBeenCalled();
 });
@@ -48,7 +49,7 @@ test('names the bare registry path the client asked for', () => {
 	} as Request;
 
 	expect(() => refuseMarketplaceInProduction(req, {} as Response, vi.fn()))
-		.toThrow(new Error("Route /extensions/registry doesn't exist."));
+		.toThrow(new RouteNotFoundError({ path: '/extensions/registry' }));
 });
 
 test('passes a registry route outside production', () => {

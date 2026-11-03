@@ -17,7 +17,7 @@ export const refuseMarketplaceInProduction: RequestHandler = (
 	next,
 ) => {
 	if (!isMarketplaceEnabled()) {
-		throw new RouteNotFoundError({ path: req.baseUrl + req.path });
+		throw new RouteNotFoundError({ path: req.originalUrl.split('?')[0]! });
 	}
 
 	next();
