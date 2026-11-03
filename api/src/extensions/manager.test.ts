@@ -388,7 +388,7 @@ test('force-syncs the queued reload when a reload joining it asks to', async () 
 
 	expect(loadSpy.mock.calls).toEqual([
 		[undefined],
-		[{ forceSync: true }],
+		[{ forceSync: true, migrate: false }],
 	]);
 });
 

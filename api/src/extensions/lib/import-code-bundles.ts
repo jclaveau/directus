@@ -5,9 +5,9 @@ import {
 import type { Extension } from '@directus/types';
 import fse from 'fs-extra';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ExtensionMigration } from '../../database/migrations/list.js';
 import getModuleDefault from '../../utils/get-module-default.js';
-import { importFileUrl } from '../../utils/import-file-url.js';
 
 export type ExtensionSource = 'module' | 'registry';
 
@@ -47,9 +47,13 @@ export async function importCodeBundles(
 			}
 
 			try {
-				const bundleModule = await importFileUrl(apiPath, import.meta.url, {
-					fresh: options.fresh,
-				});
+				const bundleUrl = pathToFileURL(apiPath).href;
+
+				const bundleModule = await import(
+					options.fresh
+						? `${bundleUrl}?t=${Date.now()}`
+						: bundleUrl
+				);
 
 				codeBundles.push({
 					source,

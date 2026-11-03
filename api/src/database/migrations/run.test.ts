@@ -29,13 +29,11 @@ describe('run', () => {
 	});
 
 	describe('when passed the argument up', () => {
-		it('returns "Nothing To Upgrade" if no directus_migrations', async () => {
-			tracker.on.select('directus_migrations').response(['Empty']);
+		it('refuses an up with no pending migration of its phase', async () => {
+			tracker.on.select('directus_migrations').response([]);
 
-			await run(db, 'up').catch((e: Error) => {
-				expect(e).toBeInstanceOf(Error);
-				expect(e.message).toBe('Nothing to upgrade');
-			});
+			await expect(run(db, 'up', true, { phase: 'after-schema' }))
+				.rejects.toThrow(new Error('Nothing to upgrade'));
 		});
 
 		it('returns "Method implemented in the dialect driver" if no directus_migrations', async () => {

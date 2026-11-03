@@ -320,7 +320,7 @@ export default async function run(
  * not hold names the bundle that applied it.
  */
 function describeMissingMigration(version: string): string {
-	const separatorIndex = version.lastIndexOf(':');
+	const separatorIndex = String(version).lastIndexOf(':');
 
 	if (separatorIndex === -1) {
 		return "Couldn't find migration";

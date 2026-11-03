@@ -1,6 +1,5 @@
 import { useEnv } from '@directus/env';
 import { outstandingMigrations } from './database/index.js';
-import { getExtensionManager } from './extensions/index.js';
 import { useLogger } from './logger/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
@@ -83,6 +82,10 @@ export async function watchOutstandingMigrations(): Promise<void> {
 
 	while (!stopped) {
 		try {
+			// Loaded on demand: the extensions pull the whole service layer in, and
+			// this module is imported by the scheduler.
+			const { getExtensionManager } = await import('./extensions/index.js');
+
 			outstanding = await outstandingMigrations(
 				getExtensionManager().migrationEntries(),
 			);
