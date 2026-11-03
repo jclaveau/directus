@@ -2,6 +2,8 @@
 
 Full hooks for this area. The routing keys live in `../MEMORY.md`.
 
+- [Worktree style gate + subagent fixer](../reference_directus_worktree_style_gate_and_subagent_fix.md) — pnpm lint:style:changes fails in a worktree (symlinked node_modules): run eslint directly; a style subagent strips eslint-disable comments, diff its work
+
 - [Codecov per-package flags; blackbox not in api unit flag](../project_directus_codecov_flags.md) — codecov/patch/<pkg> target=auto≈project; blackbox-only api code fails patch/api → needs knex-mock-client unit tests; constants barrel line needs import-through-index
 - [check.yml trigger scoping + Check ambiguity](../reference_directus_check_workflow_scoping.md) — check.yml (Unit/Format/Lint/Style) fires only on prepare/feat** base PRs, NOT hhh-dev → verify hhh-dev-based PRs (#205) locally; two workflows named "Check" (blackbox-pr.yml + check.yml); cancel-in-progress makes a superseded run show "cancelled" rc=1 (false fail — watch current-head run). FIXED 2026-06-30: run on every commit (unfiltered push) → unblocks unit-coverage upload for codecov
 - [Scalabus diff-scoped eslint style gate](../project_directus_scalabus_style_gate.md) — eslint.style.config.js (jean's own config, prettier disabled, indent/semi/quotes/quality-rules off) + lint-style-changes.mjs (config-is-source, added-lines-only, untracked-file scan, tooling-exempt); two-pass --fix to satisfy both style + directus padding; custom arrow-multiline-block rule
