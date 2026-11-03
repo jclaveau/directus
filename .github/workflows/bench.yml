@@ -72,7 +72,6 @@ env:
   # Minted by `cli bootstrap` so a bench reaches the API with no login round trip.
   ADMIN_TOKEN: bench-admin-token
   TELEMETRY: 'false'
-  EXTENSIONS_PATH: tests/perf/extensions
 
 jobs:
   startup:
