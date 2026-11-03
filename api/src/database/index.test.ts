@@ -65,10 +65,6 @@ vi.mock('../utils/node-id.js', () => {
 	return { nodeId: 'testnode' };
 });
 
-vi.mock('../extensions/lib/get-extensions-path.js', () => {
-	return { getExtensionsPath: () => '/extensions' };
-});
-
 vi.mock('fs-extra', () => {
 	return {
 		default: {
@@ -77,7 +73,7 @@ vi.mock('fs-extra', () => {
 					throw new Error('ENOENT');
 				}
 
-				if (target.startsWith('/extensions')) {
+				if (target === '/custom-migrations') {
 					return state.customFiles;
 				}
 
@@ -96,6 +92,7 @@ async function loadDatabase() {
 function resetState() {
 	mockEnv['DB_CLIENT'] = 'pg';
 	mockEnv['DB_CONNECTION_STRING'] = 'postgres://localhost/directus';
+	mockEnv['MIGRATIONS_PATH'] = '/custom-migrations';
 	state.coreFiles = ['20990101A-first.js', '20990102A-second.js'];
 	state.customFiles = [];
 	state.customExists = false;
@@ -142,7 +139,7 @@ describe('outstandingMigrations', () => {
 		expect(await outstandingMigrations()).toEqual([]);
 	});
 
-	it('counts the migrations staged in the extensions path too', async () => {
+	it('counts the migrations staged in MIGRATIONS_PATH too', async () => {
 		state.customExists = true;
 		state.customFiles = ['20990103A-custom.js'];
 		state.completed = [{ version: '20990101A' }, { version: '20990102A' }];

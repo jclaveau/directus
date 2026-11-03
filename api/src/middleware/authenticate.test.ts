@@ -29,7 +29,6 @@ vi.mock('../database/index');
 vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
 		SECRET: 'test',
-		EXTENSIONS_PATH: './extensions',
 		SESSION_COOKIE_NAME: 'directus_session',
 		// needed for constants.ts top level mocking
 		REFRESH_TOKEN_COOKIE_DOMAIN: '',

@@ -289,7 +289,7 @@ describe('Services / Extensions / install', () => {
 describe('Services / Extensions / uninstall', () => {
 	it.each([
 		[
-			{ id: 'extension-id', source: 'local', bundle: null, folder: 'version-1' },
+			{ id: 'extension-id', source: 'module', bundle: null, folder: 'version-1' },
 			oneLine`
 				Invalid payload. Cannot uninstall extensions
 				that were not installed via marketplace.
@@ -362,7 +362,7 @@ describe('Services / Extensions / uninstall', () => {
 describe('Services / Extensions / reinstall', () => {
 	it.each([
 		[
-			{ id: 'extension-id', source: 'local', bundle: null, folder: 'version-1' },
+			{ id: 'extension-id', source: 'module', bundle: null, folder: 'version-1' },
 			oneLine`
 				Invalid payload. Cannot reinstall extensions
 				that were not installed via marketplace.
@@ -450,7 +450,7 @@ describe('Services / Extensions / readAll', () => {
 			},
 			{ id: 'stale-id', bundle: 'bundle-id', source: 'registry', folder: 'removed' },
 			{ id: 'orphan-id', bundle: 'missing-id', source: 'registry', folder: 'x' },
-			{ id: 'local-id', bundle: null, source: 'local', folder: 'local-folder' },
+			{ id: 'module-id', bundle: null, source: 'module', folder: 'module-folder' },
 		] as any);
 
 		const service = new ExtensionsService({
@@ -474,13 +474,13 @@ describe('Services / Extensions / readAll', () => {
 				},
 			},
 			{
-				id: 'local-id',
+				id: 'module-id',
 				bundle: null,
 				meta: {
-					id: 'local-id',
+					id: 'module-id',
 					bundle: null,
-					source: 'local',
-					folder: 'local-folder',
+					source: 'module',
+					folder: 'module-folder',
 				},
 				schema: null,
 			},
@@ -508,8 +508,8 @@ describe('Services / Extensions / readOne', () => {
 		vi.spyOn(ItemsService.prototype, 'readOne').mockResolvedValue({
 			id: 'extension-id',
 			bundle: null,
-			source: 'local',
-			folder: 'local-folder',
+			source: 'module',
+			folder: 'module-folder',
 		});
 
 		const service = new ExtensionsService({
@@ -524,8 +524,8 @@ describe('Services / Extensions / readOne', () => {
 			meta: {
 				id: 'extension-id',
 				bundle: null,
-				source: 'local',
-				folder: 'local-folder',
+				source: 'module',
+				folder: 'module-folder',
 			},
 		});
 	});

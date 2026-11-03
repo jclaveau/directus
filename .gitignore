@@ -55,7 +55,5 @@ TODO
 /tests/blackbox/sequencer-data.json
 /packages/extensions-sdk/temp-extension-*/
 
-# Benchmark output and its throwaway extensions dir
+# Benchmark output
 tests/perf/results/
-tests/perf/extensions/
-tests/perf/cache-extensions/

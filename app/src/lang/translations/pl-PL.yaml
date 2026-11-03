@@ -1197,7 +1197,6 @@ installed: Zainstalowany
 reinstall: Zainstaluj ponownie
 open_in_marketplace: Otwórz w Marketplace
 source_registry: Marketplace
-source_local: Lokalny
 source_module: Moduł Node
 collection: Kolekcja
 collections: Kolekcje
