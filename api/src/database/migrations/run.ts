@@ -94,7 +94,23 @@ export default async function run(
 	}
 
 	async function down() {
-		const lastAppliedMigration = orderBy(completedMigrations, ['timestamp', 'version'], ['desc', 'desc'])[0];
+		// A batch stamps its rows with one time: the run order breaks the tie, and
+		// a row no installed migration lists sorts last, to be refused by name.
+		const runOrder = (completed: Migration) => {
+			const index = listedMigrations.findIndex(
+				(listedMigration) => listedMigration.version === completed.version,
+			);
+
+			return index === -1
+				? listedMigrations.length
+				: index;
+		};
+
+		const lastAppliedMigration = orderBy(
+			completedMigrations,
+			['timestamp', runOrder],
+			['desc', 'desc'],
+		)[0];
 
 		if (!lastAppliedMigration) {
 			throw Error('Nothing to downgrade');

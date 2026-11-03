@@ -45,8 +45,12 @@ export default defineBundleApi([
 	}),
 	defineMigrationEntry('20261104A-fill-orders', {
 		phase: 'after-schema',
-		up: async (knex) => knex('orders').insert({}),
-		down: async (knex) => knex('orders').delete(),
+		up: async (knex) => {
+			await knex('orders').insert({});
+		},
+		down: async (knex) => {
+			await knex('orders').delete();
+		},
 	}),
 ]);
 ```
@@ -68,7 +72,8 @@ A migration entry is named `<YYYYMMDD><letter>-<kebab-name>` and recorded in
 | `20261103A-add-orders` of `@consumer/domain` | `@consumer/domain:20261103A` |
 
 The core and bundle migrations run in date order; on the same date the core runs first.
-Two entries of a bundle on the same date are refused.
+Two entries of a bundle with the same date and letter are refused when the migrations
+are listed.
 
 | command                                               | runs                                                    |
 | ----------------------------------------------------- | ------------------------------------------------------- |

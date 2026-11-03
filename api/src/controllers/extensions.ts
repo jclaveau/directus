@@ -336,6 +336,9 @@ router.post(
 router.get(
 	'/app-chunk',
 	asyncHandler(async (_req, res, next) => {
+		// A chunk rebuild writes no row, so no purge would drop a cached hash.
+		res.locals['cache'] = false;
+
 		res.locals['payload'] = {
 			data: { chunk: getExtensionManager().getAppChunkHash() },
 		};
