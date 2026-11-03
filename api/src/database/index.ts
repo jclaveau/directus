@@ -9,7 +9,6 @@ import knex from 'knex';
 import path, { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import { isArray, merge, toArray } from '../utils/lodash-es-used.js';
@@ -308,6 +307,7 @@ export async function isInstalled(): Promise<boolean> {
  */
 // eslint-disable-next-line local/no-single-caller-function -- 3 call sites
 export async function outstandingMigrations(): Promise<string[]> {
+	const env = useEnv();
 	const logger = useLogger();
 
 	let requiredVersions: (string | undefined)[];
@@ -315,7 +315,7 @@ export async function outstandingMigrations(): Promise<string[]> {
 	try {
 		let migrationFiles = await fse.readdir(path.join(__dirname, 'migrations'));
 
-		const customMigrationsPath = path.resolve(getExtensionsPath(), 'migrations');
+		const customMigrationsPath = path.resolve(env['MIGRATIONS_PATH'] as string);
 
 		let customMigrationFiles =
 			((await fse.pathExists(customMigrationsPath)) && (await fse.readdir(customMigrationsPath))) || [];
@@ -324,7 +324,10 @@ export async function outstandingMigrations(): Promise<string[]> {
 			(file: string) => file.startsWith('run') === false && file.endsWith('.d.ts') === false,
 		);
 
-		customMigrationFiles = customMigrationFiles.filter((file: string) => file.endsWith('.js'));
+		// The runner's filter, so the hold waits on exactly what it would run.
+		customMigrationFiles = customMigrationFiles.filter(
+			(file: string) => file.includes('-') && /\.(c|m)?js$/.test(file),
+		);
 
 		migrationFiles.push(...customMigrationFiles);
 

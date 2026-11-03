@@ -242,7 +242,6 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	PACKAGE_FILE_LOCATION: 'string',
 
-	EXTENSIONS_PATH: 'string',
 	EXTENSIONS_MUST_LOAD: 'boolean',
 	EXTENSIONS_AUTO_RELOAD: 'boolean',
 	EXTENSIONS_SANDBOX_MEMORY: 'number',

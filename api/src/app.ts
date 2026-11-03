@@ -67,7 +67,7 @@ import {
 	validateChoiceEnv,
 	validateDurationEnv,
 	validateHeaderNameEnv,
-	validateMarketplaceEnvUnset,
+	validateUnreadEnv,
 } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initPoolHealthMirror } from './processes/lib/pool-health.js';
@@ -133,7 +133,7 @@ export default async function createApp(): Promise<express.Application> {
 	// and crash-loop behind it.
 	validateDurationEnv(['CACHE_SCOPED_DEPLOY_FILL_PAUSE_MAX']);
 	validateCacheSettingsEnv();
-	validateMarketplaceEnvUnset();
+	validateUnreadEnv();
 
 	await validateDatabaseConnection();
 

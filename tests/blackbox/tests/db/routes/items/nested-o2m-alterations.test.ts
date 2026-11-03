@@ -3,7 +3,7 @@ import vendors from '@common/get-dbs-to-test';
 import { oneLine } from '@directus/utils';
 import { describe } from 'vitest';
 import { defineNestedWriteSteps } from './nested-o2m-steps';
-import { startAuditedInstance } from './query-audit-steps';
+import { startAuditedInstance } from '@common/query-audit-steps';
 
 const feature = loadFeature(
 	'./tests/db/routes/items/nested-o2m-alterations.feature',

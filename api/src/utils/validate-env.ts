@@ -184,30 +184,35 @@ export function validateHeaderNameEnv(key: string): void {
 	}
 }
 
-/** The variables configuring the extensions Marketplace. */
-const MARKETPLACE_ENV = [
-	'EXTENSIONS_LOCATION',
-	'MARKETPLACE_REGISTRY',
-	'MARKETPLACE_TRUST',
-];
+// Extensions change only with a deploy (#627): a deployment configuring the
+// Marketplace expects installs it does not get.
+const MARKETPLACE_ADVICE = 'extensions change only with a deploy: the'
+	+ ' Marketplace it configures is removed. Unset it.';
+
+const UNREAD_VARIABLE_ADVICE: Record<string, string> = {
+	EXTENSIONS_PATH: 'extensions load only as the dependencies of the'
+		+ ' package.json in PACKAGE_FILE_LOCATION. Unset it.',
+	EXTENSIONS_LOCATION: MARKETPLACE_ADVICE,
+	MARKETPLACE_REGISTRY: MARKETPLACE_ADVICE,
+	MARKETPLACE_TRUST: MARKETPLACE_ADVICE,
+};
 
 /**
- * Refuse a Marketplace variable that is set, at boot like
- * {@link validateDurationEnv}: extensions change only with a deploy (#627), so a
- * deployment configuring the Marketplace expects installs it does not get.
+ * Refuse a variable this build does not read, set by a deployment configured
+ * for one that did.
  */
-export function validateMarketplaceEnvUnset(): void {
+export function validateUnreadEnv(): void {
 	const env = useEnv();
 
-	for (const key of MARKETPLACE_ENV) {
-		if (key in env === false) {
+	for (const [key, advice] of Object.entries(UNREAD_VARIABLE_ADVICE)) {
+		if (env[key] === undefined) {
 			continue;
 		}
 
 		useLogger().error(
-			`${JSON.stringify(key)} Environment Variable is set, but extensions `
-				+ 'change only with a deploy: the Marketplace it configures is '
-				+ 'removed. Unset it.',
+			`${JSON.stringify(key)} Environment Variable is `
+				+ `${JSON.stringify(env[key])}, which this build does not read: `
+				+ `${advice}`,
 		);
 
 		process.exit(1);

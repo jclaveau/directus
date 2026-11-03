@@ -33,6 +33,14 @@ Feature: A single translation is checked as it is created and deleted
       |   key: sw-<run>              |     key: sw-<run>             |
       |   language: fr-FR            |     language: fr-FR           |
       |   value: second              |     value: second             |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_translations | 1      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 3       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 3       | directus_translations | 2      | 1      | 0      | 0      |
+      | 3       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a batch repeating a key and language is refused like a single one
     Given these requests are sent:
@@ -68,6 +76,12 @@ Feature: A single translation is checked as it is created and deleted
       | query:                       |   data:                       |
       |   fields: language,value     |     - language: en-US         |
       |   filter[key][_eq]: sw-<run> |       value: first            |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_translations | 2      | 0      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | directus_translations | 1      | 0      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: a translation deleted by its key is gone
     Given these requests are sent:
@@ -88,6 +102,11 @@ Feature: A single translation is checked as it is created and deleted
       | query:                         |   data: [] |
       |   fields: id                   |            |
       |   filter[key][_eq]: sw-<run>   |            |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_translations | 0      | 0      | 0      | 1      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
 
   Scenario: deleting a translation by a key that is no uuid is refused
     Then these requests get these responses:
@@ -101,6 +120,9 @@ Feature: A single translation is checked as it is created and deleted
       |                               |         directus_translations    |
       |                               |         must be a uuid instead   |
       |                               |         of "not-a-key".          |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 1      | 0      | 0      | 0      |
 
   Scenario: a translation is reworded by its key and by a query
     Given these requests are sent:
@@ -131,3 +153,13 @@ Feature: A single translation is checked as it is created and deleted
       |         _eq: sw-<run>          |                      |
       |   data:                        |                      |
       |     value: queried             |                      |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_translations | 2      | 0      | 1      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_translations | 3      | 0      | 1      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |

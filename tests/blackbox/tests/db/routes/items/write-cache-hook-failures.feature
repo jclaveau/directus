@@ -18,8 +18,8 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       and gives the rows sent the code "c".
     - "declare-foreign" on test_wcf_nested_child: declares
       test_wcf_nested_foreign through `purgeBy` and gives the rows the code "b".
-    - "declare-foreign" on test_wcf_nested_delete_child, a delete: declares
-      test_wcf_nested_delete_foreign through `purgeBy`. A holder still
+    - "declare-foreign" on test_wcf_nested_del_child, a delete: declares
+      test_wcf_nested_del_foreign through `purgeBy`. A holder still
       referencing the child refuses its delete, which deselecting it from its
       parent runs.
     - "refuse-deletion" on test_wcf_delete, a delete: declares
@@ -92,6 +92,12 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
       Value "c" for field "code" in collection "test_wcf_update_precise" has to be unique.
       """
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_update_precise | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wcf_update_precise | 2      | 0      | 2      | 0      | 0    |
 
   Scenario: a refused update purges the collection whole for an undeclared takeover
     When these requests get these responses:
@@ -132,9 +138,11 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       |   fields: body                        |   data:                |
       |   filter[slot][_eq]: c                |     - body: bystander  |
       | method: PATCH                         | code: 400              |+
-      | path: /items/test_wcf_update_coarse/1 |                        |
+      | path: /items/test_wcf_update_coarse   |                        |
       | payload:                              |                        |
-      |   body: take-over-sibling             |                        |
+      |   keys: [1]                           |                        |
+      |   data:                               |                        |
+      |     body: take-over-sibling           |                        |
       | method: GET                           | code: 200              |+
       | path: /items/test_wcf_update_coarse   | cache: MISS            |
       | query:                                | body:                  |
@@ -149,6 +157,12 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
       Value "c" for field "code" in collection "test_wcf_update_coarse" has to be unique.
       """
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_update_coarse | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wcf_update_coarse | 3      | 0      | 2      | 0      | 0    |
 
   Scenario: a refused nested update purges what its hook declared, not its rows
     When these requests get these responses:
@@ -216,57 +230,83 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
       Value "b" for field "code" in collection "test_wcf_nested_child" has to be unique.
       """
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_nested_child   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_nested_parent  | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_wcf_nested_child   | 2      | 1      | 0      | 0      | 1    |
+      | 3       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 3       | test_wcf_nested_foreign | 1      | 1      | 0      | 0      | 1    |
+      | 8       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 8       | test_wcf_nested_child   | 3      | 0      | 1      | 0      | 0    |
+      | 8       | test_wcf_nested_parent  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a refused nested delete purges what its hook declared
     When these requests get these responses:
       | request                                      | response             |
       | method: POST                                 | code: 200            |+
-      | path: /items/test_wcf_nested_delete_parent   |                      |
+      | path: /items/test_wcf_nested_del_parent   |                      |
       | payload:                                     |                      |
       |   id: 1                                      |                      |
       |   title: parent                              |                      |
       | method: POST                                 | code: 200            |+
-      | path: /items/test_wcf_nested_delete_child    |                      |
+      | path: /items/test_wcf_nested_del_child    |                      |
       | payload:                                     |                      |
       |   id: 1                                      |                      |
       |   body: declare-foreign                      |                      |
       |   parent: 1                                  |                      |
       | method: POST                                 | code: 200            |+
-      | path: /items/test_wcf_nested_delete_holder   |                      |
+      | path: /items/test_wcf_nested_del_holder   |                      |
       | payload:                                     |                      |
       |   id: 1                                      |                      |
       |   child: 1                                   |                      |
       | method: POST                                 | code: 200            |+
-      | path: /items/test_wcf_nested_delete_foreign  |                      |
+      | path: /items/test_wcf_nested_del_foreign  |                      |
       | payload:                                     |                      |
       |   id: 1                                      |                      |
       |   body: original                             |                      |
       | method: GET                                  | code: 200            |+
-      | path: /items/test_wcf_nested_delete_foreign  | cache: MISS          |
+      | path: /items/test_wcf_nested_del_foreign  | cache: MISS          |
       | query:                                       | body:                |
       |   fields: body                               |   data:              |
       |                                              |     - body: original |
       | method: GET                                  | code: 200            |+
-      | path: /items/test_wcf_nested_delete_foreign  | cache: HIT           |
+      | path: /items/test_wcf_nested_del_foreign  | cache: HIT           |
       | query:                                       | body:                |
       |   fields: body                               |   data:              |
       |                                              |     - body: original |
       | method: PATCH                                | code: 400            |+
-      | path: /items/test_wcf_nested_delete_parent/1 |                      |
+      | path: /items/test_wcf_nested_del_parent/1 |                      |
       | payload:                                     |                      |
       |   children:                                  |                      |
       |     delete:                                  |                      |
       |       - 1                                    |                      |
       | method: GET                                  | code: 200            |+
-      | path: /items/test_wcf_nested_delete_foreign  | cache: MISS          |
+      | path: /items/test_wcf_nested_del_foreign  | cache: MISS          |
       | query:                                       | body:                |
       |   fields: body                               |   data:              |
       |                                              |     - body: original |
     Then response 7 is refused with the message:
       """
-      Cannot delete "test_wcf_nested_delete_child:1": it is still referenced by
-      collection "test_wcf_nested_delete_holder".
+      Cannot delete "test_wcf_nested_del_child:1": it is still referenced by
+      collection "test_wcf_nested_del_holder".
       """
+    And on postgres the requests ran these statements:
+      | request | table                       | select | insert | update | delete | with |
+      | 1       | directus_users              | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_nested_del_child   | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_nested_del_parent  | 1      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users              | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_wcf_nested_del_child   | 1      | 1      | 0      | 0      | 1    |
+      | 3       | directus_users              | 1      | 0      | 0      | 0      | 0    |
+      | 3       | test_wcf_nested_del_holder  | 1      | 1      | 0      | 0      | 1    |
+      | 4       | directus_users              | 1      | 0      | 0      | 0      | 0    |
+      | 4       | test_wcf_nested_del_foreign | 1      | 1      | 0      | 0      | 1    |
+      | 7       | directus_users              | 1      | 0      | 0      | 0      | 0    |
+      | 7       | test_wcf_nested_del_child   | 2      | 0      | 0      | 1      | 0    |
+      | 7       | test_wcf_nested_del_parent  | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a delete its hook cancels is refused, purging what the hook declared
     When these requests get these responses:
@@ -328,6 +368,14 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       Invalid payload. A filter hook cancelled the deletion, but this operation requires
       it.
       """
+    And on postgres the requests ran these statements:
+      | request | table                   | select | insert | update | delete | with |
+      | 1       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_delete         | 2      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_wcf_delete_foreign | 1      | 1      | 0      | 0      | 1    |
+      | 7       | directus_users          | 1      | 0      | 0      | 0      | 0    |
+      | 7       | test_wcf_delete         | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: a failed upsert purges the slice its hook declared for the row it took over
     When these requests get these responses:
@@ -382,6 +430,12 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
       The body "refuse" is refused
       """
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_upsert_takeover | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wcf_upsert_takeover | 2      | 0      | 1      | 0      | 0    |
 
   Scenario: a failed upsert taking nothing over purges only what its hook declared
     When these requests get these responses:
@@ -437,6 +491,13 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
       The body "refuse-declaring-foreign" is refused
       """
+    And on postgres the requests ran these statements:
+      | request | table                    | select | insert | update | delete | with |
+      | 1       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_upsert_declared | 2      | 1      | 0      | 0      | 1    |
+      | 2       | directus_users           | 1      | 0      | 0      | 0      | 0    |
+      | 2       | test_wcf_upsert_foreign  | 1      | 1      | 0      | 0      | 1    |
+      | 7       | directus_users           | 1      | 0      | 0      | 0      | 0    |
 
   Scenario: an upsert failing on a transaction it shares purges the collection whole
     When these requests get these responses:
@@ -492,6 +553,12 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       """
       The body "refuse" is refused
       """
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete | with |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_upsert_shared | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users         | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wcf_upsert_shared | 3      | 0      | 1      | 0      | 0    |
 
   Scenario: an upsert failing on an instance without a cache purges nothing
     When these requests get these responses:
@@ -560,3 +627,9 @@ Feature: A write failing after its hooks still purges what they wrote or declare
       | query:                                       | body:                   |
       |   fields: body                               |   data:                 |
       |   filter[slot][_eq]: c                       |     - body: bystander   |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete | with |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 1       | test_wcf_upsert_added | 2      | 1      | 0      | 0      | 1    |
+      | 6       | directus_users        | 1      | 0      | 0      | 0      | 0    |
+      | 6       | test_wcf_upsert_added | 6      | 0      | 1      | 0      | 0    |

@@ -10,7 +10,7 @@ import type {
 } from '../../shared/types/index.js';
 
 export function generateExtensionsEntrypoint(
-	extensionMaps: { local: Map<string, Extension>; module: Map<string, Extension> },
+	extensionMaps: { module: Map<string, Extension> },
 	settings: ExtensionSettings[],
 ): string {
 	const appOrHybridExtensions: (AppExtension | HybridExtension)[] = [];

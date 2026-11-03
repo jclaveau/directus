@@ -61,7 +61,7 @@ export type ExtensionSandboxOptions = z.infer<typeof ExtensionSandboxOptions>;
 
 export interface ExtensionSettings {
 	id: string;
-	source: 'module' | 'local';
+	source: 'module';
 	enabled: boolean;
 	bundle: string | null;
 	folder: string;

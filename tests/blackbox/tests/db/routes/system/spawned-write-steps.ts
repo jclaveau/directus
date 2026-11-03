@@ -7,6 +7,11 @@ import {
 	responseCellOf,
 } from '@common/cucumber';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import {
+	auditEnvForFeature,
+	defineStatementCountsStep,
+	warmUpAuditedInstance,
+} from '@common/query-audit-steps';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { stopSpawnedInstance } from '@utils/stop-spawned-instance';
@@ -93,7 +98,12 @@ export function defineSpawnedWriteFeature(
 			const port = await freePortOfWorker();
 			env[vendor].PORT = String(port);
 			env[vendor]['PUBLIC_URL'] = getUrl(vendor, env);
-			Object.assign(env[vendor], featureOptions.envOverrides);
+
+			Object.assign(
+				env[vendor],
+				featureOptions.envOverrides,
+				auditEnvForFeature(feature, vendor),
+			);
 
 			instance = spawn('node', [paths.cli, 'start'], {
 				cwd: paths.cwd,
@@ -102,6 +112,7 @@ export function defineSpawnedWriteFeature(
 
 			await awaitDirectusConnection(port);
 			await featureOptions.beforeFeature?.(vendor);
+			await warmUpAuditedInstance(feature, vendor, getUrl(vendor, env));
 		}, 60_000);
 
 		afterAll(async () => {
@@ -111,19 +122,28 @@ export function defineSpawnedWriteFeature(
 
 		defineFeature(feature, (scenario) => {
 			for (const { title } of feature.scenarios) {
-				scenario(title, ({ given, then }) => {
+				scenario(title, ({ given, then, and }) => {
 					const scenarioKeys: ScenarioKeys = {
 						run: randomUUID(),
 						keysByName: {},
 					};
 
-					given.optional('these requests are sent:', (table: Row[]) => {
-						return sendRows(getUrl(vendor, env), scenarioKeys, table, true);
+					const receivedResponses: Response[] = [];
+
+					given.optional('these requests are sent:', async (table: Row[]) => {
+						await sendRows(getUrl(vendor, env), scenarioKeys, table, true);
 					});
 
-					then('these requests get these responses:', (table: Row[]) => {
-						return sendRows(getUrl(vendor, env), scenarioKeys, table, false);
+					then('these requests get these responses:', async (table: Row[]) => {
+						receivedResponses.push(...await sendRows(
+							getUrl(vendor, env),
+							scenarioKeys,
+							table,
+							false,
+						));
 					});
+
+					defineStatementCountsStep(and, vendor, receivedResponses);
 				}, 60_000);
 			}
 		});
@@ -232,6 +252,8 @@ async function sendRows(
 	table: Row[],
 	allowsBlankResponse: boolean,
 ) {
+	const responses: Response[] = [];
+
 	for (const { request: requestText, response: responseText } of table) {
 		const requestCell = cellOfKnownKeys<RequestCell>(
 			'request',
@@ -249,6 +271,7 @@ async function sendRows(
 		);
 
 		const response = await sendRequest(instanceUrl, requestCell);
+		responses.push(response);
 
 		expect(receivedPart(response, expectedResponse)).toMatchObject(
 			lowercaseHeaders(expectedResponse),
@@ -272,4 +295,6 @@ async function sendRows(
 				.at(-1)!;
 		}
 	}
+
+	return responses;
 }

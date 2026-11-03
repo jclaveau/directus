@@ -38,6 +38,11 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   fields: status,role                    |     - status: invited      |
       |   filter[email][_eq]: >-                 |       role: <invitee-role> |
       |     allowed-<run>@example.com            |                            |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 3      | 1      | 0      | 0      |
 
   Scenario: an invited user invited again to the same role stays as they were
     Given these requests are sent:
@@ -72,6 +77,10 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   fields: status,role            |     - status: invited   |
       |   filter[email][_eq]: >-         |       role: <same-role> |
       |     again-<run>@example.com      |                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
+      | 2       | directus_users | 2      | 0      | 0      | 0      |
 
   Scenario: an invitation of an active user leaves the user as they were
     Given these requests are sent:
@@ -104,6 +113,9 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   fields: status,role             |     - status: active    |
       |   filter[email][_eq]: >-          |       role: <kept-role> |
       |     active-<run>@example.com      |                         |
+    And on postgres the requests ran these statements:
+      | request | table          | select | insert | update | delete |
+      | 1       | directus_users | 2      | 0      | 0      | 0      |
 
   Scenario: a registration needing no verification makes an active user
     Given these requests are sent:
@@ -137,6 +149,16 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       | payload:                          |                      |
       |   email: direct-<run>@example.com |                      |
       |   password: registered-password   |                      |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 2      | 0      | 0      | 0      |
+      | 1       | directus_settings | 2      | 0      | 0      | 0      |
+      | 1       | directus_users    | 3      | 1      | 0      | 0      |
+      | 3       | directus_access   | 2      | 0      | 0      | 0      |
+      | 3       | directus_activity | 0      | 1      | 0      | 0      |
+      | 3       | directus_sessions | 0      | 1      | 0      | 1      |
+      | 3       | directus_settings | 1      | 0      | 0      | 0      |
+      | 3       | directus_users    | 3      | 0      | 1      | 0      |
 
   Scenario: a registration to an allowed verification URL waits for it
     Given these requests are sent:
@@ -165,6 +187,11 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   fields: status                    |     - status: unverified |
       |   filter[email][_eq]: >-            |                          |
       |     verified-<run>@example.com      |                          |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_access   | 2      | 0      | 0      | 0      |
+      | 1       | directus_settings | 3      | 0      | 0      | 0      |
+      | 1       | directus_users    | 3      | 1      | 0      | 0      |
 
   Scenario: a reset requested to an allowed URL is accepted
     Given these requests are sent:
@@ -181,3 +208,7 @@ Feature: An invitation, a registration and a reset carry a URL on the allow list
       |   email: resetting-<run>@example.com |           |
       |   reset_url: >-                      |           |
       |     https://allowed.test/reset       |           |
+    And on postgres the requests ran these statements:
+      | request | table             | select | insert | update | delete |
+      | 1       | directus_settings | 1      | 0      | 0      | 0      |
+      | 1       | directus_users    | 2      | 0      | 0      | 0      |

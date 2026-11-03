@@ -175,7 +175,7 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | 1       | directus_activity     | 0      | 3      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 2      | 0      | 0      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_book  | 8      | 0      | 2      | 0      |
+      | 1       | test_nested_o2m_book  | 6      | 0      | 2      | 0      |
       | 1       | test_nested_o2m_shelf | 3      | 0      | 0      | 0      |
 
   Scenario: a deleted child is nullified, one of another parent is left alone
@@ -277,7 +277,7 @@ Feature: A parent's o2m field given as { create, update, delete } alters what it
       | 1       | directus_activity     | 0      | 6      | 0      | 0      |
       | 1       | directus_revisions    | 0      | 4      | 0      | 0      |
       | 1       | directus_users        | 1      | 0      | 0      | 0      |
-      | 1       | test_nested_o2m_book  | 10     | 1      | 3      | 0      |
+      | 1       | test_nested_o2m_book  | 9      | 1      | 3      | 0      |
       | 1       | test_nested_o2m_shelf | 3      | 0      | 0      | 0      |
 
   Scenario: an alterations object of the wrong shape is refused, writing nothing

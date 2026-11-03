@@ -21,3 +21,11 @@ Feature: A single row refused as a duplicate names the value it repeats
       Value "repeated" for field "code" in collection "test_write_unique_code" has to be
       unique.
       """
+    And on postgres the requests ran these statements:
+      | request | table                  | select | insert | update | delete |
+      | 1       | directus_activity      | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions     | 0      | 1      | 0      | 0      |
+      | 1       | directus_users         | 1      | 0      | 0      | 0      |
+      | 1       | test_write_unique_code | 1      | 1      | 0      | 0      |
+      | 2       | directus_users         | 1      | 0      | 0      | 0      |
+      | 2       | test_write_unique_code | 0      | 1      | 0      | 0      |

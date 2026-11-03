@@ -38,3 +38,13 @@ Feature: A singleton's PATCH creates its row once, then updates it
       |                                                  |       item: '1'        |
       |                                                  |       delta:           |
       |                                                  |         title: second  |
+    And on postgres the requests ran these statements:
+      | request | table                 | select | insert | update | delete |
+      | 1       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 1       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 1       | directus_users        | 1      | 0      | 0      | 0      |
+      | 1       | test_singleton_upsert | 2      | 1      | 0      | 0      |
+      | 2       | directus_activity     | 0      | 1      | 0      | 0      |
+      | 2       | directus_revisions    | 0      | 1      | 0      | 0      |
+      | 2       | directus_users        | 1      | 0      | 0      | 0      |
+      | 2       | test_singleton_upsert | 3      | 0      | 1      | 0      |

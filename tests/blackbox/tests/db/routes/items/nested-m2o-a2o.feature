@@ -42,7 +42,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 2       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 2       | directus_users        | 1      | 0      | 0      | 0      |
       | 2       | test_nested_m2o_card  | 1      | 1      | 0      | 0      |
-      | 2       | test_nested_m2o_owner | 4      | 0      | 1      | 0      |
+      | 2       | test_nested_m2o_owner | 3      | 0      | 1      | 0      |
 
   Scenario: a nested M2O object naming an existing row alone leaves it unwritten
     When these requests get these responses:
@@ -120,12 +120,12 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 3       | directus_activity     | 0      | 2      | 0      | 0      |
       | 3       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 3       | directus_users        | 1      | 0      | 0      | 0      |
-      | 3       | test_nested_m2o_card  | 3      | 0      | 1      | 0      |
-      | 3       | test_nested_m2o_owner | 4      | 0      | 1      | 0      |
+      | 3       | test_nested_m2o_card  | 2      | 0      | 1      | 0      |
+      | 3       | test_nested_m2o_owner | 3      | 0      | 1      | 0      |
       | 4       | directus_activity     | 0      | 2      | 0      | 0      |
       | 4       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 4       | directus_users        | 1      | 0      | 0      | 0      |
-      | 4       | test_nested_m2o_card  | 3      | 0      | 1      | 0      |
+      | 4       | test_nested_m2o_card  | 2      | 0      | 1      | 0      |
       | 4       | test_nested_m2o_owner | 2      | 1      | 0      | 0      |
 
   Scenario: a PATCH of several keys files each revision under its own row
@@ -197,7 +197,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 3       | directus_revisions    | 0      | 2      | 1      | 0      |
       | 3       | directus_users        | 1      | 0      | 0      | 0      |
       | 3       | test_nested_m2o_card  | 2      | 0      | 1      | 0      |
-      | 3       | test_nested_m2o_owner | 4      | 0      | 1      | 0      |
+      | 3       | test_nested_m2o_owner | 3      | 0      | 1      | 0      |
 
   Scenario: a batch create files a nested row's revision under its carrier
     When these requests get these responses:
@@ -267,7 +267,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 2       | directus_activity    | 0      | 2      | 0      | 0      |
       | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
       | 2       | directus_users       | 3      | 1      | 0      | 0      |
-      | 2       | test_nested_m2o_task | 3      | 0      | 1      | 0      |
+      | 2       | test_nested_m2o_task | 2      | 0      | 1      | 0      |
 
   Scenario: a nested A2O object without its collection field is refused
     When these requests get these responses:
@@ -379,7 +379,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
       | 2       | directus_users       | 1      | 0      | 0      | 0      |
       | 2       | test_nested_a2o_link | 1      | 1      | 0      | 0      |
-      | 2       | test_nested_a2o_page | 3      | 0      | 1      | 0      |
+      | 2       | test_nested_a2o_page | 2      | 0      | 1      | 0      |
 
   Scenario: a nested A2O object naming an existing row alone leaves it unwritten
     When these requests get these responses:
@@ -455,7 +455,7 @@ Feature: A nested many-to-one or any-to-one object writes its related row
       | 2       | directus_activity    | 0      | 2      | 0      | 0      |
       | 2       | directus_revisions   | 0      | 2      | 1      | 0      |
       | 2       | directus_users       | 1      | 0      | 0      | 0      |
-      | 2       | test_nested_a2o_link | 3      | 0      | 1      | 0      |
+      | 2       | test_nested_a2o_link | 2      | 0      | 1      | 0      |
       | 2       | test_nested_a2o_page | 1      | 1      | 0      | 0      |
 
   Scenario: a batch keyed by uuid reads back the rows it created

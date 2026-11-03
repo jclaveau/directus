@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import createApp from './app.js';
 import { validateDatabaseConnection } from './database/index.js';
 import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
-import { validateMarketplaceEnvUnset } from './utils/validate-env.js';
+import { validateUnreadEnv } from './utils/validate-env.js';
 
 vi.mock('./database', () => ({
 	default: vi.fn(),
@@ -24,7 +24,6 @@ vi.mock('./telemetry/index.js');
 // reduce to just mock the file when logger is also using useLogger everywhere @TODO
 vi.mock('@directus/env', () => ({
 	useEnv: vi.fn().mockReturnValue({
-		EXTENSIONS_PATH: './extensions',
 		STORAGE_LOCATIONS: ['local'],
 		EMAIL_TEMPLATES_PATH: './templates',
 	}),
@@ -90,7 +89,6 @@ const BASE_ENV = {
 	PUBLIC_URL: 'http://localhost:8055/directus',
 	TELEMETRY: 'false',
 	LOG_STYLE: 'raw',
-	EXTENSIONS_PATH: './extensions',
 	STORAGE_LOCATIONS: ['local'],
 	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
 	ROOT_REDIRECT: './admin',
@@ -121,13 +119,13 @@ const request = async (path: string = '') => {
 
 describe('createApp', async () => {
 	test(oneLine`
-		refuses the Marketplace variables before reaching the database
+		refuses the unread variables before reaching the database
 	`, async () => {
 		await createApp();
 
-		expect(validateMarketplaceEnvUnset).toHaveBeenCalledExactlyOnceWith();
+		expect(validateUnreadEnv).toHaveBeenCalledExactlyOnceWith();
 
-		const refusalOrder = vi.mocked(validateMarketplaceEnvUnset)
+		const refusalOrder = vi.mocked(validateUnreadEnv)
 			.mock.invocationCallOrder[0];
 
 		const connectionOrder = vi.mocked(validateDatabaseConnection)

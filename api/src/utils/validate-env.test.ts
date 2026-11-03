@@ -9,7 +9,7 @@ import {
 	validateDurationEnv,
 	validateEnv,
 	validateHeaderNameEnv,
-	validateMarketplaceEnvUnset,
+	validateUnreadEnv,
 } from './validate-env.js';
 
 vi.mock('@directus/env');
@@ -268,26 +268,52 @@ test('takes a header name Node can write', () => {
 // Extensions change only with a deploy (#627): a deployment still configuring
 // the Marketplace expects installs it no longer gets.
 test.each([
-	{ key: 'EXTENSIONS_LOCATION', value: 's3' },
-	{ key: 'MARKETPLACE_REGISTRY', value: 'https://registry.example.com' },
-	{ key: 'MARKETPLACE_TRUST', value: '' },
-])('refuses $key set', ({ key, value }) => {
-	vi.mocked(useEnv).mockReturnValueOnce({ [key]: value });
+	{
+		env: { EXTENSIONS_LOCATION: 's3' },
+		message: '"EXTENSIONS_LOCATION" Environment Variable is "s3", which this'
+			+ ' build does not read: extensions change only with a deploy: the'
+			+ ' Marketplace it configures is removed. Unset it.',
+	},
+	{
+		env: { MARKETPLACE_REGISTRY: 'https://registry.example.com' },
+		message: '"MARKETPLACE_REGISTRY" Environment Variable is'
+			+ ' "https://registry.example.com", which this build does not read:'
+			+ ' extensions change only with a deploy: the Marketplace it'
+			+ ' configures is removed. Unset it.',
+	},
+	{
+		env: { MARKETPLACE_TRUST: '' },
+		message: '"MARKETPLACE_TRUST" Environment Variable is "", which this'
+			+ ' build does not read: extensions change only with a deploy: the'
+			+ ' Marketplace it configures is removed. Unset it.',
+	},
+])('refuses $env', ({ env, message }) => {
+	vi.mocked(useEnv).mockReturnValueOnce(env);
 
-	validateMarketplaceEnvUnset();
+	validateUnreadEnv();
 
-	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(
-		`"${key}" Environment Variable is set, but extensions change only `
-			+ 'with a deploy: the Marketplace it configures is removed. Unset it.',
-	);
-
+	expect(mockLogger.error).toHaveBeenCalledExactlyOnceWith(message);
 	expect(process.exit).toHaveBeenCalledExactlyOnceWith(1);
 });
 
-test('takes a deployment setting none of the Marketplace variables', () => {
+test('refuses EXTENSIONS_PATH, which this build does not read', () => {
 	vi.mocked(useEnv).mockReturnValueOnce({ EXTENSIONS_PATH: './extensions' });
 
-	validateMarketplaceEnvUnset();
+	validateUnreadEnv();
+
+	expect(mockLogger.error).toHaveBeenCalledWith(
+		'"EXTENSIONS_PATH" Environment Variable is "./extensions", which this'
+			+ ' build does not read: extensions load only as the dependencies of'
+			+ ' the package.json in PACKAGE_FILE_LOCATION. Unset it.',
+	);
+
+	expect(process.exit).toHaveBeenCalledWith(1);
+});
+
+test('passes an environment without EXTENSIONS_PATH', () => {
+	vi.mocked(useEnv).mockReturnValueOnce({ PACKAGE_FILE_LOCATION: '.' });
+
+	validateUnreadEnv();
 
 	expect(mockLogger.error).not.toHaveBeenCalled();
 	expect(process.exit).not.toHaveBeenCalled();

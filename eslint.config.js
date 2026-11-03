@@ -387,6 +387,36 @@ export default typescriptEslint.config(
 		rules: { 'no-restricted-imports': 'off' },
 	},
 
+	// get-port draws from one range every blackbox worker shares, so two of them
+	// can be handed the same port, and the loser's tests then run against the
+	// winner's instance. freePortOfWorker draws from the worker's own slice.
+	// no-restricted-imports only sees a static import, so the dynamic one needs
+	// the syntax rule below.
+	{
+		files: ['tests/blackbox/**/*.ts'],
+		ignores: ['tests/blackbox/utils/free-port-of-worker.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: 'get-port',
+							message: "Import { freePortOfWorker } from '@utils/free-port-of-worker'.",
+						},
+					],
+				},
+			],
+			'no-restricted-syntax': [
+				'error',
+				{
+					selector: "ImportExpression[source.value='get-port']",
+					message: "Import { freePortOfWorker } from '@utils/free-port-of-worker'.",
+				},
+			],
+		},
+	},
+
 	// Test files
 	{
 		files: ['**/*.test.ts'],

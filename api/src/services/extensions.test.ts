@@ -70,7 +70,7 @@ describe('Services / Extensions / readAll', () => {
 			},
 			{ id: 'stale-id', bundle: 'bundle-id', source: 'module', folder: 'removed' },
 			{ id: 'orphan-id', bundle: 'missing-id', source: 'module', folder: 'x' },
-			{ id: 'local-id', bundle: null, source: 'local', folder: 'local-folder' },
+			{ id: 'module-id', bundle: null, source: 'module', folder: 'module-folder' },
 		] as any);
 
 		const service = new ExtensionsService({
@@ -94,13 +94,13 @@ describe('Services / Extensions / readAll', () => {
 				},
 			},
 			{
-				id: 'local-id',
+				id: 'module-id',
 				bundle: null,
 				meta: {
-					id: 'local-id',
+					id: 'module-id',
 					bundle: null,
-					source: 'local',
-					folder: 'local-folder',
+					source: 'module',
+					folder: 'module-folder',
 				},
 				schema: null,
 			},
@@ -128,8 +128,8 @@ describe('Services / Extensions / readOne', () => {
 		vi.spyOn(ItemsService.prototype, 'readOne').mockResolvedValue({
 			id: 'extension-id',
 			bundle: null,
-			source: 'local',
-			folder: 'local-folder',
+			source: 'module',
+			folder: 'module-folder',
 		});
 
 		const service = new ExtensionsService({
@@ -144,8 +144,8 @@ describe('Services / Extensions / readOne', () => {
 			meta: {
 				id: 'extension-id',
 				bundle: null,
-				source: 'local',
-				folder: 'local-folder',
+				source: 'module',
+				folder: 'module-folder',
 			},
 		});
 	});

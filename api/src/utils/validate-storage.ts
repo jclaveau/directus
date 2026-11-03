@@ -3,7 +3,6 @@ import { toArray } from '@directus/utils';
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
-import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 
 export async function validateStorage(): Promise<void> {
@@ -32,13 +31,5 @@ export async function validateStorage(): Promise<void> {
 		} catch {
 			logger.warn(`Upload directory (${path.resolve(env['STORAGE_LOCAL_ROOT'] as string)}) is not read/writeable!`);
 		}
-	}
-
-	try {
-		await access(getExtensionsPath(), constants.R_OK);
-	}
-	catch {
-		const extensionsDir = path.resolve(getExtensionsPath());
-		logger.warn(`Extensions directory (${extensionsDir}) is not readable!`);
 	}
 }

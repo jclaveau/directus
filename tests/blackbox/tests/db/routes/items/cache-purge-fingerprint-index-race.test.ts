@@ -40,10 +40,12 @@ const REDIS_PORT = 6108;
 const cacheStatusHeader = 'x-cache-status';
 
 // Enough members that the purge's pass over the set outlasts the held reads:
-// 120k scanned in 856 ms on a CI runner, under the 900 ms needed. Planted straight
-// into it, in the set's own grammar: a member naming a slice no write touches is
-// read and compared like any other, and reading it is the cost this needs.
-const decoyMemberCount = 180_000;
+// the pass costs 6-26 µs a member across CI runners, so 120k ran 742 ms on
+// the fastest, under the 900 ms the reads need; 360k clears it by more than
+// twice. Planted straight into it, in the set's own grammar: a member naming
+// a slice no write touches is read and compared like any other, and reading
+// it is the cost this needs.
+const decoyMemberCount = 360_000;
 const decoyChunkSize = 4_000;
 
 // How long the hook holds a read after its query. Its fill lands this far after the
@@ -373,7 +375,7 @@ describe(oneLine`
 		}, 120_000);
 
 		it(oneLine`
-			a collection-wide purge of a set holding 180k reads never holds Redis for
+			a collection-wide purge of a set holding 360k reads never holds Redis for
 			10 ms, and leaves no index set behind
 		`, async () => {
 			await plantDecoys(heldIndexKey);
@@ -382,7 +384,7 @@ describe(oneLine`
 			// cannot pass for a stall. The slowlog keeps every command slower than
 			// 10 ms — set here, not trusted to the image's default, since a higher
 			// threshold would pass this with nothing measured. Only the ones naming an
-			// index set count, since the purge also drops the 180k cache keys the
+			// index set count, since the purge also drops the 360k cache keys the
 			// decoys name.
 			expect(await redisCommand(REDIS_PORT, [
 				'CONFIG',

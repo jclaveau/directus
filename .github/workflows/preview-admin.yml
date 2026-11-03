@@ -281,8 +281,17 @@ jobs:
 
           # Auto-login endpoint: relays a server-side session /auth/login to the browser,
           # so opening <url>/auto-login lands in the Data Studio with no password typing.
-          mkdir -p extensions/directus-extension-auto-login
-          cat > extensions/directus-extension-auto-login/package.json <<'PKG'
+          # Extensions load as the dependencies of the PACKAGE_FILE_LOCATION package.
+          AUTO_LOGIN=preview-extensions/node_modules/directus-extension-auto-login
+          mkdir -p "$AUTO_LOGIN"
+          cat > preview-extensions/package.json <<'PKG'
+          {
+            "name": "preview-extensions",
+            "private": true,
+            "dependencies": { "directus-extension-auto-login": "1.0.0" }
+          }
+          PKG
+          cat > "$AUTO_LOGIN/package.json" <<'PKG'
           {
             "name": "directus-extension-auto-login",
             "version": "1.0.0",
@@ -296,7 +305,7 @@ jobs:
             }
           }
           PKG
-          cat > extensions/directus-extension-auto-login/index.js <<'IDX'
+          cat > "$AUTO_LOGIN/index.js" <<'IDX'
           export default {
             id: 'auto-login',
             handler: (router, { env, logger }) => {
@@ -330,14 +339,15 @@ jobs:
           IDX
 
           # Under PM2, the way the published image runs it, so the Processes page
-          # has a supervisor to report. Started from the repo root (not the image's
-          # /directus) so EXTENSIONS_PATH still finds the auto-login extension, and
-          # pointed at one log file so the streaming step below is unchanged.
+          # has a supervisor to report, pointed at one log file so the streaming
+          # step below is unchanged.
           npm install --global pm2@5
           # --wait-ready and the matching listen_timeout are what
           # ecosystem.config.cjs declares, and a rolling restart retiring a
           # worker before its replacement serves is what they prevent.
-          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" pm2 start directus/cli.js \
+          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" \
+            PACKAGE_FILE_LOCATION="$PWD/preview-extensions" \
+            pm2 start directus/cli.js \
             --name directus \
             --instances "${{ inputs.instances || '3' }}" \
             --max-memory-restart 400M \

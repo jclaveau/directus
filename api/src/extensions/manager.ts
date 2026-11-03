@@ -21,7 +21,7 @@ import type {
 	ExtensionManagerOptions,
 } from '@directus/types';
 import { isTypeIn, toBoolean } from '@directus/utils';
-import { pathToRelativeUrl, processId } from '@directus/utils/node';
+import { processId } from '@directus/utils/node';
 import alias from '@rollup/plugin-alias';
 import nodeResolve from '@rollup/plugin-node-resolve';
 import virtual from '@rollup/plugin-virtual';
@@ -49,7 +49,6 @@ import { JobQueue } from '../utils/job-queue.js';
 import { loadIsolatedVm } from '../utils/load-isolated-vm.js';
 import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
-import { getExtensionsPath } from './lib/get-extensions-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
 import { getExtensions } from './lib/get-extensions.js';
 import { getSharedDepsMapping } from './lib/get-shared-deps-mapping.js';
@@ -89,9 +88,6 @@ export class ExtensionManager {
 	 * leaves in place for the retry to compare against.
 	 */
 	private lastLoadedExtensions: Extension[] = [];
-
-	// folder:Extension
-	private localExtensions: Map<string, Extension> = new Map();
 
 	// name:Extension
 	private moduleExtensions: Map<string, Extension> = new Map();
@@ -159,15 +155,13 @@ export class ExtensionManager {
 	private processId = processId();
 
 	public get extensions() {
-		return [...this.localExtensions.values(), ...this.moduleExtensions.values()];
+		return [...this.moduleExtensions.values()];
 	}
 
 	public getExtension(source: string, folder: string) {
 		switch (source) {
 			case 'module':
 				return this.moduleExtensions.get(folder);
-			case 'local':
-				return this.localExtensions.get(folder);
 		}
 
 		return undefined;
@@ -226,12 +220,11 @@ export class ExtensionManager {
 		const logger = useLogger();
 
 		try {
-			const { local, module } = await getExtensions();
+			const { module } = await getExtensions();
 
-			this.localExtensions = local;
 			this.moduleExtensions = module;
 
-			this.extensionsSettings = await getExtensionsSettings({ local, module });
+			this.extensionsSettings = await getExtensionsSettings({ module });
 		} catch (error) {
 			this.handleExtensionError({ error, reason: `Couldn't load extensions` });
 		}
@@ -408,15 +401,12 @@ export class ExtensionManager {
 
 		logger.info('Watching extensions for changes...');
 
-		const extensionDirUrl = pathToRelativeUrl(getExtensionsPath());
-		const changeTrigger = 'a change in the extensions folder';
+		const changeTrigger = 'a change in the extension packages';
 
 		this.watcher = chokidar.watch(
-			[path.resolve('package.json'), path.posix.join(extensionDirUrl, '*', 'package.json')],
+			[path.resolve('package.json')],
 			{
 				ignoreInitial: true,
-				// dotdirs are watched by default and frequently found in 'node_modules'
-				ignored: `${extensionDirUrl}/**/node_modules/**`,
 				// on macOS dotdirs in linked extensions are watched too
 				followSymlinks: os.platform() === 'darwin' ? false : true,
 			},
@@ -487,7 +477,7 @@ export class ExtensionManager {
 		}));
 
 		const entrypoint = generateExtensionsEntrypoint(
-			{ module: this.moduleExtensions, local: this.localExtensions },
+			{ module: this.moduleExtensions },
 			this.extensionsSettings,
 		);
 
@@ -609,7 +599,6 @@ export class ExtensionManager {
 	private async registerApiExtensions(): Promise<void> {
 		const sources = {
 			module: this.moduleExtensions,
-			local: this.localExtensions,
 		} as const;
 
 		await Promise.all(
@@ -635,7 +624,7 @@ export class ExtensionManager {
 							case 'bundle':
 								await this.registerBundleExtension(
 									extension,
-									source as 'module' | 'local',
+									source as 'module',
 									id,
 								);
 
@@ -737,7 +726,7 @@ export class ExtensionManager {
 
 	private async registerBundleExtension(
 		bundle: BundleExtension,
-		source: 'local' | 'module',
+		source: 'module',
 		bundleId: string,
 	) {
 		const extensionEnabled = (extensionName: string) => {

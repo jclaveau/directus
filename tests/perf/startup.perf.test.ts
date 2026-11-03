@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
+import { createExtensionPackage } from './extension-package.js';
 import { summarise, summaryRow } from './measure.js';
 
 /**
@@ -41,9 +43,6 @@ const defaultOutput = join(root, 'tests', 'perf', 'results');
 const outputDir = process.env['PERF_OUTPUT_DIR'] ?? defaultOutput;
 const basePort = Number(process.env['PERF_BASE_PORT'] ?? 8200);
 
-const extensionsDir = process.env['PERF_EXTENSIONS_PATH']
-	?? join(root, 'tests', 'perf', 'extensions');
-
 const extensionCount = Number(process.env['PERF_EXTENSIONS'] ?? 8);
 const extensionKb = Number(process.env['PERF_EXTENSION_KB'] ?? 500);
 
@@ -66,23 +65,8 @@ for (const [name, value] of knobs) {
  * generated fresh so a leftover directory from another run cannot skew an arm.
  */
 async function writeExtensions(): Promise<string[]> {
-	const existing = await readdir(extensionsDir).catch(() => []);
-
-	// PERF_EXTENSIONS_PATH invites being pointed at a real extensions directory, and
-	// this deletes what it finds, so it only ever deletes what it wrote
-	const foreign = existing.filter((entry) => !/^perf-hook-\d+$/.test(entry));
-
-	if (foreign.length > 0) {
-		throw new Error(
-			`${extensionsDir} holds extensions this bench did not write`
-			+ ` (${foreign.join(', ')}); point PERF_EXTENSIONS_PATH somewhere else.`,
-		);
-	}
-
-	await rm(extensionsDir, { recursive: true, force: true });
-	await mkdir(extensionsDir, { recursive: true });
-
-	const names: string[] = [];
+	const extensionsDir = await mkdtemp(join(tmpdir(), 'directus-perf-hooks-'));
+	const extensionFolders: string[] = [];
 
 	for (let index = 0; index < extensionCount; index++) {
 		const name = `perf-hook-${index}`;
@@ -121,10 +105,10 @@ async function writeExtensions(): Promise<string[]> {
 		);
 
 		await writeFile(join(dir, 'index.js'), `${lines.join('\n')}\n`);
-		names.push(name);
+		extensionFolders.push(dir);
 	}
 
-	return names;
+	return extensionFolders;
 }
 
 const serverEnv = {
@@ -140,13 +124,14 @@ type Arm = { name: string; cli: string; samples: number[] };
 async function timeOneBoot(
 	arm: Arm,
 	attempt: number,
+	extensionPackage: string,
 ): Promise<{ ms: number; output: string }> {
 	const port = basePort + attempt;
 
 	const server = spawn('node', [arm.cli, 'start'], {
 		env: {
 			...serverEnv,
-			EXTENSIONS_PATH: extensionsDir,
+			PACKAGE_FILE_LOCATION: extensionPackage,
 			PORT: String(port),
 			PUBLIC_URL: `http://127.0.0.1:${port}`,
 			CACHE_NAMESPACE: `perf-${process.pid}-${attempt}`,
@@ -206,12 +191,17 @@ test('the API answers its first request', async () => {
 
 	let attempt = 0;
 
-	const extensionNames = await writeExtensions();
+	const extensionFolders = await writeExtensions();
+	const extensionPackage = await createExtensionPackage(extensionFolders);
+
+	const extensionNames = extensionFolders.map((extensionFolder) => {
+		return basename(extensionFolder);
+	});
 
 	// Discarded: the first boot of a bundle pays for a cold page cache that no later
 	// one does, and it would drag the median of a short series.
 	for (const arm of arms) {
-		const { output } = await timeOneBoot(arm, attempt++);
+		const { output } = await timeOneBoot(arm, attempt++, extensionPackage);
 
 		// A server that finds no extension boots fine and answers just as fast, so
 		// without this the whole extension dimension could quietly measure nothing.
@@ -225,7 +215,7 @@ test('the API answers its first request', async () => {
 	// instead of handing all of it to whichever went second.
 	for (let rep = 0; rep < reps; rep++) {
 		for (const arm of arms) {
-			const { ms } = await timeOneBoot(arm, attempt++);
+			const { ms } = await timeOneBoot(arm, attempt++, extensionPackage);
 
 			arm.samples.push(ms);
 		}

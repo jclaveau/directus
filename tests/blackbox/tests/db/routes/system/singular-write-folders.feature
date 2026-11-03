@@ -52,3 +52,24 @@ Feature: Folders are written one at a time or in batches
       | query:                      |   data: []              |
       |   fields: id                |                         |
       |   filter[id][_eq]: <folder> |                         |
+    And on postgres the requests ran these statements:
+      | request | table              | select | insert | update | delete |
+      | 1       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 1       | directus_folders   | 1      | 1      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 1       | directus_users     | 1      | 0      | 0      | 0      |
+      | 2       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 2       | directus_folders   | 2      | 0      | 1      | 0      |
+      | 2       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 2       | directus_users     | 1      | 0      | 0      | 0      |
+      | 3       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 3       | directus_folders   | 2      | 0      | 1      | 0      |
+      | 3       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 3       | directus_users     | 1      | 0      | 0      | 0      |
+      | 4       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 4       | directus_folders   | 3      | 0      | 1      | 0      |
+      | 4       | directus_revisions | 0      | 1      | 0      | 0      |
+      | 4       | directus_users     | 1      | 0      | 0      | 0      |
+      | 5       | directus_activity  | 0      | 1      | 0      | 0      |
+      | 5       | directus_folders   | 0      | 0      | 0      | 1      |
+      | 5       | directus_users     | 1      | 0      | 0      | 0      |

@@ -1230,7 +1230,6 @@ installed: Установлено
 reinstall: Переустановить
 open_in_marketplace: Открыть в Магазине
 source_registry: Магазин
-source_local: Локальный
 source_module: Библиотека Node
 collection: Коллекция
 collections: Коллекции
