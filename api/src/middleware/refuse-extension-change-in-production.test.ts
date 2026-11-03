@@ -3,8 +3,8 @@ import type { Request, Response } from 'express';
 import { afterEach, expect, test, vi } from 'vitest';
 import {
 	isMarketplaceEnabled,
-	refuseMarketplaceInProduction,
-} from './refuse-marketplace-in-production.js';
+	refuseExtensionChangeInProduction,
+} from './refuse-extension-change-in-production.js';
 
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -31,7 +31,7 @@ test('refuses a registry route in production', () => {
 		originalUrl: '/extensions/registry/install',
 	} as Request;
 
-	expect(() => refuseMarketplaceInProduction(req, {} as Response, next))
+	expect(() => refuseExtensionChangeInProduction(req, {} as Response, next))
 		.toThrow(new RouteNotFoundError({ path: '/extensions/registry/install' }));
 
 	expect(next).not.toHaveBeenCalled();
@@ -48,7 +48,7 @@ test('names the bare registry path the client asked for', () => {
 		originalUrl: '/extensions/registry?search=a',
 	} as Request;
 
-	expect(() => refuseMarketplaceInProduction(req, {} as Response, vi.fn()))
+	expect(() => refuseExtensionChangeInProduction(req, {} as Response, vi.fn()))
 		.toThrow(new RouteNotFoundError({ path: '/extensions/registry' }));
 });
 
@@ -56,7 +56,7 @@ test('passes a registry route outside production', () => {
 	vi.stubEnv('NODE_ENV', 'development');
 	const next = vi.fn();
 
-	refuseMarketplaceInProduction(
+	refuseExtensionChangeInProduction(
 		{
 			baseUrl: '/extensions/registry',
 			path: '/install',

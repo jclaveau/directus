@@ -333,9 +333,9 @@ describe('createApp', async () => {
 
 			const names = (app as any)._router.stack.map((layer: any) => layer.name);
 
-			expect(names).toContain('refuseMarketplaceInProduction');
+			expect(names).toContain('refuseExtensionChangeInProduction');
 
-			expect(names.indexOf('refuseMarketplaceInProduction'))
+			expect(names.indexOf('refuseExtensionChangeInProduction'))
 				.toBeLessThan(names.indexOf('checkCache'));
 		});
 	});

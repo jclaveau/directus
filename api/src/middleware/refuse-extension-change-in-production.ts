@@ -11,7 +11,7 @@ export function isMarketplaceEnabled(): boolean {
 	return (getNodeEnv() || 'production') !== 'production';
 }
 
-export const refuseMarketplaceInProduction: RequestHandler = (
+export const refuseExtensionChangeInProduction: RequestHandler = (
 	req,
 	_res,
 	next,
