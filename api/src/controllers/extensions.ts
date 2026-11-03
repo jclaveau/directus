@@ -309,10 +309,11 @@ router.delete(
 
 router.post(
 	'/app-entries',
-	asyncHandler(async (req, res, next) => {
+	asyncHandler(async (req, _res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
-				reason: `'${req.accountability?.user}' cannot report the app entries`,
+				reason: `${JSON.stringify(req.accountability.user)}`
+					+ ' cannot report the app entries',
 			});
 		}
 
