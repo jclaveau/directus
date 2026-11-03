@@ -20,6 +20,7 @@ import {
 } from '../middleware/refuse-extension-change-in-production.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
+import { readReportedBundleEntries } from '../extensions/lib/sync-app-entries.js';
 import { ExtensionReadError, ExtensionsService } from '../services/extensions.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
@@ -300,6 +301,43 @@ router.delete(
 		}
 
 		await service.deleteOne(pk);
+
+		return next();
+	}),
+	respond,
+);
+
+router.post(
+	'/app-entries',
+	asyncHandler(async (req, res, next) => {
+		if (req.accountability && req.accountability.admin !== true) {
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' cannot report the app entries`,
+			});
+		}
+
+		const { chunk, entries } = req.body ?? {};
+
+		if (typeof chunk !== 'string') {
+			throw new InvalidPayloadError({ reason: '"chunk" must be a string' });
+		}
+
+		await getExtensionManager().syncAppEntries(
+			chunk,
+			readReportedBundleEntries(entries),
+		);
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/app-chunk',
+	asyncHandler(async (_req, res, next) => {
+		res.locals['payload'] = {
+			data: { chunk: getExtensionManager().getAppChunkHash() },
+		};
 
 		return next();
 	}),

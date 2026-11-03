@@ -6,7 +6,6 @@ import getDatabase, {
 	isInstalled,
 	validateDatabaseConnection,
 } from '../../../database/index.js';
-import runMigrations from '../../../database/migrations/run.js';
 import installDatabase from '../../../database/seeds/run.js';
 import { useLogger } from '../../../logger/index.js';
 import { AccessService } from '../../../services/access.js';
@@ -15,9 +14,16 @@ import { RolesService } from '../../../services/roles.js';
 import { SettingsService } from '../../../services/settings.js';
 import { UsersService } from '../../../services/users.js';
 import { getSchema } from '../../../utils/get-schema.js';
+import { migrateLatest } from '../../utils/migrate-latest.js';
 import { defaultAdminPolicy, defaultAdminRole, defaultAdminUser } from '../../utils/defaults.js';
 
-export default async function bootstrap({ skipAdminInit }: { skipAdminInit?: boolean }): Promise<void> {
+export default async function bootstrap({
+	skipAdminInit,
+	snapshot,
+}: {
+	skipAdminInit?: boolean;
+	snapshot?: string;
+}): Promise<void> {
 	const logger = useLogger();
 
 	logger.info('Initializing bootstrap...');
@@ -34,7 +40,7 @@ export default async function bootstrap({ skipAdminInit }: { skipAdminInit?: boo
 		await installDatabase(database);
 
 		logger.info('Running migrations...');
-		await runMigrations(database, 'latest');
+		await migrateLatest(database, snapshot);
 
 		const schema = await getSchema();
 
@@ -51,7 +57,7 @@ export default async function bootstrap({ skipAdminInit }: { skipAdminInit?: boo
 	} else {
 		logger.info('Database already initialized, skipping install');
 		logger.info('Running migrations...');
-		await runMigrations(database, 'latest');
+		await migrateLatest(database, snapshot);
 	}
 
 	await database.destroy();

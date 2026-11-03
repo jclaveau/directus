@@ -65,6 +65,11 @@ export interface ExtensionSettings {
 	enabled: boolean;
 	bundle: string | null;
 	folder: string;
+	/**
+	 * The type of a bundle entry, which a bundle declaring its entries in code
+	 * needs stored.
+	 */
+	type?: string | null;
 	// options: Record<string, unknown> | null;
 	// permissions: Record<string, unknown> | null;
 }
@@ -127,6 +132,11 @@ export type BundleExtension = ExtensionBase & {
 	partial: boolean | undefined;
 	entrypoint: SplitEntrypoint;
 	entries: BundleExtensionEntry[];
+	/**
+	 * Set when the package.json leaves `entries` out: the server reads them from
+	 * the built `api.js`, and the browser reports the `app.js` ones.
+	 */
+	entriesFrom?: 'code';
 };
 
 export type Extension = AppExtension | ApiExtension | HybridExtension | BundleExtension;

@@ -16,6 +16,7 @@
 	"sideEffects": false,
 	"exports": {
 		".": "./dist/index.js",
+		"./scalabus": "./dist/scalabus.js",
 		"./node": "./dist/node.js",
 		"./package.json": "./package.json",
 		"./api.d.ts": "./api.d.ts"
@@ -30,7 +31,7 @@
 		"build": "pnpm run '/^build:.*/'",
 		"build:node": "tsdown src/node.ts --tsconfig src/node/tsconfig.json --out-dir dist --dts --no-clean",
 		"//build-unbundle": "The shared entry ships to extension bundlers. Emitting one module per source file is what lets them drop the zod-backed schemas when only the define* helpers are imported; a single bundled file keeps the two inseparable.",
-		"build:shared": "tsdown src/index.ts --tsconfig src/tsconfig.json --out-dir dist --dts --no-clean --unbundle",
+		"build:shared": "tsdown src/index.ts src/scalabus.ts --tsconfig src/tsconfig.json --out-dir dist --dts --no-clean --unbundle",
 		"dev": "pnpm run '/^build:.*/' --watch",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"

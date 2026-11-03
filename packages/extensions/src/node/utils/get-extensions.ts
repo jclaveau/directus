@@ -12,6 +12,17 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 	const extensionOptions = manifest[EXTENSION_PKG_KEY];
 
 	if (extensionOptions.type === 'bundle') {
+		if (
+			extensionOptions.entries !== undefined
+			&& extensionOptions.source !== undefined
+		) {
+			throw new Error(
+				`Bundle ${JSON.stringify(name)} declares both "entries" and "source"`
+					+ ` in its package.json;`
+					+ ` drop "entries" to declare them in code`,
+			);
+		}
+
 		return {
 			path,
 			name,
@@ -22,7 +33,12 @@ export function getExtensionDefinition(manifest: ExtensionManifest, meta: { path
 				app: extensionOptions.path.app,
 				api: extensionOptions.path.api,
 			},
-			entries: extensionOptions.entries.map((entry) => pick(entry, 'name', 'type')),
+			entries: (extensionOptions.entries ?? []).map(
+				(entry) => pick(entry, 'name', 'type'),
+			),
+			...(extensionOptions.entries === undefined
+				? { entriesFrom: 'code' as const }
+				: {}),
 			host: extensionOptions.host,
 			local,
 		};

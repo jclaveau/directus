@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import { outstandingMigrations } from './database/index.js';
+import { getExtensionManager } from './extensions/index.js';
 import { useLogger } from './logger/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
@@ -82,7 +83,9 @@ export async function watchOutstandingMigrations(): Promise<void> {
 
 	while (!stopped) {
 		try {
-			outstanding = await outstandingMigrations();
+			outstanding = await outstandingMigrations(
+				getExtensionManager().migrationEntries(),
+			);
 		}
 		catch (error) {
 			// Transient while another service is mid-migration. Health stays down

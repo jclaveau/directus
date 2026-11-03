@@ -6,7 +6,13 @@ import {
 	ServiceUnavailableError,
 	UnprocessableContentError,
 } from '@directus/errors';
-import type { ApiOutput, BundleExtension, ExtensionSettings, ExtensionManager } from '@directus/types';
+import type {
+	ApiOutput,
+	BundleExtension,
+	BundleExtensionEntry,
+	ExtensionSettings,
+	ExtensionManager,
+} from '@directus/types';
 import { describe, type DescribeOptions } from '@directus/extensions-registry';
 import type { AbstractServiceOptions, Accountability, DeepPartial, SchemaOverview } from '@directus/types';
 import { isObject, oneLine } from '@directus/utils';
@@ -171,9 +177,15 @@ export class ExtensionsService {
 
 			if (!parentBundle) continue;
 
-			const schema = (parentBundle.schema as BundleExtension | null)?.entries.find(
+			const parentSchema = parentBundle.schema as BundleExtension | null;
+
+			// Another process may have stored an app entry this one has not read yet.
+			const schema = parentSchema?.entries.find(
 				(entry) => entry.name === meta.folder,
-			);
+			)
+				?? (parentSchema?.entriesFrom === 'code' && meta.type
+					? { name: meta.folder, type: meta.type as BundleExtensionEntry['type'] }
+					: undefined);
 
 			if (!schema) continue;
 

@@ -3,11 +3,8 @@ import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
 import { isObject } from '@directus/utils/values';
 import type { DatabaseClient } from '@directus/types';
-import fse from 'fs-extra';
 import type { Knex } from 'knex';
 import knex from 'knex';
-import path, { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
@@ -24,6 +21,7 @@ import {
 	requiredConnectionFields,
 } from './connections.js';
 import { getHelpers } from './helpers/index.js';
+import { listMigrations, type ExtensionMigration } from './migrations/list.js';
 import { auditQueriesOf, queryAuditEnabled } from './query-audit.js';
 
 export {
@@ -40,8 +38,6 @@ type QueryInfo = Partial<Knex.Sql> & {
 
 let database: Knex | null = null;
 let inspector: SchemaInspector | null = null;
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default getDatabase;
 
@@ -306,32 +302,17 @@ export async function isInstalled(): Promise<boolean> {
  * is briefly unreachable while another service is mid-migration.
  */
 // eslint-disable-next-line local/no-single-caller-function -- 3 call sites
-export async function outstandingMigrations(): Promise<string[]> {
-	const env = useEnv();
+export async function outstandingMigrations(
+	extensionMigrations: ExtensionMigration[] = [],
+): Promise<string[]> {
 	const logger = useLogger();
 
-	let requiredVersions: (string | undefined)[];
+	let requiredVersions: string[];
 
 	try {
-		let migrationFiles = await fse.readdir(path.join(__dirname, 'migrations'));
+		const listedMigrations = await listMigrations(extensionMigrations);
 
-		const customMigrationsPath = path.resolve(env['MIGRATIONS_PATH'] as string);
-
-		let customMigrationFiles =
-			((await fse.pathExists(customMigrationsPath)) && (await fse.readdir(customMigrationsPath))) || [];
-
-		migrationFiles = migrationFiles.filter(
-			(file: string) => file.startsWith('run') === false && file.endsWith('.d.ts') === false,
-		);
-
-		// The runner's filter, so the hold waits on exactly what it would run.
-		customMigrationFiles = customMigrationFiles.filter(
-			(file: string) => file.includes('-') && /\.(c|m)?js$/.test(file),
-		);
-
-		migrationFiles.push(...customMigrationFiles);
-
-		requiredVersions = migrationFiles.map((filePath) => filePath.split('-')[0]);
+		requiredVersions = listedMigrations.map((migration) => migration.version);
 	}
 	catch (error: any) {
 		logger.error(`Database migrations cannot be found`);
@@ -347,7 +328,7 @@ export async function outstandingMigrations(): Promise<string[]> {
 
 	return requiredVersions.filter((version) => {
 		return completedVersions.includes(version) === false;
-	}) as string[];
+	});
 }
 
 /**
@@ -357,11 +338,13 @@ export async function outstandingMigrations(): Promise<string[]> {
  * precisely so that it can.
  */
 // eslint-disable-next-line local/no-single-caller-function -- also called by app.ts
-export async function outstandingMigrationsOrExit(): Promise<string[]> {
+export async function outstandingMigrationsOrExit(
+	extensionMigrations: ExtensionMigration[] = [],
+): Promise<string[]> {
 	const logger = useLogger();
 
 	try {
-		return await outstandingMigrations();
+		return await outstandingMigrations(extensionMigrations);
 	}
 	catch (error: any) {
 		logger.error(`Can't read the applied migrations from the database`);

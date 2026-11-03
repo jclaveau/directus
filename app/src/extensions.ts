@@ -9,9 +9,14 @@ import { getInternalOperations, registerOperations } from './operations';
 import { getInternalPanels, registerPanels } from './panels';
 import { registerThemes } from './themes/register';
 import { getRootPath } from './utils/get-root-path';
+import {
+	reportAppEntries,
+	watchAppChunk,
+	type AppChunkStamp,
+} from './utils/sync-app-chunk';
 import { translate } from './utils/translate-object-values';
 
-let customExtensions: AppExtensionConfigs | null = null;
+let customExtensions: (AppExtensionConfigs & AppChunkStamp) | null = null;
 
 const extensions: RefRecord<AppExtensionConfigs> = {
 	interfaces: shallowRef([]),
@@ -89,6 +94,19 @@ export function registerExtensions(app: App): void {
 
 	onHydrateCallbacks.push(onHydrateModules);
 	onDehydrateCallbacks.push(onDehydrateModules);
+
+	const appChunk: AppChunkStamp = customExtensions ?? {};
+
+	let stopWatchingAppChunk = () => {};
+
+	onHydrateCallbacks.push(async () => {
+		stopWatchingAppChunk = watchAppChunk(appChunk);
+		await reportAppEntries(appChunk);
+	});
+
+	onDehydrateCallbacks.push(async () => {
+		stopWatchingAppChunk();
+	});
 }
 
 export async function onHydrateExtensions() {
