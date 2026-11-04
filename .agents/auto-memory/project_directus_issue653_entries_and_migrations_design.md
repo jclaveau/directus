@@ -10,7 +10,7 @@ Design round with jean 2026-11-03, all points ruled. Supersedes the "awaiting je
 
 **Rulings (SETTLED, don't re-raise)**
 - Option B (core runner runs extension migrations), NOT A (copy into MIGRATIONS_PATH). Untrusted-code objection gone (#670 Marketplace dev-only, #667 package-only extensions).
-- Only the bundle `entries` level leaves package.json; `type`/`host`/`partial`/`hidden`/`path`/`coverage` stay. New optional `source: {app?, api?}`, defaults `src/app.ts`/`src/api.ts` (jean: option a). `entries` + `source` together → refused naming the bundle.
+- Only the bundle `entries` level leaves package.json; `type`/`host`/`partial`/`hidden`/`path`/`coverage` stay. Entry files are always `src/app.ts`/`src/api.ts`: the `source` option was DROPPED 2026-11-04 (C4 B), superseding option a.
 - Factories in `@directus/extensions` subpath `./scalabus`, re-exported by `@directus/extensions-sdk/scalabus` (same split as upstream define*). Upstream define* get `@deprecated` JSDoc. Names: `define<Type>Entry(name, config)`, `defineBundleApi([...])` / `defineBundleApp([...])` → `{ format: 'scalabus/1', entries }`.
 - Entry names read at RUNTIME: api names from the `api.js` import (once per load, fresh on reload, reused for registration); app names sent by the browser once at load. Jean rejected a generated `entries.json`.
 - Stale app chunk: content hash of the generated chunk; tab-focus check → toast "refresh" only when the hash differs (api-only rebuilds don't change it).
@@ -36,4 +36,5 @@ Design round with jean 2026-11-03, all points ruled. Supersedes the "awaiting je
 - A4: `migrate:up` refuses when the next pending migration is after-schema, pointing at `migrate:latest --snapshot <path>`.
 - C1: `readBundleEntries` validates a hand-written export like the factories do (unknown type, undated migration name refused).
 - C2: same entry name on the api and app side of one bundle → refused.
+- O1: `PATCH /extensions/<bundleRowId>/entries/<name>` upserts the override row. O2 A: a code bundle skips the auto bundle enable/disable sync. O3 A: api entry rows kept (synced from api.js like package.json).
 - B4/B5/B6(A: disabled bundle skipped)/D2(A: entry url carries ?chunk=)/D4 go; A2 out of scope (dev mistake).
