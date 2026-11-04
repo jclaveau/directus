@@ -42,6 +42,10 @@ export class WebhooksService extends ItemsService<Webhook> {
 		throw this.errorDeprecation;
 	}
 
+	override async updateGroups(): Promise<PrimaryKey[]> {
+		throw this.errorDeprecation;
+	}
+
 	override async deleteMany(keys: PrimaryKey[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		const result = await super.deleteMany(keys, opts);
 		this.messenger.publish('webhooks', { type: 'reload' });

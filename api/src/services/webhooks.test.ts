@@ -106,6 +106,19 @@ describe('Integration Tests', () => {
 			});
 		});
 
+		describe('upsertOne', () => {
+			it('should error onto an existing webhook', async () => {
+				tracker.reset();
+				tracker.on.select('directus_webhooks').response([{ id: 1 }]);
+
+				await expect(service.upsertOne({ id: 1 })).rejects.toMatchObject({
+					code: 'METHOD_NOT_ALLOWED',
+					message: 'Webhooks are deprecated, use Flows instead',
+					status: 405,
+				});
+			});
+		});
+
 		describe('deleteOne', () => {
 			it('should publish webhooks reload message once', async () => {
 				await service.deleteOne(1);
