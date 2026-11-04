@@ -37,7 +37,9 @@ export async function resolveBundleSources(
 		for (const side of ['app', 'api'] as const) {
 			const sideSource = declaredSource[side];
 
-			if (sideSource === undefined) continue;
+			if (sideSource === undefined) {
+				continue;
+			}
 
 			if (!(await isSourceFile(root, sideSource))) {
 				throw new Error(
