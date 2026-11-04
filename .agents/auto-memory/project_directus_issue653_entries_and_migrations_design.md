@@ -28,3 +28,12 @@ Design round with jean 2026-11-03, all points ruled. Supersedes the "awaiting je
 
 **Why:** a fresh session otherwise re-proposes options jean rejected (entries.json, core-first order, 0001A versions, two PRs, advisory lock).
 **How to apply:** implement from the plan in this order; read this file before touching `packages/extensions` schemas, `manager.ts` load, or `database/migrations/run.ts`.
+
+**PR #673 autoreview rulings (2026-11-04)**
+- B3/B7: override-only rows for a code bundle's app entries. No row → entry follows its bundle's `enabled`; a row only once an admin toggles it. App lists its app entries from its own chunk. Removes POST /app-entries, the `type` column (20261103A), CodeQL #25.
+- B1: no unique (bundle, folder) index, fine (upstream has none).
+- A3: a MIGRATIONS_PATH file without a `<YYYYMMDD><letter>-` date is refused.
+- A4: `migrate:up` refuses when the next pending migration is after-schema, pointing at `migrate:latest --snapshot <path>`.
+- C1: `readBundleEntries` validates a hand-written export like the factories do (unknown type, undated migration name refused).
+- C2: same entry name on the api and app side of one bundle → refused.
+- B4/B5/B6(A: disabled bundle skipped)/D2(A: entry url carries ?chunk=)/D4 go; A2 out of scope (dev mistake).
