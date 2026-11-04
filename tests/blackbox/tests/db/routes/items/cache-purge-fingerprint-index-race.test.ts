@@ -90,7 +90,7 @@ describe(oneLine`
 		// this one. Nothing in here ever records a pending purge, so it loses nothing.
 		env[vendor]['CACHE_SCOPED_PURGE_RETRY_INTERVAL'] = '0';
 
-		// No scheduled reap: the default one ticks on the hour, and a tick inside
+		// Once a year: the default reap ticks on the hour, and a tick inside
 		// the purge walks the decoys, each naming no entry, and bumps the counter
 		// the held reads check, so every fill declines to cache. The reaps the
 		// clears ask for are the only ones, and the test waits them out.
