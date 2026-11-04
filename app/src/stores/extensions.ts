@@ -111,7 +111,9 @@ export const useExtensionsStore = defineStore('extensions', () => {
 
 		await refresh();
 
-		if (entry.schema && isIn(entry.schema.type, APP_OR_HYBRID_EXTENSION_TYPES)) {
+		const entryType = entry.schema?.type;
+
+		if (entryType && isIn(entryType, APP_OR_HYBRID_EXTENSION_TYPES)) {
 			notifyReloadRequired();
 		}
 	};
