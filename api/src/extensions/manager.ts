@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { InvalidPayloadError } from '@directus/errors';
 import { APP_SHARED_DEPS } from '@directus/extensions';
 import { HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { generateExtensionsEntrypoint } from '@directus/extensions/node';
@@ -56,11 +55,6 @@ import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import { getRegistryRootPath } from './lib/get-registry-root-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
-import {
-	AppChunkStaleError,
-	diffAppEntries,
-	type ReportedBundleEntries,
-} from './lib/sync-app-entries.js';
 import {
 	importCodeBundles,
 	listMigrationEntries,
@@ -215,74 +209,6 @@ export class ExtensionManager {
 
 	public getAppChunkHash(): string | null {
 		return this.appChunkHash;
-	}
-
-	/**
-	 * Stores the app entries the app read from the chunk it runs, for the bundles
-	 * declaring their entries in code: the server never runs their `app.js`.
-	 */
-	public async syncAppEntries(
-		chunk: string,
-		reported: ReportedBundleEntries[],
-	): Promise<void> {
-		if (chunk !== this.appChunkHash) {
-			throw new AppChunkStaleError();
-		}
-
-		const itemsService = new services.ItemsService<ExtensionSettings>(
-			'directus_extensions',
-			{
-				knex: getDatabase(),
-				schema: await getSchema(),
-			},
-		);
-
-		for (const { source, folder, entries } of reported) {
-			const bundle = this.getExtension(source, folder);
-
-			if (bundle?.type !== 'bundle' || bundle.entriesFrom !== 'code') {
-				throw new InvalidPayloadError({
-					reason: `${JSON.stringify(folder)} from ${JSON.stringify(source)}`
-						+ ` is not a bundle declaring its entries in code`,
-				});
-			}
-
-			const bundleSettings = this.extensionsSettings.find(
-				(row) => {
-					return row.source === source
-						&& row.folder === folder
-						&& row.bundle === null;
-				},
-			);
-
-			if (!bundleSettings) {
-				continue;
-			}
-
-			const changes = diffAppEntries(
-				bundle,
-				bundleSettings,
-				this.extensionsSettings,
-				entries,
-			);
-
-			if (changes.removedSettingIds.length > 0) {
-				await itemsService.deleteMany(changes.removedSettingIds);
-			}
-
-			if (changes.createdSettings.length > 0) {
-				await itemsService.createMany(changes.createdSettings);
-			}
-
-			bundle.entries = changes.bundleEntries;
-
-			this.extensionsSettings = [
-				...this.extensionsSettings.filter(
-					(row) => !changes.removedSettingIds.includes(row.id),
-				),
-				...changes.createdSettings,
-			];
-		}
 	}
 
 	public getExtension(source: string, folder: string) {

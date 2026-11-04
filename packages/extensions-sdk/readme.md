@@ -90,8 +90,9 @@ rebuilt bundle triggers.
 
 ### App entries
 
-The server never runs a bundle's `app.js`, so an admin's browser reports its app entries
-to `POST /extensions/app-entries` on load, which creates their settings rows. A tab
+The server never runs a bundle's `app.js`, so an app entry has no settings row until an
+admin toggles it: the settings page lists the entries of the app chunk it runs, and
+`PATCH /extensions/<bundle id>/entries/<name>` creates or updates the entry's row. A tab
 running an app chunk the server no longer serves shows a reload prompt.
 
 ## License

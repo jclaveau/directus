@@ -1,7 +1,6 @@
 import api from '@/api';
 import { i18n } from '@/lang';
 import { useNotificationsStore } from '@/stores/notifications';
-import { useUserStore } from '@/stores/user';
 import { getRootPath } from '@/utils/get-root-path';
 
 /** What the app chunk exports beside its entries, once the server built it. */
@@ -36,37 +35,6 @@ function notifyStaleAppChunk(): void {
 			window.location.reload();
 		},
 	});
-}
-
-/**
- * Hands the server the app entries of the bundles declaring their entries in
- * code: it never runs their `app.js`, so only the app can read them. An admin
- * reports them, since the rows they become are settings.
- */
-export async function reportAppEntries(appChunk: AppChunkStamp): Promise<void> {
-	if (appChunk.chunkHash === undefined || appChunk.bundleEntries === undefined) {
-		return;
-	}
-
-	if (!useUserStore().isAdmin) {
-		return;
-	}
-
-	try {
-		await api.post('/extensions/app-entries', {
-			chunk: appChunk.chunkHash,
-			entries: appChunk.bundleEntries,
-		});
-	}
-	catch (error: any) {
-		if (error?.response?.status === 409) {
-			notifyStaleAppChunk();
-			return;
-		}
-
-		// eslint-disable-next-line no-console
-		console.warn(`Couldn't report the app entries of the bundles`, error);
-	}
 }
 
 /**

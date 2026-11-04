@@ -16,12 +16,3 @@ Feature: A bundle declaring its entries in code runs its migrations
       | eventually: true          |   data:                                             |
       |                           |     table_exists: true                              |
       |                           |     migration_version: code-entries-probe:20990101A |
-
-  Scenario: app entries read from an app chunk the server no longer serves are refused
-    Then these requests get these responses:
-      | request                       | response                      |
-      | method: POST                  | code: 409                     |+
-      | path: /extensions/app-entries | body:                         |
-      | payload:                      |   errors:                     |
-      |   chunk: stale-chunk          |     - extensions:             |
-      |   entries: []                 |         code: APP_CHUNK_STALE |

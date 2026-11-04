@@ -4,7 +4,7 @@ import {
 	onHydrateExtensions,
 	registerExtensions,
 } from './extensions';
-import { reportAppEntries, watchAppChunk } from './utils/sync-app-chunk';
+import { watchAppChunk } from './utils/sync-app-chunk';
 
 vi.mock('./displays', () => {
 	return { getInternalDisplays: () => [], registerDisplays: vi.fn() };
@@ -34,7 +34,7 @@ vi.mock('./utils/translate-object-values', () => {
 });
 
 vi.mock('./utils/sync-app-chunk', () => {
-	return { reportAppEntries: vi.fn(), watchAppChunk: vi.fn() };
+	return { watchAppChunk: vi.fn() };
 });
 
 vi.mock('./lang', async () => {
@@ -63,7 +63,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-test('watches the app chunk while hydrated, and reports its entries', async () => {
+test('watches the app chunk while hydrated', async () => {
 	const stopWatching = vi.fn();
 	vi.mocked(watchAppChunk).mockReturnValue(stopWatching);
 
@@ -72,7 +72,6 @@ test('watches the app chunk while hydrated, and reports its entries', async () =
 	await onHydrateExtensions();
 
 	expect(watchAppChunk).toHaveBeenCalledWith({});
-	expect(reportAppEntries).toHaveBeenCalledWith({});
 	expect(stopWatching).not.toHaveBeenCalled();
 
 	await onDehydrateExtensions();

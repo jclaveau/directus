@@ -34,7 +34,7 @@ export function generateExtensionsEntrypoint(
 			}
 
 			if (extension.type === 'bundle' && extension.entriesFrom === 'code') {
-				// An entry the app has not reported yet has no row to disable it.
+				// An entry without a row follows its bundle.
 				if (!settingsForExtension.enabled) {
 					continue;
 				}

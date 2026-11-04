@@ -20,7 +20,6 @@ import {
 } from '../middleware/refuse-extension-change-in-production.js';
 import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
-import { readReportedBundleEntries } from '../extensions/lib/sync-app-entries.js';
 import { ExtensionReadError, ExtensionsService } from '../services/extensions.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
@@ -307,26 +306,36 @@ router.delete(
 	respond,
 );
 
-router.post(
-	'/app-entries',
-	asyncHandler(async (req, _res, next) => {
+router.patch(
+	`/:pk(${UUID_REGEX})/entries/:name`,
+	refuseExtensionChangeInProduction,
+	asyncHandler(async (req, res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
 			throw new ForbiddenError({
 				reason: `${JSON.stringify(req.accountability.user)}`
-					+ ' cannot report the app entries',
+					+ ' cannot update extension',
 			});
 		}
 
-		const { chunk, entries } = req.body ?? {};
+		const service = new ExtensionsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
 
-		if (typeof chunk !== 'string') {
-			throw new InvalidPayloadError({ reason: '"chunk" must be a string' });
+		try {
+			res.locals['payload'] = {
+				data: await service.updateEntry(
+					req.params['pk']!,
+					req.params['name']!,
+					req.body,
+				),
+			};
 		}
-
-		await getExtensionManager().syncAppEntries(
-			chunk,
-			readReportedBundleEntries(entries),
-		);
+		catch (error) {
+			throw error instanceof ExtensionReadError
+				? error.originalError
+				: error;
+		}
 
 		return next();
 	}),

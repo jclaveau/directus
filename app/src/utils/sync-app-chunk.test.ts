@@ -1,66 +1,16 @@
 import api from '@/api';
 import { useNotificationsStore } from '@/stores/notifications';
-import { useUserStore } from '@/stores/user';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import {
-	readAppChunkUrl,
-	reportAppEntries,
-	watchAppChunk,
-} from './sync-app-chunk';
+import { readAppChunkUrl, watchAppChunk } from './sync-app-chunk';
 
-vi.mock('@/api', () => ({ default: { get: vi.fn(), post: vi.fn() } }));
+vi.mock('@/api', () => ({ default: { get: vi.fn() } }));
 vi.mock('@/lang', () => ({ i18n: { global: { t: (key: string) => key } } }));
 vi.mock('@/stores/notifications', () => ({ useNotificationsStore: vi.fn() }));
-vi.mock('@/stores/user', () => ({ useUserStore: vi.fn() }));
 vi.mock('@/utils/get-root-path', () => ({ getRootPath: () => '/admin-root/' }));
 
 afterEach(() => {
 	vi.restoreAllMocks();
 	vi.clearAllMocks();
-});
-
-describe('reportAppEntries', () => {
-	test('posts the entries of the chunk as an admin', async () => {
-		vi.mocked(useUserStore).mockReturnValue({ isAdmin: true } as never);
-
-		await reportAppEntries({
-			chunkHash: 'abc',
-			bundleEntries: [
-				{
-					source: 'module',
-					folder: 'domain',
-					entries: [{ type: 'panel', name: 'chart' }],
-				},
-			],
-		});
-
-		expect(api.post).toHaveBeenCalledWith('/extensions/app-entries', {
-			chunk: 'abc',
-			entries: [
-				{
-					source: 'module',
-					folder: 'domain',
-					entries: [{ type: 'panel', name: 'chart' }],
-				},
-			],
-		});
-	});
-
-	test('posts nothing as a non-admin', async () => {
-		vi.mocked(useUserStore).mockReturnValue({ isAdmin: false } as never);
-
-		await reportAppEntries({ chunkHash: 'abc', bundleEntries: [] });
-
-		expect(api.post).not.toHaveBeenCalled();
-	});
-
-	test('posts nothing for a chunk without code bundles', async () => {
-		vi.mocked(useUserStore).mockReturnValue({ isAdmin: true } as never);
-
-		await reportAppEntries({ chunkHash: 'abc' });
-
-		expect(api.post).not.toHaveBeenCalled();
-	});
 });
 
 describe('watchAppChunk', () => {
@@ -88,53 +38,6 @@ describe('watchAppChunk', () => {
 			dismissText: 'extension_reload_now',
 			dismissAction: expect.any(Function),
 		});
-	});
-});
-
-describe('reportAppEntries failures', () => {
-	test('asks for one reload when the server refuses a stale chunk', async () => {
-		vi.resetModules();
-
-		const { default: freshApi } = await import('@/api');
-
-		const { useNotificationsStore: freshNotifications } = await import(
-			'@/stores/notifications'
-		);
-
-		const { useUserStore: freshUserStore } = await import('@/stores/user');
-		const { reportAppEntries: freshReport } = await import('./sync-app-chunk');
-
-		const notifications = { add: vi.fn() };
-		vi.mocked(freshNotifications).mockReturnValue(notifications as never);
-		vi.mocked(freshUserStore).mockReturnValue({ isAdmin: true } as never);
-		vi.mocked(freshApi.post).mockRejectedValue({ response: { status: 409 } });
-
-		await freshReport({ chunkHash: 'abc', bundleEntries: [] });
-		await freshReport({ chunkHash: 'abc', bundleEntries: [] });
-
-		expect(notifications.add).toHaveBeenCalledTimes(1);
-
-		const reloadSpy = vi.spyOn(window.location, 'reload')
-			.mockImplementation(() => undefined);
-
-		notifications.add.mock.calls[0]![0].dismissAction();
-
-		expect(reloadSpy).toHaveBeenCalledTimes(1);
-	});
-
-	test('warns about a report the server fails otherwise', async () => {
-		const consoleWarn = vi.spyOn(console, 'warn')
-			.mockImplementation(() => undefined);
-
-		vi.mocked(useUserStore).mockReturnValue({ isAdmin: true } as never);
-		vi.mocked(api.post).mockRejectedValue(new Error('offline'));
-
-		await reportAppEntries({ chunkHash: 'abc', bundleEntries: [] });
-
-		expect(consoleWarn).toHaveBeenCalledWith(
-			'Couldn\'t report the app entries of the bundles',
-			new Error('offline'),
-		);
 	});
 });
 

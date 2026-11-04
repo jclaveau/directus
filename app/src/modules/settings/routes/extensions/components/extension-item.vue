@@ -16,6 +16,7 @@ const props = withDefaults(
 	defineProps<{
 		extension: ApiOutput;
 		children?: ApiOutput[];
+		entryOfCodeBundle?: boolean;
 	}>(),
 	{
 		children: () => [],
@@ -87,7 +88,12 @@ const requestHandler = (requestCallback: () => Promise<any>) => async () => {
 	}
 };
 
-const toggleState = requestHandler(() => extensionsStore.toggleState(props.extension.id));
+const toggleState = requestHandler(() => {
+	return props.entryOfCodeBundle
+		? extensionsStore.toggleEntryState(props.extension)
+		: extensionsStore.toggleState(props.extension.id);
+});
+
 const uninstall = requestHandler(() => extensionsStore.uninstall(props.extension.id));
 const reinstall = requestHandler(() => extensionsStore.reinstall(props.extension.id));
 const remove = requestHandler(() => extensionsStore.remove(props.extension.id));
@@ -145,7 +151,15 @@ function isAppExtension(type?: ExtensionType) {
 	</v-list-item>
 
 	<v-list v-if="children.length > 0" class="nested" :class="{ partial: isPartialAllowed }">
-		<extension-item v-for="item in children" :key="item.id" :extension="item" />
+		<extension-item
+			v-for="item in children"
+			:key="item.id"
+			:extension="item"
+			:entry-of-code-bundle="
+				extension.schema?.type === 'bundle'
+					&& extension.schema.entriesFrom === 'code'
+			"
+		/>
 	</v-list>
 </template>
 

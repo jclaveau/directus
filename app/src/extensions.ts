@@ -10,7 +10,6 @@ import { getInternalPanels, registerPanels } from './panels';
 import { registerThemes } from './themes/register';
 import {
 	readAppChunkUrl,
-	reportAppEntries,
 	watchAppChunk,
 	type AppChunkStamp,
 } from './utils/sync-app-chunk';
@@ -101,7 +100,6 @@ export function registerExtensions(app: App): void {
 
 	onHydrateCallbacks.push(async () => {
 		stopWatchingAppChunk = watchAppChunk(appChunk);
-		await reportAppEntries(appChunk);
 	});
 
 	onDehydrateCallbacks.push(async () => {
@@ -115,6 +113,11 @@ export async function onHydrateExtensions() {
 
 export async function onDehydrateExtensions() {
 	await Promise.all(onDehydrateCallbacks.map((onDehydrate) => onDehydrate()));
+}
+
+/** The app entries of the enabled bundles declaring their entries in code. */
+export function getCodeBundleEntries(): NonNullable<AppChunkStamp['bundleEntries']> {
+	return customExtensions?.bundleEntries ?? [];
 }
 
 export function useExtensions(): RefRecord<AppExtensionConfigs> {

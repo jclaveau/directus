@@ -42,6 +42,29 @@ export const useExtensionsStore = defineStore('extensions', () => {
 	const extensions = ref<ApiOutput[]>([]);
 	const reloadNotificationVisible = ref(false);
 
+	const notifyReloadRequired = () => {
+		if (reloadNotificationVisible.value) {
+			return;
+		}
+
+		notificationsStore.add({
+			id: 'reload-required',
+			title: t('reload_required'),
+			text: t('extension_reload_required_copy'),
+			type: 'warning',
+			dialog: false,
+			persist: true,
+			alwaysShowText: true,
+			dismissIcon: 'refresh',
+			dismissText: t('extension_reload_now'),
+			dismissAction: () => {
+				window.location.reload();
+			},
+		});
+
+		reloadNotificationVisible.value = true;
+	};
+
 	const refresh = async (forceRefresh = true) => {
 		loading.value = true;
 
@@ -58,22 +81,7 @@ export const useExtensionsStore = defineStore('extensions', () => {
 				isEqual(currentlyEnabledBrowserExtensions, newEnabledBrowserExtensions) === false &&
 				!reloadNotificationVisible.value
 			) {
-				notificationsStore.add({
-					id: 'reload-required',
-					title: t('reload_required'),
-					text: t('extension_reload_required_copy'),
-					type: 'warning',
-					dialog: false,
-					persist: true,
-					alwaysShowText: true,
-					dismissIcon: 'refresh',
-					dismissText: t('extension_reload_now'),
-					dismissAction: () => {
-						window.location.reload();
-					},
-				});
-
-				reloadNotificationVisible.value = true;
+				notifyReloadRequired();
 			}
 		} catch (err) {
 			error.value = err;
@@ -93,6 +101,19 @@ export const useExtensionsStore = defineStore('extensions', () => {
 		await api.patch(endpoint, { meta: { enabled: !current } });
 
 		await refresh();
+	};
+
+	// An entry of a bundle declaring its entries in code may have no row yet.
+	const toggleEntryState = async (entry: ApiOutput) => {
+		await api.patch(`/extensions/${entry.bundle}/entries/${entry.meta.folder}`, {
+			meta: { enabled: !entry.meta.enabled },
+		});
+
+		await refresh();
+
+		if (entry.schema && isIn(entry.schema.type, APP_OR_HYBRID_EXTENSION_TYPES)) {
+			notifyReloadRequired();
+		}
 	};
 
 	const install = async (extensionId: string, versionId: string) => {
@@ -119,5 +140,17 @@ export const useExtensionsStore = defineStore('extensions', () => {
 
 	refresh(false);
 
-	return { extensions, extensionIds, loading, error, refresh, toggleState, install, uninstall, reinstall, remove };
+	return {
+		extensions,
+		extensionIds,
+		loading,
+		error,
+		refresh,
+		toggleState,
+		toggleEntryState,
+		install,
+		uninstall,
+		reinstall,
+		remove,
+	};
 });

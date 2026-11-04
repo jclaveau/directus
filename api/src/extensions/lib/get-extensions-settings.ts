@@ -1,10 +1,4 @@
-import { APP_EXTENSION_TYPES } from '@directus/constants';
-import type {
-	AppExtensionType,
-	BundleExtension,
-	Extension,
-	ExtensionSettings,
-} from '@directus/types';
+import type { BundleExtension, Extension, ExtensionSettings } from '@directus/types';
 import { randomUUID } from 'node:crypto';
 import getDatabase from '../../database/index.js';
 import { ExtensionsService } from '../../services/extensions.js';
@@ -15,10 +9,6 @@ import { list } from '@directus/extensions-registry';
  * Loads stored settings for all extensions. Creates empty new rows in extensions tables for
  * extensions that don't have settings yet, and remove any settings for extensions that are no
  * longer installed.
- *
- * A bundle declaring its entries in code only lists its api entries here: the
- * app reports its app entries (`syncAppEntries`), so their rows survive a load,
- * and come back into the bundle's `entries` from their stored `type`.
  */
 export const getExtensionsSettings = async ({
 	module,
@@ -55,7 +45,9 @@ export const getExtensionsSettings = async ({
 
 			if (entryInBundle) continue;
 
-			if (bundle.entriesFrom === 'code' && isAppEntryRow(entry)) {
+			// The server cannot list the app entries of a code bundle, so it keeps
+			// every row an admin's toggle gave one.
+			if (bundle.entriesFrom === 'code') {
 				continue;
 			}
 
@@ -74,7 +66,6 @@ export const getExtensionsSettings = async ({
 				source: bundleSettings.source,
 				bundle: bundleSettings.id,
 				folder: entry.name,
-				type: entry.type,
 			});
 		}
 	};
@@ -109,7 +100,6 @@ export const getExtensionsSettings = async ({
 					source: source,
 					bundle: id,
 					folder: entry.name,
-					type: entry.type,
 				});
 			}
 		} else {
@@ -151,52 +141,5 @@ export const getExtensionsSettings = async ({
 		await service.extensionsItemService.createMany(newSettings);
 	}
 
-	const settings = [
-		...existingSettings.filter(({ id }) => !removedSettingIds.includes(id)),
-		...newSettings,
-	];
-
-	for (
-		const [source, extensions] of [
-			['module', module],
-			['registry', registry],
-		] as const
-	) {
-		for (const [folder, extension] of extensions) {
-			if (extension.type !== 'bundle' || extension.entriesFrom !== 'code') {
-				continue;
-			}
-
-			addAppEntryRows(extension, source, folder, settings);
-		}
-	}
-
-	return settings;
+	return [...existingSettings.filter(({ id }) => !removedSettingIds.includes(id)), ...newSettings];
 };
-
-function isAppEntryRow(settings: ExtensionSettings): boolean {
-	return (APP_EXTENSION_TYPES as readonly (string | null | undefined)[]).includes(
-		settings.type,
-	);
-}
-
-function addAppEntryRows(
-	bundle: BundleExtension,
-	source: 'module' | 'registry',
-	folder: string,
-	settings: ExtensionSettings[],
-): void {
-	const bundleSettings = settings.find(
-		(row) => row.source === source && row.folder === folder && row.bundle === null,
-	);
-
-	if (!bundleSettings) {
-		return;
-	}
-
-	const appEntries = settings
-		.filter((row) => row.bundle === bundleSettings.id && isAppEntryRow(row))
-		.map((row) => ({ type: row.type as AppExtensionType, name: row.folder }));
-
-	bundle.entries = [...bundle.entries, ...appEntries];
-}
