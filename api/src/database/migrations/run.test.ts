@@ -59,6 +59,31 @@ describe('run', () => {
 
 			expect(await run(db, 'up')).toBe(undefined);
 		});
+
+		it('refuses an up whose next migration runs after the schema', async () => {
+			tracker.on.select('directus_migrations').response([]);
+
+			await expect(
+				run(db, 'up', true, {
+					extensionMigrations: [
+						{
+							bundle: '@consumer/domain',
+							name: '19000101A-fill-orders',
+							config: {
+								phase: 'after-schema',
+								up: async () => {},
+								down: async () => {},
+							},
+						},
+					],
+				}),
+			).rejects.toThrow(
+				new Error(
+					'Migration "@consumer/domain:19000101A" runs after the schema:'
+						+ ' run "migrate:latest --snapshot <path>" instead',
+				),
+			);
+		});
 	});
 
 	describe('when passed the argument down', () => {

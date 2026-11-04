@@ -110,4 +110,19 @@ describe('listMigrations', () => {
 			),
 		);
 	});
+
+	test('refuses a MIGRATIONS_PATH file without a date', async () => {
+		vi.mocked(fse.readdir).mockImplementation((async (directory: string) => {
+			return directory === path.resolve('/custom-migrations')
+				? ['custom-add-foo.js']
+				: ['20990103A-core.js'];
+		}) as never);
+
+		await expect(listMigrations()).rejects.toThrow(
+			new Error(
+				'Migration "custom-add-foo.js" in MIGRATIONS_PATH has no date:'
+					+ ' name it "<YYYYMMDD><letter>-<name>.js"',
+			),
+		);
+	});
 });
