@@ -2,6 +2,7 @@ import api from '@/api';
 import { i18n } from '@/lang';
 import { useNotificationsStore } from '@/stores/notifications';
 import { useUserStore } from '@/stores/user';
+import { getRootPath } from '@/utils/get-root-path';
 
 /** What the app chunk exports beside its entries, once the server built it. */
 export interface AppChunkStamp {
@@ -100,4 +101,24 @@ export function watchAppChunk(appChunk: AppChunkStamp): () => void {
 	document.addEventListener('visibilitychange', checkAppChunk);
 
 	return () => document.removeEventListener('visibilitychange', checkAppChunk);
+}
+
+/**
+ * The url of the app chunk's entry, carrying the hash the server serves: a
+ * rebuild changes the url, so a browser-cached entry is never run past it.
+ */
+export async function readAppChunkUrl(): Promise<string> {
+	const entryUrl = `${getRootPath()}extensions/sources/index.js`;
+
+	try {
+		const response = await api.get('/extensions/app-chunk');
+
+		return `${entryUrl}?chunk=${response.data.data.chunk}`;
+	}
+	catch (error) {
+		// eslint-disable-next-line no-console
+		console.warn(`Couldn't read the app chunk the server serves`, error);
+
+		return entryUrl;
+	}
 }

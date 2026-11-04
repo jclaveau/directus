@@ -27,7 +27,7 @@ import nodeResolve from '@rollup/plugin-node-resolve';
 import virtual from '@rollup/plugin-virtual';
 import chokidar, { FSWatcher } from 'chokidar';
 import express, { Router } from 'express';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { pathExists } from 'fs-extra';
 import os from 'node:os';
 import path, { dirname, join } from 'node:path';
@@ -775,10 +775,7 @@ export class ExtensionManager {
 
 			const tempDir = join(env['TEMP_PATH'] as string, 'app-extensions');
 
-			const { output } = await bundle.write({
-				format: 'es',
-				dir: tempDir,
-			});
+			const { output } = await bundle.generate({ format: 'es' });
 
 			this.appExtensionChunks = output.reduce<string[]>((acc, chunk) => {
 				if (chunk.type === 'chunk') acc.push(chunk.fileName);
@@ -786,7 +783,7 @@ export class ExtensionManager {
 				return acc;
 			}, []);
 
-			this.appChunkHash = await stampAppChunkHash(tempDir, output);
+			this.appChunkHash = await writeStampedAppChunks(tempDir, output);
 
 			await bundle.close();
 		} catch (error) {
@@ -1266,10 +1263,11 @@ export class ExtensionManager {
 const APP_CHUNK_HASH_PLACEHOLDER = '__DIRECTUS_APP_CHUNK_HASH__';
 
 /**
- * Hashes every chunk the bundling wrote and stamps the hash into the entry, so
- * an app can tell the chunk it runs from the one the server now serves.
+ * Hashes every chunk the bundling generated and stamps the hash into the entry,
+ * so an app can tell the chunk it runs from the one the server now serves. Each
+ * chunk is renamed into place whole, so a reader never gets the placeholder.
  */
-async function stampAppChunkHash(
+async function writeStampedAppChunks(
 	tempDir: string,
 	output: readonly (
 		| { type: 'chunk'; fileName: string; code: string; isEntry: boolean }
@@ -1294,13 +1292,20 @@ async function stampAppChunkHash(
 
 	const chunkHash = hasher.digest('hex');
 
-	const entryChunk = chunks.find((chunk) => chunk.isEntry);
+	await mkdir(tempDir, { recursive: true });
 
-	if (entryChunk) {
+	for (const chunk of sortedChunks) {
+		const chunkPath = join(tempDir, chunk.fileName);
+		const writingPath = `${chunkPath}.${process.pid}.tmp`;
+
 		await writeFile(
-			join(tempDir, entryChunk.fileName),
-			entryChunk.code.replace(APP_CHUNK_HASH_PLACEHOLDER, chunkHash),
+			writingPath,
+			chunk.isEntry
+				? chunk.code.replace(APP_CHUNK_HASH_PLACEHOLDER, chunkHash)
+				: chunk.code,
 		);
+
+		await rename(writingPath, chunkPath);
 	}
 
 	return chunkHash;

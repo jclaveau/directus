@@ -34,6 +34,11 @@ export function generateExtensionsEntrypoint(
 			}
 
 			if (extension.type === 'bundle' && extension.entriesFrom === 'code') {
+				// An entry the app has not reported yet has no row to disable it.
+				if (!settingsForExtension.enabled) {
+					continue;
+				}
+
 				const disabledNames = settings
 					.filter((setting) => {
 						return setting.bundle === settingsForExtension.id
