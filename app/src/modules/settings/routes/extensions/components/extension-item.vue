@@ -155,6 +155,10 @@ function isAppExtension(type?: ExtensionType) {
 			v-for="item in children"
 			:key="item.id"
 			:extension="item"
+			:entry-of-code-bundle="
+				extension.schema?.type === 'bundle'
+					&& extension.schema.entriesFrom === 'code'
+			"
 		/>
 	</v-list>
 </template>

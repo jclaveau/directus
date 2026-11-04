@@ -383,7 +383,12 @@ describe('generateExtensionsEntrypoint', () => {
 
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
 			"import bundleCode0 from './extensions/domain/dist/app.js';"
-				+ 'const codeEntries0 = bundleCode0.entries.filter((entry) => '
+				+ 'const sharedName0 = bundleCode0.entries.find((entry) => '
+				+ 'entry.type !== "operation" && [].includes(entry.name));'
+				+ 'if (sharedName0) console.error("Bundle \\"@consumer/domain\\" names " '
+				+ '+ JSON.stringify(sharedName0.name) + " on both sides");'
+				+ 'const codeEntries0 = sharedName0 ? [] : '
+				+ 'bundleCode0.entries.filter((entry) => '
 				+ '!["audit-panel"].includes(entry.name));'
 				+ 'export const interfaces = [...codeEntries0.filter('
 				+ '(entry) => entry.type === "interface").map((entry) => entry.config)];'

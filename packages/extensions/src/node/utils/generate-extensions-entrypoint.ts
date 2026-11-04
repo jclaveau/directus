@@ -98,10 +98,23 @@ export function generateExtensionsEntrypoint(
 	);
 
 	const codeBundleImports = codeBundles.map(({ extension, disabledNames }, i) => {
+		// An operation is one entry with an app half and an api half.
+		const apiNames = extension.entries
+			.filter((entry) => entry.type !== 'operation')
+			.map((entry) => entry.name);
+
+		const sharedNameError = `Bundle ${JSON.stringify(extension.name)} names `;
+
 		return `import bundleCode${i} from './${pathToRelativeUrl(
 			path.resolve(extension.path, extension.entrypoint.app),
 		)}';`
-			+ `const codeEntries${i} = bundleCode${i}.entries.filter((entry) => `
+			+ `const sharedName${i} = bundleCode${i}.entries.find((entry) => `
+			+ `entry.type !== "operation" && `
+			+ `${JSON.stringify(apiNames)}.includes(entry.name));`
+			+ `if (sharedName${i}) console.error(${JSON.stringify(sharedNameError)} `
+			+ `+ JSON.stringify(sharedName${i}.name) + " on both sides");`
+			+ `const codeEntries${i} = sharedName${i} ? [] : `
+			+ `bundleCode${i}.entries.filter((entry) => `
 			+ `!${JSON.stringify(disabledNames)}.includes(entry.name));`;
 	});
 
