@@ -3432,32 +3432,65 @@ implements AbstractService<Item> {
 	 * Splits upsert payloads where one repeats a key its run already holds, so
 	 * no run sends `updateGroups` or `createMany` a row twice.
 	 *
-	 * A collection relating to itself upserts one payload per run, in payload
-	 * order: a run writes its updates before its creates, so a row pointing its
-	 * parent at a row created after it would break the foreign key, and a row a
-	 * nested write creates would be created again.
-	 * TODO: a relation reaching back through another collection is not split.
+	 * A payload nesting rows, or pointing a self relation at a row, upserts in a
+	 * run of its own, in payload order: a run writes its updates before its
+	 * creates, so a row it points at, or a row its nested rows point back at
+	 * through any number of collections, may not exist yet, and a row a nested
+	 * write creates would be created again.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const nestingFields = new Set<string>();
+		const selfRelationFields = new Set<string>();
 
-		const relatesToItself = this.schema.relations.some((relation) => {
-			return relation.collection === this.collection
-				&& (
+		for (const relation of this.schema.relations) {
+			if (relation.collection === this.collection) {
+				nestingFields.add(relation.field);
+
+				if (
 					relation.related_collection === this.collection
 					|| relation.meta?.one_allowed_collections?.includes(this.collection)
-				);
-		});
+				) {
+					selfRelationFields.add(relation.field);
+				}
+			}
 
-		if (relatesToItself) {
-			return payloads.map((payload) => [payload]);
+			if (
+				relation.related_collection === this.collection
+				&& relation.meta?.one_field
+			) {
+				nestingFields.add(relation.meta.one_field);
+			}
 		}
+
+		const runsAlone = (payload: Partial<Item>) => {
+			return [...nestingFields].some((field) => {
+				const value = payload[field];
+
+				return isPlainObject(value)
+					|| (Array.isArray(value) && value.some(isPlainObject));
+			})
+				|| [...selfRelationFields].some((field) => {
+					return payload[field] !== undefined && payload[field] !== null;
+				});
+		};
 
 		const upsertRuns: Partial<Item>[][] = [];
 		let currentRun: Partial<Item>[] = [];
 		let runKeyNames = new Set<string>();
 
 		for (const payload of payloads) {
+			if (runsAlone(payload)) {
+				if (currentRun.length > 0) {
+					upsertRuns.push(currentRun);
+				}
+
+				upsertRuns.push([payload]);
+				currentRun = [];
+				runKeyNames = new Set();
+				continue;
+			}
+
 			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
 
 			const keyName = isMissingPrimaryKey(primaryKey)

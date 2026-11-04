@@ -6350,6 +6350,110 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it(oneLine`
+		creates a row before the payload after it nests a row pointing back at it
+	`, async () => {
+		const cycleSchema = new SchemaBuilder()
+			.collection('a', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('b').m2o('b');
+			})
+			.collection('b', (c) => {
+				c.field('id').id();
+				c.field('a').m2o('a');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('a', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('b');
+		});
+
+		await database.schema.createTable('b', (table) => {
+			table.increments('id');
+
+			table.integer('a').references('id')
+				.inTable('a');
+		});
+
+		await database('a').insert({ id: 10, name: 'ten' });
+
+		await expect(new ItemsService('a', { knex: database, schema: cycleSchema })
+			.upsertMany([
+				{ id: 50, name: 'new' },
+				{ id: 10, b: { id: 90, a: 50 } },
+			])).resolves.toStrictEqual([50, 10]);
+
+		await expect(database('a').select('id', 'name', 'b')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 10, name: 'ten', b: 90 },
+			{ id: 50, name: 'new', b: null },
+		]);
+
+		await expect(database('b').select('id', 'a')).resolves.toStrictEqual([
+			{ id: 90, a: 50 },
+		]);
+	});
+
+	it('upserts a payload nesting a row in its own run', async () => {
+		const taggedSchema = new SchemaBuilder()
+			.collection('test', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('tag').m2o('tags');
+			})
+			.collection('tags', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		await database.schema.alterTable('test', (table) => {
+			table.integer('tag');
+		});
+
+		await database.schema.createTable('tags', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		sqlStatements = [];
+
+		await expect(new ItemsService('test', { knex: database, schema: taggedSchema })
+			.upsertMany([
+				{ id: 3, name: 'three' },
+				{ id: 1, tag: { id: 7, name: 'seven' } },
+				{ id: 4, tag: 7 },
+				{ id: 2, name: 'dos' },
+			])).resolves.toStrictEqual([3, 1, 4, 2]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in (?)',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'select `id` from `test` where `id` in (?)',
+			'select `id` from `tags` where `id` = ? limit ?',
+			'insert into `tags` (`id`, `name`) values (?, ?) returning `id`',
+			'update `test` set `tag` = ? where `id` in (?)',
+			'select `id` from `test` where `id` in (?, ?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'insert into `test` (`id`, `tag`) values (?, ?) returning `id`',
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'name', 'tag')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one', tag: 7 },
+			{ id: 2, name: 'dos', tag: null },
+			{ id: 3, name: 'three', tag: null },
+			{ id: 4, name: null, tag: 7 },
+		]);
+	});
+
 	it('creates the payloads carrying no key without reading', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 
