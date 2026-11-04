@@ -2028,7 +2028,13 @@ implements AbstractService<Item> {
 					const keyName = keyNameOf(key);
 					const answeredCount = (answeredKeyCounts.get(keyName) ?? 0) + 1;
 
-					if (refusesRepeatedPks && answeredCount > 1) {
+					// A row the caller lets a hook add may also be in the batch: both
+					// writes land, in the hook's answer order, as two UPDATEs would.
+					if (
+						refusesRepeatedPks
+						&& opts.refuseHookAddedRows !== false
+						&& answeredCount > 1
+					) {
 						throw refuseHookAnswer(new InvalidPayloadError({
 							reason: oneLine`
 								A "${this.eventScope}.update" filter hook answered with row

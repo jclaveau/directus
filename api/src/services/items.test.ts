@@ -6258,6 +6258,31 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it('writes the row a hook adds after the same row sent in the batch', async () => {
+		const shiftingFilter = (groups: UpdateGroup[]) => {
+			return [...groups, { data: { name: 'shifted' }, keys: [2] }];
+		};
+
+		emitter.onFilter('test.items.update', shiftingFilter);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema })
+				.upsertMany([
+					{ id: 1, name: 'uno' },
+					{ id: 2, name: 'dos' },
+				])).resolves.toStrictEqual([1, 2]);
+		}
+		finally {
+			emitter.offFilter('test.items.update', shiftingFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'shifted' },
+		]);
+	});
+
 	it('creates the payloads carrying no key without reading', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 
