@@ -116,7 +116,8 @@ describe('build', () => {
 
 			// an unbuilt workspace leaves the import unresolved, and a bundle that never
 			// carried the helper trivially passes the two assertions below
-			expect(bundle).not.toContain('@directus/extensions-sdk');
+			// the helper's @deprecated comment names the package, so match the import
+			expect(bundle).not.toMatch(/from\s*["']@directus\/extensions-sdk/);
 
 			// defineEndpoint is an identity function. It used to arrive with every
 			// zod-backed manifest schema attached — 125 KB — because the two were
