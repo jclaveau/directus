@@ -14,7 +14,12 @@ vi.mock('@/api', () => {
 	};
 });
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('vue-i18n', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('vue-i18n')>()),
+		useI18n: () => ({ t: (key: string) => key }),
+	};
+});
 
 beforeEach(() => {
 	setActivePinia(createTestingPinia({ createSpy: vi.fn, stubActions: false }));

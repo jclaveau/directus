@@ -1072,7 +1072,7 @@ describe('Services / Extensions / updateEntry', () => {
 		} as any);
 
 		const readByQuerySpy = vi.spyOn(ItemsService.prototype, 'readByQuery')
-			.mockResolvedValue([]);
+			.mockResolvedValue([] as any);
 
 		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne')
 			.mockResolvedValue('entry-id');
@@ -1119,7 +1119,7 @@ describe('Services / Extensions / updateEntry', () => {
 		} as any);
 
 		vi.spyOn(ItemsService.prototype, 'readByQuery')
-			.mockResolvedValue([{ id: 'entry-id' }]);
+			.mockResolvedValue([{ id: 'entry-id' }] as any);
 
 		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne');
 
