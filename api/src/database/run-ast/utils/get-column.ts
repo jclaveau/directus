@@ -85,6 +85,8 @@ export function getColumn(
 	return knex.ref(`${table}.${column}`);
 }
 
-function isFunctionColumnOptions(options?: GetColumnOptions): options is FunctionColumnOptions {
+function isFunctionColumnOptions(
+	options?: GetColumnOptions,
+): options is GetColumnOptions & FunctionColumnOptions {
 	return !!options && 'query' in options;
 }
