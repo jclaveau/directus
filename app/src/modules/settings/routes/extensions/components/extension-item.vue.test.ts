@@ -111,6 +111,6 @@ test('marks the children of a code bundle as its entries', () => {
 	});
 
 	expect(
-		wrapper.findAllComponents(ExtensionItem)[1]!.props('entryOfCodeBundle'),
+		wrapper.findAllComponents(ExtensionItem)[0]!.props('entryOfCodeBundle'),
 	).toBe(true);
 });
