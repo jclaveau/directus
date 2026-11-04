@@ -6454,6 +6454,36 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it('creates a row before the payload after it names it as its child', async () => {
+		const nodesSchema = new SchemaBuilder()
+			.collection('nodes', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('children').o2m('nodes', 'parent');
+			})
+			.build();
+
+		await database.schema.createTable('nodes', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('parent');
+		});
+
+		await database('nodes').insert({ id: 10, name: 'ten' });
+
+		await expect(new ItemsService('nodes', { knex: database, schema: nodesSchema })
+			.upsertMany([
+				{ id: 20, name: 'new' },
+				{ id: 10, children: [20] },
+			])).resolves.toStrictEqual([20, 10]);
+
+		await expect(database('nodes').select('id', 'name', 'parent')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 10, name: 'ten', parent: null },
+			{ id: 20, name: 'new', parent: 10 },
+		]);
+	});
+
 	it('creates the payloads carrying no key without reading', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 

@@ -10,6 +10,7 @@ describe.each(vendors)('%s', (vendor) => {
 	defineFeature(feature, (scenario) => {
 		for (const title of [
 			'a child updates the row a child before it created as its nested child',
+			'a child links to a child created before it',
 			'a child nests a row pointing back at a child created before it',
 		]) {
 			scenario(title, (steps) => {

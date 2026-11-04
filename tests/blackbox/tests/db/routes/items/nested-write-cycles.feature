@@ -12,9 +12,10 @@ Feature: A nested write reaching back into the collection it starts from
   - A Then reads back every row whose key starts with the prefix, sorted by
     key, with the table's columns; a row the table leaves out does not exist.
   - `test_nested_cycle_node` relates to itself: `children` lists the rows
-    whose `parent` it is. `test_nested_cycle_owner` lists its
-    `test_nested_cycle_entry` rows in `entries`; an entry's `ref` points at a
-    `test_nested_cycle_ref` row, whose `entry` points back at an entry.
+    whose `parent` it is, and `link` points at any other node.
+    `test_nested_cycle_owner` lists its `test_nested_cycle_entry` rows in
+    `entries`; an entry's `ref` points at a `test_nested_cycle_ref` row, whose
+    `entry` points back at an entry.
   - Every relation holds a foreign key.
 
   Scenario: a child updates the row a child before it created as its nested child
@@ -39,6 +40,29 @@ Feature: A nested write reaching back into the collection it starts from
       | cs-1  |      |        |
       | cs-10 |      | cs-1   |
       | cs-11 | y    | cs-1   |
+
+  Scenario: a child links to a child created before it
+    Given the rows of test_nested_cycle_node:
+      | id   |
+      | cl-1 |
+    And their children in test_nested_cycle_node:
+      | id    | parent |
+      | cl-10 | cl-1   |
+    When these requests get these responses:
+      | request                                   | response  |
+      | method: PATCH                             | code: 200 |+
+      | path: /items/test_nested_cycle_node/cl-1  |           |
+      | payload:                                  |           |
+      |   children:                               |           |
+      |     - id: cl-20                           |           |
+      |       name: new                           |           |
+      |     - id: cl-10                           |           |
+      |       link: cl-20                         |           |
+    Then the rows of test_nested_cycle_node whose key starts with "cl-" are:
+      | id    | name | parent | link  |
+      | cl-1  |      |        |       |
+      | cl-10 |      | cl-1   | cl-20 |
+      | cl-20 | new  | cl-1   |       |
 
   Scenario: a child nests a row pointing back at a child created before it
     Given the rows of test_nested_cycle_owner:

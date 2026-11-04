@@ -22,6 +22,7 @@ export const seedDBStructure = () => {
 				// other, blocks dropping the collection: drop those fields first.
 				for (const { collection, field } of [
 					{ collection: collectionNode, field: 'parent' },
+					{ collection: collectionNode, field: 'link' },
 					{ collection: collectionEntry, field: 'ref' },
 					{ collection: collectionRef, field: 'entry' },
 				]) {
@@ -61,6 +62,13 @@ export const seedDBStructure = () => {
 					primaryKeyType: 'string',
 					otherCollection: collectionNode,
 					otherField: 'parent',
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionNode,
+					field: 'link',
+					primaryKeyType: 'string',
+					otherCollection: collectionNode,
 				});
 
 				await CreateFieldO2M(vendor, {

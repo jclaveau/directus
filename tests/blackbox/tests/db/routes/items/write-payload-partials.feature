@@ -186,10 +186,10 @@ Feature: A write takes the less travelled side of each payload rule
       |   filter[name][_eq]: keeping-<run>     |                           |
     And on postgres the requests ran these statements:
       | request | table              | select | insert | update | delete |
-      | 1       | directus_activity  | 0      | 4      | 0      | 0      |
-      | 1       | directus_revisions | 0      | 4      | 3      | 0      |
+      | 1       | directus_activity  | 0      | 6      | 0      | 0      |
+      | 1       | directus_revisions | 0      | 6      | 3      | 0      |
       | 1       | directus_users     | 1      | 0      | 0      | 0      |
-      | 1       | test_wpp_child     | 2      | 1      | 0      | 0      |
+      | 1       | test_wpp_child     | 2      | 3      | 0      | 0      |
       | 1       | test_wpp_leaf      | 2      | 1      | 1      | 0      |
       | 1       | test_wpp_parent    | 1      | 1      | 0      | 0      |
 

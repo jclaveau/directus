@@ -3432,11 +3432,11 @@ implements AbstractService<Item> {
 	 * Splits upsert payloads where one repeats a key its run already holds, so
 	 * no run sends `updateGroups` or `createMany` a row twice.
 	 *
-	 * A payload nesting rows, or pointing a self relation at a row, upserts in a
-	 * run of its own, in payload order: a run writes its updates before its
-	 * creates, so a row it points at, or a row its nested rows point back at
-	 * through any number of collections, may not exist yet, and a row a nested
-	 * write creates would be created again.
+	 * A payload nesting rows, or naming a row through a self relation (its key
+	 * alone included), upserts in a run of its own, in payload order: a run
+	 * writes its updates before its creates, so a row it names, or a row its
+	 * nested rows point back at through any number of collections, may not
+	 * exist yet, and a row a nested write creates would be created again.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -3460,6 +3460,10 @@ implements AbstractService<Item> {
 				&& relation.meta?.one_field
 			) {
 				nestingFields.add(relation.meta.one_field);
+
+				if (relation.collection === this.collection) {
+					selfRelationFields.add(relation.meta.one_field);
+				}
 			}
 		}
 
