@@ -219,3 +219,10 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 
 ## 2026-11-03 (#673 shard 1): invite statement-count flake
 - `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
+
+## fingerprint-index-race HIT×5→MISS×5 = the hourly reap tick (2026-11-04, PR #674)
+
+- **`cache-purge-fingerprint-index-race` `expected [MISS×5] to deeply equal [HIT×5]` (the `filled` check) = TEST race, not stale cache.** Its instances ran the default `CACHE_SCOPED_INDEX_REAP_SCHEDULE` `0 * * * *`. A tick inside the purge walks the 360k bare-set decoys (none names an entry) and `scopedCacheIndexReapScript` bumps `scoped-cache-epoch:<collection>` for every chunk → each held read's fill guard sees the counter moved → declines to cache → MISS. Nothing stale served. Tell: purge started at 12:59:59.99, and `counter moved after` was 67 ms instead of ~200 ms (the reap moved it, not the write).
+- **Fix:** `CACHE_SCOPED_INDEX_REAP_SCHEDULE = '0 0 1 1 *'` in the test env, like the other reap-sensitive bb files. **Any bb file that spawns a scoped-cache instance and checks HIT after a fill should pin the schedule off**; the 360k decoys made the pass 8-10 s, so crossing an hour went from negligible to ~0.5%/run.
+- **Deterministic red:** schedule `* * * * * *` → both fill tests MISS×5 (run 41837755574, job 126601122705, `counter moved after 19ms`).
+- **Survey (Check runs 10-09→11-04, 217 failed bb jobs, 8 hits):** 1 revert-proof branch (intended), 6 `expected <900 to be greater than 900` calibration (all before #656's 360k), 1 this one — the only HIT×5 failure, and the only one since #656.

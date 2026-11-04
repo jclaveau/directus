@@ -90,6 +90,12 @@ describe(oneLine`
 		// this one. Nothing in here ever records a pending purge, so it loses nothing.
 		env[vendor]['CACHE_SCOPED_PURGE_RETRY_INTERVAL'] = '0';
 
+		// Once a year: the default reap ticks on the hour, and a tick inside
+		// the purge walks the decoys, each naming no entry, and bumps the counter
+		// the held reads check, so every fill declines to cache. The reaps the
+		// clears ask for are the only ones, and the test waits them out.
+		env[vendor]['CACHE_SCOPED_INDEX_REAP_SCHEDULE'] = '0 0 1 1 *';
+
 		// The instance that purges, and the one that reads while it does. Same Redis,
 		// same database, separate event loops — which is the whole point.
 		let sweeperInstance: ChildProcess;
