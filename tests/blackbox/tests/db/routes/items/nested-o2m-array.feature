@@ -17,8 +17,8 @@ Feature: A parent's o2m field given as an array is the whole list of its childre
     database, that reports the statements each request ran
     (`QUERY_AUDIT_HEADER`). The last step counts a request's statements per
     table and kind, on postgres alone: other vendors run other statements.
-  - Those counts are the baseline before the batched writes of #414, which
-    are expected to drop them.
+  - Those counts follow the batched upserts of #414; its other batched
+    writes are expected to drop them further.
 
   Scenario: a child named by its key joins the parent, the ones left out are nullified
     Given the rows of test_nested_o2m_list:

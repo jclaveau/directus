@@ -5985,6 +5985,32 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 		]);
 	});
 
+	it('updates, when asked, a row a hook adds to an upsertOne', async () => {
+		const addingFilter = vi.fn((entries: UpdateGroup[]) => {
+			return [{ data: entries[0]!.data, keys: [...entries[0]!.keys, 2] }];
+		});
+
+		emitter.onFilter('test.items.update', addingFilter);
+
+		const service = new ItemsService('test', { knex: database, schema });
+
+		try {
+			await expect(service.upsertOne(
+				{ id: 1, name: 'patched' },
+				{ refuseHookAddedRows: false },
+			)).resolves.toBe(1);
+		}
+		finally {
+			emitter.offFilter('test.items.update', addingFilter);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'patched' },
+			{ id: 2, name: 'patched' },
+		]);
+	});
+
 	it('refuses an admin delete of a key no row holds', async () => {
 		const adminService = new ItemsService('test', {
 			knex: database,
@@ -6185,6 +6211,50 @@ describe('Services / Items / a batched upsert', () => {
 			{ id: 1, name: 'uno' },
 			{ id: 2, name: 'two' },
 			{ id: 4, name: 'four' },
+		]);
+	});
+
+	it('refuses a key of the wrong type before reading or writing', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 1, name: 'uno' },
+			{ id: 'abc', name: 'wrong' },
+		])).rejects.toStrictEqual(new InvalidPayloadError({
+			reason: 'Primary key of test must be an integer instead of "abc"',
+		}));
+
+		expect(sqlStatements).toStrictEqual(['BEGIN;', 'ROLLBACK']);
+	});
+
+	it('takes back the updates of a run whose create half fails', async () => {
+		const refuseBoom = (entries: (CreateEntry | null)[]) => {
+			return mapCreateRows(entries, (data) => {
+				if (data['name'] === 'boom') {
+					throw new Error('boom refused');
+				}
+
+				return data;
+			});
+		};
+
+		emitter.onFilter('test.items.create', refuseBoom);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema })
+				.upsertMany([
+					{ name: 'boom' },
+					{ id: 1, name: 'uno' },
+				])).rejects.toStrictEqual(new Error('boom refused'));
+		}
+		finally {
+			emitter.offFilter('test.items.create', refuseBoom);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
 		]);
 	});
 
