@@ -6283,6 +6283,73 @@ describe('Services / Items / a batched upsert', () => {
 		]);
 	});
 
+	it(oneLine`
+		creates a row before the payload after it points its parent at it
+	`, async () => {
+		const nodesSchema = new SchemaBuilder()
+			.collection('nodes', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('parent').m2o('nodes');
+			})
+			.build();
+
+		await database.raw('PRAGMA foreign_keys = ON');
+
+		await database.schema.createTable('nodes', (table) => {
+			table.increments('id');
+			table.string('name');
+
+			table.integer('parent').references('id')
+				.inTable('nodes');
+		});
+
+		await database('nodes').insert({ id: 1, name: 'one' });
+
+		await expect(new ItemsService('nodes', { knex: database, schema: nodesSchema })
+			.upsertMany([
+				{ id: 5, name: 'five' },
+				{ id: 1, parent: 5 },
+			])).resolves.toStrictEqual([5, 1]);
+
+		await expect(database('nodes').select('id', 'name', 'parent')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one', parent: 5 },
+			{ id: 5, name: 'five', parent: null },
+		]);
+	});
+
+	it('updates a row a payload before it created as its nested child', async () => {
+		const nodesSchema = new SchemaBuilder()
+			.collection('nodes', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('children').o2m('nodes', 'parent');
+				c.field('parent').m2o('nodes');
+			})
+			.build();
+
+		await database.schema.createTable('nodes', (table) => {
+			table.increments('id');
+			table.string('name');
+			table.integer('parent');
+		});
+
+		await database('nodes').insert({ id: 1, name: 'one' });
+
+		await expect(new ItemsService('nodes', { knex: database, schema: nodesSchema })
+			.upsertMany([
+				{ id: 1, children: [{ id: 2, name: 'a' }] },
+				{ id: 2, name: 'y' },
+			])).resolves.toStrictEqual([1, 2]);
+
+		await expect(database('nodes').select('id', 'name', 'parent')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'one', parent: null },
+			{ id: 2, name: 'y', parent: 1 },
+		]);
+	});
+
 	it('creates the payloads carrying no key without reading', async () => {
 		const service = new ItemsService('test', { knex: database, schema });
 

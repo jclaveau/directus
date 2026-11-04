@@ -3431,9 +3431,28 @@ implements AbstractService<Item> {
 	/**
 	 * Splits upsert payloads where one repeats a key its run already holds, so
 	 * no run sends `updateGroups` or `createMany` a row twice.
+	 *
+	 * A collection relating to itself upserts one payload per run, in payload
+	 * order: a run writes its updates before its creates, so a row pointing its
+	 * parent at a row created after it would break the foreign key, and a row a
+	 * nested write creates would be created again.
+	 * TODO: a relation reaching back through another collection is not split.
 	 */
 	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const relatesToItself = this.schema.relations.some((relation) => {
+			return relation.collection === this.collection
+				&& (
+					relation.related_collection === this.collection
+					|| relation.meta?.one_allowed_collections?.includes(this.collection)
+				);
+		});
+
+		if (relatesToItself) {
+			return payloads.map((payload) => [payload]);
+		}
+
 		const upsertRuns: Partial<Item>[][] = [];
 		let currentRun: Partial<Item>[] = [];
 		let runKeyNames = new Set<string>();
