@@ -292,6 +292,10 @@ export class ExtensionsService {
 			});
 		}
 
+		if (!isObject(data.meta)) {
+			throw new InvalidPayloadError({ reason: `"meta" is required` });
+		}
+
 		const [entryRow] = await this.extensionsItemService.readByQuery({
 			filter: { bundle: { _eq: bundleId }, folder: { _eq: entryName } },
 			limit: 1,

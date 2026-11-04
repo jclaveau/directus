@@ -64,6 +64,10 @@ const isPartialAllowed = computed(() => {
 const isPartiallyEnabled = computed(() => {
 	if (props.extension.schema?.type !== 'bundle') return false;
 
+	if (!props.extension.meta.enabled) {
+		return false;
+	}
+
 	const enabledExtensionCount = props.children.filter((extension) => extension.meta.enabled);
 	return enabledExtensionCount.length !== 0 && enabledExtensionCount.length !== props.children.length;
 });
