@@ -444,4 +444,67 @@ describe('generateExtensionsEntrypoint', () => {
 				+ 'export const operations = [];',
 		);
 	});
+
+	it('leaves out the app entries of a bundle naming one on both sides', () => {
+		const mockExtensions: {
+			module: Map<string, Extension>;
+			registry: Map<string, Extension>;
+		} = {
+			module: new Map(),
+			registry: new Map(),
+		};
+
+		mockExtensions.module.set('@consumer/domain', {
+			path: './extensions/domain',
+			name: '@consumer/domain',
+			version: '1.0.0',
+			type: 'bundle',
+			entrypoint: { app: 'dist/app.js', api: 'dist/api.js' },
+			entries: [
+				{ type: 'hook', name: 'audit' },
+				{ type: 'operation', name: 'notify' },
+			],
+			entriesFrom: 'code',
+			host: '^11.0.0',
+			local: true,
+			partial: undefined,
+		});
+
+		const mockSettings: ExtensionSettings[] = [
+			{
+				id: 'domain-id',
+				folder: '@consumer/domain',
+				enabled: true,
+				source: 'module',
+				bundle: null,
+			},
+		];
+
+		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
+			"import bundleCode0 from './extensions/domain/dist/app.js';"
+				+ 'const sharedName0 = bundleCode0.entries.find((entry) => '
+				+ 'entry.type !== "operation" && ["audit"].includes(entry.name));'
+				+ 'if (sharedName0) console.error("Bundle \\"@consumer/domain\\" names " '
+				+ '+ JSON.stringify(sharedName0.name) + " on both sides");'
+				+ 'const codeEntries0 = sharedName0 ? [] : '
+				+ 'bundleCode0.entries.filter((entry) => ![].includes(entry.name));'
+				+ 'export const interfaces = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "interface").map((entry) => entry.config)];'
+				+ 'export const displays = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "display").map((entry) => entry.config)];'
+				+ 'export const layouts = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "layout").map((entry) => entry.config)];'
+				+ 'export const modules = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "module").map((entry) => entry.config)];'
+				+ 'export const panels = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "panel").map((entry) => entry.config)];'
+				+ 'export const themes = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "theme").map((entry) => entry.config)];'
+				+ 'export const operations = [...codeEntries0.filter('
+				+ '(entry) => entry.type === "operation").map((entry) => entry.config)];'
+				+ 'export const bundleEntries = [{source:"module",folder:"@consumer/domain",'
+				+ 'entries:bundleCode0.entries.map((entry) => '
+				+ '({type:entry.type,name:entry.name}))}];',
+		);
+	});
 });
