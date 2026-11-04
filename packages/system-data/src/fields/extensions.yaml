@@ -19,3 +19,6 @@ fields:
     field: enabled
     special:
       - cast-boolean
+
+  - collection: directus_extensions
+    field: type
