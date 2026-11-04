@@ -144,10 +144,10 @@ test('a join inside a _some subquery continues the numbering', () => {
 		+ ' on "articles"."id" = "alias_2"."article_id"'
 		+ ' where ("alias_1"."name" = ? and "articles"."id" in'
 		+ ' (select "links_list"."article_id" as "article_id"'
-		+ ' from "links_list" left join "users" as "alias_3"'
-		+ ' on "links_list"."owner" = "alias_3"."id"'
+		+ ' from "links_list" left join "users" as "alias_4"'
+		+ ' on "links_list"."owner" = "alias_4"."id"'
 		+ ' where "links_list"."article_id" is not null'
-		+ ' and "alias_3"."name" = ?)) limit ?) as "inner"'
+		+ ' and "alias_4"."name" = ?)) limit ?) as "inner"'
 		+ ' on "articles"."id" = "inner"."id"',
 	);
 
