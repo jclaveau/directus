@@ -49,7 +49,7 @@ line appended below.
 - [Isolate new blackbox fixtures](project_directus_bb_fixture_isolation.md) — `fields=*` splices every alias; new scenarios get own collections
 - [bb pins its own toolchain](reference_directus_blackbox_pins_own_toolchain.md) — CI resolved vitest 4.1.11; check the run log before relying on `expect.poll`
 
-## ci (20) — workflows, codecov, lint gates, bench, preview
+## ci (21) — workflows, codecov, lint gates, bench, preview
 `.agents/auto-memory/index/ci.md`
 
 - [Two eslint configs](project_directus_two_eslint_configs.md) — Lint vs Style (changes); run both before push

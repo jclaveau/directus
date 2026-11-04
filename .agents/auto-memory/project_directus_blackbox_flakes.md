@@ -210,3 +210,6 @@ Ranked (failed jobs): graphql-ip-gated-read 37 (fixed #602), autoscale-churn 25 
 - `cache-purge-fingerprint-index-race` `expected 742 to be greater than 900` recurred AFTER be95ff8418 (purge shorter than the 900 ms floor; the test's own comment says raise `decoyMemberCount`).
 - `cache-m2o-through-fk-no-key.test.ts:206` `expected 'HIT' to be 'MISS'` after a write (shard-3 rerun; the first run passed). Root cause undecided: test race vs real stale cache (HIGH if product). #655 touches no cache code.
 - The rerun relocated the failure to the second test; a push replaces a second rerun. jean: "fix both flakes in a dedicated pr".
+
+## 2026-11-03 (#673 shard 1): invite statement-count flake
+- `singular-write-users-invite` expected 1 insert each into `directus_activity` / `directus_revisions` on request 3, saw 3. #673 touches neither the users service nor that test; not in the list above. Treated as flake, `gh run rerun --failed` unasked. If the rerun is red the same way (2+ identical), stop rerunning and diagnose (see the twice-red rule above).
