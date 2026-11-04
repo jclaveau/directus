@@ -74,6 +74,17 @@ The core and bundle migrations run in date order; on the same date the core runs
 Two entries of a bundle with the same date and letter are refused when the migrations
 are listed.
 
+A file in `MIGRATIONS_PATH` follows the same `<YYYYMMDD><letter>-<name>.js` name; any
+other name stops the listing with `Migration "20220501-x.js" in MIGRATIONS_PATH has no
+date: name it "<YYYYMMDD><letter>-<name>.js"`. A file already applied under such a name
+needs both a rename and its recorded version moved before `migrate:latest`, or it runs
+again:
+
+```sql
+-- 20220501-x.js renamed 20220501A-x.js
+UPDATE directus_migrations SET version = '20220501A' WHERE version = '20220501';
+```
+
 | command                                               | runs                                                    |
 | ----------------------------------------------------- | ------------------------------------------------------- |
 | `directus database migrate:latest`                    | before-schema; refuses while an after-schema one is pending |
