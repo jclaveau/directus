@@ -384,7 +384,8 @@ describe('generateExtensionsEntrypoint', () => {
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
 			"import bundleCode0 from './extensions/domain/dist/app.js';"
 				+ 'const sharedName0 = bundleCode0.entries.find((entry) => '
-				+ 'entry.type !== "operation" && [].includes(entry.name));'
+				+ '[].some((apiEntry) => apiEntry.name === entry.name && '
+				+ '(apiEntry.type !== "operation" || entry.type !== "operation")));'
 				+ 'if (sharedName0) console.error("Bundle \\"@consumer/domain\\" names " '
 				+ '+ JSON.stringify(sharedName0.name) + " on both sides");'
 				+ 'const codeEntries0 = sharedName0 ? [] : '
@@ -488,7 +489,10 @@ describe('generateExtensionsEntrypoint', () => {
 		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
 			"import bundleCode0 from './extensions/domain/dist/app.js';"
 				+ 'const sharedName0 = bundleCode0.entries.find((entry) => '
-				+ 'entry.type !== "operation" && ["audit"].includes(entry.name));'
+				+ '[{"type":"hook","name":"audit"},'
+				+ '{"type":"operation","name":"notify"}]'
+				+ '.some((apiEntry) => apiEntry.name === entry.name && '
+				+ '(apiEntry.type !== "operation" || entry.type !== "operation")));'
 				+ 'if (sharedName0) console.error("Bundle \\"@consumer/domain\\" names " '
 				+ '+ JSON.stringify(sharedName0.name) + " on both sides");'
 				+ 'const codeEntries0 = sharedName0 ? [] : '

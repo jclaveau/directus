@@ -1142,6 +1142,36 @@ describe('Services / Extensions / updateEntry', () => {
 		});
 	});
 
+	it('creates no row for a payload without meta', async () => {
+		vi.mocked(getExtensionManager).mockReturnValue({} as any);
+
+		vi.spyOn(ExtensionsService.prototype, 'readOne').mockResolvedValue({
+			id: 'bundle-id',
+			bundle: null,
+			schema: { type: 'bundle', entriesFrom: 'code', entries: [] },
+			meta: { source: 'module', enabled: true },
+		} as any);
+
+		vi.spyOn(ItemsService.prototype, 'readByQuery')
+			.mockResolvedValue([] as any);
+
+		const createOneSpy = vi.spyOn(ItemsService.prototype, 'createOne')
+			.mockResolvedValue('entry-id');
+
+		const service = new ExtensionsService({
+			knex: knex.default({ client: MockClient }),
+			schema,
+		});
+
+		await expect(service.updateEntry('bundle-id', 'picker', {}))
+			.rejects.toHaveProperty(
+				'message',
+				'Invalid payload. "meta" is required.',
+			);
+
+		expect(createOneSpy).not.toHaveBeenCalled();
+	});
+
 	it('refuses an entry of a bundle not declaring its entries in code', async () => {
 		vi.mocked(getExtensionManager).mockReturnValue({} as any);
 

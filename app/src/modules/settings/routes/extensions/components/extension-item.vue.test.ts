@@ -114,3 +114,46 @@ test('marks the children of a code bundle as its entries', () => {
 		wrapper.findAllComponents(ExtensionItem)[0]!.props('entryOfCodeBundle'),
 	).toBe(true);
 });
+
+test('shows a disabled code bundle as disabled whatever its entries', () => {
+	const pinia = createTestingPinia({ createSpy: vi.fn });
+
+	const wrapper = mount(ExtensionItem, {
+		props: {
+			extension: {
+				id: 'bundle-id',
+				bundle: null,
+				schema: { type: 'bundle', entriesFrom: 'code', partial: true },
+				meta: { enabled: false, folder: 'orders', source: 'module', bundle: null },
+			} as any,
+			children: [
+				{
+					id: 'bundle-id/chart',
+					bundle: 'bundle-id',
+					schema: { type: 'panel', name: 'chart' },
+					meta: { enabled: true, folder: 'chart' },
+				},
+				{
+					id: 'bundle-id/picker',
+					bundle: 'bundle-id',
+					schema: { type: 'interface', name: 'picker' },
+					meta: { enabled: false, folder: 'picker' },
+				},
+			] as any,
+		},
+		global: {
+			plugins: [i18n, pinia],
+			directives: { tooltip: { mounted: () => undefined } },
+			stubs: { ExtensionItemOptions: true },
+			config: {
+				compilerOptions: {
+					isCustomElement: (tag: string) => tag.includes('-'),
+				},
+			},
+		},
+	});
+
+	expect(
+		wrapper.findComponent({ name: 'ExtensionItemOptions' }).props('state'),
+	).toBe('disabled');
+});
