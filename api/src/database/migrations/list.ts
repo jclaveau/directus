@@ -149,6 +149,15 @@ export async function listMigrations(
 		[]
 	).filter((file: string) => file.includes('-') && /\.(c|m)?js$/.test(file));
 
+	const undatedFile = customFiles.find((file) => !/^\d{8}[A-Z]-/.test(file));
+
+	if (undatedFile !== undefined) {
+		throw new Error(
+			`Migration ${JSON.stringify(undatedFile)} in MIGRATIONS_PATH has no date:`
+				+ ' name it "<YYYYMMDD><letter>-<name>.js"',
+		);
+	}
+
 	const migrations = [
 		...coreFiles.map((file) => listFileMigration(__dirname, file)),
 		...customFiles.map((file) => listFileMigration(customMigrationsPath, file)),

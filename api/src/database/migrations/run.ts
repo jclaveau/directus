@@ -75,6 +75,13 @@ export default async function run(
 			throw Error('Nothing to upgrade');
 		}
 
+		if (options.phase === undefined && nextVersion.phase === 'after-schema') {
+			throw new Error(
+				`Migration ${JSON.stringify(nextVersion.version)} runs after the schema:`
+					+ ' run "migrate:latest --snapshot <path>" instead',
+			);
+		}
+
 		const migrationModule = await nextVersion.loadModule();
 
 		if (log) {

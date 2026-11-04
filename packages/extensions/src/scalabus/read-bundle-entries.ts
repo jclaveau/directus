@@ -1,4 +1,36 @@
-import { BUNDLE_ENTRIES_FORMAT, type BundleApiEntry } from './define-entry.js';
+import {
+	BUNDLE_ENTRIES_FORMAT,
+	type BundleApiEntry,
+	defineBundleApi,
+	defineMigrationEntry,
+} from './define-entry.js';
+
+const API_ENTRY_TYPES = ['hook', 'endpoint', 'operation', 'migration'];
+
+function readDeclaredEntries(declaredEntries: unknown): BundleApiEntry[] {
+	if (!Array.isArray(declaredEntries)) {
+		throw new Error(
+			`Bundle module declares ${JSON.stringify(BUNDLE_ENTRIES_FORMAT)}`
+				+ ' without an "entries" array',
+		);
+	}
+
+	for (const [index, entry] of declaredEntries.entries()) {
+		if (!API_ENTRY_TYPES.includes(entry?.type)) {
+			throw new Error(
+				`Bundle entry ${index} declares an unknown type`
+					+ ` ${JSON.stringify(entry?.type)}; expected "hook",`
+					+ ' "endpoint", "operation" or "migration"',
+			);
+		}
+
+		if (entry.type === 'migration') {
+			defineMigrationEntry(entry.name, entry.config);
+		}
+	}
+
+	return defineBundleApi(declaredEntries).entries;
+}
 
 /**
  * The entries of a bundle's built `api.js`, whichever way it declares them:
@@ -22,7 +54,7 @@ export function readBundleEntries(bundleModule: unknown): BundleApiEntry[] {
 			);
 		}
 
-		return (bundleModule as { entries: BundleApiEntry[] }).entries;
+		return readDeclaredEntries((bundleModule as { entries?: unknown }).entries);
 	}
 
 	if (
