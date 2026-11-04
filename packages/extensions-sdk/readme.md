@@ -24,7 +24,16 @@ A bundle whose `package.json` lists no `entries` declares them in code instead:
 ```
 
 `directus-extension build` builds `src/app.ts` and `src/api.ts`, skipping a side whose
-file is missing.
+file is missing. A manifest `source` names other files instead, and then only the sides
+it names are built; a named file that is missing is refused:
+
+```json
+"directus:extension": {
+	"type": "bundle",
+	"path": { "app": "dist/app.js", "api": "dist/api.js" },
+	"source": { "api": "./directus-bundle/index.ts" }
+}
+```
 
 ```ts
 // src/api.ts

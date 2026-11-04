@@ -130,7 +130,10 @@ export default async function build(options: BuildOptions): Promise<void> {
 
 		if (
 			extensionOptions.type === 'bundle'
-			&& extensionOptions.entries === undefined
+			&& (
+				extensionOptions.entries === undefined
+				|| extensionOptions.source !== undefined
+			)
 		) {
 			let bundleSources: Awaited<ReturnType<typeof resolveBundleSources>>;
 
