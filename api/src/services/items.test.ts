@@ -3165,6 +3165,20 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(updatedKeys).toEqual([5]);
 		});
 
+		it('upserts onto the row its read finds under another spelling', async () => {
+			tracker.on.select('big_coll').response([{ id: '5' }]);
+			tracker.on.update('big_coll').response(1);
+
+			const upsertedKeys = await new ItemsService('big_coll', {
+				knex: db,
+				schema: shapesSchema,
+			}).upsertMany([{ id: '05', name: 'after' }]);
+
+			expect(upsertedKeys).toEqual(['05']);
+			expect(tracker.history.insert).toHaveLength(0);
+			expect(tracker.history.update).toHaveLength(1);
+		});
+
 		it('keeps two keys apart past the safe integers', async () => {
 			vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 
@@ -3747,6 +3761,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		it('flushes the response cache once the upsert commits', async () => {
 			tracker.on.select('directus_users').response([
 				{ id: '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' },
+				{ id: 'b6d7c3f0-6a2e-4f0b-9a51-2f4a8e1c0d22' },
 			]);
 
 			tracker.on.update('directus_users').response(1);
@@ -4627,25 +4642,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(result).toEqual([null, null, null]);
 
 			filterSpy.mockRestore();
-		});
-
-		it('upsertMany returns one key per payload, in input order', async () => {
-			tracker.on.select('test').response([{ id: 1 }]);
-			tracker.on.update('test').response(1);
-
-			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
-
-			// nested-upsert.test.ts drives the same contract through an endpoint
-			// extension, since no ordinary route returns these keys; this pins it
-			// without a server. The keys are deliberately out of order so a rewrite
-			// that groups or sorts the payloads is caught either way.
-			const keys = await service.upsertMany([
-				{ id: 3, name: 'c' },
-				{ id: 1, name: 'a' },
-				{ id: 2, name: 'b' },
-			]);
-
-			expect(keys).toEqual([3, 1, 2]);
 		});
 
 		it('updateMany translates a DB error raised by the UPDATE', async () => {
@@ -6059,6 +6055,154 @@ describe('Services / Items / a single-item write naming a key no row holds', () 
 
 		await expect(userService.updateOne(999, { name: 'patched' }))
 			.resolves.toBe(999);
+	});
+});
+
+describe('Services / Items / a batched upsert', () => {
+	let database: Knex;
+	let sqlStatements: string[];
+
+	beforeEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
+
+		database = knex.default({
+			client: 'sqlite3',
+			connection: { filename: ':memory:' },
+			useNullAsDefault: true,
+			pool: { min: 1, max: 1 },
+		});
+
+		await database.schema.createTable('test', (table) => {
+			table.increments('id');
+			table.string('name');
+		});
+
+		await database('test').insert([
+			{ id: 1, name: 'one' },
+			{ id: 2, name: 'two' },
+		]);
+
+		sqlStatements = [];
+
+		database.on('query', (query: { sql: string }) => {
+			sqlStatements.push(query.sql);
+		});
+	});
+
+	afterEach(async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		await database.destroy();
+	});
+
+	it('reads once, updates the found keys, then creates the others', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 3, name: 'three' },
+			{ id: 1, name: 'uno' },
+			{ id: 4, name: 'four' },
+			{ id: 2, name: 'dos' },
+		])).resolves.toStrictEqual([3, 1, 4, 2]);
+
+		// sqlite writes one statement per update group (#610), postgres one batch
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in (?, ?, ?, ?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`id`, `name`) select ? as `id`, ? as `name`'
+				+ ' union all select ? as `id`, ? as `name` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'dos' },
+			{ id: 3, name: 'three' },
+			{ id: 4, name: 'four' },
+		]);
+	});
+
+	it('starts a new run at a repeated key, the last payload winning', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([
+			{ id: 3, name: 'first' },
+			{ id: 1, name: 'uno' },
+			{ id: '3', name: 'last' },
+		])).resolves.toStrictEqual([3, 1, '3']);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select `id` from `test` where `id` in (?, ?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'insert into `test` (`id`, `name`) values (?, ?) returning `id`',
+			'select `id` from `test` where `id` in (?)',
+			'update `test` set `name` = ? where `id` in (?)',
+			'COMMIT;',
+		]);
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'two' },
+			{ id: 3, name: 'last' },
+		]);
+	});
+
+	it('answers null at the payload a create filter cancels', async () => {
+		const cancelRefused = (entries: (CreateEntry | null)[]) => {
+			return mapCreateRows(entries, (data) => {
+				return data['name'] === 'refused'
+					? null
+					: data;
+			});
+		};
+
+		emitter.onFilter('test.items.create', cancelRefused);
+
+		try {
+			await expect(new ItemsService('test', { knex: database, schema })
+				.upsertMany(
+					[
+						{ id: 3, name: 'refused' },
+						{ id: 1, name: 'uno' },
+						{ id: 4, name: 'four' },
+					],
+					{ allowFilterCancel: true },
+				)).resolves.toStrictEqual([null, 1, 4]);
+		}
+		finally {
+			emitter.offFilter('test.items.create', cancelRefused);
+		}
+
+		await expect(database('test').select('id', 'name')
+			.orderBy('id')).resolves.toStrictEqual([
+			{ id: 1, name: 'uno' },
+			{ id: 2, name: 'two' },
+			{ id: 4, name: 'four' },
+		]);
+	});
+
+	it('creates the payloads carrying no key without reading', async () => {
+		const service = new ItemsService('test', { knex: database, schema });
+
+		await expect(service.upsertMany([{ name: 'new' }, { name: 'newer' }]))
+			.resolves.toStrictEqual([3, 4]);
+
+		expect(sqlStatements).toStrictEqual([
+			'BEGIN;',
+			'select sqlite_version() as version limit ?',
+			expect.stringMatching(/^SAVEPOINT trx\d+;$/),
+			'insert into `test` (`name`) select ? as `name`'
+				+ ' union all select ? as `name` returning `id`',
+			expect.stringMatching(/^RELEASE SAVEPOINT trx\d+;$/),
+			'COMMIT;',
+		]);
 	});
 });
 

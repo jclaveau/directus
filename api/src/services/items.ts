@@ -73,6 +73,7 @@ import {
 } from '../utils/is-primary-key.js';
 import {
 	assign,
+	chunk,
 	clone,
 	cloneDeep,
 	isEqual,
@@ -86,6 +87,9 @@ import { validateUserCountIntegrity } from '../utils/validate-user-count-integri
 import { PayloadService } from './payload.js';
 
 const env = useEnv();
+
+// Keys per existence probe, well under Postgres' 65535 bind parameters.
+const UPSERT_PROBE_CHUNK_SIZE = 10_000;
 
 /**
  * The options `upsertMany` hands the updates it defers its purge for. Only the
@@ -3172,37 +3176,26 @@ implements AbstractService<Item> {
 	/**
 	 * Upsert a single item.
 	 *
-	 * Uses `this.createOne` / `this.updateOne` under the hood.
+	 * Uses `this.upsertMany` under the hood, refusing by default a row an update
+	 * hook adds, as `updateOne` does.
 	 */
 	async upsertOne(payload: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+		const [primaryKey] = await this.upsertMany([payload], {
+			...opts,
+			refuseHookAddedRows: opts?.refuseHookAddedRows ?? true,
+		});
 
-		if (!isMissingPrimaryKey(primaryKey)) {
-			validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
-		}
-
-		const exists =
-			!isMissingPrimaryKey(primaryKey) &&
-			!!(await this.knex
-				.select(primaryKeyField)
-				.from(this.collection)
-				.where({ [primaryKeyField]: primaryKey })
-				.first());
-
-		if (exists) {
-			const { [primaryKeyField]: _, ...data } = payload;
-			return await this.updateOne(primaryKey as PrimaryKey, data as Partial<Item>, opts);
-		}
-		else {
-			return await this.createOne(payload, opts);
-		}
+		return primaryKey!;
 	}
 
 	/**
 	 * Upsert many items.
 	 *
-	 * Uses `this.upsertOne` under the hood.
+	 * Payloads go in runs, a run ending where a payload repeats a key the run
+	 * already holds. Per run: one existence read, then one `updateGroups` for the
+	 * keys it found and one `createMany` for the rest, so the updates write before
+	 * the creates. A repeated key starts a new run, which reads the row the run
+	 * before wrote, like the raw `INSERT … ON CONFLICT` of each payload in turn.
 	 */
 	async upsertMany(
 		payloads: Partial<Item>[],
@@ -3311,9 +3304,9 @@ implements AbstractService<Item> {
 				const childOpts: DeferredPurgeOptions = {
 					...(opts || {}),
 					autoPurgeCache: false,
-					// upsertMany takes the rows its update hook adds (onHookAddedRows),
-					// though it writes them one upsertOne at a time (#414).
-					refuseHookAddedRows: false,
+					// upsertMany takes the rows its update hook adds (onHookAddedRows);
+					// upsertOne refuses them, like updateOne.
+					refuseHookAddedRows: opts.refuseHookAddedRows ?? false,
 					scopedCacheHookDeclarations,
 					onHookAddedRows: (addedKeys, addedSnapshot) => {
 						for (const addedKey of addedKeys) {
@@ -3327,8 +3320,10 @@ implements AbstractService<Item> {
 					},
 				};
 
-				for (const payload of payloads) {
-					primaryKeys.push(await service.upsertOne(payload, childOpts));
+				for (const run of service.upsertRunsOf(payloads)) {
+					for (const primaryKey of await service.upsertRun(run, childOpts)) {
+						primaryKeys.push(primaryKey);
+					}
 				}
 
 				return { primaryKeys, hookAddedKeys, hookAddedSnapshots };
@@ -3425,6 +3420,117 @@ implements AbstractService<Item> {
 		}
 
 		return primaryKeys;
+	}
+
+	/**
+	 * Splits upsert payloads where one repeats a key its run already holds, so
+	 * no run sends `updateGroups` or `createMany` a row twice.
+	 */
+	protected upsertRunsOf(payloads: Partial<Item>[]): Partial<Item>[][] {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const upsertRuns: Partial<Item>[][] = [];
+		let currentRun: Partial<Item>[] = [];
+		let runKeyNames = new Set<string>();
+
+		for (const payload of payloads) {
+			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+
+			const keyName = isMissingPrimaryKey(primaryKey)
+				? null
+				: this.primaryKeyNameOf(primaryKey);
+
+			if (keyName !== null && runKeyNames.has(keyName)) {
+				upsertRuns.push(currentRun);
+				currentRun = [];
+				runKeyNames = new Set();
+			}
+
+			currentRun.push(payload);
+
+			if (keyName !== null) {
+				runKeyNames.add(keyName);
+			}
+		}
+
+		if (currentRun.length > 0) {
+			upsertRuns.push(currentRun);
+		}
+
+		return upsertRuns;
+	}
+
+	/**
+	 * Upserts a run holding each key once: one read tells which keys exist, those
+	 * are updated in one `updateGroups`, the others created in one `createMany`.
+	 * Answers one key per payload, in the run's order.
+	 */
+	protected async upsertRun(
+		upsertRun: Partial<Item>[],
+		opts: DeferredPurgeOptions,
+	): Promise<PrimaryKey[]> {
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		const sentKeys = upsertRun.flatMap((payload) => {
+			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+
+			return isMissingPrimaryKey(primaryKey)
+				? []
+				: [primaryKey];
+		});
+
+		validateKeys(this.schema, this.collection, primaryKeyField, sentKeys);
+
+		const existingKeyNames = new Set<string>();
+
+		for (const keyChunk of chunk(sentKeys, UPSERT_PROBE_CHUNK_SIZE)) {
+			const existingRows = await this.knex
+				.select(primaryKeyField)
+				.from(this.collection)
+				.whereIn(primaryKeyField, keyChunk);
+
+			for (const existingRow of existingRows) {
+				existingKeyNames.add(this.primaryKeyNameOf(existingRow[primaryKeyField]));
+			}
+		}
+
+		const updateGroups: UpdateGroup<Item>[] = [];
+		const createPayloads: Partial<Item>[] = [];
+		const upsertedKeys: PrimaryKey[] = [];
+		const createIndexes: number[] = [];
+
+		for (const [index, payload] of upsertRun.entries()) {
+			const primaryKey: PrimaryKey | undefined = payload[primaryKeyField];
+
+			if (
+				!isMissingPrimaryKey(primaryKey)
+				&& existingKeyNames.has(this.primaryKeyNameOf(primaryKey))
+			) {
+				updateGroups.push({
+					data: omit(payload, primaryKeyField) as Partial<Item>,
+					keys: [primaryKey],
+				});
+
+				upsertedKeys[index] = primaryKey;
+			}
+			else {
+				createPayloads.push(payload);
+				createIndexes.push(index);
+			}
+		}
+
+		if (updateGroups.length > 0) {
+			await this.updateGroups(updateGroups, opts);
+		}
+
+		if (createPayloads.length > 0) {
+			const createdKeys = await this.createMany(createPayloads, opts);
+
+			for (const [createIndex, createdKey] of createdKeys.entries()) {
+				upsertedKeys[createIndexes[createIndex]!] = createdKey;
+			}
+		}
+
+		return upsertedKeys;
 	}
 
 	/**
