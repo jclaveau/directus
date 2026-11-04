@@ -24,3 +24,4 @@ Full hooks for this area. The routing keys live in `../MEMORY.md`.
 - [Preview killed by CodeRabbit body edit](../project_directus_preview_cancelled_by_bot_edit.md) — `edited` event cancels the live admin preview via workflow-level concurrency; fix snippet + dispatch allow rule
 - [ci-prebuilds rejected; slim postgres image (PR #586)](../project_directus_ci_prebuilds_slim_postgres.md) — prebuilt runner images save 0-5s/job (not worth it); real lever = 645→204 MiB composite timescaledb+postgis image, "Start database" 26-30s→12-17s
 - [no-restricted-imports misses require and dynamic import](../reference_eslint_restricted_imports_static_only.md) — a lazy-load pin needs a no-restricted-syntax pair; mutation-test the pin or the ignores are dead config
+- [CodeRabbit never auto-reviews here](../reference_directus_coderabbit_no_auto_review.md) — repo < 10 stars: only a "Trigger review" checkbox; skip the CR watch, ticking it is jean's call
