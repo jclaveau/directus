@@ -2,6 +2,7 @@ import type { Filter, Permission, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { applyFilter } from '../lib/apply-query/filter/index.js';
 import type { AliasMap } from '../../../utils/get-column-path.js';
+import type { AliasGenerator } from '../lib/apply-query/create-alias-generator.js';
 
 export interface ApplyCaseWhenOptions {
 	column: Knex.Raw;
@@ -11,6 +12,7 @@ export interface ApplyCaseWhenOptions {
 	aliasMap: AliasMap;
 	alias?: string;
 	permissions: Permission[];
+	generateAlias: AliasGenerator;
 }
 
 export interface ApplyCaseWhenContext {
@@ -19,12 +21,31 @@ export interface ApplyCaseWhenContext {
 }
 
 export function applyCaseWhen(
-	{ columnCases, table, aliasMap, cases, column, alias, permissions }: ApplyCaseWhenOptions,
+	{
+		columnCases,
+		table,
+		aliasMap,
+		cases,
+		column,
+		alias,
+		permissions,
+		generateAlias,
+	}: ApplyCaseWhenOptions,
 	{ knex, schema }: ApplyCaseWhenContext,
 ): Knex.Raw {
 	const caseQuery = knex.queryBuilder();
 
-	applyFilter(knex, schema, caseQuery, { _or: columnCases }, table, aliasMap, cases, permissions);
+	applyFilter(
+		knex,
+		schema,
+		caseQuery,
+		{ _or: columnCases },
+		table,
+		aliasMap,
+		cases,
+		permissions,
+		generateAlias,
+	);
 
 	const compiler = knex.client.queryCompiler(caseQuery);
 

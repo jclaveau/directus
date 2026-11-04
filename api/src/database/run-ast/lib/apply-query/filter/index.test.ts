@@ -4,14 +4,9 @@ import { describe, expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from '../mock.js';
 import type { Permission } from '@directus/types';
 import { DEFUAULT_PERMISSION } from '../../../../../permissions/utils/default-permission.js';
+import { applyFilter } from './index.js';
 
-const aliasFn = vi.fn();
-
-vi.doMock('nanoid/non-secure', () => ({
-	customAlphabet: () => aliasFn,
-}));
-
-const { applyFilter } = await import('./index.js');
+const aliasFn = vi.fn<() => string>();
 
 describe('boolean filter operators', () => {
 	const operators = [
@@ -64,7 +59,17 @@ describe('boolean filter operators', () => {
 					_and: [{ text: { [`_${filterOperator}`]: filterValue } }],
 				};
 
-				applyFilter(db, schema, queryBuilder, rootFilter, 'test', {}, [], []);
+				applyFilter(
+					db,
+					schema,
+					queryBuilder,
+					rootFilter,
+					'test',
+					{},
+					[],
+					[],
+					aliasFn,
+				);
 
 				const rawQuery = queryBuilder.toSQL();
 
@@ -106,6 +111,7 @@ test(`filter values on bigint fields are correctly passed as such to db query`, 
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -142,6 +148,7 @@ for (const { operator, replacement, sql } of [
 			{},
 			[],
 			[],
+			aliasFn,
 		);
 
 		const rawQuery = queryBuilder.toSQL();
@@ -182,6 +189,7 @@ test(`filtering m2o relation`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -243,6 +251,7 @@ test(`filtering nested m2o with sibling relational keys`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -287,6 +296,7 @@ test(`filtering o2m relation`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -321,6 +331,7 @@ for (const quantifier of ['_some', '_none']) {
 			{},
 			[],
 			[],
+			aliasFn,
 		);
 
 		const rawQuery = queryBuilder.toSQL();
@@ -365,6 +376,7 @@ test(`filtering o2m relation with sibling relational keys`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -406,6 +418,7 @@ test(`filtering o2m relation with sibling keys inside _some`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -449,6 +462,7 @@ test(`filtering a2o relation`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -491,6 +505,7 @@ test(`filtering _between`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -523,6 +538,7 @@ test(`filtering _in`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -555,6 +571,7 @@ test(`filtering _contains`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -597,6 +614,7 @@ test(`filtering _and`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -631,6 +649,7 @@ test(`filtering _or`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -666,6 +685,7 @@ test(`filtering $FOLLOW against reverse o2m`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -702,6 +722,7 @@ test(`filtering on count(links)`, async () => {
 		{},
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -741,6 +762,7 @@ test(`filtering on links with existing alias map`, async () => {
 		aliasMap,
 		[],
 		[],
+		aliasFn,
 	);
 
 	applyFilter(
@@ -758,6 +780,7 @@ test(`filtering on links with existing alias map`, async () => {
 		aliasMap,
 		[],
 		[],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();
@@ -806,6 +829,7 @@ test(`filter with partial field permissions`, async () => {
 		aliasMap,
 		[],
 		[permission],
+		aliasFn,
 	);
 
 	const rawQuery = queryBuilder.toSQL();

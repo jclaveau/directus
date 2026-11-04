@@ -9,6 +9,7 @@ import { getHelpers } from '../../../../helpers/index.js';
 import { addJoin } from '../add-join.js';
 import { getFilterPath } from '../get-filter-path.js';
 import { getOperation } from '../get-operation.js';
+import type { AliasGenerator } from '../create-alias-generator.js';
 import applyQuery from '../index.js';
 import { normalizeFilter } from '../normalize-filter.js';
 import { getFilterType } from './get-filter-type.js';
@@ -24,6 +25,7 @@ export function applyFilter(
 	aliasMap: AliasMap,
 	cases: Filter[],
 	permissions: Permission[],
+	generateAlias: AliasGenerator,
 ) {
 	const relations: Relation[] = schema.relations;
 	let hasJoins = false;
@@ -75,6 +77,7 @@ export function applyFilter(
 					schema,
 					rootQuery,
 					aliasMap,
+					generateAlias,
 				});
 
 				if (!hasJoins) {
@@ -157,7 +160,16 @@ export function applyFilter(
 									.from(collection)
 									.whereNotNull(column);
 
-								applyQuery(knex, relation!.collection, subQueryKnex, { filter }, schema, cases, permissions);
+								applyQuery(
+									knex,
+									relation!.collection,
+									subQueryKnex,
+									{ filter },
+									schema,
+									cases,
+									permissions,
+									generateAlias,
+								);
 							};
 
 						const { cases: subCases } = getCases(relation!.collection, permissions, []);
@@ -206,7 +218,17 @@ export function applyFilter(
 
 				validateOperator(type, filterOperator, special);
 
-				applyOperator(knex, dbQuery, schema, columnPath, filterOperator, filterValue, logical, targetCollection);
+				applyOperator(
+					knex,
+					dbQuery,
+					schema,
+					columnPath,
+					filterOperator,
+					filterValue,
+					generateAlias,
+					logical,
+					targetCollection,
+				);
 			} else {
 				const { type, special } = getFilterType(schema.collections[collection]!.fields, filterPath[0]!, collection)!;
 
@@ -221,6 +243,7 @@ export function applyFilter(
 					`${aliasedCollection}.${filterPath[0]}`,
 					filterOperator,
 					filterValue,
+					generateAlias,
 					logical,
 					collection,
 				);

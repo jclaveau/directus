@@ -5,6 +5,7 @@ import type { Knex } from 'knex';
 import { getFunctions } from '../../helpers/index.js';
 import { InvalidQueryError } from '@directus/errors';
 import { applyFunctionToColumnName } from './apply-function-to-column-name.js';
+import type { AliasGenerator } from '../lib/apply-query/create-alias-generator.js';
 
 type FunctionColumnOptions = {
 	query: Query;
@@ -16,7 +17,8 @@ type OriginalCollectionName = {
 	originalCollectionName?: string | undefined;
 };
 
-type GetColumnOptions = OriginalCollectionName | (FunctionColumnOptions & OriginalCollectionName);
+type GetColumnOptions = { generateAlias: AliasGenerator }
+	& (OriginalCollectionName | (FunctionColumnOptions & OriginalCollectionName));
 
 /**
  * Return column prefixed by table. If column includes functions (like `year(date_created)`), the
@@ -27,7 +29,7 @@ type GetColumnOptions = OriginalCollectionName | (FunctionColumnOptions & Origin
  * @param column name of the column
  * @param alias Whether or not to add a SQL AS statement
  * @param schema For retrieval of the column type
- * @param options Optional parameters
+ * @param options The statement's alias generator, and optional parameters
  * @returns Knex raw instance
  */
 export function getColumn(
@@ -36,7 +38,7 @@ export function getColumn(
 	column: string,
 	alias: string | false = applyFunctionToColumnName(column),
 	schema: SchemaOverview,
-	options?: GetColumnOptions,
+	options: GetColumnOptions,
 ): Knex.Raw {
 	const fn = getFunctions(knex, schema);
 
@@ -45,7 +47,7 @@ export function getColumn(
 		const columnName = column.match(REGEX_BETWEEN_PARENS)![1];
 
 		if (functionName in fn) {
-			const collectionName = options?.originalCollectionName || table;
+			const collectionName = options.originalCollectionName || table;
 			const type = schema?.collections[collectionName]?.fields?.[columnName!]?.type ?? 'unknown';
 			const allowedFunctions = getFunctionsForType(type);
 
@@ -62,7 +64,8 @@ export function getColumn(
 							permissions: options.permissions,
 						}
 					: undefined,
-				originalCollectionName: options?.originalCollectionName,
+				originalCollectionName: options.originalCollectionName,
+				generateAlias: options.generateAlias,
 			}) as Knex.Raw;
 
 			if (alias) {

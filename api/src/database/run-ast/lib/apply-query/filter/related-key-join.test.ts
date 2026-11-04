@@ -2,6 +2,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import knex from 'knex';
 import { describe, expect, test, vi } from 'vitest';
 import { Client_SQLite3 } from '../mock.js';
+import { applyFilter } from './index.js';
 
 /**
  * A filter whose terminal segment is the RELATED collection's primary key joins
@@ -15,14 +16,8 @@ import { Client_SQLite3 } from '../mock.js';
  * asserted here rather than assumed.
  */
 
-const aliasFn = vi.fn();
+const aliasFn = vi.fn<() => string>();
 let aliasCounter = 0;
-
-vi.doMock('nanoid/non-secure', () => {
-	return { customAlphabet: () => aliasFn };
-});
-
-const { applyFilter } = await import('./index.js');
 
 const schema = new SchemaBuilder()
 	.collection('owner', (c) => {
@@ -51,7 +46,17 @@ function compile(filter: any) {
 	const db = knex.default({ client: Client_SQLite3 });
 	const queryBuilder = db.queryBuilder();
 
-	applyFilter(db, schema, queryBuilder, filter, 'owned_item', {}, [], []);
+	applyFilter(
+		db,
+		schema,
+		queryBuilder,
+		filter,
+		'owned_item',
+		{},
+		[],
+		[],
+		aliasFn,
+	);
 
 	// Only the query, not `toSQL()`'s per-call `__knexQueryUid`, so two
 	// spellings of one query can be compared for equality.

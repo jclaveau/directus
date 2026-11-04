@@ -8,6 +8,7 @@ import { parseFilterKey } from '../../../utils/parse-filter-key.js';
 import { getHelpers } from '../../helpers/index.js';
 import { applyCaseWhen } from './apply-case-when.js';
 import { getNodeAlias } from './get-field-alias.js';
+import type { AliasGenerator } from '../lib/apply-query/create-alias-generator.js';
 
 interface NodePreProcessOptions {
 	/** Don't assign an alias to the column but instead return the column as is */
@@ -21,6 +22,7 @@ export function getColumnPreprocessor(
 	cases: Filter[],
 	permissions: Permission[],
 	aliasMap: AliasMap,
+	generateAlias: AliasGenerator,
 	permissionsOnly?: boolean,
 ) {
 	const helpers = getHelpers(knex);
@@ -65,9 +67,12 @@ export function getColumnPreprocessor(
 				},
 				permissions,
 				cases: fieldNode.cases,
+				generateAlias,
 			});
 		} else {
-			column = getColumn(knex, table, fieldNode.name, rawColumnAlias, schema);
+			column = getColumn(knex, table, fieldNode.name, rawColumnAlias, schema, {
+				generateAlias,
+			});
 		}
 
 		if (hasWhenCase) {
@@ -86,6 +91,7 @@ export function getColumnPreprocessor(
 					table,
 					alias,
 					permissions,
+					generateAlias,
 				},
 				{ knex, schema },
 			);
