@@ -24,8 +24,7 @@ A bundle whose `package.json` lists no `entries` declares them in code instead:
 ```
 
 `directus-extension build` builds `src/app.ts` and `src/api.ts`, skipping a side whose
-file is missing. `"source": { "app": "...", "api": "..." }` points at other files; a
-bundle cannot set both `source` and `entries`.
+file is missing.
 
 ```ts
 // src/api.ts

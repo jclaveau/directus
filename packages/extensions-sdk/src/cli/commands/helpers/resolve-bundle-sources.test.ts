@@ -21,7 +21,7 @@ describe('resolveBundleSources', () => {
 		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
 
 		expect(
-			await resolveBundleSources('@consumer/domain', undefined, bundleRoot),
+			await resolveBundleSources('@consumer/domain', bundleRoot),
 		).toEqual({
 			app: 'src/app.ts',
 			api: 'src/api.ts',
@@ -32,50 +32,19 @@ describe('resolveBundleSources', () => {
 		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
 
 		expect(
-			await resolveBundleSources('@consumer/domain', undefined, bundleRoot),
+			await resolveBundleSources('@consumer/domain', bundleRoot),
 		).toEqual({
 			app: null,
 			api: 'src/api.ts',
 		});
 	});
 
-	test('reads the files source names', async () => {
-		await fse.outputFile(path.join(bundleRoot, 'server/index.ts'), '');
-
-		expect(
-			await resolveBundleSources(
-				'@consumer/domain',
-				{ api: 'server/index.ts' },
-				bundleRoot,
-			),
-		).toEqual({
-			app: null,
-			api: 'server/index.ts',
-		});
-	});
-
-	test('refuses a source file that does not exist', async () => {
-		await expect(
-			resolveBundleSources(
-				'@consumer/domain',
-				{ api: 'server/index.ts' },
-				bundleRoot,
-			),
-		).rejects.toThrow(
-			new Error(
-				'Bundle "@consumer/domain" sets "source.api" to "server/index.ts", '
-					+ 'which does not exist',
-			),
-		);
-	});
-
 	test('refuses a bundle with neither default file', async () => {
 		await expect(
-			resolveBundleSources('@consumer/domain', undefined, bundleRoot),
+			resolveBundleSources('@consumer/domain', bundleRoot),
 		).rejects.toThrow(
 			new Error(
-				'Bundle "@consumer/domain" has no "src/app.ts" or "src/api.ts";'
-					+ ' set "source" to point at its entry files',
+				'Bundle "@consumer/domain" has no "src/app.ts" or "src/api.ts"',
 			),
 		);
 	});

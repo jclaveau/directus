@@ -282,8 +282,7 @@ describe('build', () => {
 
 				expect(consoleError).toHaveBeenCalledWith(
 					`${chalk.bold.red('[Error]')} Bundle "a-sourceless-bundle" has no`
-						+ ' "src/app.ts" or "src/api.ts"; set "source" to point at its'
-						+ ' entry files',
+						+ ' "src/app.ts" or "src/api.ts"',
 				);
 			}
 			finally {

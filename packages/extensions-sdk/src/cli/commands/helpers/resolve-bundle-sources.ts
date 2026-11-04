@@ -1,8 +1,7 @@
 import fse from 'fs-extra';
 import path from 'path';
 
-const DEFAULT_APP_SOURCE = 'src/app.ts';
-const DEFAULT_API_SOURCE = 'src/api.ts';
+const DEFAULT_SOURCES = { app: 'src/app.ts', api: 'src/api.ts' } as const;
 
 async function isSourceFile(root: string, source: string): Promise<boolean> {
 	const sourcePath = path.resolve(root, source);
@@ -11,14 +10,11 @@ async function isSourceFile(root: string, source: string): Promise<boolean> {
 }
 
 /**
- * The entry files of a bundle declaring its entries in code. A side whose
- * default file is missing is not built; a side `source` names must exist.
+ * The entry files of a bundle declaring its entries in code: `src/app.ts` and
+ * `src/api.ts`, a side whose file is missing not being built.
  */
 export async function resolveBundleSources(
 	bundleName: string,
-	declaredSource:
-		| { app?: string | undefined; api?: string | undefined }
-		| undefined,
 	root: string = process.cwd(),
 ): Promise<{ app: string | null; api: string | null }> {
 	const resolvedSources: { app: string | null; api: string | null } = {
@@ -27,33 +23,14 @@ export async function resolveBundleSources(
 	};
 
 	for (const side of ['app', 'api'] as const) {
-		const declaredFile = declaredSource?.[side];
-
-		if (declaredFile !== undefined) {
-			if (!(await isSourceFile(root, declaredFile))) {
-				throw new Error(
-					`Bundle ${JSON.stringify(bundleName)} sets "source.${side}" to`
-						+ ` ${JSON.stringify(declaredFile)}, which does not exist`,
-				);
-			}
-
-			resolvedSources[side] = declaredFile;
-			continue;
-		}
-
-		const defaultFile = side === 'app'
-			? DEFAULT_APP_SOURCE
-			: DEFAULT_API_SOURCE;
-
-		if (await isSourceFile(root, defaultFile)) {
-			resolvedSources[side] = defaultFile;
+		if (await isSourceFile(root, DEFAULT_SOURCES[side])) {
+			resolvedSources[side] = DEFAULT_SOURCES[side];
 		}
 	}
 
 	if (resolvedSources.app === null && resolvedSources.api === null) {
 		throw new Error(
-			`Bundle ${JSON.stringify(bundleName)} has no "src/app.ts" or "src/api.ts";`
-				+ ` set "source" to point at its entry files`,
+			`Bundle ${JSON.stringify(bundleName)} has no "src/app.ts" or "src/api.ts"`,
 		);
 	}
 

@@ -57,29 +57,4 @@ describe('getExtensionDefinition', () => {
 			local: true,
 		});
 	});
-
-	test('refuses a bundle declaring both entries and source', () => {
-		expect(() => {
-			return getExtensionDefinition(
-				{
-					name: '@consumer/domain',
-					version: '1.0.0',
-					'directus:extension': {
-						type: 'bundle',
-						host: '^11.0.0',
-						path: { app: 'dist/app.js', api: 'dist/api.js' },
-						entries: [],
-						source: { api: 'src/api.ts' },
-					},
-				},
-				{ path: '/extensions/domain', local: true },
-			);
-		}).toThrow(
-			new Error(
-				'Bundle "@consumer/domain" declares both "entries" and "source" '
-					+ 'in its package.json;'
-					+ ' drop "entries" to declare them in code',
-			),
-		);
-	});
 });
