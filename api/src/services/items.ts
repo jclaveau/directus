@@ -3488,6 +3488,10 @@ implements AbstractService<Item> {
 	 * Upserts a run holding each key once: one read tells which keys exist, those
 	 * are updated in one `updateGroups`, the others created in one `createMany`.
 	 * Answers one key per payload, in the run's order.
+	 *
+	 * Keys are matched as the read returns them: under a case-insensitive key
+	 * (MariaDB `_ci`, Postgres `citext`) `'ABC'` misses a stored `'abc'`, and
+	 * its create fails on the duplicate key.
 	 */
 	protected async upsertRun(
 		upsertRun: Partial<Item>[],
