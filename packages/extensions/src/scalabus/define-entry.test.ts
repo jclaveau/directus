@@ -2,17 +2,17 @@ import { describe, expect, test } from 'vitest';
 import {
 	defineBundleApi,
 	defineBundleApp,
-	defineDisplayEntry,
-	defineEndpointEntry,
-	defineHookEntry,
-	defineInterfaceEntry,
-	defineLayoutEntry,
-	defineMigrationEntry,
-	defineModuleEntry,
-	defineOperationApiEntry,
-	defineOperationAppEntry,
-	definePanelEntry,
-	defineThemeEntry,
+	defineDisplay,
+	defineEndpoint,
+	defineHook,
+	defineInterface,
+	defineLayout,
+	defineMigration,
+	defineModule,
+	defineOperationApi,
+	defineOperationApp,
+	definePanel,
+	defineTheme,
 } from './define-entry.js';
 
 describe('define<Type>Entry', () => {
@@ -23,19 +23,19 @@ describe('define<Type>Entry', () => {
 
 		const handler = () => null;
 
-		expect(defineHookEntry('audit', hookConfig)).toEqual({
+		expect(defineHook('audit', hookConfig)).toEqual({
 			type: 'hook',
 			name: 'audit',
 			config: hookConfig,
 		});
 
-		expect(defineEndpointEntry('orders', endpointConfig)).toEqual({
+		expect(defineEndpoint('orders', endpointConfig)).toEqual({
 			type: 'endpoint',
 			name: 'orders',
 			config: endpointConfig,
 		});
 
-		expect(defineOperationApiEntry('notify', { id: 'notify', handler })).toEqual({
+		expect(defineOperationApi('notify', { id: 'notify', handler })).toEqual({
 			type: 'operation',
 			name: 'notify',
 			config: { id: 'notify', handler },
@@ -51,31 +51,31 @@ describe('define<AppType>Entry', () => {
 		const panelConfig = { id: 'gauge' } as never;
 		const themeConfig = { id: 'night' } as never;
 
-		expect(defineDisplayEntry('badge', displayConfig)).toEqual({
+		expect(defineDisplay('badge', displayConfig)).toEqual({
 			type: 'display',
 			name: 'badge',
 			config: { id: 'badge' },
 		});
 
-		expect(defineLayoutEntry('board', layoutConfig)).toEqual({
+		expect(defineLayout('board', layoutConfig)).toEqual({
 			type: 'layout',
 			name: 'board',
 			config: { id: 'board' },
 		});
 
-		expect(defineModuleEntry('reports', moduleConfig)).toEqual({
+		expect(defineModule('reports', moduleConfig)).toEqual({
 			type: 'module',
 			name: 'reports',
 			config: { id: 'reports' },
 		});
 
-		expect(definePanelEntry('gauge', panelConfig)).toEqual({
+		expect(definePanel('gauge', panelConfig)).toEqual({
 			type: 'panel',
 			name: 'gauge',
 			config: { id: 'gauge' },
 		});
 
-		expect(defineThemeEntry('night', themeConfig)).toEqual({
+		expect(defineTheme('night', themeConfig)).toEqual({
 			type: 'theme',
 			name: 'night',
 			config: { id: 'night' },
@@ -83,13 +83,13 @@ describe('define<AppType>Entry', () => {
 	});
 });
 
-describe('defineMigrationEntry', () => {
+describe('defineMigration', () => {
 	test('defaults the phase to before-schema', () => {
 		const up = async () => {};
 
 		const down = async () => {};
 
-		expect(defineMigrationEntry('20260212A-add-orders', { up, down })).toEqual({
+		expect(defineMigration('20260212A-add-orders', { up, down })).toEqual({
 			type: 'migration',
 			name: '20260212A-add-orders',
 			config: { up, down, phase: 'before-schema' },
@@ -102,7 +102,7 @@ describe('defineMigrationEntry', () => {
 		const down = async () => {};
 
 		expect(
-			defineMigrationEntry('20260212B-fill-orders', {
+			defineMigration('20260212B-fill-orders', {
 				up,
 				down,
 				phase: 'after-schema',
@@ -118,7 +118,7 @@ describe('defineMigrationEntry', () => {
 	test('refuses a name without a date and a letter', () => {
 		const up = async () => {};
 
-		expect(() => defineMigrationEntry('add-orders', { up, down: up })).toThrow(
+		expect(() => defineMigration('add-orders', { up, down: up })).toThrow(
 			new Error(
 				'Migration entry "add-orders" must be named "<date><letter>-<slug>", '
 					+ 'like "20260212A-add-orders"',
@@ -130,7 +130,7 @@ describe('defineMigrationEntry', () => {
 		const up = async () => {};
 
 		expect(() => {
-			return defineMigrationEntry('20260212A-add-orders', {
+			return defineMigration('20260212A-add-orders', {
 				up,
 				down: up,
 				phase: 'during-schema' as 'after-schema',
@@ -151,14 +151,14 @@ describe('defineBundleApi / defineBundleApp', () => {
 
 		const handler = () => null;
 
-		expect(defineBundleApi([defineHookEntry('audit', hookConfig)])).toEqual({
+		expect(defineBundleApi([defineHook('audit', hookConfig)])).toEqual({
 			format: 'scalabus/1',
 			entries: [{ type: 'hook', name: 'audit', config: hookConfig }],
 		});
 
 		expect(
 			defineBundleApp([
-				defineOperationAppEntry('notify', {
+				defineOperationApp('notify', {
 					id: 'notify',
 					name: 'Notify',
 					icon: 'bolt',
@@ -189,8 +189,8 @@ describe('defineBundleApi / defineBundleApp', () => {
 
 		expect(() => {
 			return defineBundleApi([
-				defineHookEntry('audit', hookConfig),
-				defineEndpointEntry('audit', hookConfig),
+				defineHook('audit', hookConfig),
+				defineEndpoint('audit', hookConfig),
 			]);
 		}).toThrow(new Error('Bundle entries repeat the name "audit"'));
 	});
@@ -200,7 +200,7 @@ describe('defineBundleApi / defineBundleApp', () => {
 
 		expect(() => {
 			return defineBundleApp([
-				defineInterfaceEntry('picker', {
+				defineInterface('picker', {
 					id: 'picker',
 					name: 'Picker',
 					icon: 'box',
@@ -208,7 +208,7 @@ describe('defineBundleApi / defineBundleApp', () => {
 					options: null,
 					types: ['string'],
 				}),
-				defineInterfaceEntry('picker', {
+				defineInterface('picker', {
 					id: 'picker-2',
 					name: 'Picker 2',
 					icon: 'box',

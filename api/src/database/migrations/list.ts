@@ -13,7 +13,7 @@ export type MigrationModule = Pick<
 	'up' | 'down' | 'transactionScope'
 >;
 
-/** A `defineMigrationEntry` of an installed bundle. */
+/** A `defineMigration` of an installed bundle. */
 export interface ExtensionMigration {
 	bundle: string;
 	name: string;
@@ -128,7 +128,7 @@ function refuseCollisions(migrations: ListedMigration[]): void {
 
 /**
  * Every migration this build runs, in the order it runs them: the core's,
- * `MIGRATIONS_PATH`'s and the installed bundles' `defineMigrationEntry`s.
+ * `MIGRATIONS_PATH`'s and the installed bundles' `defineMigration`s.
  */
 export async function listMigrations(
 	extensionMigrations: ExtensionMigration[] = [],

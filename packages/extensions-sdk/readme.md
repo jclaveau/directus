@@ -30,19 +30,19 @@ file is missing.
 // src/api.ts
 import {
 	defineBundleApi,
-	defineEndpointEntry,
-	defineMigrationEntry,
+	defineEndpoint,
+	defineMigration,
 } from '@directus/extensions-sdk/scalabus';
 
 export default defineBundleApi([
-	defineEndpointEntry('orders-report', (router) => {
+	defineEndpoint('orders-report', (router) => {
 		router.get('/', (_req, res) => res.json({ data: [] }));
 	}),
-	defineMigrationEntry('20261103A-add-orders', {
+	defineMigration('20261103A-add-orders', {
 		up: async (knex) => knex.schema.createTable('orders', (table) => table.increments()),
 		down: async (knex) => knex.schema.dropTable('orders'),
 	}),
-	defineMigrationEntry('20261104A-fill-orders', {
+	defineMigration('20261104A-fill-orders', {
 		phase: 'after-schema',
 		up: async (knex) => {
 			await knex('orders').insert({});
@@ -56,9 +56,9 @@ export default defineBundleApi([
 
 ```ts
 // src/app.ts
-import { defineBundleApp, definePanelEntry } from '@directus/extensions-sdk/scalabus';
+import { defineBundleApp, definePanel } from '@directus/extensions-sdk/scalabus';
 
-export default defineBundleApp([definePanelEntry('orders-chart', { /* PanelConfig */ })]);
+export default defineBundleApp([definePanel('orders-chart', { /* PanelConfig */ })]);
 ```
 
 ### Migrations

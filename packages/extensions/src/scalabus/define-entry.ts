@@ -82,25 +82,25 @@ export interface BundleEntries<Entry extends BundleApiEntry | BundleAppEntry> {
 
 const MIGRATION_NAME_PATTERN = /^\d{8}[A-Z]-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export function defineHookEntry(name: string, config: HookConfig): HookEntry {
+export function defineHook(name: string, config: HookConfig): HookEntry {
 	return { type: 'hook', name, config };
 }
 
-export function defineEndpointEntry(
+export function defineEndpoint(
 	name: string,
 	config: EndpointConfig,
 ): EndpointEntry {
 	return { type: 'endpoint', name, config };
 }
 
-export function defineOperationApiEntry<Options = Record<string, unknown>>(
+export function defineOperationApi<Options = Record<string, unknown>>(
 	name: string,
 	config: OperationApiConfig<Options>,
 ): OperationApiEntry {
 	return { type: 'operation', name, config: config as OperationApiConfig };
 }
 
-export function defineMigrationEntry(
+export function defineMigration(
 	name: string,
 	config: MigrationConfig,
 ): MigrationEntry {
@@ -124,40 +124,40 @@ export function defineMigrationEntry(
 	return { type: 'migration', name, config: { ...config, phase } };
 }
 
-export function defineInterfaceEntry(
+export function defineInterface(
 	name: string,
 	config: InterfaceConfig,
 ): InterfaceEntry {
 	return { type: 'interface', name, config };
 }
 
-export function defineDisplayEntry(
+export function defineDisplay(
 	name: string,
 	config: DisplayConfig,
 ): DisplayEntry {
 	return { type: 'display', name, config };
 }
 
-export function defineLayoutEntry<Options = any, Query = any>(
+export function defineLayout<Options = any, Query = any>(
 	name: string,
 	config: LayoutConfig<Options, Query>,
 ): LayoutEntry {
 	return { type: 'layout', name, config: config as LayoutConfig };
 }
 
-export function defineModuleEntry(name: string, config: ModuleConfig): ModuleEntry {
+export function defineModule(name: string, config: ModuleConfig): ModuleEntry {
 	return { type: 'module', name, config };
 }
 
-export function definePanelEntry(name: string, config: PanelConfig): PanelEntry {
+export function definePanel(name: string, config: PanelConfig): PanelEntry {
 	return { type: 'panel', name, config };
 }
 
-export function defineThemeEntry(name: string, config: Theme): ThemeEntry {
+export function defineTheme(name: string, config: Theme): ThemeEntry {
 	return { type: 'theme', name, config };
 }
 
-export function defineOperationAppEntry(
+export function defineOperationApp(
 	name: string,
 	config: OperationAppConfig,
 ): OperationAppEntry {

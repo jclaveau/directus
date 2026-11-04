@@ -29,7 +29,7 @@ const TRANSACTIONAL_CLIENTS: DatabaseClient[] = ['postgres', 'cockroachdb'];
 
 export interface RunOptions {
 	/**
-	 * The installed bundles' `defineMigrationEntry`s, run in date order with
+	 * The installed bundles' `defineMigration`s, run in date order with
 	 * the core's.
 	 */
 	extensionMigrations?: ExtensionMigration[];

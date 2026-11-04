@@ -200,7 +200,7 @@ export class ExtensionManager {
 	}
 
 	/**
-	 * The `defineMigrationEntry`s of the installed bundles, as the last load
+	 * The `defineMigration`s of the installed bundles, as the last load
 	 * read them.
 	 */
 	public migrationEntries(): ExtensionMigration[] {

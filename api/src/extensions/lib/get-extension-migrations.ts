@@ -3,7 +3,7 @@ import { getExtensions } from './get-extensions.js';
 import { importCodeBundles, listMigrationEntries } from './import-code-bundles.js';
 
 /**
- * The `defineMigrationEntry`s of the installed bundles, for a CLI command that
+ * The `defineMigration`s of the installed bundles, for a CLI command that
  * migrates without loading the extensions. A bundle failing to import fails
  * the command: its migrations would otherwise be skipped silently.
  */

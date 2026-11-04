@@ -2,7 +2,7 @@ import {
 	BUNDLE_ENTRIES_FORMAT,
 	type BundleApiEntry,
 	defineBundleApi,
-	defineMigrationEntry,
+	defineMigration,
 } from './define-entry.js';
 
 const API_ENTRY_TYPES = ['hook', 'endpoint', 'operation', 'migration'];
@@ -25,7 +25,7 @@ function readDeclaredEntries(declaredEntries: unknown): BundleApiEntry[] {
 		}
 
 		if (entry.type === 'migration') {
-			defineMigrationEntry(entry.name, entry.config);
+			defineMigration(entry.name, entry.config);
 		}
 	}
 
