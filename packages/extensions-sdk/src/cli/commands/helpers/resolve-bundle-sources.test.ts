@@ -21,7 +21,7 @@ describe('resolveBundleSources', () => {
 		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
 
 		expect(
-			await resolveBundleSources('@consumer/domain', bundleRoot),
+			await resolveBundleSources('@consumer/domain', {}, bundleRoot),
 		).toEqual({
 			app: 'src/app.ts',
 			api: 'src/api.ts',
@@ -32,7 +32,7 @@ describe('resolveBundleSources', () => {
 		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
 
 		expect(
-			await resolveBundleSources('@consumer/domain', bundleRoot),
+			await resolveBundleSources('@consumer/domain', {}, bundleRoot),
 		).toEqual({
 			app: null,
 			api: 'src/api.ts',
@@ -41,10 +41,72 @@ describe('resolveBundleSources', () => {
 
 	test('refuses a bundle with neither default file', async () => {
 		await expect(
-			resolveBundleSources('@consumer/domain', bundleRoot),
+			resolveBundleSources('@consumer/domain', {}, bundleRoot),
 		).rejects.toThrow(
 			new Error(
 				'Bundle "@consumer/domain" has no "src/app.ts" or "src/api.ts"',
+			),
+		);
+	});
+
+	test('builds only the sides its source names', async () => {
+		await fse.outputFile(path.join(bundleRoot, 'src/app.ts'), '');
+		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
+		await fse.outputFile(path.join(bundleRoot, 'directus-bundle/index.ts'), '');
+
+		expect(
+			await resolveBundleSources(
+				'@consumer/domain',
+				{ source: { api: './directus-bundle/index.ts' } },
+				bundleRoot,
+			),
+		).toEqual({
+			app: null,
+			api: './directus-bundle/index.ts',
+		});
+	});
+
+	test('refuses a source side that is not a file', async () => {
+		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
+
+		await expect(
+			resolveBundleSources(
+				'@consumer/domain',
+				{ source: { api: './missing.ts' } },
+				bundleRoot,
+			),
+		).rejects.toThrow(
+			new Error(
+				'Bundle "@consumer/domain" names "./missing.ts" as its api source,'
+				+ ' which is not a file',
+			),
+		);
+	});
+
+	test('refuses a source naming no side', async () => {
+		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
+
+		await expect(
+			resolveBundleSources('@consumer/domain', { source: {} }, bundleRoot),
+		).rejects.toThrow(
+			new Error(
+				'Bundle "@consumer/domain" declares a "source" naming no side',
+			),
+		);
+	});
+
+	test('refuses a bundle declaring both entries and source', async () => {
+		await fse.outputFile(path.join(bundleRoot, 'src/api.ts'), '');
+
+		await expect(
+			resolveBundleSources(
+				'@consumer/domain',
+				{ entries: [], source: { api: './src/api.ts' } },
+				bundleRoot,
+			),
+		).rejects.toThrow(
+			new Error(
+				'Bundle "@consumer/domain" declares both "entries" and "source"',
 			),
 		);
 	});

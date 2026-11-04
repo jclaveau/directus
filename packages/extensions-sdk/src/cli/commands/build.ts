@@ -135,7 +135,10 @@ export default async function build(options: BuildOptions): Promise<void> {
 			let bundleSources: Awaited<ReturnType<typeof resolveBundleSources>>;
 
 			try {
-				bundleSources = await resolveBundleSources(extensionManifest.name);
+				bundleSources = await resolveBundleSources(
+					extensionManifest.name,
+					extensionOptions,
+				);
 			}
 			catch (error) {
 				log((error as Error).message, 'error');

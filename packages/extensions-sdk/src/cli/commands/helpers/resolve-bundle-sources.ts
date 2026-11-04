@@ -1,3 +1,4 @@
+import type { ExtensionOptionsBundle } from '@directus/extensions';
 import fse from 'fs-extra';
 import path from 'path';
 
@@ -15,6 +16,7 @@ async function isSourceFile(root: string, source: string): Promise<boolean> {
  */
 export async function resolveBundleSources(
 	bundleName: string,
+	_bundleOptions: Pick<ExtensionOptionsBundle, 'entries' | 'source'>,
 	root: string = process.cwd(),
 ): Promise<{ app: string | null; api: string | null }> {
 	const resolvedSources: { app: string | null; api: string | null } = {
