@@ -37,27 +37,41 @@ const mocks = vi.hoisted(() => {
 		generateEntrypoint: vi.fn(() => 'entry-code'),
 		deleteMany: vi.fn(),
 		createMany: vi.fn(),
+		rename: vi.fn(),
+		mkdir: vi.fn(),
 		rollup: vi.fn(async () => {
-			return {
-				write: async () => {
-					return {
-						output: [
-							{
-								type: 'chunk',
-								fileName: 'index.js',
-								code: 'entry __DIRECTUS_APP_CHUNK_HASH__',
-								isEntry: true,
-							},
-							{ type: 'asset' },
-							{
-								type: 'chunk',
-								fileName: 'a-chunk.js',
-								code: 'chunk',
-								isEntry: false,
-							},
-						],
-					};
+			const output = [
+				{
+					type: 'chunk',
+					fileName: 'index.js',
+					code: 'entry __DIRECTUS_APP_CHUNK_HASH__',
+					isEntry: true,
 				},
+				{ type: 'asset' },
+				{
+					type: 'chunk',
+					fileName: 'a-chunk.js',
+					code: 'chunk',
+					isEntry: false,
+				},
+			];
+
+			return {
+				// Writes the chunks as generated, as the bundler writes them to disk.
+				write: async () => {
+					await mocks.writeFile(
+						'/tmp/directus-test/app-extensions/index.js',
+						'entry __DIRECTUS_APP_CHUNK_HASH__',
+					);
+
+					await mocks.writeFile(
+						'/tmp/directus-test/app-extensions/a-chunk.js',
+						'chunk',
+					);
+
+					return { output };
+				},
+				generate: async () => ({ output }),
 				close: async () => undefined,
 			};
 		}),
@@ -136,6 +150,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 		...(await importOriginal<typeof import('node:fs/promises')>()),
 		readdir: async () => [],
 		writeFile: mocks.writeFile,
+		rename: mocks.rename,
+		mkdir: mocks.mkdir,
 	};
 });
 
@@ -280,10 +296,27 @@ test('registers the entries of a code bundle from its api', async () => {
 		mocks.settings,
 	);
 
-	expect(mocks.writeFile).toHaveBeenCalledWith(
-		'/tmp/directus-test/app-extensions/index.js',
-		'entry e557227bf7f12218ffdbc95aad3a2496b1e5587464f3577e61c797db30a29ad8',
-	);
+	expect(mocks.writeFile.mock.calls).toEqual([
+		[
+			`/tmp/directus-test/app-extensions/a-chunk.js.${process.pid}.tmp`,
+			'chunk',
+		],
+		[
+			`/tmp/directus-test/app-extensions/index.js.${process.pid}.tmp`,
+			'entry e557227bf7f12218ffdbc95aad3a2496b1e5587464f3577e61c797db30a29ad8',
+		],
+	]);
+
+	expect(mocks.rename.mock.calls).toEqual([
+		[
+			`/tmp/directus-test/app-extensions/a-chunk.js.${process.pid}.tmp`,
+			'/tmp/directus-test/app-extensions/a-chunk.js',
+		],
+		[
+			`/tmp/directus-test/app-extensions/index.js.${process.pid}.tmp`,
+			'/tmp/directus-test/app-extensions/index.js',
+		],
+	]);
 
 	expect(manager.getAppChunkHash()).toBe(
 		'e557227bf7f12218ffdbc95aad3a2496b1e5587464f3577e61c797db30a29ad8',

@@ -404,4 +404,44 @@ describe('generateExtensionsEntrypoint', () => {
 				+ '({type:entry.type,name:entry.name}))}];',
 		);
 	});
+
+	it('leaves out a disabled bundle declaring its entries in code', () => {
+		const mockExtensions: {
+			module: Map<string, Extension>;
+			registry: Map<string, Extension>;
+		} = {
+			module: new Map(),
+			registry: new Map(),
+		};
+
+		mockExtensions.module.set('@consumer/domain', {
+			path: './extensions/domain',
+			name: '@consumer/domain',
+			version: '1.0.0',
+			type: 'bundle',
+			entrypoint: { app: 'dist/app.js', api: 'dist/api.js' },
+			entries: [],
+			entriesFrom: 'code',
+			host: '^11.0.0',
+			local: true,
+			partial: undefined,
+		});
+
+		const mockSettings: ExtensionSettings[] = [
+			{
+				id: 'domain-id',
+				folder: '@consumer/domain',
+				enabled: false,
+				source: 'module',
+				bundle: null,
+			},
+		];
+
+		expect(generateExtensionsEntrypoint(mockExtensions, mockSettings)).toBe(
+			'export const interfaces = [];export const displays = [];'
+				+ 'export const layouts = [];export const modules = [];'
+				+ 'export const panels = [];export const themes = [];'
+				+ 'export const operations = [];',
+		);
+	});
 });

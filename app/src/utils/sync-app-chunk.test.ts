@@ -2,12 +2,17 @@ import api from '@/api';
 import { useNotificationsStore } from '@/stores/notifications';
 import { useUserStore } from '@/stores/user';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { reportAppEntries, watchAppChunk } from './sync-app-chunk';
+import {
+	readAppChunkUrl,
+	reportAppEntries,
+	watchAppChunk,
+} from './sync-app-chunk';
 
 vi.mock('@/api', () => ({ default: { get: vi.fn(), post: vi.fn() } }));
 vi.mock('@/lang', () => ({ i18n: { global: { t: (key: string) => key } } }));
 vi.mock('@/stores/notifications', () => ({ useNotificationsStore: vi.fn() }));
 vi.mock('@/stores/user', () => ({ useUserStore: vi.fn() }));
+vi.mock('@/utils/get-root-path', () => ({ getRootPath: () => '/admin-root/' }));
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -172,5 +177,31 @@ describe('watchAppChunk without a check', () => {
 		});
 
 		stopWatching();
+	});
+});
+
+describe('readAppChunkUrl', () => {
+	test('reads the entry url carrying the served chunk hash', async () => {
+		vi.mocked(api.get).mockResolvedValue({ data: { data: { chunk: 'def' } } });
+
+		expect(await readAppChunkUrl()).toBe(
+			'/admin-root/extensions/sources/index.js?chunk=def',
+		);
+	});
+
+	test('reads the bare entry url when the hash cannot be read', async () => {
+		const consoleWarn = vi.spyOn(console, 'warn')
+			.mockImplementation(() => undefined);
+
+		vi.mocked(api.get).mockRejectedValue(new Error('offline'));
+
+		expect(await readAppChunkUrl()).toBe(
+			'/admin-root/extensions/sources/index.js',
+		);
+
+		expect(consoleWarn).toHaveBeenCalledWith(
+			'Couldn\'t read the app chunk the server serves',
+			new Error('offline'),
+		);
 	});
 });
