@@ -71,6 +71,7 @@ import {
 	isMissingPrimaryKey,
 	isPrimaryKey,
 } from '../utils/is-primary-key.js';
+import { primaryKeyNameOf } from '../utils/primary-key-name.js';
 import {
 	assign,
 	chunk,
@@ -902,34 +903,45 @@ implements AbstractService<Item> {
 
 			type PostRow = PreparedRow & {
 				primaryKey: PrimaryKey;
-				revisionsO2M: Awaited<ReturnType<PayloadService['processO2M']>>['revisions'];
-				nestedActionEventsO2M: ActionEventParams[];
+				revisionsO2M: PrimaryKey[];
 			};
 
-			const postPrepared: PostRow[] = [];
+			// At this point, the primary key is guaranteed to be set.
+			const parentRows = prepared.map((p) => {
+				return { data: p.payloadWithPresets, key: p.primaryKey as PrimaryKey };
+			});
+
+			const {
+				revisionsByParent: revisionsO2MByParent,
+				nestedActionEvents: nestedActionEventsO2M,
+				userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
+			} = await new PayloadService(this.collection, {
+				accountability: this.accountability,
+				knex: trx,
+				schema: this.schema,
+				nested: this.nested,
+			}).processO2M(parentRows, opts);
 
 			for (const p of prepared) {
-				// At this point, the primary key is guaranteed to be set.
-				const primaryKey = p.primaryKey as PrimaryKey;
-
-				const {
-					revisions: revisionsO2M,
-					nestedActionEvents: nestedActionEventsO2M,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-				} = await p.payloadService.processO2M(p.payloadWithPresets, primaryKey, opts);
-
 				userIntegrityCheckFlags |=
-					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O | userIntegrityCheckFlagsO2M;
+					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O;
 
-				nestedActionEvents.push(...p.nestedActionEventsM2O, ...p.nestedActionEventsA2O, ...nestedActionEventsO2M);
-
-				postPrepared.push({
-					...p,
-					primaryKey,
-					revisionsO2M,
-					nestedActionEventsO2M,
-				});
+				nestedActionEvents.push(
+					...p.nestedActionEventsM2O,
+					...p.nestedActionEventsA2O,
+				);
 			}
+
+			const postPrepared: PostRow[] = prepared.map((p, index) => {
+				return {
+					...p,
+					primaryKey: parentRows[index]!.key,
+					revisionsO2M: revisionsO2MByParent[index]!,
+				};
+			});
+
+			userIntegrityCheckFlags |= userIntegrityCheckFlagsO2M;
+			nestedActionEvents.push(...nestedActionEventsO2M);
 
 			if (userIntegrityCheckFlags) {
 				if (opts.onRequireUserIntegrityCheck) {
@@ -994,7 +1006,7 @@ implements AbstractService<Item> {
 						}
 
 						if (opts.onRevisionCreate) {
-							opts.onRevisionCreate(revisionId);
+							opts.onRevisionCreate(revisionId, p.primaryKey);
 						}
 					}
 				}
@@ -1428,38 +1440,14 @@ implements AbstractService<Item> {
 	}
 
 	/**
-	 * A uuid names one row whatever the case of its letters (RFC 9562), an integer
-	 * or a bigInteger whatever zeros lead it. A string key is taken as spelled:
-	 * on a column comparing without case (citext) or padding (char), two
-	 * spellings of one row read as two rows, and a row named by the spelling
-	 * the read does not return is told missing.
+	 * The name of a key of this service's collection, or of `keyCollection`, as
+	 * `primaryKeyNameOf` (utils/primary-key-name.ts) spells it.
 	 */
 	protected primaryKeyNameOf(
 		key: PrimaryKey,
 		keyCollection: string = this.collection,
 	): string {
-		const primaryKeyField = this.schema.collections[keyCollection]!.primary;
-
-		const primaryKeyType = this.schema.collections[keyCollection]!
-			.fields[primaryKeyField]!.type;
-
-		if (primaryKeyType === 'uuid') {
-			return String(key).toLowerCase();
-		}
-
-		// A child key comes unvalidated: as numbers, 'abc' and 'xyz' would both be NaN.
-		if (!/^[+-]?\d+$/.test(String(key))) {
-			return String(key);
-		}
-
-		if (primaryKeyType === 'integer') {
-			return String(Number(key));
-		}
-
-		// Past 2^53 a Number would round two rows onto one name.
-		return primaryKeyType === 'bigInteger'
-			? String(BigInt(key))
-			: String(key);
+		return primaryKeyNameOf(key, keyCollection, this.schema);
 	}
 
 	/**
@@ -2753,17 +2741,18 @@ implements AbstractService<Item> {
 			nestedActionEvents.push(...nestedActionEventsM2O);
 			nestedActionEvents.push(...nestedActionEventsA2O);
 
-			for (const key of keys) {
-				const {
-					revisions,
-					nestedActionEvents: nestedActionEventsO2M,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-				} = await payloadService.processO2M(payloadWithA2O, key, opts);
+			const {
+				revisionsByParent,
+				nestedActionEvents: nestedActionEventsO2M,
+				userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
+			} = await payloadService.processO2M(
+				keys.map((key) => ({ data: payloadWithA2O, key })),
+				opts,
+			);
 
-				childrenRevisions.push(...revisions);
-				nestedActionEvents.push(...nestedActionEventsO2M);
-				userIntegrityCheckFlags |= userIntegrityCheckFlagsO2M;
-			}
+			childrenRevisions.push(...revisionsByParent.flat());
+			nestedActionEvents.push(...nestedActionEventsO2M);
+			userIntegrityCheckFlags |= userIntegrityCheckFlagsO2M;
 
 			if (userIntegrityCheckFlags) {
 				if (opts?.onRequireUserIntegrityCheck) {
@@ -3159,7 +3148,7 @@ implements AbstractService<Item> {
 					const revisionID = revisionIDs[i]!;
 
 					if (opts.onRevisionCreate) {
-						opts.onRevisionCreate(revisionID);
+						opts.onRevisionCreate(revisionID, revisions[i]!.item);
 					}
 
 					if (i === 0) {

@@ -95,9 +95,10 @@ export type RepeatedPkAnswer = (typeof RepeatedPkAnswers)[number];
 
 export type MutationOptions = {
 	/**
-	 * Callback function that's fired whenever a revision is made in the mutation
+	 * Callback function that's fired whenever a revision is made in the mutation,
+	 * with the key of the revision and the key of the item it revises
 	 */
-	onRevisionCreate?: ((pk: PrimaryKey) => void) | undefined;
+	onRevisionCreate?: ((pk: PrimaryKey, item: PrimaryKey) => void) | undefined;
 
 	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.

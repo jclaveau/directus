@@ -925,9 +925,11 @@ describe('Integration Tests', () => {
 				// The related-record lookup by PK resolves to no row, so the existing-record guard fails.
 				tracker.on.select('city').response([]);
 
-				await expect(service.processO2M({ cities: [99] }, 1)).rejects.toThrowError(ForbiddenError);
+				await expect(service.processO2M([{ data: { cities: [99] }, key: 1 }]))
+					.rejects.toThrowError(ForbiddenError);
 
-				await expect(service.processO2M({ cities: [99] }, 1)).rejects.toThrowError(
+				await expect(service.processO2M([{ data: { cities: [99] }, key: 1 }]))
+					.rejects.toThrowError(
 					"Could not find a 'city' record having the primary key 99 while processing O2M relation",
 				);
 			});
