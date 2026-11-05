@@ -887,6 +887,32 @@ describe('Services / Access', () => {
 			expect(tracker.history.select).toStrictEqual([]);
 		});
 
+		it('passes the options of a role delete on to the access rows', async () => {
+			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			vi.spyOn(ItemsService.prototype, 'getKeysByQuery')
+				.mockResolvedValue(['6f1c2a4e-0000-4000-8000-000000000007']);
+
+			await new AccessService({
+				knex: knex.default({ client: MockClient }),
+				schema,
+			}).deleteRoleAccess(
+				['role-id-7'],
+				{ bypassLimits: true, emitEvents: false },
+			);
+
+			expect(deleteMany).toHaveBeenCalledWith(
+				['6f1c2a4e-0000-4000-8000-000000000007'],
+				{
+					bypassLimits: true,
+					emitEvents: false,
+					keysFromQuery: true,
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.All,
+				},
+			);
+		});
+
 		it('deletes nothing for a deleted role holding no access', async () => {
 			const deleteMany = vi.spyOn(ItemsService.prototype, 'deleteMany');
 
