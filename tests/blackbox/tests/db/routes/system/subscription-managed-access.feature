@@ -86,7 +86,8 @@ Feature: The access a subscription grants is the subscriptions bundle's alone
       | path: /access/<granted_access> |   errors:                                      |
       | payload:                       |     - message: >-                              |
       |   policy: <other_policy>       |         You don't have permission to access    |
-      |                                |         this.                                  |
+      |                                |         collection "directus_access" or it     |
+      |                                |         does not exist. Queried in root.       |
       |                                |       extensions:                              |
       |                                |         code: FORBIDDEN                        |
       | method: PATCH                  | code: 200                                      |+
