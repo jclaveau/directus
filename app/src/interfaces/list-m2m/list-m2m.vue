@@ -44,6 +44,8 @@ const props = withDefaults(
 		allowDuplicates?: boolean;
 		junctionFieldLocation?: string;
 		junctionFilter?: Filter | null;
+		// A user who cannot read this field sees the remove button, and the API
+		// refuses the save.
 		managedByField?: string | null;
 	}>(),
 	{
