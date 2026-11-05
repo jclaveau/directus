@@ -1,4 +1,4 @@
-import config, { getUrl, paths, type Env } from '@common/config';
+import config, { paths, type Env } from '@common/config';
 import {
 	defineFeature,
 	loadFeature,
@@ -247,7 +247,7 @@ describe.each(vendors)('%s', (vendor) => {
 		return sendRows(
 			{
 				vendor,
-				instanceUrl: () => getUrl(vendor, vendorEnv),
+				instanceUrl: () => vendorEnv['PUBLIC_URL']!,
 				scenarioKeys,
 			},
 			rowsTable,
